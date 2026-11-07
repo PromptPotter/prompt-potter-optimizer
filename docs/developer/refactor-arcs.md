@@ -6,11 +6,16 @@ owns how an arc is run, whether by a person or by agents.
 
 ## Size and scope
 
-- **An arc is medium**: bigger than a single fix, well short of a 400-file batch. One that grows
-  toward that size is split before dispatch.
+- **An arc is small: one or two ledger rows, about ten files at most.** Split a bigger one before
+  dispatch.
+- **A census comes before the brief.** Every holder of each fact the arc touches is listed repo-wide.
+  A row whose holders reach past the arc's files moves the arc's edge or waits for an arc that owns
+  them.
 - **Scope, and every decision the arc needs, are settled before the first build.** A decision that
   surfaces mid-arc is asked before the next build, never built ahead of the answer.
 - **An arc owns its files.** Arcs that run together touch disjoint files, or name the one they share.
+  Arcs whose files overlap run as a chain: each link branches off the previous one's tip, and only
+  disjoint chains run in parallel.
 
 ## The brief
 
@@ -70,6 +75,9 @@ Every brief carries the following:
   adds the test that holds it: reverting the fix fails the test.
 - **A small INTRODUCED finding is fixed in the branch.** A PRE-EXISTING finding becomes a row,
   never another pass.
+- **Arcs that conflict get one fix pass.** It runs on their merge (`git merge-tree` names the
+  conflicts), in one session that resolves the seam and fixes every arc's findings. It never
+  runs as parallel passes that collide again at assembly.
 - **An arc has converged** at a round with no INTRODUCED finding.
 - **Stop early:**
   - the second round whose lead findings the previous pass introduced stops the arc, and the
@@ -80,4 +88,7 @@ Every brief carries the following:
 
 **Why.** A batch of five arcs (2026-11-05) spent most of about 48 builds on work it later cut. Three
 of those arcs carried changes that needed another arc's mechanism first. None checked "equals main"
-until about its sixth round. Each review re-read the whole re-squashed arc instead of the delta.
+until about its sixth round. Each review re-read the whole re-squashed arc instead of the delta. Wave 1 (2026-11-06) ran eight
+medium arcs in parallel. None converged in round 1, and six needed a mechanism outside their own
+files. Three tripped the stop rule in round 2. The one arc re-cut to about ten files converged and
+landed.

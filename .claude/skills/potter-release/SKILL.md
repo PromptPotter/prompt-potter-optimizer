@@ -14,8 +14,14 @@ a commit that already runs live.
 
 ## 1. Prepare
 
-- [ ] Write the release body from `CHANGELOG.md` `## [Unreleased]` into a scratchpad file, shaped like the
-      last release's (`gh release view`); check every capability phrase against what shipped.
+- [ ] Write the release body from `CHANGELOG.md` `## [Unreleased]` into a scratchpad file; check every
+      capability phrase against what shipped. Outline-shaped, every bullet a complete sentence:
+      - a bold one-line intro under 20 words, then the install line and the hosted link as two bullets;
+      - `### 🎯 New`: up to three bold leads, each with two or three plain sub-bullets a user understands;
+      - `### ⚠️ Breaking`: one plain bullet for everything an upgrade breaks;
+      - `### 📋 Technical Details`: a bold lead per change, naming its identifiers; the last bullet is
+        the commit count by type since the last tag;
+      - a last line: `Full Changelog: <compare URL>`. No links section.
 - [ ] Bump the version in `pyproject.toml`, `uv.lock` (the version hunk only), `CITATION.cff` and `CHANGELOG.md`.
 - [ ] Delete each migration the last release landed on the box: its module and its `MIGRATIONS` row
       (`application/maintenance/migrate.py`).

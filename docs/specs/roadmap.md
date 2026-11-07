@@ -147,67 +147,51 @@ The paid run comes after D, H and the re-key batch: the M13 CAPO head-to-head on
 
 An independent audit checked every open debt row against main after batch E and regrouped the rest
 into medium arcs ([`../developer/refactor-arcs.md`](../developer/refactor-arcs.md)). The operator
-confirms this order before the first of them is briefed. Each arc's named decision is settled
-before its build; the recommendation is in brackets.
-
-**First, apply the audit's verdicts to [`code-debt-cleanup.md`](code-debt-cleanup.md)** (one docs
-commit).
-
-Delete as shipped:
-- the bank mint keeping repeated rows;
-- the unparseable job file logged and skipped;
-- census A's raw reads of the blocklist, grants and job registry (keep its six private `_read`
-  copies);
-- the server half of "One subject";
-- the phone shot of `/candidates` (keep the Lighthouse score).
-
-Fix as stale:
-- § One record shape's "one verb or two" (decided: one verb, U4);
-- the TermNorm parse refusal (only `direct_prompt`'s missing prompt metadata is left);
-- every "Rides with" naming K3a, W1, E+, "the run-card session" or `arc/records`;
-- the allowance refusal said to name no provider (`provider=None` is deliberate);
-- "writers with no reader" for `dashboard.json` and `index.json`, against §0.
-
-Delete from the plan:
-- the declined `phases.py` split;
-- the empty § Phone pass checklist;
-- minimatch #171;
-- the box's unexplained R1 scores (the wipe removes them);
-- "two seams owed a re-read";
-- the unpicked rename candidates;
-- the admitted `OBSERVE_LABELS`;
-- the "never observed" checks for `_rebank_on_branch` and `cycle_seed` (checks to run, not debt).
-
-**Next: M2.**
+confirmed the order and wave 1's decisions on 2026-11-06. After wave 1, each row is a scope, not an
+arc. It is cut into small arcs that run as one chain, one at a time (operator, 2026-11-07;
+[`../developer/refactor-arcs.md`](../developer/refactor-arcs.md) § Size and scope). The wave-1
+branches `arc/m*` and their reviews are reference material for that cut. A later arc's recommendation is in
+brackets until its brief settles it. Each brief names the files it shares with another arc of its
+wave.
 
 | Arc | Was | Closes | Decision first | Size | Waits on |
 |---|---|---|---|---|---|
-| **M1** gate cost | T rest | the four regenerators made `light`, the `last_green` lock, the walk tier, the worktree `compileall`, the controlled leg's count, the Vite leftovers | walk tier in the full gate or `--release` only (full gate) | ~10 files | — |
-| **M2** command log | Q1 | Q1, census C, the `_tasks` test, the noise-floor stop, the pass with no address; EA's cut state table is its acceptance test (`origin/arc/ea-8`) | amend architecture §0 Control-remote and decision 0001 so commands leave the cycle ledger (yes) | ~22 files, wipes run data | — |
-| **M3** run scope | U1a | config items 4 and 7 (the L4 override as one overlay), `bind_cache`, `LaunchState.ledger`, the `set_cycle_ledger` binders | bind at `runner/entry.py` now (yes); an unusable L4 mutation refused or dropped | ~25 files, one L4 re-key | — |
-| **M4** typed pipeline carrier | U1a | engine A, config items 8 and 9, the free-tier layer, the overlay delete, a changed knob's source, the free-tier model axis | `steps` leaves the params bag (yes) | ~45 files | — |
+| **M1** gate cost | T rest | the four regenerators made `light`, the `last_green` lock, the walk tier, the controlled leg's count, the Vite leftovers | the walk tier runs in the full gate; `eslint-plugin-react` restores the dropped rules (operator, 2026-11-06) | ~15 files | — |
+| **M2** command log | Q1 | Q1, census C, the `_tasks` test, the noise-floor stop, the pass with no address; EA's cut state table is its acceptance test (`origin/arc/ea-8`) | amend architecture §0 Control-remote and decision 0001 so commands leave the cycle ledger | ~32 files, wipes run data | — |
+| **M3** run scope | U1a | config items 4 and 7 (the L4 override as one overlay), `bind_cache`, `LaunchState.ledger`, the `set_cycle_ledger` binders | bind at `runner/entry.py` now; an unusable L4 mutation is refused, typed and served, by the rule that refuses an unknown overlay | ~28 files, one L4 re-key | — |
+| **M4** typed pipeline carrier | U1a | engine A, config items 8 and 9, the free-tier layer and its model axis, the three merges as one wherever behaviour equals main | `steps` leaves the params bag; every treatment digest re-keys (accepted) | ~35 files | — |
+| **M4b** connector identity | U1a | `backend_type` becomes `connector` (the definition key included), `PipelineSchema`'s name and version, `Campaign.backend_id` / `backend_url`, an unregistered connector refused typed, `Session.backend_id`, the `BackendClient` forwarders | the landing re-writes tenant definitions (yes) | sized at its brief | M3, M4 |
+| **M4c** knob edits | U1a | steer typing, a changed knob's source, an override's delete | rides M8's `ConfigKnob.source` (yes) | small | M4, with M8 |
 | **M5** running set | RS | RS, census F's `exclude_nodes`, the one-node rule | accept the L4 cache miss, riding M8's re-key (yes) | ~20 files | M2, M4 |
-| **M6** one start | U2 | the five doors, the one launch answer, config item 6, the double selection, `draft_declared`, `close_for_landing`, the shutdown notice, the job logs | plan and price before admission for every start (yes) | ~35 files | M2, M3 |
-| **M7** run init and round 0 | U2 | batch 3's init and round-0 rows, config item 5, `--diag` as a mode, the test builders, the origin-gate rows, `_peer_cycle` | halt a degraded origin (yes) | ~30 files, offline proof | M6 |
-| **M8** potter call door, served roster | U1b, EP | `InjectionBundle`, the template's carrier, the seed rule, `ConfigKnob.source`, `PROMPT_FIELD`, swept F, the digest reach | a failed critique is a typed fault, the round continues or fails (typed fault) | ~50 files, one re-key; split it | M3, M4 |
+| **M6** one start | U2 | the five doors, the one launch answer, config item 6, the double selection, `draft_declared`, `close_for_landing`, the shutdown notice, the job logs, a refusal before admission answered on every door (MCP's `tasks/result` included), a queued launch that dies with its asker | plan and price before admission for every start (yes) | ~35 files | M2, M3 |
+| **M7** run init and round 0 | U2 | batch 3's init and round-0 rows, config item 5, `--diag` as a mode, the test builders, the origin-gate rows, `_peer_cycle`, a resume that takes 72 s to apply | halt a degraded origin (yes) | ~30 files, offline proof | M6 |
+| **M8** potter call door, served roster | U1b, EP | `InjectionBundle`, the template's carrier (`prompt_edits`, from M4), the seed rule, `ConfigKnob.source`, `PROMPT_FIELD`, swept F, the digest reach | a failed critique is a typed fault, the round continues or fails (typed fault) | ~50 files, one re-key; split at its brief | M3, M4 |
 | **M9** ledger read stack | U3 | the read stack, `_unlanded`, the cold-fold snapshot, the `dashboard.json` checkout, the artifact writers outside the roster | keep `dashboard.json` / `index.json` as projections (yes, §0) | ~30 files | M3, M6 |
-| **M10** narration and tracing | U3, ET | one narration table, the typed phase act, ET, `FileSink`, `ActivityItem` as `Said` | delete `FileSink` (yes) | ~30 files | M9 |
+| **M10** narration and tracing | U3, ET | one narration table, the typed phase act, ET, `FileSink`, `ActivityItem` as `Said`, a pause's cause served | delete `FileSink` (yes) | ~30 files | M9 |
 | **M11** typed run records | U3 | engine B and C, `StatusMark`, `rewound`, the act record, the cell beat, `cached` / `key_source`, the export's spend | one wipe shared with M10 (yes) | ~30 files | M9 |
-| **M12** spend | S | S, the payer-rule and host-coupon rows, the lost mirror, the reserved hold, stale `run_limits` | a re-grant counts from `granted_at` (yes) | ~30 files, migrates `charges.jsonl` | M3, M9 |
-| **M13** one scoring pass | U4 | § One record shape, the skipped verify, noise-floor and seed-screen on the ledger, the catch-up cells | the verb is "held-out" (yes) | ~30 files | M2, M9 |
+| **M12** spend | S | S, the payer-rule and host-coupon rows, the lost mirror, the reserved hold, stale `run_limits`, a connector's spend declaration, one budget door per launch | a re-grant counts from `granted_at` (yes) | ~30 files, migrates `charges.jsonl` | M3, M9 |
+| **M13** one scoring pass | U4 | § One record shape, the skipped verify, noise-floor and seed-screen on the ledger, the catch-up cells, the verify that starts 38 s late and is never acked `accepted` | the verb is "held-out" (yes) | ~30 files | M2, M9 |
 | **M14** faults | Q3 | a: census B, one refusal type; b: `logging` leaves `application/` and `domain/` | — | a small; b ~65 files, mechanical | b: M9 |
 | **M15** change feed | Q2 | Q2, census E | a subject is the `Subject` path (yes) | ~30 files | M2, M9 |
-| **M16** webapp | swept C, U5 | a: lineage reads the served tree; b: one arm row, the selection in the hash | b: a swiped-in column stays blank until its reads land (yes) | a ~12, b ~40 files | b: M15 |
-| **M17** store hygiene | K3a rest | census A's `_read` copies, `banks_sharing`, the file mode, the landing proving a manifest, the `Fate.RUN` dict rows, `MAX_PATH` | read through `io.py`'s readers (yes) | ~20 files | — |
-| **M18** an upload without a backend | G | the in-process `llm_only` connector, the wire-skew probe, TermNorm's wording, § Bypasses | the operator's go to edit TermNorm | — | M4 |
-| **M19** the election | D | the election root, PoBB's lock-in, the collapse gate, the lift bars, CAPO's survivor ranking | offline first, then priced | — | M13 |
+| **M16** webapp | swept C, U5 | lineage reads the served tree; one arm row; the selection in the hash | a swiped-in column stays blank until its reads land (yes) | ~50 files, cut small | M15 |
+| **M17** store hygiene | K3a rest | census A's `_read` copies, `banks_sharing`, the file mode, the landing proving a manifest, the `Fate.RUN` dict rows, the landing wherever code meets an unlanded root, `--reset`'s two decisions, one remedy for an unreadable file | read through `io.py`'s readers | ~28 files | — |
+| **M18** an upload without a backend | G | the in-process `llm_only` connector, the wire-skew probe, TermNorm's wording, § Bypasses, a named endpoint per connector, core's TermNorm defaults | edit TermNorm where the arc needs it (operator, 2026-11-06) | — | M4b |
+| **M19** the election | D | the election root, the collapse gate, the lift bars, CAPO's survivor ranking | offline first, then priced | — | M13 |
+| **M20** MCP over HTTP | — | the MCP door served over Streamable HTTP behind the API's sign-in, a second transport of the one adapter | auth per [`access-model.md`](../operations/access-model.md) (yes) | sized at its brief | M2 |
 
-Waves:
-1. M1, M2, M3, M4, M17, M16a, M14a: no dependencies, disjoint files.
-2. M5, M6, M8.
-3. M7, M9.
-4. M10 with M11 (one wipe), M12, M13, M14b.
-5. M15, M16b, M19, and M18 once TermNorm is cleared.
+The chain takes the scopes in this order. Each small arc starts once the previous one has landed:
+1. M1, M4, M14a, M17, M3, M2.
+2. M4b then M5; M6 then M20; M8 with M4c.
+3. M7, M9, M18.
+4. M10 with M11 (one wipe), M12, M13, M15.
+5. M14b alone: a mechanical sweep of `application/` and `domain/`, after M10's narration takes what it
+   keeps, with no other arc open.
+6. M16b, M19.
+
+A later wave forms its chains at its briefs, from the files each one names
+([`../developer/refactor-arcs.md`](../developer/refactor-arcs.md) § Size and scope).
+
+M4's and M8's re-keys share one cold cache only if no paid run lands between their merges.
 
 LA, LB, LC, LW, TS and R stay last. S no longer waits on G: the payer rows ride M12.
 

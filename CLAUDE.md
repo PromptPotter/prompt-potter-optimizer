@@ -48,6 +48,7 @@ overlay ([`promptpotter/assets/datasets/CLAUDE.md`](promptpotter/assets/datasets
 - **A slow or costly LLM call is fixed by a tighter prompt**, not a timeout, cap or provider (rails, not the fix); length is a quality tax; attribute one real payload by block first.
 - **Supervise every run actively, never fire-and-wait** (3-minute checks first). The file tree is the dashboard: each run writes `cycles/{cycle_id}/readout.log`; the read verbs whose answer is in no file are `evidence`, `cycles`, `machine-status`, `trail`, `price-head-to-head`.
 - **Print every `python -m promptpotter …` command you invoke, verbatim, beside its result.**
+- **An arc owns its files.** Arcs that run together touch disjoint files, or name the one they share. Arcs whose files overlap run as a chain: each link branches off the previous one's tip, and only disjoint chains run in parallel. Arcs that conflict get one fix pass on their merge ([`refactor-arcs.md`](docs/developer/refactor-arcs.md) owns the process).
 - A "refactor" may not raise a row of the gate's `surface-ledger` check (`scripts/complexity_ledger.py`); a raise edits the baseline with its reason in the commit body.
 - Fewest dependencies: stdlib or a small helper first; core is the engine, a surface is an extra ([`docs/decisions.md`](docs/decisions.md) § 0006).
 
