@@ -12,6 +12,7 @@ import {
   unionFirstAppearance,
   type SortedRounds,
 } from "@/lib/derivations";
+import { fmtSampleTag } from "@/lib/format";
 import { SAMPLE_MOVEMENT_LABELS } from "@/lib/api/types";
 
 interface HoverState {
@@ -143,19 +144,19 @@ function SeriesHoverPopup({
   return (
     <div role="tooltip" className="st-hover" style={{ left, top }}>
       <div className="st-hover-head">
-        R{hover.round} · order at sample #{hover.sampleId} (step {hover.position}/{hover.total})
+        R{hover.round} · order at sample {fmtSampleTag(hover.sampleId)} (step {hover.position}/{hover.total})
       </div>
       <div className="st-hover-chips">
         {order.computed.map((sid) => (
-          <span key={`c-${sid}`} className="st-chip computed" title={`#${sid} — already computed`}>
+          <span key={`c-${sid}`} className="st-chip computed" title={`${fmtSampleTag(sid)} — already computed`}>
             {sid}
           </span>
         ))}
-        <span className="st-chip current" title={`#${order.current} — measuring now`}>
+        <span className="st-chip current" title={`${fmtSampleTag(order.current)} — measuring now`}>
           ▶{order.current}
         </span>
         {order.planned.map((sid) => (
-          <span key={`p-${sid}`} className="st-chip planned" title={`#${sid} — planned`}>
+          <span key={`p-${sid}`} className="st-chip planned" title={`${fmtSampleTag(sid)} — planned`}>
             {sid}
           </span>
         ))}
