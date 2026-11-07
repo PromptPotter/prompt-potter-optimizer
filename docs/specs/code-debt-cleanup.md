@@ -324,11 +324,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   in the cell while core's `BackendClient.priced_as` splits the same string for the bound; they
   disagree when a dataset sets `provider`. Action: the cell takes the pair core bound. **Rides
   with:** M12. **Re-test:** `git grep -n "inline_route" -- promptpotter/connectors/dspy_module.py` is empty.
-- **`backend-integration.md` presents TermNorm's wire as every backend's contract** — "any backend
-  that speaks three endpoints", `/pipeline` "read once at init", its Connection security is TermNorm's
-  env, linked from every connector's inspector. Action: the page states the `Connector` declaration
-  contract; TermNorm's endpoints become one connector's section beside n8n's. **Rides with:** M18.
-  **Re-test:** read the page's first paragraph.
 - **TermNorm's live datasets (`llm_only`, `entity_profiling`, `llm_ranking`) are refused at parse**:
   `direct_prompt` must gain a `prompt_info`, edited in the TermNorm checkout (operator, 2026-11-06).
   **Rides with:** M18. **Re-test:** `python -m promptpotter new llm_only` parses its pipeline.

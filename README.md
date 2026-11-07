@@ -41,7 +41,7 @@
 
 | You built it with | How PromptPotter meets it |
 |---|---|
-| **An agent framework, a managed agent service or a workflow builder** — LangGraph, CrewAI, the OpenAI Agents SDK, Bedrock Agents, n8n, Dify, or plain FastAPI | Three endpoints — `POST /matches`, `GET /pipeline`, `GET /status` — and the knobs your `/pipeline` declares become what is tuned ([backend integration](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md)) |
+| **An agent framework, a managed agent service or a workflow builder** — LangGraph, CrewAI, the OpenAI Agents SDK, Bedrock Agents, n8n, Dify, or plain FastAPI | A `Connector` declaration; an HTTP backend's default wire is three endpoints — `POST /matches`, `GET /pipeline`, `GET /status` — and the knobs your pipeline declares become what is tuned ([backend integration](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md)) |
 | **DSPy** | `PromptPotterOpt`, where you would reach for GEPA ([dspy-optimizer](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md)) |
 | **An agent in a sandbox** | Each candidate runs as a [Harbor](https://github.com/laude-institute/harbor) trial, graded by the task's own checker |
 | **Langfuse / MLflow** | Every round fans out as traces; the winner lands in MLflow's Prompt Registry ([observability](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/observability.md)) |
