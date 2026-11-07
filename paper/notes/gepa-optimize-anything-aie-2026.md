@@ -5,7 +5,7 @@ Read 2026-10-19. An observation for the related-work and results sections, not a
 **Why it matters here.** GEPA is the reference peer ([`../../docs/research/landscape.md`](../../docs/research/landscape.md)
 § Peers; shipped inside DSPy and MLflow). Its author presented
 `optimize_anything` on the main stage of the AI Engineer World's Fair, so these numbers are the ones a
-reviewer will have seen. Two consequences for M14: the **scope line** in
+reviewer will have seen. Two consequences for the preprint: the **scope line** in
 [`../../docs/research/landscape.md`](../../docs/research/landscape.md) § Against GEPA and AlphaEvolve
 is under pressure, and the **ARC-AGI headline** is the cleanest public example of the
 unoptimized-origin problem the citation filter already names (*Optimization before Evaluation*,

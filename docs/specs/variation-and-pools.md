@@ -19,7 +19,7 @@
 | **access** | how a node reads a pool: `off` · `open` · `closed` | `domain/pool.py::Access` |
 | **host** | the node a capability is mounted on | `l1_generate`'s `recombination_host` |
 | **mix** | how many of a round's arms each variation node produces | unbuilt |
-| **preset** | a manifest reproducing a paper | `roadmap.md` § The bench (M13) |
+| **preset** | a manifest reproducing a paper | `roadmap.md` § The bench |
 
 ## Still to build
 

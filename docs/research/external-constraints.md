@@ -13,12 +13,12 @@ recalled. What the code already enforces is named by its symbol only.
    ([`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md) owns the invariant). Source:
    [Auditing Harness Tampering](https://arxiv.org/abs/2609.00069) (read) — tampering persisting in
    the *best-scoring* lineage, 18.3% to 84.6% across audited systems.
-2. **Early stopping must be defensible under optional stopping** (M14). A fixed-α test repeated under
+2. **Early stopping must be defensible under optional stopping** (the preprint). A fixed-α test repeated under
    optional stopping inflates false positives; the field's answer is a confidence sequence from test
    supermartingales, valid at any stopping time ([Hsu & Shekhar](https://arxiv.org/abs/2607.17409),
    read). PoBB's ε is a bar on a posterior reading, not an anytime-valid error rate; the preprint
    reports how the two differ on the same rounds.
-3. **Budget-matched comparison is what reviewers ask for first** (M13, M14). Gains shrink or reverse
+3. **Budget-matched comparison is what reviewers ask for first** (the bench, the preprint). Gains shrink or reverse
    at matched rollout budgets ([LEVI](https://arxiv.org/abs/2605.09764), abstract read).
    [HAL](https://arxiv.org/abs/2510.11977) (read) and [AI Agents That Matter](https://arxiv.org/abs/2407.01502)
    set the template: a cost–accuracy Pareto frontier, dollars and tokens as separate axes, a holdout
@@ -97,7 +97,7 @@ near p ≈ 0.5 (SFL [2408.15099](https://arxiv.org/html/2408.15099v3) §4.1, DAP
 [2503.14476](https://arxiv.org/html/2503.14476)). No source measures a mid-accuracy band for prompt
 optimization.
 
-## M14 — the preprint
+## The preprint
 
 - **Clustered and paired SEs, not binomial** ([Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640):
   clustering inflates SEs up to 3×) — `scoring/paired.py`, `shared/statistics.py::holm_adjusted`,

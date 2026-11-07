@@ -18,7 +18,7 @@ claim is [`benchmarks.md`](benchmarks.md)'s; this page claims no head-to-head be
 included, anytime-valid under optional stopping ([`external-constraints.md`](external-constraints.md)
 § Ranked, item 2) — nor a **comparability guard**. Hence a bench: a third party's method plugs in as
 an optimizer manifest, measured under one model, budget meter, grader, split and archive
-([`../specs/roadmap.md`](../specs/roadmap.md) § The bench (M13)).
+([`../specs/roadmap.md`](../specs/roadmap.md) § The bench).
 
 **PromptPotter's own family is LLM-driven evolution**: an LLM proposes variants, a scorer ranks them,
 winners breed. The line: [APE](https://arxiv.org/abs/2211.01910) and OPRO (an LLM authors its own
@@ -34,7 +34,7 @@ with the prompt and searches a tree, not a line** (§ Comparison to MCTS).
 
 | Peer | What | Verdict · worth taking | Checked |
 |---|---|---|---|
-| **DSPy** — `BootstrapFewShot`, `MIPROv2`, `dspy.GEPA` ([`stanfordnlp/dspy`](https://github.com/stanfordnlp/dspy), MIT) | Typed modules whose prompts an optimizer compiles: `Teleprompter.compile(student, *, trainset, teacher=None, valset=None, **kwargs) -> Module`; GEPA budgets by `auto`, `max_full_evals`, `max_metric_calls` (what a budget-matched head-to-head sets). | **Relevant** — the first M13 peer: three optimizers behind one `compile()`, no shared budget meter or grader. Reach, taken by shipping as a DSPy optimizer (`presentation/teleprompter.py`; [`../developer/dspy-optimizer.md`](../developer/dspy-optimizer.md) § What you trade away). A call replayed from DSPy's own cache is not counted. | 2026-09-24 |
+| **DSPy** — `BootstrapFewShot`, `MIPROv2`, `dspy.GEPA` ([`stanfordnlp/dspy`](https://github.com/stanfordnlp/dspy), MIT) | Typed modules whose prompts an optimizer compiles: `Teleprompter.compile(student, *, trainset, teacher=None, valset=None, **kwargs) -> Module`; GEPA budgets by `auto`, `max_full_evals`, `max_metric_calls` (what a budget-matched head-to-head sets). | **Relevant** — the bench's first peer: three optimizers behind one `compile()`, no shared budget meter or grader. Reach, taken by shipping as a DSPy optimizer (`presentation/teleprompter.py`; [`../developer/dspy-optimizer.md`](../developer/dspy-optimizer.md) § What you trade away). A call replayed from DSPy's own cache is not counted. | 2026-09-24 |
 | **GEPA `optimize_anything`** | GEPA outside DSPy optimizes any scored text artifact, rendered images as feedback; its ARC-AGI-1 headline (32.5% → 89.5%) is against its own seed, below the same model at reasoning High. | Narrows our scope line (§ Against GEPA and AlphaEvolve); [`../../paper/notes/gepa-optimize-anything-aie-2026.md`](../../paper/notes/gepa-optimize-anything-aie-2026.md). | 2026-10-19 |
 | **Promptolution** ([`gepromptet/promptolution`](https://github.com/gepromptet/promptolution), [EACL 2026 demo](https://aclanthology.org/2026.eacl-demo.21/)) | One backend, response cache, token logging; its own CAPO, EvoPrompt, OPRO. | **Relevant as a peer**: closest research-side bench, no stopping rule beyond each optimizer's, no subset-invariant score. CAPO — racing under a token budget — is PoBB's nearest published neighbour. | 2026-09-24 |
 | **LEVI** ([2605.09764](https://arxiv.org/abs/2605.09764)) | Matches or exceeds GEPA at under half its rollout budget (abstract read). | **Relevant** — the budget-matched baseline; mapped in [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md). | 2026-09-24 |

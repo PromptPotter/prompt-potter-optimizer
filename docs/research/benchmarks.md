@@ -120,7 +120,7 @@ candidates: **MMLU-Pro** (~12k) for breadth, **MATH** (7,500 test) for depth, bo
 clustered (arms differenced per cell, seeds averaged within it: `evidence` serves it as
 `HeadToHead.contrasts`, Holm and BH across the matrix), exact or bootstrapped, with SNR per benchmark,
 never a binomial SE; the Agentic Benchmark Checklist is filled and published as an appendix
-([`external-constraints.md`](external-constraints.md) § M14).
+([`external-constraints.md`](external-constraints.md) § The preprint).
 
 Beside it, two round counts from `index.json::final`: **`rounds_to_separable`** (first round whose
 pick separates from the origin on the shared panel) — quote this — and **`rounds_to_improved`** (first

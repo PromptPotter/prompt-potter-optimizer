@@ -13283,7 +13283,7 @@
             "type": "integer"
           },
           "max_concurrent_cycles_writable": {
-            "description": "Whether this caller may move `max_concurrent_cycles` through `set-concurrent-cycles`. False on the host's key, where the host sets it.",
+            "description": "Whether this caller may move `max_concurrent_cycles` through `set-concurrent-cycles`. False for any caller but the host account with the budget capability.",
             "title": "Max Concurrent Cycles Writable",
             "type": "boolean"
           }
@@ -15338,7 +15338,7 @@
       },
       "SetConcurrentCyclesPayload": {
         "additionalProperties": false,
-        "description": "How many campaigns this account may hold at once, queued launches included; at most the\nmachine's capacity, and an account on the host's key cannot move its own.",
+        "description": "How many campaigns this account may hold at once, queued launches included; at most the\nmachine's capacity, and set only by whoever runs this server.",
         "properties": {
           "max_concurrent_cycles": {
             "description": "The new limit.",

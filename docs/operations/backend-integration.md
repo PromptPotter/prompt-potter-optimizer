@@ -1,16 +1,18 @@
 # Backend integration
 
-PromptPotter optimizes any backend that speaks three endpoints; every axis is derived from the pipeline shape it reports.
+PromptPotter optimizes any backend registered as a `Connector` (`connectors/protocol.py::Connector`, in `connectors/__init__.py::CONNECTORS`); every axis is derived from the pipeline that connector declares — served at `GET /pipeline` by an HTTP backend, built by its `pipeline_declaration`, or, where it declares neither, the `pipeline:` block of the dataset's own `dataset.yaml`, which overlays the other two.
 
-## Endpoints
+## The HTTP default — TermNorm's endpoints
+
+A `remote_http` connector that keeps `Connector`'s defaults speaks two of the endpoints [TermNorm](https://github.com/runfish5/TermNorm-excel) serves (`connectors/termnorm.py`): `/matches` (`Connector.cell_path`) and `GET /pipeline` (`Connector.serves_pipeline`). `/status` is TermNorm's own declared probe; `Connector.preflight` defaults to `None`, so a connector that declares none probes nothing.
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/matches` | POST | Run one query under given `pipeline_params`; returns prediction, ranked candidates, and `diagnostics.warnings[]` (`{step, code, message}` — the self-healing signal). |
-| `/pipeline` | GET | Full schema: nodes, types, parameters, allowed value sets, LLM-node prompt templates, named sequences. Read once at init. |
-| `/status` | GET | Liveness; 200 when up. |
+| `/pipeline` | GET | Full schema: nodes, types, parameters, allowed value sets, LLM-node prompt templates, named sequences. Read live at run init, on every draft read and in `dataset_pipeline` (`application/pipeline_resolve.py::served_pipeline`). |
+| `/status` | GET | TermNorm's liveness and version probe (`connectors/termnorm.py::_termnorm_preflight`); 200 when up. |
 
-Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md). Tested with [TermNorm](https://github.com/runfish5/TermNorm-excel); PromptPotter's own API roster is `/docs` (`openapi.generated.json`).
+Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md). PromptPotter's own API roster is `/docs` (`openapi.generated.json`).
 
 **A gateway (OmniRoute, OpenRouter) is a backend like any other, and a campaign points at a pinned model, never at a router that chooses one per request.** Pinning the model does not pin the HOST; a backend may report per LLM node which host answered (`TokenUsageRecord.served_by`).
 
@@ -39,13 +41,13 @@ A ceiling is enforced before a cell is SENT, at the most the cell may cost; with
 
 ## Connection security
 
-The endpoint, token and header reach the wire only through the connector (`Connector.endpoint` / `auth_token` / `auth_scheme`, `Authorization: Bearer` unless declared; TermNorm's read `TERMNORM_URL` / `TERMNORM_TOKEN`, n8n's `N8N_HARNESS_URL` / `N8N_HARNESS_TOKEN`). An empty `TERMNORM_TOKEN` sends no header; the backend decides whether to require it (`TERMNORM_REQUIRE_AUTH=1`; mismatch → 401), and the Linux deploy provisions one shared token per install, required even on loopback.
+An HTTP connector's endpoint, token and header reach the wire only through the connector (`Connector.endpoint` / `auth_token` / `auth_scheme`, `Authorization: Bearer` unless declared; TermNorm's read `TERMNORM_URL` / `TERMNORM_TOKEN`, n8n's `N8N_HARNESS_URL` / `N8N_HARNESS_TOKEN`). An empty `TERMNORM_TOKEN` sends no header; the backend decides whether to require it (`TERMNORM_REQUIRE_AUTH=1`; mismatch → 401), and the Linux deploy provisions one shared token per install, required even on loopback.
 
 **Resilience** — a 429 is the run's backpressure (`infrastructure/llm/send_pacing.py::Backpressure`, one shared cooldown); a 5xx or a connection broken before any reply backs off 1→2→4→8 s unless the body says `detail.retryable: false`; a connection never made waits for the connector's own probe (`connectors/protocol.py::Connector.unreachable`) up to `infrastructure/backend.py::_OUTAGE_WAIT_S`; a link dropped mid-wait surfaces through TCP keepalive (`infrastructure/llm/base.py::KEEPALIVE_OPTIONS`) as a broken connection, resent; a cell open past the smaller of `cell_envelope_s` and the launch's wall clock left is cut `HALTED`; **a read timeout is never resent** — the backend is still working, and billing, the first request.
 
 ## A webhook backend — the n8n eval harness
 
-`connectors/n8n.py` drives one n8n workflow holding a copy of a production LLM node behind an authenticated webhook, each difference from the three endpoints declared on `Connector`: `cell_path: ""` (POST to the URL itself), `read_reply` (no `data` envelope), `round_trip_is_latency` (no timings), `pipeline_declaration` (no `GET /pipeline`: one prompt node, `harness`).
+`connectors/n8n.py` drives one n8n workflow holding a copy of a production LLM node behind an authenticated webhook, each difference from the HTTP default declared on `Connector`: `cell_path: ""` (POST to the URL itself), `read_reply` (no `data` envelope), `round_trip_is_latency` (no timings), `pipeline_declaration` (no `GET /pipeline`: one prompt node, `harness`).
 
 | Variable | Holds |
 |---|---|

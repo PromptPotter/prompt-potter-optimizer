@@ -126,8 +126,8 @@ read for the L2/L3 repair rate and the errored-cell INVESTIGATE; then L4 validat
 call order, errors and configuration it could handle itself, and whether the code would get simpler if
 it were deleted. A new seam needs something that actually varies.
 
-The paid run comes after D, H and the re-key batch: the M13 CAPO head-to-head on `hotpotqa-closedbook`
-(§ The bench (M13)), priced first. Then the board (§ Optimizer tuning — the standing board).
+The paid run comes after D, H and the re-key batch: the bench's CAPO head-to-head on `hotpotqa-closedbook`
+(§ The bench), priced first. Then the board (§ Optimizer tuning — the standing board).
 
 **Forks left to the operator.** Until he decides, an arc leaves each one as it stands:
 - what "calls held equal" holds equal;
@@ -162,7 +162,7 @@ wave.
 | **M3** run scope | U1a | config items 4 and 7 (the L4 override as one overlay), `bind_cache`, `LaunchState.ledger`, the `set_cycle_ledger` binders | bind at `runner/entry.py` now; an unusable L4 mutation is refused, typed and served, by the rule that refuses an unknown overlay | ~28 files, one L4 re-key | — |
 | **M4** typed pipeline carrier | U1a | engine A, config items 8 and 9, the free-tier layer and its model axis, the three merges as one wherever behaviour equals main | `steps` leaves the params bag; every treatment digest re-keys (accepted) | ~35 files | — |
 | **M4b** connector identity | U1a | `backend_type` becomes `connector` (the definition key included), `PipelineSchema`'s name and version, an unregistered connector refused typed, `Session.backend_id` | the landing re-writes tenant definitions (yes) | sized at its brief | M3, M4 |
-| **M4c** knob edits | U1a | steer typing, a changed knob's source, an override's delete | | small | M4, with M8 |
+| **M4c** knob edits | U1a | steer typing, a changed knob's source, an override's delete | | small | M4 |
 | **M5** running set | RS | RS, census F's `exclude_nodes`, the one-node rule | accept the L4 cache miss, riding M8's re-key (yes) | ~20 files | M2, M4 |
 | **M6** one start | U2 | the five doors, the one launch answer, config item 6, the double selection, `draft_declared`, `close_for_landing`, the shutdown notice, the job logs, a refusal before admission answered on every door (MCP's `tasks/result` included), a queued launch that dies with its asker | plan and price before admission for every start (yes) | ~35 files | M2, M3 |
 | **M7** run init and round 0 | U2 | batch 3's init and round-0 rows, config item 5, `--diag` as a mode, the test builders, the origin-gate rows, `_peer_cycle`, a resume that takes 72 s to apply | halt a degraded origin (yes) | ~30 files, offline proof | M6 |
@@ -182,7 +182,7 @@ wave.
 
 The chain takes the scopes in this order. Each small arc starts once the previous one has landed:
 1. M1, M4, M14a, M17, M3, M2.
-2. M4b then M5; M6 then M20; M8 with M4c.
+2. M4b then M5; M6 then M20; M8; M4c.
 3. M7, M9, M18.
 4. M10 with M11 (one wipe), M12, M13, M15.
 5. M14b alone: a mechanical sweep of `application/` and `domain/`, after M10's narration takes what it
@@ -201,7 +201,7 @@ LA, LB, LC, LW, TS and R stay last. S no longer waits on G: the payer rows ride 
 1. **Recombination at $0** (C9). Paid: the mode head-to-head (§ Variation and pools, item 1).
 2. **The optimizer climbs** (§ Optimizer tuning — the standing board). Paid: the board's path, steps
    (1)–(4).
-3. **The preprint's evidence (M14).**
+3. **The preprint's evidence.**
    - Code: the N-arm mint verb, and `bbeh` re-ingested with a wider bench partition.
    - Code: anytime-valid confidence sequences become the default stopping rule. Today's PoBB stays a
      selectable rule, and a replay over banked rounds reports where the two disagree
@@ -220,7 +220,7 @@ LA, LB, LC, LW, TS and R stay last. S no longer waits on G: the payer rows ride 
 6. **Embedding (§ Embedding (M15)):** headlined by the Langflow setup. R1 comes first, because C5 and R2
    wait on it; the rest are independent of each other.
 
-Lanes by dependency. Front priority: Lane A and the bench lane (M13), concurrently; C9 ahead of
+Lanes by dependency. Front priority: Lane A and the bench lane, concurrently; C9 ahead of
 the rest of Lane C.
 
 ### Lane A — the hosted beta, usable by a coupon account end to end
@@ -243,15 +243,15 @@ the rest of Lane C.
 - **C9** Variation and pools (§ Variation and pools).
 - **C10** Operator-authored prompt-field order (§ Prompt-field order).
 
-**M14 (publication)** needs: ablation rows L1 / L1+L2 / full (`paper/plans/ablation.yaml`) · scan · cross-run archive · critique ·
+**The preprint** needs: ablation rows L1 / L1+L2 / full (`paper/plans/ablation.yaml`) · scan · cross-run archive · critique ·
 zero-signal-filter; competitor and L4 numbers after C3. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
 
-## The bench (M13)
+## The bench
 
-**M13:** every optimizer, peers included, is a manifest the bench runs, inheriting measurement,
+Every optimizer, peers included, is a manifest the bench runs, inheriting measurement,
 archive, spend ledger, persistence, the five entry points and the control plane; the headline is the
 held-out bench score. It closes when ONE peer (CAPO first) runs end to end in a head-to-head whose
-only difference is the optimizer. **M14 (the preprint):** the stopping rule and the comparability
+only difference is the optimizer. **The preprint:** the stopping rule and the comparability
 guard are executable here and every peer ran under them ([`../../paper/`](../../paper/README.md)).
 
 The contract is [`../architecture.md`](../architecture.md) § Bench and optimizer; node types are
@@ -337,7 +337,7 @@ misses; (2) screen library blocks without the optimizer — authored arms, origi
 ## Variation and pools
 
 The contract is [`variation-and-pools.md`](variation-and-pools.md); why is
-[`../decisions.md`](../decisions.md) § 0007. Part of M13; each M14 ablation row quotes
+[`../decisions.md`](../decisions.md) § 0007. Part of the bench; each preprint ablation row quotes
 `rounds_to_separable`. It must not become a fifth sealed optimizer, a second overlay beside
 `optimization.nodes`, a pool written by a file edit, or a credit model steering before a reading
 shows it informative.
@@ -553,7 +553,7 @@ winner; traces in (OTel GenAI JSONL first) beside § What PromptPotter emits.
 **Free compute — spend it where calls bind.** Through R4 an open-weight model on free GPUs answers on
 no provider's bill (its rate may be zero; R7 meters the GPU-seconds). First the models the instruments
 already run — another host is another instrument, so screen its agreement with the cloud host on one
-panel before a campaign moves; then the call-heavy rungs: L4 inner cycles, M14's seeds and budget
+panel before a campaign moves; then the call-heavy rungs: L4 inner cycles, the preprint's seeds and budget
 points, the optimizer-model screen (§ Optimizer tuning — the standing board, step 3); then R6's
 exhibit, which needs the GPUs themselves.
 

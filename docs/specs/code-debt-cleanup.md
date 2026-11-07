@@ -198,9 +198,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 - **The TS type generator keeps only a docstring's first line**, so 57 interface docs in
   `types.generated.ts` stop mid-sentence. Action: `build_ts_types.py` carries the first paragraph.
   **Rides with:** M1. **Re-test:** no generated doc ends without a full stop.
-- **`M13` and `M14` each name both a medium arc and a roadmap milestone** (M14 is also the
-  preprint). Action: the milestones take names. **Rides with:** the next roadmap edit. **Re-test:**
-  `git grep -nE "\bM1[34] \((publication|the preprint)\)" -- docs` is empty.
 - **The scripts' writer and the store's are two**: `store/io.py::_atomic_replace` and
   `scripts/processes.py::replace_changed` each state one bounded retry on Windows' WinError 5; the
   stdlib-only interpreter the scripts run under is what varies. Action: one retry rule stated by one
@@ -327,14 +324,13 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   in the cell while core's `BackendClient.priced_as` splits the same string for the bound; they
   disagree when a dataset sets `provider`. Action: the cell takes the pair core bound. **Rides
   with:** M12. **Re-test:** `git grep -n "inline_route" -- promptpotter/connectors/dspy_module.py` is empty.
-- **`backend-integration.md` presents TermNorm's wire as every backend's contract** — "any backend
-  that speaks three endpoints", `/pipeline` "read once at init", its Connection security is TermNorm's
-  env, linked from every connector's inspector. Action: the page states the `Connector` declaration
-  contract; TermNorm's endpoints become one connector's section beside n8n's. **Rides with:** M18.
-  **Re-test:** read the page's first paragraph.
 - **TermNorm's live datasets (`llm_only`, `entity_profiling`, `llm_ranking`) are refused at parse**:
   `direct_prompt` must gain a `prompt_info`, edited in the TermNorm checkout (operator, 2026-11-06).
   **Rides with:** M18. **Re-test:** `python -m promptpotter new llm_only` parses its pipeline.
+- **`ConnectorInspector.tsx::SECURITY_DOC_URL` links § Connection security for every connector**, an
+  in-process one too, where no endpoint, token or header applies. Action: the link rides the served
+  connector's wire kind. **Rides with:** M18. **Re-test:**
+  `git grep -n "SECURITY_DOC_URL" -- webapp/components`.
 - **The host prompt and tool schemas mislead a driving model** — `OptimizationOverrides` inherits
   `optimizer: "potter"` and `arm_gate: "off"` as schema defaults (the head-to-head validator requires
   `optimizer`); `EditDraftPatch.config` is an untyped `dict`; a "partial `CampaignConfig`" has three
@@ -800,12 +796,10 @@ next run-data reshape.
 - **`RaceStandingRecord.paired_breakdown` is an untyped stat bag**: potter (`pobb/checks.py`) and capo
   write different keys, and `views/readout.py::on_race_standing` reads `.get("p_better", 1.0)` to sort
   and `.get("p_better", 0.0)` to print. Action: a typed per-prior model. **Re-test:** `git grep -n '"p_better"' -- promptpotter`.
-- **`evidence/read.py::campaigns_on_dataset` matches the name label**, so two banks under one name (a
-  re-upload, a name two tiers hold) pool into one read. Action: the name resolved once and matched on
-  `Campaign.declaration.dataset_hash`.
 - **The stale-data ladder's outcome has two owners**: `sample_measurement.py::execute_stale_data_protocol`
   stamps one of five exclusive bools on `MeasuredCell` that `render/sample.py` re-reads as an `elif`
-  chain; the ladder is string-keyed. Action: one outcome enum on the cell, the ladder a `match`.
+  chain; the ladder is string-keyed, and a pause requested mid-ladder returns the degraded cell with
+  no outcome marked. Action: one outcome enum on the cell, the pause exit among its values, the ladder a `match`.
   **Rides with:** the next accepted re-key (`domain.scoring::MeasuredCell` is reached by every treatment).
   **Re-test:** `git grep -nE "switched_out|persistently_degraded|config_fundamental_skip" -- promptpotter/domain/scoring.py`.
 
@@ -1245,6 +1239,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   in `llm/heartbeat.py`, `campaign_store/store.py::CampaignStore.list_campaigns` and
   `user_store.py::read_accounts` are held by no test. Action: a survey serves a bad row with its fault,
   and a test holds each catch. **Re-test:** a tenant tree with one unreadable dataset lists the rest.
+- `evidence/read.py::_cycle_facts` loads again the manifest `_at` already holds (`at.campaign`),
+  behind an `assert`: a manifest deleted between the two reads fails the read as a bare
+  `AssertionError`, a 500. Action: pass `at.campaign`. **Re-test:**
+  `git grep -n "a subject resolves through its campaign's directory" -- promptpotter`.
 
 **B. A refusal spelled per door.** **Rides with:** Q3.
 - `provider_config.py::OIDCConfigError`, `prompt_block.py::PackRefusal` and
@@ -1263,6 +1261,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   CLI-side. The matcher falls back to a substring, and the dispatcher walks `descend` twice.
   `run_records.py::BankedSubject` is a second address. Action: one resolution, at the dispatcher, by
   exact id or prefix. **Re-test:** `git grep -n "resolve_campaign_id(" -- promptpotter`.
+- `evidence/read.py::campaigns_on_dataset` matches the name label, so two banks under one name (a
+  re-upload, a name two tiers hold) pool into one read: a served-answer change, not a cleanup.
+  Action: the name resolved once and matched on `Campaign.declaration.dataset_hash`. **Re-test:**
+  `git grep -n "c.dataset_name == dataset_name" -- promptpotter/application/evidence`.
 
 **D. Spelled by hand beside the rows.** **Rides with:** the next read added.
 - `api/deps.py::_NAMED` and `read_input`'s pattern, `cli/parsers.py`' read help,
@@ -1313,6 +1315,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `n` keeps its total.
 - `tests/test_scoring.py` writes `HostSession._tasks` past the interface. Action: Q1's log read
   replaces it. **Re-test:** `git grep -n "_tasks\[" -- tests`.
+- `quota.py::set_concurrent_cycles` gates `is_host` only, while the field is writable only under
+  `CAMPAIGN_BUDGET_CAP` too (`quota.py::concurrent_cycles_writable`): two rules for one write.
+  Action: the setter refuses by `concurrent_cycles_writable`. **Re-test:**
+  `git grep -n "if not is_host(stores.identity)" -- promptpotter/application/jobs/quota.py`.
 
 ## Open — multi-arc
 
@@ -1666,7 +1672,6 @@ word's `git grep -c` for that sense is 0.
     re-granted as `grant.json`. **Re-test:** `ls .promptpotter/projects/*/grant.json` after a restamp.
   - `LifetimeSpend` carries no token count, so the coupon's token side shows left / face, never used.
     **Re-test:** the Host allowance section with a token-bound grant.
-  - `AccountUsageTab::LimitControl`'s note ("runs on their provider key") predates own keys.
 - **Seen moving harbor's agent onto our client** (2026-11-04):
   - `LLMResponse.cost_usd` omits a resend `_admitted_send` made that may have billed (the book holds it
     as unreported), so `_AgentModel.cost_usd` can read a reported sum below the book's. **Re-test:** one

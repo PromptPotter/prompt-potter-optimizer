@@ -518,7 +518,7 @@ def _campaign_channels(rows: list[SubjectReading]) -> list[SubjectReading]:
 
 
 class _Located(NamedTuple):
-    """The address resolved ONCE — sandbox, campaign dir, cycle dir — before any path is read."""
+    """The address resolved ONCE by `_at` — sandbox, campaign manifest, campaign dir, cycle dir."""
 
     stores: Stores
     campaign: Campaign
