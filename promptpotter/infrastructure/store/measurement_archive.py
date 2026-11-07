@@ -279,7 +279,7 @@ class _CellFile:
 
 
 class MeasurementArchive:
-    """Keyed by content, never ``backend_id``: a dataset repointed elsewhere is served its old rows."""
+    """Keyed by content, never by the connector: a dataset repointed elsewhere is served its old rows."""
 
     _open: ClassVar[dict[Path, MeasurementArchive]] = {}
     _open_lock: ClassVar[threading.Lock] = threading.Lock()

@@ -271,7 +271,6 @@ async def init_services(
     _warn_if_labels_have_no_ranker(pipeline_schema, bank.samples, connector)
     return Session(
         store=stores,
-        backend_id=connector.name,
         backend_client=client,
         pipeline_schema=pipeline_schema,
         pipeline_read=PipelineRead(

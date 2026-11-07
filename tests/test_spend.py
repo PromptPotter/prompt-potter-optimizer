@@ -801,7 +801,6 @@ async def _walk(
                 # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
                 _searching(1.0),
                 dataset,
-                backend_id="walks",
                 scorer=_HIT,
                 control=_control_pausing(
                     lambda: pause_after_call is not None and len(returned) >= pause_after_call,
@@ -910,7 +909,10 @@ async def _round(
     finally:
         telemetry.reset_cycle_ledger(bound)
     return {
-        "rows": [list(walk.results) for walk in walks],
+        "rows": [
+            [cell.filed(dataclasses.replace(cell.facts, answer=None)) for cell in walk.results]
+            for walk in walks
+        ],
         "stops": [stopped or _ended_on(walk) for walk in walks],
         "absorbed": absorbed(),
         "asked": asked,
@@ -1247,7 +1249,6 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         built_stores,
         _searching(0.01),
         reread,
-        backend_id="reread",
         scorer=_HIT,
         client=backend_client(built_stores.jobs_dir, max_cells_in_flight=1),
     )

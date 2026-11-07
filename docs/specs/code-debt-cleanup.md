@@ -304,10 +304,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   `serves_uploads`. **Rides with:** M18. **Re-test:** `git grep -nE "llm_only|param_keys" --
   promptpotter/assets/datasets/defaults.yaml` is empty and `connectors/termnorm.py` holds the one
   node template.
-- **`Session.backend_id` is a test-only archive switch** — production always sets it;
-  `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
-  Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
-  explicitly. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
 - **A campaign's connector has two sources** — `wiring.py` picks the session's connector from the
   definition's `backend_type`, while `mask/load.py`, `hierarchy.py`, `admission.py` and
   `embedded_run.py` read `Campaign.connector`; a resume after the definition is retargeted reads

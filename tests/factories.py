@@ -410,7 +410,6 @@ def loop_session(
     schema: PipelineSchema,
     samples: Sequence[Sample],
     *,
-    backend_id: str = "",
     client: BackendClient | None = None,
     scorer: Scorer | None = None,
     partition: BankPartition | None = None,
@@ -422,7 +421,6 @@ def loop_session(
 ) -> Session:
     return Session(
         store=stores,
-        backend_id=backend_id,
         backend_client=backend_client(
             stores.jobs_dir, max_cells_in_flight=1, cancel_stops_billing=True, holds_own_sends=True
         )
@@ -468,7 +466,6 @@ def seat(
     scorer: Scorer | None = None,
     optimization: dict[str, Any] | None = None,
     dataset_name: str = "seat",
-    backend_id: str = "",
     control: RunControl | None = None,
     hop: CycleHop | None = None,
     origin: tuple[OptSearchPoint, Callable[[Session], CellSheet]] | None = None,
@@ -493,7 +490,6 @@ def seat(
         stores,
         schema,
         bank,
-        backend_id=backend_id,
         scorer=scorer or scorer_of(),
         partition=partition_bank(list(bank), config.dataset_split, seed=config.run_seed),
         control=control,
