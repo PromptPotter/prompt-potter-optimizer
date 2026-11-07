@@ -175,6 +175,7 @@ from promptpotter.infrastructure.store.layout import (
     inner_sandboxes_dir,
 )
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
+from promptpotter.infrastructure.store.private_root import DataRootExposedError, hold_private
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.site_records import (
     SiteRecord,
@@ -622,6 +623,30 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         "an outside visit kept a served query, a signed-in request, the admin's browser, or this side"
     )
     asyncio.run(_open_sign_up_is_bounded(tmp_path / "perimeter", monkeypatch))
+
+    # The data root reaches no other user, whoever launches under whatever umask: a fresh root is
+    # made 0700, a wider one tightened, and one this process cannot tighten refused by name.
+    if sys.platform != "win32":
+        opened = tmp_path / "opened-root"
+        opened.mkdir(mode=0o755)
+        opened.chmod(0o755)
+        for root in (tmp_path / "fresh-root" / "home", opened):
+            subprocess.run(
+                [sys.executable, "-c", "import os; os.umask(0o022); import promptpotter"],
+                cwd=_REPO,
+                env={**os.environ, "PROMPTPOTTER_HOME": str(root)},
+                check=True,
+            )
+            assert root.stat().st_mode & 0o777 == 0o700, f"{root.name} reached other users"
+        opened.chmod(0o755)
+
+        def not_owner(*_: object) -> None:
+            raise PermissionError
+
+        monkeypatch.setattr(os, "chmod", not_owner)
+        with pytest.raises(DataRootExposedError) as refused:
+            hold_private(opened)
+        assert refused.value.details == {"path": str(opened)}
 
 
 _CHUNK = 1024 * 1024
