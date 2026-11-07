@@ -1,3 +1,3 @@
 1) Run `git fetch origin main 'refs/heads/brief/*:refs/remotes/origin/brief/*' 'refs/heads/batch/*:refs/remotes/origin/batch/*' 'refs/heads/arc/*:refs/remotes/origin/arc/*'`.
 2) `git show origin/brief/wave-2:briefs/QUEUE` lists arc ids, one per line. Claim the first id that has no `refs/heads/claim/<id>` on origin (`git ls-remote origin refs/heads/claim/<id>`): `c=$(git commit-tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904 -m "claim <id> $(date +%s%N)") && git push origin $c:refs/heads/claim/<id>`. A rejected push means another session holds it: try the next id. No free id: stop and say so.
-3) Your whole instruction is then `git show origin/brief/wave-2:briefs/<id>.md`: read it entirely and follow it to the end.
+3) Your whole instruction is then `git show origin/brief/wave-2:briefs/common.md` followed by `git show origin/brief/wave-2:briefs/<id>.md` (a brief that already starts with common.md's text is whole by itself): read both entirely and follow them to the end.
