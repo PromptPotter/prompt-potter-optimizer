@@ -1,6 +1,6 @@
 import { FailureLine, Said } from "@/components/ui";
 import { BACKEND_REACHABILITY_INFO, TONES, type Said as SaidRow } from "@/lib/api/types";
-import { cycleAddress, postCommand } from "@/lib/api/commands";
+import { commands, cycleAddress } from "@/lib/api/commands";
 import { cx } from "@/lib/cx";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useBackend } from "@/lib/hooks/useConnector";
@@ -53,7 +53,7 @@ export function CriticalAlertBanner() {
             disabled={pause.pending !== null}
             onClick={() =>
               void pause.run("pause-cycle", () =>
-                postCommand("pause-cycle", cycleAddress(viewedPath)),
+                commands["pause-cycle"](cycleAddress(viewedPath)),
               )
             }
             aria-label="Pause the campaign"

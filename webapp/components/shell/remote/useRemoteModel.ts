@@ -1,4 +1,4 @@
-import { cycleAddress, postCommand } from "@/lib/api";
+import { commands, cycleAddress } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useViewedDashboard } from "@/lib/poll";
 import { encodeCyclePath } from "@/lib/ids";
@@ -23,7 +23,7 @@ export function useRemoteModel() {
   const arm = (cells: number, auto: boolean) =>
     void cmd.run("sample-lookahead", () =>
       // `cells: 1` disarms; sent unclamped, the walk clamps it to `lookahead.ceiling`.
-      postCommand("set-sample-lookahead", { ...cycleAddress(viewedPath), cells, auto }),
+      commands["set-sample-lookahead"]({ ...cycleAddress(viewedPath), cells, auto }),
     );
   const armCells = (raw: string) => {
     const cells = Number(raw);
@@ -49,7 +49,7 @@ export function useRemoteModel() {
     arm,
     armCells,
     skip: () =>
-      void cmd.run("skip", () => postCommand("skip-searchpoint", cycleAddress(viewedPath))),
+      void cmd.run("skip", () => commands["skip-searchpoint"](cycleAddress(viewedPath))),
     pending: cmd.pending,
     failure: cmd.failure,
   };

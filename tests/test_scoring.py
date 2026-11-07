@@ -1270,6 +1270,7 @@ def _bench_pass(
     )
 
 
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
@@ -2258,6 +2259,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 # 4. An authored round — the operator's arm in the seat a proposer fills
 
 
+@pytest.mark.usefixtures("optimizing_memory")
 def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
@@ -2389,6 +2391,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
 # 5. Elimination — who is cut, and when
 
 
+@pytest.mark.usefixtures("optimizing_memory")
 def test_an_arm_is_cut_only_on_evidence_that_it_trails(
     built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
@@ -2795,6 +2798,7 @@ _CLEAN_PANEL: Sequence[float | None] = [1.0] * 9
 _TIED_PANEL: Sequence[float | None] = [1.0, 0.0] + [0.0] * 6 + [1.0]
 
 
+@pytest.mark.usefixtures("optimizing_memory")
 def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
@@ -3681,6 +3685,7 @@ def _evidence_campaign(
     return Subject(cid)
 
 
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_it_is_none(
     built_stores: Stores, tmp_path: Path
 ) -> None:

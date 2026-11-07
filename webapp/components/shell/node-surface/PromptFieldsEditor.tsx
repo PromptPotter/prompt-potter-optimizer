@@ -1,5 +1,5 @@
 import { useImperativeHandle, useMemo, useRef, useState, type DragEvent, type Ref } from "react";
-import { libraryRead, postCommand } from "@/lib/api";
+import { commands, libraryRead } from "@/lib/api";
 import type { DraftPatch, NodePrompt } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { segmentPrompt, type KnownSnippet } from "@/lib/derivations";
@@ -121,7 +121,7 @@ export function PromptFieldsEditor({
     void bank.run("bank-snippet", async () => {
       for (const edit of owed) {
         sent.current.add(edit.text);
-        await postCommand("bank-snippet", { ...edit, experiment });
+        await commands["bank-snippet"]({ ...edit, experiment });
       }
     });
   };

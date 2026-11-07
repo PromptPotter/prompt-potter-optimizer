@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { postCommand } from "@/lib/api";
+import { commands } from "@/lib/api";
 import type { HierarchyCourse, SubtreeCampaign, DisplayMetric } from "@/lib/api/types";
 import {
   candidatesAtPath,
@@ -148,7 +148,7 @@ export function useLineage({
     confirm: () => {
       const rootId = tree ? pathOfAddress(tree.facts.root).at(-1)?.cycleId : undefined;
       if (!campaignId || !rootId) return;
-      void cmd.run("cleanup-empty-cycles", () => postCommand("cleanup-empty-cycles", { campaign_id: campaignId, cycle_id: rootId }), () => {
+      void cmd.run("cleanup-empty-cycles", () => commands["cleanup-empty-cycles"]({ campaign_id: campaignId, cycle_id: rootId }), () => {
         setCleanupAcked(true);
         setCleanupOpen(false);
       });
@@ -175,7 +175,7 @@ export function useLineage({
         ? (then) =>
             void del.run(
               "delete-cycle",
-              () => postCommand("delete-cycle", { campaign_id: campaignId, cycle_id: cycleId }),
+              () => commands["delete-cycle"]({ campaign_id: campaignId, cycle_id: cycleId }),
               then,
             )
         : null,

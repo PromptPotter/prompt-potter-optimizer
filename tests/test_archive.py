@@ -318,7 +318,7 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
 # 2. The archive on disk
 
 
-@pytest.mark.usefixtures("offline")
+@pytest.mark.usefixtures("offline", "optimizing_memory")
 def test_the_archive_on_disk_keeps_every_paid_answer(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -636,6 +636,7 @@ def _emit_round(
     return pick.id
 
 
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_inherits_them(
     built_stores: Stores, offline: Router
 ) -> None:
@@ -1724,6 +1725,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 # 4. An origin the gate halted, resumed past it
 
 
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launch_reads_the_pass(
     built_stores: Stores,
 ) -> None:

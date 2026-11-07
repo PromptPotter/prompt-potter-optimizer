@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  commands,
   postDraftFromDataset,
   postDraftFromOrigin,
-  postCommand,
-  postIngestDataset,
   postBuildCandidateLibraryFromColumn,
   postUploadCandidateLibrary,
   type StartCheckinOptions,
@@ -198,7 +197,7 @@ export function useIngestFlow({
     const alive = begin();
     setPhase({ stage: "checkin", model: "the check-in model" });
     const r = await resolving.run("resolve", () =>
-      postCommand("resolve-origin", { draft_id: draft.draft_id }),
+      commands["resolve-origin"]({ draft_id: draft.draft_id }),
     );
     if (!alive()) return;
     // A refused turn lands in review on the draft as it stood; its failure prints beside Start.
@@ -245,7 +244,7 @@ export function useIngestFlow({
     const id =
       chipId ?? threads.append(threadKey.current, { kind: "file", name: file.name, detail: null });
     setPhase({ stage: "uploading" });
-    const r = await opening.run("upload", () => postIngestDataset(file, slug));
+    const r = await opening.run("upload", () => commands["ingest-upload"](file, slug));
     if (!alive()) return;
     if (!r.ok) {
       // The one refusal whose next step is a choice: it opens the collision card, not a failure line.
@@ -396,7 +395,7 @@ export function useIngestFlow({
     setInputText("");
     echo(text);
     const updated = await mutateDraft("edit", () =>
-      postCommand("edit-draft-campaign", { draft_id: id, patch: { raw_task_description: text } }),
+      commands["edit-draft-campaign"]({ draft_id: id, patch: { raw_task_description: text } }),
     );
     if (updated) await runCheckin(updated);
   };
@@ -404,7 +403,7 @@ export function useIngestFlow({
   const applyPatch = (patch: DraftPatch) => {
     if (phase.stage !== "ready") return;
     const id = phase.draft.draft_id;
-    void mutateDraft("edit", () => postCommand("edit-draft-campaign", { draft_id: id, patch }));
+    void mutateDraft("edit", () => commands["edit-draft-campaign"]({ draft_id: id, patch }));
   };
 
   const uploadCandidateLibrary = async (file: File) => {
@@ -442,7 +441,7 @@ export function useIngestFlow({
     } while (tail !== draftWrites.current);
     // Sparse, so the `CommandRecord` shows what the operator declared.
     const r = await starting.run("start", () =>
-      postCommand("start-checkin", { draft_id: id, ...limits }),
+      commands["start-checkin"]({ draft_id: id, ...limits }),
     );
     if (!r.ok || !alive()) {
       setMinting(false);

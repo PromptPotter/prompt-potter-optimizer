@@ -33,7 +33,7 @@ A reset may seed from `lib/state/view-memory.tsx` (per-campaign ids, flags and U
 
 ## Testing posture
 
-The gate is `python scripts/gate.py --web`; its standalone typecheck is what makes `strict` real (`vite build` checks no types). **Vitest covers reader-side derivations and `lib/read-cache.ts` / `useRead`** only, on fixtures of the SERVED shape (`lib/test-fixtures.ts`), never a cast `dashboard.json`. **The browser walk (`npm run e2e`) owns "does it render against a served cycle"**; the gate runs its `cold` tier ([`e2e/README.md`](e2e/README.md)). A component-render test earns its place only for a class no other tier catches. Smoke by hand at `http://localhost:8001/`: as-is for **anon**, `PROMPTPOTTER_AUTH=off` for **authed + live** at zero spend; [`../dev/oidc-local/`](../dev/oidc-local/) for the real OIDC round-trip.
+The gate is `python scripts/gate.py --web`; its standalone typecheck is what makes `strict` real (`vite build` checks no types). **Vitest covers reader-side derivations and `lib/read-cache.ts` / `useRead`** only, on fixtures of the SERVED shape (`lib/test-fixtures.ts`), never a cast `dashboard.json`. **The browser walk (`npm run e2e`) owns "does it render against a served cycle"**; the gate runs its `cold` and `walk` tiers, the walk on offline-run's world ([`e2e/README.md`](e2e/README.md)). A component-render test earns its place only for a class no other tier catches. Smoke by hand at `http://localhost:8001/`: as-is for **anon**, `PROMPTPOTTER_AUTH=off` for **authed + live** at zero spend; [`../dev/oidc-local/`](../dev/oidc-local/) for the real OIDC round-trip.
 
 ## Build + run
 

@@ -41,7 +41,6 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import ORIGIN_FILE, ResolvedDataset
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.errors import PayloadInvalidError
@@ -51,6 +50,7 @@ if TYPE_CHECKING:
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import CellSheet
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class CampaignOrigin(NamedTuple):
 
 
 def lock_criterion(
-    session: Session, campaign_config: CampaignConfig, origin_rows: CellSheet
+    session: Session, campaign_config: CampaignConfig, origin_rows: CellSheet, ledger: CycleEventLog
 ) -> dict[str, str] | None:
     """Locked once: ``pipeline_resolve.py::cycle_config`` reads the record back."""
     block = campaign_config.scoring
@@ -78,8 +78,7 @@ def lock_criterion(
         parse_dials(block[DIALS_KEY], terms), origin_anchors(origin_rows, terms), terms
     )
     locked = {k: v for k, v in block.items() if k != DIALS_KEY} | {"per_cell": formula}
-    if (ledger := active_cycle_ledger()) is not None:
-        ledger.append(ScoringLockedRecord(declared=dict(block), locked=locked))
+    ledger.append(ScoringLockedRecord(declared=dict(block), locked=locked))
     return locked
 
 
@@ -285,7 +284,7 @@ async def establish_campaign_origin(
                 "Origin scoring hit a transient transport abort — re-scoring once fresh."
             )
         sheet, scores = scored.sheet, scored.scores
-        locked_scoring = lock_criterion(session, campaign_config, sheet)
+        locked_scoring = lock_criterion(session, campaign_config, sheet, listener.ledger)
         if locked_scoring is not None:
             # Re-GRADED under the criterion these rows just anchored; nothing is re-measured.
             populate_session_scoring(

@@ -17,7 +17,11 @@ from promptpotter.application.jobs.mint import (
     resolve_cycle_plan,
     resolve_resume,
 )
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolved_overrides
+from promptpotter.application.optimizer_manifest import (
+    SelectedOptimizer,
+    resolved_overrides,
+    select_optimizer,
+)
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
@@ -270,8 +274,9 @@ def inner_campaign_id(
     role: MeasurementRole = MeasurementRole.PANEL,
 ) -> str:
     """Content, never asker: the TREATMENT, never the budget, so a deepened cell continues the rounds already banked."""
+    edits, model = _one_model(overrides)
     digest = stable_hash(
-        [spec.treatment(), resolved_overrides(overrides), _purpose(role)], length=6
+        [spec.treatment(), resolved_overrides(edits), model, _purpose(role)], length=6
     )
     return f"{dataset_id_prefix(spec.inner_dataset)}__{digest}"
 
@@ -396,15 +401,36 @@ class _Opened(NamedTuple):
     optimizer: SelectedOptimizer
 
 
+_ONE_CHOICE = ("model", "provider")
+
+
+def _one_model(overrides: Overrides) -> tuple[Overrides, dict[str, str]]:
+    """The arm's edits less who answers, and the ONE model every inner node answers by: the first
+    edit naming one, on its provider where that edit names one."""
+    edits = {
+        node: {k: v for k, v in edit.items() if k not in _ONE_CHOICE}
+        for node, edit in overrides.items()
+    }
+    for edit in overrides.values():
+        if isinstance(model := edit.get("model"), str) and model:
+            provider = edit.get("provider")
+            named = {"provider": provider} if isinstance(provider, str) and provider else {}
+            return edits, {"model": model, **named}
+    return edits, {}
+
+
 def _laid_arm(config: CampaignConfig, overrides: Overrides) -> CampaignConfig:
     """The arm's edit laid into the cell's own overlay, last: the selection refuses what no
     render can apply (`optimizer_manifest.py::_select`), and its treatment hashes the rest."""
     if not overrides:
         return config
+    edits, model = _one_model(overrides)
+    every = select_optimizer(config.optimization).llm_nodes if model else ()
     nodes = dict(config.optimization.nodes)
-    for node, edit in overrides.items():
+    for node in dict.fromkeys([*edits, *every]):
         held = nodes[node].config if node in nodes else {}
-        nodes[node] = ManifestNodeOverlay(config={**held, **edit})
+        laid = {**held, **edits.get(node, {}), **(model if node in every else {})}
+        nodes[node] = ManifestNodeOverlay(config=laid)
     optimization = config.optimization.model_copy(update={"nodes": nodes})
     return config.model_copy(update={"optimization": optimization})
 
@@ -435,18 +461,16 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
             spent={},
         )
     train_data = [*search, *bench]
-    config = _laid_arm(
-        inner_instrument_config(
-            spec,
-            CampaignConfig.model_validate(
-                dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)
-            ),
-            solver=session.pipeline_schema.prompt_nodes(),
-            n_search=len(search),
+    instrument = inner_instrument_config(
+        spec,
+        CampaignConfig.model_validate(
+            dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)
         ),
-        cell.overrides,
+        solver=session.pipeline_schema.prompt_nodes(),
+        n_search=len(search),
     )
     try:
+        config = _laid_arm(instrument, cell.overrides)
         declaration = declare(session, config, purpose=ctx.purpose)
         # The campaign that exists decides, never an id its origin content derives: a drifted
         # origin reaches the drift refusal rather than a fresh root.

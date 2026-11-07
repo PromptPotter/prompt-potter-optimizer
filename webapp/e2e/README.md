@@ -14,8 +14,8 @@ npx playwright test --project=walk -g "theme"    # one slice
 
 First time on a machine: `npx playwright install chromium`.
 
-**`gate.py` runs `cold` only** — its playwright check does not walk an offline-run world yet
-([`code-debt-cleanup.md`](../../docs/specs/code-debt-cleanup.md) § The webapp's vanilla pass), and `spend` needs money. `walk` reads no operator campaign when
+**`gate.py` runs `cold` and `walk`**, the walk against offline-run's potter world
+(`scripts/gate.py::_playwright`); `spend` needs money. `walk` reads no operator campaign when
 `PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`) names a run — potter's straight run is what `gate.py --only offline-run` leaves
 at `.gate_cache/offline-run/potter` — and `walk_world.py` serves a throwaway copy of it whose
 account agreed to the live terms, with the `offline` backend. Unset, `walk` reads the checkout's
@@ -39,8 +39,8 @@ cannot hold both. **Neither binds 8001** — that port is the operator's.
 
 **A run boots only the servers its projects need** (`playwright.config.ts::runs`, read off
 `--project`): `walk` starts the walk server, `cold` and `spend` the throwaway one, and no
-`--project` at all — `npm run e2e` — starts both. So the gate's `--project=cold` never opens the
-operator's workspace.
+`--project` at all — `npm run e2e` — starts both. The gate's `walk` reads its `PP_E2E_WALK_WORLD`
+copy, so the gate never opens the operator's workspace.
 
 **One spec inside `cold` brings a THIRD**, and it is not a fourth world: `onboarding-signed-in`
 needs an identity that is signed in and is not the host, which neither server above can produce

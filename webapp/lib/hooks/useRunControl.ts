@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cycleAddress, postCommand } from "@/lib/api";
+import { commands, cycleAddress } from "@/lib/api";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import type { RunAdmission } from "@/lib/api/types";
 import { pauseNextStep, phasePauseLabel, phaseWalks } from "@/lib/derivations";
@@ -46,16 +46,16 @@ export function useRunControl(): RunControl | null {
     if (action === null) return;
     if (action === "pause") {
       setPausing(true);
-      void cmd.run("pause-cycle", () => postCommand("pause-cycle", cycleAddress(viewedPath)));
+      void cmd.run("pause-cycle", () => commands["pause-cycle"](cycleAddress(viewedPath)));
       return;
     }
     // A paused cycle's worker has exited, so resume is a relaunch: the same branch as start.
-    void cmd.run("start-run", () => postCommand("start-run", cycleAddress(viewedPath)));
+    void cmd.run("start-run", () => commands["start-run"](cycleAddress(viewedPath)));
   };
 
   const step = (rounds: number) =>
     void cmd.run("start-run", () =>
-      postCommand("start-run", { ...cycleAddress(viewedPath), step_rounds: rounds }),
+      commands["start-run"]({ ...cycleAddress(viewedPath), step_rounds: rounds }),
     );
 
   return {

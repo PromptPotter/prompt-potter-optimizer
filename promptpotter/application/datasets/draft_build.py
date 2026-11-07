@@ -143,10 +143,9 @@ def _task_title(task: str | None) -> str | None:
     return title if 0 < len(title) <= _TITLE_MAX_CHARS else None
 
 
-def _recap(
-    draft: DraftFile, connector: str, config: CampaignConfig, criterion: DraftCriterion
-) -> str:
-    rounds = config.optimization.budget.rounds
+def _recap(draft: DraftFile, connector: str, criterion: DraftCriterion) -> str:
+    """No rounds: the Start step sends them after this is said, so its blank names them
+    (`_blank_binds`)."""
     title = _task_title(draft.raw_task_description)
     lead = (
         f"evolve a prompt for “{title}”"
@@ -154,16 +153,10 @@ def _recap(
         else f"evolve a prompt that turns each “{draft.column_query or 'your input'}” into "
         f"the right “{draft.column_ground_truth or 'the target'}”"
     )
-    over = (
-        "with no rounds cap"
-        if rounds is None
-        else f"over {'1 round' if rounds == 1 else f'up to {rounds} rounds'}"
-    )
     return (
         f"PromptPotter will {lead} — "
         f"running {connector}, "
-        f"scoring by {criterion.matcher or 'its formula'}, "
-        f"{over}."
+        f"scoring by {criterion.matcher or 'its formula'}."
     )
 
 
@@ -230,7 +223,7 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
         ],
         readiness=origin_readiness(draft, pipeline),
         launch_refusal=refusal,
-        recap=_recap(draft, served.connector, pipeline.config, pipeline.criterion),
+        recap=_recap(draft, served.connector, pipeline.criterion),
         setup_schema=setup_schema(draft, launch=launch, declared=declared),
     )
 
@@ -278,10 +271,19 @@ def _cap(budget: dict[str, Any], axis: CapAxis, bound: float | None = None) -> d
 
 def _blank_binds(declared: Budget) -> str:
     """What a blank launch cap leaves binding: the campaign's declared ceiling (a free account's
-    is the tier's), else the account's allowance."""
-    if declared.usd is None and declared.tokens is None:
-        return "Blank: your account's allowance binds this launch."
-    return f"Blank: the campaign's {money_text(declared)} ceiling binds this launch."
+    is the tier's), else the account's allowance; and its declared rounds."""
+    money = (
+        "your account's allowance"
+        if declared.usd is None and declared.tokens is None
+        else f"the campaign's {money_text(declared)} ceiling"
+    )
+    rounds = declared.rounds
+    over = (
+        "with no rounds cap"
+        if rounds is None
+        else f"over {'1 round' if rounds == 1 else f'up to {rounds} rounds'}"
+    )
+    return f"Blank: {money} binds this launch, {over}."
 
 
 def setup_schema(draft: DraftFile, *, launch: Budget, declared: Budget) -> dict[str, Any]:

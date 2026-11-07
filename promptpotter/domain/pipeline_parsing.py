@@ -45,6 +45,7 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
     "model": "string",
     "provider": "string",
     "reasoning_effort": "string",
+    "route_order": "array",
     "persona": "string",
     "task_intent": "string",
     "problem_description": "string",
@@ -484,10 +485,12 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 modes = [ANSWER_AS_JSON]
             step_kwargs["param_keys"] = step_kwargs["param_keys"] | {SCHEMA_TOGGLE_PARAM}
             # Types only: outside `param_keys`, so no layer's `narrow` can intersect the row away.
+            # `route_order` too: the resolve pins a routed node's host (`pin_default_routes`), so a
+            # seed copied off a run's resolved config names it.
             step_kwargs["param_types"] = {
                 **step_kwargs["param_types"],
                 SCHEMA_TOGGLE_PARAM: "string",
-                **{k: WELL_KNOWN_PARAM_TYPES[k] for k in OUTPUT_CONTRACT_KEYS},
+                **{k: WELL_KNOWN_PARAM_TYPES[k] for k in (*OUTPUT_CONTRACT_KEYS, "route_order")},
             }
             step_kwargs["param_allowed_values"] = {
                 **step_kwargs["param_allowed_values"],

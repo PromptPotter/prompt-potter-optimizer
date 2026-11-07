@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cycleAddress, postCommand } from "@/lib/api";
+import { commands, cycleAddress } from "@/lib/api";
 import {
   type Budget,
   type MeteredSpend,
@@ -88,7 +88,7 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
     setConfirmingHalt(false);
     setNote(null);
     const r = await cmd.run("change-run-limits", () =>
-      postCommand("change-run-limits", { ...cycleAddress(viewedPath), budget: change }),
+      commands["change-run-limits"]({ ...cycleAddress(viewedPath), budget: change }),
     );
     if (r.ok) setNote(applied);
   };

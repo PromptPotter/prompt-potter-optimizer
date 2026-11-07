@@ -44,7 +44,7 @@ Routing: [`dispatch-hub.md`](../../../../docs/developer/dispatch-hub.md).
 
 ## Editing a renderer's PROSE is a measurement change
 
-`nodes.py::source_digest` hashes the prompt-shaping set, so rewording a directive voids banked origins. A prompt-shaping constant lives in `bundle.py`; a unit reached only through an instance or a registry carries `shared/hashing.py::shapes_optimizer_prompt`. A module is hashed by unit, never whole: a member's reads walk into `dispatch/`, so only the units its readers reach are hashed.
+`nodes.py::source_digest` hashes the prompt-shaping set, so rewording a directive voids banked origins. A prompt-shaping constant lives in `bundle.py`; a unit reached only through an instance or a registry carries `shared/hashing.py::shapes_optimizer_prompt`. Hashed whole: each member's module, its `prompt_sources`, and a module marking itself (`shapes_optimizer_prompt(__name__)`: `shared/answer_text.py`, `shared/composite.py`). Anywhere else a unit is hashed when it is marked, or when hashed code reaches it by name, transitively, short of `source_scan.py::PLUMBING_MODULES`; so `dispatch/` is hashed by the units a member reads.
 
 ## A validator either REJECTS or SCORES — never both
 

@@ -111,19 +111,15 @@ jobs:
           key: eslint-${{ github.sha }}
           restore-keys: eslint-
 
-      # The `playwright` check walks the built app against the REAL API, which
-      # `e2e/serve.mjs` runs out of `.venv` — so this job needs the engine after
-      # all. Same extras as the `check` job: the app has to import before it can
-      # be walked. `--with-deps` because a bare runner has none of Chromium's
-      # shared libraries.
+      # The `playwright` check walks the offline-run world through the API
+      # `e2e/serve.mjs` runs out of `.venv`. The gate syncs `.venv` to its pinned
+      # extras itself, so that is this job's one sync. `--with-deps` because a
+      # bare runner has none of Chromium's shared libraries.
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           save-cache: false
-
-      - name: Install the engine the walk serves
-        run: uv sync --extra dev --extra api --frozen
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium

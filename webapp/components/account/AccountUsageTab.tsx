@@ -25,7 +25,7 @@ import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useWorkspace } from "@/lib/workspace";
-import { couponRead, quotaRead, postCommand } from "@/lib/api";
+import { couponRead, quotaRead, commands } from "@/lib/api";
 
 const SEGMENTED_MAX = 8;
 
@@ -250,7 +250,7 @@ function QueueTable({ queue }: { queue: MachineQueueEntry[] }) {
         <Button
           disabled={cmd.pending !== null}
           onClick={() =>
-            void cmd.run(q.job_id, () => postCommand("cancel-queued-run", { job_id: q.job_id }))
+            void cmd.run(q.job_id, () => commands["cancel-queued-run"]({ job_id: q.job_id }))
           }
         >
           {cmd.pending === q.job_id ? "Cancelling…" : "Cancel"}
@@ -289,7 +289,7 @@ function LimitControl({ quota }: { quota: QuotaStatus }) {
   const save = async (next: number) => {
     if (next === limit || !Number.isInteger(next) || next < 1) return;
     await cmd.run("set-concurrent-cycles", () =>
-      postCommand("set-concurrent-cycles", { max_concurrent_cycles: next }),
+      commands["set-concurrent-cycles"]({ max_concurrent_cycles: next }),
     );
   };
 

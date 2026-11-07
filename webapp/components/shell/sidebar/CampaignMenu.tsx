@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { postCommand } from "@/lib/api";
+import { commands } from "@/lib/api";
 import type { ListedCampaign } from "@/lib/api/types";
 import { tagValue } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
@@ -21,19 +21,19 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
 
   const runArchive = () =>
     void cmd.run("archive", () =>
-      postCommand("archive-campaign", { campaign_id: campaign.address }),
+      commands["archive-campaign"]({ campaign_id: campaign.address }),
     );
 
   const runUnarchive = () =>
     void cmd.run("unarchive", () =>
-      postCommand("unarchive-campaign", { campaign_id: campaign.address }),
+      commands["unarchive-campaign"]({ campaign_id: campaign.address }),
     );
 
   const runRename = () => {
     setRenaming(false);
     // `""` is a real value: it clears the label back to the dataset-name fallback.
     void cmd.run("rename", () =>
-      postCommand("set-campaign-label", {
+      commands["set-campaign-label"]({
         campaign_id: campaign.address,
         label: draft.trim(),
       }),
@@ -46,14 +46,14 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
     if (unstarted) {
       void cmd.run(
         "delete",
-        () => postCommand("discard-draft", { draft_id: campaign.address }),
+        () => commands["discard-draft"]({ draft_id: campaign.address }),
         () => flow.discarded(campaign.address),
       );
       return;
     }
     void cmd.run(
       "delete",
-      () => postCommand("delete-campaign", { campaign_id: campaign.address }),
+      () => commands["delete-campaign"]({ campaign_id: campaign.address }),
       // Lets go of the view BEFORE the re-poll rather than discovering it by 404.
       () => {
         if (viewedCampaignId === campaign.address) navigate(null);

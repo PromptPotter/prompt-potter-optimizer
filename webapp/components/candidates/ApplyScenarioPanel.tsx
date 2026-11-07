@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cycleAddress, postCommand } from "@/lib/api";
+import { commands, cycleAddress } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { FailureLine } from "@/components/ui";
 import type { CyclePath } from "@/lib/ids";
@@ -28,7 +28,7 @@ export function ApplyScenarioPanel({
     void cmd.run(
       "apply-scenario",
       () =>
-        postCommand("fork-cycle", {
+        commands["fork-cycle"]({
           ...cycleAddress(path),
           round: at,
           // No `origin_prompts`: the lifted round 0 is the origin, and the server refuses the pair.

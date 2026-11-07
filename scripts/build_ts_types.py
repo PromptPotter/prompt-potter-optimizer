@@ -194,7 +194,11 @@ def _emit_command_contract() -> str:
         required = [name for name, info in _wire_fields(model) if info.is_required()]
         keys = " | ".join(json.dumps(name) for name in required) or "never"
         sent.append(f"  {json.dumps(kind.value)}: CommandSent<{_export(model)}, {keys}>;")
+    browser = " | ".join(json.dumps(kind.value) for kind in sorted(CommandKind) if kind.browser)
     return (
+        "// Each kind whose `Press` claims the browser door "
+        "(domain/command_kinds.py::CommandKind.browser).\n"
+        f"export type BrowserKind = {browser};\n\n"
         "type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;\n"
         "// A body as sent: its required keys, every other one omittable at any depth.\n"
         "export type CommandSent<T, K extends keyof T> = { [P in K]: DeepPartial<T[P]> } & {\n"

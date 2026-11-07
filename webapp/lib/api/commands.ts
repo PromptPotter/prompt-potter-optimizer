@@ -2,6 +2,7 @@ import { encodeDescend, pathRoot, type CyclePath } from "../ids";
 import { API, send, toApiError } from "./client";
 import { mintIdempotencyKey } from "./errors";
 import type {
+  BrowserKind,
   CommandPayloads,
   CommandResponses,
   ConfigOverrides as WireConfigOverrides,
@@ -11,22 +12,73 @@ import type {
 
 export type VerifyStrategy = VerifyReading["strategy"];
 
+type JsonKind = BrowserKind & keyof CommandPayloads;
+
 // The body IS the kind's payload model, and the answer is its route's: neither is declared here.
-export async function postCommand<K extends keyof CommandPayloads>(
-  kind: K,
-  payload: CommandPayloads[K],
-): Promise<CommandResponses[K]> {
-  const r = await send(`${API}/commands/${kind}`, {
+function json<K extends JsonKind>(kind: K) {
+  return async (payload: CommandPayloads[K]): Promise<CommandResponses[K]> => {
+    const r = await send(`${API}/commands/${kind}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": mintIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw await toApiError(r);
+    return (await r.json()) as CommandResponses[K];
+  };
+}
+
+// A file goes up as the form its route reads, so it has no JSON body to type.
+async function ingestUpload(file: File, slug?: string): Promise<CommandResponses["ingest-upload"]> {
+  const form = new FormData();
+  form.append("file", file);
+  if (slug) form.append("slug", slug);
+  const r = await send(`${API}/commands/ingest-upload`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": mintIdempotencyKey(),
-    },
-    body: JSON.stringify(payload),
+    headers: { "Idempotency-Key": mintIdempotencyKey() },
+    body: form,
   });
   if (!r.ok) throw await toApiError(r);
-  return (await r.json()) as CommandResponses[K];
+  return (await r.json()) as CommandResponses["ingest-upload"];
 }
+
+// Every kind whose `Press` claims the browser door, each by its one sender: tsc fails a claimed
+// kind with none, and a kind the browser does not claim has none to call.
+export const commands = {
+  "accept-terms": json("accept-terms"),
+  "archive-campaign": json("archive-campaign"),
+  "bank-snippet": json("bank-snippet"),
+  "cancel-queued-run": json("cancel-queued-run"),
+  "change-run-limits": json("change-run-limits"),
+  "cleanup-empty-cycles": json("cleanup-empty-cycles"),
+  "compact-archive": json("compact-archive"),
+  "delete-campaign": json("delete-campaign"),
+  "delete-cycle": json("delete-cycle"),
+  "discard-draft": json("discard-draft"),
+  "edit-draft-campaign": json("edit-draft-campaign"),
+  "fork-cycle": json("fork-cycle"),
+  "grade-bench": json("grade-bench"),
+  "ingest-upload": ingestUpload,
+  "open-dataset-draft": json("open-dataset-draft"),
+  "open-origin-draft": json("open-origin-draft"),
+  "origin-gate-decision": json("origin-gate-decision"),
+  "pause-cycle": json("pause-cycle"),
+  "remove-api-key": json("remove-api-key"),
+  "resolve-origin": json("resolve-origin"),
+  "set-api-key": json("set-api-key"),
+  "set-campaign-label": json("set-campaign-label"),
+  "set-concurrent-cycles": json("set-concurrent-cycles"),
+  "set-sample-lookahead": json("set-sample-lookahead"),
+  "set-user-settings": json("set-user-settings"),
+  "skip-searchpoint": json("skip-searchpoint"),
+  "start-checkin": json("start-checkin"),
+  "start-run": json("start-run"),
+  "submit-arms": json("submit-arms"),
+  "unarchive-campaign": json("unarchive-campaign"),
+  "verify-candidate": json("verify-candidate"),
+} satisfies Record<BrowserKind, (...sent: never[]) => Promise<unknown>>;
 // A command is addressed like a read: the root hop, plus the `descend` tail below it.
 export function cycleAddress(path: CyclePath): {
   campaign_id: string;

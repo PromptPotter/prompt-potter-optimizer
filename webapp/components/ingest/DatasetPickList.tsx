@@ -1,4 +1,4 @@
-import { postCommand } from "@/lib/api";
+import { commands } from "@/lib/api";
 import {
   type DatasetIndexEntry,
   type DatasetIndexResponse,
@@ -38,7 +38,7 @@ export function DatasetPickList({
   const discardDraft = (draftId: string) =>
     void discard.run(
       "discard",
-      () => postCommand("discard-draft", { draft_id: draftId }),
+      () => commands["discard-draft"]({ draft_id: draftId }),
       () => onDiscarded(draftId),
     );
   const ready = datasetsRead.status === "ready" && originsRead.status === "ready";

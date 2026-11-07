@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { postCommand } from "@/lib/api";
+import { commands } from "@/lib/api";
 import { type ArchiveReport, ARCHIVE_MODE_INFO, type ArchiveMode as Mode } from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
 import { useCommand } from "@/lib/hooks/useCommand";
@@ -31,7 +31,7 @@ export function ArchiveCompactionControl() {
 
   async function run(apply: boolean) {
     const slot = apply ? commit : dry;
-    const r = await slot.run(mode, () => postCommand("compact-archive", { mode, apply }));
+    const r = await slot.run(mode, () => commands["compact-archive"]({ mode, apply }));
     if (!r.ok) {
       // Each run swaps atomically but the batch does not, so a failed apply voids its preview.
       if (apply) setPreview(null);

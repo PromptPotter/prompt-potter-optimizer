@@ -6,127 +6,79 @@ Any new endpoint is multi-tenant by default.
 
 ## Sequence
 
-### The crunch (operator, 2026-11-04)
+### The cleanup arcs (plan review, 2026-11-07)
 
-The code debt, worked as arcs in four waves, in order and as far as it gets: a sequence, not a
-schedule. Sections named in a row are
-[`code-debt-cleanup.md`](code-debt-cleanup.md)'s; "host step N" is [`host-assistant.md`](host-assistant.md) § Build order.
+The code debt, worked as chains of small links in the order below, as far as it gets: a sequence, not
+a schedule. Sections named in a row are [`code-debt-cleanup.md`](code-debt-cleanup.md)'s; "host step
+N" is [`host-assistant.md`](host-assistant.md) § Build order. How a link is sized, briefed, landed,
+reviewed and stopped is [`../developer/refactor-arcs.md`](../developer/refactor-arcs.md)'s. "Was"
+names the earlier arc a ledger row may still cite.
 
-- **Order is `<next-change>`'s.** The unifications come first, seams before their readers: U1, then
-  U2, then U3, then U4 beside U5. The leaps land at their seams: Q1 beside U2, Q2 and Q3 after U3
-  (§ The quantum-leap pass (2026-11-05)). File moves and renames come last, each at a sync point with
-  no open PR in its tree. A batch that reshapes run data wipes at its landing (the box's wipe waits for the
-  operator's word). The optimizer-prompt re-keys (P, L, C, U1b, W2, LC) land before the next paid run.
-- **Where.** An arc that needs no box, no TermNorm checkout, no paid call and no phone shot runs in the
-  cloud: one `RemoteTrigger` session pushing one `arc/*` branch of one squashed commit, no PR. The
-  rest run locally, heavy proofs serialized by the orchestrator. Arcs are dispatched a batch at a
-  time; the next batch starts once the last one has landed. **Arcs land in
-  batches**: one PR per batch, one commit per arc, CI running the full gate on the PR.
+- **The backbone first.** K0, M3 and DOORS D1–D6 landed in batch 10 with most of M1. M2, M4 and CONN
+  finish the backbone.
+- **Where.** A chain that needs no box, no TermNorm checkout, no paid call and no phone shot runs in
+  the cloud, one session per chain. Docs, the gate, phone shots, TermNorm and fix passes run locally.
 - **Model.** Sonnet for a mechanical sweep, Opus for judgement. Fable plans; it executes no arc.
-- **Landing.** An arc owns its files: arcs in one wave touch disjoint files or name the one they share.
-  A PR is ready once an independent review's findings are fixed on its own branch and CI is green on
-  its tip, rebased on main. It merges on the operator's word: he reviews every merge. Main is
-  landable after every merge, so a checkpoint means: stop dispatching, land what is ready, deploy.
-- **How an arc is sized, briefed, reviewed and stopped** is
-  [`../developer/refactor-arcs.md`](../developer/refactor-arcs.md)'s (operator, 2026-11-06): medium
-  arcs, scope settled before the first build, behaviour equal to main except what the brief names.
-- **The box runs the build it ran before batch E**; deploying main, and the run-data wipe batch E
-  owes, wait for the operator's word. Main keeps landing.
-- **The end:** the code debt is rewritten, then the operator is asked about a release.
+- **Deploying main waits for the operator's word.** Main keeps landing. The end: the code debt is
+  rewritten, then the operator is asked about a release.
 - **An item ships when its code-debt entry is deleted.** A shape noticed in passing is fixed at its root
   in the same arc, unless it is a fork.
 
-**Batch 1 lands as two PRs.** 1a, before the video: K1, T, TRIM, E+, on main as it builds today, so
-the box deploy changes nothing in how it builds. 1b, after the video: VITE, then W1, W6, A1, A2, H, C,
-L, K3a, with #63 and #65.
-
-| Arc | What | Owns | Where | Waits on |
+| Arc | Was | Closes | Decision first | Waits on |
 |---|---|---|---|---|
-| **K1** | one `ParamLayers` fold, `CycleSeed` folded in whole (§ Config resolution and run scope, items 1–3, 8, 9) | `application/pipeline_resolve.py`, `domain/campaign_config.py`, `domain/pipeline_overlay.py`, `bench/mint.py`, `runner/run_prep.py` | local · Opus | — |
-| **T** | the dev loop: § Tooling seen while landing #59–#62; § The member backbone, the dev loop; from § Open — from the structure pass: `p_served`, npm drift, `offline_run.py` importing the gate, a killed push's links, `--controlled` on main, the offline legs' draws, `MAX_PATH` | `scripts/`, `.githooks/`, `config/paths.py` | local · Opus | — |
-| **TRIM** | the docs and governance reset (operator, 2026-11-04). The docs grew too large and piecemeal, and the rules over-govern. Any rule may shrink or go where the code, the gate or today's repo makes it redundant, stale or inadequate; no rule against trimming binds this arc. This § Sequence and `code-debt-cleanup.md` stay: they are the crunch's live ledger | `docs/`, every `CLAUDE.md`, `.claude/`, `README.md`, the gate's doc checks | cloud · Fable | — |
-| **A1** | host step 1; § Config resolution item 12 (harbor); `get_llm_client`'s cached keys; LiteLLM out of core: what still pulls it (the pricing table's source, harbor) | `infrastructure/llm/`, `connectors/harbor.py`, `pyproject.toml` extras | cloud · Opus | — |
-| **A2** | host step 2; § Seen bounding the perimeter; the `cold` tier's 429 (§ URGENT); the two `ValidationError` formatters | `domain/command_kinds.py`, `presentation/api/`, `jobs/quota.py` read rate, `shared/errors.py` | cloud · Opus | — |
-| **H** | § Open — from the head-to-head arc, minus the INVESTIGATE rows the paid twins read and the forks below; § Config resolution item 11 (`evidence`); the origin's absolute path (filed twice) | `application/evidence/`, `head_to_head_price.py`, `jobs/mint.py::arm_plans`, `runner/bench.py` depth, `origin.py` | cloud · Opus | — |
-| **W1** | webapp read discipline: § The webapp swept by shape E; § The webapp's vanilla pass "Failures dropped to booleans"; `CommitInput` | `webapp/lib/hooks/`, `webapp/lib/poll.tsx`, `webapp/lib/state/auth.tsx` | cloud · Opus | — |
-| **W6** | webapp dead code and ratchets: § swept G; size literals and the latch; CSS moves; `vitest.config.ts`; the onboarding buttons | webapp deletions, `app/styles/` | cloud · Sonnet | — |
-| **VITE** | build with Vite (§ Open — multi-arc, "Next.js only as a build tool"), so a side worktree passes the full gate; the gate walks the offline world (§ vanilla, "The `walk` tier rots unseen") | `webapp/package.json` + lock, build config, `scripts/gate.py` web checks | cloud · Opus | — |
+| **M1** gate cost, the rest | T rest | the Vite leftovers | — | — |
+| **DOORS** D7 | M6's, M12's and M4c's door rows | one short name per act, the kind and the CLI verb alike, but the composite `new` and `resume` | the names in the ledger row (operator, 2026-11-07: short and intuitive) | lands with M2's wipe |
+| **M2** command log | Q1 | Q1, census C, the `_tasks` test, the noise-floor stop, the pass with no address, the idempotency promise; `salvage/ea-8`'s command-state table is its acceptance test | commands leave the cycle ledger for one account log, amending architecture §0 Control-remote and decision 0001 in its commit (operator, 2026-11-07); wipes run data | — |
+| **M4** typed pipeline carrier | U1a, M4c | engine A, config items 8 and 9, the free-tier layer and its model axis, the three merges as one wherever behaviour equals main, `prompt_edits`, the stale-data outcome, a changed knob's source, an override's delete; ports `salvage/m4-2` | `steps` leaves the params bag; every treatment digest re-keys (accepted) | — |
+| **CONN** connector identity | M4b, with rows of M6, M7, M12, M18 | one resolver that refuses an unregistered connector typed at every lookup; `init_services` takes the campaign's connector and refuses a mismatch; `backend_type` becomes `connector`, the definition key included; `PipelineSchema`'s name and version; `index_terms` once; the defaults' two owners; `DEFAULT_CONNECTOR` and the endpoint default; a connector's spend, payer and wire kind declared | the landing re-writes tenant definitions (yes) | M4 |
+| **REFUSE** one refusal | M14a | census B, a refusal answered four ways, a launch refusal's three shapes, the unknown-slot refusal | — | — |
+| **LAND** the landing as a precondition | M17's landing rows | the landing at every process entry, keyed on the record schema the code writes; it drops unloadable run data by itself and refuses unknown files alone; `block_packs/_sources` and its builder move into the checkout; one remedy for an unreadable file; a shadowed manifest proven through its reader | yes (operator, 2026-11-07): every later wipe is a landing step | lands before the first wipe |
+| **READS** | M17's read rows | `banks_sharing`, the `Fate.RUN` dict rows, a whole-file read refused four ways, `CACHE_PATH` | read through `io.py`'s readers | — |
+| **M5** running set | RS | RS, census F's `exclude_nodes`, the one-node rule | accept the L4 cache miss (yes) | M2 (kept until a pass shows it is no file dependency; operator, 2026-11-07), M4 |
+| **M6** one start | U2 | `RunStart` and `HeldRun`, config item 6 (slot lifetime), the one launch answer, the double selection, `draft_declared`, a task opened only for an admitted act, a queued launch promoted by whoever frees the slot | plan and price before admission for every start (yes) | M2 |
+| **M7** run init and round 0 | U2 | batch 3's init and round-0 rows, config item 5, `--diag` as a mode, the test builders, the origin-gate rows, `_peer_cycle`, a resume that takes 72 s to apply | halt a degraded origin (yes) | M6 |
+| **ADDR** an address off its record | — | the fork-summary kind, the webapp's id parses (`rootCycleId`, the short labels), parent counting | the mint record serves the kind and the short label | M7 |
+| **M8** potter call door, served roster | U1b, EP | `InjectionBundle`, `Calls.ask`, the seed rule, `PROMPT_FIELD`, swept F, the `[#N]` slots, the panel's money text, a refused L4 arm's identity | a failed critique is a typed fault (yes) | M4 |
+| **M9** ledger read stack | U3 | the read stack, `_unlanded`, the cold-fold snapshot, the `dashboard.json` checkout, the artifact writers outside the roster, the swallowed round checkout | keep `dashboard.json` / `index.json` as projections (yes, §0) | — |
+| **M10** narration and tracing | U3, ET | one narration table, the typed phase act, ET, `ActivityItem` as `Said`, a pause's cause served | — | M9 |
+| **M11** typed run records | U3 | engine B and C, `StatusMark`, `rewound`, the act record, the cell beat, `cached` / `key_source`, the export's spend, the on-disk renames (`ArmSlot`, `CycleSeed`, `LinePayload`) | — | M9 |
+| **M12** spend | S | the book counted once, one charge value, the lost mirror, the reserved hold, stale `run_limits`, a grant verb, the host-coupon rows | a re-grant counts from `granted_at` (yes); migrates `charges.jsonl` | M9 |
+| **M13** one scoring pass | U4 | § One record shape, the skipped verify, noise-floor and seed-screen on the ledger, the catch-up cells, the verify that starts 38 s late and is never acked `accepted` | the verb is "held-out" (yes) | M2, M9 |
+| **M14b** faults as values | Q3 | `logging` leaves `application/` and `domain/`: a mechanical sweep with no other arc open | — | M9, M10 |
+| **FEED** change feed | Q2, M15 | Q2, census E | a subject is the `Subject` path (yes) | M2, M9 |
+| **M16** webapp (a, b) | swept C, U5 | lineage reads the served tree; one arm row; the selection in the hash | a swiped-in column stays blank until its reads land (yes) | FEED |
+| **M18** TermNorm's edge | G | the in-process `llm_only` connector, the wire-skew probe, TermNorm's wording and `prompt_info`, a named endpoint per connector, § Bypasses; local, in the TermNorm checkout | edit TermNorm where the arc needs it (operator, 2026-11-06) | CONN |
+| **M19** the election | D | the election root, the collapse gate, the lift bars, `CatchUpPool`, CAPO's survivor ranking | offline first, then priced | M13 unconfirmed |
+| **M20** MCP over HTTP | — | the MCP door served over Streamable HTTP behind the API's sign-in, a second transport of the one adapter | auth per [`access-model.md`](../operations/access-model.md) (yes) | M2 |
+| **M21** Turns | B | § Turns — the unsupervised limit, on M6's admission; `useRemoteModel`'s bag | — | M6 |
+| **M22** host steps 4 and 5 | A4 | the host loop, the chat, the check-in's ingest | host-assistant § Open (operator) | — |
+| **M23** host step 6 | A5 | host step 6, with the "Run the resolver now" row | — | M22, M6 |
 
-Also in batch 1, filed in later waves:
+**Edges** (→ means before): M4 → CONN, M5, M8. M2 → M6 → M7 → ADDR. M9 → M10, M11, M12, M13, FEED.
+M2 → M13, FEED, M20. M13 → M19. FEED → M16. M10 → M14b. CONN → M18. LAND lands before the first
+wipe (M2, CONN, M10 and M11, M12, M13).
 
-| Arc | What | Owns | Where | Waits on |
-|---|---|---|---|---|
-| **E+** | the phone: § URGENT, "The phone draws the run's figures twice"; § The phone pass; the masthead wrap; a view family that is chrome; the Candidates card's pending read; HoverCard and touch targets; the Lighthouse run. For the checkpoint: a stage view for a display read from across a room, off by default behind a settings toggle; the lift over the origin as the headline figure; the efficiency figures | `webapp/components/shell/`, the masthead, settings, the served figures | local · Opus, `/design`, phone shots | — |
-| **K3a** | the store refuses what it cannot read. From § Typed state, its store rows: file identity, run files read as dicts, `iter_jsonl`, the torn tail, `feed_fold`, `CampaignOwner`, the root found two ways, `_Billed`. Also the ray tail | `infrastructure/store/`, `infrastructure/ledger.py` | cloud · Opus | — |
-| **C** | L2 re-election (§ The right winner, mechanism 1); a fork naming one change only | `potter/dispatch/` except `l1_wire_schema.py`, `escalation/`, the layer-control channel | cloud · Opus | — |
-| **L** | library, packs, variation, re-key batch 2: the library, cross and pack rows of § Open — from the head-to-head arc; one text in two packs; the pool, pack and snippet rows of § Open — from the structure pass; one node's knob gating four pools; `Scope` on members; the manifest-hash marks | `application/library.py`, `config/prompt_blocks.py`, `variation/`, `store/account_packs.py`, `potter/dispatch/facade.py` | cloud · Opus | — |
+**Critical path:** M2 and M9 → M13 → M19, then the next paid run. M9 → FEED → M16 runs beside it.
 
-**The unifications.** Each folds a family of debt into one mechanism and deletes the code-debt
-entries it names. Each lands as its own batch, beside the disjoint arcs of the table after it.
+**Next:** a census for M2 with D7 on its tip, M9, M4 and REFUSE, the chains batch 10 unblocked; then
+CONN on M4's tip, and LAND.
 
-| Arc | One what | Absorbs | Closes when | Owns | Waits on |
-|---|---|---|---|---|---|
-| **U1a** | one layered fold over typed rows: which values a cycle runs is built once, by `ParamLayers`, from a typed `NodeConfig` per node, inside one frozen `RunScope` | § The engine swept by shape A (a typed `PipelineParams`); § Config resolution items 4, 5, 7; § The engine swept by shape D; § The member backbone: `LaunchState.ledger`, `Lineage.rounds`; the overlay's delete; a changed knob's source; the check-in graph's overlay; "adds no arms ⇒ off"; the measurement node derived twice; a moved capability passing a resume; the selection made in three places; `embedded_run`'s two flags; the free tier's layer, which joins the fold; the served `*Response` models moved out of the resolver | a member knob reads its node's `NodeConfig`, never a `pipeline_params` dict; a new config layer is one entry in the fold | `pipeline_resolve.py`, `campaign_config.py`, `pipeline_overlay.py`, `connectors/protocol.py`, `application/initialization/`, `free_tier.py`, `telemetry.py`, `optimizer_manifest.py`, `bench/llm_call.py`, `bench/node_context.py`, `scoring/judges/call.py`, `scoring/evaluators.py` | batch 1a |
-| **U1b** | one declared prompt-field roster, served; the optimizer prompt template is a prompt node of potter's `pipeline.yaml`, tuned like any node; with EP, potter asks through the bench's call door (one re-key for both) | § swept F (the node editor reads row facts); the roster spelled in `PROMPT_FIELDS`, `OptimizerPromptTemplate` and `webapp/lib/prompt-fields.ts`; one node editor where `NodeSurface`, `NodeConfigEditor` and `PromptWithLibrary` forward to each other (its one value parser, `node-config.ts::parseParam`, landed with EN); EP (§ The excision pass, batch 3); the formula's short spelling | adding a prompt-node field touches its roster row and its reader only; potter builds no call by hand | the roster, `OptimizerPromptTemplate`, potter's `pipeline.yaml`, `optimizers/potter/` except `race.py`, `bench/llm_call.py`, `bench/node_context.py::Calls`, the node editor (`shell/node-surface/`, `derivations/node-config.ts`), `config_map.py`, `webapp/lib/prompt-fields.ts`; shares `potter/generation_only.py` with U2 | U1a |
-| **U2** | one cycle transition: mint, resume, step, fork, arm, inner and embedded each build one `RunStart` (parent or none, seed delta, declaration, purpose) that yields one `CyclePlan`. A resume that meets drift forks with the drift as its seed when the run OPTIMIZES and refuses when it COMPARES (§ 0009). One rate holder gives each purpose its share | the launch door: § Config resolution item 6; the launch, adopt and rate rows of § Open — from the head-to-head arc; `close_for_landing`; an unparseable job; a Start followed into its campaign. Also: `require_scorer` / `require_partition` at each site; slot release by hand; the three `LaunchRequest` dataclasses; Turns' admission; CLI `new`; § URGENT's promoted Start left unserved and the resolver run three times; § The excision pass, batch 3: one `start`, `open_cycle` binding `RunScope`, round 0 in the loop, one launch answer, `--diag` a mode, the test builders on the seams | a launch option touches `RunStart` and its one reader; `embedded_run` calls `launch()` | `application/jobs/` except `coupon.py`, `launching.py`, `embedded_run.py`, the resume command, `run_prep.py`, `runner/entry.py`, `origin.py`, `initialization/`, `runner/inner/spawn.py`, the launch routes, `tests/factories.py`, the `main.py` notice; shares `potter/generation_only.py` with U1b | U1a |
-| **U3** | one reader of the ledger: every derived surface is a `Projection` over typed records, and `scope.ledger.append` is the one producer door (`RunCallbacks` and the telemetry `emit_*` go) | records: § The engine swept by shape B and C; § What a cycle writes to disk; § Typed state's record rows; `rewound`; `cached` / `key_source`; the cell beat; spend in the export. Also: the cold server's fold; one append rebuilding every entry; `ActivityFeed`; the table in `phases.py`; the two meanings of `round_cells`; the sidecars read back as state; § The excision pass, batch 4: the read stack, ET, one narration table, the phase act typed | a record kind touches its model and its one handler; a gate check fails a kind no projection reads | `domain/run_records.py`, `infrastructure/projections/`, `ledger_scan.py`, `domain/activity.py`, `tracing/`, `views/readout.py`, `views/view_models.py`, `run_callbacks.py`, `telemetry.py` emits, `runner/output.py`, `scoring/measurement_log.py`, `store/read_model.py`, `hierarchy.py`; shares `run_observers.py` with S | U2 |
-| **U4** | one scoring pass: kind, subject, rows and comparator are fields of one record, read by one fold keyed `(kind, arm.key)`; one verb with a row choice at every entry point (operator, 2026-11-04). Noise-floor, seed-screen, probe-reasoning and ab write the ledger like every paid pass | § One record shape for every scoring pass; the race's catch-up cells; the re-read arm's two names; the bench's depth | a scoring command kind touches one declaration; no paid pass is missing from the ledger | `diagnostics/verify.py`, `runner/bench.py`, `runner/measurement.py`, the scoring verbs and their views | U3 |
-| **U5** | one served arm row and one viewed subject: the live round's candidates are `ArmState` rows with `filed: false`; the subject is the hash's address, and view memory only seeds it | § swept A (one arm shape), C (lineage reads the served tree) and D; § The candidates surface; § vanilla's adapters and "Several doors"; the doors of the setup screen and the prompt workspace; `LiveCandidate` and its `live*` twins; `ArmRow.source`; "is round N filed" asked three ways; the hidden columns; § The excision pass: one viewed searchpoint and the webapp's selection half | an arm-row field touches its model and its renderer; selection is the hash | `application/views/` arm rows, `webapp/components/candidates/`, `webapp/lib/derivations/`, `webapp/lib/state/`, `webapp/lib/workspace.tsx`, `SelectionContext.tsx`, `shell/Views.tsx` | U3; shares `application/views/` with U4 and names the files |
+**Re-keys.** M4, CONN, M8, M5 (the L4 cache), DOORS's verb renames and M19 (decisions) land in any
+order before the next paid run. M4's and M8's re-keys share one cold cache only if no paid run lands
+between their merges.
 
-**The excision pass** ([`code-debt-cleanup.md`](code-debt-cleanup.md)
-§ The excision pass (six layer audits and a plan review, 2026-11-05)). Its § Decided once rows bind every
-arc after it; its batch 3, 4 and 5 groups join U2, U1b, U3, S, B and U5 as part of what each closes.
+**Last, at sync points with no open chain in their trees:**
 
-**The leaps** ([`code-debt-cleanup.md`](code-debt-cleanup.md) § The quantum-leap pass (2026-11-05)).
-Each gives one fact one owner and derives every other site by construction, held by an exhaustive
-table or state-machine test instead of review. Its § Decided once rows bind every arc before it; the
-batch-E edges it names close in batch E at "no regression against main".
+| Arc | What | Waits on |
+|---|---|---|
+| **LA** | § The file layout, Wave A | no open chain in `presentation/` or `infrastructure/` |
+| **LB** | Wave B | M9 |
+| **LC** | Wave C, as one re-key batch | M8, M19 |
+| **LW** | the webapp modules that break `lib/CLAUDE.md` § Where a module lives; the barrel cycle | M16, FEED |
+| **TS** | the test suite consolidated after the deletions; tests go through each module's interface | LB |
+| **R** | § Open — renames the operator picked | every other arc (it runs last) |
 
-| Arc | One what | Absorbs | Closes when | Owns | Waits on |
-|---|---|---|---|---|---|
-| **Q1** | one command log: a command is one append-only record stream in one account-scoped log (filed, applied, refused, voided, cancelled, each an event written with its filing in one step); its status a fold of its own events; a ledger move or delete orphans nothing | MCP's task memory and the per-door stop addresses; the per-ledger `CommandRecord` / `CommandAckRecord` and their fold; the loop's standing-command read; the trail's command lines; § Open — optimizer tuning's pass with no address | a command's status is read from the log alone: no ledger holds a command record, no index stands beside the log, a cancel is one command at every entry point | `application/commands/dispatcher.py`, the log's store module, `store/account_trail.py`, `ledger_scan.py`'s command fold, `runtime_flags.py::standing_controls`; shares `jobs/mint.py::_mint_campaign`'s adopt step (`campaign_store/store.py::adopt_ledger`) and the one launch answer with U2 | beside U2 |
-| **Q2** | one change feed, the server says what moved: every served subject has a version from the one producer door; the door and the dispatcher publish `{subject, version}` on one account SSE stream; the cache re-asks exactly the moved subject. An event is a hint, the read the truth; the stream lost → reconnect and re-ask every mounted read | every client freshness guess (a descriptor's `cadence` and the `intervalMs` its caller names, a write's `revalidate`, `invalidateReads`, the viewed dashboard's phase re-ask and slow beat, `useEvidence`'s pulse and the listing's bill re-ask of the coupon, focus, visibility and `online` revalidation, the failed-read cadence); the resting reads EW did not land: a settled or replayed dashboard, a settled course's steps and tree, evidence and cells between moves, each woken by the version of a subject it measures; `useCycleEvents`' stream; the server's mtime and clock stamps; § swept E's `useEvidence` re-ask; § Open — from the structure pass's store-wide entry version and `run_state_stamps` ETag | a read declares no cadence and a write names no read: a new read is one descriptor, a new write one server-side declaration; a settled read asks nothing until its subject's version moves | `webapp/lib/read-cache.ts`, `poll.tsx`, `cadence.ts`, `api/reads.ts`, `hooks/useCommand.ts`, `hooks/useCycleEvents.ts`; `routers/reads.py::_events` and `::_conditional`, `projections/event_stream.py`, `application/hierarchy.py::entries_version`, `runtime_flags.py::run_state_stamps` | U3, Q1; beside U4 and U5 |
-| **Q3** | one fault channel, a fault is a value: inside a run a typed record through `scope.ledger.append`, inside a read a field of the row it failed; `logging` leaves `application/` and `domain/` | § Config resolution item 10 (engine decisions narrated into `logger.warning`); the origin gate's logged re-score; the skipped origin of `origin_listing.py::list_origins`; the swallowed export of `campaign_store/store.py::CampaignStore.bank_final`; `shared/errors.py::graceful` in `application/` | `application/` and `domain/` import no `logging`; the gate lists no `except` there that neither raises nor hands its fault on; every fault kind has a projection reader | the fault record kinds in `domain/run_records.py`, the catch sites in `application/`, one gate check | U3; beside U4 and U5 |
-| **RS** | one running set: a which-nodes question reads the nodes a run calls (chain, phases, declared off-chain nodes, less the excluded); an order question reads the chain | batch E's cut EN rule; run init's and the Start gate's model and prompt checks; `prompt_nodes`' readers; potter's view and wounds; `carried_writes`; the price, fence and scoring role readers; "phase" spelled twice; the default-every-node and one-node rules spelled twice | every which-nodes reader reads the one `running` set; a test per door fails when its fix is reverted | `domain/pipeline_schema.py`, `pipeline_resolve.py`'s run-init readers, `optimizer_manifest.py` phases, the which-nodes readers the entry names | Q1 (operator, 2026-11-05); U1a and U1b own its resolver and potter files |
-
-**Landed so far.** Batch 2 landed P, W2, A3, and U1a's selection door and typed `NodeConfig`. U1a's
-`RunScope` and typed pipeline carrier did not land (`git grep -c "RunScope" -- promptpotter`), so
-every "waits on U1a" below is still open. Batch E (PR #70) landed EA (reads mount from their rows,
-one `Subject`), ED (the research tier, connector cell terms, cards), EW (reads off the cache) and EN
-(the draft as one partial `CampaignConfig`); EM landed as no code. Its cut parts went to Q1 (EA's
-command status), Q2 (EW's resting reads) and RS (EN's which-nodes rule). From here the order is
-§ The medium arcs below.
-The paid run beside batch 2: the host-pin twins (§ Open — multi-arc, "the default host pin"), also
-read for the L2/L3 repair rate and the errored-cell INVESTIGATE; then L4 validation.
-
-| Arc | What | Owns | Where | Waits on |
-|---|---|---|---|---|
-| **G** | an upload runs without a backend: the in-process `llm_only` connector, one node implementation shared with TermNorm's `_step_llm_only`, the default upload connector. Also: § On the box, "Left by the payer rule"; the connectors' `cell_payer`; § URGENT's wire skew and TermNorm's warning wording; the free tier's model axis; § Bypasses | `connectors/`, `jobs/coupon.py`, `jobs/quota.py` sends, `free_tier.py`, TermNorm | local · Opus | U1a |
-| **P** | potter internals, re-key batch 1. From § Open — optimizer tuning, its code rows: the no-op batch, every campaign's ledger, the resumed walk, the held prompt field, splice framing, the estimator's line series, `AxisIndex.digest`, the critique cluster, the strict-portable wire schema. Also `paper_templates.marked`, the origin-boundary resume, `_peer_cycle`. The origin gate HALTS an origin that scored no cell, and a plain `resume` overrides (operator, 2026-11-04) | `optimizers/potter/l1/`, `potter/dispatch/l1_wire_schema.py`, `runner/round.py`, `intelligence/`, `paper_templates.py` | cloud · Opus | batch 1b |
-| **W2** | served words own the wording: § swept B; § vanilla, "Wording authored in the browser"; § Typed state's word tables (the bench scope folded into `READING_STATE_INFO` with a `fault` column, `DISPLAY_METRIC_INFO`, `POOL_NOUN`, `SIDE_TONE`); activity rows as `Said`; the two waiting predicates; refusals that carry an Account tab key the serving layer words; `readSpend`; the word tables become one `Worded` base that registers when built at module scope and the exporter emits under its one annotated binding, so a new table is one declaration | `domain/said.py` and the word tables, `scripts/build_ts_types.py`, the webapp's word sites | cloud · Opus | W1 |
-| **A3** | host step 3 | `presentation/mcp/`, an extra | cloud · Opus | A2 |
-| **D** | the election root (§ The right winner, mechanism 2); PoBB's high-accuracy lock-in; the collapse gate. Also:<br>• a round ends once a challenger is clearly past the parent, and its unfinished siblings stop there.<br>• the bound comes from adaptive testing: sequential likelihood-ratio tests, Fluid Benchmarking, and their always-valid variants. Pick the most powerful one that stays valid under the hard-first order. | `potter/pobb/`, `race.py`, `domain/arms.py`, `scoring/selection.py` | cloud · Opus | C, U4 |
-| **S** | the spend book: a lost mirror; a subscriber that raises; a reserved cell's hold; `keyed_client`'s fold; a resumed own-key reserve; the restamp; `LifetimeSpend`'s tokens; a grant verb; a pass with no cycle; § The excision pass, batch 4: one charge value, the account charged once at the root, the sender on `RunScope`. Wipes run data; migrates `charges.jsonl` | `infrastructure/llm/spend_book.py`, `send_pacing.py`, `jobs/coupon.py`, `wallet_store.py`; shares `run_observers.py` with U3 | cloud · Opus | U2, G |
-| **B** | Turns (§ Turns — the unsupervised limit), on U2's admission; `useRemoteModel`'s bag | `domain/spend.py`, `webapp/components/shell/remote/`, CLI `resume` | cloud · Opus | U2 |
-| **A4** | host steps 4 and 5 | `application/` host loop, `webapp/components/chat/`, `webapp/components/ingest/` | cloud · Opus | A1, A2, host-assistant § Open (operator) |
-
-**The sync points, last, then paid evidence.**
-
-| Arc | What | Owns | Where | Waits on |
-|---|---|---|---|---|
-| **LA** | § The file layout, Wave A | `presentation/`, `infrastructure/` | cloud · Opus | no open PR in those trees |
-| **LB** | Wave B | `application/runner/`, `optimizers/__init__.py`, `knobs.py` | cloud · Opus | U3 |
-| **LC** | Wave C, as one re-key batch | `optimizers/` | cloud · Opus | P, U1b, D |
-| **LW** | the webapp modules that break `lib/CLAUDE.md` § Where a module lives; the barrel cycle | moves in `webapp/lib/` and `webapp/components/` | cloud · Sonnet | W2, U5, Q2 |
-| **A5** | host step 6, with the "Run the resolver now" row | the `checkin` node, `useIngestFlow` | cloud · Opus | A3, A4, U2 |
-| **TS** | the test suite consolidated after the deletions; tests go through each module's interface | `tests/` | cloud · Opus | LB |
-| **R** | § Open — renames the operator picked | tree-wide | cloud · Sonnet | every other arc (it runs last) |
-
-**Every arc's review asks** whether each module it touches is shallow: what its callers must know, which
-call order, errors and configuration it could handle itself, and whether the code would get simpler if
-it were deleted. A new seam needs something that actually varies.
-
-The paid run comes after D, H and the re-key batch: the bench's CAPO head-to-head on `hotpotqa-closedbook`
+The paid run comes after M19 and the re-keys: the bench's CAPO head-to-head on `hotpotqa-closedbook`
 (§ The bench), priced first. Then the board (§ Optimizer tuning — the standing board).
 
 **Forks left to the operator.** Until he decides, an arc leaves each one as it stands:
@@ -134,7 +86,6 @@ The paid run comes after D, H and the re-key batch: the bench's CAPO head-to-hea
 - a bench's total (the box's definition is read first);
 - the sub-cent money rule;
 - whether an upload's bytes are kept before the parse;
-- whether a swiped-in hidden column may stay blank until its reads land (U5);
 - what `hit_spread` means;
 - how API keys are stored at rest;
 - one env file on the box;
@@ -143,60 +94,7 @@ The paid run comes after D, H and the re-key batch: the bench's CAPO head-to-hea
 - the crowning bar (paper stage 3);
 - everything under § Blocked.
 
-### The medium arcs (plan audit, 2026-11-06)
-
-An independent audit checked every open debt row against main after batch E and regrouped the rest
-into medium arcs ([`../developer/refactor-arcs.md`](../developer/refactor-arcs.md)). The operator
-confirmed the order and wave 1's decisions on 2026-11-06. After wave 1, each row is a scope, not an
-arc. It is cut into small arcs, deletions first, that run in two or three chains on disjoint files.
-Each joins a batch on proof, and every batch is reviewed before main (operator, 2026-11-07;
-[`../developer/refactor-arcs.md`](../developer/refactor-arcs.md) § Size and scope, § Landing). A later arc ports
-from the branches the `salvage/*` tags mark, piece by piece (`git tag -l 'salvage/*' -n9`). A later arc's recommendation is in
-brackets until its brief settles it. Each brief names the files it shares with another arc of its
-wave.
-
-| Arc | Was | Closes | Decision first | Size | Waits on |
-|---|---|---|---|---|---|
-| **M1** gate cost | T rest | eslint's cache and tsc's typegen made `light`, the `optimizer-schemas` probe's outputs, the walk tier, the Vite leftovers | the walk tier runs in the full gate (operator, 2026-11-06) | ~15 files | — |
-| **M2** command log | Q1 | Q1, census C, the `_tasks` test, the noise-floor stop, the pass with no address; EA's cut state table is its acceptance test (`origin/arc/ea-8`) | amend architecture §0 Control-remote and decision 0001 so commands leave the cycle ledger | ~32 files, wipes run data | — |
-| **M3** run scope | U1a | config items 4 and 7 (the L4 override as one overlay), `bind_cache`, `LaunchState.ledger`, the `set_cycle_ledger` binders | bind at `runner/entry.py` now; an unusable L4 mutation is refused, typed and served, by the rule that refuses an unknown overlay | ~28 files, one L4 re-key | — |
-| **M4** typed pipeline carrier | U1a | engine A, config items 8 and 9, the free-tier layer and its model axis, the three merges as one wherever behaviour equals main | `steps` leaves the params bag; every treatment digest re-keys (accepted) | ~35 files | — |
-| **M4b** connector identity | U1a | `backend_type` becomes `connector` (the definition key included), `PipelineSchema`'s name and version, an unregistered connector refused typed | the landing re-writes tenant definitions (yes) | sized at its brief | M3, M4 |
-| **M4c** knob edits | U1a | steer typing, a changed knob's source, an override's delete | | small | M4 |
-| **M5** running set | RS | RS, census F's `exclude_nodes`, the one-node rule | accept the L4 cache miss, riding M8's re-key (yes) | ~20 files | M2, M4 |
-| **M6** one start | U2 | the five doors, the one launch answer, config item 6, the double selection, `draft_declared`, `close_for_landing`, a refusal before admission answered on every door (MCP's `tasks/result` included), a queued launch that dies with its asker | plan and price before admission for every start (yes) | ~35 files | M2, M3 |
-| **M7** run init and round 0 | U2 | batch 3's init and round-0 rows, config item 5, `--diag` as a mode, the test builders, the origin-gate rows, `_peer_cycle`, a resume that takes 72 s to apply | halt a degraded origin (yes) | ~30 files, offline proof | M6 |
-| **M8** potter call door, served roster | U1b, EP | `InjectionBundle`, the template's carrier (`prompt_edits`, from M4), the seed rule, `PROMPT_FIELD`, swept F, the digest reach | a failed critique is a typed fault, the round continues or fails (typed fault) | ~50 files, one re-key; split at its brief | M3, M4 |
-| **M9** ledger read stack | U3 | the read stack, `_unlanded`, the cold-fold snapshot, the `dashboard.json` checkout, the artifact writers outside the roster | keep `dashboard.json` / `index.json` as projections (yes, §0) | ~30 files | M3, M6 |
-| **M10** narration and tracing | U3, ET | one narration table, the typed phase act, ET, `ActivityItem` as `Said`, a pause's cause served | | ~30 files | M9 |
-| **M11** typed run records | U3 | engine B and C, `StatusMark`, `rewound`, the act record, the cell beat, `cached` / `key_source`, the export's spend | one wipe shared with M10 (yes) | ~30 files | M9 |
-| **M12** spend | S | S, the payer-rule and host-coupon rows, the lost mirror, the reserved hold, stale `run_limits`, a connector's spend declaration, one budget door per launch | a re-grant counts from `granted_at` (yes) | ~30 files, migrates `charges.jsonl` | M3, M9 |
-| **M13** one scoring pass | U4 | § One record shape, the skipped verify, noise-floor and seed-screen on the ledger, the catch-up cells, the verify that starts 38 s late and is never acked `accepted` | the verb is "held-out" (yes) | ~30 files | M2, M9 |
-| **M14** faults | Q3 | a: census B, one refusal type; b: `logging` leaves `application/` and `domain/` | — | a small; b ~65 files, mechanical | b: M9 |
-| **M15** change feed | Q2 | Q2, census E | a subject is the `Subject` path (yes) | ~30 files | M2, M9 |
-| **M16** webapp | swept C, U5 | lineage reads the served tree; one arm row; the selection in the hash | a swiped-in column stays blank until its reads land (yes) | ~50 files, cut small | M15 |
-| **M17** store hygiene | K3a rest | `banks_sharing`, the landing proving a manifest, the `Fate.RUN` dict rows, the landing wherever code meets an unlanded root, `--reset`'s two decisions, one remedy for an unreadable file | read through `io.py`'s readers | ~28 files | — |
-| **M18** an upload without a backend | G | the in-process `llm_only` connector, the wire-skew probe, TermNorm's wording, § Bypasses, a named endpoint per connector, core's TermNorm defaults | edit TermNorm where the arc needs it (operator, 2026-11-06) | — | M4b |
-| **M19** the election | D | the election root, the collapse gate, the lift bars, CAPO's survivor ranking | offline first, then priced | — | M13 |
-| **M20** MCP over HTTP | — | the MCP door served over Streamable HTTP behind the API's sign-in, a second transport of the one adapter | auth per [`access-model.md`](../operations/access-model.md) (yes) | sized at its brief | M2 |
-
-The chain takes the scopes in this order. Each small arc starts once the previous one has landed:
-1. M1, M4, M14a, M17, M3, M2.
-2. M4b then M5; M6 then M20; M8; M4c.
-3. M7, M9, M18.
-4. M10 with M11 (one wipe), M12, M13, M15.
-5. M14b alone: a mechanical sweep of `application/` and `domain/`, after M10's narration takes what it
-   keeps, with no other arc open.
-6. M16b, M19.
-
-A later wave forms its chains at its briefs, from the files each one names
-([`../developer/refactor-arcs.md`](../developer/refactor-arcs.md) § Size and scope).
-
-M4's and M8's re-keys share one cold cache only if no paid run lands between their merges.
-
-LA, LB, LC, LW, TS and R stay last. S no longer waits on G: the payer rows ride M12.
-
-### After the crunch
+### After the cleanup
 
 1. **Recombination at $0** (C9). Paid: the mode head-to-head (§ Variation and pools, item 1).
 2. **The optimizer climbs** (§ Optimizer tuning — the standing board). Paid: the board's path, steps

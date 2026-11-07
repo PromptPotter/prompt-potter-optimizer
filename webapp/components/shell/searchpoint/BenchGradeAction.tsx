@@ -1,5 +1,5 @@
 import { Button, FailureLine, Term } from "@/components/ui";
-import { postCommand } from "@/lib/api/commands";
+import { commands } from "@/lib/api/commands";
 import { BENCH_REFUSAL_INFO } from "@/lib/api/types";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { encodeCyclePath, pathRoot } from "@/lib/ids";
@@ -20,7 +20,7 @@ export function BenchGradeAction() {
     <Button
       disabled={grading || !status.can_grade}
       onClick={() =>
-        void cmd.run("grade-bench", () => postCommand("grade-bench", { campaign_id: campaignId }))
+        void cmd.run("grade-bench", () => commands["grade-bench"]({ campaign_id: campaignId }))
       }
     >
       {grading ? "Grading…" : "Grade on bench"}

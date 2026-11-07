@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
-import { cycleAddress, postCommand, type VerifyStrategy } from "@/lib/api/commands";
+import { commands, cycleAddress, type VerifyStrategy } from "@/lib/api/commands";
 import {
   READING_STATE_INFO,
   VERIFY_STRATEGY_LABELS,
@@ -65,7 +65,7 @@ export function VerifyAction({
       "verify-candidate",
       () =>
         // `samples` omitted is the server's count (`verify.py::derive_verify_samples`).
-        postCommand("verify-candidate", {
+        commands["verify-candidate"]({
           ...cycleAddress(path),
           candidate_id: candidate.arm,
           strategy,

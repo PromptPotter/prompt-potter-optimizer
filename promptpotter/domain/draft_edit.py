@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -10,13 +11,15 @@ from promptpotter.domain.pipeline_schema import ParamIntent
 from promptpotter.domain.strict_model import StrictModel, UploadBytes
 
 
-def _partial(model: type[BaseModel], *, without: str = "", **nested: type[BaseModel]) -> Any:
-    """*model*'s fields but *without*, each optional with no default and its own bounds and
-    description: a layer names only what it sets, so no unsent field states a value a reader
-    could take for one that applies. A *nested* field takes the partial named for it."""
+def _partial(
+    model: type[BaseModel], *, only: Collection[str] | None = None, **nested: type[BaseModel]
+) -> Any:
+    """*model*'s fields, or *only* the ones named, each optional with no default and its own
+    bounds and description: a layer names only what it sets, so no unsent field states a value a
+    reader could take for one that applies. A *nested* field takes the partial named for it."""
     fields: dict[str, Any] = {}
     for name, info in model.model_fields.items():
-        if name == without:
+        if only is not None and name not in only:
             continue
         bounds = [m for m in info.metadata if not isinstance(m, Knob)]
         annotation: Any = nested.get(name, info.annotation)
@@ -27,16 +30,29 @@ def _partial(model: type[BaseModel], *, without: str = "", **nested: type[BaseMo
     return create_model(f"_{model.__name__}Fields", __base__=StrictModel, **fields)
 
 
-# No `budget`: a launch's budget is its payload's own field, the one door on every launch kind.
-class OptimizationOverrides(_partial(OptimizationConfig, without="budget")):  # type: ignore[misc]
+# Neither `optimization` takes `budget`: a launch's budget is its payload's own field, the one door
+# on every launch kind.
+class OptimizationOverrides(
+    _partial(OptimizationConfig, only=("optimizer", "nodes", "arm_gate", "halt_at_accuracy"))  # type: ignore[misc]
+):
     """An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's,
-    laid over the one it names."""
+    laid over the one it names. Every other knob is the dataset's declaration."""
 
 
-class PartialCampaignConfig(_partial(CampaignConfig, optimization=OptimizationOverrides)):  # type: ignore[misc]
-    """A partial `CampaignConfig`, by its own paths: a check-in edit's ``config``, a mint's
-    stand-in declaration. Only the fields sent move anything: its ``exclude_unset`` dump is the
-    layer `campaign_config.py::merge_config_layers` lays."""
+class PartialOptimizationConfig(
+    _partial(OptimizationConfig, only=OptimizationConfig.model_fields.keys() - {"budget"})  # type: ignore[misc]
+):
+    """A stand-in declaration's ``optimization``: every knob a dataset declares."""
+
+
+class ConfigEdit(_partial(CampaignConfig, optimization=OptimizationOverrides)):  # type: ignore[misc]
+    """A check-in edit's ``config``, by `CampaignConfig`'s own paths. Only the fields sent move
+    anything: its ``exclude_unset`` dump is the layer `campaign_config.py::merge_config_layers`
+    lays."""
+
+
+class PartialCampaignConfig(_partial(CampaignConfig, optimization=PartialOptimizationConfig)):  # type: ignore[misc]
+    """A mint's stand-in declaration, by `CampaignConfig`'s own paths, laid over its defaults."""
 
 
 class NodeOutputEdit(StrictModel):
@@ -69,7 +85,7 @@ class EditDraftPatch(StrictModel):
     connector: str | None = Field(default=None, min_length=1, max_length=64)
     # A blank task is no task: the draft holds none until one is set.
     raw_task_description: str | None = Field(default=None, max_length=16384, pattern=r"\S")
-    config: PartialCampaignConfig | None = Field(
+    config: ConfigEdit | None = Field(
         default=None,
         description="Laid over the draft's config by `campaign_config.py::merge_config_layers`. "
         "A string `scoring` names the criterion whole; a `scoring` "

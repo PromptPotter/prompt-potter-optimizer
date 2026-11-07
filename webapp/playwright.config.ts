@@ -13,7 +13,7 @@ const WALK_WORLD = process.env.PP_E2E_WALK_WORLD;
 const WALK_URL = process.env.PP_E2E_BASE_URL || `http://127.0.0.1:${WALK_PORT}`;
 const COLD_URL = `http://127.0.0.1:${COLD_PORT}`;
 
-// `webServer` is per RUN, not per project: a cold-only run (the gate's) must never start the server reading the operator's workspace.
+// `webServer` is per RUN, not per project: a cold-only run must never start the server reading the operator's workspace.
 const ASKED = process.argv.flatMap((arg, i, argv) => {
   if (arg.startsWith("--project=")) return [arg.slice("--project=".length)];
   if (arg !== "--project") return [];

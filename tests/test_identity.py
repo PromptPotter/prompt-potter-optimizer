@@ -317,6 +317,7 @@ def _connector_config(**fields: Any) -> CampaignConfig:
 # 1. Hashes — what a measurement is filed under
 
 
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_other(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -508,6 +509,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         assert overlay_refusal.value.code == "optimizer_overlay", (
             f"{unusable}: an unusable L4 mutation ran as the floor under its arm's name"
         )
+    # An arm's model answers every inner node, whichever node its edit names it on.
+    answered = _l4_selected("potter", {"l1_critique": {"model": "qwen/qwen3.7-flash"}})
+    assert {answered.node_config(n).model for n in answered.llm_nodes} == {"qwen/qwen3.7-flash"}, (
+        "an L4 arm's model answered one inner node, the rest the manifest's"
+    )
     # A drafted prompt edit rides the overlay: the node runs it, its hash reads it, L4's still wins.
     drafted = select_optimizer(
         OptimizerChoice(
@@ -1386,6 +1392,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 # 2. The config a campaign runs
 
 
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     tmp_path: Path, built_stores: Stores, offline: Router, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2026,6 +2033,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert [knob[key].arm.replicate for key in ("k1", "k2")] == [1, 2], (
         "an arm stating a default knob ran as replicate 1 of a treatment it shares"
     )
+    # An arm sets an operator's knobs only: a dataset knob of its own is a difference no arm names.
+    with pytest.raises(ValueError):
+        ArmRequest.model_validate(
+            {"arm_key": "d1", "optimization": {"optimizer": "potter", "degradation_threshold": 0.5}}
+        )
     # An L4 seat declares through the door every campaign takes, and an arm so declared runs what a
     # campaign minted on that declaration resolves to.
     panel = InnerTasks(
@@ -2464,7 +2476,7 @@ _EXPORTED_ROWS = [
 ]
 
 
-@pytest.mark.usefixtures("offline")
+@pytest.mark.usefixtures("offline", "optimizing_memory")
 def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     monkeypatch: pytest.MonkeyPatch, built_stores: Stores
 ) -> None:

@@ -1,4 +1,4 @@
-import { cycleAddress, postCommand } from "@/lib/api";
+import { commands, cycleAddress } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
@@ -30,8 +30,8 @@ export function LiveSegment({
   const decide = (path: CyclePath, a: DecisionAction) =>
     void cmd.run(a.label, () =>
       a.kind === "submit-arms"
-        ? postCommand(a.kind, { ...cycleAddress(path), keep: a.keep })
-        : postCommand(a.kind, { ...cycleAddress(path), decision: a.decision }),
+        ? commands[a.kind]({ ...cycleAddress(path), keep: a.keep })
+        : commands[a.kind]({ ...cycleAddress(path), decision: a.decision }),
     );
   const busy = cmd.pending !== null || viewedPath === null;
 

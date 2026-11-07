@@ -55,9 +55,9 @@ from promptpotter.shared.worded import Worded
 
 class Press(NamedTuple):
     """Who may press a kind: the terminal verb a person presses it by, whether a host assistant
-    may press it for them, and why the browser does not, where it does not (empty: a webapp
-    source sends it, `tests/test_security.py` § 5). A row pressed at the browser alone has none
-    (`BROWSER`)."""
+    may press it for them, and why the browser does not, where it does not (empty: its sender is
+    in `webapp/lib/api/commands.ts::commands`, which tsc refuses to build without one). A row
+    pressed at the browser alone has none (`BROWSER`)."""
 
     cli_verb: str
     host: bool

@@ -52,7 +52,7 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 13,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 196,
+    "p_served": 206,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 12,
     # The rows each file naming most of them leaves out.
@@ -65,7 +65,7 @@ BASELINE = {
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.
-    "test_functions": 29,
+    "test_functions": 28,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"

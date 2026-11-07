@@ -246,6 +246,7 @@ def _anchored(delta: dict[str, float], *, mu: float = 0.0) -> DeltaRuler:
     return fit.anchored("1PL")
 
 
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: Path) -> None:
     # Calibrated: eight samples clear any sample floor, so the arm count is the binding condition.
     arm_a = [Observation("a", str(sid), 1.0 if sid % 3 else 0.0) for sid in range(8)]

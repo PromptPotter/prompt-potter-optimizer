@@ -1,23 +1,6 @@
-import { API, send, toApiError } from "./client";
-import { postCommand } from "./commands";
-import { mintIdempotencyKey } from "./errors";
+import { commands } from "./commands";
 import type { DraftCampaignWire } from "@/lib/api/types";
 
-export async function postIngestDataset(
-  file: File,
-  slug?: string,
-): Promise<DraftCampaignWire> {
-  const form = new FormData();
-  form.append("file", file);
-  if (slug) form.append("slug", slug);
-  const r = await send(`${API}/commands/ingest-upload`, {
-    method: "POST",
-    headers: { "Idempotency-Key": mintIdempotencyKey() },
-    body: form,
-  });
-  if (!r.ok) throw await toApiError(r);
-  return (await r.json()) as DraftCampaignWire;
-}
 // A JSON body carries bytes base64 (`EditDraftPatch.candidate_library_file`).
 async function base64Of(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -31,7 +14,7 @@ export async function postUploadCandidateLibrary(
   file: File,
 ): Promise<DraftCampaignWire> {
   const blob = await base64Of(file);
-  return postCommand("edit-draft-campaign", {
+  return commands["edit-draft-campaign"]({
     draft_id: draftId,
     patch: { candidate_library_file: { filename: file.name, blob } },
   });
@@ -40,16 +23,16 @@ export function postBuildCandidateLibraryFromColumn(
   draftId: string,
   column: string,
 ): Promise<DraftCampaignWire> {
-  return postCommand("edit-draft-campaign", {
+  return commands["edit-draft-campaign"]({
     draft_id: draftId,
     patch: { candidate_library_column: column },
   });
 }
 // Opens a draft from the dataset's CURRENT config; no campaign exists until `start-checkin`.
 export function postDraftFromDataset(name: string): Promise<DraftCampaignWire> {
-  return postCommand("open-dataset-draft", { dataset_name: name });
+  return commands["open-dataset-draft"]({ dataset_name: name });
 }
 // Unlike `postDraftFromDataset`, reproduces the origin's prompt verbatim, with `campaign_origin` lineage.
 export function postDraftFromOrigin(originId: string): Promise<DraftCampaignWire> {
-  return postCommand("open-origin-draft", { origin_id: originId });
+  return commands["open-origin-draft"]({ origin_id: originId });
 }
