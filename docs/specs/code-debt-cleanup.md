@@ -291,28 +291,19 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   (install and research tiers) against `connectors/termnorm.py` `available_models` /
   `default_node_config` and `draft_campaign.py::UPLOAD_BUDGET_ROUNDS` /
   `Connector.default_optimization` (uploads); an upload opens the model axis the install policy
-  closes. `defaults.yaml` also picks `backend_type: termnorm` for every install dataset (the
-  "backend_type missing" 422 is unreachable there) and holds `available_models` and `rounds: 8`
-  that every dataset overrides. Action: a connector's node template is laid under every definition
-  naming it, in any tier; connector-neutral campaign defaults are one file every tier lays under; the
-  four upload-seeding `Connector` fields become one optional upload-defaults declaration whose
-  presence is `serves_uploads`. First step, S: delete the three `defaults.yaml` keys, add
-  `backend_type: termnorm` to `email-tagging/dataset.yaml` and `justlogic/family.yaml`, fix
-  `docs/manual/03-first-campaign.md`, run the full gate. **Rides with:** M18. **Re-test:**
-  `git grep -n "backend_type" -- promptpotter/assets/datasets/defaults.yaml` is empty.
+  closes. `defaults.yaml` names no connector, model list or budget; every definition names its own.
+  Action: a connector's node template is laid under every definition naming it, in any tier;
+  connector-neutral campaign defaults are one file every tier lays under; the four upload-seeding
+  `Connector` fields become one optional upload-defaults declaration whose presence is
+  `serves_uploads`. **Rides with:** M18. **Re-test:** `git grep -nE "llm_only|param_keys" --
+  promptpotter/assets/datasets/defaults.yaml` is empty and `connectors/termnorm.py` holds the one
+  node template.
 - **`Session.backend_id` is a test-only archive switch** — production always sets it;
   `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
   Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
   explicitly. Holders beside it: `application/origin.py:75` (`campaign_terms(session.backend_id)`,
   while `mask/load.py:216` reads `campaign.connector`: two sources for one connector name),
   `runner/inner/spawn_context.py:66`, `presentation/cli/commands/new.py:446`. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
-- **`BackendClient` forwards five `Connector` members beside its own `.connector`** — two doors to
-  one declaration (the `max_cells_in_flight`, `measured_unit` and `cell_attempts` properties, the
-  `cell_envelope_s` and `prompt_delivery` methods). Action: delete the forwarders; their callers
-  read `.connector.X` (`cell_attempts` and `cell_envelope_s` are read only by
-  `paper/bbeh-comparison/bbeh_potter_runner.py`). **Rides with:** M4b. **Re-test:**
-  `git grep -nE "(backend_client|client)\.(max_cells_in_flight|measured_unit|prompt_delivery|cell_attempts|cell_envelope_s)\b" -- promptpotter paper`
-  is empty (14 hits when filed).
 - **Three TermNorm defaults in core** — `connectors/__init__.py` `DEFAULT_CONNECTOR` and `shipped`
   (repeating the one `serves_uploads` declaration), and `Settings.TERMNORM_URL` defaulting to
   loopback, so a box with no TermNorm lists it configured and health reports it broken. Connector
@@ -327,10 +318,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   the Connector and refuses typed, naming the registered set; `_validate` refuses a non-lowercase
   name; callers take the Connector. **Rides with:** M4b. **Re-test:** a dataset naming
   `backend_type: nope` answers 422 on `new`, `start-run` and the pipeline read.
-- **`Connector.node_roles` repeats the role the served pipeline carries** — `draft_build.py` reads it
-  while `draft_wire` already holds the parsed chain with `PipelineNode.role`. Action: derive from the
-  chain; delete the field (verify TermNorm serves `candidate_source` first). **Rides with:** M5.
-  **Re-test:** `git grep -n "node_roles" -- promptpotter` is empty.
 - **Core computes TermNorm's term index for every connector, pushed by two calls** —
   `Session.index_terms`, `loop_start.py` and `origin.py`. Action: one call where the session opens,
   handing the connector's session the bank. **Rides with:** M7. **Re-test:**

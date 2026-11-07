@@ -418,12 +418,12 @@ class Target(CycleRead):
 
     @property
     def measured_unit(self) -> MeasuredUnit:
-        return self._cycle.session.backend_client.measured_unit
+        return self._cycle.session.backend_client.connector.measured_unit
 
     @property
     def prompt_delivery(self) -> Delivery:
         session = self._cycle.session
-        return session.backend_client.prompt_delivery(session.pipeline_params)
+        return session.backend_client.connector.prompt_delivery(session.pipeline_params)
 
     @property
     def cell_formula(self) -> str | None:

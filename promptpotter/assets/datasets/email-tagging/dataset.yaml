@@ -117,11 +117,12 @@ source:
 pipeline:
   # Pilot: a single llm_only node against TermNorm /matches, exact-match scoring; mirrors the live
   # n8n subject-classifier-LM tagging decision.
+  backend_type: termnorm
+  available_models:
+    - openai/gpt-oss-20b
   description: >-
     Classify an inbound email into one routing category: financial, actionable, informational or
     other.
-  available_models:
-    - openai/gpt-oss-20b
   nodes:
     llm_only:
       description: Reads the email and answers with one category label.

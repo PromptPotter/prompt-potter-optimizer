@@ -415,7 +415,7 @@ async def score_on_bench(
     # A look-ahead press is a round's to spend, and a pass is no round: it holds the backend's ceiling.
     control = session.state.control
     session.state.control = replace(
-        control, held_lookahead=session.backend_client.max_cells_in_flight
+        control, held_lookahead=session.backend_client.connector.max_cells_in_flight
     )
     try:
         return await _pass_on_bench(

@@ -174,7 +174,7 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
         bench=len(partition.bench),
         cell=cell,
         optimizers={name: optimizer_round_price(stores, name) for name in sorted(names)},
-        cells_in_flight=session.backend_client.max_cells_in_flight,
+        cells_in_flight=session.backend_client.connector.max_cells_in_flight,
     )
 
 

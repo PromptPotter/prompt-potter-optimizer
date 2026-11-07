@@ -17,7 +17,7 @@ from promptpotter.domain.connector import (
     bearer,
     data_envelope,
 )
-from promptpotter.domain.pipeline_schema import NodeRole, NodeSpendBound
+from promptpotter.domain.pipeline_schema import NodeSpendBound
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import KeySource
 from promptpotter.domain.value_tree import Delivery
@@ -234,9 +234,6 @@ class Connector:
 
     default_optimization: tuple[tuple[str, Any], ...] = ()
     """Seeds ``campaign.json::optimization``; ``degradation_threshold`` has no schema default."""
-
-    node_roles: Mapping[str, NodeRole] = field(default_factory=dict)
-    """The node roles ingest reads a pipeline's required inputs from."""
 
     default_node_config: Mapping[str, Any] = field(default_factory=dict)
     """Seeds a fresh ``dataset.yaml::pipeline``; its ``param_allowed_values`` is a DEFAULT, never a cost rail."""

@@ -205,7 +205,8 @@ class QueryLoopState:
 def _armed_cells(session: Session) -> int:
     """Sample look-ahead is LIVE though it defaults off: any dataset, the moment the operator arms it."""
     return effective_lookahead(
-        session.state.control.sample_lookahead(), session.backend_client.max_cells_in_flight
+        session.state.control.sample_lookahead(),
+        session.backend_client.connector.max_cells_in_flight,
     )
 
 
@@ -877,7 +878,7 @@ class _ScoringPhase[K: Hashable]:
             )
         watched = set[asyncio.Future[Any]](calls)
         raised: asyncio.Future[None] | None = None
-        if armed < self.session.backend_client.max_cells_in_flight:
+        if armed < self.session.backend_client.connector.max_cells_in_flight:
             raised = asyncio.ensure_future(self.depth_raised(armed))
             watched.add(raised)
         try:

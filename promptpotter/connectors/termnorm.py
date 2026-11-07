@@ -8,7 +8,6 @@ import httpx
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, cell_envelope_of
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
@@ -152,10 +151,6 @@ CONNECTOR = Connector(
     max_cells_in_flight=16,
     # A fresh CSV upload skips the retrieval nodes: no Brave Search billing in round 1.
     default_pipeline=("llm_only",),
-    node_roles={
-        "token_matching": NodeRole.CANDIDATE_SOURCE,
-        "fuzzy_matching": NodeRole.CANDIDATE_SOURCE,
-    },
     default_optimization=(("degradation_threshold", 0.4),),
     available_models=(
         "openai/gpt-oss-20b",
