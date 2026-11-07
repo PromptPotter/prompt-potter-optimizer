@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.identity.paths import DefaultClaim, default_identity_paths
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import read_json_optional, write_json
+from promptpotter.infrastructure.store.io import write_json
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import FileKind
 from promptpotter.shared.identity import TERMINAL_IDENTITY_ID
 
 if TYPE_CHECKING:
@@ -39,11 +41,10 @@ def maybe_claim_default(
 
 def registered_user_id(marker_path: Path) -> str | None:
     """Optional, not tolerant: a corrupt marker read as unclaimed would silently demote the host."""
-    raw = read_json_optional(marker_path)
-    if raw is None:
+    claim = read_file(marker_path, DefaultClaim.model_validate_json, FileKind.STORED_CONFIG)
+    if claim is None:
         return None
-    uid = DefaultClaim.model_validate(raw).user_id
-    return uid if uid != "default" else None
+    return claim.user_id if claim.user_id != "default" else None
 
 
 def _is_host(*, terminal: bool, user_id: str) -> bool:

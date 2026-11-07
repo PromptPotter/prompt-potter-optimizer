@@ -866,7 +866,7 @@ class ErrorRecord(FrozenModel):
     record_type: Literal["error"] = "error"
     # Exception class name — operator-facing diagnostic, never load-bearing for routing.
     kind: str
-    # The exception's first line; the lines after it are `detail`.
+    # The exception's first non-blank line, else its class name; the lines after it are `detail`.
     message: str
     detail: str | None
     traceback: str | None = None
@@ -884,7 +884,7 @@ class ErrorRecord(FrozenModel):
         traceback: str | None = None,
         round: int | None = None,
     ) -> ErrorRecord:
-        message, _, detail = (str(exc) or type(exc).__name__).partition("\n")
+        message, _, detail = (str(exc).strip() or type(exc).__name__).partition("\n")
         return cls(
             kind=kind,
             message=message,

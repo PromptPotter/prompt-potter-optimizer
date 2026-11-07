@@ -58,6 +58,7 @@ Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only 
 .promptpotter/
   block_packs/{name}/pack.json          # the install's block packs, read-only to every account
   jobs/{job_id}.json                    # machine-global admission records (`domain/job.py::JobStage`)
+  jobs/ended/{job_id}.json              # a job released before today, deleted after `jobs/registry.py::_ENDED_KEPT`
   logs/latest-readout-path.txt          # names the newest terminal launch's `readout.log`
   .cache/source_facts.json              # the install cache, where an install has no checkout
   .cache/huggingface/                   # the box unit's HF_HOME (`deploy-linux/install-service.sh`)

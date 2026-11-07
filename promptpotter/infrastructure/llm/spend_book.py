@@ -49,9 +49,13 @@ from promptpotter.infrastructure.store.read_model import (
     HoldTrailRecord,
     LedgerIndex,
     RecordClasses,
+)
+from promptpotter.infrastructure.store.wallet_store import (
+    BilledCharge,
+    ChargeBook,
+    HeldCharge,
     held_tokens,
 )
-from promptpotter.infrastructure.store.wallet_store import BilledCharge, ChargeBook, HeldCharge
 from promptpotter.shared.errors import (
     ErrorCategory,
     HostAllowanceExhaustedError,

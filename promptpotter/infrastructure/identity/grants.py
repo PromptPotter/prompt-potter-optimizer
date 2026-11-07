@@ -5,12 +5,13 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from pydantic import ValidationError, field_serializer
+from pydantic import field_serializer
 
 from promptpotter.domain.strict_model import FrozenModel, NonNegativeWireFloat
-from promptpotter.infrastructure.store.io import append_jsonl, read_bytes_optional, write_json
+from promptpotter.infrastructure.store.io import append_jsonl, write_json
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import FileKind, FileUnreadableError, validation_reason
+from promptpotter.shared.errors import FileKind, FileUnreadableError
 
 logger = logging.getLogger(__name__)
 
@@ -36,22 +37,15 @@ class GrantsFile(FrozenModel):
     grants: dict[str, PrincipalGrant]
 
 
-def _read(path: Path) -> GrantsFile:
+def _grants(path: Path) -> dict[str, PrincipalGrant]:
     """Absent is no grants; a file that does not validate, an empty one included, raises."""
-    raw = read_bytes_optional(path)
-    if raw is None:
-        return GrantsFile(grants={})
-    try:
-        return GrantsFile.model_validate_json(raw)
-    except ValidationError as exc:
-        raise FileUnreadableError(
-            FileKind.STORED_CONFIG, path=str(path), reason=validation_reason(exc, shown=1)
-        ) from exc
+    held = read_file(path, GrantsFile.model_validate_json, FileKind.STORED_CONFIG)
+    return {} if held is None else held.grants
 
 
 def read_grant(path: Path, sub_principal_user_id: str) -> PrincipalGrant | None:
     try:
-        grants = _read(path).grants
+        grants = _grants(path)
     except FileUnreadableError:
         # Deny-all: an invalid file promotes nobody to a delegate.
         logger.warning("grants.json does not validate; no grant is read")
@@ -67,7 +61,7 @@ def resolve_effective_capabilities(
 
 
 def list_grants(path: Path) -> dict[str, PrincipalGrant]:
-    return _read(path).grants
+    return _grants(path)
 
 
 def _append_audit(
@@ -101,7 +95,7 @@ def grant_principal(
     audit_path: Path,
 ) -> None:
     """Refuses a sub-principal AS delegator: the read-time ceiling walks one level only."""
-    grants = _read(path).grants
+    grants = _grants(path)
     if delegated_by_user_id in grants:
         raise ValueError(
             f"cannot delegate from {delegated_by_user_id!r}: it is itself a sub-principal "
@@ -131,7 +125,7 @@ def grant_principal(
 def revoke_principal(
     path: Path, *, sub_principal_user_id: str, actor: str, audit_path: Path
 ) -> bool:
-    grants = _read(path).grants
+    grants = _grants(path)
     removed = sub_principal_user_id in grants
     if removed:
         _write(path, {k: v for k, v in grants.items() if k != sub_principal_user_id})

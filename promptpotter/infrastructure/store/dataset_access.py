@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import count
 from pathlib import Path
@@ -18,7 +18,7 @@ from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.store.io import parse_yaml, read_bytes_optional
+from promptpotter.infrastructure.store.io import parse_yaml
 from promptpotter.infrastructure.store.read_model import file_sig, read_file
 from promptpotter.shared.errors import (
     DatasetAccessError,
@@ -117,17 +117,6 @@ def definition_layer(raw: bytes) -> dict[str, Any] | None:
             raise ValueError(f"`{key}` must be a mapping")
     _card(data.get("card") or {})
     return data
-
-
-def _named[T](path: Path, read: Callable[[bytes], T]) -> T | None:
-    """*read* over the file at *path*, ``None`` where it is absent; a refusal names the file."""
-    raw = read_bytes_optional(path)
-    if raw is None:
-        return None
-    try:
-        return read(raw)
-    except ValueError as exc:
-        raise ValueError(f"{path}: {exc}") from exc
 
 
 def _layers(dataset: ResolvedDataset) -> list[tuple[Path, dict[str, Any]]]:
@@ -288,7 +277,7 @@ def dataset_framing(raw: bytes) -> DatasetFraming:
 
 
 def read_framing_file(path: Path | None) -> DatasetFraming:
-    framing = None if path is None else _named(path, dataset_framing)
+    framing = None if path is None else read_file(path, dataset_framing, FileKind.STORED_CONFIG)
     return DatasetFraming("", TaskDecomposition()) if framing is None else framing
 
 
@@ -319,7 +308,8 @@ def read_dataset_origin(dataset: ResolvedDataset) -> dict[str, dict[str, Any]]:
     """Starting prompts keyed by node; a family's entry is the default for a node it names."""
     out: dict[str, dict[str, Any]] = {}
     for directory in definition_chain(dataset):
-        if (layer := _named(directory / ORIGIN_FILE, origin_layer)) is not None:
+        origin = directory / ORIGIN_FILE
+        if (layer := read_file(origin, origin_layer, FileKind.STORED_CONFIG)) is not None:
             out |= layer
     return out
 

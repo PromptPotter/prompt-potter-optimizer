@@ -157,7 +157,7 @@ wave.
 
 | Arc | Was | Closes | Decision first | Size | Waits on |
 |---|---|---|---|---|---|
-| **M1** gate cost | T rest | eslint's cache and tsc's typegen made `light`, the `optimizer-schemas` probe's outputs, the walk tier, the controlled leg's count, the Vite leftovers | the walk tier runs in the full gate; `eslint-plugin-react` restores the dropped rules (operator, 2026-11-06) | ~15 files | — |
+| **M1** gate cost | T rest | eslint's cache and tsc's typegen made `light`, the `optimizer-schemas` probe's outputs, the walk tier, the Vite leftovers | the walk tier runs in the full gate; `eslint-plugin-react` restores the dropped rules (operator, 2026-11-06) | ~15 files | — |
 | **M2** command log | Q1 | Q1, census C, the `_tasks` test, the noise-floor stop, the pass with no address; EA's cut state table is its acceptance test (`origin/arc/ea-8`) | amend architecture §0 Control-remote and decision 0001 so commands leave the cycle ledger | ~32 files, wipes run data | — |
 | **M3** run scope | U1a | config items 4 and 7 (the L4 override as one overlay), `bind_cache`, `LaunchState.ledger`, the `set_cycle_ledger` binders | bind at `runner/entry.py` now; an unusable L4 mutation is refused, typed and served, by the rule that refuses an unknown overlay | ~28 files, one L4 re-key | — |
 | **M4** typed pipeline carrier | U1a | engine A, config items 8 and 9, the free-tier layer and its model axis, the three merges as one wherever behaviour equals main | `steps` leaves the params bag; every treatment digest re-keys (accepted) | ~35 files | — |
@@ -175,7 +175,7 @@ wave.
 | **M14** faults | Q3 | a: census B, one refusal type; b: `logging` leaves `application/` and `domain/` | — | a small; b ~65 files, mechanical | b: M9 |
 | **M15** change feed | Q2 | Q2, census E | a subject is the `Subject` path (yes) | ~30 files | M2, M9 |
 | **M16** webapp | swept C, U5 | lineage reads the served tree; one arm row; the selection in the hash | a swiped-in column stays blank until its reads land (yes) | ~50 files, cut small | M15 |
-| **M17** store hygiene | K3a rest | census A's `_read` copies, `banks_sharing`, the landing proving a manifest, the `Fate.RUN` dict rows, the landing wherever code meets an unlanded root, `--reset`'s two decisions, one remedy for an unreadable file | read through `io.py`'s readers | ~28 files | — |
+| **M17** store hygiene | K3a rest | `banks_sharing`, the landing proving a manifest, the `Fate.RUN` dict rows, the landing wherever code meets an unlanded root, `--reset`'s two decisions, one remedy for an unreadable file | read through `io.py`'s readers | ~28 files | — |
 | **M18** an upload without a backend | G | the in-process `llm_only` connector, the wire-skew probe, TermNorm's wording, § Bypasses, a named endpoint per connector, core's TermNorm defaults | edit TermNorm where the arc needs it (operator, 2026-11-06) | — | M4b |
 | **M19** the election | D | the election root, the collapse gate, the lift bars, CAPO's survivor ranking | offline first, then priced | — | M13 |
 | **M20** MCP over HTTP | — | the MCP door served over Streamable HTTP behind the API's sign-in, a second transport of the one adapter | auth per [`access-model.md`](../operations/access-model.md) (yes) | sized at its brief | M2 |

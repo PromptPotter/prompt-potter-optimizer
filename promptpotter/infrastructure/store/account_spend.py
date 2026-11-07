@@ -38,9 +38,13 @@ from promptpotter.infrastructure.store.read_model import (
     HoldTrailRecord,
     LedgerIndex,
     RecordClasses,
+)
+from promptpotter.infrastructure.store.wallet_store import (
+    BilledCharge,
+    ChargeBook,
+    HeldCharge,
     held_tokens,
 )
-from promptpotter.infrastructure.store.wallet_store import BilledCharge, ChargeBook, HeldCharge
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore

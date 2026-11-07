@@ -205,11 +205,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   not recognized"; `vendor-marks` read a missing package as "simple-icons has no 'anthropic'").
   Action: borrow from the clone's main checkout, or refuse at once and name the missing folder.
   **Re-test:** push main from a fresh worktree.
-- **A kept offline-run green counts a workspace by its directory** — `scripts/offline_run.py::still_green`
-  asks only that the directory stands, and `claim_home` stamps the run's arguments, not its keys, so a
-  clone-shared home answers for a tree that did not build it. Action: stamp each workspace with the key
-  that built it, and compare. **Rides with:** M1. **Re-test:** two worktrees with different engine
-  sources share a home; the second rebuilds.
 - **`Check.after`'s lane rule is stated, not checked** — `scripts/gate.py::Check` says a dependency is
   earlier in its lane, but the module assert only orders `CHECKS`, so a check whose `after` names another
   kind runs in a parallel lane and reads a half-built product. Action: the assert also requires the
@@ -224,6 +219,7 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 - **A refused L4 arm's identity is the floor's** — `potter/dispatch/layout.py::layout_levers` folds a
   breach into the floor and drops it from the resolved overrides, so `spawn.py::inner_cell_hop` and the
   envelope read the floor arm's campaign. Action: the identity reads the refusal. **Rides with:** M8.
+  **Re-test:** a breaching and a floor arm get different inner campaign ids.
 - **The optimizer prompt spells slots its own way** — it writes `[#N]` / `#N`
   (`potter/dispatch/injections/` `panels.py`, `catalogues.py`, `layer_state.py`), while every surface prints
   `domain/sample.py::sample_tag`'s `#007`. Changing it is a prompt-shaping edit. Action: the prompt
@@ -236,7 +232,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   `plugin_registry.py` re-keys every treatment digest (it shapes the optimizer prompt), so it waits for
   a re-key. **Rides with:** M8 (its re-key). **Re-test:** `git grep -n 'BUILT_IN}: ' -- promptpotter`
   names one line.
-  **Re-test:** a breaching and a floor arm get different inner campaign ids.
 - **The landing does not run wherever code meets an unlanded root** — the boot landing is cut. Sites:
   `presentation/cli/campaign_runner.py` and `main.py` (no boot landing), the `_sources` registries
   (completed per verb, so a registry verb is refused on an unlanded root), the process interlock
@@ -252,11 +247,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   refuses once as a `FileKind` through `read_file`, or is named a cache read. **Rides with:** M17.
   **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
   surveys and caches.
-- **One torn `grant.json` fails the install-spend survey** — `application/jobs/install_spend.py` catches
-  `OSError` and `LedgerUnreadableError`, not the unreadable-file refusal `GrantStore.load` raises, while
-  `application/account.py` and `application/datasets/startability.py` catch it. Action: a survey serves
-  the unreadable row. **Rides with:** M17. **Re-test:** tear one `grant.json`; the survey serves the other
-  accounts.
 - **A failed round checkout is swallowed into a log** — `application/scoring/closed_rounds.py` wraps the
   checkout in `graceful(...)`. Action: the read refuses or serves the row typed. **Rides with:** M9.
   **Re-test:** `git grep -n "graceful(" -- promptpotter/application/scoring/closed_rounds.py` is empty.
@@ -910,12 +900,11 @@ import-graph script before and after; close each wave with `gate.py --only layer
   `e2e/walk_world.py`, and the host it walks as is exempt from the read bucket
   (`quota.py::refuse_request_rate`). Action: the gate's `playwright` check builds that world and adds
   `--project=walk` on it. **Re-test:** `gate.py` lists a walk check.
-- **The Vite build leaves five things standing**:
+- **The Vite build leaves four things standing**:
   - The derivations barrel pulls the network layer into every chunk that imports it.
   - Babel (React Compiler) is 87% of build time.
   - Chunks exceed 500 kB.
   - ESLint rules dropped with `eslint-config-next`: `react/jsx-key`, `react/no-unescaped-entities`, `react/display-name`, `react/jsx-no-target-blank`, `@next/next/*`.
-  - `headers.py::_WEBAPP_CSP` `style-src 'self'` may now hold, with no inline style from the framework: check the console first.
 - **Several doors into one state**: candidate selection minted at each
   `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
   `setSelectionForSampleSet` from several surfaces, `FileTree::onSelect` drilled through its parents.
@@ -1209,12 +1198,11 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 What batch E's reviews found outside the arc under review, grouped by shape.
 
 **A. A file read past its store's one reader.** **Rides with:** M17.
-- `wallet_store.py::GrantStore` and `wallet_store.py::TenantApiKeyStore` load their files raw, and so do
-  `tenant_dataset_store.py::load_task_context`, `default_claim.py` and
-  `intelligence/hard_sample_sorter.py`. `dataset_access.py::_named` reads `task.md` and `origin.yaml`
-  itself, so one malformed `dataset.yaml` gets four answers. Action: each file reads through its
-  store's typed row, and a file the store cannot read is refused once. **Re-test:**
-  `git grep -nE "def _read\b" -- promptpotter/infrastructure promptpotter/application`.
+- `intelligence/hard_sample_sorter.py::read_hard_samples` loads its file raw. Action: it reads through
+  its store's typed row, and a file the store cannot read is refused once. **Rides with:** the re-key
+  arc, not M17 (potter and capo-pobb reach it). **Re-test:**
+  `git grep -n "read_json_optional(path)" -- promptpotter/application/intelligence/hard_sample_sorter.py`
+  is empty.
 - `tenant_dataset_store.py::banks_sharing` fails the whole survey on one bad entry. The survey catches
   in `llm/heartbeat.py`, `campaign_store/store.py::CampaignStore.list_campaigns` and
   `user_store.py::read_accounts` are held by no test. Action: a survey serves a bad row with its fault,
@@ -1247,7 +1235,7 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `git grep -n "c.dataset_name == dataset_name" -- promptpotter/application/evidence`.
 
 **D. Spelled by hand beside the rows.** **Rides with:** the next read added.
-- `api/deps.py::_NAMED` and `read_input`'s pattern, `cli/parsers.py`' read help,
+- `api/deps.py::read_input`'s pattern, `cli/parsers.py`' read help,
   `complexity_ledger.py::_TERMINAL_VIEW`, and the 29 hand-written URLs of `webapp/lib/api/reads.ts`
   each restate `ReadKind`'s rows. The webapp re-asks reads by an untyped name (`invalidateReads("…")`).
   Action: each derives from the rows, and a read's name is a type. **Re-test:**
@@ -1299,6 +1287,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   (another cycle's, a sandbox's), while `list_cycle_files` lists only `CampaignLayout.files()` (batch
   7's fix pass). Action: the campaign scope reads what it lists. **Re-test:** a campaign-scope read of
   `cycles/<id>/readout.log` is refused.
+- `domain/phases.py::RunPhaseInfo.parked` is read only for a phase with an action
+  (`phases.py::RunAdmission`'s refusal, `run-phase.ts`' PAUSED): QUEUED's, STARTING's and GATE's words
+  are served and read by nothing (censuses 3 and 4). Action: the word lives only where it is read.
+  **Re-test:** every non-empty `parked` row has a reader.
 
 ## Open — multi-arc
 
@@ -1490,12 +1482,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `round_walks` each decide which walk counts as a round of its own.
 - **The capo offline bench turns on one seed**: lift +0.700 or none after a draw-order change, so the
   fixture cannot tell a mating-law change from a reshuffle.
-- **The controlled offline leg's arm-memory count moves between identical runs** (`arm potter: memory
-  holds 380` then `375` own answers on one tree): a cell coalesced with a twin in flight is answered
-  from memory, not sent. A printed reading, not a decision. Action: count filed answers, not distinct
-  ones — the count is `scripts/offline_run.py::run_controlled`'s (`file_answers` mints a ref per
-  filing, and a coalesced cell files none). Separately, `--controlled` stops at `_variant_edit`
-  ("no framing to cite") on the foreign potter campaign, on main too. **Re-test:** two `--controlled` runs of one tree print one count.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 
@@ -1568,8 +1554,7 @@ word's `git grep -c` for that sense is 0.
   - Unverified, for the next change to each file: `shell/CriticalAlertBanner` builds `Said` rows in the
     browser and re-sorts `TONES` for `pinned`; `ViewTabs.show` is many `open`/`close` calls, not one
     workspace act; `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after
-    (`iter_files(skip=)` exists); `domain/activity.py::ActivityFeed` falls back to `"run error"` where
-    `run_said` has none; `iter_family_courses` reads each index twice; `list_hierarchy` re-calls
+    (`iter_files(skip=)` exists); `iter_family_courses` reads each index twice; `list_hierarchy` re-calls
     `line_config` per non-holder course; `FileTree` mounts a 2 s `useActivePointer()` poll for one
     failure line; a `/hierarchy` 200 replaces every entry object `lib/hooks/useRegistry.ts::useRegistry` indexes.
 - **The collapse gate cuts a hedging arm on noise**: `pobb/checks.py::check` →
@@ -1596,8 +1581,6 @@ word's `git grep -c` for that sense is 0.
     (dataset block, draft override, cycle seed), so the row says only "Changed from default".
   - `locus_crossover` is listed as a maker with nothing upstream making two-parent children; an
     arm-editing maker's on/off belongs on `nodes.Proposer` as a member-declared rule.
-  - The check-in picklist button's accessible name runs slug and meta together; two open check-ins
-    share one slug.
 - **Potter's `dispatch/` modules still hash whole** (`shapes_optimizer_prompt(__name__)`): a member
   module's reads are walked (`nodes.py::_source_digest`), so only a unit read through an instance or a
   registry needs a mark. **Re-test:**
@@ -1605,8 +1588,6 @@ word's `git grep -c` for that sense is 0.
 - **Seen building the prompt workspace**:
   - An override cannot be removed, only overwritten: knob Reset writes the declared value and a cleared
     prompt field writes `""`, so the draft stays "edited". The overlay merge needs a delete.
-  - `PipelineSetupSection` picks a default node in a `useEffect` with a ref latch: a second door into the
-    shared node selection.
   - The packs copy each snippet's arXiv id and method into its `tags`, so Tags repeats Source and Method.
   - `ui/MenuCheck` takes a `title=` prop, which `CandidatesToolbar` fills with teaching prose.
 - **Seen framing snippets in a prompt**:
