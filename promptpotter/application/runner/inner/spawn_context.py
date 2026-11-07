@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Annotated
 from promptpotter.application.bench.difficulty import ruler_clock
 from promptpotter.application.runner.inner.tasks import (
     InnerCells,
-    is_self_optimization,
     parse_resolved,
 )
 from promptpotter.domain.cycle_paths import CycleHop
@@ -63,7 +62,7 @@ _INNER_SPAWN: Annotated[
 def _outer_cells(session: Session) -> InnerCells | None:
     """``None`` off the recursion. The workload's panel, never a second read of the file the
     samples and fingerprint came from."""
-    if not is_self_optimization(session.backend_client.connector.name):
+    if not session.backend_client.connector.self_optimization:
         return None
     return parse_resolved(session.backend_client.workload.experiment).panel.resolve_cells(
         session.store
