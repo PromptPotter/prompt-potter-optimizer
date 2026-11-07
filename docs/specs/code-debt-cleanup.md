@@ -1125,10 +1125,6 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 - **`domain/cycle_index.py::RunStatus.of` builds `mark: str` and asserts it a `StatusMark`**, so the
   literal holds at runtime only. Action: `StatusMark` typed off `RunPhase` and `StopOutcome`, whose
   values it repeats (a re-key of the exported union, so not one edit). **Re-test:** `git grep -n "mark: str" -- promptpotter/domain/cycle_index.py`.
-- **The pipeline renderer's styles live in `app/styles/domains/chat.css`** (`.wf-hero-*`,
-  `.connector*`, `.pipeline-zoom*`), restated by `dashboard-pipeline-nodes.css` to win on order. The
-  renderer is `dashboard/pipeline/PipelineFlow`'s. Action: move the block to its own domain file in
-  one commit, in a new arc. **Re-test:** `git grep -c "wf-hero" -- webapp/app/styles/domains/chat.css`.
 - **A landing waits on every live producer on another commit, whether or not the ledger shape
   moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
