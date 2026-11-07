@@ -1151,7 +1151,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
         filtered=filtered,
         active=active,
         has_starting_prompts=ships_prompts,
-        prompt_fields_as_node_params=session.backend_client.prompt_fields_as_node_params,
+        prompt_fields_as_node_params=session.backend_client.connector.prompt_fields_as_node_params,
         dataset_name=dataset_name,
     )
 

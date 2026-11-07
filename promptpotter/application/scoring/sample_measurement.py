@@ -313,7 +313,7 @@ def measured_cell_price(session: Session, wire_params: Mapping[str, Any]) -> Cel
 async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBound | None:
     """``None`` where the backend's own sends are each admitted; a node with no served bound leaves it UNBOUNDED."""
     client = session.backend_client
-    if client.holds_own_sends and not client.derives_spend_bounds:
+    if client.connector.holds_own_sends and client.connector.sent_spend_bound is None:
         return None
     usd = 0.0
     input_tokens = output_tokens = 0
@@ -521,7 +521,7 @@ async def measure_sample(
         data, spent, envelope = await _send_cell(sample, session, wire_params, pairs)
 
         ranked = terminal_ranking(data, pipeline_schema)
-        predicted = _predicted(data, ranked, session.backend_client.answer_key)
+        predicted = _predicted(data, ranked, session.backend_client.connector.answer_key)
         if predicted == "ERROR":
             return _error_result(
                 sample,
@@ -583,7 +583,7 @@ async def _send_cell(
     client = session.backend_client
     bound = await cell_bound(session, wire_params)
     # The run's wall clock bounds every cell, so one still open at its edge is cut.
-    budget_s = client.cell_envelope_s(sample, wire_params)
+    budget_s = client.connector.cell_envelope_s(sample, wire_params)
     if (left := require_spend_book(f"cell {sample.id}").clock_left()) is not None:
         if left <= 0.0:
             raise SendRefusedError(
@@ -593,7 +593,7 @@ async def _send_cell(
         budget_s = min(budget_s, left)
     envelope = CellEnvelope(
         budget_s,
-        attempts=client.cell_attempts,
+        attempts=client.connector.cell_attempts,
         label=f"{sample.id}:{query[:40]}",
     )
     # Unconditional and OUTSIDE the envelope scope: the envelope's only sighting of a machine sleep rides it.

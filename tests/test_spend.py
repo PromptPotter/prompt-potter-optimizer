@@ -2349,7 +2349,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     wallet = spend_book()
 
     async def remote_cell() -> Any:
-        async with CellEnvelope(600.0, attempts=remote.cell_attempts, label="q"):
+        async with CellEnvelope(600.0, attempts=remote.connector.cell_attempts, label="q"):
             return await remote.run_query(
                 Sample(id=0, query="q", ground_truth=None),
                 bound=whole_cell,
@@ -2461,7 +2461,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         pairs = {dspy_module.PROGRAM_NODE: client.priced_as(config)}
 
         async def one_cell() -> Any:
-            async with CellEnvelope(600.0, attempts=client.cell_attempts, label="q"):
+            async with CellEnvelope(600.0, attempts=client.connector.cell_attempts, label="q"):
                 return await client.run_query(
                     Sample(id=0, query="q", ground_truth="4"),
                     {dspy_module.PROGRAM_NODE: config},
@@ -2556,7 +2556,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     whole = SendBound(input_tokens=100_000, output_tokens=50_000, usd=0.5)
 
     async def agent_cell(sample_id: int) -> Any:
-        async with CellEnvelope(600.0, attempts=agent.cell_attempts, label="q"):
+        async with CellEnvelope(600.0, attempts=agent.connector.cell_attempts, label="q"):
             return await agent.run_query(
                 Sample(id=sample_id, query="q", ground_truth=None),
                 bound=whole,
