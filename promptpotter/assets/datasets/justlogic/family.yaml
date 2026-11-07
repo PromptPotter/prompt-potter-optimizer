@@ -8,15 +8,16 @@ source:
 pipeline:
   # JustLogic (Chen 2025): a synthetic, knowledge-independent deductive benchmark, routed through
   # TermNorm /matches with the llm_only pipeline.
-  description: >-
-    Deductive reasoning: decide whether a claim follows from its premises — TRUE, FALSE or
-    Uncertain.
+  backend_type: termnorm
   # One model under two ROUTES (`:nitro` and plain), and the `model` axis stays closed on it: this is
   # the L4 inner instrument, and opening the axis would let L1 flip the host while reporting a prompt,
   # which is the confound `route_order` is forbidden for, wearing a model name.
   available_models:
     - openai/gpt-oss-20b:nitro
     - openai/gpt-oss-20b
+  description: >-
+    Deductive reasoning: decide whether a claim follows from its premises — TRUE, FALSE or
+    Uncertain.
   nodes:
     llm_only:
       # Depths 2-4 (iid mix), a wider inner instrument than d23; ':nitro' for throughput. Depth 4
