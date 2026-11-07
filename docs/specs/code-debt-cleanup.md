@@ -252,11 +252,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   refuses once as a `FileKind` through `read_file`, or is named a cache read. **Rides with:** M17.
   **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
   surveys and caches.
-- **One torn `grant.json` fails the install-spend survey** — `application/jobs/install_spend.py` catches
-  `OSError` and `LedgerUnreadableError`, not the unreadable-file refusal `GrantStore.load` raises, while
-  `application/account.py` and `application/datasets/startability.py` catch it. Action: a survey serves
-  the unreadable row. **Rides with:** M17. **Re-test:** tear one `grant.json`; the survey serves the other
-  accounts.
 - **A failed round checkout is swallowed into a log** — `application/scoring/closed_rounds.py` wraps the
   checkout in `graceful(...)`. Action: the read refuses or serves the row typed. **Rides with:** M9.
   **Re-test:** `git grep -n "graceful(" -- promptpotter/application/scoring/closed_rounds.py` is empty.
@@ -1209,10 +1204,10 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 What batch E's reviews found outside the arc under review, grouped by shape.
 
 **A. A file read past its store's one reader.** **Rides with:** M17.
-- `wallet_store.py::GrantStore` and `wallet_store.py::TenantApiKeyStore` load their files raw, and so do
-  `default_claim.py` and `intelligence/hard_sample_sorter.py`. Action: each file reads through its
-  store's typed row, and a file the store cannot read is refused once. **Re-test:**
-  `git grep -nE "def _read\b" -- promptpotter/infrastructure promptpotter/application`.
+- `intelligence/hard_sample_sorter.py::read_hard_samples` loads its file raw. Action: it reads through
+  its store's typed row, and a file the store cannot read is refused once. **Re-test:**
+  `git grep -n "read_json_optional(path)" -- promptpotter/application/intelligence/hard_sample_sorter.py`
+  is empty.
 - `tenant_dataset_store.py::banks_sharing` fails the whole survey on one bad entry. The survey catches
   in `llm/heartbeat.py`, `campaign_store/store.py::CampaignStore.list_campaigns` and
   `user_store.py::read_accounts` are held by no test. Action: a survey serves a bad row with its fault,

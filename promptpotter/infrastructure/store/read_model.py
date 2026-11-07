@@ -31,7 +31,6 @@ from promptpotter.infrastructure.store.io import (
     read_tail,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
-from promptpotter.infrastructure.store.wallet_store import HeldCharge
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import (
     FileKind,
@@ -589,8 +588,3 @@ class HeldSends[H]:
             self.hold(record.hold_id, record)
         elif record.hold_id is not None:
             self.close(record.hold_id, priced=record.bill_or_rate_usd is not None)
-
-
-def held_tokens(hold: SpendHoldRecord | HeldCharge) -> int:
-    """An uncapped reply holds no tokens: such a send is admitted only where no token ceiling stands."""
-    return 0 if hold.output_tokens is None else hold.input_tokens + hold.output_tokens
