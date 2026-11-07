@@ -136,7 +136,7 @@ benchmarks = [
     "datasets>=2.14.0",
 ]
 observability = [
-    "langfuse>=2.0.0",  # why kept: per-call trace mirror (events.jsonl + cloud)
+    "langfuse>=2.0.0",  # why kept: the Langfuse cloud sink
     "mlflow-skinny>=3.15.0",  # why kept: the client for the operator's own MLflow server —
                         # rounds as runs, the winner as a prompt version — off until
                         # settings.MLFLOW_TRACKING_URI names one.

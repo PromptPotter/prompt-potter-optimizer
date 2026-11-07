@@ -303,7 +303,9 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
 - **`Session.backend_id` is a test-only archive switch** — production always sets it;
   `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
   Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
-  explicitly. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
+  explicitly. Holders beside it: `application/origin.py:75` (`campaign_terms(session.backend_id)`,
+  while `mask/load.py:216` reads `campaign.connector`: two sources for one connector name),
+  `runner/inner/spawn_context.py:66`, `presentation/cli/commands/new.py:446`. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
 - **`BackendClient` forwards five `Connector` members beside its own `.connector`** — two doors to
   one declaration (the `max_cells_in_flight`, `measured_unit` and `cell_attempts` properties, the
   `cell_envelope_s` and `prompt_delivery` methods). Action: delete the forwarders; their callers
@@ -1039,6 +1041,16 @@ fixtures.
 
 ### What a cycle writes to disk (storage survey 2026-11-01)
 
+- **`storage_report.py::_leaf_of` files an unrow'd campaign file under `trace`**, and
+  `campaign_store/store.py::_keepsake` drops it on `delete --keep-results`: the storage report never
+  shows a writer no `CAMPAIGN_ROWS` row names, and a row with no writer is never detected either.
+  Action: serve an unrow'd file as unclassified, never fold it into a leaf. **Re-test:**
+  `git grep -n "counts as loop trace" -- promptpotter`.
+- **`OBS_ENABLED` is a second switch over two sinks that each have their own** (`LANGFUSE_ENABLED`
+  and its keys, `MLFLOW_TRACKING_URI`), read once in `tracing/bridge.py::configured_sinks`. Kept
+  because `config/settings.py` is reached by the L4 treatment digests. Action: delete it with the
+  next digest re-key. **Re-test:** `git grep -n "OBS_ENABLED" -- .` is empty.
+
 - **An archived answer's outputs are read off today's backend**: `scoring/measurement_log.py::open_cell`
   reads the live declaration to build `outputs_of`, because an `ArchiveEntry` records only
   `node_configs` and `PipelineData.wire()` is flat, with no per-node attribution. Action: a per-node
@@ -1136,8 +1148,8 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
   landing that moves no record shape refuses while a run is live.
 - **Run files read as dicts outside `store/` have no shape row**: `data_root.py::KINDS` proves
-  `rounds/round_*.json`, the `diagnostics/` sidecar, `rates.json` (`llm/pricing.py`), the langfuse
-  mirror (`tracing/langfuse_sink.py`) and both model-capability files (`llm/capabilities.py`) by
+  `rounds/round_*.json`, the `diagnostics/` sidecar, `rates.json` (`llm/pricing.py`), the Langfuse
+  id map `langfuse/state.json` (`tracing/langfuse_sink.py`) and both model-capability files (`llm/capabilities.py`) by
   presence alone, because their readers walk `dict`s. A reshape there passes `land-data` and is read
   around. Action: each reader takes its model through `store/read_model.py::read_file`, its row that
   model's `TypeAdapter`. **Rides with:** § The engine swept by shape B for `evidence/read.py` (its

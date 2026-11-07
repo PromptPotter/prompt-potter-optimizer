@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.view_models import ViewContext
-from promptpotter.config.settings import settings
 from promptpotter.domain.arms import Proposal, candidate_label
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
@@ -29,6 +28,7 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import Budget, MeteredSpend
 from promptpotter.domain.wounds import collapse_reason
+from promptpotter.infrastructure.tracing.bridge import configured_sinks
 from promptpotter.shared.answer_text import truncate
 
 if TYPE_CHECKING:
@@ -90,7 +90,9 @@ def init_exit(ctx: ViewContext, *, cycle: Cycle, session: Session) -> InitExitVi
         samples=len(partition.search),
         bench_samples=len(partition.bench),
         origin_samples=len(cycle.origin_round.results),
-        obs_on=settings.OBS_ENABLED,
+        obs_on=bool(
+            configured_sinks(session.tenant_root, session.campaign_id, langfuse=session.langfuse)
+        ),
         resumed_from_round=session.state.resumed_from_round,
         # Round 0 is built fresh by `Cycle.start`, so only later rounds count as cached.
         cached_rounds_count=sum(1 for rr in cycle.rounds if rr.round > 0),

@@ -43,11 +43,24 @@ logger = logging.getLogger(__name__)
 DATASET_NAME: str = "ground_truth"
 
 
+def configured_sinks(
+    store_base_dir: str | Path, campaign_id: str, *, langfuse: LangfuseLogger | None
+) -> list[TraceSink]:
+    """The sinks a cycle traces to; none configured, its projection is inert."""
+    sinks: list[TraceSink] = []
+    if not settings.OBS_ENABLED:
+        return sinks
+    if langfuse and langfuse.enabled:
+        sinks.append(LangfuseSink(store_base_dir, campaign_id, langfuse))
+    if settings.MLFLOW_TRACKING_URI:
+        sinks.append(MLflowSink(store_base_dir))
+    return sinks
+
+
 class TracingProjection(Projection):
     def __init__(
         self, hop: CycleHop, sinks: Sequence[TraceSink], *, unopened: Sequence[str] = ()
     ) -> None:
-        self._enabled: bool = settings.OBS_ENABLED
         self._hop = hop
         self._sinks = tuple(sinks)
         # A configured sink that never opened: `start` serves it beside the sinks that fail there.
@@ -62,11 +75,7 @@ class TracingProjection(Projection):
     def for_cycle(
         cls, store_base_dir: str | Path, hop: CycleHop, *, langfuse: LangfuseLogger | None
     ) -> TracingProjection:
-        sinks: list[TraceSink] = []
-        if langfuse and langfuse.enabled:
-            sinks.append(LangfuseSink(store_base_dir, hop.campaign_id, langfuse))
-        if settings.MLFLOW_TRACKING_URI:
-            sinks.append(MLflowSink(store_base_dir))
+        sinks = configured_sinks(store_base_dir, hop.campaign_id, langfuse=langfuse)
         unopened = () if langfuse is None or langfuse.failure is None else (langfuse.failure,)
         return cls(hop, sinks, unopened=unopened)
 
@@ -78,8 +87,6 @@ class TracingProjection(Projection):
         langfuse_session_id: str | None,
     ) -> list[str]:
         """Each sink that will trace nothing this run, as a sentence: its caller serves them."""
-        if not self._enabled:
-            return []
         opening = CampaignStart(
             campaign_id=self._hop.campaign_id,
             config=config_snapshot,
@@ -102,8 +109,6 @@ class TracingProjection(Projection):
         return failed
 
     def _tell(self, what: str, call: Callable[[TraceSink], None]) -> None:
-        if not self._enabled:
-            return
         for sink in self._sinks:
             with graceful(f"{type(sink).__name__} failed on {what}"):
                 call(sink)
