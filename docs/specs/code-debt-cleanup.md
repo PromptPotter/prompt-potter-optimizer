@@ -1598,12 +1598,6 @@ word's `git grep -c` for that sense is 0.
   - The bar and the sidebar lead with the 6-cell 0%; the 39% shows only as the overlap series.
   - Collapse must be judged against the truth labels the cells hold, and against the parent's answers on
     the same cells. An engine decision: prove it with an offline run.
-- **The server's shutdown notice counts runs it does not host**: `main.py::_telegram_shutdown_notice`
-  reads `JobRegistry.list_running()`, which holds the machine's CLI runs too. A server stopped beside a
-  CLI campaign reports it "stopped … in flight" and says "Resume from the campaign once it is back up",
-  but the run continues. The notice must name only the jobs this process owns. Seen 2026-10-30 against
-  `promptpotter-self.panel__606cc9`; the same stop logged `ASGI callable returned without completing
-  response` for its open `events:subscribe` stream.
 - **A member knob's `NodeConfigParam` serves no estimand**, which the config map shows for every campaign
   knob (`application/knobs.py`), so the setup screen cannot say what moving one moves.
 - **Seen building the setup screen**:
