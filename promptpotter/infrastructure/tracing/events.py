@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
-
-from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.arms import Concluded
@@ -15,17 +11,6 @@ if TYPE_CHECKING:
         RoundEnteredRecord,
         RunPhaseRecord,
     )
-
-
-def generate_observation_id() -> str:
-    prefix = datetime.now(UTC).strftime("%y%m%d%H%M%S")
-    suffix = uuid.uuid4().hex[: 32 - len(prefix)]
-    return f"{prefix}{suffix}"
-
-
-def dataset_item_id(dataset_name: str, query: str) -> str:
-    """MUST be byte-identical across the file sink and the cloud bridge, hence it lives here."""
-    return stable_hash([dataset_name, query])
 
 
 @dataclass(frozen=True, slots=True)

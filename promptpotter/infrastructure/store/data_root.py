@@ -299,7 +299,6 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
 class Leaf(Enum):
     """Where a campaign file's bytes count in the storage report."""
 
-    DATASET = "dataset"
     CONNECTOR = "connector"
     # A round checkout less its per-sample rows, which count as `CONNECTOR`.
     STATE = "state"
@@ -317,12 +316,11 @@ class LeafInfo(NamedTuple):
 
 LEAF_INFO: Worded[Leaf, LeafInfo] = Worded(
     {
-        Leaf.DATASET: LeafInfo("Dataset", "The input data's mirror: langfuse ground truth.", False),
         Leaf.CONNECTOR: LeafInfo(
             "Connector", "What the backend produced: node-I/O cache and per-sample arrays.", False
         ),
         Leaf.STATE: LeafInfo("State", "Round checkouts, less their per-sample rows.", True),
-        Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: prompts, the langfuse trace.", True),
+        Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: prompts, the Langfuse id map.", True),
         Leaf.HISTORY: LeafInfo("History", "The loop's event spine: its ledger.", True),
         Leaf.REPORTS: LeafInfo(
             "Reports", "Readable output: manifest, reports, hard samples.", True
@@ -379,17 +377,7 @@ def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
             Leaf.CONNECTOR,
             TypeAdapter(RoundAudit),
         ),
-        CampaignRow(f"{where} langfuse events", f"{lf}/events.jsonl", Leaf.TRACE, keepsake=True),
         CampaignRow(f"{where} langfuse state", f"{lf}/state.json", Leaf.TRACE, keepsake=True),
-        CampaignRow(f"{where} langfuse trace", f"{lf}/traces/*.json", Leaf.TRACE, keepsake=True),
-        CampaignRow(
-            f"{where} langfuse observation",
-            f"{lf}/observations/*/*.json",
-            Leaf.TRACE,
-            keepsake=True,
-        ),
-        CampaignRow(f"{where} langfuse score", f"{lf}/scores/*.jsonl", Leaf.TRACE, keepsake=True),
-        CampaignRow(f"{where} dataset mirror", f"{lf}/datasets/**", Leaf.DATASET),
         CampaignRow(f"{where} prompt", f"{at(cycle / 'prompts')}/**", Leaf.TRACE),
     )
 

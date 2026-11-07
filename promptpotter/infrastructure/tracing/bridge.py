@@ -18,7 +18,6 @@ from promptpotter.infrastructure.tracing.events import (
     QueryScoreStart,
     TraceSink,
 )
-from promptpotter.infrastructure.tracing.file_sink import FileSink
 from promptpotter.infrastructure.tracing.langfuse_sink import LangfuseSink
 from promptpotter.infrastructure.tracing.mlflow_server import MLflowSink
 from promptpotter.shared.errors import SendRefusedError, graceful
@@ -63,7 +62,7 @@ class TracingProjection(Projection):
     def for_cycle(
         cls, store_base_dir: str | Path, hop: CycleHop, *, langfuse: LangfuseLogger | None
     ) -> TracingProjection:
-        sinks: list[TraceSink] = [FileSink(store_base_dir, hop)]
+        sinks: list[TraceSink] = []
         if langfuse and langfuse.enabled:
             sinks.append(LangfuseSink(store_base_dir, hop.campaign_id, langfuse))
         if settings.MLFLOW_TRACKING_URI:

@@ -507,11 +507,11 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
   accessors `append` and `last`; the audit sidecar a fold. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
 - **ET, inside U3: tracing translates the ledger twice.** `tracing/bridge.py::TracingProjection` re-encodes
   records into a sink vocabulary, `tracing/langfuse_sink.py::LangfuseSink` re-encodes it again over
-  `tracing/langfuse_client.py::LangfuseLogger`; `tracing/file_sink.py::FileSink` has no reader. Action:
+  `tracing/langfuse_client.py::LangfuseLogger`. Action:
   Langfuse and MLflow are each a writing projection on `LedgerIndex` over the typed records; the
-  translator, the fan-out and the file sink go. [`architecture.md`](../architecture.md) §0.5 names
+  translator and the fan-out go. [`architecture.md`](../architecture.md) §0.5 names
   "Langfuse-shape events" as the tracing bucket's foundation; that line becomes the projections in the
-  same commit (operator, 2026-11-05). **Re-test:** `git grep -n "class FileSink" -- promptpotter`.
+  same commit (operator, 2026-11-05). **Re-test:** `git grep -n "class TracingProjection" -- promptpotter`.
 - **U3: the ledger is narrated twice.** `views/readout.py::ReadoutProjection` (the readout log) and
   `domain/activity.py::ActivityFeed` (the chat) each word the same record kinds their own way, each with
   its own hold dedupe and arm labels, and the words already drift; announced arms are folded in five
@@ -817,8 +817,7 @@ next run-data reshape.
   ladder is string-keyed. Action: one outcome enum on the cell, the ladder a `match`.
   **Re-test:** `git grep -n "recovered, _step" -- promptpotter`.
 
-**C. Served reads fold the ledger.** **Rides with:** § What a cycle writes to disk (`FileSink`) and
-§ One record shape for every scoring pass.
+**C. Served reads fold the ledger.** **Rides with:** § One record shape for every scoring pass.
 - **`hard_samples.json` is a checkout read back as served data**: `runner/output.py` writes it under
   `graceful`, and `scoring/measurement_log.py::_cycle_view` serves the leaderboard order from it, empty
   when absent (a failed write served as "no scale") and with no `at` (a replay page orders by today's
@@ -1042,15 +1041,6 @@ fixtures.
 
 ### What a cycle writes to disk (storage survey 2026-11-01)
 
-- **`tracing/file_sink.py::FileSink`, the local Langfuse shadow, has no reader and runs on every
-  cycle**, also with no Langfuse configured and in L4 inner cycles. It writes most of a run home's
-  files: one file per panel row per cycle (`langfuse/datasets/ground_truth/*.json`, a copy of
-  `banks/{hash}.json`), one per trace, one per observation (written at open and again at close), and
-  a scores `.jsonl` + `.lock` per trace. Action: delete it and its `data_root.py::_cycle_rows`
-  langfuse rows, keeping `state.json` (`LangfuseSink`'s id map). Langfuse and MLflow keep their
-  native formats, and a local Langfuse-format copy is rendered from the ledger on demand.
-  **Rides with:** the next on-disk reshape (§ One record shape for every scoring pass).
-  **Re-test:** `git grep -n "FileSink(" -- promptpotter`; `find <offline home> -path '*langfuse*' -type f | wc -l`.
 - **An archived answer's outputs are read off today's backend**: `scoring/measurement_log.py::open_cell`
   reads the live declaration to build `outputs_of`, because an `ArchiveEntry` records only
   `node_configs` and `PipelineData.wire()` is flat, with no per-node attribution. Action: a per-node

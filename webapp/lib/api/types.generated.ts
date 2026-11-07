@@ -3937,7 +3937,7 @@ export interface LeafBytes {
 
 /** One leaf's bytes in a campaign tree. */
 export interface LeafShare {
-  leaf: 'dataset' | 'connector' | 'state' | 'trace' | 'history' | 'reports';
+  leaf: 'connector' | 'state' | 'trace' | 'history' | 'reports';
   bytes: number;
 }
 
@@ -4845,7 +4845,7 @@ export type CapAxis = 'usd' | 'tokens' | 'rounds' | 'wall_clock_s';
 export type TokenUsageKind = 'optimizer' | 'backend' | 'judge' | 'diagnostic' | 'bench';
 
 // promptpotter.infrastructure.store.data_root::Leaf
-export type Leaf = 'dataset' | 'connector' | 'state' | 'trace' | 'history' | 'reports';
+export type Leaf = 'connector' | 'state' | 'trace' | 'history' | 'reports';
 
 export interface SignInRefusalInfo {
   label: string;
@@ -5536,10 +5536,9 @@ export const VERIFY_STRATEGY_LABELS: Record<'random' | 'hard', string> = {
 
 // Mirror of infrastructure/store/data_root.py::LEAF_INFO, in display order.
 export const LEAF_INFO: Record<Leaf, LeafInfo> = {
-  "dataset": { label: "Dataset", description: "The input data's mirror: langfuse ground truth.", loop: false },
   "connector": { label: "Connector", description: "What the backend produced: node-I/O cache and per-sample arrays.", loop: false },
   "state": { label: "State", description: "Round checkouts, less their per-sample rows.", loop: true },
-  "trace": { label: "Trace", description: "Loop telemetry: prompts, the langfuse trace.", loop: true },
+  "trace": { label: "Trace", description: "Loop telemetry: prompts, the Langfuse id map.", loop: true },
   "history": { label: "History", description: "The loop's event spine: its ledger.", loop: true },
   "reports": { label: "Reports", description: "Readable output: manifest, reports, hard samples.", loop: true },
 };
@@ -5603,7 +5602,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [PREFIX_STATE_TITLES, ["discounted", "cold", "unreported", "replayed"]],
   [SPEND_KIND_LABELS, ["backend", "optimizer", "judge", "diagnostic", "bench"]],
   [VERIFY_STRATEGY_LABELS, ["random", "hard"]],
-  [LEAF_INFO, ["dataset", "connector", "state", "trace", "history", "reports"]],
+  [LEAF_INFO, ["connector", "state", "trace", "history", "reports"]],
 ]);
 
 // domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX.

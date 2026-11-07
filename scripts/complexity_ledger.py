@@ -34,7 +34,7 @@ BASELINE = {
     # `Settings` fields — what the environment can set.
     "settings_env": 46,
     # Parameters annotated `Any`.
-    "any_params": 42,
+    "any_params": 41,
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 67,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
@@ -48,7 +48,7 @@ BASELINE = {
     # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
     "deferred_imports": 6,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
-    "p_record": 17,
+    "p_record": 16,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 13,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.

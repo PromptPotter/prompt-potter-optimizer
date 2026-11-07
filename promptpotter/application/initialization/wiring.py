@@ -285,7 +285,7 @@ async def init_services(
         dataset_name=dataset_name,
         dataset=dataset,
         identity=identity,
-        # ``enable_tracing=False`` (L4 inner campaigns) drops only the cloud sink, never ``FileSink``.
+        # ``enable_tracing=False`` (L4 inner campaigns) drops the cloud sink.
         langfuse=LangfuseLogger(enabled=enable_tracing),
     )
 
