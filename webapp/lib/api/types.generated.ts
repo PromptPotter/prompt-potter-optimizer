@@ -4602,17 +4602,6 @@ export interface StartRunPayload {
   mode: RunMode;
 }
 
-/** Let a paused cycle run a bounded number of rounds, then stop again. */
-export interface StepCyclePayload {
-  /** The campaign acted on, by its id or a prefix naming one, resolved by the
-   * dispatcher for every door; the root of a `descend` chain is named by its
-   * full id. */
-  campaign_id: string;
-  cycle_id: string;
-  /** Rounds to run. */
-  step_rounds: number;
-}
-
 /** Answer a cycle holding for a round's arms (`optimization.arm_gate`) with arms of its own, */
 export interface SubmitArmsPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
@@ -4716,7 +4705,6 @@ export interface CommandPayloads {
   "skip-searchpoint": CommandSent<SkipSearchpointPayload, "campaign_id" | "cycle_id">;
   "start-checkin": CommandSent<StartCheckinPayload, "draft_id">;
   "start-run": CommandSent<StartRunPayload, "campaign_id" | "cycle_id">;
-  "step-cycle": CommandSent<StepCyclePayload, "campaign_id" | "cycle_id">;
   "submit-arms": CommandSent<SubmitArmsPayload, "campaign_id" | "cycle_id">;
   "unarchive-campaign": CommandSent<UnarchiveCampaignPayload, "campaign_id">;
   "verify-candidate": CommandSent<VerifyCandidatePayload, "campaign_id" | "cycle_id" | "candidate_id">;
@@ -4754,7 +4742,6 @@ export interface CommandResponses {
   "skip-searchpoint": CommandAcceptedBody;
   "start-checkin": StartCheckinResponse | HeadToHeadStarted;
   "start-run": CommandAcceptedBody;
-  "step-cycle": CommandAcceptedBody;
   "submit-arms": CommandAcceptedBody;
   "unarchive-campaign": CommandAcceptedBody;
   "verify-candidate": VerifyGradedView | VerifySaturated;

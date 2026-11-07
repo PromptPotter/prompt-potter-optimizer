@@ -125,7 +125,7 @@ class PauseCause(enum.StrEnum):
     INTERRUPT = "interrupt"
     # Cancelled by its host: the L4 outer sample deadline, an embedder, a withdrawn launch.
     CANCELLED = "cancelled"
-    # The launch reached the round allowance it was started with (``step-cycle``).
+    # The launch reached the round allowance it was started with (``start-run {step_rounds}``).
     STEP = "step"
     # A declared bound cut the round's panel (``StopReason.PANEL_CUT``).
     BOUND = "bound"
@@ -275,7 +275,7 @@ class RunState(NamedTuple):
 
     @property
     def launch_refusal(self) -> str:
-        """Why `start-run` / `step-cycle` / `resume` is refused; empty where one is admitted."""
+        """Why `start-run` / `resume` is refused; empty where one is admitted."""
         if self.inner:
             return INNER_LAUNCH_REFUSAL
         if self.resumable:
