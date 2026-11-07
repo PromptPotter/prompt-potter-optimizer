@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Hashable, Mapping, Sequence
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import Field
 
@@ -99,7 +99,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.io import read_json_tolerant, validate_path_component
+from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
@@ -239,22 +239,12 @@ class _Accum:
         self.cells: dict[str, GradedCell] = {}
 
 
-def _dataset_name(manifest: dict[str, Any]) -> str:
-    block_raw = manifest.get("campaign_config")
-    block = block_raw if isinstance(block_raw, dict) else manifest
-    return str(block.get("dataset_name", ""))
-
-
-def _dataset_of(campaign_dir: Path) -> str:
-    return _dataset_name(read_json_tolerant(CampaignLayout(campaign_dir).manifest, {}))
-
-
 def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
     """Read off each manifest: a directory-name match skips an A/B arm, a fork, a rename."""
     return [
-        child.name
-        for child in stores.campaigns.iter_campaign_dirs()
-        if _dataset_of(child) == dataset_name
+        c.campaign_id
+        for c in stores.campaigns.list_campaigns(lifecycle="all")
+        if c.dataset_name == dataset_name
     ]
 
 
@@ -407,10 +397,8 @@ def subject_evidence(
     owners: dict[tuple[tuple[tuple[str, str], ...], str], tuple[Stores, Campaign]] = {}
     for key, at in answering.items():
         spec = wanted[key]
-        campaign = at.stores.campaigns.load_campaign(spec.campaign_id)
-        if campaign is not None:
-            inside = tuple((h.campaign_id, h.cycle_id) for h in spec.inside)
-            owners.setdefault((inside, spec.campaign_id), (at.stores, campaign))
+        inside = tuple((h.campaign_id, h.cycle_id) for h in spec.inside)
+        owners.setdefault((inside, spec.campaign_id), (at.stores, at.campaign))
     grader = (
         comparison_grader(sorted(owners.values(), key=lambda o: o[1].created_at))
         if owners
@@ -533,12 +521,14 @@ class _Located(NamedTuple):
     """The address resolved ONCE — sandbox, campaign dir, cycle dir — before any path is read."""
 
     stores: Stores
+    campaign: Campaign
     campaign_dir: Path
     cycle_dir: Path
 
 
 def _at(stores: Stores, spec: Subject) -> _Located | None:
-    """`None`, never a raise: one mistyped id or deleted sandbox must not fail every other subject."""
+    """An address that names nothing answers `None`; a manifest that will not read refuses, naming
+    its file."""
     try:
         leaf = descend_store(stores, spec.inside)
         campaign_dir = next(
@@ -546,12 +536,14 @@ def _at(stores: Stores, spec: Subject) -> _Located | None:
         )
         if campaign_dir is None:
             return None
+        campaign = leaf.campaigns.load_campaign(spec.campaign_id)
+        if campaign is None:
+            return None
         # The root cycle by the manifest, never a directory walk: a fork sits beside it.
-        manifest = read_json_tolerant(CampaignLayout(campaign_dir).manifest, {})
-        cycle_id = validate_path_component(spec.cycle_id or str(manifest.get("root_cycle_id", "")))
+        cycle_id = validate_path_component(spec.cycle_id or campaign.root_cycle_id)
     except (BadRequestError, NotFoundError, ValueError):
         return None
-    return _Located(leaf, campaign_dir, campaign_cycles_dir(campaign_dir) / cycle_id)
+    return _Located(leaf, campaign, campaign_dir, campaign_cycles_dir(campaign_dir) / cycle_id)
 
 
 def _files_read(at: _Located) -> Hashable:
@@ -614,8 +606,7 @@ def _member_rows(path: CyclePath, arm: ArmName, sheet: CellSheet, instrument_id:
 
 def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
     stores, cycle_dir = at.stores, at.cycle_dir
-    manifest = read_json_tolerant(CampaignLayout(at.campaign_dir).manifest, {})
-    dataset_name = _dataset_name(manifest)
+    dataset_name = at.campaign.dataset_name
     if spec.kind == "campaign":
         cycle = _open_cycle(stores, spec.campaign_id, cycle_dir)
         origin = cycle.point(0) if cycle is not None else None
@@ -627,7 +618,7 @@ def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
             cycle_dir=cycle_dir,
             label=spec.campaign_id,
             dataset_name=dataset_name,
-            created_at=str(manifest.get("created_at", "")),
+            created_at=at.campaign.created_at,
             point=c0,
             authorship=_authorship(c0, c0_index),
             human_intervened=c0_index is not None and c0_index.human_intervened,

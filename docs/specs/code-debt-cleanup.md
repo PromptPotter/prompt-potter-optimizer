@@ -800,12 +800,9 @@ next run-data reshape.
 - **`RaceStandingRecord.paired_breakdown` is an untyped stat bag**: potter (`pobb/checks.py`) and capo
   write different keys, and `views/readout.py::on_race_standing` reads `.get("p_better", 1.0)` to sort
   and `.get("p_better", 0.0)` to print. Action: a typed per-prior model. **Re-test:** `git grep -n '"p_better"' -- promptpotter`.
-- **`evidence/read.py` reads `campaign.json` as a tolerant dict** (`_dataset_of`, `_at`,
-  `_resolve_head`), and `_dataset_name` accepts a `campaign_config.dataset_name` shape `Campaign` has no
-  field for, while `subject_evidence` beside them loads `Campaign`. `evidence/read.py::campaigns_on_dataset`
-  matches the name label, so two banks under one name (a re-upload, a name two tiers hold) pool into
-  one read. Action: `CampaignStore.load_campaign`, and the name resolved once and matched on
-  `Campaign.declaration.dataset_hash`. **Re-test:** `git grep -n "read_json_tolerant(CampaignLayout" -- promptpotter`.
+- **`evidence/read.py::campaigns_on_dataset` matches the name label**, so two banks under one name (a
+  re-upload, a name two tiers hold) pool into one read. Action: the name resolved once and matched on
+  `Campaign.declaration.dataset_hash`.
 - **The stale-data ladder's outcome has two owners**: `sample_measurement.py::execute_stale_data_protocol`
   stamps one of five exclusive bools on `MeasuredCell` that `render/sample.py` re-reads as an `elif`
   chain; the ladder is string-keyed. Action: one outcome enum on the cell, the ladder a `match`.
@@ -1144,8 +1141,8 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   id map `langfuse/state.json` (`tracing/langfuse_sink.py`) and both model-capability files (`llm/capabilities.py`) by
   presence alone, because their readers walk `dict`s. A reshape there passes `land-data` and is read
   around. Action: each reader takes its model through `store/read_model.py::read_file`, its row that
-  model's `TypeAdapter`. **Rides with:** § The engine swept by shape B for `evidence/read.py` (its
-  `campaign.json` reads, already an entry there), D for the three `llm/` and `tracing/` readers.
+  model's `TypeAdapter`. **Rides with:** § The engine swept by shape D for the three `llm/` and
+  `tracing/` readers.
   **Re-test:** `git grep -n "Fate.RUN),$" -- promptpotter/infrastructure/store/data_root.py`.
 - **`cycle_addressing.py::ActiveSessionResponse` serves two nullable ids for `CycleHop | None`**, so
   the webapp re-tests a pair. Action: one nullable `hop`. **Rides with:** the next webapp pass.
