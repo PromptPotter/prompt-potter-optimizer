@@ -135,10 +135,10 @@ def _launch_applier(
     refused_on: CycleHop | None = None,
 ) -> Applier[Launched]:
     """A launch's applier: its ack records the launch, and a retry under its key answers that
-    recorded launch, read before *refused_on*'s launch refusal is asked."""
+    recorded launch, read before *refused_on*'s start refusal is asked."""
 
     async def _run() -> Launched:
-        if refused_on is not None and (refusal := dispatcher.run_state(refused_on).launch_refusal):
+        if refused_on is not None and (refusal := dispatcher.run_state(refused_on).start_refusal):
             raise RejectedError(refusal)
         return await run()
 
