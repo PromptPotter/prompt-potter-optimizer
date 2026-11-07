@@ -293,9 +293,7 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
 - **`Session.backend_id` is a test-only archive switch** — production always sets it;
   `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
   Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
-  explicitly. Holders beside it: `application/origin.py:75` (`campaign_terms(session.backend_id)`,
-  while `mask/load.py:216` reads `campaign.connector`: two sources for one connector name),
-  `runner/inner/spawn_context.py:66`, `presentation/cli/commands/new.py:446`. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
+  explicitly. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
 - **Three TermNorm defaults in core** — `connectors/__init__.py` `DEFAULT_CONNECTOR` and `shipped`
   (repeating the one `serves_uploads` declaration), and `Settings.TERMNORM_URL` defaulting to
   loopback, so a box with no TermNorm lists it configured and health reports it broken. Connector
