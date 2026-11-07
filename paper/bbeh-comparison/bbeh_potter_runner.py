@@ -162,8 +162,8 @@ async def run_bbeh_campaign(
                 for ex in test_items:
                     # Each cell is a unit of work of its own: its envelope opens its send budget.
                     async with CellEnvelope(
-                        client.cell_envelope_s(ex, result_pipeline_params or {}),
-                        attempts=client.cell_attempts,
+                        client.connector.cell_envelope_s(ex, result_pipeline_params or {}),
+                        attempts=client.connector.cell_attempts,
                         label=f"{task}:{ex.id}",
                     ):
                         data, _spent = await client.run_query(

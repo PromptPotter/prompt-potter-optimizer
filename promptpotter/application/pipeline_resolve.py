@@ -1168,7 +1168,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
         pipeline_params, filtered=filtered, active=active, dataset_name=dataset_name
     )
     # Asked here so a channel the connector cannot run stops init, not every cell of the origin.
-    session.backend_client.prompt_delivery(pipeline_params)
+    session.backend_client.connector.prompt_delivery(pipeline_params)
 
     excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
     logger.info("Active nodes: %s%s", ", ".join(active), excl_str)

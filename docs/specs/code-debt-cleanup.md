@@ -309,13 +309,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
   Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
   explicitly. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
-- **`BackendClient` forwards five `Connector` members beside its own `.connector`** — two doors to
-  one declaration (the `max_cells_in_flight`, `measured_unit` and `cell_attempts` properties, the
-  `cell_envelope_s` and `prompt_delivery` methods). Action: delete the forwarders; their callers
-  read `.connector.X` (`cell_attempts` and `cell_envelope_s` are read only by
-  `paper/bbeh-comparison/bbeh_potter_runner.py`). **Rides with:** M4b. **Re-test:**
-  `git grep -nE "(backend_client|client)\.(max_cells_in_flight|measured_unit|prompt_delivery|cell_attempts|cell_envelope_s)\b" -- promptpotter paper`
-  is empty (14 hits when filed).
 - **Three TermNorm defaults in core** — `connectors/__init__.py` `DEFAULT_CONNECTOR` and `shipped`
   (repeating the one `serves_uploads` declaration), and `Settings.TERMNORM_URL` defaulting to
   loopback, so a box with no TermNorm lists it configured and health reports it broken. Connector

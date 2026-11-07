@@ -164,8 +164,8 @@ def declare_run_wiring(
             round_cells_ceiling=selected.round_cells_ceiling(len(session.bank.samples)),
             display_metric=campaign_config.display_metric,
             elects_on=selected.elects_on,
-            max_cells_in_flight=session.backend_client.max_cells_in_flight,
-            measured_unit=session.backend_client.measured_unit,
+            max_cells_in_flight=session.backend_client.connector.max_cells_in_flight,
+            measured_unit=session.backend_client.connector.measured_unit,
             measurement_node=selected.plan.measurement,
             # Composed here: the Langfuse host is backend-only, so a browser cannot.
             langfuse_trace_url=None

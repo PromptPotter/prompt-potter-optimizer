@@ -272,7 +272,7 @@ async def _screen(
     pipeline_params = session.pipeline_params
     # `run_walks` re-reads this at every launch boundary and clamps it to the backend's ceiling.
     session.state.control = replace(session.state.control, held_lookahead=parallel)
-    ceiling = session.backend_client.max_cells_in_flight
+    ceiling = session.backend_client.connector.max_cells_in_flight
     if parallel > ceiling:
         # A warning: a terminal shows this layer's info only under `--verbose`.
         logger.warning(
