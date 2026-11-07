@@ -62,7 +62,6 @@ CELL = CallLabel("backend_cell", "backend")
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
-    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.sample import Sample
 
@@ -169,10 +168,6 @@ class BackendClient:
     @property
     def connector(self) -> Connector:
         return self._connector
-
-    def cell_hop(self, sample: Sample, pipeline_params: dict[str, Any] | None) -> CycleHop | None:
-        hop = self._connector.cell_hop
-        return None if hop is None else hop(sample, pipeline_params)
 
     def node_spend_bound(self, node: PipelineNode, cfg: Mapping[str, Any]) -> NodeSpendBound | None:
         if (sent := self._connector.sent_spend_bound) is not None:
