@@ -56,7 +56,7 @@ The scarce things — the provider's rate limit and the host's wallet — are ex
 |---|---|---|
 | Campaigns admitted at once | `Settings.MACHINE_RUN_CAPACITY` | lowered under provider back-pressure (`report_throttle_stall` → `resolve_run_capacity`), never raised past the ceiling |
 | Share of the provider's 60 s window | derived per call (`infrastructure/llm/send_pacing.py`) | least-served tenant next |
-| Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (host, or `set-concurrent-cycles` on an account's own key) | no |
+| Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (hand-set in `user.json` by whoever runs the box; `set-concurrent-cycles` for the host account with the budget capability) | no |
 | What the box's keys may ever pay for an account | the host coupon, both units; its own keys are not metered | no |
 | Accounts the box holds | `Settings.MAX_ACCOUNTS` (`accounts_full`) | no |
 | Requests one principal may send, a free verb's included | `quota.py::refuse_request_rate` at each request's one entry (`deps.py::open_caller` on a session mount, `host_surface.py::HostSession` for a host): a `command_kinds.py::ReadKind` row draws a read bucket sized above the webapp's polls, every other row the write one; the host exempt (429 `rate_limited`) | no |

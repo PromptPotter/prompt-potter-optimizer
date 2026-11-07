@@ -972,7 +972,7 @@ def concurrent_cycles_writable(stores: Stores) -> bool:
 
 def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
     """Refused rather than clamped: a limit written lower than asked is a ceiling nobody chose."""
-    if not is_host(stores.identity):
+    if not concurrent_cycles_writable(stores):
         raise PayloadInvalidError(
             "This account's concurrent-cycles limit is set by whoever runs this box.",
             code="concurrency_set_by_host",

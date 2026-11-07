@@ -407,8 +407,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   connector at the box's MCP URL; `tools/list` answers.
 - **The browser cannot advance a paused cycle N rounds** — `StartRunPayload.step_rounds` has no
   webapp sender, and it is not a named browser carve-out. **Rides with:** M6.
-- **`BackendClient.cell_hop` is the last forwarder beside `.connector`** — its caller reads
-  `client.connector.cell_hop` and keeps the None test. **Rides with:** M4b.
 - **A written verb's flags are not derived from its payload model** — `verbs.py::_WRITTEN_VERBS`
   spells each flag by hand, so a new payload field reaches no terminal (as `step_rounds` did not).
   Past the address and `budget`, fields with no same-named `Arg`: `resume` → `start-run` `mode`;
@@ -943,13 +941,11 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
 
 - `useCandidatesModel` writes the module store during render (the per-cycle metric and overlap seeding).
 - Two sources for one question: `wonOnTheta` reads `facts.elects_on`, `electedMetric` reads `dash.display_metric`.
-- `FitnessChart::parentIdx` names the standing selection, not a parent.
 - Three interval formatters: `format.ts::fmtInterval`, `VerifyReading::band`, `SearchpointDrillIn::band`.
 - Two `cell_means` renderers: `SubjectSignals` and `channel-parts::CellMeans`.
 - Three ways into Compare (the toolbar menu, `CompareOriginAction`, the forest).
 - Teaching prose in `title=`: the `FitnessLegend` hint, the toolbar, the dendrogram `<title>`, `CompareOriginAction`, `RoundVerdict`.
 - `TrajectorySeriesView::SeriesHoverPopup` is a hand-built popover beside `ui/Popover`.
-- `.ov-forest` is styled in `compare-evidence.css` for `OuterSignalPanel`, and collides with `candidates/Forest`.
 - `EvidenceCharts` and `CostStrip` lost their hover readouts with the tooltip; a per-cell or per-round value they need opens in the DOM.
 
 ### The webapp swept by shape (debt hunt 2026-11-02)
@@ -1318,10 +1314,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `n` keeps its total.
 - `tests/test_scoring.py` writes `HostSession._tasks` past the interface. Action: Q1's log read
   replaces it. **Re-test:** `git grep -n "_tasks\[" -- tests`.
-- `quota.py::set_concurrent_cycles` gates `is_host` only, while the field is writable only under
-  `CAMPAIGN_BUDGET_CAP` too (`quota.py::concurrent_cycles_writable`): two rules for one write.
-  Action: the setter refuses by `concurrent_cycles_writable`. **Re-test:**
-  `git grep -n "if not is_host(stores.identity)" -- promptpotter/application/jobs/quota.py`.
 
 ## Open — multi-arc
 
