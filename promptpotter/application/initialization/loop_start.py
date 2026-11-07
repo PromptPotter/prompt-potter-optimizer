@@ -87,7 +87,9 @@ def init_cycle(session: Session, *, resume_from_round_override: int | None) -> N
     store.write_optimized_surface(
         hop,
         session.pipeline_schema.value_tree(
-            prompt_delivery=session.backend_client.prompt_delivery(session.pipeline_params)
+            prompt_delivery=session.backend_client.connector.prompt_delivery(
+                session.pipeline_params
+            )
         ),
     )
     existing = store.load(hop, moment=None)
