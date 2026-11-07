@@ -213,7 +213,7 @@ class _ArchiveRecorder:
         self._file(cells)
 
     def _file(self, cells: Sequence[GradedCell]) -> list[GradedCell]:
-        if not cells or not self.session.backend_id:
+        if not cells:
             return list(cells)
         answers = self.session.store.archive.file_answers(
             self.entry,
@@ -302,13 +302,12 @@ def open_walk(
     source = session.state.source
     assert source is not None, "populate_session_scoring arms the run source before any scoring"
     store = session.store
-    backend_id = session.backend_id
     pipeline_schema = session.pipeline_schema
 
     entry = archive_entry(
         search_point, dataset_hash=session.bank.dataset_hash, pipeline_schema=pipeline_schema
     )
-    replaying = bool(backend_id) and not force_fresh
+    replaying = not force_fresh
     node_configs = entry.node_configs if replaying else []
     # No node configs, no cell identity: every such searchpoint would share one claim per sample.
     feed = ReplayFeed(store.archive, node_configs) if node_configs else None

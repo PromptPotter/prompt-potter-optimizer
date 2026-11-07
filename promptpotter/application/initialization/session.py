@@ -97,7 +97,6 @@ class LaunchState:
 @dataclass(frozen=True)
 class Session:
     store: Stores
-    backend_id: str
     backend_client: BackendClient
     pipeline_schema: PipelineSchema
     # Recorded whole by `record_resolved_run`, at the mint and at every `init_cycle`.

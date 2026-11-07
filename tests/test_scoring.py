@@ -1148,7 +1148,6 @@ def _peer_cycle(
     solves: Callable[[str, Sample], bool | None],
     *,
     bench: int = 0,
-    backend_id: str = "",
     control: RunControl | None = None,
     book: SpendBook | None = None,
     **optimization: Any,
@@ -1210,7 +1209,6 @@ def _peer_cycle(
                 **optimization,
             },
             dataset_name=schema.name,
-            backend_id=backend_id,
             control=control,
             hop=hop,
             origin=(origin, measured_origin),
@@ -1499,8 +1497,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             "capo",
             capo_nodes,
             even_cells,
-            # A backend to file under, so the kept population replays and only offspring are bought.
-            backend_id="capo-e2e",
             book=book,
             panel_gate=panel_gate,
         ) as (cycle, callbacks):
@@ -1713,7 +1709,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             name,
             composed_nodes,
             lambda prompt, _s: "Merged." in prompt,
-            backend_id="composition-e2e",
         ) as (cycle, callbacks),
     ):
         offline.llm.says = crossover_says
@@ -1797,7 +1792,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             name,
             composed_nodes,
             paid_then_cut,
-            backend_id="theta-cut-e2e",
             book=theta_book,
             panel_gate="off",
         ) as (cycle, callbacks),
@@ -1845,7 +1839,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         bench_nodes,
         lambda prompt, s: "GOOD" in prompt or ("OK" in prompt and s.id % 2 == 0),
         bench=4,
-        backend_id="capo-e2e",
     ) as (cycle, callbacks):
         offline.llm.says = bench_says
         session = cycle.session
