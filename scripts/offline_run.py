@@ -1078,10 +1078,14 @@ async def run_controlled(
     )
     for name, (_, cid) in arms.items():
         seen = contextvars.copy_context().run(memory, cid)
-        if seen & foreign_only or not seen <= filed(cid):
+        walked = filed(cid)
+        if seen & foreign_only or not seen <= walked:
             raise SystemExit(f"offline run: arm {name}'s memory reads an answer it did not walk")
+        # The filings, never the distinct cells memory stands: a cell coalesced with a twin in flight
+        # files nothing, so how many twins coalesce is a race, and a count of them moves run to run.
         print(
-            f"arm {name}: memory holds {len(seen)} own answers, none of {len(foreign_only)} foreign"
+            f"arm {name}: memory holds only its own {len(walked)} filed answers, "
+            f"none of {len(foreign_only)} foreign"
         )
     record = stores.campaigns.load_head_to_head("h2h")
     assert record is not None, "the arms joined no head-to-head"
