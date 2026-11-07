@@ -148,8 +148,9 @@ The paid run comes after D, H and the re-key batch: the M13 CAPO head-to-head on
 An independent audit checked every open debt row against main after batch E and regrouped the rest
 into medium arcs ([`../developer/refactor-arcs.md`](../developer/refactor-arcs.md)). The operator
 confirmed the order and wave 1's decisions on 2026-11-06. After wave 1, each row is a scope, not an
-arc. It is cut into small arcs that run as one chain, one at a time (operator, 2026-11-07;
-[`../developer/refactor-arcs.md`](../developer/refactor-arcs.md) § Size and scope). A later arc ports
+arc. It is cut into small arcs, deletions first, that run in two or three chains on disjoint files.
+Each joins a batch on proof, and every batch is reviewed before main (operator, 2026-11-07;
+[`../developer/refactor-arcs.md`](../developer/refactor-arcs.md) § Size and scope, § Landing). A later arc ports
 from the branches the `salvage/*` tags mark, piece by piece (`git tag -l 'salvage/*' -n9`). A later arc's recommendation is in
 brackets until its brief settles it. Each brief names the files it shares with another arc of its
 wave.
