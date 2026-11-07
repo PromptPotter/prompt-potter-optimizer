@@ -1,4 +1,4 @@
-# Refactor arcs — sizing, briefing, reviewing, stopping
+# Refactor arcs — sizing, landing, briefing, reviewing, stopping
 
 A refactor arc closes rows of [`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md) in the
 order of [`../specs/roadmap.md`](../specs/roadmap.md) § The crunch (operator, 2026-11-04). This page
@@ -15,7 +15,23 @@ owns how an arc is run, whether by a person or by agents.
   surfaces mid-arc is asked before the next build, never built ahead of the answer.
 - **An arc owns its files.** Arcs that run together touch disjoint files, or name the one they share.
   Arcs whose files overlap run as a chain: each link branches off the previous one's tip, and only
-  disjoint chains run in parallel.
+  disjoint chains run in parallel, two or three at a time.
+- **Deletions go first.** An arc that removes a second door, a shim, a dead field or layer, or a test
+  the charter rejects runs before an arc that reshapes. A deletion is quick to prove.
+
+## Landing
+
+- **An arc joins its batch on proof, not on review.** A batch is one `batch/<n>` branch. The proof is
+  the full gate green on the arc's tip, plus the brief's equals-main checks: the optimizer treatment
+  digests and decisions ([`offline-run.md`](offline-run.md)) and the served responses. No review is
+  waited for.
+- **One independent review covers each batch, before it reaches main.** A batch holds one to five
+  arcs, as the work allows: a risky arc closes its batch early. The review reads the batch's combined
+  diff against main. Then one fix pass on the batch branch fixes every
+  INTRODUCED finding, and each PRE-EXISTING one becomes a ledger row. The batch goes to main on the
+  push gate's proof, with no second review round.
+- **A standing problem is accepted while it does not escalate.** The ledger is worked to its end,
+  then passed again.
 
 ## The brief
 
@@ -54,8 +70,8 @@ Every brief carries the following:
 
 ## The review
 
-- **Independent and read-only.** It gets the brief and the diff, never the builder's report.
-- **It reads the delta since the last reviewed tip**; the whole arc is read once, at close.
+- **Independent and read-only.** It gets the briefs and the batch's diff, never a builder's report.
+- **It reads the batch against main**: the arcs that joined it since main.
 - **It finds, ranked:**
   1. behaviour moved that the brief did not name (checked against the equals-main list);
   2. transition code: a shim, a kept bridge, a reader of two shapes;
@@ -71,30 +87,29 @@ Every brief carries the following:
 
 ## Fix passes and stopping
 
-- **A fix pass names each finding's invariant**, fixes every in-layer holder the census lists, and
+- **A fix arc names each finding's invariant**, fixes every in-layer holder the census lists, and
   adds what holds it: reverting the fix fails it. That is a test only where
   [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)'s charter admits one. Otherwise it is a check in
   the owning module, or the code's own shape. A failure that a re-run fixes gets no test.
-- **A small INTRODUCED finding is fixed in the branch.** A PRE-EXISTING finding becomes a row,
-  never another pass.
+- **A batch gets one fix pass**, never a second. Whatever the pass cannot close becomes a row.
 - **Arcs that conflict get one fix pass.** It runs on their merge (`git merge-tree` names the
   conflicts), in one session that resolves the seam and fixes every arc's findings. It never
   runs as parallel passes that collide again at assembly.
-- **An arc has converged** at a round with no INTRODUCED finding.
+- **A build that fails its proof** gets one more build in the same session. A second failure stops
+  the arc, and the operator cuts or re-scopes it.
 - **Stop early:**
-  - the second round whose lead findings the previous pass introduced stops the arc, and the
-    operator cuts or re-scopes it before another build;
-  - a mechanism whose every round finds a new state is cut back, not hardened;
+  - a mechanism whose every fix finds a new state is cut back, not hardened;
   - a written diagnosis that hands a mechanism to another arc stops work on it that turn.
 - **A stopped or cut arc's tip is tagged `salvage/<id>`.** The tag is annotated with what its
   reviews found clean and what must not be ported. Later small arcs port from it piece by piece
   (`git tag -l 'salvage/*' -n9`). Never delete a `salvage/` tag or its branch before its rows land.
   The last link to land deletes both.
-- **One independent review covers the assembled batch** before its PR.
 
 **Why.** A batch of five arcs (2026-11-05) spent most of about 48 builds on work it later cut. Three
 of those arcs carried changes that needed another arc's mechanism first. None checked "equals main"
 until about its sixth round. Each review re-read the whole re-squashed arc instead of the delta. Wave 1 (2026-11-06) ran eight
 medium arcs in parallel. None converged in round 1, and six needed a mechanism outside their own
 files. Three tripped the stop rule in round 2. The one arc re-cut to about ten files converged and
-landed.
+landed. The first small arc after it (M1a, 2026-11-07) still spent a second review round on a
+Windows Ctrl+C edge case. So the operator moved review from each arc to each batch of up to five,
+still before main.
