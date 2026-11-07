@@ -176,10 +176,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 
   Action: every door and every persisted job carries the Refusal value. **Rides with:** M6.
   **Re-test:** `git grep -n "class LaunchRefusal" -- promptpotter` is empty.
-- **`launch_refusal` names two things** — `jobs/quota.py::launch_refusal` (served as
-  `DraftBuild.launch_refusal`) is the coupon's refusal, while `phases.py::RunState.launch_refusal` is
-  a cycle-busy string read by `commands/launching.py`. Action: rename the phases one. **Rides with:**
-  M6. **Re-test:** `git grep -n "launch_refusal" -- promptpotter/domain` is empty.
 - **A taken name is read two ways** — `slug_exists` (the directory exists) against the definition's
   holders (`dataset.json` exists), across `stores.py`, `draft_patch.py`, `ingest.py` and
   `mint_and_start.py`. Action: one read of a tenant name's hold. **Rides with:** M6. **Re-test:**
@@ -304,10 +300,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   `serves_uploads`. **Rides with:** M18. **Re-test:** `git grep -nE "llm_only|param_keys" --
   promptpotter/assets/datasets/defaults.yaml` is empty and `connectors/termnorm.py` holds the one
   node template.
-- **`Session.backend_id` is a test-only archive switch** — production always sets it;
-  `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
-  Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
-  explicitly. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
 - **A campaign's connector has two sources** — `wiring.py` picks the session's connector from the
   definition's `backend_type`, while `mask/load.py`, `hierarchy.py`, `admission.py` and
   `embedded_run.py` read `Campaign.connector`; a resume after the definition is retargeted reads
@@ -1123,10 +1115,6 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 - **`domain/cycle_index.py::RunStatus.of` builds `mark: str` and asserts it a `StatusMark`**, so the
   literal holds at runtime only. Action: `StatusMark` typed off `RunPhase` and `StopOutcome`, whose
   values it repeats (a re-key of the exported union, so not one edit). **Re-test:** `git grep -n "mark: str" -- promptpotter/domain/cycle_index.py`.
-- **The pipeline renderer's styles live in `app/styles/domains/chat.css`** (`.wf-hero-*`,
-  `.connector*`, `.pipeline-zoom*`), restated by `dashboard-pipeline-nodes.css` to win on order. The
-  renderer is `dashboard/pipeline/PipelineFlow`'s. Action: move the block to its own domain file in
-  one commit, in a new arc. **Re-test:** `git grep -c "wf-hero" -- webapp/app/styles/domains/chat.css`.
 - **A landing waits on every live producer on another commit, whether or not the ledger shape
   moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
@@ -1238,10 +1226,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   in `llm/heartbeat.py`, `campaign_store/store.py::CampaignStore.list_campaigns` and
   `user_store.py::read_accounts` are held by no test. Action: a survey serves a bad row with its fault,
   and a test holds each catch. **Re-test:** a tenant tree with one unreadable dataset lists the rest.
-- `evidence/read.py::_cycle_facts` loads again the manifest `_at` already holds (`at.campaign`),
-  behind an `assert`: a manifest deleted between the two reads fails the read as a bare
-  `AssertionError`, a 500. Action: pass `at.campaign`. **Re-test:**
-  `git grep -n "a subject resolves through its campaign's directory" -- promptpotter`.
 - `llm/pricing.py::CACHE_PATH` binds `rates.json` to the data root at import, while every other reader
   resolves the root per call: a home set after the import reads and writes the first root's rates
   (batch 6's review). Action: the path resolves per call, through the store's reader. **Re-test:**
@@ -1558,9 +1542,6 @@ word's `git grep -c` for that sense is 0.
   halts an origin with no scored cell, but holds a degraded one, and its three answers repeat run verbs
   (`abort` ≈ leave it ended, `proceed` ≈ `resume`, `rescore` ≈ `resume --from 0` force-fresh).
   Open: halt it too, deleting the hold.
-- **A declined pause refuses with "."**: `phases.py::RUN_PHASE_INFO` gives `RUNNING` and `SCORING` a
-  parked `""`, which `RunAdmission` capitalizes into the refusal. **Re-test:** each phase whose
-  action can be declined parks a non-empty word.
 - **A cold server folds every ledger before the first page answers**: the first
   `GET /hierarchy?depth=1` waits on a full `LEDGER_FOLDS` pass over every `projects/` ledger, and
   the browser shows a sidebar stuck on "loading…". On 2026-10-30, with 91 MB / 129k lines in

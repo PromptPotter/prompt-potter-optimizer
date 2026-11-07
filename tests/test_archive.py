@@ -202,7 +202,6 @@ def _walk_panel(
         workspace(root),
         schema,
         panel if bank is None else bank,
-        backend_id="b",
         scorer=scorer_of(per_sample, per_cell),
     )
     sp = PointContext(schema=schema, framing=TaskDecomposition(), demo=[]).job(

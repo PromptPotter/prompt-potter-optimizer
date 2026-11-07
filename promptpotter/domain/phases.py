@@ -274,7 +274,7 @@ class RunState(NamedTuple):
         return not self.producer.attached
 
     @property
-    def launch_refusal(self) -> str:
+    def start_refusal(self) -> str:
         """Why `start-run` / `resume` is refused; empty where one is admitted."""
         if self.inner:
             return INNER_LAUNCH_REFUSAL
@@ -432,14 +432,15 @@ class RunAdmission(FrozenModel):
         else:
             skip = "" if walking else "No searchpoint is being scored to skip."
         lookahead = "" if walking else "No run of this cycle is in flight to hold calls ahead for."
-        declined = run.pause_refusal if info.action == "pause" else run.launch_refusal
+        pausing = info.action == "pause"
+        declined = run.pause_refusal if pausing else run.start_refusal
         if info.action is None:
             offers, refusal = None, info.no_action
         elif run.inner:
             offers, refusal = None, declined
         elif declined:
-            # The phase names a verb its producer does not admit yet.
-            offers, refusal = None, f"{info.parked.capitalize()}."
+            # The phase names a verb its producer does not admit yet; a pause says its own refusal.
+            offers, refusal = None, declined if pausing else f"{info.parked.capitalize()}."
         else:
             offers, refusal = info.action, ""
         return cls(
