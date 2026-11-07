@@ -300,11 +300,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   `backend_type: termnorm` to `email-tagging/dataset.yaml` and `justlogic/family.yaml`, fix
   `docs/manual/03-first-campaign.md`, run the full gate. **Rides with:** M18. **Re-test:**
   `git grep -n "backend_type" -- promptpotter/assets/datasets/defaults.yaml` is empty.
-- **`Campaign.backend_id` / `backend_url` store the connector twice and a URL nothing reads** — one
-  reader of `backend_id` (`mask/load.py`), none of `backend_url`, whose comment claims every later
-  launch runs there. Action: delete both; a run-data reshape (wipe allowed from 2026-11-08).
-  **Rides with:** M4b, with the `backend_type`→`connector` row. **Re-test:**
-  `git grep -n "backend_url" -- promptpotter/domain/campaign.py` is empty.
 - **`Session.backend_id` is a test-only archive switch** — production always sets it;
   `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
   Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
@@ -1315,10 +1310,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `useConnector.ts::useConnector`, `useNestedPipelines.ts` and `OptimizerSetupSection.tsx`. Action:
   one constructor beside `useRead`, or `PipelineFlow` takes the data and its gap. **Re-test:**
   `git grep -n 'status: "ready", data' -- webapp/lib/hooks webapp/components`.
-- `checkin_draft.py::DraftFile.reused_origin_id` is written and read by nothing, though its comment
-  routes Start through the `origin_override` seed: a reopen from an origin seeds nothing, and no test
-  says so. Action: Start reads it, held by a test, or it goes. **Re-test:**
-  `git grep -n "reused_origin_id" -- promptpotter/application/jobs`.
 
 **G. Singles.**
 - A per-cell criterion naming a term no cell carries compiles (`authored.py::scorer_of`) and refuses
