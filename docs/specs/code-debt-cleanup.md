@@ -201,10 +201,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 - **`M13` and `M14` each name both a medium arc and a roadmap milestone** (M14 is also the
   preprint). Action: the milestones take names. **Rides with:** the next roadmap edit. **Re-test:**
   `git grep -nE "\bM1[34] \((publication|the preprint)\)" -- docs` is empty.
-- **`LaunchState` is built before its ledger opens** — `initialization/session.py` declares
-  `ledger: CycleEventLog | None`, and its readers assert or branch on None. Action: build
-  `LaunchState` after `build_run_observers` opens the ledger. **Rides with:** M7. **Re-test:** count
-  `state.ledger` None-branches.
 - **The scripts' writer and the store's are two**: `store/io.py::_atomic_replace` and
   `scripts/processes.py::replace_changed` each state one bounded retry on Windows' WinError 5; the
   stdlib-only interpreter the scripts run under is what varies. Action: one retry rule stated by one
@@ -811,10 +807,10 @@ next run-data reshape.
   one read. Action: `CampaignStore.load_campaign`, and the name resolved once and matched on
   `Campaign.declaration.dataset_hash`. **Re-test:** `git grep -n "read_json_tolerant(CampaignLayout" -- promptpotter`.
 - **The stale-data ladder's outcome has two owners**: `sample_measurement.py::execute_stale_data_protocol`
-  returns a step string its one caller drops (`query_loop.py`, `recovered, _step =`), and stamps one of
-  several exclusive bools on `MeasuredCell` that `render/sample.py` re-reads as an `elif` chain; the
-  ladder is string-keyed. Action: one outcome enum on the cell, the ladder a `match`.
-  **Re-test:** `git grep -n "recovered, _step" -- promptpotter`.
+  stamps one of five exclusive bools on `MeasuredCell` that `render/sample.py` re-reads as an `elif`
+  chain; the ladder is string-keyed. Action: one outcome enum on the cell, the ladder a `match`.
+  **Rides with:** the next accepted re-key (`domain.scoring::MeasuredCell` is reached by every treatment).
+  **Re-test:** `git grep -nE "switched_out|persistently_degraded|config_fundamental_skip" -- promptpotter/domain/scoring.py`.
 
 **C. Served reads fold the ledger.** **Rides with:** § One record shape for every scoring pass.
 - **`hard_samples.json` is a checkout read back as served data**: `runner/output.py` writes it under
@@ -1028,9 +1024,8 @@ fixtures.
 - **`JobsDock::passMark` / `passLabel` derive running/starting from `started_at === null`** (so does
   `AccountUsageTab`). Action: a served pass state. **Re-test:** `git grep -n "started_at === null" -- webapp/components`.
 - Hand-built controls beside the primitives: `Criterion::DialRow` commits on pointerup/keyup/blur beside
-  `CommitInput`; raw `<select>` in several surfaces with no `ui/` select; `RunLimitsControl::capInput`
-  and `LimitReconcile::parseCapIn` beside `run-limits.ts::parseCap`. Low weight.
-  **Re-test:** `git grep -nE "<select|parseCapIn|capInput" -- webapp/components`.
+  `CommitInput`; raw `<select>` in several surfaces with no `ui/` select. Low weight.
+  **Re-test:** `git grep -nE "<select" -- webapp/components`.
 
 **G. Dead and ratchets.**
 - **Teaching prose in `title=` across many surfaces** beyond § The candidates surface's list. Action: a
