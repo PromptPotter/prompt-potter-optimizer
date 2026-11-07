@@ -1577,8 +1577,6 @@ word's `git grep -c` for that sense is 0.
     (dataset block, draft override, cycle seed), so the row says only "Changed from default".
   - `locus_crossover` is listed as a maker with nothing upstream making two-parent children; an
     arm-editing maker's on/off belongs on `nodes.Proposer` as a member-declared rule.
-  - The check-in picklist button's accessible name runs slug and meta together; two open check-ins
-    share one slug.
 - **Potter's `dispatch/` modules still hash whole** (`shapes_optimizer_prompt(__name__)`): a member
   module's reads are walked (`nodes.py::_source_digest`), so only a unit read through an instance or a
   registry needs a mark. **Re-test:**
@@ -1586,8 +1584,6 @@ word's `git grep -c` for that sense is 0.
 - **Seen building the prompt workspace**:
   - An override cannot be removed, only overwritten: knob Reset writes the declared value and a cleared
     prompt field writes `""`, so the draft stays "edited". The overlay merge needs a delete.
-  - `PipelineSetupSection` picks a default node in a `useEffect` with a ref latch: a second door into the
-    shared node selection.
   - The packs copy each snippet's arXiv id and method into its `tags`, so Tags repeats Source and Method.
   - `ui/MenuCheck` takes a `title=` prop, which `CandidatesToolbar` fills with teaching prose.
 - **Seen framing snippets in a prompt**:
