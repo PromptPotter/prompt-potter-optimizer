@@ -8,6 +8,7 @@ from pydantic import Field
 
 from promptpotter.application.knobs import (
     CouplingSeverity,
+    KnobSource,
     check_couplings,
     declared_couplings,
     resolve_knob_states,
@@ -29,7 +30,7 @@ class ConfigKnob(StrictModel):
     )
     label: str = Field(description="Short display name (prefix-stripped)")
     value: Any = Field(description="Effective value in this campaign's frozen config")
-    source: str = Field(
+    source: KnobSource = Field(
         description="Where the value came from: default | campaign (operator-set) | required | "
         "manifest (an optimizer node's knob, as its manifest declares it)"
     )

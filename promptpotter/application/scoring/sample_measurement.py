@@ -764,12 +764,12 @@ async def execute_stale_data_protocol(
     *,
     pipeline_params: dict[str, Any] | None = None,
     sample_index: SampleIndex | None = None,
-) -> tuple[MeasuredCell, str]:
+) -> MeasuredCell:
     result = cached_result
 
     for step in STALE_DATA_LOAD_PROTOCOL:
         if session.state.control.pause_requested():
-            return result, "paused"
+            return result
         if step == "rerun":
             historical = sample_index.degradation_count(sample.id) if sample_index else 0
             effective_count = historical + 1
@@ -779,12 +779,10 @@ async def execute_stale_data_protocol(
                     degraded_observed=True,
                     degraded_obs_count=effective_count,
                     degraded_obs_threshold=RERUN_TRIGGER_COUNT,
-                ), "below_threshold"
+                )
 
             if _rerun_would_repeat_token_budget_failure(cached_result, pipeline_params):
-                return replace(
-                    cached_result, config_fundamental_skip=True
-                ), "skipped_config_fundamental"
+                return replace(cached_result, config_fundamental_skip=True)
 
             rerun = await measure_sample(sample, session, pipeline_params)
             result = replace(
@@ -795,13 +793,13 @@ async def execute_stale_data_protocol(
                 ),
             )
             if not is_deprecated(result):
-                return result, "rerun"
+                return result
 
         elif step == "sampleswitch":
             if (
                 sample_index
                 and sample_index.degradation_rate(sample.id) >= SAMPLESWITCH_MIN_DEGRADATION_RATE
             ):
-                return replace(cached_result, cached=True, switched_out=True), "sampleswitch"
+                return replace(cached_result, cached=True, switched_out=True)
 
-    return replace(result, persistently_degraded=True), "exhausted"
+    return replace(result, persistently_degraded=True)

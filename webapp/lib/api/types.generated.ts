@@ -3898,7 +3898,7 @@ export interface ConfigKnob {
   value: unknown;
   /** Where the value came from: default | campaign (operator-set) | required |
    * manifest (an optimizer node's knob, as its manifest declares it) */
-  source: string;
+  source: 'default' | 'campaign' | 'required' | 'manifest';
 }
 
 export interface ConfigCoupling {
