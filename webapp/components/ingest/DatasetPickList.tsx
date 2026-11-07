@@ -72,6 +72,7 @@ export function DatasetPickList({
                   type="button"
                   className="ingest-pick-btn"
                   disabled={busy}
+                  aria-label={`${d.label}, edited ${fmtAgo(d.span.last_at)}`}
                   onClick={() => onReopenDraft(d.address)}
                 >
                   <span className="ingest-pick-name">{d.label}</span>
@@ -80,7 +81,7 @@ export function DatasetPickList({
                 <button
                   type="button"
                   disabled={busy || discard.pending !== null}
-                  aria-label={`Discard the ${d.label} check-in`}
+                  aria-label={`Discard the ${d.label} check-in edited ${fmtAgo(d.span.last_at)}`}
                   onClick={() => discardDraft(d.address)}
                 >
                   Discard
