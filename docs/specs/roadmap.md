@@ -162,7 +162,7 @@ wave.
 | **M3** run scope | U1a | config items 4 and 7 (the L4 override as one overlay), `bind_cache`, `LaunchState.ledger`, the `set_cycle_ledger` binders | bind at `runner/entry.py` now; an unusable L4 mutation is refused, typed and served, by the rule that refuses an unknown overlay | ~28 files, one L4 re-key | — |
 | **M4** typed pipeline carrier | U1a | engine A, config items 8 and 9, the free-tier layer and its model axis, the three merges as one wherever behaviour equals main | `steps` leaves the params bag; every treatment digest re-keys (accepted) | ~35 files | — |
 | **M4b** connector identity | U1a | `backend_type` becomes `connector` (the definition key included), `PipelineSchema`'s name and version, an unregistered connector refused typed, `Session.backend_id` | the landing re-writes tenant definitions (yes) | sized at its brief | M3, M4 |
-| **M4c** knob edits | U1a | steer typing, a changed knob's source, an override's delete | | small | M4, with M8 |
+| **M4c** knob edits | U1a | steer typing, a changed knob's source, an override's delete | | small | M4 |
 | **M5** running set | RS | RS, census F's `exclude_nodes`, the one-node rule | accept the L4 cache miss, riding M8's re-key (yes) | ~20 files | M2, M4 |
 | **M6** one start | U2 | the five doors, the one launch answer, config item 6, the double selection, `draft_declared`, `close_for_landing`, the shutdown notice, the job logs, a refusal before admission answered on every door (MCP's `tasks/result` included), a queued launch that dies with its asker | plan and price before admission for every start (yes) | ~35 files | M2, M3 |
 | **M7** run init and round 0 | U2 | batch 3's init and round-0 rows, config item 5, `--diag` as a mode, the test builders, the origin-gate rows, `_peer_cycle`, a resume that takes 72 s to apply | halt a degraded origin (yes) | ~30 files, offline proof | M6 |
@@ -182,7 +182,7 @@ wave.
 
 The chain takes the scopes in this order. Each small arc starts once the previous one has landed:
 1. M1, M4, M14a, M17, M3, M2.
-2. M4b then M5; M6 then M20; M8 with M4c.
+2. M4b then M5; M6 then M20; M8; M4c.
 3. M7, M9, M18.
 4. M10 with M11 (one wipe), M12, M13, M15.
 5. M14b alone: a mechanical sweep of `application/` and `domain/`, after M10's narration takes what it

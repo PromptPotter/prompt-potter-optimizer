@@ -1,16 +1,16 @@
 # Backend integration
 
-PromptPotter optimizes any backend registered as a `Connector` (`connectors/protocol.py::Connector`, in `connectors/__init__.py::CONNECTORS`); every axis is derived from the pipeline that connector declares — served at `GET /pipeline` by an HTTP backend, or built by its `pipeline_declaration`.
+PromptPotter optimizes any backend registered as a `Connector` (`connectors/protocol.py::Connector`, in `connectors/__init__.py::CONNECTORS`); every axis is derived from the pipeline that connector declares — served at `GET /pipeline` by an HTTP backend, built by its `pipeline_declaration`, or, where it declares neither, the `pipeline:` block of the dataset's own `dataset.yaml`, which overlays the other two.
 
-## The HTTP default — TermNorm's three endpoints
+## The HTTP default — TermNorm's endpoints
 
-A `remote_http` connector that keeps `Connector`'s defaults speaks the wire [TermNorm](https://github.com/runfish5/TermNorm-excel) serves (`connectors/termnorm.py`):
+A `remote_http` connector that keeps `Connector`'s defaults speaks two of the endpoints [TermNorm](https://github.com/runfish5/TermNorm-excel) serves (`connectors/termnorm.py`): `/matches` (`Connector.cell_path`) and `GET /pipeline` (`Connector.serves_pipeline`). `/status` is TermNorm's own declared probe; `Connector.preflight` defaults to `None`, so a connector that declares none probes nothing.
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/matches` | POST | Run one query under given `pipeline_params`; returns prediction, ranked candidates, and `diagnostics.warnings[]` (`{step, code, message}` — the self-healing signal). |
-| `/pipeline` | GET | Full schema: nodes, types, parameters, allowed value sets, LLM-node prompt templates, named sequences. TermNorm's is read once at init. |
-| `/status` | GET | Liveness; 200 when up. |
+| `/pipeline` | GET | Full schema: nodes, types, parameters, allowed value sets, LLM-node prompt templates, named sequences. Read live at run init, on every draft read and in `dataset_pipeline` (`application/pipeline_resolve.py::served_pipeline`). |
+| `/status` | GET | TermNorm's liveness and version probe (`connectors/termnorm.py::_termnorm_preflight`); 200 when up. |
 
 Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md). PromptPotter's own API roster is `/docs` (`openapi.generated.json`).
 

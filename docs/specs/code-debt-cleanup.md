@@ -330,6 +330,10 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
 - **TermNorm's live datasets (`llm_only`, `entity_profiling`, `llm_ranking`) are refused at parse**:
   `direct_prompt` must gain a `prompt_info`, edited in the TermNorm checkout (operator, 2026-11-06).
   **Rides with:** M18. **Re-test:** `python -m promptpotter new llm_only` parses its pipeline.
+- **`ConnectorInspector.tsx::SECURITY_DOC_URL` links § Connection security for every connector**, an
+  in-process one too, where no endpoint, token or header applies. Action: the link rides the served
+  connector's wire kind. **Rides with:** M18. **Re-test:**
+  `git grep -n "SECURITY_DOC_URL" -- webapp/components`.
 - **The host prompt and tool schemas mislead a driving model** — `OptimizationOverrides` inherits
   `optimizer: "potter"` and `arm_gate: "off"` as schema defaults (the head-to-head validator requires
   `optimizer`); `EditDraftPatch.config` is an untyped `dict`; a "partial `CampaignConfig`" has three
@@ -795,12 +799,10 @@ next run-data reshape.
 - **`RaceStandingRecord.paired_breakdown` is an untyped stat bag**: potter (`pobb/checks.py`) and capo
   write different keys, and `views/readout.py::on_race_standing` reads `.get("p_better", 1.0)` to sort
   and `.get("p_better", 0.0)` to print. Action: a typed per-prior model. **Re-test:** `git grep -n '"p_better"' -- promptpotter`.
-- **`evidence/read.py::campaigns_on_dataset` matches the name label**, so two banks under one name (a
-  re-upload, a name two tiers hold) pool into one read. Action: the name resolved once and matched on
-  `Campaign.declaration.dataset_hash`.
 - **The stale-data ladder's outcome has two owners**: `sample_measurement.py::execute_stale_data_protocol`
   stamps one of five exclusive bools on `MeasuredCell` that `render/sample.py` re-reads as an `elif`
-  chain; the ladder is string-keyed. Action: one outcome enum on the cell, the ladder a `match`.
+  chain; the ladder is string-keyed, and a pause requested mid-ladder returns the degraded cell with
+  no outcome marked. Action: one outcome enum on the cell, the pause exit among its values, the ladder a `match`.
   **Rides with:** the next accepted re-key (`domain.scoring::MeasuredCell` is reached by every treatment).
   **Re-test:** `git grep -nE "switched_out|persistently_degraded|config_fundamental_skip" -- promptpotter/domain/scoring.py`.
 
@@ -1240,6 +1242,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   in `llm/heartbeat.py`, `campaign_store/store.py::CampaignStore.list_campaigns` and
   `user_store.py::read_accounts` are held by no test. Action: a survey serves a bad row with its fault,
   and a test holds each catch. **Re-test:** a tenant tree with one unreadable dataset lists the rest.
+- `evidence/read.py::_cycle_facts` loads again the manifest `_at` already holds (`at.campaign`),
+  behind an `assert`: a manifest deleted between the two reads fails the read as a bare
+  `AssertionError`, a 500. Action: pass `at.campaign`. **Re-test:**
+  `git grep -n "a subject resolves through its campaign's directory" -- promptpotter`.
 
 **B. A refusal spelled per door.** **Rides with:** Q3.
 - `provider_config.py::OIDCConfigError`, `prompt_block.py::PackRefusal` and
@@ -1258,6 +1264,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   CLI-side. The matcher falls back to a substring, and the dispatcher walks `descend` twice.
   `run_records.py::BankedSubject` is a second address. Action: one resolution, at the dispatcher, by
   exact id or prefix. **Re-test:** `git grep -n "resolve_campaign_id(" -- promptpotter`.
+- `evidence/read.py::campaigns_on_dataset` matches the name label, so two banks under one name (a
+  re-upload, a name two tiers hold) pool into one read: a served-answer change, not a cleanup.
+  Action: the name resolved once and matched on `Campaign.declaration.dataset_hash`. **Re-test:**
+  `git grep -n "c.dataset_name == dataset_name" -- promptpotter/application/evidence`.
 
 **D. Spelled by hand beside the rows.** **Rides with:** the next read added.
 - `api/deps.py::_NAMED` and `read_input`'s pattern, `cli/parsers.py`' read help,
@@ -1308,6 +1318,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `n` keeps its total.
 - `tests/test_scoring.py` writes `HostSession._tasks` past the interface. Action: Q1's log read
   replaces it. **Re-test:** `git grep -n "_tasks\[" -- tests`.
+- `quota.py::set_concurrent_cycles` gates `is_host` only, while the field is writable only under
+  `CAMPAIGN_BUDGET_CAP` too (`quota.py::concurrent_cycles_writable`): two rules for one write.
+  Action: the setter refuses by `concurrent_cycles_writable`. **Re-test:**
+  `git grep -n "if not is_host(stores.identity)" -- promptpotter/application/jobs/quota.py`.
 
 ## Open — multi-arc
 

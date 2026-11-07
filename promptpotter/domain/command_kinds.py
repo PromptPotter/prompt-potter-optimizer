@@ -224,7 +224,7 @@ class CommandKind(StrEnum):
         anyone("set-limits"),
         True,
     )
-    # Account-scoped, and holding the rung is not enough on the host's key: `quota.py::set_concurrent_cycles`.
+    # Account-scoped, and set only by whoever runs this server: `quota.py::set_concurrent_cycles`.
     SET_CONCURRENT_CYCLES = (
         "set-concurrent-cycles",
         "limits_and_queue:set_concurrent_cycles",
@@ -734,7 +734,7 @@ class CancelQueuedRunPayload(CommandPayload, kind=CommandKind.CANCEL_QUEUED_RUN)
 
 class SetConcurrentCyclesPayload(CommandPayload, kind=CommandKind.SET_CONCURRENT_CYCLES):
     """How many campaigns this account may hold at once, queued launches included; at most the
-    machine's capacity, and an account on the host's key cannot move its own."""
+    machine's capacity, and set only by whoever runs this server."""
 
     max_concurrent_cycles: WireInt = Field(ge=1, description="The new limit.")
 
