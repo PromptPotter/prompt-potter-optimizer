@@ -240,7 +240,7 @@ function LimitControl({ quota }: { quota: QuotaStatus }) {
     return (
       <div className="account-limit readonly">
         <p className="account-note">
-          <strong>Set by whoever runs this server.</strong> It caps how many of this account's
+          <strong>Set by whoever runs this server.</strong> It caps how many of this account&apos;s
           runs share the machine. Ask them to raise it.
         </p>
       </div>

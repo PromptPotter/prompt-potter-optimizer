@@ -1,5 +1,6 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import jsxA11y from "eslint-plugin-jsx-a11y";
+import react from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
@@ -7,6 +8,14 @@ const eslintConfig = defineConfig([
   {
     files: ["**/*.{js,jsx,mjs,ts,tsx,mts}"],
     extends: [reactHooks.configs.flat.recommended, jsxA11y.flatConfigs.recommended],
+    plugins: { react },
+    settings: { react: { version: "detect" } },
+    rules: {
+      "react/jsx-key": "error",
+      "react/no-unescaped-entities": "error",
+      "react/display-name": "error",
+      "react/jsx-no-target-blank": "error",
+    },
   },
   // A focusable `separator` is the ARIA window-splitter widget, so its tab stop is its own.
   {

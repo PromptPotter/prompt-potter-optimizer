@@ -12,7 +12,6 @@ from promptpotter.domain.origin_panel import line_by_individual, overlap_line
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.results import Election
 from promptpotter.infrastructure.ledger import ledger_chain
-from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_bench_readings,
     scan_ledger_verify,
@@ -59,10 +58,6 @@ class _Reads:
         return self._campaigns[key]
 
 
-def _read_index(stores: Stores, hop: CycleHop) -> CycleIndex | None:
-    return read_cycle_index(stores.campaigns.cycle_dir(hop), moment=None)
-
-
 def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
     leaf = path[-1]
     reads.seen.add((stores.base_dir, leaf.campaign_id, leaf.cycle_id))
@@ -77,7 +72,7 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
             FamilyCourse(
                 store=stores,
                 path=(*path[:-1], hop),
-                manifest=_read_index(stores, hop),
+                manifest=index,
                 inner=False,
             )
         )
@@ -95,11 +90,11 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
                 FamilyCourse(
                     store=sandbox,
                     path=(*path, hop),
-                    manifest=_read_index(sandbox, hop),
+                    manifest=index,
                     inner=True,
                 )
             )
-    return [c for c in out if c.manifest is not None]
+    return out
 
 
 def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
@@ -108,7 +103,7 @@ def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
     root = FamilyCourse(
         store=root_store,
         path=path,
-        manifest=_read_index(root_store, path[-1]),
+        manifest=root_store.campaigns.load(path[-1], moment=None),
         inner=False,
     )
     out = [root]

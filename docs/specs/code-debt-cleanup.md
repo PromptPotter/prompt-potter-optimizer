@@ -900,11 +900,10 @@ import-graph script before and after; close each wave with `gate.py --only layer
   `e2e/walk_world.py`, and the host it walks as is exempt from the read bucket
   (`quota.py::refuse_request_rate`). Action: the gate's `playwright` check builds that world and adds
   `--project=walk` on it. **Re-test:** `gate.py` lists a walk check.
-- **The Vite build leaves four things standing**:
+- **The Vite build leaves three things standing**:
   - The derivations barrel pulls the network layer into every chunk that imports it.
   - Babel (React Compiler) is 87% of build time.
   - Chunks exceed 500 kB.
-  - ESLint rules dropped with `eslint-config-next`: `react/jsx-key`, `react/no-unescaped-entities`, `react/display-name`, `react/jsx-no-target-blank`, `@next/next/*`.
 - **Several doors into one state**: candidate selection minted at each
   `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
   `setSelectionForSampleSet` from several surfaces, `FileTree::onSelect` drilled through its parents.
@@ -1554,8 +1553,7 @@ word's `git grep -c` for that sense is 0.
   - Unverified, for the next change to each file: `shell/CriticalAlertBanner` builds `Said` rows in the
     browser and re-sorts `TONES` for `pinned`; `ViewTabs.show` is many `open`/`close` calls, not one
     workspace act; `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after
-    (`iter_files(skip=)` exists); `iter_family_courses` reads each index twice; `list_hierarchy` re-calls
-    `line_config` per non-holder course; `FileTree` mounts a 2 s `useActivePointer()` poll for one
+    (`iter_files(skip=)` exists); `FileTree` mounts a 2 s `useActivePointer()` poll for one
     failure line; a `/hierarchy` 200 replaces every entry object `lib/hooks/useRegistry.ts::useRegistry` indexes.
 - **The collapse gate cuts a hedging arm on noise**: `pobb/checks.py::check` →
   `domain/scoring.py::is_answer_collapsed` reads one repeated label over `n_min` answered cells as
