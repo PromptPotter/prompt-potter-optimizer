@@ -19,7 +19,6 @@ from promptpotter.config.paths import (
     BLOCK_PACKS_DIR,
     ENDED_JOBS_DIR,
     INSTALL_CACHE_DIR,
-    JOB_LOGS_DIR,
     JOBS_DIR,
     JUDGE_REUSE_DIR,
     LANDING_FILE,
@@ -248,7 +247,6 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     # Today's launches are what the daily quota counts, so a reset keeps them.
     Kind("job", _INSTALL, f"{JOBS_DIR}/*.json", _SURVIVOR, JOB_ADAPTER),
     Kind("ended job", _INSTALL, f"{JOBS_DIR}/{ENDED_JOBS_DIR}/*.json", Fate.RUN, JOB_ADAPTER),
-    Kind("job log", _INSTALL, f"{JOBS_DIR}/{JOB_LOGS_DIR}/*.log", Fate.RUN),
     Kind("landing", _INSTALL, f"{JOBS_DIR}/{LANDING_FILE}", Fate.MACHINE),
     Kind("admission lock", _INSTALL, f"{JOBS_DIR}/{ADMISSION_LOCK}", Fate.MACHINE),
     Kind("producer lock", _INSTALL, f"{JOBS_DIR}/{PRODUCERS_DIR}/*.lock", Fate.MACHINE),
@@ -371,6 +369,7 @@ def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
         CampaignRow(f"{where} ledger", at(layout.ledger), Leaf.HISTORY, RECORD_ADAPTER),
         CampaignRow(f"{where} producer lock", at(layout.producer_lock), Leaf.TRACE),
         CampaignRow(f"{where} pass lock", at(layout.pass_lock), Leaf.TRACE),
+        CampaignRow(f"{where} job log", at(layout.job_log), Leaf.TRACE),
         CampaignRow(
             f"{where} round audit",
             f"{at(layout.audit_rounds)}/{ROUND_GLOB}",

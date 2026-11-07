@@ -256,13 +256,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   refuses once as a `FileKind` through `read_file`, or is named a cache read. **Rides with:** M17.
   **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
   surveys and caches.
-- **A job's log outlives its campaign**: `jobs/launcher/run_job.py::spawn_job` writes
-  `jobs/logs/{job_id}.log` and nothing deletes it, so `jobs/logs` grows without bound. Decision
-  (operator, 2026-11-07): a job's log is deleted with its campaign, on the channel that deletes the
-  campaign (`commands/workspace_edits.py` → `CampaignStore.delete_campaign`), with no separate
-  expiry. The log is keyed by job id, which the campaign tree does not name. **Rides with:** M6.
-  **Re-test:** a deleted
-  campaign's job ids name no file under `jobs/logs`.
 - **One torn `grant.json` fails the install-spend survey** — `application/jobs/install_spend.py` catches
   `OSError` and `LedgerUnreadableError`, not the unreadable-file refusal `GrantStore.load` raises, while
   `application/account.py` and `application/datasets/startability.py` catch it. Action: a survey serves
