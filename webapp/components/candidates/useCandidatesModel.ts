@@ -22,7 +22,7 @@ import { useLineage } from "@/lib/hooks/useLineage";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { useViewedCourse, useViewedLineage } from "@/lib/lineage";
 import type { CandidateBar } from "@/lib/types";
-import { roundOf } from "./dendrogram";
+import { barRound } from "./dendrogram";
 
 export type CandidatesModel = ReturnType<typeof useCandidatesModel>;
 
@@ -106,7 +106,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
         return;
       }
       setSelectionForCandidate(
-        selectedCandidateOf(leafCycleId, roundOf(v), v.reading.arm.key, v.label),
+        selectedCandidateOf(leafCycleId, barRound(v), v.reading.arm.key, v.label),
       );
     },
     [setSelectionForCandidate, leafCycleId],
@@ -125,7 +125,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
       views.find(
         (v) =>
           v.reading !== null &&
-          isSelectedCandidate(selectedCandidate, leafCycleId, roundOf(v), v.reading.arm.key),
+          isSelectedCandidate(selectedCandidate, leafCycleId, barRound(v), v.reading.arm.key),
       )?.key ?? null,
     [views, selectedCandidate, leafCycleId],
   );
@@ -144,7 +144,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
 
   const divergenceBoundary = useMemo(() => {
     if (divergentRound == null) return null;
-    const idx = views.findIndex((v) => roundOf(v) >= divergentRound);
+    const idx = views.findIndex((v) => barRound(v) >= divergentRound);
     return idx >= 0 ? idx : null;
   }, [divergentRound, views]);
 

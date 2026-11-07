@@ -52,19 +52,19 @@ function l2Terminal() {
 describe("roundCandidates — a run that stopped mid-L2", () => {
   const dash = l2Terminal();
   const rows = roundCandidates(dash);
-  const roundOf = (r: (typeof rows)[number]) => r.reading.arm.round;
+  const rowRound = (r: (typeof rows)[number]) => r.reading.arm.round;
 
   it("emits origin as round 0 (C0)", () => {
-    const origin = rows.find((r) => roundOf(r) === 0);
+    const origin = rows.find((r) => rowRound(r) === 0);
     expect(origin).toBeDefined();
     expect(origin?.reading.arm.label).toBe("C0");
     expect(origin?.key).toBe("R0.0");
   });
 
   it("emits every non-empty post-origin round's candidates", () => {
-    const historical = rows.filter((r) => roundOf(r) > 0);
+    const historical = rows.filter((r) => rowRound(r) > 0);
     expect(historical).toHaveLength(9);
-    expect(new Set(historical.map(roundOf))).toEqual(new Set([1, 2, 3]));
+    expect(new Set(historical.map(rowRound))).toEqual(new Set([1, 2, 3]));
   });
 
   it("does not emit any inflight row for the L2-terminal round 4", () => {
@@ -89,7 +89,7 @@ describe("roundCandidates — a run that stopped mid-L2", () => {
   });
 
   it("empty round 4 does not suppress the in-flight branch for round 4", () => {
-    const round4 = rows.filter((r) => roundOf(r) === 4);
+    const round4 = rows.filter((r) => rowRound(r) === 4);
     expect(round4).toHaveLength(0);
   });
 

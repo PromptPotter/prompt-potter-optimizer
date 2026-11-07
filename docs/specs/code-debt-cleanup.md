@@ -219,10 +219,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   kind runs in a parallel lane and reads a half-built product. Action: the assert also requires the
   builder to share the lane or the check to run alone. **Rides with:** M1. **Re-test:** point one
   check's `after` at a check of the other kind; import fails.
-- **`roundOf` names three things** — `lib/poll.tsx` (the dashboard's live round),
-  `components/candidates/dendrogram.ts` (a bar's round) and `forest-layout.ts` (a hierarchy
-  candidate's round). Action: three distinct names. **Rides with:** M16. **Re-test:** `git grep -n
-  "roundOf" -- webapp` names one definition.
 - **A workspace and a hop are re-derived from a path by parent counting** —
   `jobs/reaper.py::_tenant_root_of` and `sweep_dead_cycles`, `campaign_store/store.py` (the cycle's
   hop beside `cycle_dir.parent.parent`) and `store/account_trail.py` (a campaign id from
@@ -297,9 +293,7 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
 - **`Session.backend_id` is a test-only archive switch** — production always sets it;
   `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
   Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
-  explicitly. Holders beside it: `application/origin.py:75` (`campaign_terms(session.backend_id)`,
-  while `mask/load.py:216` reads `campaign.connector`: two sources for one connector name),
-  `runner/inner/spawn_context.py:66`, `presentation/cli/commands/new.py:446`. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
+  explicitly. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
 - **Three TermNorm defaults in core** — `connectors/__init__.py` `DEFAULT_CONNECTOR` and `shipped`
   (repeating the one `serves_uploads` declaration), and `Settings.TERMNORM_URL` defaulting to
   loopback, so a box with no TermNorm lists it configured and health reports it broken. Connector
@@ -318,8 +312,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   `Session.index_terms`, `loop_start.py` and `origin.py`. Action: one call where the session opens,
   handing the connector's session the bank. **Rides with:** M7. **Re-test:**
   `git grep -n "index_terms" -- promptpotter`.
-- **`is_self_optimization` is decided by the name `promptpotter`** (`runner/inner/tasks.py`). Action: a
-  `Connector` declaration. **Rides with:** M4b. **Re-test:** `git grep -n "\"promptpotter\")" -- promptpotter/application/runner/inner/tasks.py`.
 - **DSPy splits the model string for pricing twice** — `dspy_module.py` meters `inline_route(model)`
   in the cell while core's `BackendClient.priced_as` splits the same string for the bound; they
   disagree when a dataset sets `provider`. Action: the cell takes the pair core bound. **Rides
@@ -1216,10 +1208,6 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 
 ### Words and the sample tag (batch-2 reviews, 2026-11-05)
 
-- **Unpadded `#N` outlives the one `sample_tag`**: `TrajectorySeriesView.tsx::SeriesHoverPopup`, the
-  `L1Variants.tsx` targets line and `readout.py::on_race_catch_up` spell the id themselves.
-  Action: each reads `format.ts::fmtSampleTag` / `domain/sample.py::sample_tag`. **Re-test:**
-  `git grep -nE "#\\$\\{|'#' \\+|f\"#\\{" -- webapp/components promptpotter/application/views`.
 - **`config/settings.py::_git_head` answers `UNVERSIONED` silently** for a ref in neither the loose
   refs nor `packed-refs` (a reftable repo, corrupt refs). Action: the landing's refusal names the
   checkout it could not version. **Re-test:** a landing from a reftable clone names why.

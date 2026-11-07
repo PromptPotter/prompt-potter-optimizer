@@ -72,7 +72,7 @@ def lock_criterion(
     block = campaign_config.scoring
     if not isinstance(block, dict) or DIALS_KEY not in block:
         return None
-    terms = campaign_terms(session.backend_id)
+    terms = campaign_terms(session.backend_client.connector.name)
     formula = realize_dials(
         parse_dials(block[DIALS_KEY], terms), origin_anchors(origin_rows, terms), terms
     )

@@ -62,7 +62,7 @@ export interface DendroRow {
   genes: string[];
 }
 
-export function roundOf(bar: CandidateBar): number {
+export function barRound(bar: CandidateBar): number {
   return bar.reading?.arm.round ?? 0;
 }
 
@@ -70,7 +70,7 @@ export function dendroRow(bar: CandidateBar): DendroRow {
   const { parent, donor, genes } = descentOf(bar.node);
   return {
     key: bar.key,
-    round: roundOf(bar),
+    round: barRound(bar),
     label: bar.label,
     address: bar.node.address,
     is_selected: bar.reading?.election.selected ?? false,

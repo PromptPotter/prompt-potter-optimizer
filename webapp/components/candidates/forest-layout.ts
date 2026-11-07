@@ -72,13 +72,13 @@ export const DIRECTION_GLYPH: Record<CourseSpawn["direction"], string> = {
   equivalent: "≡",
 };
 
-const roundOf = (c: HierarchyCandidate): number => c.facts.reading.arm.round;
+const candidateRound = (c: HierarchyCandidate): number => c.facts.reading.arm.round;
 const retiredBy = (c: HierarchyCandidate): string | null => tagValue(c, "superseded");
 
 function groupRounds(cands: readonly HierarchyCandidate[]): Map<number, HierarchyCandidate[]> {
   const byRound = new Map<number, HierarchyCandidate[]>();
   for (const c of cands) {
-    const r = roundOf(c);
+    const r = candidateRound(c);
     const arr = byRound.get(r) ?? [];
     arr.push(c);
     byRound.set(r, arr);
@@ -196,7 +196,7 @@ export function layout(
     const laneSpan = isExpanded ? expandedLaneSpan(cands) : 1;
     const laneOffset = nextRow;
     nextRow += laneSpan;
-    const rightmost = cands.length > 0 ? baseCol + Math.max(...cands.map(roundOf)) : baseCol;
+    const rightmost = cands.length > 0 ? baseCol + Math.max(...cands.map(candidateRound)) : baseCol;
     if (rightmost > maxCol) maxCol = rightmost;
     const electsOn = new Map<number, RoundFacts["elects_on"]>();
     for (const rnd of course.children) {
@@ -216,7 +216,7 @@ export function layout(
     });
     for (const cand of cands) {
       for (const inner of cand.children) {
-        visitCampaign(inner, baseCol + roundOf(cand) + 1, cand.address, key);
+        visitCampaign(inner, baseCol + candidateRound(cand) + 1, cand.address, key);
       }
     }
     // An inner campaign no candidate holds hangs from the course itself, its caveat saying why.
@@ -422,7 +422,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
     // A fork shares its parent's round axis; an inner run starts a column right of its spawner.
     const minChildX = l.course.facts.spawn ? anchorX : anchorX + d.colW;
     const firstRound = l.candidates.length > 0
-      ? Math.min(...l.candidates.map(roundOf))
+      ? Math.min(...l.candidates.map(candidateRound))
       : null;
     let childX = minChildX;
     if (firstRound != null) {
