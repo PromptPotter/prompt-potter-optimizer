@@ -57,6 +57,7 @@ from promptpotter.application.caller import Caller
 from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import cycle_target
+from promptpotter.application.cycle_files import FileScope, read_cycle_file
 from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.host_surface import (
@@ -247,7 +248,7 @@ sys.exit(0 if landing.proven and not landing.refused and not landing.caches else
 
 
 def test_no_path_secret_or_dataset_text_leaves_its_fence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
 ) -> None:
     with pytest.raises(ValueError):
         campaign_root_dir_for(WorkspaceDir(tmp_path), "../escape")
@@ -255,6 +256,19 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         cycle_dir_for(
             WorkspaceDir(tmp_path), CycleHop(campaign_id="ok_campaign", cycle_id="../escape")
         )
+
+    # The run process's log (host paths, backend URL, tracebacks) is the runtime's: never served.
+    logged = CycleHop(campaign_id="camp-logged", cycle_id="cycle_logged")
+    job_log = CycleLayout(cycle_dir_for(built_stores.base_dir, logged)).job_log
+    job_log.parent.mkdir(parents=True)
+    job_log.write_text("Traceback: /srv/promptpotter backend=http://10.0.0.5\n", encoding="utf-8")
+    hidden_at: tuple[tuple[FileScope, str], ...] = (
+        ("cycle", ".runtime/job.log"),
+        ("campaign", f"cycles/{logged.cycle_id}/.runtime/job.log"),
+    )
+    for scope, hidden in hidden_at:
+        with pytest.raises(NotFoundError):
+            read_cycle_file(built_stores, (logged,), scope=scope, file=hidden)
 
     secret = "gsk_redact_me_xxxxxxxxxxxxxxxxxxxxxxx"
     monkeypatch.setattr(settings_mod.settings, "GROQ_API_KEY", SecretStr(secret), raising=False)

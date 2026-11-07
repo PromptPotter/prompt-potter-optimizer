@@ -82,6 +82,12 @@ def this_producer(jobs_dir: Path) -> str:
         return producer_id
 
 
+def minted_producer(jobs_dir: Path) -> str | None:
+    """This process's producer id if it ever admitted a job here; reading mints nothing."""
+    with _token_lock:
+        return _tokens.get(jobs_dir.resolve())
+
+
 def this_producer_lock(jobs_dir: Path) -> Path:
     return _producer_path(jobs_dir, this_producer(jobs_dir))
 

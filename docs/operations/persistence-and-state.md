@@ -82,6 +82,7 @@ Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only 
         .runtime/
           ledger.jsonl                  # append-only spine
           producer.lock                 # what "attached" means
+          pass.lock                     # held beside it while a paid pass, not a loop, holds the cycle
           job.log                       # a detached launch's stderr, one per cycle
           cache/rounds/
     measurements/                       # PAID; rooted at `Stores.archive_home`

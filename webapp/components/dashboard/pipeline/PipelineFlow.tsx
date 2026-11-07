@@ -491,7 +491,7 @@ export function PipelineFlow({ layer, inspector, nested, tone, bare = false }: P
           <div className="wf-hero-arrow">{inspector}</div>
         </>
       )}
-      {/* Siblings: inside the box, the nested level matches every `.wf-hero-node.llm <part>` rule in chat.css. */}
+      {/* Siblings: inside the box, the nested level matches every `.wf-hero-node.llm <part>` rule in dashboard-pipeline.css. */}
       <div className={cx("wf-hero-unit", `tone-${tone}`, nested != null && "has-nested")}>
         {box}
         {nested != null && <div className="wf-hero-nested">{nested}</div>}

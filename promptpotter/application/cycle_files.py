@@ -119,7 +119,8 @@ def read_cycle_file(
 
     resolved = _resolve_safe_file(scope_root, file)
     held = stat_optional(resolved)
-    if held is None:
+    # The listing's rule, at both scopes: a campaign-scope path reaches its cycles' dot-dirs.
+    if held is None or not _shown(resolved.relative_to(scope_root.resolve())):
         raise NotFoundError(f"File not found: {file}")
     raw = None if held.st_size > _MAX_PREVIEW_BYTES else read_bytes_optional(resolved)
     content_type: Literal["json", "markdown", "log", "text", "binary"] = (
