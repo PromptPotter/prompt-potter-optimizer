@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from fastapi.routing import APIRoute
+from processes import replace_changed
 from pydantic import BaseModel, SecretStr
 from pydantic.fields import ComputedFieldInfo, FieldInfo
 
@@ -510,8 +511,8 @@ def main() -> int:
     blocks.append(_emit_live_windows())
     blocks.append(_emit_cycle_path_grammar())
     content = _HEADER + "\n\n".join(blocks) + "\n"
-    _OUT_PATH.write_text(content, encoding="utf-8", newline="\n")
-    print(f"wrote {_OUT_PATH.relative_to(REPO)}")
+    verb = "wrote" if replace_changed(_OUT_PATH, content) else "unchanged"
+    print(f"{verb} {_OUT_PATH.relative_to(REPO)}")
     return 0
 
 

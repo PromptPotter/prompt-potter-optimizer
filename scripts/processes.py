@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import os
 import re
@@ -9,7 +10,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -228,6 +229,51 @@ def _locked(fd: int) -> bool:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         return False
+    return True
+
+
+@contextlib.contextmanager
+def exclusive(path: Path) -> Iterator[None]:
+    """Blocks until this process holds *path*'s lock, for a span of seconds: never the gate's own."""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT)
+    try:
+        while not _locked(fd):
+            time.sleep(0.05)
+    except BaseException:  # an interrupted wait holds nothing to release
+        os.close(fd)
+        raise
+    try:
+        yield
+    finally:
+        if sys.platform == "win32":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        os.close(fd)  # POSIX drops the flock with its last descriptor
+
+
+def replace_changed(path: Path, content: str) -> bool:
+    """*content* swapped in whole, and only where it differs: an unchanged file is never written."""
+    data = content.encode("utf-8")
+    with contextlib.suppress(FileNotFoundError):
+        if path.read_bytes() == data:
+            return False
+    staged = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        staged.write_bytes(data)
+        # Retried as `store/io.py::_atomic_replace` is: Windows fails with WinError 5 while a reader
+        # holds the destination.
+        for attempt in range(3):
+            try:
+                os.replace(staged, path)
+                break
+            except PermissionError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.1)
+    finally:
+        staged.unlink(missing_ok=True)
     return True
 
 

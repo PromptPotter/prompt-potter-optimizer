@@ -107,13 +107,27 @@ def _node(exe: str, *args: str) -> list[str]:
     return [shutil.which(exe) or exe, *args]
 
 
-def _snapshot(paths: Sequence[str]) -> list[bytes | None]:
+# A file as a regenerator leaves it: its bytes, and the mtime a rewrite moves.
+_Written = tuple[bytes, int] | None
+
+
+def _snapshot(paths: Sequence[str]) -> list[_Written]:
     # Prior CONTENT, never the index: a model edit leaves the regenerated file right but unstaged.
-    return [(REPO / p).read_bytes() if (REPO / p).exists() else None for p in paths]
+    def written(path: Path) -> _Written:
+        with contextlib.suppress(FileNotFoundError):
+            mtime = path.stat().st_mtime_ns
+            return path.read_bytes(), mtime
+        return None
+
+    return [written(REPO / p) for p in paths]
 
 
-def _stale(paths: Sequence[str], before: Sequence[bytes | None]) -> Outcome:
-    stale = [p for p, now, was in zip(paths, _snapshot(paths), before, strict=True) if now != was]
+def _stale(paths: Sequence[str], before: Sequence[_Written]) -> Outcome:
+    moved = list(zip(paths, _snapshot(paths), before, strict=True))
+    stale = [p for p, now, was in moved if now != was]
+    # Equal bytes written anew: a `light` regenerator writes nothing when green.
+    if rewritten := [p for p, now, was in moved if now and was and now != was and now[0] == was[0]]:
+        return 1, f"{', '.join(rewritten)} rewritten unchanged — write through `replace_changed`."
     if stale:
         return 1, f"{', '.join(stale)} stale — regenerated in place; re-run to confirm."
     return 0, ""
@@ -982,7 +996,7 @@ class Check:
     run: Callable[[Selection], Outcome]
     # The pre-commit hook's fast set (`--staged`). The pre-push hook runs every check CI runs.
     on_commit: bool = False
-    # Cheap and writes nothing a sibling gate reads, so a gate of only these never queues behind a sibling's.
+    # Cheap and, when green, writes nothing a sibling gate reads, so a gate of only these never queues behind a sibling's.
     light: bool = False
     landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
     # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
@@ -1227,6 +1241,7 @@ CHECKS: tuple[Check, ...] = (
         "py",
         _Probe("scripts/build_ts_types.py", ("webapp/lib/api/types.generated.ts",)),
         on_commit=True,
+        light=True,
         reads=(*_ENGINE, "webapp/lib/api/types.generated.ts"),
     ),
     # "web", unlike its siblings: it reads `simple-icons` out of `webapp/node_modules`.
@@ -1237,6 +1252,7 @@ CHECKS: tuple[Check, ...] = (
             "scripts/build_vendor_marks.py", ("webapp/components/ui/vendor-marks.generated.ts",)
         ),
         on_commit=True,
+        light=True,
         reads=(
             "scripts/build_vendor_marks.py",
             "webapp/assets/vendor-marks/",
@@ -1256,6 +1272,7 @@ CHECKS: tuple[Check, ...] = (
             ),
         ),
         on_commit=True,
+        light=True,
     ),
     Check(
         "specs",
@@ -1269,6 +1286,7 @@ CHECKS: tuple[Check, ...] = (
             ),
         ),
         on_commit=True,
+        light=True,
     ),
     # Last in the host: it imports every module, which no regenerator before it may see.
     Check(

@@ -202,12 +202,17 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   `ledger: CycleEventLog | None`, and its readers assert or branch on None. Action: build
   `LaunchState` after `build_run_observers` opens the ledger. **Rides with:** M7. **Re-test:** count
   `state.ledger` None-branches.
-- **The scripts and the engine each keep an atomic file writer** — `store/io.py::_atomic_replace`
-  retries Windows' WinError 5, while the stdlib-only regenerator writer in `scripts/processes.py` and
-  `scripts/last_green.py::LastGreen.record` call `os.replace` once. A reader holding the file fails the
-  write on the operator's desk only. Action: one retry rule stated by one owner; the stdlib-only
-  interpreter is what varies. **Rides with:** M17. **Re-test:** `git grep -n "os.replace(" -- promptpotter
-  scripts` names no call outside that owner.
+- **The scripts' writer and the store's are two**: `store/io.py::_atomic_replace` and
+  `scripts/processes.py::replace_changed` each state one bounded retry on Windows' WinError 5; the
+  stdlib-only interpreter the scripts run under is what varies. Action: one retry rule stated by one
+  owner. **Rides with:** M17. **Re-test:** `git grep -n "def _atomic_replace\|def replace_changed" --
+  promptpotter scripts`: 2 lines now, 1 at target.
+- **A push to main from a worktree proves its web lane without packages**: `gate.py::_tip_checkout`
+  borrows `_BORROWED` (`webapp/node_modules`) from the pushing checkout, and a side worktree has none,
+  so on 2026-11-07 the Python lane ran green for 509 s, then all six web checks failed ("'eslint' is
+  not recognized"; `vendor-marks` read a missing package as "simple-icons has no 'anthropic'").
+  Action: borrow from the clone's main checkout, or refuse at once and name the missing folder.
+  **Re-test:** push main from a fresh worktree.
 - **A kept offline-run green counts a workspace by its directory** — `scripts/offline_run.py::still_green`
   asks only that the directory stands, and `claim_home` stamps the run's arguments, not its keys, so a
   clone-shared home answers for a tree that did not build it. Action: stamp each workspace with the key
@@ -1181,18 +1186,17 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   which a host loaded from outside the gate lock (a builder's bare `pytest` or `vitest`) still trips,
   though the gate runs it `alone` on one unisolated worker per project. **Re-test:** five builders
   plus one full gate with no reap and no gate waiting longer than its own run.
-- **Four `--staged` checks queue only because their regenerators always write**: `ts-types`,
-  `vendor-marks`, `optimizer-schemas` and `specs` rewrite their tracked output on every run, even
-  when it is unchanged, so they cannot be `gate.py::Check.light`. Two more keep a commit queued:
-  eslint's `--cache` write and tsc's typegen. `ts-types`, `optimizer-schemas` and `specs` read
-  `!webapp/`, so nearly every commit selects one. Action: each regenerator writes only when the
-  content differs, via atomic `os.replace`; mark the four light. **Re-test:** a `--staged` gate
-  selecting them starts while a sibling gate runs.
-- **Two gates can still lose each other's greens**: `last_green.py::LastGreen.record` re-loads
-  `greens.json` just before an atomic replace, but nothing locks the load-to-replace span, so of two
-  gates finishing together the later drops the earlier's greens (a rerun, never a false green).
-  Action: hold an exclusive lock across load, merge and replace. **Re-test:** two concurrent
-  `record` calls on distinct checks both persist.
+- **Two `--staged` checks keep a commit queued because their tools always write**: eslint's
+  `--cache` write and tsc's typegen, so neither can be `gate.py::Check.light`. Action: each writes
+  only when its content differs, or outside what a sibling gate reads; mark them light. **Re-test:**
+  a `--staged` gate selecting them starts while a sibling gate runs.
+- **The `optimizer-schemas` probe guards two of the files its regenerator writes**: the check's
+  `regenerates` tuple in `scripts/gate.py` names potter's and checkin's `resolved_schemas.json`.
+  `scripts/build_optimizer_schemas.py` writes one per manifest in `optimizers.MANIFESTS`, capo's,
+  gepa's and levi's too. A stale one of those passes the gate and CI, since nothing fails a dirty tree.
+  The example plugin's copy is tracked, and no gate run writes it. Action: the regenerator declares
+  its outputs, and the probe reads that declaration. **Rides with:** M1. **Re-test:** edit capo's
+  `resolved_schemas.json` by hand; `gate.py --only optimizer-schemas` is red.
 - **`initialization/session.py::LaunchState.ledger` is `Optional` while a round needs it**:
   `run_observers.py::build_run_observers` sets it after the state is built, so `runner/round.py`
   asserts presence and five other readers branch on `None`. Action: the run's state is built with its

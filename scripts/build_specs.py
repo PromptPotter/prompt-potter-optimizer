@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from processes import replace_changed
 from pydantic import TypeAdapter
 
 # ruff: noqa: E402 -- we import from promptpotter after adjusting sys.path
@@ -113,8 +114,8 @@ def main() -> int:
     ):
         # `sort_keys` so a registration reorder is not a diff.
         content = json.dumps(document, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
-        path.write_text(content, encoding="utf-8", newline="\n")
-        print(f"wrote {path.relative_to(_REPO)}")
+        verb = "wrote" if replace_changed(path, content) else "unchanged"
+        print(f"{verb} {path.relative_to(_REPO)}")
     return 0
 
 
