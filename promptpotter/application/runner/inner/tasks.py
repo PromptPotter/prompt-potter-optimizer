@@ -45,7 +45,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.shared.errors import CellUnscoreableError
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import Connector
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -303,12 +302,8 @@ class InnerTaskSpec(FrozenModel):
 assert set(InnerTaskSpec.model_fields) >= DEPTH_FIELDS
 
 
-def _recursion_connector() -> Connector:
-    return connectors.CONNECTORS.get("promptpotter")
-
-
 def is_self_optimization(backend_type: str) -> bool:
-    return connectors.CONNECTORS.table.get(backend_type) is _recursion_connector()
+    return (c := connectors.CONNECTORS.table.get(backend_type)) is not None and c.self_optimization
 
 
 INNER_ARM_GATE: ArmGateMode = "off"

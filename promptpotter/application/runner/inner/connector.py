@@ -156,4 +156,5 @@ CONNECTOR = Connector(
     pipeline_declaration=_pipeline_declaration,
     prompt_fields_as_node_params=True,
     identity_config=_identity_config,
+    self_optimization=True,
 )

@@ -125,6 +125,9 @@ class Connector:
     serves_uploads: bool = False
     """A check-in may name it: it runs an uploaded table's rows, and nothing beside them."""
 
+    self_optimization: bool = False
+    """The recursion: a campaign on it is an L4 outer loop."""
+
     extract_experiment: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None
     """Set = the dataset's ``panel`` OWNS its rows, else the row ladder's. Rows in panel order:
     ``source_pin`` enters ``Sample.key``; a ``None`` ground truth IS the shape."""

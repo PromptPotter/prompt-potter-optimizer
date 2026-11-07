@@ -319,8 +319,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   `Session.index_terms`, `loop_start.py` and `origin.py`. Action: one call where the session opens,
   handing the connector's session the bank. **Rides with:** M7. **Re-test:**
   `git grep -n "index_terms" -- promptpotter`.
-- **`is_self_optimization` is decided by the name `promptpotter`** (`runner/inner/tasks.py`). Action: a
-  `Connector` declaration. **Rides with:** M4b. **Re-test:** `git grep -n "\"promptpotter\")" -- promptpotter/application/runner/inner/tasks.py`.
 - **DSPy splits the model string for pricing twice** — `dspy_module.py` meters `inline_route(model)`
   in the cell while core's `BackendClient.priced_as` splits the same string for the bound; they
   disagree when a dataset sets `provider`. Action: the cell takes the pair core bound. **Rides
