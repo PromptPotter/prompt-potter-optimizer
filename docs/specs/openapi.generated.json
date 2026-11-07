@@ -3989,6 +3989,12 @@
           },
           "source": {
             "description": "Where the value came from: default | campaign (operator-set) | required | manifest (an optimizer node's knob, as its manifest declares it)",
+            "enum": [
+              "default",
+              "campaign",
+              "required",
+              "manifest"
+            ],
             "title": "Source",
             "type": "string"
           },
