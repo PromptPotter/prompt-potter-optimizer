@@ -8625,7 +8625,6 @@
       "Leaf": {
         "description": "Where a campaign file's bytes count in the storage report.",
         "enum": [
-          "dataset",
           "connector",
           "state",
           "trace",
