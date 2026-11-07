@@ -570,6 +570,7 @@ def _read_subject(at: _Located, spec: Subject) -> _SubjectRead | None:
         cell_channels(head.point.bench),
         _cycle_facts(
             at.stores,
+            at.campaign,
             CycleHop(campaign_id=spec.campaign_id, cycle_id=head.cycle_dir.name),
             head.cycle_dir,
         ),
@@ -800,7 +801,7 @@ def _spend_to_round(by_round: Mapping[int, SpendRollup]) -> dict[str, float]:
     return out
 
 
-def _cycle_facts(stores: Stores, hop: CycleHop, cycle_dir: Path) -> _CycleFacts:
+def _cycle_facts(stores: Stores, campaign: Campaign, hop: CycleHop, cycle_dir: Path) -> _CycleFacts:
     chain = ledger_chain(CycleDir(cycle_dir), moment=None)
     scanned = scan_standing_rounds(chain)
     standing, series = scanned.rounds, scanned.level_series
@@ -810,8 +811,6 @@ def _cycle_facts(stores: Stores, hop: CycleHop, cycle_dir: Path) -> _CycleFacts:
     instrument_id = cycle_instrument(stores.campaigns.read_bank_partition(hop), standing)
     if instrument_id is None:
         raise NotFoundError(f"cycle {hop.cycle_id} drew no bank, so it names no instrument")
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    assert campaign is not None, "a subject resolves through its campaign's directory"
     opt = cycle_config(stores, campaign, hop).config.optimization
     scale = (
         None
