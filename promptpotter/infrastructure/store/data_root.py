@@ -320,7 +320,7 @@ LEAF_INFO: Worded[Leaf, LeafInfo] = Worded(
             "Connector", "What the backend produced: node-I/O cache and per-sample arrays.", False
         ),
         Leaf.STATE: LeafInfo("State", "Round checkouts, less their per-sample rows.", True),
-        Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: prompts, the Langfuse id map.", True),
+        Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: locks, the Langfuse id map.", True),
         Leaf.HISTORY: LeafInfo("History", "The loop's event spine: its ledger.", True),
         Leaf.REPORTS: LeafInfo(
             "Reports", "Readable output: manifest, reports, hard samples.", True
@@ -378,7 +378,6 @@ def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
             TypeAdapter(RoundAudit),
         ),
         CampaignRow(f"{where} langfuse state", f"{lf}/state.json", Leaf.TRACE, keepsake=True),
-        CampaignRow(f"{where} prompt", f"{at(cycle / 'prompts')}/**", Leaf.TRACE),
     )
 
 

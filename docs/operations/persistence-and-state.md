@@ -78,7 +78,7 @@ Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only 
         dashboard.json  index.json  export.json  optimized.md
         log.md  review.md  hard_samples.json  readout.log
         rounds/round_NNNN.json
-        langfuse/  prompts/
+        langfuse/                       # only when Langfuse is configured
         .runtime/
           ledger.jsonl                  # append-only spine
           producer.lock                 # what "attached" means

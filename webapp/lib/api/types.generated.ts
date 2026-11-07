@@ -5538,7 +5538,7 @@ export const VERIFY_STRATEGY_LABELS: Record<'random' | 'hard', string> = {
 export const LEAF_INFO: Record<Leaf, LeafInfo> = {
   "connector": { label: "Connector", description: "What the backend produced: node-I/O cache and per-sample arrays.", loop: false },
   "state": { label: "State", description: "Round checkouts, less their per-sample rows.", loop: true },
-  "trace": { label: "Trace", description: "Loop telemetry: prompts, the Langfuse id map.", loop: true },
+  "trace": { label: "Trace", description: "Loop telemetry: locks, the Langfuse id map.", loop: true },
   "history": { label: "History", description: "The loop's event spine: its ledger.", loop: true },
   "reports": { label: "Reports", description: "Readable output: manifest, reports, hard samples.", loop: true },
 };
