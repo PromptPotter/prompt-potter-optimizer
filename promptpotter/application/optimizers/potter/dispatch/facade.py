@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import sys
-from collections.abc import Iterator
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -52,13 +51,10 @@ from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPro
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.pool import BlockPool, DemoPool
 from promptpotter.domain.run_standing import rounds_without_advance
-from promptpotter.infrastructure.llm.telemetry import (
-    emit_round_warning,
-    reset_cycle_ledger,
-    set_cycle_ledger,
-)
+from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.errors import PromptCompositionError
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.run_scope import RunScope, scoped
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -212,14 +208,9 @@ class DispatchHub:
         return FilledPrompt(filled, injection_vars, rendered, coverage)
 
 
-@contextlib.contextmanager
-def _no_round_warnings() -> Iterator[None]:
+def _no_round_warnings() -> contextlib.AbstractContextManager[RunScope]:
     """A probe render must not emit: the operator would read a fresh warning about a truncation from rounds ago."""
-    token = set_cycle_ledger(None)
-    try:
-        yield
-    finally:
-        reset_cycle_ledger(token)
+    return scoped(ledger=None)
 
 
 def _silent_l1_panels(bundle: InjectionBundle) -> frozenset[str]:

@@ -106,7 +106,6 @@ from promptpotter.application.jobs.launcher.admission import (
     paid_pass,
 )
 from promptpotter.application.optimizer_manifest import (
-    binding_optimizer,
     select_optimizer,
 )
 from promptpotter.application.optimizers import nodes as node_contract
@@ -167,7 +166,7 @@ from promptpotter.application.runner.bench import (
 )
 from promptpotter.application.runner.campaign_result import bank_campaign_result, line_launches
 from promptpotter.application.runner.cycle_close import build_cycle_result
-from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
+from promptpotter.application.runner.inner.spawn_context import inner_spawn_of
 from promptpotter.application.runner.measurement import ReferencePairs
 from promptpotter.application.runner.round import announce_opening, execute_round, run_init
 from promptpotter.application.runner.termination import standing_tripped, target_tripped
@@ -333,11 +332,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     spending_under,
     unbounded_spend_book,
 )
-from promptpotter.infrastructure.llm.telemetry import (
-    at_round,
-    reset_cycle_ledger,
-    set_cycle_ledger,
-)
+from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import cycle_held, release_cycle
 from promptpotter.infrastructure.runtime_flags import derive_run_state, standing_controls
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -360,6 +355,7 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal
 from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
 from promptpotter.shared.plugin_registry import Registry
+from promptpotter.shared.run_scope import scoped
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
 
 _H2H_FORMULA = "env_reward"
@@ -1215,17 +1211,15 @@ def _peer_cycle(
             framing=TaskDecomposition(pipeline_purpose="Answer each query with its letter."),
         )
         cycle, callbacks = seated.cycle, seated.callbacks
-        bound = set_cycle_ledger(callbacks.ledger)
-        try:
-            publish_inner_spawn_context(cycle.session)
-            with binding_optimizer(
-                cycle.optimizer, determinism=cycle.config.optimization.determinism
-            ):
-                run_init(cycle, callbacks)
-                with spending_under(unbounded_spend_book() if book is None else book):
-                    yield cycle, callbacks
-        finally:
-            reset_cycle_ledger(bound)
+        with scoped(
+            ledger=callbacks.ledger,
+            spawn=inner_spawn_of(cycle.session),
+            optimizer=cycle.optimizer,
+            determinism=cycle.config.optimization.determinism,
+        ):
+            run_init(cycle, callbacks)
+            with spending_under(unbounded_spend_book() if book is None else book):
+                yield cycle, callbacks
 
 
 def _asked(body: dict[str, Any]) -> str:
@@ -3418,8 +3412,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         # A second RUNNING record is a new launch: the press the last one never reached is not its.
         commands.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
         assert standing_controls(command_dir).skips == ()
-        token = set_cycle_ledger(commands)
-        try:
+        with scoped(ledger=commands):
             assert not control.spend_skip(), "a skip no walk took cut the next launch's arm"
             taken = press(skip, "skip-2")
             assert control.spend_skip()
@@ -3444,8 +3437,6 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             commands.append(
                 RunPhaseRecord.stop(StopReason.PAUSED, cause=paused_by[0], detail=paused_by[1])
             )
-        finally:
-            reset_cycle_ledger(token)
     finally:
         release_cycle(command_dir)
     paused = derive_run_state(command_dir)
@@ -4574,9 +4565,11 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
 
     def cell(params: dict[str, Any], book_usd: float | None = None) -> MeasuredCell:
         async def measured() -> MeasuredCell:
-            # Bound in this run's own context, so nothing outlives it.
-            set_cycle_ledger(CycleEventLog(tmp_path / "harness.jsonl"))
-            with at_round(1), spending_under(spend_book(book_usd, usd_reserve=None)):
+            with (
+                scoped(ledger=CycleEventLog(tmp_path / "harness.jsonl")),
+                at_round(1),
+                spending_under(spend_book(book_usd, usd_reserve=None)),
+            ):
                 return await measure_sample(row, session, params)
 
         return asyncio.run(measured())

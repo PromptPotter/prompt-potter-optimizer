@@ -58,7 +58,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         ctx.round_num,
         len(drafts),
     )
-    declare_gate(session, "arms", drafts=drafts)
+    declare_gate(ctx.callbacks.ledger, "arms", drafts=drafts)
 
     def _take() -> list[Proposal] | None:
         standing = session.state.control.standing_submission()
@@ -79,5 +79,5 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
     arms = await hold_for_operator(session, _take, node=OPERATOR_SEAT.name, round_num=ctx.round_num)
     if arms is None:
         raise StopLoop(StopReason.PAUSED)
-    declare_running(session)
+    declare_running(ctx.callbacks.ledger)
     return arms

@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import ast
 import asyncio
-import contextvars
+import contextlib
 import inspect
 import json
 import os
@@ -63,13 +63,18 @@ from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.maintenance.landing import plan_landing
 from promptpotter.application.optimizer_manifest import (
-    binding_prompt_overrides,
     manifest_directories,
     running_prompt,
     select_optimizer,
 )
 from promptpotter.application.runner.inner.connector import measurement_modules
-from promptpotter.config.paths import PROJECTS_DIR, default_projects_root, install_datasets_root
+from promptpotter.config.paths import (
+    PROJECTS_DIR,
+    default_projects_root,
+    install_datasets_root,
+    optimizer_manifest_path,
+    user_data_root,
+)
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
@@ -88,6 +93,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
+from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import RunMode
@@ -101,7 +107,6 @@ from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
-    bind_memory_scope,
     list_populations,
     load_population,
 )
@@ -113,9 +118,10 @@ from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
+from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable, Sequence
+    from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
@@ -557,12 +563,34 @@ def text_templates(config: CampaignConfig) -> dict[str, str]:
     }
 
 
-def edited_proposer(config: CampaignConfig) -> dict[str, dict[str, Any]]:
-    """Appended, so the fake still knows the node by its template's opening."""
+@contextlib.contextmanager
+def edited_proposer(config: CampaignConfig) -> Iterator[None]:
+    """The proposer's template edited in the install's shadow of its manifest, as an operator's
+    edit lands (`config/paths.py::optimizer_manifest_path`); appended, so the fake still knows the
+    node by its template's opening."""
     selected = select_optimizer(config.optimization)
     node = selected.proposer
-    held = running_prompt(node, selected.node_config(node), selected.manifest)
-    return {node: {"problem_description": f"{held.problem_description}\n\nEdited on resume."}}
+    node_config = selected.node_config(node)
+    key = prompt_key(node_config)
+    held = running_prompt(node, node_config, selected.manifest)
+    for directory in manifest_directories(selected.name):
+        authored = yaml.safe_load(optimizer_manifest_path(directory).read_text(encoding="utf-8"))
+        if key in (authored.get("resolved_prompts") or {}):
+            break
+    else:
+        raise SystemExit(f"offline run: no manifest {selected.name!r} reads holds {key!r}")
+    authored["resolved_prompts"][key]["problem_description"] = (
+        f"{held.problem_description}\n\nEdited on resume."
+    )
+    shadow = user_data_root() / "optimizers" / directory.name / "pipeline.yaml"
+    shadow.parent.mkdir(parents=True, exist_ok=True)
+    shadow.write_text(yaml.safe_dump(authored, sort_keys=False, allow_unicode=True), "utf-8")
+    try:
+        if optimizer_manifest_path(directory) != shadow:
+            raise SystemExit(f"offline run: the install's manifest shadow {shadow} is not read")
+        yield
+    finally:
+        shadow.unlink()
 
 
 def closed_a_round(stores: Stores, hop: CycleHop) -> bool:
@@ -701,7 +729,7 @@ async def run_one(
         shutil.rmtree(stores.campaigns.layout(session.hop).rounds)
         paused = session.hop
         session = await rebound_session(stores, paused)
-        with binding_prompt_overrides(edited_proposer(config) if diverge else None):
+        with edited_proposer(config) if diverge else contextlib.nullcontext():
             session, result = await run_campaign(
                 session,
                 readout_sink=print,
@@ -1066,18 +1094,18 @@ async def run_controlled(
     assert bank is not None, "every arm ran on the labelled bank"
 
     def memory(campaign_id: str) -> set[str]:
-        bind_memory_scope(ArmOf(walks(campaign_id), ruler_version=0))
-        return {
-            answer.answer
-            for entry in list_populations(stores, bank)
-            for answer in load_population(stores, entry, bank)
-        }
+        with scoped(memory=ArmOf(walks(campaign_id), ruler_version=0)):
+            return {
+                answer.answer
+                for entry in list_populations(stores, bank)
+                for answer in load_population(stores, entry, bank)
+            }
 
     foreign_only = set().union(*(filed(c) for c in subjects)) - set().union(
         *(filed(c) for _, c in arms.values())
     )
     for name, (_, cid) in arms.items():
-        seen = contextvars.copy_context().run(memory, cid)
+        seen = memory(cid)
         walked = filed(cid)
         if seen & foreign_only or not seen <= walked:
             raise SystemExit(f"offline run: arm {name}'s memory reads an answer it did not walk")

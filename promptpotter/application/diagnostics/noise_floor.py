@@ -63,76 +63,76 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Noi
             f"origin arm in {hop.campaign_id}/{hop.cycle_id} round 0 carries no scored samples."
         )
 
-    opened = await open_diagnostic(stores, hop, source=RunSource.NOISE_FLOOR)
-    session = opened.session
-    schema = session.pipeline_schema
-    jsp = opened.points.measured(origin)
-    scoring_set = [s for s in session.bank.samples if s.key in sample_keys]
-    if not scoring_set:
-        raise DiagnosticError(
-            f"none of round 0's {len(sample_keys)} scored sample(s) is in the bank the cycle drew."
-        )
-    config_hash = jsp.sp_hash(schema)
-    source = round_file.fold
-    if source is None or (source_composite := source.composite_fitness) is None:
-        raise DiagnosticError(
-            f"round 0 of {hop.campaign_id}/{hop.cycle_id} read no cell, so there is no recorded "
-            "composite for the band to stand beside."
-        )
-
-    logger.info(
-        "noise-floor %s/%s: re-scoring origin C0 %dx (force_fresh) on %d samples",
-        hop.campaign_id,
-        hop.cycle_id,
-        k,
-        len(scoring_set),
-    )
-    composites: list[float] = []
-    accuracies: list[float] = []
-    for i in range(k):
-        with diagnostic_trace(stores, hop):
-            scored = await diagnostic_pass(
-                score_search_point(
-                    jsp,
-                    scoring_set,
-                    session,
-                    label=f"noise_floor_{i}",
-                    measured=None,
-                    force_fresh=True,
-                ),
-            )
-        accuracy, composite = scored.scores.accuracy, scored.scores.composite_fitness
-        if accuracy is None or composite is None:
+    async with open_diagnostic(stores, hop, source=RunSource.NOISE_FLOOR) as opened:
+        session = opened.session
+        schema = session.pipeline_schema
+        jsp = opened.points.measured(origin)
+        scoring_set = [s for s in session.bank.samples if s.key in sample_keys]
+        if not scoring_set:
             raise DiagnosticError(
-                f"noise-floor rescore {i + 1}/{k} of {hop.campaign_id}/{hop.cycle_id} measured no "
-                f"cell — the band would describe the outage, not the backend."
+                f"none of round 0's {len(sample_keys)} scored sample(s) is in the bank the cycle drew."
             )
-        composites.append(composite)
-        accuracies.append(accuracy)
-        logger.info("noise-floor rescore %d/%d: composite=%.4f", i + 1, k, composite)
+        config_hash = jsp.sp_hash(schema)
+        source = round_file.fold
+        if source is None or (source_composite := source.composite_fitness) is None:
+            raise DiagnosticError(
+                f"round 0 of {hop.campaign_id}/{hop.cycle_id} read no cell, so there is no recorded "
+                "composite for the band to stand beside."
+            )
 
-    band = mean_ci(composites)
-    assert band is not None  # a RescoreCount is two or more
-    mean_composite, ci_lo, ci_hi = band
+        logger.info(
+            "noise-floor %s/%s: re-scoring origin C0 %dx (force_fresh) on %d samples",
+            hop.campaign_id,
+            hop.cycle_id,
+            k,
+            len(scoring_set),
+        )
+        composites: list[float] = []
+        accuracies: list[float] = []
+        for i in range(k):
+            with diagnostic_trace(stores, hop):
+                scored = await diagnostic_pass(
+                    score_search_point(
+                        jsp,
+                        scoring_set,
+                        session,
+                        label=f"noise_floor_{i}",
+                        measured=None,
+                        force_fresh=True,
+                    ),
+                )
+            accuracy, composite = scored.scores.accuracy, scored.scores.composite_fitness
+            if accuracy is None or composite is None:
+                raise DiagnosticError(
+                    f"noise-floor rescore {i + 1}/{k} of {hop.campaign_id}/{hop.cycle_id} measured no "
+                    f"cell — the band would describe the outage, not the backend."
+                )
+            composites.append(composite)
+            accuracies.append(accuracy)
+            logger.info("noise-floor rescore %d/%d: composite=%.4f", i + 1, k, composite)
 
-    record = DiagnosticRunRecord(
-        ts=utcnow_iso(),
-        dataset=opened.campaign.dataset_name,
-        source_campaign=hop.campaign_id,
-        source_cycle=hop.cycle_id,
-        source_candidate_id=origin.individual.id,
-        config_hash=config_hash[:12],
-        workspace_n=len(scoring_set),
-        workspace_accuracy=sum(accuracies) / len(accuracies),
-        source_campaign_accuracy=source.accuracy,
-        source_campaign_composite=source_composite,
-        source_campaign_n=source.total,
-        noise_floor_k=k,
-        noise_floor_mean=mean_composite,
-        noise_floor_ci_lo=ci_lo,
-        noise_floor_ci_hi=ci_hi,
-        noise_floor_raw=composites,
-    )
-    path = stores.diagnostic_runs.save(record)
-    logger.info("noise-floor: wrote diagnostic-run record → %s", path)
-    return NoiseFloorOutcome(record=record, artifact_path=str(path))
+        band = mean_ci(composites)
+        assert band is not None  # a RescoreCount is two or more
+        mean_composite, ci_lo, ci_hi = band
+
+        record = DiagnosticRunRecord(
+            ts=utcnow_iso(),
+            dataset=opened.campaign.dataset_name,
+            source_campaign=hop.campaign_id,
+            source_cycle=hop.cycle_id,
+            source_candidate_id=origin.individual.id,
+            config_hash=config_hash[:12],
+            workspace_n=len(scoring_set),
+            workspace_accuracy=sum(accuracies) / len(accuracies),
+            source_campaign_accuracy=source.accuracy,
+            source_campaign_composite=source_composite,
+            source_campaign_n=source.total,
+            noise_floor_k=k,
+            noise_floor_mean=mean_composite,
+            noise_floor_ci_lo=ci_lo,
+            noise_floor_ci_hi=ci_hi,
+            noise_floor_raw=composites,
+        )
+        path = stores.diagnostic_runs.save(record)
+        logger.info("noise-floor: wrote diagnostic-run record → %s", path)
+        return NoiseFloorOutcome(record=record, artifact_path=str(path))

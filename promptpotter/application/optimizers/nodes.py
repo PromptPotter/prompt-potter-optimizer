@@ -309,12 +309,16 @@ class LlmNode(NodeMember):
     phase: ClassVar[OptimizerPhase | None] = None
     # Node config keys it moves mid-run, by the node it moves them on.
     steers: ClassVar[Mapping[str, frozenset[str]]] = {}
-    # Params beyond the prompt fields an L4 override of this node carries, by JSON type.
+    # Config keys beyond the call keys and prompt fields an overlay of this node may lay, by JSON type.
     outer_levers: ClassVar[Mapping[str, str]] = {}
 
     def resolved_levers(self, _declared: Mapping[str, Any]) -> dict[str, Any]:
-        """The L4 override levers its optimizer resolves itself, as they RESOLVE: the inner cell's identity reads them."""
+        """Its laid levers as they RESOLVE, the one form its render and the inner cell's identity read."""
         return {}
+
+    def lever_refusals(self, _declared: Mapping[str, Any]) -> list[str]:
+        """Why its laid levers cannot render, which selection refuses (`optimizer_manifest.py::_select`)."""
+        return []
 
 
 @dataclass(frozen=True)

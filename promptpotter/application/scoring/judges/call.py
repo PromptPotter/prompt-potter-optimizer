@@ -4,9 +4,8 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager, suppress
-from contextvars import ContextVar
+from collections.abc import Callable, Mapping
+from contextlib import suppress
 
 import httpx
 
@@ -22,26 +21,15 @@ from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
     current_round,
 )
-from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
+from promptpotter.infrastructure.store.llm_reuse_cache import hash_call
 from promptpotter.shared.errors import (
     CellSendRefusedError,
     SendRefusedError,
     UngeneratedRequestError,
 )
+from promptpotter.shared.run_scope import run_scope
 
 logger = logging.getLogger(__name__)
-
-
-_CACHE: ContextVar[LLMReuseCache | None] = ContextVar("judge_reuse_cache", default=None)
-
-
-@contextmanager
-def bind_cache(cache: LLMReuseCache | None) -> Iterator[None]:
-    token = _CACHE.set(cache)
-    try:
-        yield
-    finally:
-        _CACHE.reset(token)
 
 
 async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
@@ -49,10 +37,11 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
 
     The REPLY is cached, never the verdict — keyed by ``hash_call`` over the rendered prompt and
     model / provider / temperature / max_tokens, so a changed ``_parse`` or ``to_score`` re-derives.
-    The cache replays, meters and keeps it (`LLMReuseCache.answer`).
+    The cache replays, meters and keeps it (`LLMReuseCache.answer`): the run scope's, its
+    store's `judge_reuse`, or none outside a scoring scope.
     """
     started = time.monotonic()
-    cache = _CACHE.get()
+    cache = run_scope().judge_cache
 
     async def send() -> LLMResponse:
         # The catch covers the provider's reply alone: the cache's own replay, meter and keep raise.

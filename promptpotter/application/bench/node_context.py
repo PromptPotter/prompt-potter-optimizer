@@ -483,7 +483,7 @@ class Calls(CycleRead):
         return LLMCallContext(
             node=self._member.name,
             config=self._cycle.optimizer.node_config(self._member.name),
-            ledger=session.state.ledger,
+            ledger=self._round.callbacks.ledger,
             round_num=self._round.round_num,
             candidate_idx=idx,
             cache=session.store.optimizer_reuse,

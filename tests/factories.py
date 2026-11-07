@@ -415,7 +415,6 @@ def loop_session(
     partition: BankPartition | None = None,
     control: RunControl | None = None,
     hop: CycleHop | None = None,
-    ledger: CycleEventLog | None = None,
     dataset: ResolvedDataset | None = None,
     dataset_name: str | None = None,
 ) -> Session:
@@ -435,7 +434,6 @@ def loop_session(
         cycle_id="" if hop is None else hop.cycle_id,
         drawn=None if hop is None else partition,
         state=LaunchState(
-            ledger=ledger,
             scoring=ScorerSetup(scorer=scorer, partition=partition),
             source=RunSource.OPTIMIZATION_LOOP,
             control=RunControl() if control is None else control,
@@ -494,7 +492,6 @@ def seat(
         partition=partition_bank(list(bank), config.dataset_split, seed=config.run_seed),
         control=control,
         hop=hop,
-        ledger=ledger,
         dataset_name=dataset_name,
     )
     selected = select_optimizer(config.optimization)

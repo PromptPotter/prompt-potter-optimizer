@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, assert_never
 
@@ -15,6 +14,7 @@ from promptpotter.infrastructure.store.io import write_jsonl
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile, standing
 from promptpotter.infrastructure.store.read_model import LedgerSpan, read_rows
 from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.run_scope import run_scope
 
 if TYPE_CHECKING:
     from promptpotter.domain.ruler import RulerReach
@@ -55,23 +55,20 @@ class CellOf(NamedTuple):
 
 type MemoryScope = OpenAt | ArmOf | CellOf
 
-# Unbound reads the archive whole: a served read outside every run.
-_UNBOUND = OpenAt()
-_SCOPE: ContextVar[MemoryScope] = ContextVar("memory_scope", default=_UNBOUND)
-
-
-def bind_memory_scope(scope: MemoryScope) -> None:
-    """Inside the task it scopes."""
-    _SCOPE.set(scope)
-
 
 def memory_scope() -> MemoryScope:
-    return _SCOPE.get()
+    """The run scope's: a read outside a run names its own (`run_scope.py::scoped`), never the whole archive by default."""
+    if (scope := run_scope().memory) is None:
+        raise RuntimeError(
+            "no memory scope is named, so what this read remembers is unknown: a run takes its "
+            "purpose's at its scope, and a read outside one names its own"
+        )
+    return scope
 
 
 def _remembered() -> Callable[[FiledAnswer], bool] | None:
     """An open span grows with its ledger, so a walk is remembered once its record lands."""
-    match scope := _SCOPE.get():
+    match scope := memory_scope():
         case OpenAt():
             return None
         case ArmOf(walks=walks) | CellOf(walks=walks):
@@ -83,7 +80,7 @@ def _remembered() -> Callable[[FiledAnswer], bool] | None:
 
 def every_campaign_now() -> bool:
     """Whether this task's memory is the whole archive as it stands: the one a shared fold serves."""
-    match scope := _SCOPE.get():
+    match scope := memory_scope():
         case OpenAt():
             return True
         case ArmOf() | CellOf():

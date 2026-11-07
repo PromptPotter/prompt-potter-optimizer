@@ -7,7 +7,7 @@ from promptpotter.application.bench.node_context import Calls
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     checkin_manifest,
-    node_prompt,
+    running_prompt,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     validate_template,
@@ -29,8 +29,8 @@ def base_optimizer_template(inner: SelectedOptimizer, name: str) -> OptimizerPro
     """L4-override-free: the bench's check-in where it declares *name*, else *inner*'s under its overlay's edits."""
     checkin = checkin_manifest()
     if checkin.schema.get_node(name) is not None:
-        return node_prompt(name, checkin.config, checkin.manifest)
-    return node_prompt(name, inner.node_config(name), inner.manifest)
+        return running_prompt(name, checkin.config, checkin.manifest)
+    return running_prompt(name, inner.node_config(name), inner.manifest)
 
 
 def inner_template(cells: InnerCells, name: str) -> OptimizerPromptTemplate | None:

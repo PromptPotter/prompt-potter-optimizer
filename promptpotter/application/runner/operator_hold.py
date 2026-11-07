@@ -8,6 +8,7 @@ import time
 from typing import TYPE_CHECKING
 
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -24,7 +25,7 @@ async def hold_for_operator[T](
     """What *take* first answers, or ``None`` where a pause reached the hold before an answer did."""
     beat = asyncio.create_task(
         heartbeat(
-            session.state.ledger,
+            active_cycle_ledger(),
             call_id=f"{node}:{session.cycle_id}",
             node=node,
             round_num=round_num,

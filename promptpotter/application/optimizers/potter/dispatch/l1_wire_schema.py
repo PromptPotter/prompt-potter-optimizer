@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.optimizer_manifest import resolve_node_override
+from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     BLOCK_ID_INSTRUCTION,
     LAYOUT_SCHEMA_INSTRUCTION,
@@ -57,11 +57,7 @@ def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
 
 def effective_l1_field_names() -> dict[str, str]:
     """Unconditional: gating on the INNER cycle's own config would emit a rename nothing applied, then score it."""
-    proposed = resolve_node_override("l1_generate").schema_field_names
-    if not proposed:
-        return {}
-    survivors = set(L1Variant.model_fields) - set(proposed)
-    return {f: w for f, w in proposed.items() if f in L1Variant.model_fields and w not in survivors}
+    return dict(bound_optimizer().levers("l1_generate").get(SCHEMA_RENAME_PARAM, {}))
 
 
 def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str]) -> None:

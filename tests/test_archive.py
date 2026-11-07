@@ -85,7 +85,7 @@ from promptpotter.application.origin import (
     try_inherit_fork_origin,
 )
 from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
-from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
+from promptpotter.application.runner.inner.spawn_context import inner_spawn_of
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.round import run_init
 from promptpotter.application.scoring import query_loop, search_point_scorer
@@ -144,14 +144,12 @@ from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
-from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
     SampleFoldRow,
     bench_reads,
-    bind_memory_scope,
     list_populations,
     load_population,
     sample_fold_rows,
@@ -176,6 +174,7 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
+from promptpotter.shared.run_scope import rescope, scoped
 
 _CAMPAIGN = "testds__20260101-000000"
 
@@ -217,17 +216,16 @@ def _walk_panel(
             predicted=predicted,
         )
 
-    bound = set_cycle_ledger(CycleEventLog(root / "walk.jsonl" if ledger is None else ledger))
     measured = None if ledger is None else MeasuredPass(individual_id="arm")
-    try:
-        with mock.patch.object(query_loop, "measure_sample", _measure):
-            walked = asyncio.run(
-                search_point_scorer.score_search_point(
-                    sp, panel, session, label="panel", measured=measured
-                )
+    with (
+        scoped(ledger=CycleEventLog(root / "walk.jsonl" if ledger is None else ledger)),
+        mock.patch.object(query_loop, "measure_sample", _measure),
+    ):
+        walked = asyncio.run(
+            search_point_scorer.score_search_point(
+                sp, panel, session, label="panel", measured=measured
             )
-    finally:
-        reset_cycle_ledger(bound)
+        )
     return session, walked
 
 
@@ -510,7 +508,7 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
 
     def inside_arm() -> tuple[set[str], list[str], list[SampleFoldRow]]:
         walk(arm_root, bank("origin", ["yes", "no"], 3))
-        bind_memory_scope(ArmOf(CampaignWalks(campaigns, "arm"), ruler_version=0))
+        rescope(memory=ArmOf(CampaignWalks(campaigns, "arm"), ruler_version=0))
         assert listed() == {"origin"}, "the arm saw a population its campaign never walked"
         # A cycle the campaign mints after the fence (a rebase, a fork) is its own too, and a
         # replayed answer joins the arm's memory once its walk lands there.
@@ -1636,7 +1634,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             origin=(repair_origin, lambda _s: sheet(rows)),
         )
         cycle, callbacks = running.cycle, running.callbacks
-        publish_inner_spawn_context(cycle.session)
+        rescope(spawn=inner_spawn_of(cycle.session))
         run_init(cycle, callbacks)
         # Round 1's arm ran to its end on cell 3 and came back with no measurement.
         hole = measurement(
@@ -1676,18 +1674,13 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 )
             )
         set_cycle(cycle, line=line)
-        bound = set_cycle_ledger(callbacks.ledger)
-        try:
-            with (
-                mock.patch.object(query_loop, "measure_sample", _answered),
-                spending_under(unbounded_spend_book()),
-            ):
-                before = round_packages(cycle, line, callbacks)
-                branch_id = asyncio.run(
-                    apply_correction(cycle, line, before, repair_bank, callbacks)
-                )
-        finally:
-            reset_cycle_ledger(bound)
+        with (
+            scoped(ledger=callbacks.ledger),
+            mock.patch.object(query_loop, "measure_sample", _answered),
+            spending_under(unbounded_spend_book()),
+        ):
+            before = round_packages(cycle, line, callbacks)
+            branch_id = asyncio.run(apply_correction(cycle, line, before, repair_bank, callbacks))
         assert branch_id is not None, "a holed round was carried as it ran"
         return hop, hop.model_copy(update={"cycle_id": branch_id})
 
@@ -1752,7 +1745,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
         )
         cycle, session = ctx.cycle, ctx.cycle.session
         session.state.clock = LaunchClock.now()
-        publish_inner_spawn_context(session)
+        rescope(spawn=inner_spawn_of(session))
         ctx.callbacks.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
         if replayed:
             # The origin a resume replays stands on its close (`closed_rounds.py::closed_rounds`).
@@ -1761,12 +1754,8 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
                 cycle,
                 line=[cycle.origin_round.model_copy(update={"at_offset": closed.at_offset})],
             )
-        bound = set_cycle_ledger(ctx.callbacks.ledger)
-        try:
-            with spending_under(unbounded_spend_book()):
-                end = asyncio.run(run_round_loop(cycle, [], cycle.config, session, ctx.callbacks))
-        finally:
-            reset_cycle_ledger(bound)
+        with scoped(ledger=ctx.callbacks.ledger), spending_under(unbounded_spend_book()):
+            end = asyncio.run(run_round_loop(cycle, [], cycle.config, session, ctx.callbacks))
         if not crashes:
             ctx.callbacks.ledger.append(RunPhaseRecord.stop(end.stop_reason))
         return end.stop_reason

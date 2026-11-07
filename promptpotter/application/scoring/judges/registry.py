@@ -12,7 +12,6 @@ from promptpotter.application.scoring.evaluators import (
     NameOwner,
     validate_campaign_evaluator,
 )
-from promptpotter.application.scoring.judges.call import bind_cache
 from promptpotter.application.scoring.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
 from promptpotter.application.scoring.judges.simpleqa import SEALQA, SIMPLEQA
 from promptpotter.domain.judges import Judge, JudgeSpec
@@ -22,7 +21,6 @@ from promptpotter.shared.plugin_registry import Registry
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import MeasuredCell
-    from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 
 
 ENTRY_POINT_GROUP = "promptpotter.judges"
@@ -77,11 +75,10 @@ async def _compute(
     result: MeasuredCell,
     judge: Judge,
     spec: JudgeSpec,
-    cache: LLMReuseCache | None = None,
     **_: Any,
 ) -> JudgedTerm:
-    with bind_cache(cache):
-        verdict = await judge.grade(spec, result)
+    # Its replies cache in the run scope's `judge_cache` (`call.py::ask`).
+    verdict = await judge.grade(spec, result)
     return JudgedTerm(
         verdict.score,
         JudgeReading(
@@ -94,7 +91,6 @@ def build_evaluators(
     specs: Mapping[str, JudgeSpec],
     *,
     beside: Sequence[NameOwner],
-    cache: LLMReuseCache | None = None,
 ) -> tuple[Evaluator, ...]:
     """``beside``: the names the campaign binds beyond the package's, refused as terms."""
     out: list[Evaluator] = []
@@ -117,7 +113,7 @@ def build_evaluators(
             name=term,
             description=judge.description,
             scope="per_sample",
-            compute=partial(_compute, judge=judge, spec=spec, cache=cache),
+            compute=partial(_compute, judge=judge, spec=spec),
             # Undefined, not zero, on a verifier-graded bank: `materialize_sample_values` skips it.
             needs_labels=judge.needs_gold,
         )

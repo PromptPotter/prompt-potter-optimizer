@@ -10,10 +10,10 @@ from promptpotter.application.initialization.loop_start import (
     cycle_partition,
     finalize_loop_state,
     init_optimization_loop,
-    scope_memory,
+    session_scope,
 )
 from promptpotter.application.initialization.session import LaunchClock, Session
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, binding_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.nodes import Controller
 from promptpotter.application.run_observers import (
     RunObservers,
@@ -27,7 +27,6 @@ from promptpotter.application.runner.campaign_result import (
     declare_line_bench,
 )
 from promptpotter.application.runner.cycle_close import close_cycle
-from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.run_prep import (
     PreparedRun,
@@ -66,6 +65,7 @@ from promptpotter.infrastructure.llm.telemetry import at_round, bind_priced
 from promptpotter.infrastructure.producer_lock import release_cycle
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
 from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.run_scope import rescope, scoped
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +229,8 @@ def _onto_fork(
         campaign_config=campaign_config,
         forked_from=observers,
     )
+    # The line's every emit lands on the cycle it moved onto, under the launch's one scope.
+    rescope(ledger=observers.callbacks.ledger)
     arm_run_controls(session, observers)
     return observers
 
@@ -334,7 +336,8 @@ async def run_optimization(
     budget: HeldBudget,
     optimizer: SelectedOptimizer,
 ) -> tuple[Session, CycleResult]:
-    """*observers* MUST be pre-built (ledger bound before origin); *dataset* is the whole bank.
+    """*observers* MUST be pre-built: their ledger is the run scope's, bound here before origin;
+    *dataset* is the whole bank.
 
     Answers the session the run ENDED on: a fork run init or a rebase took is a cycle of its own.
     """
@@ -344,12 +347,15 @@ async def run_optimization(
     session.state.clock = LaunchClock.now()
     try:
         # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
+        # The run's one scope (`run_scope.py`); a cell's run nests its own inside the spawner's.
         with (
             at_round(0),
-            binding_optimizer(
-                optimizer,
+            scoped(
+                ledger=observers.callbacks.ledger,
+                optimizer=optimizer,
                 determinism=run_clamp(campaign_config.optimization.determinism, session.purpose),
             ),
+            session_scope(session),
         ):
             diagnosing = optimizer.plan.controller if mode.diag else None
             if mode.diag and diagnosing is None:
@@ -357,7 +363,6 @@ async def run_optimization(
                     f"--diag shows what an optimizer's controller does at a round boundary, and "
                     f"{optimizer.name} declares no controller node"
                 )
-            scope_memory(session)
             partition = cycle_partition(session, dataset, campaign_config)
             dataset = list(partition.search)
             # Before this launch takes a cell: a re-read of a cell the campaign priced prices nothing.
@@ -366,8 +371,6 @@ async def run_optimization(
                 scan_ledger_priced_keys(campaigns.campaign_cycle_ledgers(session.campaign_id))
             )
             refresh_rates_in_background()
-            # Unconditional: the runner cannot know a child will recurse.
-            publish_inner_spawn_context(session)
             # Fresh per launch, keeping only the cycles this run measures FOR.
             session.state.control = RunControl(enclosing=session.state.control.enclosing)
             try:

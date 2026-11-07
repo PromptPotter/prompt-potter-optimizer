@@ -41,6 +41,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import ORIGIN_FILE, ResolvedDataset
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.errors import PayloadInvalidError
@@ -77,7 +78,7 @@ def lock_criterion(
         parse_dials(block[DIALS_KEY], terms), origin_anchors(origin_rows, terms), terms
     )
     locked = {k: v for k, v in block.items() if k != DIALS_KEY} | {"per_cell": formula}
-    if (ledger := session.state.ledger) is not None:
+    if (ledger := active_cycle_ledger()) is not None:
         ledger.append(ScoringLockedRecord(declared=dict(block), locked=locked))
     return locked
 

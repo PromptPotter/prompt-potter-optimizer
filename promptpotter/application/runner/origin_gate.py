@@ -29,12 +29,10 @@ logger = logging.getLogger(__name__)
 _DECISIONS: tuple[str, ...] = get_args(GateDecision)
 
 
-def pass_origin_gate(session: Session, *, by: str) -> None:
+def pass_origin_gate(cb: RunCallbacks, *, by: str) -> None:
     """The operator's override, a decision of round 0: every later launch of the cycle reads it."""
-    ledger = session.state.ledger
-    assert ledger is not None, "build_run_observers must bind state.ledger before the gate"
     record_decision(
-        ledger,
+        cb.ledger,
         BenchCheckpointKind.ORIGIN_GATE_PASS,
         {},
         "proceed",
@@ -86,7 +84,7 @@ async def run_origin_gate(
                 f"\n  [ORIGIN GATE: {grade}] type {keys} then Enter (or use the webapp):",
                 flush=True,
             )
-        declare_gate(session, "origin")
+        declare_gate(cb.ledger, "origin")
 
         outcome = await hold_for_operator(
             session, session.state.control.take_gate_decision, node="origin_gate", round_num=0
@@ -101,8 +99,8 @@ async def run_origin_gate(
                 "Origin gate: proceed — entering L1 against a %s origin (operator override).",
                 grade,
             )
-            pass_origin_gate(session, by="proceed")
-            declare_running(session)
+            pass_origin_gate(cb, by="proceed")
+            declare_running(cb.ledger)
             return None
 
         logger.warning("Origin gate: re-scoring the origin force-fresh.")
@@ -117,7 +115,7 @@ async def run_origin_gate(
         if origin_gate_tripped(cycle.origin_round.health, mode) is None:
             new_grade = cycle.origin_round.health.grade
             logger.warning("Origin gate: re-scored origin is %s — entering L1.", new_grade)
-            declare_running(session)
+            declare_running(cb.ledger)
             return None
 
 

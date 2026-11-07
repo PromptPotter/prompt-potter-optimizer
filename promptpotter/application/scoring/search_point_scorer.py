@@ -22,7 +22,7 @@ from promptpotter.domain.spend import ROLE_SPEND_KIND
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.spend_book import bound_spend_book
-from promptpotter.infrastructure.llm.telemetry import current_round, filed_as
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, current_round, filed_as
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.measurement_context import (
@@ -155,7 +155,7 @@ async def _claim_cell(
             if waiting is None:
                 waiting = asyncio.create_task(
                     heartbeat(
-                        session.state.ledger,
+                        active_cycle_ledger(),
                         call_id=f"scoring:{sample.id}",
                         node="backend_scoring",
                         round_num=current_round(),

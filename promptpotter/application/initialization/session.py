@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.run_records import BackendRevision
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.domain.validators import StopRule
-    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
@@ -76,7 +75,6 @@ class LaunchState:
     clock: LaunchClock | None = None
     resumed_from_round: int = 1
     audit_projection: AuditTrailProjection | None = None
-    ledger: CycleEventLog | None = None
     scoring: ScorerSetup = field(default_factory=ScorerSetup)
     source: RunSource | None = None
     # Seeded off the cycle's index at init; afterwards written only by `record_intervention`.

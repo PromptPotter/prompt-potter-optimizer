@@ -45,6 +45,7 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import node_lay
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1CritiqueOutput,
     L1GenerateOutput,
+    L1Variant,
     L2ContextOutput,
     L2RecombiningOutput,
     L2TerminatingOutput,
@@ -245,6 +246,35 @@ class L1Generate(LayoutNode, nodes.Proposer):
     @property
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation})
+
+    def resolved_levers(self, declared: Mapping[str, Any]) -> dict[str, Any]:
+        """The rename with each wire name stripped, here alone; an empty one renames nothing."""
+        rename = declared.get(SCHEMA_RENAME_PARAM)
+        if not isinstance(rename, Mapping):
+            return {} if rename is None else {SCHEMA_RENAME_PARAM: rename}
+        stripped = {f: w.strip() if isinstance(w, str) else w for f, w in rename.items()}
+        return {SCHEMA_RENAME_PARAM: stripped} if stripped else {}
+
+    def lever_refusals(self, declared: Mapping[str, Any]) -> list[str]:
+        """A rename the emission and the parse twin cannot both apply, which would fail every parse."""
+        rename = self.resolved_levers(declared).get(SCHEMA_RENAME_PARAM)
+        if rename is None:
+            return []
+        if not isinstance(rename, Mapping):
+            return [f"{SCHEMA_RENAME_PARAM} is no field-to-name map"]
+        fields = set(L1Variant.model_fields)
+        taken = [*rename.values(), *(fields - set(rename))]
+        refused: list[str] = []
+        for field, wire in rename.items():
+            if field not in fields:
+                refused.append(f"{SCHEMA_RENAME_PARAM} renames {field!r}, no L1 variant field")
+            elif not isinstance(wire, str) or not wire.isidentifier() or wire == field:
+                refused.append(
+                    f"{SCHEMA_RENAME_PARAM} renames {field!r} to {wire!r}, no new identifier"
+                )
+            elif taken.count(wire) > 1:
+                refused.append(f"{SCHEMA_RENAME_PARAM} names {wire!r} for two fields")
+        return refused
 
     def arms(self, selected: SelectedOptimizer) -> int:
         knobs = selected.knobs_of(self.name, L1GenerateKnobs)

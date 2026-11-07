@@ -387,7 +387,7 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
 (operator, 2026-11-04).
 
 **Decided once, read by every arc below.**
-- **Two carriers.** The run's `RunScope` (§ Config resolution and run scope, item 4), bound once where the
+- **Two carriers.** The run's `shared/run_scope.py::RunScope`, bound once where the
   cycle opens, carries the plan, the ledger and the sender. The member's node context yields a per-call
   context holding node, config, round and index only. A `ContextVar` that stays propagates within one
   task. U2 binds `RunScope`, S fills its sender, the potter arc deletes the bundle. **Re-test:**
@@ -421,7 +421,7 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
   `runner/run_prep.py::prepare_run`, `origin.py::establish_campaign_origin` and
   `initialization/loop_start.py::finalize_loop_state` write `session.state` from eight modules, and ORIGIN
   starts before INIT. Action: `open_cycle` in `runner/`, INIT then ORIGIN; it is § Config resolution
-  items 4 and 5 made concrete. **Re-test:** `git grep -c "session.state.[a-z_]* =" -- promptpotter/application`.
+  item 5 made concrete. **Re-test:** `git grep -c "session.state.[a-z_]* =" -- promptpotter/application`.
 - **Round 0 has two doors.** `origin.py::establish_campaign_origin` walks it before the cycle exists;
   `bench/node_context.py::rewalk_origin` walks it again for the gate and the repair. Seated from outside
   the walk and kept: `origin.py::try_inherit_fork_origin` (a fork's concluded origin), a standing origin,
@@ -684,14 +684,8 @@ facts: a lint over EW's one type door, not a mechanism.
 
 ### Config resolution and run scope (backbone hunt 2026-10-31, ranked by impact radius)
 
-**Rides with:** one arc; 4 absorbs 7.
+**Rides with:** one arc.
 
-4. **Run scope is ~21 ambient `ContextVar`s bound piecemeal** — telemetry, send pacing, spend book,
-   optimizer manifest, archive memory scope, coupon, measurement context, judges, spawn;
-   `set_cycle_ledger` bound at 6 sites, `bind_memory_scope` sets without a reset token, one ledger with
-   three doors (the var, `RunCallbacks.ledger`, `LaunchState.ledger`), an unbound memory scope defaulting
-   to `OpenAt()` (the whole archive). Action: one frozen `RunScope` bound once at the run seam.
-   **Re-test:** `git grep -c "ContextVar(" -- promptpotter`.
 5. **`Session` / `LaunchState` is a staged builder modelled as a bag of Optionals** —
    `initialization/session.py`; ~62 guard or sentinel sites (`require_scorer()`, `launch_clock()`,
    `campaign_id=""`); `run_observers.declare_running` skips silently on a None ledger. Action: each init
@@ -699,18 +693,6 @@ facts: a lint over EW's one type door, not a mechanism.
 6. **Slot lifetime is a hand-rolled `except BaseException: release…` at ~20 sites** (admission,
    `run_job`, head-to-head, mint-and-start, check-in, embedded run). Action: the registry hands out a held
    slot as a context manager. **Re-test:** `git grep -c "release_slot(\|job_registry.release(" -- promptpotter`.
-7. **Optimizer selection is ambient** — `optimizer_manifest.py` `_BOUND` (`bound_optimizer`, read by
-   `loop_start.py`, `run_prep.py`, `run_observers.py`, `cycle_close.py`, `views/ingress.py`),
-   `_DETERMINISM` and `_OPTIMIZER_PROMPT_OVERRIDES`, read by `bench/llm_call.py::_merged_config`,
-   `potter/dispatch/layout.py` and `l1_wire_schema.py`; `_single_model` depends on node order. Action:
-   selection rides `RunScope` (4), keyed by node. An L4 cell's overrides are a second optimizer
-   overlay beside `optimizer_manifest.py::SelectedOptimizer`'s own: spawn lays them into the inner
-   run's `OptimizerChoice.nodes` instead, and `optimizer_manifest.py::binding_prompt_overrides`,
-   `optimizer_manifest.py::declared_node_override`, `optimizer_manifest.py::resolve_node_override` and
-   `optimizer_manifest.py::_single_model` go. Fork first: an unusable mutation is dropped
-   (`optimizer_manifest.py::_resolved_prompt_parts`) where an unknown overlay is refused
-   (`optimizer_manifest.py::_select`); one rule. One L4 re-key.
-   **Re-test:** `git grep -n "_BOUND.get()\|_OPTIMIZER_PROMPT_OVERRIDES" -- promptpotter`.
 8. **A root's typed refusal is served as one generic caveat** — `pipeline_resolve.py::campaign_runs_with`
    and `line_config` answer `None` for any `_ROOT_UNRESOLVED`, and `application/hierarchy.py::_UNRESOLVED`
    serves the same sentence whichever refusal it was. Action: the refusal rides the row, its message
@@ -746,7 +728,7 @@ Grouped by the arc each would ride; workaround comments and dead top-level names
   carries it parsed. **Re-test:** `git grep -n "parse_resolved(" -- promptpotter`.
 - **`search_point.py::NodeConfig.prompt_edits` is a `dict[str, str]`** beside the
   `OptimizerPromptTemplate` that `pipeline_manifest.py::typed_config` validates the same edits as and
-  drops; `node_prompt` lays the dict back with `model_copy`. The typed field cannot land in place:
+  drops; `running_prompt` lays the dict back with `model_copy`. The typed field cannot land in place:
   `opt_search_point.py` imports `search_point.py`, which holds the call-key rosters. And the template
   rides beside its config: `llm_call.py::run_optimizer_node` takes a filled `template` and an
   `LLMCallContext` whose `config` named it (`critique.py::distil_critique`,
@@ -791,11 +773,7 @@ next run-data reshape.
   `_walk` each re-decide whether `current_round` closed, by different predicates. Action: derive it
   once, from ledger plus producer lock. **Re-test:** `git grep -n 'm.state == "running"' -- promptpotter`.
 
-**D. One LLM-call seam.** **Rides with:** § Config resolution and run scope #4 (`RunScope`) and #7.
-- **The reuse cache arrives by two carriers**: `LLMCallContext.cache` for an optimizer call and
-  `scoring/judges/call.py::bind_cache` (a `ContextVar`) for a grader; the protocol is
-  `LLMReuseCache.answer`. Action: the cache rides `RunScope` (§ Config resolution 4).
-  **Re-test:** `git grep -n "def bind_cache" -- promptpotter`.
+**D. One LLM-call seam.** **Rides with:** any pass in the files named.
 - **`scoring/evaluators.py::Evaluator` is one class for two contracts** (`per_sample` async vs
   `per_round` sync, different kwargs) held apart by runtime guards (`_validate_evaluator`,
   `inspect.isawaitable`); its `Scope` collides with `campaign_config.Scope` and `data_root.Scope`.
@@ -1122,10 +1100,6 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   The example plugin's copy is tracked, and no gate run writes it. Action: the regenerator declares
   its outputs, and the probe reads that declaration. **Rides with:** M1. **Re-test:** edit capo's
   `resolved_schemas.json` by hand; `gate.py --only optimizer-schemas` is red.
-- **`initialization/session.py::LaunchState.ledger` is `Optional` while a round needs it**:
-  `run_observers.py::build_run_observers` sets it after the state is built, so `runner/round.py`
-  asserts presence and five other readers branch on `None`. Action: the run's state is built with its
-  ledger. **Re-test:** `git grep -n "state.ledger" -- promptpotter/application`.
 - **`run_records.py::RoundEnteredRecord.rewound` is a flag keeping two acts apart** — entering a round
   and displacing what stood past it — that `ledger_scan.py::_Standing.feed` splits again. Action:
   two records, or one whose displacement is its own field. **Rides with:** M11.

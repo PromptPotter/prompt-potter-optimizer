@@ -33,12 +33,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.telemetry import (
-    emit_command,
-    emit_command_ack,
-    reset_cycle_ledger,
-    set_cycle_ledger,
-)
+from promptpotter.infrastructure.llm.telemetry import emit_command, emit_command_ack
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import (
@@ -55,6 +50,7 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.identity import acting_principal, require_capability
 from promptpotter.shared.named_rows import imported, returned
+from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import Inline
@@ -382,9 +378,8 @@ class CommandDispatcher:
                 )
 
         command_id = str(uuid.uuid4())
-        token = set_cycle_ledger(ledger)
         applied: list[R] = []
-        try:
+        with scoped(ledger=ledger):
             emit_command(
                 command_id=command_id,
                 kind=kind,
@@ -419,8 +414,6 @@ class CommandDispatcher:
                 if applied and applier.rides is not None:
                     applier.rides(applied[0], exc)
                 raise
-        finally:
-            reset_cycle_ledger(token)
 
         if not applied:
             raise ConflictError(

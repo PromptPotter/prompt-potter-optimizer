@@ -151,7 +151,7 @@ class CyclePlan:
     # What the origin's render splices in, which a mint's check-in may commit after the refusals.
     framing: TaskDecomposition
     # The one selection every refusal was asked of: the mint hashes it into `Campaign.treatment`,
-    # declares its wiring under it, and the launch binds it (`binding_optimizer`).
+    # declares its wiring under it, and the launch scopes it (`runner/entry.py::run_optimization`).
     optimizer: SelectedOptimizer
     # What the cycle's chain and scorer admit, which its pools draw and `treatment` hashes.
     admits: frozenset[Presumption]

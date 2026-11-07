@@ -95,7 +95,7 @@ async def run_round_loop(
             ):
                 if session.store.campaigns.resumed_ending(session.hop) is StopReason.ORIGIN_GATE:
                     # Resuming an origin the gate halted, still unhealthy, is the operator's override.
-                    pass_origin_gate(session, by="resume")
+                    pass_origin_gate(cb, by="resume")
                 elif (
                     gate_stop := await run_origin_gate(cycle, dataset, session, cb, opt.origin_gate)
                 ) is not None:

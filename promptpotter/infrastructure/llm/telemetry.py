@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from contextvars import ContextVar, Token
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.backend import BackpressureReading
@@ -33,36 +33,28 @@ from promptpotter.domain.spend import KeySource, TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import MeasurementRole, measured_pass
+from promptpotter.shared.run_scope import UNBOUND, run_scope
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
 
-# No default: unbound is "never bound", and a bound ``None`` is the declared mute of a probe render.
-_CYCLE_LEDGER: ContextVar[CycleEventLog | None] = ContextVar("cycle_ledger")
 _CURRENT_ROUND: ContextVar[int | None] = ContextVar("current_round", default=None)
-
-
-def set_cycle_ledger(ledger: CycleEventLog | None) -> Token[CycleEventLog | None]:
-    return _CYCLE_LEDGER.set(ledger)
-
-
-def reset_cycle_ledger(token: Token[CycleEventLog | None]) -> None:
-    _CYCLE_LEDGER.reset(token)
 
 
 def active_cycle_ledger() -> CycleEventLog | None:
     """Ask before OPENING one: a second handle is a second appender, and ``append`` is not atomic."""
-    return _CYCLE_LEDGER.get(None)
+    ledger = run_scope().ledger
+    return None if ledger is UNBOUND else ledger
 
 
 def bound_ledger(what: str) -> CycleEventLog | None:
-    try:
-        return _CYCLE_LEDGER.get()
-    except LookupError:
+    """The run scope's ledger; ``None`` where a probe render mutes it."""
+    if (ledger := run_scope().ledger) is UNBOUND:
         raise RuntimeError(
             f"{what}: no cycle ledger is bound, so this record would reach no file. Bind one "
-            "where the entry binds its spend book (`build_run_observers`, `verb_ledger`)."
-        ) from None
+            "where the entry opens its run scope (`run_optimization`, `verb_ledger`)."
+        )
+    return ledger
 
 
 def billing_ledger(what: str) -> CycleEventLog:

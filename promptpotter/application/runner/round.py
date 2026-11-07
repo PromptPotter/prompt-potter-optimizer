@@ -171,7 +171,6 @@ def _unbought_cells(arm: ArmState, rows: CellSheet, cut: StopReason | None) -> i
 
 
 def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | None) -> None:
-    session = ctx.cycle.session
     round_num = ctx.round_num
     panel = round_result.panel
     unbought = {
@@ -181,10 +180,8 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
     # A broken arm also carries error rows, but its own outcome already charges it.
     holed = sorted(key for key, arm in panel.items() if is_leader_eligible(arm) and holes[key])
     # Sink is the LEDGER: the halt below unwinds before `close_round`.
-    ledger = session.state.ledger
-    assert ledger is not None, "build_run_observers must bind state.ledger before a round runs"
     record_decision(
-        ledger,
+        ctx.callbacks.ledger,
         BenchCheckpointKind.PANEL_COVERAGE,
         {"arms": list(panel), "round_num": round_num},
         holed,
