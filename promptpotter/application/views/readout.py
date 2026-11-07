@@ -166,7 +166,7 @@ class ReadoutProjection(Projection):
             sink=sink,
             patience=campaign_config.optimization.convergence_patience,
             pipeline_schema=session.pipeline_schema,
-            measured_unit=session.backend_client.measured_unit,
+            measured_unit=session.backend_client.connector.measured_unit,
         )
 
     def open_readout(self, cycle_dir: Path) -> None:

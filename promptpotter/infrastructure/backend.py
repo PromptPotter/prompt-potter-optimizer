@@ -62,11 +62,9 @@ CELL = CallLabel("backend_cell", "backend")
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
-    from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.value_tree import Delivery
 
 logger = logging.getLogger(__name__)
 
@@ -172,27 +170,9 @@ class BackendClient:
     def connector(self) -> Connector:
         return self._connector
 
-    @property
-    def max_cells_in_flight(self) -> int:
-        return self._connector.max_cells_in_flight
-
-    @property
-    def measured_unit(self) -> MeasuredUnit:
-        return self._connector.measured_unit
-
-    @property
-    def cell_attempts(self) -> int:
-        return self._connector.cell_attempts
-
-    def cell_envelope_s(self, sample: Sample, pipeline_params: dict[str, Any] | None) -> float:
-        return self._connector.cell_envelope_s(sample, pipeline_params)
-
     def cell_hop(self, sample: Sample, pipeline_params: dict[str, Any] | None) -> CycleHop | None:
         hop = self._connector.cell_hop
         return None if hop is None else hop(sample, pipeline_params)
-
-    def prompt_delivery(self, pipeline_params: dict[str, Any] | None) -> Delivery:
-        return self._connector.prompt_delivery(pipeline_params)
 
     def node_spend_bound(self, node: PipelineNode, cfg: Mapping[str, Any]) -> NodeSpendBound | None:
         if (sent := self._connector.sent_spend_bound) is not None:
