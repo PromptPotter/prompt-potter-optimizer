@@ -407,8 +407,6 @@ export interface BackendResponse {
 }
 
 export interface BackendHealthResponse {
-  /** Backend identifier */
-  backend_id: string;
   /** Backend API base URL probed */
   base_url: string;
   /** Reachability, worded by `BACKEND_REACHABILITY_INFO` */

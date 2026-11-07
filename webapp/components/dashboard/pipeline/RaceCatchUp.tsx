@@ -1,3 +1,4 @@
+import { fmtSampleTag } from "@/lib/format";
 import { useViewedDashboard } from "@/lib/poll";
 
 // Members that caught up on a race, under the optimizer that ran it; nothing until one has.
@@ -14,7 +15,7 @@ export function RaceCatchUp() {
             <span className="dash-log-dim">
               R{e.round} {e.label} · {e.member}
             </span>{" "}
-            <span className="dash-log-mark">↻</span> #{e.position}
+            <span className="dash-log-mark">↻</span> {fmtSampleTag(e.position)}
             {e.prior_keys.length > 0 && (
               <span className="dash-log-dim"> — {e.prior_keys.join(", ")}</span>
             )}

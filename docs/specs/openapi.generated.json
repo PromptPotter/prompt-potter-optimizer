@@ -1413,11 +1413,6 @@
       "BackendHealthResponse": {
         "additionalProperties": false,
         "properties": {
-          "backend_id": {
-            "description": "Backend identifier",
-            "title": "Backend Id",
-            "type": "string"
-          },
           "base_url": {
             "description": "Backend API base URL probed",
             "title": "Base Url",
@@ -1452,7 +1447,6 @@
           }
         },
         "required": [
-          "backend_id",
           "base_url",
           "status",
           "checked_at"

@@ -820,7 +820,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         return CellTerm(name=name, direction="high", description="A probe term.", **rest)
 
     def table_refuses(*, probe: Connector | None = None) -> bool:
-        members = [*shipped._builtins(), *([("probe", probe)] if probe else [])]
+        members = [*connectors._builtins(), *([("probe", probe)] if probe else [])]
         with monkeypatch.context() as patched:
             patched.setattr(
                 connectors,
@@ -910,7 +910,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
                 }
             },
         )
-        members = [*shipped._builtins(), ("reporting", reporting)]
+        members = [*connectors._builtins(), ("reporting", reporting)]
         with monkeypatch.context() as patched:
             patched.setattr(
                 connectors,
