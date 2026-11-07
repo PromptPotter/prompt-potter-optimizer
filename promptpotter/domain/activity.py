@@ -381,7 +381,7 @@ class ActivityFeed:
                     id=item_id,
                     kind="error",
                     icon="✗",
-                    label=record.message or "run error",
+                    label=record.message,
                     detail=STOP_REASON_INFO[record.stop_reason].label,
                     tone="danger",
                     round=record.round,

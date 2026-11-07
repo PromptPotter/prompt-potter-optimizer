@@ -1549,8 +1549,7 @@ word's `git grep -c` for that sense is 0.
   - Unverified, for the next change to each file: `shell/CriticalAlertBanner` builds `Said` rows in the
     browser and re-sorts `TONES` for `pinned`; `ViewTabs.show` is many `open`/`close` calls, not one
     workspace act; `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after
-    (`iter_files(skip=)` exists); `domain/activity.py::ActivityFeed` falls back to `"run error"` where
-    `run_said` has none; `iter_family_courses` reads each index twice; `list_hierarchy` re-calls
+    (`iter_files(skip=)` exists); `iter_family_courses` reads each index twice; `list_hierarchy` re-calls
     `line_config` per non-holder course; `FileTree` mounts a 2 s `useActivePointer()` poll for one
     failure line; a `/hierarchy` 200 replaces every entry object `lib/hooks/useRegistry.ts::useRegistry` indexes.
 - **The collapse gate cuts a hedging arm on noise**: `pobb/checks.py::check` →
