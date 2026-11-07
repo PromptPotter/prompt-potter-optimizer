@@ -23,7 +23,7 @@ from promptpotter.application.jobs.registry import JobRegistry, launch_interrupt
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
-from promptpotter.config.paths import JOB_LOGS_DIR, READOUT_POINTER, user_data_root
+from promptpotter.config.paths import READOUT_POINTER, user_data_root
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
@@ -88,7 +88,7 @@ async def spawn_job(
     """Returns only once the run's process holds the job and its claim (`run_job`): a spawner
     gone before that, its producer lock with it, would leave a job a reconciling read releases
     under its child. Answers the task that ends when the run's process exits."""
-    log_path = spec.jobs_dir / JOB_LOGS_DIR / f"{spec.job_id}.log"
+    log_path = CycleLayout(stores.campaigns.cycle_dir(spec.hop)).job_log
     try:
         child = _start(spec, log_path)
     except BaseException as exc:
