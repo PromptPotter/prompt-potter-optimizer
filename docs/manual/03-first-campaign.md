@@ -21,7 +21,7 @@ That's it. The skill takes over from here.
 
 ## What if I don't have a backend?
 
-You'll need one: a dataset's calls run on a backend unless it names another connector. The default is the companion project [TermNorm-excel](https://github.com/runfish5/TermNorm-excel), and `/potter-run` clones and starts it beside this checkout. What a backend must expose: [`operations/backend-integration.md`](../operations/backend-integration.md).
+You'll need one: a dataset names its connector; the shipped datasets name the companion project [TermNorm-excel](https://github.com/runfish5/TermNorm-excel), and `/potter-run` clones and starts it beside this checkout. What a backend must expose: [`operations/backend-integration.md`](../operations/backend-integration.md).
 
 ## What if I don't want to use Claude Code?
 

@@ -291,15 +291,13 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   (install and research tiers) against `connectors/termnorm.py` `available_models` /
   `default_node_config` and `draft_campaign.py::UPLOAD_BUDGET_ROUNDS` /
   `Connector.default_optimization` (uploads); an upload opens the model axis the install policy
-  closes. `defaults.yaml` also picks `backend_type: termnorm` for every install dataset (the
-  "backend_type missing" 422 is unreachable there) and holds `available_models` and `rounds: 8`
-  that every dataset overrides. Action: a connector's node template is laid under every definition
-  naming it, in any tier; connector-neutral campaign defaults are one file every tier lays under; the
-  four upload-seeding `Connector` fields become one optional upload-defaults declaration whose
-  presence is `serves_uploads`. First step, S: delete the three `defaults.yaml` keys, add
-  `backend_type: termnorm` to `email-tagging/dataset.yaml` and `justlogic/family.yaml`, fix
-  `docs/manual/03-first-campaign.md`, run the full gate. **Rides with:** M18. **Re-test:**
-  `git grep -n "backend_type" -- promptpotter/assets/datasets/defaults.yaml` is empty.
+  closes. `defaults.yaml` names no connector, model list or budget; every definition names its own.
+  Action: a connector's node template is laid under every definition naming it, in any tier;
+  connector-neutral campaign defaults are one file every tier lays under; the four upload-seeding
+  `Connector` fields become one optional upload-defaults declaration whose presence is
+  `serves_uploads`. **Rides with:** M18. **Re-test:** `git grep -nE "llm_only|param_keys" --
+  promptpotter/assets/datasets/defaults.yaml` is empty and `connectors/termnorm.py` holds the one
+  node template.
 - **`Session.backend_id` is a test-only archive switch** — production always sets it;
   `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
   Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
