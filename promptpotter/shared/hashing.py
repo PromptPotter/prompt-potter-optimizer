@@ -150,7 +150,41 @@ def _annotation_ids(unit: ast.AST) -> set[int]:
         )
         if a is not None
     ]
-    return {id(n) for root in roots for n in ast.walk(root)}
+    # ``Annotated[T, *meta]``'s metadata is a value the annotated name carries, so it is read.
+    meta = {
+        id(n)
+        for root in roots
+        for node in ast.walk(root)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.slice, ast.Tuple)
+        and (
+            node.value.id if isinstance(node.value, ast.Name) else getattr(node.value, "attr", None)
+        )
+        == "Annotated"
+        for value in node.slice.elts[1:]
+        for n in ast.walk(value)
+    }
+    return {id(n) for root in roots for n in ast.walk(root)} - meta
+
+
+def _raised_ids(unit: ast.AST) -> set[int]:
+    """A refusal shapes no prompt: what a ``raise`` reads is never walked."""
+    return {
+        id(n)
+        for node in ast.walk(unit)
+        if isinstance(node, ast.Raise)
+        for part in (node.exc, node.cause)
+        if part is not None
+        for n in ast.walk(part)
+    }
+
+
+def _unworded(unit: ast.AST) -> ast.AST:
+    """A unit's raises keep their exception class and drop its arguments: a reworded refusal is free."""
+    for node in ast.walk(unit):
+        if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+            node.exc.args, node.exc.keywords = [], []
+    return unit
 
 
 class SourceReads(TypedDict):
@@ -183,7 +217,7 @@ def _reads(unit: ast.AST, names: set[str], imported: set[str]) -> SourceReads:
     own = [] if whole else _package_imports(n for n in ast.walk(unit) if n is not unit)
     bound = imported | {row[0] for row in own}
     local = set() if whole else _bound_within(unit) - bound
-    skip = _annotation_ids(unit)
+    skip = _annotation_ids(unit) | _raised_ids(unit)
     read_names: set[str] = set()
     read_attrs: set[tuple[str, str]] = set()
     for node in ast.walk(unit):
@@ -214,7 +248,7 @@ def _unit_facts(units: list[ast.AST], tree: ast.Module, names: set[str]) -> list
         {
             "name": _unit_name(unit),
             "whole": unit is tree,
-            "source": _normalized_source(unit),
+            "source": _normalized_source(_unworded(unit)),
             "reads": unit_reads,
         }
         for unit, unit_reads in zip(units, reads, strict=True)

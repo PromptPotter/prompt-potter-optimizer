@@ -48,8 +48,6 @@ def configured_sinks(
 ) -> list[TraceSink]:
     """The sinks a cycle traces to; none configured, its projection is inert."""
     sinks: list[TraceSink] = []
-    if not settings.OBS_ENABLED:
-        return sinks
     if langfuse and langfuse.enabled:
         sinks.append(LangfuseSink(store_base_dir, campaign_id, langfuse))
     if settings.MLFLOW_TRACKING_URI:

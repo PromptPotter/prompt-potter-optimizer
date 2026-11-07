@@ -244,6 +244,7 @@ from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
+from promptpotter.infrastructure.store import source_scan
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
@@ -350,6 +351,51 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert digest(only_prose) == digest(only_prose.replace('"""Doc."""', "pass")), (
         "a body of nothing but a docstring keyed apart from an empty one"
     )
+    # A refusal shapes no prompt: its words, and what only a raise reads, are free.
+    refusing = marked + (
+        "HINT = 1\n"
+        "@shapes_optimizer_prompt\n"
+        "def cut(n):\n"
+        "    if n < 0:\n"
+        "        raise ValueError(f'no {n}')\n"
+        "    return n\n"
+    )
+    reworded = refusing.replace("f'no {n}'", "HINT, n")
+    assert digest(reworded) == digest(refusing), "a reworded refusal re-keyed a treatment"
+    cut_reads = [u["reads"] for u in source_facts(reworded)["units"] if u["name"] == "cut"]
+    assert cut_reads and "HINT" not in cut_reads[0]["names"], "a raise-only read was walked"
+    # An annotation is free, but `Annotated` metadata is a value its name carries, so it is walked.
+    annotated = marked + "@shapes_optimizer_prompt\ndef pick(n: Annotated[Arm, BOUND]): pass\n"
+    (pick,) = source_facts(annotated)["units"]
+    assert "BOUND" in pick["reads"]["names"], "an annotation's metadata went unwalked"
+    assert "Arm" not in pick["reads"]["names"], "an annotation was walked"
+    # The walk stops at plumbing: editing what it reads re-keys nothing.
+    package = tmp_path / "pkg" / "promptpotter"
+    for module, text in {
+        "__init__": "",
+        "config/__init__": "",
+        "config/settings": "WIDTH = 2\n",
+        "config/shaped": "WIDTH = 2\n",
+        "unit": marked + "from promptpotter.config import settings, shaped\n"
+        "@shapes_optimizer_prompt\n"
+        "def width():\n    return settings.WIDTH + shaped.WIDTH\n",
+    }.items():
+        (package / f"{module}.py").parent.mkdir(parents=True, exist_ok=True)
+        (package / f"{module}.py").write_text(text, encoding="utf-8")
+
+    def walked(edit: str | None = None) -> tuple[str, ...]:
+        with monkeypatch.context() as patch:
+            patch.setattr(source_scan, "_PACKAGE_ROOT", package)
+            if edit is None:
+                return source_scan.optimizer_prompt_shapers(())
+            (package / "config" / f"{edit}.py").write_text("WIDTH = 3\n", encoding="utf-8")
+            try:
+                return source_scan.optimizer_prompt_shapers(())
+            finally:
+                (package / "config" / f"{edit}.py").write_text("WIDTH = 2\n", encoding="utf-8")
+
+    assert walked("settings") == walked(), "a plumbing module's edit re-keyed a treatment"
+    assert walked("shaped") != walked(), "the walk stopped short of a shaping module"
 
     # The judge a cell is graded by moves its searchpoint hash.
     schema = pipeline_schema(

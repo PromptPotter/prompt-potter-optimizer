@@ -9,9 +9,6 @@ from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-shapes_optimizer_prompt(__name__)
 
 # A field L1 cannot operate without, or the SOLE carrier of a state L1 must not enter blind.
 L1_MANDATORY: frozenset[str] = frozenset(

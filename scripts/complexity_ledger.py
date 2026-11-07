@@ -32,7 +32,7 @@ BASELINE = {
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
     "config_leaf_fields": 95,
     # `Settings` fields — what the environment can set.
-    "settings_env": 46,
+    "settings_env": 45,
     # Parameters annotated `Any`.
     "any_params": 41,
     # `dict[str, Any]` maps declared in `domain/`.

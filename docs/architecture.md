@@ -271,7 +271,9 @@ A PR touching one states its case.
   facts that outlive a process; a heartbeat is the version with a window where the answer is wrong.
 - **Langfuse-shape events and `TracingProjection`** — the Tracing bucket's foundation.
 - **The roster's `source_digest`** (`optimizers/nodes.py`) — what an optimizer node is handed is L4 measurement identity,
-  so its renderers, bundling and composition are hashed (AST-normalized).
+  so its renderers, bundling and composition are hashed (AST-normalized). The reach walks by unit and
+  stops at `source_scan.py::PLUMBING_MODULES` and at a refusal: what a `raise` reads is never walked,
+  and a walked unit's raises hash their exception class without its arguments.
 - **The core/extra split** — moving a package into core charges every embedder; re-measure
   reachability ([`decisions.md`](decisions.md) § 0006).
 - **Resume and fork-on-divergence** (`ResumeCheckpointRecord`, `CheckpointKind`).

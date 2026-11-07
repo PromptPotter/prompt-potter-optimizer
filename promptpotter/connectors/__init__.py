@@ -7,7 +7,7 @@ import typing
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.cell_terms import misdeclared_connector_terms
 from promptpotter.domain.connector import ConnectorExecution
-from promptpotter.shared.plugin_registry import BUILT_IN, Registry
+from promptpotter.shared.plugin_registry import Registry, built_in_origin
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterator
@@ -54,7 +54,7 @@ def _validate(c: object, origin: str) -> Connector:
         raise RuntimeError(f"{where}: compose_overlay needs cells_hold_the_machine.")
     if c.round_trip_is_latency and c.execution != "remote_http":
         raise RuntimeError(f"{where}: core clocks an in-process cell — drop round_trip_is_latency.")
-    if c.self_optimization and origin not in {f"{BUILT_IN}: {m}" for m in _APPLICATION_BUILT_INS}:
+    if c.self_optimization and origin not in {built_in_origin(m) for m in _APPLICATION_BUILT_INS}:
         raise RuntimeError(f"{where}: only an application built-in is the recursion.")
     if refused := misdeclared_connector_terms(c.cell_terms):
         raise RuntimeError(f"{where}: {'; '.join(refused)}.")

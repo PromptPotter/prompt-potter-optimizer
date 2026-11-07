@@ -30,13 +30,10 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.dispatch.bundle import RecombinationOffer
     from promptpotter.application.runner.inner.tasks import InnerCells
-
-shapes_optimizer_prompt(__name__)
 
 
 # A ceiling on a non-prompt field reads as a live cap while binding nothing.

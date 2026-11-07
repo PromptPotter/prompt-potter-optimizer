@@ -242,7 +242,6 @@ class NoApiKeyError(SendRefusedError, PotterError):
             "restarts the app."
         )
         SendRefusedError.__init__(self, message, category=ErrorCategory.CLIENT)
-        self.provider = provider
         self.tab = "keys"
         self.details = {"provider": provider, "key": key}
 
@@ -279,7 +278,6 @@ class HostAllowanceExhaustedError(SendRefusedError, PotterError):
         )
         SendRefusedError.__init__(self, f"{facts} {said}", category=ErrorCategory.HOST_ALLOWANCE)
         self.reason = reason
-        self.provider = provider
         self.tab = None if provider is None else "keys"
         self.details = {"reason": reason, "provider": provider}
 

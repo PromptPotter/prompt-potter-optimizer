@@ -25,14 +25,11 @@ from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.domain.wounds import RuntimeFailure
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.runner.inner.tasks import InnerCells
 
-# Every optimizer's source digest hashes this module: its constants decide what a prompt receives.
-shapes_optimizer_prompt(__name__)
 
 # A field with no entry is emitted unbounded.
 OPTIMIZER_PROMPT_FIELD_MAX_CHARS: dict[str, int] = {

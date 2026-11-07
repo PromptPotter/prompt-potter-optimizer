@@ -30,8 +30,6 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
-shapes_optimizer_prompt(__name__)
-
 logger = logging.getLogger(__name__)
 
 
@@ -101,6 +99,7 @@ CLUSTER_ROWS_MIN = 2
 CLUSTERS_MAX = 3
 
 
+@shapes_optimizer_prompt
 class VariantEvidenceGrounding(OptimizerResponseModel):
     """PERMISSIVE on ``field`` at the parse boundary: not every provider honours the grafted enum, so the validator enforces it."""
 
@@ -203,6 +202,7 @@ def _renamed_variant(items: tuple[tuple[str, str], ...]) -> type[L1Variant]:
     return create_model("L1Variant", __base__=L1Variant, **overrides)
 
 
+@shapes_optimizer_prompt
 class FailureCluster(OptimizerResponseModel):
     # GENERATION order: the ids commit the cluster to rows before the prose can name one. `minItems`
     # is advisory on a `strict: False` wire; `critique_response_model` drops what it does not hold.
@@ -353,6 +353,7 @@ def fork_proposal_model(offer: tuple[str, ...]) -> type[StandingForkProposal]:
     )
 
 
+@shapes_optimizer_prompt
 class TerminateProposal(OptimizerResponseModel):
     reason: Annotated[str, BeforeValidator(_truncate_marked(150))] = Field(
         default="",

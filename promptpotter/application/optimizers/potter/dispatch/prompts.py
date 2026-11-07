@@ -16,13 +16,11 @@ from promptpotter.application.optimizers.potter.dispatch.layout import resolve_n
 from promptpotter.application.optimizers.potter.records import L1Layout, L2Memory
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.runner.inner.tasks import InnerCells
 
-shapes_optimizer_prompt(__name__)
 
 logger = logging.getLogger(__name__)
 

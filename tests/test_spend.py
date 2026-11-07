@@ -2973,9 +2973,10 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     finally:
         unbind()
     refused = LaunchRefusal.of(box_paid.value)
-    assert (refused.reason, box_paid.value.provider) == (LaunchRefusalReason.USED_UP, "openai"), (
-        "a send past the coupon was refused for another cause, or named no provider to key"
-    )
+    assert (refused.reason, box_paid.value.details["provider"]) == (
+        LaunchRefusalReason.USED_UP,
+        "openai",
+    ), "a send past the coupon was refused for another cause, or named no provider to key"
     spent_out.charges.append(
         BilledCharge(
             hold_id="own",

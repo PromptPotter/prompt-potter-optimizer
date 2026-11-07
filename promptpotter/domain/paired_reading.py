@@ -66,8 +66,7 @@ class ReadingStateInfo(NamedTuple):
 
 
 # Marked: a state's kind decides the round's advance, and so the stall a prompt reports. The words
-# below are unmarked, so no prompt's closure reaches them through this table; potter's and
-# capo-pobb's still do through review.md (code-debt-cleanup.md, the review.md and log.md row).
+# below are unmarked, so no prompt's closure reaches them through this table.
 READING_STATE_KIND: Annotated[dict[ReadingState, ReadingStateKind], shapes_optimizer_prompt] = {
     ReadingState.READ: ReadingStateKind.READ,
     ReadingState.NOT_ASKED: ReadingStateKind.WAITING,

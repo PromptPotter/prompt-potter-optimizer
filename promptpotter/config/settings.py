@@ -199,8 +199,6 @@ class Settings(BaseSettings):
 
     QUEUE_MAX_WAIT_S: float = 6 * 3600.0
 
-    OBS_ENABLED: bool = True
-
     # Unset: MLflow receives nothing. Set: that server takes each round as a run and each winner as a prompt version.
     MLFLOW_TRACKING_URI: str = ""
 

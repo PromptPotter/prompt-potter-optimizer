@@ -5,16 +5,15 @@ from importlib.metadata import EntryPoints, entry_points
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 
-from promptpotter.shared.hashing import shapes_optimizer_prompt
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping
 
-# Which member answers a node name decides the text an optimizer prompt carries.
-shapes_optimizer_prompt(__name__)
-
 
 BUILT_IN = "built-in"
+
+
+def built_in_origin(where: str) -> str:
+    return f"{BUILT_IN}: {where}"
 
 
 class _Named(Protocol):
@@ -74,7 +73,7 @@ class Registry[M: _Named]:
             origins[member.name] = label
 
         for where, obj in self._builtins():
-            origin = f"{BUILT_IN}: {where}"
+            origin = built_in_origin(where)
             add(self._validate(obj, origin), origin, BUILT_IN)
         if absent := sorted(self._shipped - table.keys()):
             raise RuntimeError(f"{self.group}: {absent} must be built-in and are not.")

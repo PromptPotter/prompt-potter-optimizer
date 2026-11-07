@@ -36,6 +36,8 @@ PLUMBING_MODULES = (
     "promptpotter.shared.hashing",
     "promptpotter.shared.worded",
     "promptpotter.config.paths",
+    "promptpotter.config.settings",
+    "promptpotter.application.runner.round",
 )
 
 

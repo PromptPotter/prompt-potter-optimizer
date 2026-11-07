@@ -180,14 +180,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   holders (`dataset.json` exists), across `stores.py`, `draft_patch.py`, `ingest.py` and
   `mint_and_start.py`. Action: one read of a tenant name's hold. **Rides with:** M6. **Re-test:**
   `git grep -n "slug_exists" -- promptpotter` names one definition and its callers.
-- **A refusal edit re-keys the treatment digest** — the optimizer-prompt shaper scan
-  (`nodes.py::source_digest`) reaches refusal classes, so M14a moved the potter, capo and capo-pobb
-  digests with no prompt change. Action: the digest hashes what shapes a prompt, never a refusal's
-  text. **Rides with:** M8 (the digest reach). **Re-test:** edit one refusal sentence; `offline_run.py
-  --digests` does not move.
-  - Parked behind it: `NoApiKeyError.provider` and `HostAllowanceExhaustedError.provider`
-    (`shared/errors.py`) have no reader since `LaunchRefusal.provider` went; deleting them moves the
-    potter and capo-pobb digests (`arc/w2x3` 7aeab5219 holds the cut).
 - **The unknown-slot refusal is spelled twice** — `bench/task_context.py` and the potter injection
   registry each validate a template's slots. Action: one template-slot validation. **Rides with:** M8.
   **Re-test:** one function words an unknown slot.
@@ -225,13 +217,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   `domain/sample.py::sample_tag`'s `#007`. Changing it is a prompt-shaping edit. Action: the prompt
   renders its slots through `sample_tag`. **Rides with:** M8 (its re-key). **Re-test:**
   `git grep -nE "\[#\{|#\{" -- promptpotter/application/optimizers/potter` names no slot.
-- **The recursion guard rebuilds the registry's origin label** — `connectors/__init__.py::_validate`
-  decides "only an application built-in" by re-spelling `f"{BUILT_IN}: {m}"`, a second spelling of
-  `shared/plugin_registry.py::Registry`'s, so a reworded label refuses `promptpotter` at every boot.
-  Action: one `plugin_registry` helper builds the built-in origin, read by both. Editing
-  `plugin_registry.py` re-keys every treatment digest (it shapes the optimizer prompt), so it waits for
-  a re-key. **Rides with:** M8 (its re-key). **Re-test:** `git grep -n 'BUILT_IN}: ' -- promptpotter`
-  names one line.
 - **The landing does not run wherever code meets an unlanded root** — the boot landing is cut. Sites:
   `presentation/cli/campaign_runner.py` and `main.py` (no boot landing), the `_sources` registries
   (completed per verb, so a registry verb is refused on an unlanded root), the process interlock
@@ -692,8 +677,8 @@ browser): `runtime_flags.py::derive_run_state` is the owner §0 already names, t
 W2's. The run lifecycle as one state machine: the command side is Q1's fold, the run side
 `derive_run_state` and `phases.py::RUN_PHASE_INFO`'s admission table, one owner each. L4 measurement
 identity hashed off rendered bytes instead of the AST reach (`optimizers/nodes.py`'s `source_digest`):
-the static reach is §0.5 load-bearing and honest before any call runs; its over-reach is one entry
-under § Typed state. Served words, typed records, the run scope, the subject, the read catalogue and
+the static reach is §0.5 load-bearing and honest before any call runs, and stops at plumbing and at
+a refusal. Served words, typed records, the run scope, the subject, the read catalogue and
 the typed file rows: W2, U3, U1a, EA and K3a each already are that leap. `??` defaults on served
 facts: a lint over EW's one type door, not a mechanism.
 
@@ -1012,11 +997,6 @@ fixtures.
   and asserts every row's glob matches a file or names why it may be absent. **Re-test:** the test
   exists and fails when a row's glob is misspelled.
 
-- **`OBS_ENABLED` is a second switch over two sinks that each have their own** (`LANGFUSE_ENABLED`
-  and its keys, `MLFLOW_TRACKING_URI`), read once in `tracing/bridge.py::configured_sinks`. Kept
-  because `config/settings.py` is reached by the L4 treatment digests. Action: delete it with the
-  next digest re-key. **Re-test:** `git grep -n "OBS_ENABLED" -- .` is empty.
-
 - **An archived answer's outputs are read off today's backend**: `scoring/measurement_log.py::open_cell`
   reads the live declaration to build `outputs_of`, because an `ArchiveEntry` records only
   `node_configs` and `PipelineData.wire()` is flat, with no per-node attribution. Action: a per-node
@@ -1124,15 +1104,6 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 - **A deleted fork takes its `LeftComparisonRecord` with it**, so its arm reads `controlled` again
   while the fork's spend stays banked. Action: the exit outlives the fork. **Re-test:** delete a
   fork off an arm, then read the arm's `evidence`.
-- **Potter's and capo-pobb's digests hash the review.md and log.md writers' words**: their members
-  reach `generation_only.py::run_generation_only_round` → `round.py::close_round` →
-  `output.py::write_review_md` / `write_log_md`, so `READING_STATE_INFO`, `STOP_REASON_INFO`,
-  `HEALTH_CAUSE_INFO`, `DISPLAY_METRIC_INFO`, `UNIT_FORMATS` and the `NoApiKeyError` /
-  `HostAllowanceExhaustedError` sentences (`campaign_result.py::read_cycle_bench` → the judges →
-  `coupon.py::keyed_client`) key both treatments while no request byte moves. Action: the closure stops
-  at the round's close, a writer of files no prompt reads. **Rides with:** the next L4 digest pass.
-  **Re-test:** a reach trace over `source_scan.py::optimizer_prompt_shapers` for potter still ends a
-  `READING_STATE_INFO` chain at `generation_only.py::run_generation_only_round`.
 
 ### The member backbone
 
@@ -1580,10 +1551,6 @@ word's `git grep -c` for that sense is 0.
     (dataset block, draft override, cycle seed), so the row says only "Changed from default".
   - `locus_crossover` is listed as a maker with nothing upstream making two-parent children; an
     arm-editing maker's on/off belongs on `nodes.Proposer` as a member-declared rule.
-- **Potter's `dispatch/` modules still hash whole** (`shapes_optimizer_prompt(__name__)`): a member
-  module's reads are walked (`nodes.py::_source_digest`), so only a unit read through an instance or a
-  registry needs a mark. **Re-test:**
-  `git grep -n "shapes_optimizer_prompt(__name__)" -- promptpotter/application`.
 - **Seen building the prompt workspace**:
   - An override cannot be removed, only overwritten: knob Reset writes the declared value and a cleared
     prompt field writes `""`, so the draft stays "edited". The overlay merge needs a delete.

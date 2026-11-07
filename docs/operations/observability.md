@@ -1,6 +1,6 @@
 # Observability
 
-Every optimizer LLM call and escalation check is a trace folded from the ledger (`infrastructure/tracing/bridge.py::TracingProjection`, off when `OBS_ENABLED` is false) and fanned out to sinks: Langfuse (`tracing/langfuse_sink.py`) and MLflow (`tracing/mlflow_server.py`) when configured. Phase events (`domain/phases.py::CampaignPhase`, and each optimizer's own on `LlmNode.phase` — potter's `escalation/state.py::PotterPhase`) emit `enter`/`exit` pairs into the cycle ledger; each optimizer call carries its rendered prompt, output and token counts. A backend-match span is declared (`tracing/events.py::QueryScoreStart`) and nothing calls it: [`../specs/mlflow-interop.md`](../specs/mlflow-interop.md) owns that gap.
+Every optimizer LLM call and escalation check is a trace folded from the ledger (`infrastructure/tracing/bridge.py::TracingProjection`) and fanned out to sinks: Langfuse (`tracing/langfuse_sink.py`) and MLflow (`tracing/mlflow_server.py`) when configured. Phase events (`domain/phases.py::CampaignPhase`, and each optimizer's own on `LlmNode.phase` — potter's `escalation/state.py::PotterPhase`) emit `enter`/`exit` pairs into the cycle ledger; each optimizer call carries its rendered prompt, output and token counts. A backend-match span is declared (`tracing/events.py::QueryScoreStart`) and nothing calls it: [`../specs/mlflow-interop.md`](../specs/mlflow-interop.md) owns that gap.
 
 ## The wall clock, and where the claim stops
 
