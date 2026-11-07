@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import re
 import time
@@ -596,6 +597,7 @@ async def _send_cell(
         attempts=client.connector.cell_attempts,
         label=f"{sample.id}:{query[:40]}",
     )
+    cell_hop = client.connector.cell_hop
     # Unconditional and OUTSIDE the envelope scope: the envelope's only sighting of a machine sleep rides it.
     heartbeat_task = asyncio.create_task(
         heartbeat(
@@ -604,7 +606,7 @@ async def _send_cell(
             node="backend_scoring",
             round_num=current_round(),
             start_monotonic=time.monotonic(),
-            inner_fn=lambda: client.cell_hop(sample, wire_params),
+            inner_fn=None if cell_hop is None else functools.partial(cell_hop, sample, wire_params),
             on_suspend=envelope.on_suspend,
         )
     )

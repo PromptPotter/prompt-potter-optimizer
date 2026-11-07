@@ -407,8 +407,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   connector at the box's MCP URL; `tools/list` answers.
 - **The browser cannot advance a paused cycle N rounds** — `StartRunPayload.step_rounds` has no
   webapp sender, and it is not a named browser carve-out. **Rides with:** M6.
-- **`BackendClient.cell_hop` is the last forwarder beside `.connector`** — its caller reads
-  `client.connector.cell_hop` and keeps the None test. **Rides with:** M4b.
 - **A written verb's flags are not derived from its payload model** — `verbs.py::_WRITTEN_VERBS`
   spells each flag by hand, so a new payload field reaches no terminal (as `step_rounds` did not).
   Past the address and `budget`, fields with no same-named `Arg`: `resume` → `start-run` `mode`;
