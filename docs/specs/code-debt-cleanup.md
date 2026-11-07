@@ -318,10 +318,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   the Connector and refuses typed, naming the registered set; `_validate` refuses a non-lowercase
   name; callers take the Connector. **Rides with:** M4b. **Re-test:** a dataset naming
   `backend_type: nope` answers 422 on `new`, `start-run` and the pipeline read.
-- **`Connector.node_roles` repeats the role the served pipeline carries** — `draft_build.py` reads it
-  while `draft_wire` already holds the parsed chain with `PipelineNode.role`. Action: derive from the
-  chain; delete the field (verify TermNorm serves `candidate_source` first). **Rides with:** M5.
-  **Re-test:** `git grep -n "node_roles" -- promptpotter` is empty.
 - **Core computes TermNorm's term index for every connector, pushed by two calls** —
   `Session.index_terms`, `loop_start.py` and `origin.py`. Action: one call where the session opens,
   handing the connector's session the bank. **Rides with:** M7. **Re-test:**

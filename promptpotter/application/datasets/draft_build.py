@@ -5,7 +5,6 @@ from typing import Any
 
 from pydantic import Field
 
-from promptpotter import connectors
 from promptpotter.application.datasets.draft_campaign import DraftCriterion, owned_draft
 from promptpotter.application.datasets.origin_readiness import (
     SETUP_STEP_TITLES,
@@ -37,6 +36,7 @@ from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
     PipelineDependency,
+    PipelineSchema,
     dependencies_from_node_roles,
 )
 from promptpotter.domain.search_point import TaskDecomposition
@@ -120,9 +120,10 @@ class DraftCampaignWire(StrictModel):
     )
 
 
-def _dependencies(connector: str, active: list[str]) -> tuple[PipelineDependency, ...]:
-    roles = connectors.CONNECTORS.get(connector).node_roles
-    return dependencies_from_node_roles({n: r for n, r in roles.items() if n in active})
+def _dependencies(chain: PipelineSchema, active: list[str]) -> tuple[PipelineDependency, ...]:
+    return dependencies_from_node_roles(
+        {n.name: n.role for n in chain.nodes if n.name in active and n.role is not None}
+    )
 
 
 def _dependency_fulfilled(dep: PipelineDependency, draft: DraftFile) -> bool:
@@ -225,7 +226,7 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
         active_steps=active,
         dependencies=[
             DraftDependency(**dep.model_dump(), fulfilled=_dependency_fulfilled(dep, draft))
-            for dep in _dependencies(served.connector, active)
+            for dep in _dependencies(pipeline.chain, active)
         ],
         readiness=origin_readiness(draft, pipeline),
         launch_refusal=refusal,
