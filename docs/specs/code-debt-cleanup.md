@@ -1013,11 +1013,6 @@ fixtures.
 
 ### What a cycle writes to disk (storage survey 2026-11-01)
 
-- **`storage_report.py::_leaf_of` files an unrow'd campaign file under `trace`**, and
-  `campaign_store/store.py::_keepsake` drops it on `delete --keep-results`: the storage report never
-  shows a writer no `CAMPAIGN_ROWS` row names, and a row with no writer is never detected either.
-  Action: serve an unrow'd file as unclassified, never fold it into a leaf. **Re-test:**
-  `git grep -n "counts as loop trace" -- promptpotter`.
 - **`OBS_ENABLED` is a second switch over two sinks that each have their own** (`LANGFUSE_ENABLED`
   and its keys, `MLFLOW_TRACKING_URI`), read once in `tracing/bridge.py::configured_sinks`. Kept
   because `config/settings.py` is reached by the L4 treatment digests. Action: delete it with the

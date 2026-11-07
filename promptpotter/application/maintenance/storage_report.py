@@ -29,9 +29,9 @@ _CONNECTOR_ROUND_KEYS = tuple(
 
 
 def _leaf_of(path: Path, campaign_dir: Path) -> Leaf:
-    """A file no campaign row names counts as loop trace."""
+    """A file no campaign row names is unclassified."""
     row = campaign_row(PurePosixPath(path.relative_to(campaign_dir).as_posix()))
-    return Leaf.TRACE if row is None else row.leaf
+    return Leaf.UNCLASSIFIED if row is None else row.leaf
 
 
 @functools.lru_cache(maxsize=2048)
