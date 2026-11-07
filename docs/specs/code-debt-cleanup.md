@@ -364,27 +364,22 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   **Re-test:** the same refused `start-run` over MCP and REST carries the same `refusal_words`.
 - **`resume --rewind/--steer` with `--max-usd` crashes with a traceback** — `resume_command.py`
   builds a fork seed's budget on the money axis it refuses; a fork has no launch-budget field
-  (`launching.py` launches it with `Budget()`), a fourth budget door. Action: `ForkCyclePayload` and
-  `StepCyclePayload` take the launch's budget through the one door. **Rides with:** M12.
+  (`launching.py` launches it with `Budget()`), a fourth budget door. Action: `ForkCyclePayload`
+  takes the launch's budget through the one door. **Rides with:** M12.
   **Re-test:** `resume --rewind 1 --max-usd 1` refuses typed or runs.
-- **`step-cycle` is a second door into `start-run {step_rounds}`** — the difference is the capability
-  rung, and `step_rounds` admits 100 rounds; no webapp sender. Action: delete the kind, payload and
-  handler; the `campaign.step` rung keeps no launch. **Rides with:** M6. **Re-test:**
-  `git grep -n "STEP_CYCLE" -- promptpotter` is empty.
 - **A queued launch dies with the asking process** — the queue wait runs in the caller
   (`jobs/launcher/launch.py`), so a CLI-derived kind exits and an MCP stdio session ends, while the
   door reported success. Action: the queued job on disk is promoted by whoever frees the slot.
-  **Rides with:** M6/M2. **Re-test:** queue a `step` from the CLI behind a running cycle; it starts
+  **Rides with:** M6/M2. **Re-test:** `resume --step-rounds 1` behind a running cycle; it starts
   when the slot frees.
 - **Adapter-kept rules that belong under the dispatcher** — the leftover sweep runs before CLI
   launches and in the API's loop but never for MCP stdio or `embedded_run`; `embedded_run.__all__`
   hand-keeps four command wrappers (and `cli/commands/maintenance.py` imports from it); two typed
   REST routes (`edit-draft-campaign`, `resolve-origin`) duplicate the generic loop with a second
   description; `compact-archive inventory`, `ab` and the tenant `trail` are CLI-only undeclared;
-  `--halt-at` is a second door to `--set halt_at_accuracy`; steer values parse three ways and the
-  server types none. Action: the sweep moves under the one admission; the wrappers and typed routes
-  are deleted; a CLI-only reason sits on the `Verb` row, gate-checked; the server types an overlay
-  against the served `param_types`. **Rides with:** M6 (sweep, wrappers), M4c (steer). **Re-test:**
+  steer values parse three ways and the server types none. Action: the sweep moves under the one
+  admission; the wrappers and typed routes are deleted; a CLI-only reason sits on the `Verb` row,
+  gate-checked; the server types an overlay against the served `param_types`. **Rides with:** M6 (sweep, wrappers), M4c (steer). **Re-test:**
   `git grep -n "def compact_archive" -- promptpotter/application/embedded_run.py` is empty.
 - **The webapp lacks kinds whose rows claim every door** — no sender of `submit-arms`,
   `cancel-queued-run`, `delete-cycle`; an `arm_gate: review` campaign holds in the browser with only
@@ -404,6 +399,20 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   MCP adapter, not a sixth entry point. **Rides with:** M20; its auth follows
   [`access-model.md`](../operations/access-model.md). **Re-test:** in claude.ai, add a custom
   connector at the box's MCP URL; `tools/list` answers.
+- **The browser cannot advance a paused cycle N rounds** — `StartRunPayload.step_rounds` has no
+  webapp sender, and it is not a named browser carve-out. **Rides with:** M6.
+- **`BackendClient.cell_hop` is the last forwarder beside `.connector`** — its caller reads
+  `client.connector.cell_hop` and keeps the None test. **Rides with:** M4b.
+- **A written verb's flags are not derived from its payload model** — `verbs.py::_WRITTEN_VERBS`
+  spells each flag by hand, so a new payload field reaches no terminal (as `step_rounds` did not).
+  Past the address and `budget`, fields with no same-named `Arg`: `resume` → `start-run` `mode`;
+  `fork-cycle` `reason`, `mode`, `round`, `candidate_id`, `seed`, `keep_rounds`; `new` →
+  `mint-campaign` `optimization`, `campaign_config`; `start-checkin` `draft_id`, `head_to_head`;
+  `edit-draft-campaign` `draft_id`, `patch`; `resolve-origin` `draft_id`; `ingest-upload`
+  `filename`, `blob`; `head-to-head` → `dataset_name`; `verify` → `candidate_id`. Action: each field
+  has an `Arg` of its name or a declared terminal-only reason, checked at import the way
+  `verbs.py::command_verb` derives them. **Rides with:** M6. **Re-test:** add a field to
+  `StartRunPayload`; importing `verbs.py` fails.
 
 ### The excision pass (six layer audits and a plan review, 2026-11-05)
 

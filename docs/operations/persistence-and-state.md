@@ -38,7 +38,7 @@ One minter and reader, `domain/cycle_paths.py::Subject` (`address` / `parse_addr
 
 | Verb | Does |
 |---|---|
-| `new <name \| file.csv>` | mint from a dataset, or ingest a CSV into a check-in draft and Start it once the readiness gate passes (a gap prints its questions and exits non-zero: `--set k=v`, re-run); `--diag`, `--halt-at` |
+| `new <name \| file.csv>` | mint from a dataset, or ingest a CSV into a check-in draft and Start it once the readiness gate passes (a gap prints its questions and exits non-zero: `--set k=v`, re-run); `--diag` |
 | `head-to-head --head-to-head ID --arm …` | mint every arm of one controlled comparison in one act |
 | `resume` | continue from the last closed round; `--from N`, `--rewind N`, `--fork-on-divergence`, `--no-check`, `--steer`, `--diag` |
 | `verify <subject>`, `bench` | fresh search cells on one candidate (never a re-ask of a scored one); grade origin and selection on the bench rows |
@@ -48,7 +48,7 @@ One minter and reader, `domain/cycle_paths.py::Subject` (`address` / `parse_addr
 | `compact-archive <inventory \| compact \| restore \| purge-cold> [--apply]` | the only verb that can destroy a measurement: `compact` moves `domain/scoring.py::UNREAD_PIPELINE_KEYS` off `panel` answers into `measurements/cold/`, `restore` puts them back, `purge-cold` is irreversible; `origin`/`parent` answers are never eligible |
 | `reset`, `land-data`, `close-admission` | the data-root verbs — [`../decisions.md`](../decisions.md) § 0011 |
 | `reindex`, `pin-roster`, `offer-extras`, `health` | rebuild `measurements/index.jsonl`; pin a Harbor roster; list the extras the offered datasets need; check backends and sign-in providers |
-| `pause`, `origin-gate`, `submit-arms`, `skip-searchpoint`, `step-cycle`, `set-limits`, `set-concurrent-cycles`, `cancel-queued`, `delete-cycle`, `cleanup-empty-cycles`, `archive`, `unarchive`, `delete [--keep-results]`, `rename`, `bank-snippet`, `discard-draft` | `CommandKind` verbs, each a `CommandRecord` the dispatcher acks |
+| `pause`, `origin-gate`, `submit-arms`, `skip-searchpoint`, `set-limits`, `set-concurrent-cycles`, `cancel-queued`, `delete-cycle`, `cleanup-empty-cycles`, `archive`, `unarchive`, `delete [--keep-results]`, `rename`, `bank-snippet`, `discard-draft` | `CommandKind` verbs, each a `CommandRecord` the dispatcher acks |
 
 Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only where that stops its bill (`Connector.cancel_stops_billing`). Nothing the loop decides reads a diagnostic. A paid diagnostic or `bench` holds a machine slot and an account reservation, refused `409 cycle_busy` / `409 machine_busy` rather than queued (`application/jobs/launcher/admission.py::paid_pass`).
 

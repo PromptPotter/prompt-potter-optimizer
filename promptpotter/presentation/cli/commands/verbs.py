@@ -133,15 +133,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "round 2 (refinement overrides applied, no scoring) → halt. "
                 "index.json::final.mode lands as 'diag'.",
             ),
-            Arg(
-                "--halt-at",
-                dest="halt_at_accuracy",
-                type=float,
-                default=None,
-                metavar="ACC",
-                help="Halt when the optimizer's declared pick has accuracy ≥ ACC (e.g. 0.66). The "
-                "campaign's own knob, so `--set halt_at_accuracy=ACC` spelled short.",
-            ),
             NO_WAIT,
             *BUDGET_AXES,
         ),
@@ -256,6 +247,15 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "Steering a node to a gateway or to a model it does not permit is a babysit act: "
                 "it requires the `campaign.babysit` capability and grades the fork's runs C. CLI "
                 "twin of the web steer-fork (`POST /commands/fork-cycle`), same seam + gate.",
+            ),
+            Arg(
+                "--step-rounds",
+                dest="step_rounds",
+                type=int,
+                default=None,
+                metavar="N",
+                help="Run N rounds (1-100), then pause the cycle as `stepped` — a step, not a "
+                "budget stop (contrast `--max-rounds`).",
             ),
             NO_WAIT,
             *BUDGET_AXES,

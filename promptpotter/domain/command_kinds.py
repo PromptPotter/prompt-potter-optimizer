@@ -165,14 +165,6 @@ class CommandKind(StrEnum):
         False,
         "task",
     )
-    STEP_CYCLE = (
-        "step-cycle",
-        "launching:step_cycle",
-        CAMPAIGN_STEP_CAP,
-        anyone("step-cycle"),
-        False,
-        "task",
-    )
     # Its fork supersedes the line's head, which it pauses.
     FORK_CYCLE = (
         "fork-cycle",
@@ -592,14 +584,6 @@ class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.CHANGE_RUN_LIMITS):
                 "a budget naming at least one of usd / tokens / rounds / wall_clock_s is required"
             )
         return self
-
-
-class StepCyclePayload(CyclePayload, kind=CommandKind.STEP_CYCLE):
-    """Let a paused cycle run a bounded number of rounds, then stop again."""
-
-    inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
-
-    step_rounds: WireInt = Field(default=1, ge=1, le=100, description="Rounds to run.")
 
 
 class StartRunPayload(CyclePayload, kind=CommandKind.START_RUN):

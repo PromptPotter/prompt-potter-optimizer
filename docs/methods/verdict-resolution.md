@@ -82,7 +82,7 @@ So **a winner with lower accuracy than a rival or the previous round is normally
 `elect_round_winner` ranks `P(θ_cand > θ_parent)`, the reading PoBB cuts on. When an operator calls
 the election wrong off the accuracy column, say which column it used.
 
-**No harness rule ranks rounds by their own readings.** The `--halt-at` stop
+**No harness rule ranks rounds by their own readings.** The `halt_at_accuracy` stop
 (`runner/termination.py::target_tripped`) reads the optimizer's declared pick (`Cycle.selection`) on
 the round that picked it, never each round's composite high-water; the overlap line's members are
 those picks too. Only potter's L2/L3 stall comparator keeps the high-water, as its own signal.
