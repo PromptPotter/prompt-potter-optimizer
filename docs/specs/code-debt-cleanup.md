@@ -1236,10 +1236,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   in `llm/heartbeat.py`, `campaign_store/store.py::CampaignStore.list_campaigns` and
   `user_store.py::read_accounts` are held by no test. Action: a survey serves a bad row with its fault,
   and a test holds each catch. **Re-test:** a tenant tree with one unreadable dataset lists the rest.
-- `evidence/read.py::_cycle_facts` loads again the manifest `_at` already holds (`at.campaign`),
-  behind an `assert`: a manifest deleted between the two reads fails the read as a bare
-  `AssertionError`, a 500. Action: pass `at.campaign`. **Re-test:**
-  `git grep -n "a subject resolves through its campaign's directory" -- promptpotter`.
 
 **B. A refusal spelled per door.** **Rides with:** Q3.
 - `provider_config.py::OIDCConfigError`, `prompt_block.py::PackRefusal` and
