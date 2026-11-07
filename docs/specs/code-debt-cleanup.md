@@ -176,10 +176,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 
   Action: every door and every persisted job carries the Refusal value. **Rides with:** M6.
   **Re-test:** `git grep -n "class LaunchRefusal" -- promptpotter` is empty.
-- **`launch_refusal` names two things** — `jobs/quota.py::launch_refusal` (served as
-  `DraftBuild.launch_refusal`) is the coupon's refusal, while `phases.py::RunState.launch_refusal` is
-  a cycle-busy string read by `commands/launching.py`. Action: rename the phases one. **Rides with:**
-  M6. **Re-test:** `git grep -n "launch_refusal" -- promptpotter/domain` is empty.
 - **A taken name is read two ways** — `slug_exists` (the directory exists) against the definition's
   holders (`dataset.json` exists), across `stores.py`, `draft_patch.py`, `ingest.py` and
   `mint_and_start.py`. Action: one read of a tenant name's hold. **Rides with:** M6. **Re-test:**
@@ -1546,9 +1542,6 @@ word's `git grep -c` for that sense is 0.
   halts an origin with no scored cell, but holds a degraded one, and its three answers repeat run verbs
   (`abort` ≈ leave it ended, `proceed` ≈ `resume`, `rescore` ≈ `resume --from 0` force-fresh).
   Open: halt it too, deleting the hold.
-- **A declined pause refuses with "."**: `phases.py::RUN_PHASE_INFO` gives `RUNNING` and `SCORING` a
-  parked `""`, which `RunAdmission` capitalizes into the refusal. **Re-test:** each phase whose
-  action can be declined parks a non-empty word.
 - **A cold server folds every ledger before the first page answers**: the first
   `GET /hierarchy?depth=1` waits on a full `LEDGER_FOLDS` pass over every `projects/` ledger, and
   the browser shows a sidebar stuck on "loading…". On 2026-10-30, with 91 MB / 129k lines in
