@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import inspect
 import json
 import sys
 import textwrap
@@ -125,8 +126,10 @@ def _emit_type(annotation: typing.Any) -> str:
     return "unknown"
 
 
-def _jsdoc(text: str | None) -> str:
-    return f"  /** {textwrap.fill(text, width=78, subsequent_indent='   * ')} */\n" if text else ""
+def _jsdoc(text: str | None, indent: str = "  ") -> str:
+    if not text:
+        return ""
+    return f"{indent}/** {textwrap.fill(text, width=78, subsequent_indent=f'{indent} * ')} */\n"
 
 
 def _emit_field(name: str, info: FieldInfo, annotation: typing.Any, *, omittable: bool) -> str:
@@ -414,9 +417,9 @@ def _emit_cycle_path_grammar() -> str:
 
 
 def _doc_block(owner: type) -> str:
-    doc = (owner.__doc__ or "").strip().splitlines()
+    paragraph = " ".join(inspect.cleandoc(owner.__doc__ or "").split("\n\n")[0].split())
     # A dataclass declared with no docstring is handed its signature as one.
-    return f"/** {doc[0]} */\n" if doc and not doc[0].startswith(f"{owner.__name__}(") else ""
+    return "" if paragraph.startswith(f"{owner.__name__}(") else _jsdoc(paragraph, indent="")
 
 
 def _emit_record(record: type) -> str:

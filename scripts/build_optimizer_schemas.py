@@ -51,6 +51,7 @@ def _entry(node: str, model: type[BaseModel]) -> dict[str, Any]:
 
 
 def main() -> int:
+    # One line per file it writes, `wrote` where the content moved: the gate's probe reads them.
     for directory, models in sorted(_manifests().items()):
         declared = read_yaml(directory / "pipeline.yaml").get("nodes") or {}
         if orphans := sorted(set(models) - set(declared)):
@@ -61,8 +62,7 @@ def main() -> int:
         out_path = directory / "resolved_schemas.json"
         # `ensure_ascii=False`: escaped prose cannot reproduce the committed output byte for byte.
         content = json.dumps(resolved, indent=2, ensure_ascii=False) + "\n"
-        verb = "wrote" if replace_changed(out_path, content) else "unchanged:"
-        print(f"{verb} {len(resolved)} schemas to {out_path}")
+        print(f"{'wrote' if replace_changed(out_path, content) else 'unchanged'} {out_path}")
     return 0
 
 

@@ -176,25 +176,12 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 - **The unknown-slot refusal is spelled twice** — `bench/task_context.py` and the potter injection
   registry each validate a template's slots. Action: one template-slot validation. **Rides with:** M8.
   **Re-test:** one function words an unknown slot.
-- **The TS type generator keeps only a docstring's first line**, so 57 interface docs in
-  `types.generated.ts` stop mid-sentence. Action: `build_ts_types.py` carries the first paragraph.
-  **Rides with:** M1. **Re-test:** no generated doc ends without a full stop.
 - **The scripts' writer and the store's are two**: `store/io.py::_atomic_replace` and
   `scripts/processes.py::replace_changed` each state one bounded retry on Windows' WinError 5; the
-  stdlib-only interpreter the scripts run under is what varies. Action: one retry rule stated by one
-  owner. **Rides with:** M17. **Re-test:** `git grep -n "def _atomic_replace\|def replace_changed" --
+  stdlib-only interpreter the scripts run under is what varies, and any `promptpotter` import runs
+  `require_core()` and `hold_private()` first, so the scripts' half cannot read the store's. Every
+  script already writes through `replace_changed`. Action: one retry rule stated by one owner. **Rides with:** M17. **Re-test:** `git grep -n "def _atomic_replace\|def replace_changed" --
   promptpotter scripts`: 2 lines now, 1 at target.
-- **A push to main from a worktree proves its web lane without packages**: `gate.py::_tip_checkout`
-  borrows `_BORROWED` (`webapp/node_modules`) from the pushing checkout, and a side worktree has none,
-  so on 2026-11-07 the Python lane ran green for 509 s, then all six web checks failed ("'eslint' is
-  not recognized"; `vendor-marks` read a missing package as "simple-icons has no 'anthropic'").
-  Action: borrow from the clone's main checkout, or refuse at once and name the missing folder.
-  **Re-test:** push main from a fresh worktree.
-- **`Check.after`'s lane rule is stated, not checked** — `scripts/gate.py::Check` says a dependency is
-  earlier in its lane, but the module assert only orders `CHECKS`, so a check whose `after` names another
-  kind runs in a parallel lane and reads a half-built product. Action: the assert also requires the
-  builder to share the lane or the check to run alone. **Rides with:** M1. **Re-test:** point one
-  check's `after` at a check of the other kind; import fails.
 - **A workspace and a hop are re-derived from a path by parent counting** —
   `jobs/reaper.py::_tenant_root_of` and `sweep_dead_cycles`, `campaign_store/store.py` (the cycle's
   hop beside `cycle_dir.parent.parent`) and `store/account_trail.py` (a campaign id from
@@ -818,11 +805,6 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **A view family that is chrome**: `components/shell/families.tsx::FAMILIES` holds a family with a
   null pane (the phone's campaign list is the sidebar), so naming it on a wide screen opens a chip
   that draws nothing. **Re-test:** every family has a pane.
-- **The `walk` tier rots unseen**: the gate runs only `cold`, so a walk assertion outlives the control
-  it names. The world is built: `PP_E2E_WALK_WORLD=<offline-run>/potter` serves a copy through
-  `e2e/walk_world.py`, and the host it walks as is exempt from the read bucket
-  (`quota.py::refuse_request_rate`). Action: the gate's `playwright` check builds that world and adds
-  `--project=walk` on it. **Re-test:** `gate.py` lists a walk check.
 - **The Vite build leaves three things standing**:
   - The derivations barrel pulls the network layer into every chunk that imports it.
   - Babel (React Compiler) is 87% of build time.
@@ -1049,17 +1031,9 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   which a host loaded from outside the gate lock (a builder's bare `pytest` or `vitest`) still trips,
   though the gate runs it `alone` on one unisolated worker per project. **Re-test:** five builders
   plus one full gate with no reap and no gate waiting longer than its own run.
-- **Two `--staged` checks keep a commit queued because their tools always write**: eslint's
-  `--cache` write and tsc's typegen, so neither can be `gate.py::Check.light`. Action: each writes
-  only when its content differs, or outside what a sibling gate reads; mark them light. **Re-test:**
-  a `--staged` gate selecting them starts while a sibling gate runs.
-- **The `optimizer-schemas` probe guards two of the files its regenerator writes**: the check's
-  `regenerates` tuple in `scripts/gate.py` names potter's and checkin's `resolved_schemas.json`.
-  `scripts/build_optimizer_schemas.py` writes one per manifest in `optimizers.MANIFESTS`, capo's,
-  gepa's and levi's too. A stale one of those passes the gate and CI, since nothing fails a dirty tree.
-  The example plugin's copy is tracked, and no gate run writes it. Action: the regenerator declares
-  its outputs, and the probe reads that declaration. **Rides with:** M1. **Re-test:** edit capo's
-  `resolved_schemas.json` by hand; `gate.py --only optimizer-schemas` is red.
+- **The example plugin's `resolved_schemas.json` is tracked, and no gate run writes it**:
+  `scripts/build_optimizer_schemas.py` reads `optimizers.MANIFESTS`, which the plugin joins only in
+  the `optimizer-plugin` check's scratch venv. **Re-test:** edit it by hand; a gate is red.
 - **`run_records.py::RoundEnteredRecord.rewound` is a flag keeping two acts apart** — entering a round
   and displacing what stood past it — that `ledger_scan.py::_Standing.feed` splits again. Action:
   two records, or one whose displacement is its own field. **Rides with:** M11.
@@ -1492,8 +1466,12 @@ word's `git grep -c` for that sense is 0.
   - `ui/MenuCheck` takes a `title=` prop, which `CandidatesToolbar` fills with teaching prose.
 - **Seen framing snippets in a prompt**:
   - `.prompt-snippet-input` re-declares the field skin's border and background inside the frame.
-- **A side worktree cannot pass the full gate**: pytest's `compileall` breaks on long Temp paths,
-  so a rebuilt commit series is gated without it. **Re-test:** the full gate green in a worktree.
+- **A tree rooted past ~140 characters fails the suite's warm-up**: `tests_owning.py::_record`'s
+  `compileall` writes each `.pyc` through a `.pyc.<id>` temp, so under Windows' `LongPathsEnabled=0`
+  a 180-character root fails with `FileNotFoundError`, where an import only skips its cache. A
+  `.claude/worktrees/` tree (101) and a pushed tip's Temp checkout pass. Action, a decision: the
+  desk's `LongPathsEnabled`, or the gate refusing such a tree at its start, naming the path.
+  **Re-test:** the gate from a 180-character root.
 - **Seen building the read catalogue** (2026-11-04):
   - `GET /auth/me` writes (`account.arrive`): a read catalogued as `ReadKind.ME` that opens an account.
     Action: arrival is the sign-in callback's act alone. **Re-test:** `git grep -n "arrive(" -- promptpotter/presentation`.

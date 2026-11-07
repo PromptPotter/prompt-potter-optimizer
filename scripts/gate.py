@@ -67,6 +67,8 @@ class Selection:
     narrowed: tuple[str, ...] | None = None
     # The py lane's probes not kept green, asked in one host process.
     probes: tuple[_Probe, ...] = ()
+    # Every check is `light`, so this gate runs beside a sibling's rather than queuing.
+    unqueued: bool = False
 
     @classmethod
     def build(cls, staged: bool, changed: bool) -> Selection:
@@ -128,9 +130,22 @@ def _stale(paths: Sequence[str], before: Sequence[_Written]) -> Outcome:
     # Equal bytes written anew: a `light` regenerator writes nothing when green.
     if rewritten := [p for p, now, was in moved if now and was and now != was and now[0] == was[0]]:
         return 1, f"{', '.join(rewritten)} rewritten unchanged — write through `replace_changed`."
-    if stale:
-        return 1, f"{', '.join(stale)} stale — regenerated in place; re-run to confirm."
-    return 0, ""
+    return _regenerated(stale)
+
+
+def _regenerated(stale: Sequence[str]) -> Outcome:
+    return (
+        (1, f"{', '.join(stale)} stale — regenerated in place; re-run to confirm.")
+        if stale
+        else (0, "")
+    )
+
+
+def _rewrote(out: str) -> Outcome:
+    # A regenerator that declares its own outputs names each on a line, `wrote` where it moved.
+    return _regenerated(
+        [line[len("wrote ") :] for line in out.splitlines() if line.startswith("wrote ")]
+    )
 
 
 def _scan(files: Sequence[Path], needle: re.Pattern[str]) -> list[str]:
@@ -854,13 +869,21 @@ def _tsc(_sel: Selection) -> Outcome:
 
 def _eslint(sel: Selection) -> Outcome:
     # `web_files` is empty outside --staged, where bare `eslint` means the whole tree.
-    return run(_node("npm", "run", "lint", "--", *sel.web_files, *(sel.narrowed or ())), _WEBAPP)
+    own: tuple[str, ...] = ()
+    if sel.unqueued:
+        # Beside a sibling, it lints on a copy of the tree's cache: eslint rewrites it every run.
+        copy = Path(os.environ["PROMPTPOTTER_HOME"]) / ".eslintcache"
+        with contextlib.suppress(FileNotFoundError):
+            shutil.copyfile(_WEBAPP / ".eslintcache", copy)
+        own = (f"--cache-location={copy}",)
+    lint = ("lint", "--", *own, *sel.web_files, *(sel.narrowed or ()))
+    return run(_node("npm", "run", *lint), _WEBAPP)
 
 
 def _playwright(_sel: Selection) -> Outcome:
-    # Only `cold`: `walk` needs an offline-run world (`PP_E2E_WALK_WORLD`) and `spend` costs real
-    # money.
-    return run(_node("npx", "playwright", "test", "--project=cold"), _WEBAPP)
+    # `walk` serves a copy of offline-run's potter workspace; `spend` costs real money.
+    tiers = _node("npx", "playwright", "test", "--project=cold", "--project=walk")
+    return run(tiers, _WEBAPP, PP_E2E_WALK_WORLD=str(_WALK_WORLD))
 
 
 def _lock_satisfies(requirer: str, dep: str, entries: frozenset[str]) -> bool:
@@ -1002,12 +1025,13 @@ class Check:
     # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
     # or its peak is more than any lane beside it leaves free.
     alone: bool = False
-    # The check that builds what it reads: earlier in its lane, and brought along by `--only`.
-    after: str = ""
+    # The checks that build what it reads: earlier in its lane, or anywhere earlier when it runs
+    # alone, and brought along by `--only`.
+    after: tuple[str, ...] = ()
     # Empty is its kind's prefixes; `!prefix` is everything outside one. A callable is derived at
     # first use, so importing the gate parses nothing.
     reads: tuple[str, ...] | Callable[[], tuple[str, ...]] = ()
-    # A file it BUILDS: its verdict is kept only while that file stands.
+    # A path it BUILDS: its verdict is kept only while that path stands.
     builds: str = ""
     # Directories it reads of what its `after` built; their content is in its key.
     product: tuple[str, ...] = ()
@@ -1141,6 +1165,10 @@ def _optimizer_plugin(_: Selection) -> Outcome:
     return 0, out
 
 
+# What the `walk` tier serves a copy of: the straight leg's potter workspace.
+_WALK_WORLD = clone_cache() / OFFLINE_RUN / "potter"
+
+
 def _offline_run(_: Selection) -> Outcome:
     # The clone's homes, so a worktree's run answers for main and the worktree deletes clean. One
     # home per leg: a home stamped for other arguments is rewritten whole.
@@ -1264,13 +1292,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         "optimizer-schemas",
         "py",
-        _Probe(
-            "scripts/build_optimizer_schemas.py",
-            (
-                "promptpotter/assets/optimizers/potter/resolved_schemas.json",
-                "promptpotter/assets/checkin/resolved_schemas.json",
-            ),
-        ),
+        _Probe("scripts/build_optimizer_schemas.py", judge=_rewrote),
         on_commit=True,
         light=True,
     ),
@@ -1304,7 +1326,14 @@ CHECKS: tuple[Check, ...] = (
     ),
     # The script keeps a green per optimizer, keyed on the sources that optimizer reaches, so a run
     # by hand answers for it and a pushed tip reruns only the optimizers whose sources moved.
-    Check(OFFLINE_RUN, "py", _offline_run, landing=True, reads=(*OFFLINE_RUN_READS, *_GATE)),
+    Check(
+        OFFLINE_RUN,
+        "py",
+        _offline_run,
+        landing=True,
+        reads=(*OFFLINE_RUN_READS, *_GATE),
+        builds=str(_WALK_WORLD),
+    ),
     Check(
         "optimizer-plugin",
         "py",
@@ -1313,7 +1342,7 @@ CHECKS: tuple[Check, ...] = (
         reads=(*OFFLINE_RUN_READS, f"{_EXAMPLE_PLUGIN_DIR}/", *_GATE),
     ),
     Check("lockfile", "web", _lockfile, on_commit=True, light=True),
-    Check("eslint", "web", _eslint, on_commit=True, narrow=_web_modules),
+    Check("eslint", "web", _eslint, on_commit=True, light=True, narrow=_web_modules),
     Check("vitest", "web", _vitest, alone=True, narrow=_web_modules),
     Check(
         "vite-build",
@@ -1321,24 +1350,36 @@ CHECKS: tuple[Check, ...] = (
         lambda _: run(_node("npm", "run", "build"), _WEBAPP),
         builds="webapp/out/index.html",
     ),
-    Check("tsc", "web", _tsc, on_commit=True),
+    # Its incremental `tsconfig.tsbuildinfo` is written only where its content moved.
+    Check("tsc", "web", _tsc, on_commit=True, light=True),
     Check(
         "playwright",
         "web",
         _playwright,
         landing=True,
         alone=True,
-        after="vite-build",
+        after=("vite-build", OFFLINE_RUN),
         product=("webapp/out",),
-        # The cold server's backend is the offline world's (`e2e/serve_app.py`).
-        reads=(*_WEBAPP_READS, *_ENGINE_RUNTIME, "scripts/offline_world.py"),
+        # Both servers' backend is the offline world's (`e2e/serve_app.py`); `walk` walks its run.
+        reads=(*_WEBAPP_READS, *OFFLINE_RUN_READS),
     ),
     Check("npm-audit", "release", _npm_audit),
     Check("pip-audit", "release", _pip_audit),
     Check("advisories", "release", _advisories),
 )
-# A lane runs in this order, so what a check reads is built before it.
-assert all(any(b.name == c.after for b in CHECKS[:i]) for i, c in enumerate(CHECKS) if c.after)
+
+
+def _built_before(check: Check, at: int) -> bool:
+    # A lane runs in `CHECKS` order, and the `alone` checks run after every lane.
+    earlier = {b.name: b for b in CHECKS[:at]}
+    return all(
+        name in earlier
+        and (check.alone or (earlier[name].kind == check.kind and not earlier[name].alone))
+        for name in check.after
+    )
+
+
+assert all(_built_before(c, i) for i, c in enumerate(CHECKS))
 
 
 @dataclass(frozen=True)
@@ -1409,7 +1450,8 @@ def _lanes(
 
 # The one remote ref a push proves.
 _PROVEN_REF = "refs/heads/main"
-# What a pushed tip's checkout borrows from the pushing tree. Its venv and greens are the clone's.
+# What a pushed tip's checkout borrows from the clone's main tree, as it reads that tree's venv
+# and greens: the web lane's packages, which a side worktree has none of.
 _BORROWED = ("webapp/node_modules",)
 # The temp dir is the machine's: the clone's tag keeps one clone's sweep off another's checkouts.
 _TIP_CHECKOUT = f"pp-push-{digest(str(clone_root()).encode()).hex()[:8]}-"
@@ -1449,10 +1491,10 @@ def _tip_checkout(tip: str) -> Iterator[Path]:
     code, out = git("worktree", "add", "--detach", str(tree), tip)
     if code:
         raise RuntimeError(f"git worktree add {tip}: {out}")
-    links = [tree / rel for rel in _BORROWED if (REPO / rel).is_dir()]
+    lent = [rel for rel in _BORROWED if (clone_root() / rel).is_dir()]
     try:
-        for link in links:
-            _link(link, (REPO / link.relative_to(tree)).resolve())
+        for rel in lent:
+            _link(tree / rel, (clone_root() / rel).resolve())
         yield tree
     finally:
         _unlink_borrowed(tree)
@@ -1461,18 +1503,24 @@ def _tip_checkout(tip: str) -> Iterator[Path]:
             raise RuntimeError(f"git worktree remove {tree}: {out}")
 
 
-def _prove_tips(refs: str, names: Sequence[str]) -> int:
+def _prove_tips(refs: str, checks: Sequence[Check]) -> int:
     # *refs* is git's pre-push stdin: `<local ref> <local sha> <remote ref> <remote sha>` a line.
     # Only main is proven: a branch is work in flight, proven when it lands. An all-zero local
     # sha is a deletion: no tip to prove.
     pushed = [line.split() for line in refs.splitlines()]
     tips = sorted({sha for _, sha, ref, _ in pushed if ref == _PROVEN_REF and set(sha) != {"0"}})
+    missing = [str(clone_root() / rel) for rel in _BORROWED if not (clone_root() / rel).is_dir()]
+    if tips and missing and any(c.kind == "web" for c in checks):
+        print(
+            f"gate[push]: the web lane reads {', '.join(missing)}, which is absent: `npm ci` there"
+        )
+        return 1
     _sweep_tip_checkouts()
     failed = 0
     for tip in tips:
         began = time.monotonic()
         with _tip_checkout(tip) as tree:
-            argv = [sys.executable, "scripts/gate.py", "--only", ",".join(names)]
+            argv = [sys.executable, "scripts/gate.py", "--only", ",".join(c.name for c in checks)]
             rc = subprocess.run(argv, cwd=tree, stdin=subprocess.DEVNULL).returncode
         verdict = "FAIL" if rc else "green"
         print(
@@ -1662,16 +1710,18 @@ def main() -> int:
             if not c.landing and any(reads(path, c.inputs() or ()) for path in sel.changed)
         ]
     if not args.staged:
-        # `--only playwright` brings `vite-build` along, so it never reads a build older than its sources.
+        # `--only playwright` brings its builders along, so it never reads a product older than its sources.
         named = {c.name: c for c in CHECKS}
-        for check in list(checks):
-            while check.after and named[check.after] not in checks:
-                check = named[check.after]
-                checks.append(check)
+        todo = list(checks)
+        while todo:
+            for builder in (named[name] for name in todo.pop().after):
+                if builder not in checks:
+                    checks.append(builder)
+                    todo.append(builder)
     checks.sort(key=CHECKS.index)
     if args.push:
         # Before any re-exec: each checkout pins its own, and a path pinned here would name this tree.
-        return _prove_tips(sys.stdin.read(), [c.name for c in checks])
+        return _prove_tips(sys.stdin.read(), checks)
     if any(c.kind == "py" for c in checks):
         _reexec_pinned()
     label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)
@@ -1691,6 +1741,7 @@ def main() -> int:
             and isinstance(c.run, _Probe)
             and not (store is not None and c.kept(store, c.key(store)))
         ),
+        unqueued=light,
     )
     started = time.monotonic()
     # CI's configuration, never the desk's: no `.env` and no workspace, or a verdict reads either.
