@@ -248,6 +248,15 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "it requires the `campaign.babysit` capability and grades the fork's runs C. CLI "
                 "twin of the web steer-fork (`POST /commands/fork-cycle`), same seam + gate.",
             ),
+            Arg(
+                "--step-rounds",
+                dest="step_rounds",
+                type=int,
+                default=None,
+                metavar="N",
+                help="Run N rounds (1-100), then pause the cycle as `stepped` — a step, not a "
+                "budget stop (contrast `--max-rounds`).",
+            ),
             NO_WAIT,
             *BUDGET_AXES,
         ),

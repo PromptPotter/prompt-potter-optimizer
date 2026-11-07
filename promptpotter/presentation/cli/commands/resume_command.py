@@ -65,6 +65,7 @@ def _start_run(
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,
         budget=budget_from_args(args),
+        step_rounds=args.step_rounds,
         mode=_run_mode(args, fork_on_divergence=fork_on_divergence),
     )
 
@@ -280,6 +281,8 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     steering = bool(args.steer)
     if rewinding and steering:
         raise SystemExit("ERROR: --rewind and --steer each cut a fork — pass one per `resume`.")
+    if (rewinding or steering) and args.step_rounds is not None:
+        raise SystemExit("ERROR: --step-rounds steps a cycle's own run; a fork's run takes none.")
 
     try:
         if rewinding:
