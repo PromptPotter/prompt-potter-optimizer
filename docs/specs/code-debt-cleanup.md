@@ -143,11 +143,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 
 ### Wave 1's census (2026-11-06)
 
-- **`derived` returns `T | None`, so every keyed caller re-narrows** — `read_model.py::derived` folds
-  "no signature" into the answer type. Callers include `closed_rounds.py`, `measurement_log.py`,
-  `difficulty.py`, `evidence/read.py`, `capabilities.py` and `tenant_dataset_store.py`. Action: a
-  Hashable signature returns `T`; the unsigned case is its own call. **Rides with:** M9. **Re-test:**
-  count the `is None` narrowings directly after a `derived(` call.
 - **A fork summary's kind is parsed from its id** — `runner/output.py` reads fork versus diag off the
   cycle id's grammar, not the mint record that says which it is. Action: read the kind the mint
   recorded. **Rides with:** M11. **Re-test:** `git grep -nE "_fork_|_diag_" -- promptpotter/application/runner/output.py`.

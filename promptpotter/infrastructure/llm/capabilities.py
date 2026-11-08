@@ -107,13 +107,10 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
             return answer(reasoning_efforts=None, reasoning_note=note, source="override")
 
     path = _cache_path(workspace)
-    cached = (
-        derived(
-            ("model_capabilities", path),
-            sig=file_sig(path),
-            compute=lambda: read_json_tolerant(path, default={}),
-        )
-        or {}
+    cached = derived(
+        ("model_capabilities", path),
+        sig=file_sig(path),
+        compute=lambda: read_json_tolerant(path, default={}),
     )
     models = cached.get("models") if isinstance(cached, dict) else None
     record = models.get(key) if isinstance(models, dict) else None

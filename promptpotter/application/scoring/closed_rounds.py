@@ -68,12 +68,11 @@ def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> 
             if (answer := facts.answer) is not None
         )
 
-    held = derived(
+    return derived(
         ("walked_rows", stores.archive.base_dir, scorer.id, tuple(cells)),
         sig=stores.archive.files_signature({answer.partition(".")[0] for answer in replayed}),
         compute=grade,
     )
-    return held or scorer.sheet(())
 
 
 def cycle_instrument(
