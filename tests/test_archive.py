@@ -84,7 +84,11 @@ from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
 )
-from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
+from promptpotter.application.pipeline_resolve import (
+    cycle_config,
+    permitted_narrowing,
+    steer_verdict,
+)
 from promptpotter.application.runner.inner.spawn_context import inner_spawn_of
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.round import run_init
@@ -625,11 +629,17 @@ def _emit_round(
     name: str,
     *,
     crowned: bool = True,
+    resolved_params: dict[str, Any] | None = None,
 ) -> str:
     n = len(closed)
     pick = prompted(instruction=name)
     key = ArmKey(pick.id)
-    arm = arm_state(name, slot=ArmSlot(round=n, idx=0, total=1), individual=pick)
+    arm = arm_state(
+        name,
+        slot=ArmSlot(round=n, idx=0, total=1),
+        individual=pick,
+        resolved_params=resolved_params or {},
+    )
     rr = _round(round=n, arms={key: arm}, election=election(key if crowned else None, ended_on=key))
     closed.append(rr)
     close_round(ledger, closed, cycle=closing)
@@ -1073,6 +1083,36 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         )
     clean = store.load(applied, moment=None)
     assert clean is not None and not clean.human_intervened, "a clean fork was stamped babysat"
+    # A panel fork off a candidate sends only the operator's edit: with none it steers nothing and
+    # stamps no intervention, and it runs the candidate's own record, provider and route included.
+    candidate_record = {"a": {"model": "m", "provider": "p", "route_order": ["r"]}}
+    candidate_key = _emit_round(
+        closing, scenario_log, scenario_rounds, "s2", resolved_params=candidate_record
+    )
+    no_edit = ForkSeed()
+    assert steer_verdict(stores, permitted, no_edit.pipeline_overlay) == "clean"
+    panel_fork = scenario.model_copy(
+        update={
+            "cycle_id": mint_operator_fork(
+                stores=stores,
+                hop=scenario,
+                from_round=2,
+                from_candidate_id=candidate_key,
+                seed=parse_cycle_seed(no_edit, stores, campaign, scenario),
+            )
+        }
+    )
+    panel_laid = cycle_config(stores, campaign, panel_fork)
+    panel_index = store.load(panel_fork, moment=None)
+    assert (panel_laid.seed_overlay, panel_laid.steers_outside(permitted)) == (
+        candidate_record,
+        False,
+    ), (
+        "a panel fork candidate_record other params than its candidate's record, or steered by running them"
+    )
+    assert panel_index is not None and not panel_index.human_intervened, (
+        "a panel fork with no edit was stamped babysat"
+    )
 
     # A fork's own ledger displaces its parent's prefix once.
     displaced = CycleHop(campaign_id="displaced__20260101-000000", cycle_id="cycle_displaced")

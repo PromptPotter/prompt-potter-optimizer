@@ -13,13 +13,16 @@ import { SummaryBlock } from "@/components/shell/SummaryBlock";
 import { entryAlone } from "@/lib/derivations";
 import { fmtAgo, fmtBytes, fmtDateTime, fmtValue, PLACEHOLDER } from "@/lib/format";
 
+// What no layer set: a default, a required floor, or a manifest's own value.
+const UNSET_SOURCES: ReadonlySet<ConfigKnob["source"]> = new Set(["default", "required", "manifest"]);
+
 // A knob moving several estimands is listed under each, so the path dedupes it.
 function declaredKnobs(map: ConfigMapResponse): ConfigKnob[] {
   const byPath = new Map<string, ConfigKnob>();
   for (const group of map.groups) {
     for (const knob of group.knobs) {
       const scalar = knob.value == null || typeof knob.value !== "object";
-      if (knob.source === "campaign" && scalar) byPath.set(knob.path, knob);
+      if (!UNSET_SOURCES.has(knob.source) && scalar) byPath.set(knob.path, knob);
     }
   }
   return [...byPath.values()];

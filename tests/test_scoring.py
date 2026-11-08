@@ -534,7 +534,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         },
         "cached": True,
         "answer": "file.a1",
-        "retry_of_degraded": True,
+        "stale_outcome": "retried",
         "degraded_obs_count": 2,
     }
     stale = {"fitness": 1.0, "objective": 1.0, "unscored": "an older formula's"}

@@ -14,7 +14,7 @@ from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import held_out_lift_of, inner_facts_of
 from promptpotter.domain.results_health import is_deprecated, terminal_node
 from promptpotter.domain.sample import sample_tag
-from promptpotter.domain.scoring import graded_answer
+from promptpotter.domain.scoring import StaleOutcome, graded_answer
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import Grade, MeasuredCell
@@ -138,55 +138,60 @@ def fmt_query_result(
         msg = w.message or w.code or w.step or "warning"
         line += f"\n{_ann_indent}{YELLOW}⚠ {w.step}: {msg}{RESET}"
 
-    if facts.retry_of_degraded:
-        comp = facts.rerun_comparison
-        detail = f"; result: {comp['hit_change']}" if comp and comp["hit_change"] else ""
-        if comp and comp["rank_change"]:
-            detail += f" (rank {comp['rank_change']})"
-        line = _append_annotation(
-            line,
-            _ann_indent,
-            YELLOW,
-            "\U0001f504",
-            f"cache had pipeline warnings → reran{detail}",
-        )
-    elif facts.switched_out:
-        line = _append_annotation(
-            line,
-            _ann_indent,
-            YELLOW,
-            "\U0001f500",
-            "query degrades ≥50% of the time historically → using cached answer "
-            "(resampling would likely degrade again)",
-        )
-    elif facts.config_fundamental_skip:
-        line = _append_annotation(
-            line,
-            _ann_indent,
-            RED,
-            "⚠",
-            "cached failure was token-budget exhaustion + rerun max_tokens "
-            "≤ cached output → skipped LLM rerun (would repeat); marked fatal",
-        )
-    elif facts.persistently_degraded:
-        line = _append_annotation(
-            line,
-            _ann_indent,
-            RED,
-            "⚠",
-            "entire stale-data ladder exhausted → still degraded; "
-            "score counts but flag this candidate",
-        )
-    elif facts.degraded_observed and not is_deprecated(facts):
-        obs = _count_or_unknown(facts.degraded_obs_count)
-        threshold = _count_or_unknown(facts.degraded_obs_threshold)
-        line = _append_annotation(
-            line,
-            _ann_indent,
-            DIM,
-            "↩",
-            f"pipeline warning observed; {obs}/{threshold} occurrences toward rerun "
-            f"trigger (not yet at threshold)",
-        )
+    match facts.stale_outcome:
+        # An exhausted ladder reran first, and the tape reads its rerun.
+        case StaleOutcome.RETRIED | StaleOutcome.PERSISTENTLY_DEGRADED:
+            line = _append_annotation(
+                line,
+                _ann_indent,
+                YELLOW,
+                "\U0001f504",
+                f"cache had pipeline warnings → reran{_rerun_detail(facts)}",
+            )
+        case StaleOutcome.SWITCHED_OUT:
+            line = _append_annotation(
+                line,
+                _ann_indent,
+                YELLOW,
+                "\U0001f500",
+                "query degrades ≥50% of the time historically → using cached answer "
+                "(resampling would likely degrade again)",
+            )
+        case StaleOutcome.CONFIG_SKIP:
+            line = _append_annotation(
+                line,
+                _ann_indent,
+                RED,
+                "⚠",
+                "cached failure was token-budget exhaustion + rerun max_tokens "
+                "≤ cached output → skipped LLM rerun (would repeat); marked fatal",
+            )
+        case StaleOutcome.PAUSED:
+            line = _append_annotation(
+                line,
+                _ann_indent,
+                DIM,
+                "⏸",
+                f"pause requested mid stale-data ladder → kept as it stood{_rerun_detail(facts)}",
+            )
+        case StaleOutcome.OBSERVED if not is_deprecated(facts):
+            obs = _count_or_unknown(facts.degraded_obs_count)
+            threshold = _count_or_unknown(facts.degraded_obs_threshold)
+            line = _append_annotation(
+                line,
+                _ann_indent,
+                DIM,
+                "↩",
+                f"pipeline warning observed; {obs}/{threshold} occurrences toward rerun "
+                f"trigger (not yet at threshold)",
+            )
 
     return line
+
+
+def _rerun_detail(facts: MeasuredCell) -> str:
+    comp = facts.rerun_comparison
+    detail = f"; result: {comp['hit_change']}" if comp and comp["hit_change"] else ""
+    if comp and comp["rank_change"]:
+        detail += f" (rank {comp['rank_change']})"
+    return detail

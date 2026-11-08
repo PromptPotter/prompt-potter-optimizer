@@ -591,7 +591,7 @@ export interface RunsWithParam {
   /** The config grid's own param key (`NodeConfigParam.key`) */
   key: string;
   value: unknown;
-  source: 'dataset' | 'campaign' | 'seed' | 'model_floor' | 'identity' | 'evolved' | 'unset';
+  source: 'dataset' | 'campaign' | 'free_tier' | 'seed' | 'model_floor' | 'identity' | 'evolved' | 'unset';
 }
 
 /** The models of one vendor that a campaign's root course runs. */
@@ -3916,7 +3916,7 @@ export interface NodeConfigParam {
   never_axis: '' | 'cost_lever' | 'schema_owned';
   movable_by: ('proposer' | 'optimizer')[];
   held: boolean;
-  source: 'dataset' | 'campaign' | 'seed' | 'model_floor' | 'identity' | 'evolved' | 'unset';
+  source: 'dataset' | 'campaign' | 'free_tier' | 'seed' | 'model_floor' | 'identity' | 'evolved' | 'unset';
   permitted: string[];
   permitted_stated: boolean;
 }
@@ -4049,6 +4049,12 @@ export interface EditDraftPatch {
    * sample matcher, `dials` the composite's weights (the empty string clears
    * them), `per_sample` and `per_cell` set those formulas. */
   config: ConfigEdit | null;
+  /** Dotted paths, by this patch's own fields, of the draft's own values to drop
+   * before the rest is laid, so the layer below shows through:
+   * `config.optimization.nodes.<node>.config.<key>` or
+   * `origin_prompts.<step>.<field>`. A path the draft does not set is a no-
+   * op. */
+  reset: string[] | null;
   node_narrowing: Record<string, ParamIntent[]> | null;
   node_output: NodeOutputEdit | null;
   column_query: string | null;
@@ -4237,9 +4243,11 @@ export interface ConfigKnob {
   label: string;
   /** Effective value in this campaign's frozen config */
   value: unknown;
-  /** Where the value came from: default | campaign (operator-set) | required |
-   * manifest (an optimizer node's knob, as its manifest declares it) */
-  source: 'default' | 'campaign' | 'required' | 'manifest';
+  /** Where the value came from: default | required | manifest (an optimizer node's
+   * knob, as its manifest declares it) | the layer that set it: campaign (the
+   * operator's edit; any set bench knob), and on an optimizer node's knob
+   * dataset, free_tier or seed */
+  source: 'default' | 'dataset' | 'campaign' | 'free_tier' | 'seed' | 'required' | 'manifest';
 }
 
 export interface ConfigCoupling {

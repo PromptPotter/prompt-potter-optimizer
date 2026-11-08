@@ -3041,9 +3041,43 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     assert (
         layered.sp_budget_origin,
         layered.optimization.nodes["adaptive_queue"].config["sp_budget_round"],
-        layered.pipeline_overlay,
+        free_tier.free_tier_overlay(layered, schema, boxed),
     ) == (20, 20, {"llm_only": {"reasoning_effort": "low"}}), (
         "a free check-in measured on more cells, or launched above its model's lowest rung"
+    )
+    # A searched model axis offers the tier's models alone: what the check-in offers, Start runs.
+    searched = parse_pipeline_response(
+        {
+            "nodes": {
+                "llm_only": {
+                    "config": {"model": oss},
+                    "optimizer": {
+                        "param_keys": ["model", "reasoning_effort"],
+                        "observation_mappings": [{"pipeline_key": "answer", "is_llm": True}],
+                    },
+                }
+            },
+            "pipelines": {"default": ["llm_only"]},
+            "available_models": ["openai/dear", *free_tier.free_tier().task_models],
+        }
+    )
+    tiered = free_tier.with_free_tier_layer(config, searched, boxed)
+    offered = searched.narrow(tiered.optimizer_narrowing)
+    llm_only = offered.get_node("llm_only")
+    assert llm_only is not None and offered.model_options(llm_only) == list(
+        free_tier.free_tier().task_models
+    ), "a free check-in offers a model the tier does not list"
+    launched = {"steps": ["llm_only"], "llm_only": {"model": oss}}
+    refused_models = [
+        what
+        for run in (config, tiered)
+        for what in free_tier.outside_free_tier(
+            run, select_optimizer(run.optimization), launched, searched, boxed
+        )
+        if what.startswith("the task model")
+    ]
+    assert refused_models == ["the task model openai/dear"], (
+        "Start refused a model the free check-in offered, or ran one the tier does not list"
     )
 
     def optimizer_on(effort: str) -> CampaignConfig:

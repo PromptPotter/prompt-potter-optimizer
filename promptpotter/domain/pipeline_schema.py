@@ -437,9 +437,16 @@ class PipelineNode(FrozenModel):
 
 
 # Declared in fold order: a later layer wins (`pipeline_resolve.py::ParamLayers`).
-ParamLayer = Literal["dataset", "campaign", "seed", "model_floor", "identity", "evolved"]
+ParamLayer = Literal[
+    "dataset", "campaign", "free_tier", "seed", "model_floor", "identity", "evolved"
+]
 # Stamped BY the fold, never diffed against it; `identity` is unoverridable, so no surface edits one.
 ParamSource = Literal[ParamLayer, "unset"]
+# The layers an optimizer node's knob is set by; the others lay only a target's params.
+KnobLayer = Literal["dataset", "campaign", "free_tier", "seed"]
+assert set(get_args(KnobLayer)) <= set(get_args(ParamLayer)), "a knob's layer is a ParamLayer"
+# Per optimizer node, the layer that last set each key of its `optimization.nodes` config.
+type KnobLayers = Mapping[str, Mapping[str, KnobLayer]]
 
 
 class NodeConfigParam(FrozenModel):

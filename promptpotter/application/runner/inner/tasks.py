@@ -18,11 +18,12 @@ from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.campaign_config import (
     DEFAULT_ORIGIN_BUDGET,
+    NODE_OVERLAYS,
     ArmGateMode,
     CampaignConfig,
     LivesConfig,
     OptimizationConfig,
-    merge_node_overlays,
+    merge_config_layers,
 )
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY
@@ -311,20 +312,26 @@ INNER_ARM_GATE: ArmGateMode = "off"
 
 def _inner_optimization(
     opt: OptimizationConfig,
-    nodes: Mapping[str, ManifestNodeOverlay],
-    depth_nodes: Mapping[str, ManifestNodeOverlay],
+    nodes: dict[str, ManifestNodeOverlay],
+    depth_nodes: dict[str, ManifestNodeOverlay],
     *,
     n_samples: int | None,
 ) -> OptimizationConfig:
     """An inner cycle's selection key: its nodes under the inner gate. ``n_samples=None`` leaves
     the sampler's size out, which is what the identity hashes."""
-    merged = merge_node_overlays(merge_node_overlays(opt.nodes, nodes), depth_nodes)
-    inner = opt.model_copy(update={"nodes": merged, "arm_gate": INNER_ARM_GATE})
+    laid: dict[str, object] = {}
+    for layer in (opt.nodes, nodes, depth_nodes):
+        laid = merge_config_layers(laid, NODE_OVERLAYS.dump_python(layer, exclude_unset=True))
+    inner = opt.model_copy(
+        update={"nodes": NODE_OVERLAYS.validate_python(laid), "arm_gate": INNER_ARM_GATE}
+    )
     sampler = select_optimizer(inner).sampler
     if n_samples is None or sampler.size_knob is None:
         return inner
-    size = {sampler.name: ManifestNodeOverlay(config={sampler.size_knob: n_samples})}
-    return inner.model_copy(update={"nodes": merge_node_overlays(merged, size)})
+    size = {sampler.name: {"config": {sampler.size_knob: n_samples}}}
+    return inner.model_copy(
+        update={"nodes": NODE_OVERLAYS.validate_python(merge_config_layers(laid, size))}
+    )
 
 
 # `problem_description` and `answer_format` are absent: they carry the injection slots and the output contract.

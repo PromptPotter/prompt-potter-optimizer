@@ -137,7 +137,18 @@ export function PromptFieldsEditor({
     const nextFp = JSON.stringify(asStrings(keys, next));
     if (nextFp === sentFp) return;
     setSentFp(nextFp);
-    onApply(promptFieldsPatch(scope, node, prompts, asStrings(keys, next)));
+    // A cleared field the config sets over the template drops that edit: the template shows again.
+    const cleared = keys.filter((key) => edited?.includes(key) && (next[key] ?? "") === "");
+    const laid = asStrings(
+      keys.filter((key) => !cleared.includes(key)),
+      next,
+    );
+    const patch = promptFieldsPatch(scope, node, prompts, laid);
+    onApply(
+      cleared.length > 0
+        ? { ...patch, reset: cleared.map((key) => `config.optimization.nodes.${node}.config.${key}`) }
+        : patch,
+    );
   };
 
   // A drop is an edit committed at once: the field takes the snippet after its own text.

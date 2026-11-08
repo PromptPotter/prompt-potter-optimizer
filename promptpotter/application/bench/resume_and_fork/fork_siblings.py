@@ -6,17 +6,18 @@ import logging
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
 from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
 from promptpotter.application.served_dashboard import fork_remainder
+from promptpotter.domain.arms import Proposed
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_overlay import merge_pipeline_params, node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
@@ -216,9 +217,11 @@ def mint_fork(
 def declare_steered_values(
     seed: CycleSeed, narrowing: Mapping[str, NodeSearchNarrowing]
 ) -> CycleSeed:
-    """Without it the fork runs ``model=X`` beside a permitted set that excludes X."""
+    """Without it the fork runs ``model=X`` beside a permitted set that excludes X; X is what the
+    fork runs, its candidate's own under the operator's edit."""
     declared = dict(seed.optimizer_narrowing)
-    for node, cfg in node_config_items(seed.pipeline_overlay):
+    runs = merge_pipeline_params(seed.origin_params, seed.pipeline_overlay, None) or {}
+    for node, cfg in node_config_items(runs):
         origin = narrowing.get(node)
         listed = origin.param_allowed_values if origin else {}
         own = declared.get(node)
@@ -257,6 +260,9 @@ def mint_operator_fork(
     reason: str = "",
 ) -> str:
     campaign = owned_campaign(stores, hop.campaign_id)
+    named = RoundArm(round=from_round, arm=ArmKey(from_candidate_id)) if from_candidate_id else None
+    if named is not None:
+        seed = seed.model_copy(update={"origin_params": _candidate_params(stores, hop, named)})
     # Against what the parent's nodes permit, so the child lays over what its parent ran.
     seed = declare_steered_values(seed, permitted_narrowing(stores, campaign, hop))
     if not keep_rounds:
@@ -275,8 +281,15 @@ def mint_operator_fork(
             else f"operator-steered fork from {hop.cycle_id}"
         ),
         issued_by=acting_principal(stores.identity),
-        named=RoundArm(round=from_round, arm=ArmKey(from_candidate_id))
-        if from_candidate_id
-        else None,
+        named=named,
         seed=seed,
     )
+
+
+def _candidate_params(stores: Stores, hop: CycleHop, named: RoundArm) -> dict[str, Any] | None:
+    """Each node's config as the named candidate's record resolved it; ``None`` where it was
+    proposed and never walked, so it resolved none."""
+    arm = stores.campaigns.standing_rounds(hop, moment=None).arms.get((named.round, named.arm))
+    if arm is None or isinstance(arm.state, Proposed):
+        return None
+    return {node: dict(cfg) for node, cfg in node_config_items(arm.state.resolved_params)}

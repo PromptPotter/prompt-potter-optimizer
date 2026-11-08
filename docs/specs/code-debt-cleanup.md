@@ -223,14 +223,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   `inner_instrument_config` refuses first, on main too). Action: the journey drives `_open_seat` over
   an offline inner campaign. **Rides with:** M8. **Re-test:** `grep -n "_laid_arm" tests/test_identity.py`
   is empty.
-- **A fork seeded off a candidate is a babysit steer** — `SteerForkPanel.tsx` sends the candidate's
-  whole resolved config as `seed.pipeline_overlay`. It carries `provider` and the pinned
-  `route_order`, which `domain/pipeline_overlay.py::overlay_sets_model_outside_allowed` always
-  counts, so every panel fork runs babysat and its mint stamps `human_intervened`, and a principal
-  without `campaign.babysit` is refused 404 (main too). The payload already names the candidate
-  (`round`, `candidate_id`). Action: fork init seeds from the named candidate's record, the panel
-  sends only the operator's edit, and the verdict reads that edit. **Rides with:** M4. **Re-test:** a
-  panel fork with no edit reads `steer_verdict` "clean".
 
 ### Batch 11's fix pass (2026-11-08)
 
@@ -644,14 +636,6 @@ facts: a lint over EW's one type door, not a mechanism.
 6. **Slot lifetime is a hand-rolled `except BaseException: release…` at ~20 sites** (admission,
    `run_job`, head-to-head, mint-and-start, check-in, embedded run). Action: the registry hands out a held
    slot as a context manager. **Re-test:** `git grep -c "release_slot(\|job_registry.release(" -- promptpotter`.
-8. **A root's typed refusal is served as one generic caveat** — `pipeline_resolve.py::campaign_runs_with`
-   and `line_config` answer `None` for any `_ROOT_UNRESOLVED`, and `application/hierarchy.py::_UNRESOLVED`
-   serves the same sentence whichever refusal it was. Action: the refusal rides the row, its message
-   served. **Re-test:** read `application/hierarchy.py::_UNRESOLVED`.
-9. **A minted cycle's dataset layer is read off today's definition** — `pipeline_resolve.py::_campaign_merge`
-   lays the dataset's `node.config` and declared nodes from `dataset.yaml` as it stands; `ResolvedRun`
-   records the laid declaration but not the layer the run sent. Action: run init records the dataset
-   layer; a read lays the recorded one. **Re-test:** `git grep -n "runnable_definition" -- promptpotter/application/pipeline_resolve.py`.
 
 ### The engine swept by shape (debt hunt 2026-11-02)
 
@@ -663,12 +647,9 @@ Grouped by the arc each would ride; workaround comments and dead top-level names
   `cfg.get("model")`, `str(cfg.get("model", ""))`); the reserved `steps` list shares the bag with the
   node dicts (`pipeline_overlay.py::node_config_items` skips it by `isinstance`, and `"steps"` is
   spelled again across connectors and domain, past `domain/CLAUDE.md`'s probe); the prompt is split
-  off its config by `k != "prompt"` beside `search_point.py::strip_rendered_prompt`. Three merges
-  (`campaign_config.py::merge_config_layers` / `merge_node_overlays`, `pipeline_overlay.py::apply_node_overlay`)
-  fold one thing. An optimizer's llm nodes already read `search_point.py::NodeConfig`; the
-  free tier's per-node bounds still land in `CampaignConfig.pipeline_overlay`
-  (`application/free_tier.py::with_free_tier_layer`), read there by ~40 files, so they join `ParamLayers` as a
-  layer of their own only with this sweep. Action: `PipelineParams(steps, nodes: {name: NodeConfig})`
+  off its config by `k != "prompt"` beside `search_point.py::strip_rendered_prompt`. Two merges
+  (`campaign_config.py::merge_config_layers`, `pipeline_overlay.py::apply_node_overlay`) fold one thing.
+  An optimizer's llm nodes already read `search_point.py::NodeConfig`. Action: `PipelineParams(steps, nodes: {name: NodeConfig})`
   parsed once at the overlay seam, engine keys as fields, the backend's params one dict.
   **Re-test:** `git grep -c -E 'pipeline_params: (dict|Mapping)\[str, Any\]' -- promptpotter`;
   `git grep -n '"steps"\|k != "prompt"' -- promptpotter`.
@@ -697,12 +678,6 @@ next run-data reshape.
 - **`RaceStandingRecord.paired_breakdown` is an untyped stat bag**: potter (`pobb/checks.py`) and capo
   write different keys, and `views/readout.py::on_race_standing` reads `.get("p_better", 1.0)` to sort
   and `.get("p_better", 0.0)` to print. Action: a typed per-prior model. **Re-test:** `git grep -n '"p_better"' -- promptpotter`.
-- **The stale-data ladder's outcome has two owners**: `sample_measurement.py::execute_stale_data_protocol`
-  stamps one of five exclusive bools on `MeasuredCell` that `render/sample.py` re-reads as an `elif`
-  chain; the ladder is string-keyed, and a pause requested mid-ladder returns the degraded cell with
-  no outcome marked. Action: one outcome enum on the cell, the pause exit among its values, the ladder a `match`.
-  **Rides with:** M4.
-  **Re-test:** `git grep -nE "switched_out|persistently_degraded|config_fundamental_skip" -- promptpotter/domain/scoring.py`.
 
 **C. Served reads fold the ledger.** **Rides with:** § One record shape for every scoring pass.
 - **`hard_samples.json` is a checkout read back as served data**: `runner/output.py` writes it under
@@ -1163,11 +1138,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   separability on a run that used the tenant ruler, then choose a bar — never tighten one before. **Rides
   with:** [`../../paper/README.md`](../../paper/README.md) § The sequence, stage 3. **Re-test:** a
   tenant-ruler run's `index.json::final.rounds_to_separable` beside its `rounds_to_improved`.
-- **The free tier offers what it refuses.** `application/free_tier.py::with_free_tier_layer` narrows each
-  model's params but never the model axis, so a free check-in offers models Start refuses. Action: the
-  per-value lists name only values known to fail; the spend ceiling bounds the rest. **Rides with:**
-  the next check-in pass. **Re-test:** a free account's model menu equals
-  `free_tier.yaml::task_models`.
 - **NEXT — the default host pin is a trial with no verdict.** `domain/pipeline_overlay.py::pin_default_routes`
   writes each model's default host (`infrastructure/llm/registry.py::_MODEL_PROFILES`) into every
   node config; `route_order: []` opts out. **Decided:** a model keeps its pin only where its realized
@@ -1427,19 +1397,18 @@ word's `git grep -c` for that sense is 0.
 - **A member knob's `NodeConfigParam` serves no estimand**, which the config map shows for every campaign
   knob (`application/knobs.py`), so the setup screen cannot say what moving one moves.
 - **Seen building the setup screen**:
-  - An edited optimizer-prompt field cannot be reset: `OptimizerNodePrompt` serves no template text and
-    `campaign_config._merge_dicts` keeps a null as a value.
+  - An edited optimizer-prompt field cannot be reset to its template text: `OptimizerNodePrompt`
+    serves none.
   - Smaller: `title=` used as teaching prose in `NodeDetail` and `OptimizerCard`;
     `CheckinLoadingWindow` keeps its own `setInterval` outside `lib/cadence`; `.setup-step` is styled in
     `chat.css`.
 - **Seen in the phone-first setup pass**:
-  - A changed knob value names no source: the resolver keeps none for `optimization.nodes` layers
-    (dataset block, draft override, cycle seed), so the row says only "Changed from default".
   - `locus_crossover` is listed as a maker with nothing upstream making two-parent children; an
     arm-editing maker's on/off belongs on `nodes.Proposer` as a member-declared rule.
 - **Seen building the prompt workspace**:
-  - An override cannot be removed, only overwritten: knob Reset writes the declared value and a cleared
-    prompt field writes `""`, so the draft stays "edited". The overlay merge needs a delete.
+  - The knob Reset writes the declared value, so the draft stays "edited": `OptimizerSetupSection.tsx`
+    lays `NodeKnobsPanel`'s patch as `optimization.nodes` alone, where `EditDraftPatch.reset` is the
+    delete. **Re-test:** `git grep -n "set(k.declared)" -- webapp`.
   - The packs copy each snippet's arXiv id and method into its `tags`, so Tags repeats Source and Method.
   - `ui/MenuCheck` takes a `title=` prop, which `CandidatesToolbar` fills with teaching prose.
 - **Seen framing snippets in a prompt**:

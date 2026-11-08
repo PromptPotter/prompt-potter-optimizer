@@ -2639,6 +2639,20 @@
             "title": "Optimizer Narrowing",
             "type": "object"
           },
+          "origin_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The params twin of `origin_prompts`: a fork off a candidate runs that candidate's record (`resolved_params`), laid under `pipeline_overlay`, the operator's edit. None on a seed off no candidate.",
+            "title": "Origin Params"
+          },
           "origin_prompts": {
             "additionalProperties": {
               "$ref": "#/components/schemas/NodePrompt"
@@ -5849,6 +5863,30 @@
             "title": "Declared Nodes",
             "type": "array",
             "uniqueItems": true
+          },
+          "free_tier_overlay": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Free Tier Overlay",
+            "type": "object"
+          },
+          "knob_layers": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "enum": [
+                  "dataset",
+                  "campaign",
+                  "free_tier",
+                  "seed"
+                ],
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Knob Layers",
+            "type": "object"
           }
         },
         "required": [

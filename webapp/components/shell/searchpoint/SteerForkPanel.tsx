@@ -19,6 +19,20 @@ import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { Empty, FailureLine, ReadState, Said } from "@/components/ui";
 import { LimitReconcile } from "./LimitReconcile";
 
+// The editor hands back the candidate's whole config with the edit laid in; the steer is the edit.
+function editOf(
+  next: Record<string, Record<string, unknown>>,
+  seeded: Record<string, unknown>,
+): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [node, cfg] of Object.entries(next)) {
+    const was = (seeded[node] ?? {}) as Record<string, unknown>;
+    const moved = Object.entries(cfg).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(was[k]));
+    if (moved.length > 0) out[node] = Object.fromEntries(moved);
+  }
+  return out;
+}
+
 export function SteerForkPanel({
   candidate,
   path,
@@ -47,8 +61,8 @@ export function SteerForkPanel({
     string,
     Record<string, unknown>
   > | null>(null);
-  const steerOverlay = pickedOverlay ?? overlay;
-  const preview = useRead(forkPreviewRead(root.campaignId, steerOverlay));
+  // The fork runs the candidate's own record; only the operator's edit is a steer.
+  const preview = useRead(forkPreviewRead(root.campaignId, pickedOverlay ?? {}));
   const checking = preview.status === "loading";
   const refused = readyData(preview)?.steer === "refused";
 
@@ -65,7 +79,7 @@ export function SteerForkPanel({
     const { budget, nodes } = limits.current;
     const forkSeed: ForkSeed = {
       origin_prompts: editedPrompts.current ?? seedPrompts,
-      pipeline_overlay: editedOverlay.current ?? overlay,
+      pipeline_overlay: editedOverlay.current ?? {},
       config_overrides: nodes ? { nodes } : {},
       ...(Object.keys(editedNarrowing.current).length > 0
         ? { node_narrowing: editedNarrowing.current }
@@ -139,8 +153,9 @@ export function SteerForkPanel({
           );
         }}
         onConfigChange={(o) => {
-          editedOverlay.current = o;
-          setPickedOverlay(o);
+          const edit = editOf(o, overlay);
+          editedOverlay.current = edit;
+          setPickedOverlay(edit);
         }}
         onNarrowing={(nodeId, n) => {
           editedNarrowing.current = { ...editedNarrowing.current, [nodeId]: n };

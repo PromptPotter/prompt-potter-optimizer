@@ -2255,6 +2255,28 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
         patched = {"draft_id": draft["draft_id"], "patch": {"slug": "sums-host"}}
         edited = await host("edit-draft-campaign", keyed(patched))
         assert not edited.get("isError"), edited["content"]
+        # A reset drops the draft's own override, so the layer below runs again: Start would
+        # otherwise launch a value the operator took back.
+        knob = "config.optimization.nodes.adaptive_queue.config.sp_budget_round"
+        laid = [edited["structuredContent"]["config"]]
+        for edit in (
+            {
+                "config": {
+                    "optimization": {
+                        "nodes": {"adaptive_queue": {"config": {"sp_budget_round": 7}}}
+                    }
+                }
+            },
+            {"reset": [knob]},
+        ):
+            sent_edit = await host(
+                "edit-draft-campaign", keyed({"draft_id": draft["draft_id"], "patch": edit})
+            )
+            assert not sent_edit.get("isError"), sent_edit["content"]
+            laid.append(sent_edit["structuredContent"]["config"])
+        assert laid[0] != laid[1] and laid[2] == laid[0], (
+            "a reset left the draft's own override in what Start launches"
+        )
 
     # A knob sent at its default is another act than the knob unsent: one key names one of them.
     halting = {"dataset_name": "no-such-dataset", "optimization": {"halt_at_accuracy": 0.9}}

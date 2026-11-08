@@ -93,6 +93,13 @@ class EditDraftPatch(StrictModel):
         "the per-sample matcher, `dials` the composite's weights (the empty string clears them), "
         "`per_sample` and `per_cell` set those formulas.",
     )
+    reset: list[str] | None = Field(
+        default=None,
+        description="Dotted paths, by this patch's own fields, of the draft's own values to drop "
+        "before the rest is laid, so the layer below shows through: "
+        "`config.optimization.nodes.<node>.config.<key>` or `origin_prompts.<step>.<field>`. "
+        "A path the draft does not set is a no-op.",
+    )
     node_narrowing: dict[str, list[ParamIntent]] | None = None
     node_output: NodeOutputEdit | None = None
     column_query: str | None = Field(default=None, max_length=256)

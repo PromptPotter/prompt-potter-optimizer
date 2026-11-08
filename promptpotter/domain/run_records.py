@@ -36,6 +36,7 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.pipeline_schema import (
     CapabilityMenu,
+    KnobLayer,
     ManifestNodeOverlay,
     NodeSearchNarrowing,
 )
@@ -848,6 +849,12 @@ class CycleSeed(FrozenModel):
         default_factory=dict,
         description="C0's prompt loci, per prompt node; empty when the seed carries no origin.",
     )
+    origin_params: dict[str, Any] | None = Field(
+        default=None,
+        description="The params twin of `origin_prompts`: a fork off a candidate runs that "
+        "candidate's record (`resolved_params`), laid under `pipeline_overlay`, the operator's "
+        "edit. None on a seed off no candidate.",
+    )
     pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
     optimizer_narrowing: dict[str, NodeSearchNarrowing] = Field(
         default_factory=dict,
@@ -1050,6 +1057,10 @@ class PipelineRead(FrozenModel):
     # The definition's half of that read, which a campaign outliving its dataset dir still folds.
     dataset_overlay: dict[str, dict[str, Any]]
     declared_nodes: frozenset[str]
+    # The free tier's launch defaults its mint laid (`free_tier.py::free_tier_overlay`).
+    free_tier_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # Per optimizer-node knob the declaration holds, the layer below the draft's edit that laid it.
+    knob_layers: dict[str, dict[str, KnobLayer]] = Field(default_factory=dict)
 
 
 class ResolvedRunRecord(FrozenModel):

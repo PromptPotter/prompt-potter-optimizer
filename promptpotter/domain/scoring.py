@@ -5,6 +5,7 @@ import json
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from enum import StrEnum
 from functools import cached_property
 from typing import (
     Annotated,
@@ -244,6 +245,17 @@ class RerunComparison(TypedDict):
     improved: bool
 
 
+class StaleOutcome(StrEnum):
+    """Where the stale-data ladder left a degraded cached cell: one exit, so one value."""
+
+    OBSERVED = "observed"
+    CONFIG_SKIP = "config_skip"
+    RETRIED = "retried"
+    SWITCHED_OUT = "switched_out"
+    PERSISTENTLY_DEGRADED = "persistently_degraded"
+    PAUSED = "paused"
+
+
 @dataclass(frozen=True, slots=True)
 class MeasuredCell:
     """``sample_key`` is what the cell IS: replay matches on it. Its position is the bank's."""
@@ -262,12 +274,9 @@ class MeasuredCell:
     # The archive's address, ``{cell file}.{answer id}``; ``None`` where nothing was filed.
     answer: str | None = None
     retry_of_deprecated_cache: bool = False
-    retry_of_degraded: bool = False
+    stale_outcome: StaleOutcome | None = field(default=None, metadata=BY_HAND)
     rerun_comparison: RerunComparison | None = None
-    switched_out: bool = False
-    config_fundamental_skip: bool = False
-    persistently_degraded: bool = False
-    degraded_observed: bool = False
+    # Said with ``StaleOutcome.OBSERVED`` alone: how far the cell stands from the rerun trigger.
     degraded_obs_count: int | None = None
     degraded_obs_threshold: int | None = None
 
@@ -283,12 +292,17 @@ class MeasuredCell:
             error_category=(
                 (error_category(row) or ErrorCategory.UNKNOWN) if is_error_result(row) else None
             ),
+            stale_outcome=None
+            if (outcome := row.get("stale_outcome")) is None
+            else StaleOutcome(text(outcome, "MeasuredCell.stale_outcome")),
         )
 
     def wire(self) -> dict[str, object]:
         out = _CELL.write(self)
         if self.error_category is not None:
             out["error_category"] = self.error_category.value
+        if self.stale_outcome is not None:
+            out["stale_outcome"] = self.stale_outcome.value
         return out
 
     def ledger_wire(self) -> dict[str, object]:
@@ -349,7 +363,7 @@ _SAYS_EVERYTHING = MeasuredCell(
     error_category=ErrorCategory.SERVER,
     cached=True,
     answer="f.a",
-    retry_of_degraded=True,
+    stale_outcome=StaleOutcome.RETRIED,
     rerun_comparison={"hit_change": "MISS->HIT", "rank_change": None, "improved": True},
     degraded_obs_count=2,
     pipeline=PipelineData(

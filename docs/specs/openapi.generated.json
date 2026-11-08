@@ -4243,10 +4243,13 @@
             "type": "string"
           },
           "source": {
-            "description": "Where the value came from: default | campaign (operator-set) | required | manifest (an optimizer node's knob, as its manifest declares it)",
+            "description": "Where the value came from: default | required | manifest (an optimizer node's knob, as its manifest declares it) | the layer that set it: campaign (the operator's edit; any set bench knob), and on an optimizer node's knob dataset, free_tier or seed",
             "enum": [
               "default",
+              "dataset",
               "campaign",
+              "free_tier",
+              "seed",
               "required",
               "manifest"
             ],
@@ -5978,6 +5981,21 @@
               }
             ],
             "title": "Raw Task Description"
+          },
+          "reset": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dotted paths, by this patch's own fields, of the draft's own values to drop before the rest is laid, so the layer below shows through: `config.optimization.nodes.<node>.config.<key>` or `origin_prompts.<step>.<field>`. A path the draft does not set is a no-op.",
+            "title": "Reset"
           },
           "slug": {
             "anyOf": [
@@ -11121,6 +11139,7 @@
             "enum": [
               "dataset",
               "campaign",
+              "free_tier",
               "seed",
               "model_floor",
               "identity",
@@ -14991,6 +15010,7 @@
             "enum": [
               "dataset",
               "campaign",
+              "free_tier",
               "seed",
               "model_floor",
               "identity",

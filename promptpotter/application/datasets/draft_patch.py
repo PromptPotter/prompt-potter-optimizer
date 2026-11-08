@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter import connectors
@@ -98,12 +99,14 @@ async def plan_draft_patch(
         else held
     )
 
+    config, prompts = _reset(draft, patch.reset or [])
     if patch.origin_prompts is not None:
         changes["origin_prompts"] = patch.origin_prompts
+    elif prompts != draft.origin_prompts:
+        changes["origin_prompts"] = prompts
     if (library := _candidate_library(stores, draft, patch)) is not None:
         changes["candidate_library"] = library
 
-    config = dict(draft.config)
     was = draft_pipeline(stores, draft, held)
     sent = {} if patch.config is None else patch.config.model_dump(mode="json", exclude_unset=True)
     if patch.config is not None:
@@ -163,6 +166,35 @@ async def plan_draft_patch(
         column_ground_truth=patch.column_ground_truth,
         served=served,
     )
+
+
+def _reset(draft: DraftFile, paths: list[str]) -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
+    """*draft*'s config and origin prompts less each of its own values a reset path names; a
+    container left empty goes with it, so a reset draft reads as never edited there."""
+    config = copy.deepcopy(draft.config)
+    prompts = {step: dict(fields) for step, fields in draft.origin_prompts.items()}
+    for path in paths:
+        match path.split("."):
+            case ["config", "optimization", "nodes", node, "config", key]:
+                _drop(config, ["optimization", "nodes", node, "config", key])
+            case ["origin_prompts", step, field]:
+                _drop(prompts, [step, field])
+            case _:
+                raise PayloadInvalidError(
+                    f"patch.reset {path!r} names no value a draft holds: a reset path is "
+                    "`config.optimization.nodes.<node>.config.<key>` or "
+                    "`origin_prompts.<step>.<field>`."
+                )
+    return config, prompts
+
+
+def _drop(held: dict[str, Any], path: list[str]) -> None:
+    head, *rest = path
+    inner = held.get(head)
+    if rest and isinstance(inner, dict):
+        _drop(inner, rest)
+    if not rest or inner == {}:
+        held.pop(head, None)
 
 
 def _description_keys(pipeline: DraftPipeline) -> dict[str, list[str]]:

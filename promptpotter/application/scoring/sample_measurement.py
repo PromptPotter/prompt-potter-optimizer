@@ -8,6 +8,7 @@ import re
 import time
 from collections.abc import Mapping
 from dataclasses import replace
+from enum import StrEnum
 from statistics import fmean
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,7 @@ from promptpotter.domain.scoring import (
     PipelineData,
     RerunComparison,
     Scorer,
+    StaleOutcome,
     extract_item_label,
     turn_scalars,
 )
@@ -59,7 +61,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-STALE_DATA_LOAD_PROTOCOL: tuple[str, ...] = ("rerun", "sampleswitch")
+
+class StaleDataStep(StrEnum):
+    """The stale-data ladder, climbed in declared order."""
+
+    RERUN = "rerun"
+    SAMPLESWITCH = "sampleswitch"
+
 
 RERUN_TRIGGER_COUNT: int = 3
 
@@ -770,39 +778,42 @@ async def execute_stale_data_protocol(
 ) -> MeasuredCell:
     result = cached_result
 
-    for step in STALE_DATA_LOAD_PROTOCOL:
+    for step in StaleDataStep:
         if session.state.control.pause_requested():
-            return result
-        if step == "rerun":
-            historical = sample_index.degradation_count(sample.id) if sample_index else 0
-            effective_count = historical + 1
-            if effective_count < RERUN_TRIGGER_COUNT:
-                return replace(
-                    cached_result,
-                    degraded_observed=True,
-                    degraded_obs_count=effective_count,
-                    degraded_obs_threshold=RERUN_TRIGGER_COUNT,
+            return replace(result, stale_outcome=StaleOutcome.PAUSED)
+        match step:
+            case StaleDataStep.RERUN:
+                historical = sample_index.degradation_count(sample.id) if sample_index else 0
+                effective_count = historical + 1
+                if effective_count < RERUN_TRIGGER_COUNT:
+                    return replace(
+                        cached_result,
+                        stale_outcome=StaleOutcome.OBSERVED,
+                        degraded_obs_count=effective_count,
+                        degraded_obs_threshold=RERUN_TRIGGER_COUNT,
+                    )
+
+                if _rerun_would_repeat_token_budget_failure(cached_result, pipeline_params):
+                    return replace(cached_result, stale_outcome=StaleOutcome.CONFIG_SKIP)
+
+                rerun = await measure_sample(sample, session, pipeline_params)
+                result = replace(
+                    rerun,
+                    stale_outcome=StaleOutcome.RETRIED,
+                    rerun_comparison=compare_rerun(
+                        cached_result, rerun, session.state.scoring.require_scorer()
+                    ),
                 )
+                if not is_deprecated(result):
+                    return result
+            case StaleDataStep.SAMPLESWITCH:
+                if (
+                    sample_index
+                    and sample_index.degradation_rate(sample.id)
+                    >= SAMPLESWITCH_MIN_DEGRADATION_RATE
+                ):
+                    return replace(
+                        cached_result, cached=True, stale_outcome=StaleOutcome.SWITCHED_OUT
+                    )
 
-            if _rerun_would_repeat_token_budget_failure(cached_result, pipeline_params):
-                return replace(cached_result, config_fundamental_skip=True)
-
-            rerun = await measure_sample(sample, session, pipeline_params)
-            result = replace(
-                rerun,
-                retry_of_degraded=True,
-                rerun_comparison=compare_rerun(
-                    cached_result, rerun, session.state.scoring.require_scorer()
-                ),
-            )
-            if not is_deprecated(result):
-                return result
-
-        elif step == "sampleswitch":
-            if (
-                sample_index
-                and sample_index.degradation_rate(sample.id) >= SAMPLESWITCH_MIN_DEGRADATION_RATE
-            ):
-                return replace(cached_result, cached=True, switched_out=True)
-
-    return replace(result, persistently_degraded=True)
+    return replace(result, stale_outcome=StaleOutcome.PERSISTENTLY_DEGRADED)

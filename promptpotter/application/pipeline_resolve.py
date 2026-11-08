@@ -28,7 +28,14 @@ from promptpotter.application.datasets.prompts import (
     pipeline_node_overlay,
 )
 from promptpotter.application.datasets.startability import draft_samples
-from promptpotter.application.free_tier import free_fence, free_task_models, with_free_tier_layer
+from promptpotter.application.free_tier import (
+    FreeFence,
+    free_fence,
+    free_task_models,
+    free_tier,
+    free_tier_overlay,
+    with_free_tier_layer,
+)
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.quota import sends_on
@@ -81,6 +88,7 @@ from promptpotter.domain.pipeline_schema import (
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
     CapabilityMenu,
+    KnobLayer,
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
@@ -175,6 +183,7 @@ class ParamLayers:
     workspace: Path | None
     dataset: Mapping[str, Any] = field(default_factory=dict)
     campaign: Mapping[str, Any] = field(default_factory=dict)
+    free_tier: Mapping[str, Any] = field(default_factory=dict)
     seed: Mapping[str, Any] = field(default_factory=dict)
     identity: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     evolved: Mapping[str, Any] = field(default_factory=dict)
@@ -201,6 +210,8 @@ class ParamLayers:
                 return self.dataset
             case "campaign":
                 return self.campaign
+            case "free_tier":
+                return self.free_tier
             case "seed":
                 return self.seed
             case "model_floor":
@@ -674,6 +685,7 @@ def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> _D
         narrowing=cfg.optimizer_narrowing,
         declared=pipeline_declared_nodes(local),
     )
+    fence = free_fence(stores, served.connector)
     return _DraftMerge(
         # What was on OFFER before this draft narrowed it, so a menu cannot shrink to its own pick.
         declared=declared,
@@ -686,15 +698,15 @@ def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> _D
             workspace=stores.base_dir,
             dataset=pipeline_node_overlay(local),
             campaign=cfg.pipeline_overlay,
+            free_tier=free_tier_overlay(cfg, declared, fence),
             identity=identity_layer(None, None, None, cfg.judges, active),
         ),
-        free=_task_fenced(stores, served.connector),
+        free=_task_fenced(fence),
         local=local,
     )
 
 
-def _task_fenced(stores: Stores, connector: str) -> bool:
-    fence = free_fence(stores, connector)
+def _task_fenced(fence: FreeFence | None) -> bool:
     return fence is not None and fence.task
 
 
@@ -724,9 +736,10 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
             workspace=stores.base_dir,
             dataset=read.dataset_overlay,
             campaign=cfg.pipeline_overlay,
+            free_tier=read.free_tier_overlay,
             seed=cycle.seed_overlay,
         ),
-        free=_task_fenced(stores, campaign.connector),
+        free=_task_fenced(free_fence(stores, campaign.connector)),
         hop=hop,
         experiment=resolved.experiment,
     )
@@ -734,9 +747,11 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
 
 def recorded_schema(stores: Stores, hop: CycleHop) -> PipelineSchema:
     """What *hop* ran, as its mint recorded run init read it; never today's files or backend."""
-    return parse_pipeline_response(
-        _recorded_read(stores.campaigns.read_resolved_run(hop), hop).declaration
-    )
+    return parse_pipeline_response(recorded_read(stores, hop).declaration)
+
+
+def recorded_read(stores: Stores, hop: CycleHop) -> PipelineRead:
+    return _recorded_read(stores.campaigns.read_resolved_run(hop), hop)
 
 
 def _recorded_read(resolved: ResolvedRun, hop: CycleHop) -> PipelineRead:
@@ -1024,24 +1039,32 @@ _ROOT_UNRESOLVED = (
 )
 
 
-def campaign_runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith | None:
-    """``None`` is a root whose pipeline did not resolve: a broken dataset drops its own row only."""
+class RootRunsWith(NamedTuple):
+    """``runs_with`` ``None`` is a root whose pipeline did not resolve: a broken dataset drops its
+    own row only, and the row serves the refusal it raised."""
+
+    runs_with: CampaignRunsWith | None
+    # The root's typed refusal, as raised; ``None`` where it resolved.
+    unread: str | None
+
+
+def campaign_runs_with(stores: Stores, campaign: Campaign) -> RootRunsWith:
     try:
         key = _root_key(stores, campaign)
-    except _ROOT_UNRESOLVED:
-        logger.exception("runs_with: root of %s did not resolve", campaign.campaign_id)
-        return None
+    except _ROOT_UNRESOLVED as exc:
+        return RootRunsWith(None, str(exc))
 
-    def resolved() -> CampaignRunsWith | None:
+    def resolved() -> RootRunsWith:
         try:
-            return _runs_with(stores, campaign)
-        except _ROOT_UNRESOLVED:
-            logger.exception("runs_with: root of %s did not resolve", campaign.campaign_id)
-            return None
+            return RootRunsWith(_runs_with(stores, campaign), None)
+        except _ROOT_UNRESOLVED as exc:
+            return RootRunsWith(None, str(exc))
 
-    return derived(
+    held = derived(
         ("runs_with", stores.campaigns.cycle_dir(campaign.root_hop)), sig=key, compute=resolved
     )
+    assert held is not None, "a keyed derivation always answers"
+    return held
 
 
 class LineConfig(NamedTuple):
@@ -1074,7 +1097,12 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
         stable_hash(
             None
             if read is None
-            else [read.declaration, read.dataset_overlay, sorted(read.declared_nodes)]
+            else [
+                read.declaration,
+                read.dataset_overlay,
+                sorted(read.declared_nodes),
+                read.free_tier_overlay,
+            ]
         ),
     )
 
@@ -1116,6 +1144,26 @@ def _vendor_of(model: str) -> str:
     return normalize_model_id(model).partition("/")[0]
 
 
+def _knob_layers(
+    config: CampaignConfig, dataset: ResolvedDataset | None, fence: FreeFence | None
+) -> dict[str, dict[str, KnobLayer]]:
+    """Which layer below the draft's edit laid each optimizer-node knob *config* holds: the
+    dataset's block where it holds the value laid, the free tier's over it."""
+    held = {node: overlay.config for node, overlay in config.optimization.nodes.items()}
+    tiered = fence is not None and (fence.task or bool(fence.providers))
+    below: list[tuple[KnobLayer, Mapping[str, Any]]] = [
+        ("dataset", {} if dataset is None else dataset_campaign_block(dataset)),
+        ("free_tier", free_tier().campaign if tiered else {}),
+    ]
+    out: dict[str, dict[str, KnobLayer]] = {}
+    for layer, block in below:
+        for node, overlay in ((block.get("optimization") or {}).get("nodes") or {}).items():
+            for key, value in ((overlay or {}).get("config") or {}).items():
+                if key in held.get(node, {}) and held[node][key] == value:
+                    out.setdefault(node, {})[key] = layer
+    return out
+
+
 def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Session:
     campaign_config = cycle.config
     exclude = list(campaign_config.exclude_nodes)
@@ -1129,12 +1177,27 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
         declared=session.pipeline_read.declared_nodes,
         workspace=session.store.base_dir,
     )
+    # Laid at the mint, then read off its record: an account leaving the tier moves no minted run.
+    if session.cycle_id:
+        recorded = recorded_read(session.store, session.hop)
+        minted = {
+            "free_tier_overlay": recorded.free_tier_overlay,
+            "knob_layers": recorded.knob_layers,
+        }
+    else:
+        fence = free_fence(session.store, session.backend_client.connector.name)
+        minted = {
+            "free_tier_overlay": free_tier_overlay(campaign_config, session.pipeline_schema, fence),
+            "knob_layers": _knob_layers(campaign_config, dataset, fence),
+        }
+    read = session.pipeline_read.model_copy(update=minted)
     folded = ParamLayers(
         steps=active,
         schema=filtered,
         workspace=session.store.base_dir,
-        dataset=session.pipeline_read.dataset_overlay,
+        dataset=read.dataset_overlay,
         campaign=campaign_config.pipeline_overlay,
+        free_tier=read.free_tier_overlay,
         seed=cycle.seed_overlay,
         identity=identity_layer(
             session.store,
@@ -1176,6 +1239,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
     return replace(
         session,
         pipeline_schema=schema_as_run(filtered, pipeline_params, active, session.store.base_dir),
+        pipeline_read=read,
         pipeline_params=pipeline_params,
         identity_keys=folded.identity_keys,
     )

@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { readGap, readyData, shownData, useRead } from "@/lib/hooks/useRead";
-import { optimizerRosterRead } from "@/lib/api";
+import { configMapRead, optimizerRosterRead } from "@/lib/api";
 import {
+  type ConfigKnob,
+  type ConfigMapResponse,
   type ManifestNodeOverlay,
   type NodeConfigParam,
   type OptimizerRoster,
@@ -47,6 +49,8 @@ export function NodeKnobsPanel({
   const served = shownData(read);
   const { campaignId } = useWorkspace();
   const rosterRead = useRead(optimizerRosterRead());
+  // A campaign's knobs name the layer that set them; a draft's setup serves no such map.
+  const mapRead = useRead(!editable && campaignId ? configMapRead(campaignId) : null);
 
   if (!editable && !campaignId) {
     return <Empty className="mech-empty">Select a campaign to see its optimizer&apos;s knobs.</Empty>;
@@ -69,9 +73,27 @@ export function NodeKnobsPanel({
       optimizer={served.optimizer}
       setup={served.optimizer_setup}
       entry={readyData(rosterRead)?.optimizers.find((o) => o.name === served.optimizer)}
+      setBy={knobLayers(readyData(mapRead))}
       onChange={onChange}
     />
   );
+}
+
+type KnobLayer = ConfigKnob["source"];
+
+const LAYER_WORDS: Partial<Record<KnobLayer, string>> = {
+  dataset: "by the dataset",
+  campaign: "by this campaign",
+  free_tier: "by the free tier",
+  seed: "by a steer",
+};
+
+function knobLayers(map: ConfigMapResponse | null | undefined): Map<string, KnobLayer> {
+  const out = new Map<string, KnobLayer>();
+  for (const group of map?.groups ?? []) {
+    for (const knob of group.knobs) out.set(knob.path, knob.source);
+  }
+  return out;
 }
 
 function declaredLabel(entry: OptimizerRoster["optimizers"][number] | undefined): string {
@@ -82,14 +104,18 @@ function KnobGroups({
   optimizer,
   setup,
   entry,
+  setBy,
   onChange,
 }: {
   optimizer: string;
   setup: OptimizerSetup;
   entry: OptimizerRoster["optimizers"][number] | undefined;
+  setBy: Map<string, KnobLayer>;
   onChange: OnChange;
 }) {
   const declared = declaredLabel(entry);
+  const layerOf = (node: string, key: string) =>
+    setBy.get(`optimization.nodes.${node}.config.${key}`);
   const groups = knobGroups(setup);
   const isMain = (node: string, key: string) =>
     setup.main.some((ref) => ref.node === node && ref.knob === key);
@@ -123,6 +149,7 @@ function KnobGroups({
                 node={node}
                 knob={knob}
                 declaredLabel={declared}
+                setBy={layerOf(node, knob.key)}
                 showNode
                 onChange={onChange}
               />
@@ -170,6 +197,7 @@ function KnobGroups({
                     node={group.node}
                     knob={k}
                     declaredLabel={declared}
+                    setBy={layerOf(group.node, k.key)}
                     onChange={onChange}
                   />
                 ))}
@@ -187,12 +215,15 @@ export function KnobItem({
   node,
   knob: k,
   declaredLabel,
+  setBy,
   showNode = false,
   onChange,
 }: {
   node: string;
   knob: NodeConfigParam;
   declaredLabel: string;
+  // The config map's layer behind a campaign's value; a draft's setup has none.
+  setBy?: KnobLayer | undefined;
   showNode?: boolean;
   onChange: OnChange;
 }) {
@@ -233,6 +264,7 @@ export function KnobItem({
         <p className="mech-row-default">
           <span>
             Changed from {declaredLabel} {fmtValue(k.declared)}
+            {setBy && LAYER_WORDS[setBy] ? ` ${LAYER_WORDS[setBy]}` : null}
           </span>
           {set ? (
             <Button variant="ghost" className="mech-reset" onClick={() => set(k.declared)}>

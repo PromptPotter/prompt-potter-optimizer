@@ -14,12 +14,13 @@ from promptpotter.application.knobs import (
     resolve_knob_states,
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, recorded_read
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     Estimand,
     knob_label,
 )
+from promptpotter.domain.pipeline_schema import KnobLayers
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores, owned_campaign
 
@@ -31,8 +32,10 @@ class ConfigKnob(StrictModel):
     label: str = Field(description="Short display name (prefix-stripped)")
     value: Any = Field(description="Effective value in this campaign's frozen config")
     source: KnobSource = Field(
-        description="Where the value came from: default | campaign (operator-set) | required | "
-        "manifest (an optimizer node's knob, as its manifest declares it)"
+        description="Where the value came from: default | required | manifest (an optimizer "
+        "node's knob, as its manifest declares it) | the layer that set it: campaign (the "
+        "operator's edit; any set bench knob), and on an optimizer node's knob dataset, "
+        "free_tier or seed"
     )
 
 
@@ -71,12 +74,14 @@ class ConfigMapResponse(StrictModel):
 
 def campaign_config_map(stores: Stores, campaign_id: str) -> ConfigMapResponse:
     campaign = owned_campaign(stores, campaign_id)
-    return config_map(cycle_config(stores, campaign, campaign.root_hop).config)
+    cycle = cycle_config(stores, campaign, campaign.root_hop)
+    laid_by = cycle.knob_layers(recorded_read(stores, campaign.root_hop).knob_layers)
+    return config_map(cycle.config, laid_by)
 
 
-def config_map(config: CampaignConfig) -> ConfigMapResponse:
+def config_map(config: CampaignConfig, laid_by: KnobLayers) -> ConfigMapResponse:
     selected = select_optimizer(config.optimization)
-    states = resolve_knob_states(config, selected)
+    states = resolve_knob_states(config, selected, laid_by)
     groups = [
         ConfigEstimandGroup(
             key=estimand.value,

@@ -13,6 +13,7 @@ from pydantic_core import to_jsonable_python
 
 from promptpotter.application import optimizers
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
+from promptpotter.domain.pipeline_schema import KnobLayer, KnobLayers
 from promptpotter.domain.said import Tone
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
@@ -291,7 +292,8 @@ def check_couplings(config: CampaignConfig, selected: SelectedOptimizer) -> list
     return [c for c in declared_couplings(selected) if c.predicate(config)]
 
 
-KnobSource = Literal["default", "campaign", "required", "manifest"]
+# A set optimizer-node knob names the layer that set it last; a set bench knob is `campaign`.
+KnobSource = Literal["default", KnobLayer, "required", "manifest"]
 
 
 @dataclass(frozen=True)
@@ -314,8 +316,11 @@ def _at(data: Any, path: tuple[str, ...]) -> Any:
     return cur
 
 
-def resolve_knob_states(config: CampaignConfig, selected: SelectedOptimizer) -> list[KnobState]:
-    """``value`` is ``None`` where an opt-in submodel is off, not merely unset."""
+def resolve_knob_states(
+    config: CampaignConfig, selected: SelectedOptimizer, laid_by: KnobLayers
+) -> list[KnobState]:
+    """``value`` is ``None`` where an opt-in submodel is off, not merely unset; *laid_by* names
+    the layer behind each ``optimization.nodes`` key *config* sets (`CycleConfig.knob_layers`)."""
     dumped = config.model_dump(mode="json")
     authored = config.model_dump(mode="json", exclude_defaults=True)
     nodes = {n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes}
@@ -327,7 +332,8 @@ def resolve_knob_states(config: CampaignConfig, selected: SelectedOptimizer) -> 
         set_by_operator = _at(authored, path) is not _MISSING
         source: KnobSource
         if path[: len(_NODES_PATH)] == _NODES_PATH:
-            source = "campaign" if set_by_operator else "manifest"
+            node, _, key = path[len(_NODES_PATH) : len(_NODES_PATH) + 3]
+            source = laid_by[node][key] if set_by_operator else "manifest"
         else:
             source = "required" if decl.required else ("campaign" if set_by_operator else "default")
         states.append(

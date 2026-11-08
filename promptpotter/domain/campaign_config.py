@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, TypeAdapter, field_validator
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.bench import BenchTrigger, DatasetSplit
@@ -20,7 +20,12 @@ from promptpotter.domain.cells import HardSampleOrder
 from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.paired_reading import LiftReference
 from promptpotter.domain.pipeline_overlay import merge_pipeline_params, steers_disallowed_model
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
+from promptpotter.domain.pipeline_schema import (
+    KnobLayer,
+    KnobLayers,
+    ManifestNodeOverlay,
+    NodeSearchNarrowing,
+)
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
@@ -446,14 +451,10 @@ def _merge_dicts(base: dict[str, object], over: Mapping[str, object]) -> dict[st
     return out
 
 
-def merge_node_overlays(
-    base: Mapping[str, ManifestNodeOverlay], over: Mapping[str, ManifestNodeOverlay]
-) -> dict[str, ManifestNodeOverlay]:
-    out = dict(base)
-    for node, overlay in over.items():
-        held = out[node].config if node in out else {}
-        out[node] = ManifestNodeOverlay(config={**held, **overlay.config})
-    return out
+# `optimization.nodes` as a layer of `merge_config_layers`, which lays a node's config key by key.
+NODE_OVERLAYS: TypeAdapter[dict[str, ManifestNodeOverlay]] = TypeAdapter(
+    dict[str, ManifestNodeOverlay]
+)
 
 
 _TREATMENT_OWNED: dict[str, Any] = {"optimization": {"optimizer": True, "nodes": True}}
@@ -521,7 +522,12 @@ def apply_config_overrides(config: CampaignConfig, overrides: ConfigOverrides) -
         else {}
     )
     if overrides.nodes:
-        opt_updates["nodes"] = merge_node_overlays(config.optimization.nodes, overrides.nodes)
+        opt_updates["nodes"] = NODE_OVERLAYS.validate_python(
+            merge_config_layers(
+                NODE_OVERLAYS.dump_python(config.optimization.nodes, exclude_unset=True),
+                NODE_OVERLAYS.dump_python(overrides.nodes, exclude_unset=True),
+            )
+        )
     top_updates: dict[str, Any] = {}
     if isinstance(overrides.scoring, dict):
         top_updates["scoring"] = {**_scoring_block(config.scoring), **overrides.scoring}
@@ -574,6 +580,8 @@ class CycleConfig(FrozenModel):
                 config = apply_config_overrides(config, seed.config_overrides)
                 narrowing = _narrowed(config.optimizer_narrowing, seed.optimizer_narrowing)
                 config = config.model_copy(update={"optimizer_narrowing": narrowing})
+                if seed.origin_params is not None:
+                    overlay = merge_pipeline_params(overlay, seed.origin_params, None) or {}
                 overlay = merge_pipeline_params(overlay, seed.pipeline_overlay, None) or {}
             config = scoring_locked(config, span.scoring_lock)
         return cls(config=config, spans=tuple(spans), seed_overlay=overlay)
@@ -585,6 +593,26 @@ class CycleConfig(FrozenModel):
             span.seed is not None and steers_disallowed_model(permitted, span.seed.pipeline_overlay)
             for span in self.spans
         )
+
+    def knob_layers(self, recorded: KnobLayers) -> dict[str, dict[str, KnobLayer]]:
+        """The layer that last set each ``optimization.nodes`` key ``config`` holds: a seed of the
+        line over what its mint *recorded* (`PipelineRead.knob_layers`), any other the draft's edit."""
+        seeded = {
+            (node, key)
+            for span in self.spans
+            if span.seed is not None
+            for node, overlay in span.seed.config_overrides.nodes.items()
+            for key in overlay.config
+        }
+        return {
+            node: {
+                key: "seed"
+                if (node, key) in seeded
+                else recorded.get(node, {}).get(key, "campaign")
+                for key in overlay.config
+            }
+            for node, overlay in self.config.optimization.nodes.items()
+        }
 
     @property
     def own_seed(self) -> CycleSeed | None:

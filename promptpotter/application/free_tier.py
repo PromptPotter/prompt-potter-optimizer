@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, NamedTuple
 
 from promptpotter import connectors
@@ -12,9 +12,9 @@ from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
-from promptpotter.domain.free_tier import FREE_TIER_ADAPTER, FreeTier
+from promptpotter.domain.free_tier import FREE_TIER_ADAPTER, Bounds, FreeTier
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.spend import draws_coupon
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.store.io import read_yaml
@@ -55,28 +55,53 @@ def with_free_tier_layer(
     config: CampaignConfig, schema: PipelineSchema | None, fence: FreeFence
 ) -> CampaignConfig:
     """The tier's layer where anything the run sends draws the coupon, plus per fenced task node
-    of *schema* its model's bounds: each searched axis narrowed to them within what the node
-    permits, and an unset one launched at the lowest. ``None`` reads no node."""
+    of *schema* each searched axis narrowed to its model's bounds within what the node permits
+    (the model axis to the tier's models). ``None`` reads no node; what an unset param launches
+    at is `free_tier_overlay`'s."""
     if not fence.task and not fence.providers:
         return config
     tier = free_tier()
     merged = merge_config_layers(config.model_dump(mode="json", exclude_unset=True), tier.campaign)
-    space = schema.narrow(config.optimizer_narrowing) if schema is not None and fence.task else None
-    for node in space.declared_nodes if space is not None else ():
-        cfg = {**node.current_config, **config.pipeline_overlay.get(node.name, {})}
-        if not node.is_llm or not (bounds := tier.task_models.get(str(cfg.get("model")))):
-            continue
+    if schema is None or not fence.task:
+        return CampaignConfig.model_validate(merged)
+    space = schema.narrow(config.optimizer_narrowing)
+    for node, _, bounds in _bounded_nodes(config, space, tier):
         kept = node.param_allowed_values
         allowed = {p: [v for v in vs if p not in kept or v in kept[p]] for p, vs in bounds.items()}
-        unset = {p: vs[0] for p, vs in bounds.items() if p not in cfg and vs}
+        # A searched model axis offers the tier's models alone: Start refuses none it offered.
+        if "model" in node.param_keys:
+            options = space.model_options(node)
+            allowed["model"] = [m for m in tier.task_models if m in options]
         merged = merge_config_layers(
-            merged,
-            {
-                "pipeline_overlay": {node.name: unset},
-                "optimizer_narrowing": {node.name: {"param_allowed_values": allowed}},
-            },
+            merged, {"optimizer_narrowing": {node.name: {"param_allowed_values": allowed}}}
         )
     return CampaignConfig.model_validate(merged)
+
+
+def free_tier_overlay(
+    config: CampaignConfig, schema: PipelineSchema, fence: FreeFence | None
+) -> dict[str, dict[str, Any]]:
+    """The `free_tier` param layer (`pipeline_schema.py::ParamLayer`): per fenced task node of
+    *schema*, each param its model's bounds name and neither the node nor *config* sets, launched
+    at the lowest."""
+    if fence is None or not fence.task:
+        return {}
+    tier = free_tier()
+    return {
+        node.name: {p: vs[0] for p, vs in bounds.items() if p not in cfg and vs}
+        for node, cfg, bounds in _bounded_nodes(config, schema, tier)
+    }
+
+
+def _bounded_nodes(
+    config: CampaignConfig, schema: PipelineSchema, tier: FreeTier
+) -> Iterator[tuple[PipelineNode, dict[str, Any], Bounds]]:
+    """Each llm node of *schema* on a task model the tier bounds: its config as *config* lays it,
+    and its model's bounds."""
+    for node in schema.declared_nodes:
+        cfg = {**node.current_config, **config.pipeline_overlay.get(node.name, {})}
+        if node.is_llm and (bounds := tier.task_models.get(str(cfg.get("model")))):
+            yield node, cfg, bounds
 
 
 def free_task_models() -> frozenset[str]:
