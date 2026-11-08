@@ -559,11 +559,9 @@ def has_source(dataset: ResolvedDataset) -> bool:
 
 def no_dataset_hint(stores: Stores) -> str:
     """Every dataset this account reads: its own definitions first, then the installed templates."""
-    lines = [
-        f"  python -m promptpotter new {ref.dataset.name}" for ref in list_readable_datasets(stores)
-    ]
+    lines = [f"  {ref.dataset.name}" for ref in list_readable_datasets(stores)]
     body = "\n".join(lines) if lines else "  (no datasets readable here)"
-    return "Available datasets:\n\n" + body
+    return "Available datasets, each a `mint-campaign` takes by name:\n\n" + body
 
 
 def build_panel(stores: Stores, dataset: ResolvedDataset) -> bool:

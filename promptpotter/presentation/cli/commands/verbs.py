@@ -722,6 +722,14 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         ),
     ),
     _read_verb(
+        "command",
+        ReadKind.COMMAND,
+        "read:command_human",
+        help="Where one command you sent stands, by the id its door answered: running, done, "
+        "refused, or each job a launch launched. Read-only, zero spend.",
+        args=(Arg("command_id", help="The command's id, as `--json` or its door answered it."),),
+    ),
+    _read_verb(
         "machine-status",
         ReadKind.MACHINE_STATUS,
         "machine_status:machine_status_human",

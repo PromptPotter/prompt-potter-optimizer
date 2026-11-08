@@ -412,7 +412,7 @@ def cycle_axes_only(budget: Budget) -> Budget:
     if money := budget.named & MONEY_AXES:
         raise ValueError(
             f"{', '.join(sorted(money))} bound the whole campaign, never one cycle: set it with "
-            "`set-limits` or a launch's `--max-usd` / `--max-tokens`"
+            "`set-limits`, or a launch's `budget`"
         )
     return budget
 

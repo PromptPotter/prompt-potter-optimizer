@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel
 
 from promptpotter.application.cycle_addressing import resolve_course, resolve_subject
 from promptpotter.application.datasets.draft_campaign import owned_draft
@@ -18,10 +18,12 @@ from promptpotter.domain.command_events import (
     CommandAckStatus,
     CommandEffect,
     CommandRecord,
+    KeptRefusal,
     draft_subject,
     subject_key,
 )
 from promptpotter.domain.command_kinds import (
+    COMMAND_ID_CHARS,
     CampaignPayload,
     CommandAcceptedBody,
     CommandKind,
@@ -44,6 +46,7 @@ from promptpotter.shared.errors import (
     ConflictError,
     NotFoundError,
     PayloadInvalidError,
+    PotterError,
 )
 from promptpotter.shared.identity import acting_principal, require_capability
 from promptpotter.shared.named_rows import imported, returned
@@ -68,12 +71,18 @@ MAX_IDEMPOTENCY_KEY_CHARS = 256
 @dataclass(frozen=True, slots=True)
 class CommandCall[P: CommandPayload]:
     """A remote door passes the key its caller retries under, and a retry under it answers the
-    first act; an in-process sender sends once, under a fresh one."""
+    first act; an in-process sender sends once, under a fresh one. Its command id is minted here,
+    so a door names what it filed (its `cancel`) before the act answers."""
 
     payload: P
     idempotency_key: str = field(default_factory=lambda: uuid.uuid4().hex)
+    command_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     def __post_init__(self) -> None:
+        if not 0 < len(self.command_id) <= COMMAND_ID_CHARS:
+            raise BadRequestError(
+                f"A command id is 1 to {COMMAND_ID_CHARS} characters.", code="command_id_invalid"
+            )
         key = self.idempotency_key.strip()
         if not key:
             raise BadRequestError(
@@ -99,11 +108,11 @@ async def _no_body(_: CommandEffect) -> None:
 @dataclass(frozen=True, slots=True)
 class Applier[R]:
     """`effect_fn` reads the ack's effect off what `run` applied, and `replay` answers a retry from
-    the first act's; `replay=None` dedupes nothing; `ack="accepted"` leaves `run` the guard alone,
-    the loop acking `applied`."""
+    the first act's, every kind's but an unmatched payload's (`CommandPayload.unmatched`);
+    `ack="accepted"` leaves `run` the guard alone, the loop acking `applied`."""
 
     run: Callable[[], Awaitable[R]]
-    replay: Callable[[CommandEffect], Awaitable[R]] | None
+    replay: Callable[[CommandEffect], Awaitable[R]]
     effect_fn: Callable[[R], CommandEffect] | None = None
     ack: CommandAckStatus = "applied"
     # Set where what `run` answers carries the act on past its ack (a Start's admitted launch holds
@@ -129,7 +138,7 @@ class Applier[R]:
         async def _refuse() -> None:
             raise RejectedError(reason)
 
-        return Applier(_refuse, replay=None)
+        return Applier(_refuse, _no_body)
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,8 +174,8 @@ type Handler[R] = Callable[[Any], Awaitable[Applier[R]]]
 def addressed[P: CommandPayload](stores: Stores, payload: P) -> P:
     """*payload* as the dispatcher acts on it: its addressed campaign id and a cycle command's
     cycle id — the leaf's, below its ``descend`` chain — resolved from the prefixes any door sent
-    by the one rule every read takes (`resolve_subject`). A door that names a pass's stop before
-    the pass ends holds this."""
+    by the one rule every read takes (`resolve_subject`). A door that tracks what it sent holds
+    this."""
     if not isinstance(payload, CampaignPayload):
         return payload
     if isinstance(payload, CyclePayload):
@@ -178,6 +187,12 @@ def addressed[P: CommandPayload](stores: Stores, payload: P) -> P:
         resolved = resolve_subject(stores, subject)
         fields = {"campaign_id": resolved.campaign_id}
     return payload if resolved == subject else payload.model_copy(update=fields)
+
+
+def _rejected(command_id: str, detail: str, refused: Exception) -> CommandAckRecord:
+    """Its end keeps the refusal its door serves, where it is one."""
+    kept = KeptRefusal.of(refused) if isinstance(refused, PotterError) else None
+    return CommandAckRecord(command_id=command_id, status="rejected", detail=detail, refusal=kept)
 
 
 def handler_of(kind: CommandKind) -> Handler[Any]:
@@ -287,7 +302,7 @@ class CommandDispatcher:
             )
             return await CommandDispatcher(
                 leaf_stores, job_registry=self._attached, inline=self.inline
-            )._on_cycle(CommandCall(inner, call.idempotency_key))
+            )._on_cycle(replace(call, payload=inner))
         campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
         campaign = owned_campaign(self.stores, campaign_id)
         if self.stores.campaigns.load(hop, moment=None) is None:
@@ -321,24 +336,24 @@ class CommandDispatcher:
         log = self.stores.commands
         # Off the loop: an upload's act hashes its bytes.
         payload, act_digest = await asyncio.to_thread(call.payload.recorded)
-        if applier.replay is not None:
-            # The digest holds no secret's text, so a retry would match two secrets as one act.
-            if any(isinstance(value, SecretStr) for value in dict(call.payload).values()):
-                raise TypeError(f"{kind} replays, yet carries a secret its digest cannot name")
+        if not call.payload.unmatched:
             existing = log.book().keyed(subject, kind, act_digest, idempotency_key)
             if existing is not None:
                 record, ack = existing
                 return CommandOutcome(
                     payload=call.payload,
-                    accepted=CommandAcceptedBody(command_id=record.command_id),
+                    accepted=CommandAcceptedBody(command_id=record.command_id, subject=subject),
                     result=await applier.replay(ack.effect),
                     ack=ack.status,
                 )
 
-        command_id = str(uuid.uuid4())
+        command_id = call.command_id
+        if command_id in log.book().filed:
+            raise ConflictError(
+                f"command {command_id} is already filed; send a new call under an id of its own",
+                code="command_id_reused",
+            )
         applied: list[R] = []
-        ack_status: CommandAckStatus = applier.ack
-        ack_detail = ""
         # The filing and its end are one scope: a filing no act ended is ended ``cancelled``.
         filed = ended = False
         try:
@@ -357,23 +372,20 @@ class CommandDispatcher:
             try:
                 applied.append(await applier.run())
             except RejectedError as exc:
-                ack_status = "rejected"
-                ack_detail = exc.reason
+                ended = True
+                refused = ConflictError(
+                    f"command {kind} rejected: {exc.reason}",
+                    details={"command_id": command_id, "reason": exc.reason},
+                )
+                log.append(_rejected(command_id, exc.reason, refused))
+                raise refused from None
             except Exception as exc:
                 ended = True
-                log.ack(command_id, "rejected", str(exc))
+                log.append(_rejected(command_id, str(exc), exc))
                 raise
-            effect = (
-                applier.effect_fn(applied[0])
-                if (applier.effect_fn is not None and ack_status != "rejected")
-                else NoEffect()
-            )
+            effect = NoEffect() if applier.effect_fn is None else applier.effect_fn(applied[0])
             ended = True
-            log.append(
-                CommandAckRecord(
-                    command_id=command_id, status=ack_status, detail=ack_detail, effect=effect
-                )
-            )
+            log.append(CommandAckRecord(command_id=command_id, status=applier.ack, effect=effect))
         except BaseException as exc:
             # Admitted and never handed on: what the answer holds is given back in this scope.
             if applied and applier.rides is not None:
@@ -382,17 +394,11 @@ class CommandDispatcher:
                 log.ack(command_id, "cancelled", f"interrupted: {type(exc).__name__}")
             raise
 
-        if not applied:
-            raise ConflictError(
-                f"command {kind} rejected: {ack_detail}",
-                details={"command_id": command_id, "reason": ack_detail},
-            )
-
         return CommandOutcome(
             payload=call.payload,
-            accepted=CommandAcceptedBody(command_id=command_id),
+            accepted=CommandAcceptedBody(command_id=command_id, subject=subject),
             result=applied[0],
-            ack=ack_status,
+            ack=applier.ack,
         )
 
     def pause_superseded(self, parent: CycleHop, by: CycleHop) -> None:

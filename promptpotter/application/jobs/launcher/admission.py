@@ -3,10 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
-from contextlib import asynccontextmanager, contextmanager
-from contextvars import ContextVar
-from pathlib import Path
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, NoReturn, assert_never
 
 from promptpotter import connectors
@@ -27,9 +25,8 @@ from promptpotter.application.jobs.registry import JobRegistry, launch_interrupt
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
-from promptpotter.domain.command_kinds import PauseCyclePayload
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, decode_cycle_path
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
     CampaignLaunch,
@@ -66,13 +63,12 @@ from promptpotter.infrastructure.llm.spend_book import (
     spending_under,
 )
 from promptpotter.infrastructure.producer_lock import hold_pass, release_pass
-from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
     MachineBusyError,
     NotFoundError,
-    TaskUncancellableError,
 )
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
@@ -543,62 +539,15 @@ class PassStoppedError(ConflictError):
     code = "pass_stopped"
 
 
-class PassHold:
-    """A paid pass's hold of the cycle it scores, the one truth its stop reads: unheld until the
-    pass holds the cycle, held to its let-go, then ended. The hold, its let-go and a stop each act
-    under the hold's own lock, so a stop lands while the pass holds its cycle or not at all."""
-
-    def __init__(self) -> None:
-        self._lock = asyncio.Lock()
-        self._cycle_dir: Path | None = None
-        self._ended = False
-
-    async def take(self, cycle_dir: Path) -> None:
-        async with self._lock:
-            hold_pass(cycle_dir)
-            self._cycle_dir, self._ended = cycle_dir, False
-
-    async def let_go(self, stores: Stores, holding: CycleHop | None) -> str | None:
-        """Applies a pause asked of the pass, however it ended, before the cycle is let go; who asked."""
-        async with self._lock:
-            try:
-                return None if holding is None else _take_pause(stores, holding)
-            finally:
-                if self._cycle_dir is not None:
-                    release_pass(self._cycle_dir)
-                self._cycle_dir, self._ended = None, True
-
-    @asynccontextmanager
-    async def stopping(self, stores: Stores, pause: PauseCyclePayload) -> AsyncIterator[None]:
-        """Where *pause* addresses the cycle this pass holds, its body sends it before any let-go:
-        a stop never lands on a run holding the cycle after. Refused before the pass holds it, when
-        nothing is spent yet, and once it let go."""
-        hop = CycleHop(campaign_id=pause.campaign_id, cycle_id=pause.cycle_id)
-        leaf_stores, leaf = await asyncio.to_thread(
-            resolve_cycle_path, stores, (hop, *decode_cycle_path(pause.descend))
-        )
-        async with self._lock:
-            if self._ended:
-                raise TaskUncancellableError("the pass ended: nothing is left to stop")
-            if self._cycle_dir != leaf_stores.campaigns.cycle_dir(leaf):
-                raise TaskUncancellableError(
-                    f"the pass holds {leaf.cycle_id} not yet, so no pause stops it; ask again"
-                )
-            yield
-
-    @contextmanager
-    def bound(self) -> Iterator[None]:
-        """A paid pass run inside this context holds its cycle through this hold, which the caller
-        that may stop it keeps."""
-        token = _BOUND_HOLD.set(self)
-        try:
-            yield
-        finally:
-            _BOUND_HOLD.reset(token)
-
-
-# The hold of the paid pass a caller's task runs, bound by the caller that may stop it.
-_BOUND_HOLD: ContextVar[PassHold | None] = ContextVar("pass_hold", default=None)
+def _let_go(stores: Stores, holding: CycleHop | None) -> str | None:
+    """Applies a pause asked of the pass, however it ended, before the cycle is let go; who asked
+    it, or the pass's `cancel`."""
+    if holding is None:
+        return None
+    try:
+        return _take_pause(stores, holding)
+    finally:
+        release_pass(stores.campaigns.cycle_dir(holding))
 
 
 @asynccontextmanager
@@ -622,14 +571,13 @@ async def paid_pass(
     if job.queued:
         refuse_as_busy(stores, job_registry, job)
     holding: CycleHop | None = None
-    pass_hold = _BOUND_HOLD.get() or PassHold()
     try:
         meters: CeilingMeter = (
             "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
         )
         if hop is not None:
             cycle_dir = stores.campaigns.cycle_dir(hop)
-            await pass_hold.take(cycle_dir)
+            hold_pass(cycle_dir)
             holding = hop
             # Asked of a producer gone since, as a launch's RUNNING record empties the inbox.
             _take_pause(stores, hop)
@@ -669,7 +617,7 @@ async def paid_pass(
             unbind()
     except BaseException as exc:
         job_registry.release(job.job_id, exc)
-        stopped_by = await pass_hold.let_go(stores, holding)
+        stopped_by = _let_go(stores, holding)
         if stopped_by is not None and launch_interrupted(exc):
             raise PassStoppedError(
                 f"The {verb} pass stopped: {stopped_by}. Every cell it measured is banked, and a "
@@ -677,7 +625,7 @@ async def paid_pass(
             ) from None
         raise
     job_registry.release(job.job_id)
-    await pass_hold.let_go(stores, holding)
+    _let_go(stores, holding)
 
 
 def _take_pause(stores: Stores, hop: CycleHop) -> str | None:

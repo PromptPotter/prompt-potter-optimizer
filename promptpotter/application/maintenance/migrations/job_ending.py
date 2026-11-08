@@ -8,26 +8,40 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from promptpotter.config.paths import jobs_dir
+from promptpotter.domain.refusal import Refusal
 from promptpotter.infrastructure.store.data_root import Staged
+from promptpotter.shared.errors import PotterError
+
+
+def kept_refusal(words: str) -> dict[str, Any] | None:
+    """A refusal's words as its `Refusal` keeps them, under the base code: its own was never kept."""
+    return None if not words else Refusal.of(PotterError(words)).model_dump(mode="json")
+
+
+def unended(job: dict[str, Any]) -> bool:
+    """A released job naming no ending, which this migration stages."""
+    holder = job.get("holder")
+    returned_pass = isinstance(holder, dict) and holder.get("kind") == "scoring_pass"
+    return not (
+        job.get("released_at") is None
+        or job.get("ending") is not None
+        or job.get("lapse") is not None
+        or (returned_pass and not job.get("refusal"))
+    )
 
 
 def staged(projects_root: Path) -> list[Staged]:
     out: list[Staged] = []
     for path in sorted(jobs_dir(projects_root).glob("*.json")):
         job = json.loads(path.read_text(encoding="utf-8"))
-        holder = job.get("holder")
-        returned_pass = isinstance(holder, dict) and holder.get("kind") == "scoring_pass"
-        refused = bool(job.get("refusal"))
-        if (
-            job.get("released_at") is None
-            or job.get("ending") is not None
-            or job.get("lapse") is not None
-            or (returned_pass and not refused)
-        ):
+        if not unended(job):
             continue
-        job["lapse"] = lapse = "refused" if refused else "orphaned"
+        words = job.get("refusal") or ""
+        job["lapse"] = lapse = "refused" if words else "orphaned"
+        job["refusal"] = kept_refusal(words)
         out.append(
             Staged(
                 path,

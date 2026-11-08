@@ -249,10 +249,10 @@ def machine_status(jobs: JobRegistry, *, identity: IdentityContext) -> MachineSt
                 job_id=job.job_id,
                 what=job.what,
                 released_at=job.released_at or job.created_at,
-                reason=job.refusal,
+                reason=job.refusal.message,
             )
             # `list_launched_today` answers newest first.
             for job in jobs.list_launched_today()
-            if job.principal_id == principal_id and job.lapse == "refused"
+            if job.principal_id == principal_id and job.refusal is not None
         ],
     )

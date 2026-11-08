@@ -4,11 +4,12 @@ status is their fold by `COMMAND_TRANSITIONS`."""
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, get_args
+from typing import Annotated, Any, Literal, Self, get_args
 
 from pydantic import Field, TypeAdapter
 
 from promptpotter.domain.cycle_paths import Subject
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.run_records import (
     DraftOpenedEffect,
     LaunchedEffect,
@@ -17,6 +18,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import PotterError
 from promptpotter.shared.identity import Principal
 
 CommandAckStatus = Literal["accepted", "applied", "rejected", "voided", "cancelled"]
@@ -69,15 +71,36 @@ CommandEffect = Annotated[
 ]
 
 
+class KeptRefusal(FrozenModel):
+    """An act's refusal as its door served it, kept on its end so any door reading the command
+    later serves it again, its status beside it: never rebuilt from a class name."""
+
+    http_status: int
+    refusal: Refusal
+
+    @classmethod
+    def of(cls, refused: PotterError) -> Self:
+        return cls(http_status=refused.http_status, refusal=Refusal.of(refused))
+
+    def raised(self) -> PotterError:
+        error = PotterError(
+            self.refusal.message, code=self.refusal.code, details=self.refusal.details
+        )
+        error.http_status = self.http_status
+        return error
+
+
 class CommandAckRecord(FrozenModel):
     """``applied`` = it HAPPENED; a loop command is ``accepted`` first, and stays so if untaken
-    until the run boundary ``voided`` it. ``cancelled``: its act was interrupted."""
+    until the run boundary ``voided`` it. ``cancelled``: its act was interrupted. A ``rejected``
+    act keeps the refusal its door served."""
 
     record_type: Literal["command_ack"] = "command_ack"
     command_id: str
     status: CommandAckStatus
     detail: str = ""
     effect: CommandEffect = Field(default_factory=NoEffect)
+    refusal: KeptRefusal | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

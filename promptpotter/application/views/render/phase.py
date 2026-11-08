@@ -21,6 +21,7 @@ from promptpotter.application.views.render.primitives import (
     render_pipeline_overlay,
 )
 from promptpotter.domain.arm_reading import lift_band_text
+from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.origin_panel import (
     ROUND_ADVANCE_INFO,
@@ -28,7 +29,7 @@ from promptpotter.domain.origin_panel import (
     RoundAdvance,
     StallEffect,
 )
-from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
+from promptpotter.domain.phases import STOP_REASON_INFO, NextAct, StopOutcome, StopReason
 from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.ruler import PLATEAU_ROUNDS, LevelSeries
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
@@ -43,12 +44,26 @@ if TYPE_CHECKING:
     from promptpotter.domain.run_records import RoundClosedRecord
 
 
+def _spelled(act: NextAct) -> str:
+    """The terminal's spelling of *act*: its kind's verb, and the field it fills as the flag that
+    sets it (a budget axis as its `--max-` flag), *value* naming what goes there."""
+    verb = PAYLOAD_MODEL_FOR_KIND[act.kind].kind.cli_verb
+    if not act.field:
+        return f"`{verb}`"
+    axis, name = act.field.startswith("budget."), act.field.rsplit(".", 1)[-1]
+    flag = f"--max-{name.removesuffix('_s')}" if axis else f"--{name}"
+    value = f" <{act.value}>" if act.value else ""
+    return f"`{verb} {flag.replace('_', '-')}{value}`"
+
+
 def stop_next_lines(stop_reason: StopReason) -> list[str]:
-    """The step past a stop and the terminal's command for it: no terminal reader prints one alone."""
+    """The step past a stop and the terminal's commands for it: no terminal reader prints one
+    alone."""
     info = STOP_REASON_INFO[stop_reason]
+    spelled = list(dict.fromkeys(_spelled(act) for act in info.next_acts))
     return [
         *([f"next: {info.next_step}"] if info.next_step else []),
-        *([f"cli:  {info.cli_command}"] if info.cli_command else []),
+        *([f"cli:  {'; '.join(spelled)}"] if spelled else []),
     ]
 
 

@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.caller import Caller
+from promptpotter.application.command_reading import CommandReading
 from promptpotter.application.commands.loop_commands import read_payload_file
 from promptpotter.application.cycle_addressing import cycle_target
 from promptpotter.application.read_params import PARAMS_FOR_READ, ReadParams
 from promptpotter.config.logging import setup_logging
+from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.verbs import VERBS
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import PayloadInvalidError
@@ -19,8 +21,6 @@ from promptpotter.shared.named_rows import imported
 if TYPE_CHECKING:
     import argparse
     from collections.abc import Callable
-
-    from promptpotter.presentation.cli.commands.result import CommandResult
 
     Render = Callable[[ReadParams, Any, argparse.Namespace, Caller], CommandResult]
 
@@ -45,6 +45,17 @@ def _unread_flags() -> list[str]:
 
 if unread := _unread_flags():
     raise TypeError(f"read verb flags no row field or renderer takes: {', '.join(unread)}")
+
+
+def command_human(
+    _params: ReadParams, read: CommandReading, _args: argparse.Namespace, _caller: Caller
+) -> CommandResult:
+    where = f" on {read.subject}" if read.subject else ""
+    return CommandResult(
+        data=read.model_dump(mode="json"),
+        human=f"{read.command_id} ({read.kind}{where}): {read.status} as of "
+        f"{read.last_updated_at}. {read.said}",
+    )
 
 
 async def cmd_read(args: argparse.Namespace) -> CommandResult:

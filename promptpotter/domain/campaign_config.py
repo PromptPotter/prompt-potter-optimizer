@@ -227,7 +227,7 @@ class OptimizationConfig(OptimizerChoice):
             "winner from a comparison whose arms ran different cell sets. ``strict`` "
             "(default) halts on any hole; ``off`` disarms, and a selector that can elect "
             "on a cut panel then does. The halt is resumable and the "
-            "round is not persisted, so a ``resume`` re-runs it once the bound that cut "
+            "round is not persisted, so a ``start-run`` re-runs it once the bound that cut "
             "the cells has room: the cached "
             "candidates replay, the missing cells are re-measured, and the round decides "
             "on a complete panel. A PoBB elimination is NOT a hole (a rule stopped that "

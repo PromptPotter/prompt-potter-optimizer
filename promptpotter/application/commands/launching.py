@@ -53,8 +53,10 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.command_events import CommandEffect
+from promptpotter.domain.command_kinds import CancelQueuedRunPayload, PauseCyclePayload
 from promptpotter.domain.cycle_paths import CycleHop, Subject
-from promptpotter.domain.job import CampaignLaunch
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, InnerRun, Job
+from promptpotter.domain.phases import INNER_PAUSE_REFUSAL
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineSchema, narrowing_of
 from promptpotter.domain.run_mode import RunMode
@@ -66,13 +68,19 @@ from promptpotter.domain.run_records import (
     OriginSource,
 )
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
-from promptpotter.shared.errors import LedgerUnreadableError, NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import (
+    LedgerUnreadableError,
+    NotFoundError,
+    PayloadInvalidError,
+    TaskUncancellableError,
+)
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, acting_principal
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.command_kinds import (
+        CommandPayload,
         ForkCyclePayload,
         ForkSeed,
         HeadToHeadRequest,
@@ -187,6 +195,40 @@ def _launch_applier(
     return Applier(
         _run, replay=_relaunched, effect_fn=lambda ran: LaunchedEffect(launches=[ran.launch])
     )
+
+
+# What a cancel's pause of a launched run says it was asked for.
+_CANCELLED = "command cancelled"
+
+
+def launch_cancels(jobs: list[Job], stores: Stores) -> list[CommandCall[CommandPayload]]:
+    """A launch's `cancel`: each live job's own act, resolved for every job before any is
+    dispatched: a queued one withdrawn, a running run paused on its own cycle in *stores*, each
+    keyed by the job so a retried cancel acts once. A job no command of *stores* cancels now — its
+    cycle refusing the pause (`RunState.pause_refusal`) among them — refuses them all."""
+    acts: list[CommandCall[CommandPayload]] = []
+    for job in jobs:
+        key = f"cancel:{job.job_id}"
+        if job.released:
+            continue
+        if job.queued:
+            acts.append(CommandCall(CancelQueuedRunPayload(job_id=job.job_id), key))
+            continue
+        if isinstance(job.holder, InnerRun):
+            raise TaskUncancellableError(f"{job.what}: {INNER_PAUSE_REFUSAL}")
+        if job.hop == UNRESOLVED_HOP:
+            raise TaskUncancellableError(f"{job.what} names no cycle to pause yet; cancel again")
+        if job.workspace != str(stores.campaigns.workspace):
+            raise TaskUncancellableError(
+                f"{job.what} runs in a workspace this caller does not hold"
+            )
+        if refusal := stores.run_state(job.hop).pause_refusal:
+            raise TaskUncancellableError(f"{job.what}: {refusal}")
+        pause = PauseCyclePayload(
+            campaign_id=job.campaign_id, cycle_id=job.cycle_id, reason=_CANCELLED
+        )
+        acts.append(CommandCall(pause, key))
+    return acts
 
 
 def _recorded_launches(effect: CommandEffect) -> list[LaunchedJob]:
@@ -341,9 +383,12 @@ async def mint_head_to_head(
     )
 
 
-async def start_checkin(
-    dispatched: DispatchedToDraft[StartCheckinPayload],
-) -> Applier[Admitted | AdmittedHeadToHead]:
+# A Start's answer: its admission, launched once its mint closes; or, answering a retry, the
+# launch its first act recorded.
+type StartAnswer = Admitted | AdmittedHeadToHead | Launched | HeadToHeadLaunched
+
+
+async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> Applier[StartAnswer]:
     dispatcher, start, claim = dispatched.dispatcher, dispatched.payload, dispatched.claim
     stores = dispatcher.stores
 
@@ -370,22 +415,37 @@ async def start_checkin(
             holder=CampaignLaunch(source.opened.draft.dataset_name, draft_id=claim.draft_id),
         )
 
-    def _admitted(admitted: Admitted | AdmittedHeadToHead) -> CommandEffect:
-        jobs = (
-            [admitted.job] if isinstance(admitted, Admitted) else [j for j, _ in admitted.admitted]
-        )
-        return LaunchedEffect(launches=[LaunchedJob.of(job) for job in jobs])
+    def _launches(answer: StartAnswer) -> CommandEffect:
+        match answer:
+            case Admitted(job=job):
+                launches = [LaunchedJob.of(job)]
+            case AdmittedHeadToHead(admitted=admitted):
+                launches = [LaunchedJob.of(job) for job, _ in admitted]
+            case Launched(launch=launch):
+                launches = [launch]
+            case HeadToHeadLaunched(launches=launched):
+                launches = list(launched)
+        return LaunchedEffect(launches=launches)
 
-    def _withdraw(admitted: Admitted | AdmittedHeadToHead, exc: BaseException) -> None:
-        admitted.withdraw(exc)
+    def _withdraw(answer: StartAnswer, exc: BaseException) -> None:
+        if isinstance(answer, Admitted | AdmittedHeadToHead):
+            answer.withdraw(exc)
 
     # The claim and the slot ride the admitted launch to its mint; a second Start refuses while it
-    # holds the claim, and is not found once it minted, so no retry reaches this ledger.
-    async def _run() -> Admitted | AdmittedHeadToHead:
+    # holds the claim, and is not found once it minted: a retry answers the first launch only where
+    # its filer died before the mint.
+    async def _run() -> StartAnswer:
         request = start.head_to_head
         return await _admit() if request is None else await _admit_arms(request)
 
-    return Applier(_run, replay=None, effect_fn=_admitted, ack="accepted", rides=_withdraw)
+    async def _relaunched(effect: CommandEffect) -> StartAnswer:
+        launches, request = _recorded_launches(effect), start.head_to_head
+        if request is not None:
+            return head_to_head_answer(request, launches)
+        (launch,) = launches
+        return Launched(launch, held=None)
+
+    return Applier(_run, _relaunched, effect_fn=_launches, ack="accepted", rides=_withdraw)
 
 
 async def dispatch_start_checkin(
@@ -397,5 +457,7 @@ async def dispatch_start_checkin(
 ) -> Launched | HeadToHeadLaunched:
     """Acked at admission, before the mint moves the draft's ledger into the root cycle."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry, inline=inline)
-    outcome = await dispatcher.answer(start_checkin, call)
-    return await outcome.result.launched()
+    answer = (await dispatcher.answer(start_checkin, call)).result
+    if isinstance(answer, Launched | HeadToHeadLaunched):
+        return answer
+    return await answer.launched()

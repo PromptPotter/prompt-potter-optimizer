@@ -97,10 +97,10 @@ A BANKING77 campaign on an n8n harness, minted from `promptpotter mcp` on a desk
   landing drops run data. Action: one remedy, the landing's. **Rides with:** LAND. **Re-test:**
   `git grep -n "No migration exists" -- promptpotter/shared/errors.py`.
 - **A launch refused before admission reaches a host as a task** —
-  `host_surface.py::HostSession._open` opens the task before the dispatcher accepts the act, so a
-  refusal (an unreadable ledger) answers `working`, then reads `failed` on `tasks/get` 0.1 s later, while
-  the CLI exits 1 on the same refusal. The handle it opens names no campaign
-  (`host_surface.py::HostSession._status`: `mint-campaign: running`), so a host whose call accepts
+  `host_surface.py::HostSession._open` opens the task once the act is filed, before the act is
+  admitted, so a refusal (an unreadable ledger) answers `working`, then reads `failed` on `tasks/get`,
+  while the CLI exits 1 on the same refusal. The handle it opens names no campaign
+  (`command_reading.py::read_command`: `mint-campaign: running`, filed on the workspace), so a host whose call accepts
   no task (Claude Code's `tools/call` declares no Tasks extension) holds an id no tool it has can
   read, and finds its run through `hierarchy`. Action: a task opens for an admitted act and names the
   address it acts on; a refusal before admission is the call's answer on every door. **Rides
@@ -157,10 +157,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   one spine, so a subject on a diverging branch drops out of the drawing. Action: resolve by address,
   one spine per line. **Rides with:** M16b. **Re-test:** compare two branches of one campaign; both
   draw.
-- **A job persists its refusal as `str(exc)`** (`jobs/registry.py:295`, `domain/job.py:117`), read back
-  by MCP `tasks/get` (`host_surface.py:271`) and `MachineRefusal.reason` (`machine_status.py:252`).
-  Action: a job carries `Refusal`. **Rides with:** M2 (ended jobs are `Fate.RUN`, wiped at M2.3).
-  **Re-test:** `git grep -n "refusal=str(" -- promptpotter` is empty.
 - **A taken name is read two ways** — `slug_exists` (the directory exists) against the definition's
   holders (`dataset.json` exists), across `stores.py`, `draft_patch.py`, `ingest.py` and
   `mint_and_start.py`, and refused twice: `checkin.py:139` raises `LaunchError` (422
@@ -211,12 +207,12 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 
 ### Batch 10's fix pass (2026-11-07)
 
-- **14 `ContextVar`s still stand beside `RunScope`**: `jobs/coupon.py` 1, `launcher/admission.py` 1,
+- **13 `ContextVar`s still stand beside `RunScope`**: `jobs/coupon.py` 1,
   `llm/send_pacing.py` 4, `llm/spend_book.py` 3, `llm/telemetry.py` 3,
   `shared/measurement_context.py` 2. Action: each moves onto `RunScope` with its chain, or is named
-  per-call state. **Rides with:** M12 (`spend_book`, coupon), M6 (admission), M10 (telemetry), M13
+  per-call state. **Rides with:** M12 (`spend_book`, coupon), M10 (telemetry), M13
   (`measurement_context`), M8 (`send_pacing`). **Re-test:** `git grep -c "ContextVar(" -- promptpotter`
-  sums to 15, `RunScope`'s own among them.
+  sums to 14, `RunScope`'s own among them.
 - **An L4 arm's model answers every inner node** — `runner/inner/spawn.py::_one_model` lays the first
   edit's model, on that edit's provider, on every llm node, as main did, so L4 cannot search a model
   per inner node. Decision: one model per arm, or an edit's model on its own node. **Held:** the
@@ -340,15 +336,12 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   in-process one too, where no endpoint, token or header applies. Action: the link rides the served
   connector's wire kind. **Rides with:** CONN. **Re-test:**
   `git grep -n "SECURITY_DOC_URL" -- webapp/components`.
-- **One act, two names** — served refusals and descriptions name `--max-usd`, `resume`, `new` to a
-  host that has `start-run`, `mint-campaign` (`spend.py`, `jobs/quota.py`, `preflight.py`,
-  `campaign_config.py` budget, `origin_gate.py`'s log), and tool descriptions are developer
-  docstrings ("waits on a click", source paths, "the SSE tail"). Each act has one name, kind and CLI
-  verb alike, but for the composite `new` / `resume` and M13's held-out `verify-candidate` / `verify`,
-  `grade-bench` / `bench`. Action: served text names kinds; `StopReasonInfo.cli_command` becomes a
-  typed next act; an import-time check in `command_kinds.py` refuses `path::symbol` and CLI-verb
-  backticks in a tool-describing docstring. **Rides with:** DOORS D7. **Re-test:** no served refusal
-  names a CLI verb or flag.
+- **One act, two names** — two served refusals still name the composite `resume` and its flags to a
+  host that has `start-run`: `bench/resume_and_fork/resume.py` (`resume --fork-on-divergence`) and
+  `scoring/closed_rounds.py` (`resume --from`); and two read descriptions spell a kind or an address
+  in backticks (`head-to-head-price`, `cycle-dashboard`), which the import-time check in
+  `command_kinds.py` reads for command tools alone. Action: those name the kind. **Rides with:**
+  DOORS D7. **Re-test:** no served refusal names a CLI verb or flag.
 - **A gate hold claims `input_required` and sends no input request** — `host_surface.py::HostSession`
   sets the status; `tasks/result` blocks until the run ends. Action: the hold becomes the task's input
   request (the gate's `GateDecision`, the arms shape for `submit-arms`), answered as the existing
@@ -364,10 +357,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   hand-keeps four command wrappers (and `cli/commands/maintenance.py` imports from it). Action: the
   sweep moves under the one admission; the wrappers are deleted. **Rides with:** M6. **Re-test:**
   `git grep -n "def compact_archive" -- promptpotter/application/embedded_run.py` is empty.
-- **The idempotency key promises a replay some kinds never give** — `start-checkin`,
-  `set-user-settings`, `accept-terms`, `set-api-key` replay nothing. Action: the description names
-  which kinds replay, until M2's log-keyed idempotency. **Rides with:** M2. **Re-test:** retry a
-  `start-checkin` with its key after a lost answer.
 - **The MCP door speaks stdio only, so a browser chat cannot reach it** —
   `promptpotter/presentation/mcp/server.py::serve_stdio` is the one transport. Claude Code and Claude
   Desktop spawn it locally. claude.ai's custom connectors, and every remote host, call over
@@ -533,29 +522,11 @@ with:** the arcs that were the Q rows ([`roadmap.md`](roadmap.md) § The cleanup
 2026-11-07): M2, FEED, M14b and M5).
 
 **Decided once, read by every arc before a leap.**
-- No arc before Q1 holds a command's state anywhere but the record `commands/dispatcher.py` writes
-  and the MCP task memory batch E leaves standing (`host_surface.py::HostSession._tasks`).
+- No arc holds a command's state anywhere but the account's command log.
 - No arc before Q2 adds a cadence, a `revalidate` list or a cross-invalidation beyond batch E's; a new
   read polls on the descriptor it has, and A4's conversation opens no second `EventSource`.
 - No arc before Q3 adds a `logger.warning` in `application/`: a new fault is a record kind with a reader.
 
-- **Q1: one command log.** The fact: what was asked of the system and where it stands. The log
-  stands (`store/command_log.py::CommandLog`, its events `domain/command_events.py`): every command
-  is filed on its subject, its status the fold of its own events, a draft's landed on the cycle its
-  mint adopts, a run boundary's untaken ones `voided`. What is left split: a running act's status
-  and stop live only in MCP memory (`host_surface.py::HostSession._tasks`,
-  `HostSession._cancel_task`, `host_surface.py::cancel_acts`): REST serves no job read, and the
-  webapp has no stop for verify or bench. A pass's stop address is built per door
-  (`commands/measuring.py::pass_pause`, `cancel_acts`, the CLI's Ctrl+C in `cli/commands/launch.py`,
-  `new.py` and `noise_floor.py`), and the answer a door returns
-  (`command_kinds.py::CommandAcceptedBody`) does not name the address the dispatcher resolved; a
-  retry under a key replays main's way (an accepted command answers its retry after a void too).
-  Owner: the log. Deletes: `HostSession._tasks` and `_cancel_task`, the per-door stop addresses; a
-  pass with no cycle (`launcher/admission.py::paid_pass`, `hop=None`) is addressed by its command id,
-  so its stop is one command at every entry point. Shares with U2: U2's one launch answer, which is a
-  log read. Edge inside: a command filed by a process that died before applying stays "filed", and
-  the fold reads the filer's OS lock (§0.5) to derive "filed, filer gone". **Re-test:**
-  `git grep -n "def _cancel_task" -- promptpotter`.
 - **Q2: one change feed — the server says what moved.** The fact: that a served subject moved. The
   webapp guesses it at many sites: a cadence per read (a descriptor's `cadence` on
   `read-cache.ts`'s beat, or the `intervalMs` its caller reads off another read; the constants in
@@ -1174,8 +1145,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
 - `domain/scoring.py::turn_scalars` overwrites `n_turns` with the count of a step named `n`. Action:
   the per-step terms take a namespace the totals cannot meet. **Re-test:** a turn list with a step
   `n` keeps its total.
-- `tests/test_scoring.py` writes `HostSession._tasks` past the interface. Action: Q1's log read
-  replaces it. **Re-test:** `git grep -n "_tasks\[" -- tests`.
 - `cycle_files.py::read_cycle_file` at campaign scope serves any shown file under the campaign root
   (another cycle's, a sandbox's), while `list_cycle_files` lists only `CampaignLayout.files()` (batch
   7's fix pass). Action: the campaign scope reads what it lists. **Re-test:** a campaign-scope read of
@@ -1271,9 +1240,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   ones, which L4 inner cells (`bench: 0`) and `justlogic/d234-held` are built on. Open: read the
   definition (`/potter-box`), then decide whether `bench` becomes the total. **Re-test:** a fresh
   `{bench: 100}` campaign on that definition holds out 100.
-- **`noise-floor` lets its pause escape as `PassStoppedError`**, a band over fewer than `k` rescores
-  being no band; the pass's address is Q1's (§ The quantum-leap pass). **Rides with:** any change to
-  `paid_pass`. **Re-test:** stop a `noise-floor` from a second terminal; it banks no band.
 - **A locked-in arm's catch-up cells are read by its race, never its round**: `potter/race.py`
   measures a prior on each later challenger's cells (`RaceCatchUpRecord`), but
   `runner/measurement.py::_walk_population` folds only the arm's own walk into `rows[key]`, so the

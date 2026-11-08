@@ -2640,6 +2640,24 @@
         "title": "CampaignRunsWith",
         "type": "object"
       },
+      "CancelPayload": {
+        "additionalProperties": false,
+        "description": "Stop a command still acting, by its id: a verify or bench pass stops at its next cell and\nanswers over what it measured. One that ended is left as it ended.",
+        "properties": {
+          "command_id": {
+            "description": "The command's id, as its door answered it or was sent it.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id"
+        ],
+        "title": "CancelPayload",
+        "type": "object"
+      },
       "CancelQueuedRunPayload": {
         "additionalProperties": false,
         "description": "Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent.",
@@ -3588,7 +3606,7 @@
       },
       "ChangeRunLimitsPayload": {
         "additionalProperties": false,
-        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or\nround-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the\naccount allowance. On an arm of a head-to-head it moves that arm alone, and leaves the\ncomparison only when a ceiling moved.",
+        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or\nround-halted cycle continues by a higher ceiling, then a `start-run`. Spend is clamped against the\naccount allowance. On an arm of a head-to-head it moves that arm alone, and leaves the\ncomparison only when a ceiling moved.",
         "properties": {
           "budget": {
             "$ref": "#/components/schemas/Budget"
@@ -3721,12 +3739,62 @@
             "description": "Stable id of the appended `CommandRecord`.",
             "title": "Command Id",
             "type": "string"
+          },
+          "subject": {
+            "description": "The address the dispatcher resolved and filed it on: empty for the workspace, `draft:<id>` for a draft, else its campaign or cycle as a subject spells it (`campaign:<id>`, `course:<id>/<cycle>`, `;in=` its sandbox chain).",
+            "title": "Subject",
+            "type": "string"
           }
         },
         "required": [
-          "command_id"
+          "command_id",
+          "subject"
         ],
         "title": "CommandAcceptedBody",
+        "type": "object"
+      },
+      "CommandReading": {
+        "additionalProperties": false,
+        "description": "A command read afresh off the account's log: where it stands, in the words of its task\nstatus, at the address the dispatcher resolved and filed it on.",
+        "properties": {
+          "command_id": {
+            "title": "Command Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_updated_at": {
+            "title": "Last Updated At",
+            "type": "string"
+          },
+          "said": {
+            "title": "Said",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "kind",
+          "subject",
+          "status",
+          "said",
+          "created_at",
+          "last_updated_at"
+        ],
+        "title": "CommandReading",
         "type": "object"
       },
       "CompactArchivePayload": {
@@ -5337,7 +5405,7 @@
       },
       "DeleteCyclePayload": {
         "additionalProperties": false,
-        "description": "Remove ONE stub cycle, the singular of `cleanup-empty-cycles`; refused for a cycle holding\nrounds or a live producer (pause it first).",
+        "description": "Remove ONE stub cycle, the singular of the empty-cycle sweep; refused for a cycle holding\nrounds or a live producer (pause it first).",
         "properties": {
           "campaign_id": {
             "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
@@ -11542,7 +11610,7 @@
           },
           "panel_gate": {
             "default": "strict",
-            "description": "Halt at the end of a round whose electable candidates carry HOLES — cells the loop attempted and got no measurement back from, or a spend or token ceiling left unbought — instead of electing a winner from a comparison whose arms ran different cell sets. ``strict`` (default) halts on any hole; ``off`` disarms, and a selector that can elect on a cut panel then does. The halt is resumable and the round is not persisted, so a ``resume`` re-runs it once the bound that cut the cells has room: the cached candidates replay, the missing cells are re-measured, and the round decides on a complete panel. A PoBB elimination is NOT a hole (a rule stopped that arm on evidence) and neither is a classifier-deprecated sample.",
+            "description": "Halt at the end of a round whose electable candidates carry HOLES — cells the loop attempted and got no measurement back from, or a spend or token ceiling left unbought — instead of electing a winner from a comparison whose arms ran different cell sets. ``strict`` (default) halts on any hole; ``off`` disarms, and a selector that can elect on a cut panel then does. The halt is resumable and the round is not persisted, so a ``start-run`` re-runs it once the bound that cut the cells has room: the cached candidates replay, the missing cells are re-measured, and the round decides on a complete panel. A PoBB elimination is NOT a hole (a rule stopped that arm on evidence) and neither is a classifier-deprecated sample.",
             "enum": [
               "strict",
               "off"
@@ -13106,7 +13174,7 @@
                 "type": "null"
               }
             ],
-            "description": "Halt at the end of a round whose electable candidates carry HOLES — cells the loop attempted and got no measurement back from, or a spend or token ceiling left unbought — instead of electing a winner from a comparison whose arms ran different cell sets. ``strict`` (default) halts on any hole; ``off`` disarms, and a selector that can elect on a cut panel then does. The halt is resumable and the round is not persisted, so a ``resume`` re-runs it once the bound that cut the cells has room: the cached candidates replay, the missing cells are re-measured, and the round decides on a complete panel. A PoBB elimination is NOT a hole (a rule stopped that arm on evidence) and neither is a classifier-deprecated sample.",
+            "description": "Halt at the end of a round whose electable candidates carry HOLES — cells the loop attempted and got no measurement back from, or a spend or token ceiling left unbought — instead of electing a winner from a comparison whose arms ran different cell sets. ``strict`` (default) halts on any hole; ``off`` disarms, and a selector that can elect on a cut panel then does. The halt is resumable and the round is not persisted, so a ``start-run`` re-runs it once the bound that cut the cells has room: the cached candidates replay, the missing cells are re-measured, and the round decides on a complete panel. A PoBB elimination is NOT a hole (a rule stopped that arm on evidence) and neither is a classifier-deprecated sample.",
             "title": "Panel Gate"
           }
         },
@@ -17520,6 +17588,16 @@
         ],
         "type": "string"
       },
+      "TaskStatus": {
+        "enum": [
+          "working",
+          "input_required",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "type": "string"
+      },
       "TermsConsent": {
         "additionalProperties": false,
         "description": "The consent state after an accept, in the fields ``/me`` reports it.",
@@ -18016,7 +18094,7 @@
       },
       "VerifyCandidatePayload": {
         "additionalProperties": false,
-        "description": "``samples`` omitted is the ANSWER, not an absence: the count is derived from the\nper-candidate round budget and the rounds run since this cycle's last verification\n(``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is\nrefused, naming the budget — which is what keeps one click on a million-row dataset from being\na million-cell bill.\n\nAddressed as the ``evidence`` read addresses a searchpoint — cycle, descent, ``candidate_id``\n— so an L4 inner candidate is as reachable as a top-level one.",
+        "description": "``samples`` omitted is the ANSWER, not an absence: the count is derived from the\nper-candidate round budget and the rounds run since this cycle's last verification. A larger\nexplicit count is\nrefused, naming the budget — which is what keeps one click on a million-row dataset from being\na million-cell bill.\n\nAddressed as the ``evidence`` read addresses a searchpoint — cycle, descent, ``candidate_id``\n— so an L4 inner candidate is as reachable as a top-level one.",
         "properties": {
           "campaign_id": {
             "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
@@ -19745,6 +19823,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -19798,6 +19894,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "archive_campaign_api_v1_commands_archive_campaign_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -19855,6 +19969,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -19903,11 +20035,102 @@
         ]
       }
     },
+    "/api/v1/commands/cancel": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "operationId": "cancel_api_v1_commands_cancel_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Cancel",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/cancel-queued": {
       "post": {
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "cancel_queued_api_v1_commands_cancel_queued_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -19965,6 +20188,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -20018,6 +20259,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "compact_archive_api_v1_commands_compact_archive_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -20075,6 +20334,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -20128,6 +20405,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "delete_cycle_api_v1_commands_delete_cycle_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -20185,6 +20480,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -20238,6 +20551,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "edit_draft_campaign_api_v1_commands_edit_draft_campaign_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -20295,6 +20626,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -20348,6 +20697,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "grade_bench_api_v1_commands_grade_bench_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -20515,6 +20882,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -20568,6 +20953,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "open_dataset_draft_api_v1_commands_open_dataset_draft_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -20625,6 +21028,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -20678,6 +21099,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "origin_gate_api_v1_commands_origin_gate_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -20735,6 +21174,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -20788,6 +21245,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "remove_api_key_api_v1_commands_remove_api_key_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -20845,6 +21320,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -20898,6 +21391,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "resolve_origin_api_v1_commands_resolve_origin_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -20955,6 +21466,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -21008,6 +21537,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "set_concurrent_cycles_api_v1_commands_set_concurrent_cycles_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -21065,6 +21612,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -21118,6 +21683,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "set_sample_lookahead_api_v1_commands_set_sample_lookahead_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -21175,6 +21758,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -21228,6 +21829,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "skip_searchpoint_api_v1_commands_skip_searchpoint_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -21348,6 +21967,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -21401,6 +22038,24 @@
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "submit_arms_api_v1_commands_submit_arms_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -21458,6 +22113,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -21513,6 +22186,24 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
@@ -21566,6 +22257,51 @@
         "summary": "Verify-Candidate",
         "tags": [
           "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/{command_id}": {
+      "get": {
+        "description": "One command the caller filed, by its id: where it stands, at the address it was filed\non; a launch's by the jobs it launched. Not found for another's.",
+        "operationId": "command_api_v1_commands__command_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Command Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandReading"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Command",
+        "tags": [
+          "Reads"
         ]
       }
     },

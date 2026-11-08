@@ -505,6 +505,17 @@ class StopCategory(enum.StrEnum):
     FAILURE = "failure"
 
 
+class NextAct(NamedTuple):
+    """A kind a door presses past a stop, and the one payload field it fills (dotted into a
+    model), described by *value*: each door words its own spelling from it, the terminal its verb
+    and flag (`views/render/phase.py`). Checked against the kind table at its import
+    (`command_kinds.py`)."""
+
+    kind: str
+    field: str = ""
+    value: str = ""
+
+
 class StopReasonInfo(NamedTuple):
     """``halts_mid_round``: a round this reason CUTS is left on disk PARTIAL. No defaults, on purpose."""
 
@@ -515,11 +526,11 @@ class StopReasonInfo(NamedTuple):
     has_traceback: bool
     next_step: str
     grades_selection: bool
-    cli_command: str
+    next_acts: tuple[NextAct, ...]
 
 
 # `halts_mid_round` follows WHERE a stop is raised, never severity. `next_step` states the fact past
-# the stop in every surface's words, naming no verb or file; `cli_command` is the terminal's spelling.
+# the stop in every surface's words, naming no verb or file; `next_acts` are the acts it names.
 STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
     {
         StopReason.PERFECT: StopReasonInfo(
@@ -530,7 +541,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "This is one round's panel, not the dataset: verify the winner on more cells.",
             True,
-            "`verify`",
+            (NextAct("verify-candidate"),),
         ),
         StopReason.ROUNDS_BUDGET: StopReasonInfo(
             "Rounds budget reached",
@@ -541,16 +552,16 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; "
             "else read the review.",
             True,
-            "`set-limits --max-rounds <more>`, then `resume`; else read `review.md`",
+            (NextAct("set-limits", "budget.rounds", "more"), NextAct("start-run")),
         ),
         StopReason.TARGET_HIT: StopReasonInfo(
-            "Target reached", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ""
+            "Target reached", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ()
         ),
         StopReason.LIVES_EXHAUSTED: StopReasonInfo(
-            "Out of lives", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ""
+            "Out of lives", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ()
         ),
         StopReason.HARD_CAP: StopReasonInfo(
-            "Arm cap", StopOutcome.SUCCESS, StopCategory.LIMIT, False, False, "", True, ""
+            "Arm cap", StopOutcome.SUCCESS, StopCategory.LIMIT, False, False, "", True, ()
         ),
         StopReason.DIAG_COMPLETE: StopReasonInfo(
             "Diagnostic complete",
@@ -560,10 +571,10 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "",
             True,
-            "",
+            (),
         ),
         StopReason.CONVERGED: StopReasonInfo(
-            "Converged", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ""
+            "Converged", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ()
         ),
         StopReason.OPTIMIZER_EXHAUSTED: StopReasonInfo(
             "Optimizer out of moves",
@@ -573,10 +584,10 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "",
             True,
-            "",
+            (),
         ),
         StopReason.REBASED: StopReasonInfo(
-            "Rebased to fork", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", False, ""
+            "Rebased to fork", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", False, ()
         ),
         StopReason.PAUSED: StopReasonInfo(
             "Paused",
@@ -586,7 +597,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "Resuming picks it up at the next checkpoint.",
             False,
-            "`resume`",
+            (NextAct("start-run"),),
         ),
         # Unlike PAUSED the round is discarded, not persisted partial: `resume` alone re-buys the cut.
         StopReason.PANEL_CUT: StopReasonInfo(
@@ -599,7 +610,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "the backend deadline their rows name) before resuming, or turn the panel gate off to "
             "elect on the holed panel.",
             False,
-            "`Connector.cell_envelope_s` or `optimization.panel_gate: off`, then `resume`",
+            (NextAct("start-run"),),
         ),
         StopReason.ADAPTER_OWED: StopReasonInfo(
             "Adapter output owed",
@@ -610,10 +621,10 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The round before's adapter landed nothing in its re-runs; resuming re-runs it before "
             "the next walk.",
             False,
-            "`resume`",
+            (NextAct("start-run"),),
         ),
         StopReason.OPTIMIZER_ABORT: StopReasonInfo(
-            "Optimizer abort", StopOutcome.HALTED, StopCategory.SEARCH, False, False, "", True, ""
+            "Optimizer abort", StopOutcome.HALTED, StopCategory.SEARCH, False, False, "", True, ()
         ),
         # The counter is CUMULATIVE across resume: a new ceiling must clear what it already counted.
         StopReason.SPEND_BUDGET: StopReasonInfo(
@@ -625,7 +636,10 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The spend cap counts every launch so far: raise it above what it already counts, then "
             "resume.",
             True,
-            "`set-limits --max-usd <above what the cap already counts>`, then `resume`",
+            (
+                NextAct("set-limits", "budget.usd", "above what the cap already counts"),
+                NextAct("start-run"),
+            ),
         ),
         StopReason.TOKEN_BUDGET: StopReasonInfo(
             "Token budget reached",
@@ -635,7 +649,10 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "Raise the token cap above what is already spent, then resume.",
             True,
-            "`set-limits --max-tokens <above what is already spent>`, then `resume`",
+            (
+                NextAct("set-limits", "budget.tokens", "above what is already spent"),
+                NextAct("start-run"),
+            ),
         ),
         # Not SPEND_BUDGET: `set-limits` moves the campaign's ceiling, never the host's coupon.
         StopReason.HOST_ALLOWANCE: StopReasonInfo(
@@ -647,7 +664,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The box's allowance for this account is spent: a resume sends on the account's own key, "
             "and a backend's sends still run on the box's key.",
             True,
-            "`resume`",
+            (NextAct("start-run"),),
         ),
         # A cell still open at the edge was cut; each launch's clock starts afresh.
         StopReason.WALL_CLOCK: StopReasonInfo(
@@ -658,7 +675,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "Resuming runs another launch under the same clock; the run limits move it.",
             True,
-            "`resume`; `set-limits --max-wall-clock` moves it",
+            (NextAct("start-run"), NextAct("set-limits", "budget.wall_clock_s", "")),
         ),
         StopReason.ORIGIN_GATE: StopReasonInfo(
             "Origin gate (unhealthy origin)",
@@ -671,8 +688,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "An edited origin is a new campaign or an operator-steered fork at round 0: resuming "
             "refuses it.",
             True,
-            "`resume` once the backend answers; an edited origin is `new <dataset>` or "
-            "`resume --steer NODE.PARAM=VALUE`",
+            (NextAct("start-run"), NextAct("mint-campaign"), NextAct("fork-cycle")),
         ),
         StopReason.BACKEND_UNREACHABLE: StopReasonInfo(
             "Backend unreachable",
@@ -683,7 +699,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The unreached cell is a hole, not a score: restore the backend or the network it "
             "needs, then resuming re-measures it.",
             True,
-            "`resume`",
+            (NextAct("start-run"),),
         ),
         # Not SPEND_BUDGET: that ceiling is ours and `set-limits` moves it. This one is the provider's.
         StopReason.PROVIDER_CREDIT: StopReasonInfo(
@@ -695,7 +711,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "Raise the provider key's limit or top up its credit, then resume; a refused cell is a "
             "hole it re-measures.",
             True,
-            "`resume`",
+            (NextAct("start-run"),),
         ),
         # Not BACKEND_UNREACHABLE: the provider answered, with a refusal the run already waited out.
         StopReason.PROVIDER_THROTTLED: StopReasonInfo(
@@ -707,7 +723,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "Use your own key for that provider (OpenRouter BYOK), route to another host, or wait "
             "out its quota, then resume; the refused cell is a hole it re-measures.",
             True,
-            "`route_order` names the host; then `resume`",
+            (NextAct("start-run"),),
         ),
         # Not BACKEND_UNREACHABLE: the send was refused before it left, for want of a price.
         StopReason.PRICE_LIST_UNREACHABLE: StopReasonInfo(
@@ -720,7 +736,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "answer, so no send under the USD ceiling could be priced. Resume once it answers; a "
             "refused cell is a hole it re-measures.",
             True,
-            "`resume`",
+            (NextAct("start-run"),),
         ),
         # Not SPEND_BUDGET: no ceiling was reached; the send has no price to hold.
         StopReason.NO_RATE: StopReasonInfo(
@@ -733,7 +749,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "Run it on a provider and model the rate table prices, or drop the dollar cap and bound "
             "the run in tokens; then resume.",
             True,
-            "`nodes.{node}.config`, or `budget: {usd: null, tokens: N}`; then `resume`",
+            (NextAct("start-run"),),
         ),
         StopReason.CRASHED: StopReasonInfo(
             "Crashed",
@@ -744,7 +760,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The run raised an error it did not expect, and its traceback is kept; resuming re-runs "
             "from the last closed round.",
             False,
-            "`resume`; the traceback is `index.json::error.traceback`",
+            (NextAct("start-run"),),
         ),
         # Not CRASHED: the run declined the operator's own input (`PayloadInvalidError`).
         StopReason.INPUT_REFUSED: StopReasonInfo(
@@ -756,11 +772,11 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The run declined its input at run init, so nothing was searched. A spend cap under one "
             "round is raised in the run limits or met by narrowing the round's nodes; then resume.",
             False,
-            "`set-limits --max-usd`, or narrow `optimization.nodes`; then `resume`",
+            (NextAct("set-limits", "budget.usd", ""), NextAct("start-run")),
         ),
         # A JOB's ending, never a cycle's: the launch left before it held a run.
         StopReason.NOT_ADMITTED: StopReasonInfo(
-            "Not admitted", StopOutcome.HALTED, StopCategory.LIMIT, False, False, "", False, ""
+            "Not admitted", StopOutcome.HALTED, StopCategory.LIMIT, False, False, "", False, ()
         ),
         # Declared by the REAPER; mid-round because a vanished process died at an arbitrary point.
         StopReason.PRODUCER_VANISHED: StopReasonInfo(
@@ -771,11 +787,11 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "",
             False,
-            "",
+            (),
         ),
         # Like OPTIMIZER_TIMEOUT, caught by TYPE at the round loop: the closed rounds' selection stands.
         StopReason.RENDER_ERROR: StopReasonInfo(
-            "Render error", StopOutcome.FAILED, StopCategory.FAILURE, True, True, "", True, ""
+            "Render error", StopOutcome.FAILED, StopCategory.FAILURE, True, True, "", True, ()
         ),
         StopReason.DIVERGED: StopReasonInfo(
             "Diverged",
@@ -786,7 +802,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "A recorded decision no longer replays under the edited config: fork here to branch "
             "under it, or revert the edit to continue.",
             False,
-            "`resume --fork-on-divergence`, or revert the config edit",
+            (NextAct("start-run", "mode.fork_on_divergence"),),
         ),
         StopReason.OPTIMIZER_TIMEOUT: StopReasonInfo(
             "Optimizer timeout",
@@ -796,7 +812,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "",
             True,
-            "",
+            (),
         ),
     }
 )
@@ -807,11 +823,9 @@ if _missing_stop_info:
         f"STOP_REASON_INFO is missing rows for {sorted(r.value for r in _missing_stop_info)} — "
         "every StopReason needs a label + outcome (domain/phases.py)."
     )
-# A next step every surface words has the terminal's spelling, and the terminal none of its own.
+# A next step every surface words names its acts, and no act stands without its words.
 _unspelled = sorted(
-    r.value
-    for r, info in STOP_REASON_INFO.items()
-    if bool(info.next_step) != bool(info.cli_command)
+    r.value for r, info in STOP_REASON_INFO.items() if bool(info.next_step) != bool(info.next_acts)
 )
 if _unspelled:
     raise RuntimeError(f"STOP_REASON_INFO rows {_unspelled} word a next step one surface lacks")

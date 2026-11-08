@@ -92,17 +92,16 @@ class RunControl:
         return Controls() if self.cycle is None else self._log().book().controls(self.cycle)
 
     def _outer_paused(self) -> Subject | None:
-        """The innermost enclosing run a pause stands on."""
+        """The innermost enclosing run a pause, or a pass's cancel, stands on."""
         if not self.enclosing:
             return None
         book = self._log().book()
-        return next(
-            (o for o in reversed(self.enclosing) if book.controls(o).pause is not None), None
-        )
+        return next((o for o in reversed(self.enclosing) if _asked(book.controls(o))), None)
 
     def pause_requested(self) -> bool:
-        """A pause is a CLEAN EXIT: poll it only where work already done is on disk."""
-        if self._inbox().pause is not None:
+        """A pause is a CLEAN EXIT: poll it only where work already done is on disk. A pass's
+        ``cancel`` is its pause, read off the subject it is filed on."""
+        if _asked(self._inbox()):
             return True
         return self._outer_paused() is not None
 
@@ -117,10 +116,13 @@ class RunControl:
 
     def take_pause(self) -> tuple[PauseCause, str] | None:
         """``None`` where nothing on a ledger asked: a signal or a cancellation, which the caller names."""
-        asked = self._inbox().pause
-        if asked is not None:
+        inbox = self._inbox()
+        if (asked := inbox.pause) is not None:
             self._log().ack(asked.command_id, "applied")
             return PauseCause.COMMAND, f"pause by {asked.issued_by.display}"
+        # Its pass's own end drops it from the inbox: nothing to ack.
+        if (stop := inbox.stop) is not None:
+            return PauseCause.COMMAND, f"cancel by {stop.issued_by.display}"
         if (outer := self._outer_paused()) is not None:
             return PauseCause.ENCLOSING, f"enclosing run {outer.cycle_id} was paused"
         return None
@@ -163,6 +165,10 @@ class RunControl:
         asked = self._inbox().lookahead
         if asked is not None and not asked.taken:
             self._log().ack(asked.command_id, "applied")
+
+
+def _asked(inbox: Controls) -> bool:
+    return inbox.pause is not None or inbox.stop is not None
 
 
 def budget_stop(book: SpendBook) -> StopReason | None:

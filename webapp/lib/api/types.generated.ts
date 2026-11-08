@@ -313,6 +313,18 @@ export interface MachineRefusal {
   reason: string;
 }
 
+/** A command read afresh off the account's log: where it stands, in the words of
+ * its task status, at the address the dispatcher resolved and filed it on. */
+export interface CommandReading {
+  command_id: string;
+  kind: string;
+  subject: string;
+  status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
+  said: string;
+  created_at: string;
+  last_updated_at: string;
+}
+
 /** The optimizers this install can run, the default first: one per manifest the
  * registry holds. */
 export interface OptimizerRoster {
@@ -3578,11 +3590,11 @@ export interface OptimizationConfig {
    * ceiling left unbought — instead of electing a winner from a comparison
    * whose arms ran different cell sets. ``strict`` (default) halts on any
    * hole; ``off`` disarms, and a selector that can elect on a cut panel then
-   * does. The halt is resumable and the round is not persisted, so a
-   * ``resume`` re-runs it once the bound that cut the cells has room: the
-   * cached candidates replay, the missing cells are re-measured, and the
-   * round decides on a complete panel. A PoBB elimination is NOT a hole (a
-   * rule stopped that arm on evidence) and neither is a classifier-deprecated
+   * does. The halt is resumable and the round is not persisted, so a ``start-
+   * run`` re-runs it once the bound that cut the cells has room: the cached
+   * candidates replay, the missing cells are re-measured, and the round
+   * decides on a complete panel. A PoBB elimination is NOT a hole (a rule
+   * stopped that arm on evidence) and neither is a classifier-deprecated
    * sample. */
   panel_gate: 'strict' | 'off';
   /** What each arm's lift is read against — member `a` of its `vs_reference`
@@ -4574,6 +4586,10 @@ export interface ArmStarted {
 export interface CommandAcceptedBody {
   /** Stable id of the appended `CommandRecord`. */
   command_id: string;
+  /** The address the dispatcher resolved and filed it on: empty for the workspace,
+   * `draft:<id>` for a draft, else its campaign or cycle as a subject spells
+   * it (`campaign:<id>`, `course:<id>/<cycle>`, `;in=` its sandbox chain). */
+  subject: string;
 }
 
 /** The pass is the fact, the reading a cache of one grading of it. */
@@ -4686,6 +4702,14 @@ export interface BankSnippetPayload {
   experiment: string;
 }
 
+/** Stop a command still acting, by its id: a verify or bench pass stops at its
+ * next cell and answers over what it measured. One that ended is left as it
+ * ended. */
+export interface CancelPayload {
+  /** The command's id, as its door answered it or was sent it. */
+  command_id: string;
+}
+
 /** Withdraw a launch waiting for a machine slot; nothing ran and nothing was
  * spent. */
 export interface CancelQueuedRunPayload {
@@ -4724,7 +4748,7 @@ export interface DeleteCampaignPayload {
   keep_results: boolean;
 }
 
-/** Remove ONE stub cycle, the singular of `cleanup-empty-cycles`; refused for a
+/** Remove ONE stub cycle, the singular of the empty-cycle sweep; refused for a
  * cycle holding rounds or a live producer (pause it first). */
 export interface DeleteCyclePayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
@@ -4991,11 +5015,11 @@ export interface PartialOptimizationConfig {
    * ceiling left unbought — instead of electing a winner from a comparison
    * whose arms ran different cell sets. ``strict`` (default) halts on any
    * hole; ``off`` disarms, and a selector that can elect on a cut panel then
-   * does. The halt is resumable and the round is not persisted, so a
-   * ``resume`` re-runs it once the bound that cut the cells has room: the
-   * cached candidates replay, the missing cells are re-measured, and the
-   * round decides on a complete panel. A PoBB elimination is NOT a hole (a
-   * rule stopped that arm on evidence) and neither is a classifier-deprecated
+   * does. The halt is resumable and the round is not persisted, so a ``start-
+   * run`` re-runs it once the bound that cut the cells has room: the cached
+   * candidates replay, the missing cells are re-measured, and the round
+   * decides on a complete panel. A PoBB elimination is NOT a hole (a rule
+   * stopped that arm on evidence) and neither is a classifier-deprecated
    * sample. */
   panel_gate: 'strict' | 'off' | null;
   /** What each arm's lift is read against — member `a` of its `vs_reference`
@@ -5104,10 +5128,10 @@ export interface SetConcurrentCyclesPayload {
 }
 
 /** Raise or lower an existing cycle's spend, token, round or wall-clock bound; a
- * budget- or round-halted cycle continues by a higher ceiling, then `resume`.
- * Spend is clamped against the account allowance. On an arm of a head-to-head
- * it moves that arm alone, and leaves the comparison only when a ceiling
- * moved. */
+ * budget- or round-halted cycle continues by a higher ceiling, then a `start-
+ * run`. Spend is clamped against the account allowance. On an arm of a head-
+ * to-head it moves that arm alone, and leaves the comparison only when a
+ * ceiling moved. */
 export interface ChangeRunLimitsPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
@@ -5213,10 +5237,9 @@ export interface UnarchiveCampaignPayload {
 
 /** ``samples`` omitted is the ANSWER, not an absence: the count is derived from
  * the per-candidate round budget and the rounds run since this cycle's last
- * verification
- * (``application/diagnostics/verify.py::derive_verify_samples``). A larger
- * explicit count is refused, naming the budget — which is what keeps one
- * click on a million-row dataset from being a million-cell bill. */
+ * verification. A larger explicit count is refused, naming the budget — which
+ * is what keeps one click on a million-row dataset from being a million-cell
+ * bill. */
 export interface VerifyCandidatePayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
@@ -5246,7 +5269,7 @@ export const TONES = ["quiet", "success", "live", "attention", "warn", "danger"]
 export type Tone = (typeof TONES)[number];
 
 // Each kind whose `Press` claims the browser door (domain/command_kinds.py::CommandKind.browser).
-export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "ingest-upload" | "open-dataset-draft" | "open-origin-draft" | "origin-gate" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "ingest-upload" | "open-dataset-draft" | "open-origin-draft" | "origin-gate" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -5259,6 +5282,7 @@ export interface CommandPayloads {
   "accept-terms": CommandSent<AcceptTermsPayload, "version">;
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
   "bank-snippet": CommandSent<BankSnippetPayload, "supersedes" | "text" | "experiment">;
+  "cancel": CommandSent<CancelPayload, "command_id">;
   "cancel-queued": CommandSent<CancelQueuedRunPayload, "job_id">;
   "cleanup-empty-cycles": CommandSent<CleanupEmptyCyclesPayload, "campaign_id" | "cycle_id">;
   "compact-archive": CommandSent<CompactArchivePayload, "mode">;
@@ -5295,6 +5319,7 @@ export interface CommandResponses {
   "accept-terms": TermsConsent;
   "archive-campaign": CommandAcceptedBody;
   "bank-snippet": CommandAcceptedBody;
+  "cancel": CommandAcceptedBody;
   "cancel-queued": CommandAcceptedBody;
   "cleanup-empty-cycles": CommandAcceptedBody;
   "compact-archive": ArchiveReport;
@@ -5519,7 +5544,7 @@ export interface StopReasonInfo {
   has_traceback: boolean;
   next_step: string;
   grades_selection: boolean;
-  cli_command: string;
+  next_acts: unknown[];
 }
 
 export interface NodeKindInfo {
@@ -5947,36 +5972,36 @@ export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
 
 // Mirror of domain/phases.py::STOP_REASON_INFO, in display order.
 export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
-  "perfect_score": { label: "Perfect score", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "This is one round's panel, not the dataset: verify the winner on more cells.", grades_selection: true, cli_command: "`verify`" },
-  "rounds_budget": { label: "Rounds budget reached", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; else read the review.", grades_selection: true, cli_command: "`set-limits --max-rounds <more>`, then `resume`; else read `review.md`" },
-  "target_hit": { label: "Target reached", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, cli_command: "" },
-  "lives_exhausted": { label: "Out of lives", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, cli_command: "" },
-  "hard_cap_reached": { label: "Arm cap", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, cli_command: "" },
-  "diag_complete": { label: "Diagnostic complete", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, cli_command: "" },
-  "converged": { label: "Converged", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, cli_command: "" },
-  "optimizer_exhausted": { label: "Optimizer out of moves", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, cli_command: "" },
-  "rebased_to_fork": { label: "Rebased to fork", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, cli_command: "" },
-  "paused": { label: "Paused", outcome: "paused", category: "operator", halts_mid_round: true, has_traceback: false, next_step: "Resuming picks it up at the next checkpoint.", grades_selection: false, cli_command: "`resume`" },
-  "panel_cut": { label: "Panel cut by a declared bound", outcome: "paused", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Cells were cut at their time bound. Give them room (the connector's cell envelope, or the backend deadline their rows name) before resuming, or turn the panel gate off to elect on the holed panel.", grades_selection: false, cli_command: "`Connector.cell_envelope_s` or `optimization.panel_gate: off`, then `resume`" },
-  "adapter_output_owed": { label: "Adapter output owed", outcome: "paused", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "The round before's adapter landed nothing in its re-runs; resuming re-runs it before the next walk.", grades_selection: false, cli_command: "`resume`" },
-  "optimizer_abort": { label: "Optimizer abort", outcome: "halted", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, cli_command: "" },
-  "spend_budget": { label: "Spend budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "The spend cap counts every launch so far: raise it above what it already counts, then resume.", grades_selection: true, cli_command: "`set-limits --max-usd <above what the cap already counts>`, then `resume`" },
-  "token_budget": { label: "Token budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "Raise the token cap above what is already spent, then resume.", grades_selection: true, cli_command: "`set-limits --max-tokens <above what is already spent>`, then `resume`" },
-  "host_allowance": { label: "Host allowance used up", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "The box's allowance for this account is spent: a resume sends on the account's own key, and a backend's sends still run on the box's key.", grades_selection: true, cli_command: "`resume`" },
-  "wall_clock": { label: "Wall clock reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "Resuming runs another launch under the same clock; the run limits move it.", grades_selection: true, cli_command: "`resume`; `set-limits --max-wall-clock` moves it" },
-  "origin_gate": { label: "Origin gate (unhealthy origin)", outcome: "halted", category: "operator", halts_mid_round: false, has_traceback: false, next_step: "Fix the backend, then resume: resuming re-measures the cells the origin lost, and the gate grades it again; an origin still unhealthy when resumed passes on that resume. An edited origin is a new campaign or an operator-steered fork at round 0: resuming refuses it.", grades_selection: true, cli_command: "`resume` once the backend answers; an edited origin is `new <dataset>` or `resume --steer NODE.PARAM=VALUE`" },
-  "backend_unreachable": { label: "Backend unreachable", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "The unreached cell is a hole, not a score: restore the backend or the network it needs, then resuming re-measures it.", grades_selection: true, cli_command: "`resume`" },
-  "provider_credit_exhausted": { label: "Provider out of credit", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Raise the provider key's limit or top up its credit, then resume; a refused cell is a hole it re-measures.", grades_selection: true, cli_command: "`resume`" },
-  "provider_throttled": { label: "Provider rate-limited", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Use your own key for that provider (OpenRouter BYOK), route to another host, or wait out its quota, then resume; the refused cell is a hole it re-measures.", grades_selection: true, cli_command: "`route_order` names the host; then `resume`" },
-  "price_list_unreachable": { label: "Price list unreachable", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Nothing was sent and the backend is untouched: the gateway's host price list did not answer, so no send under the USD ceiling could be priced. Resume once it answers; a refused cell is a hole it re-measures.", grades_selection: true, cli_command: "`resume`" },
-  "no_rate": { label: "No rate under the spend cap", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "Nothing was sent: no rate bounds the call, so the dollar cap cannot be enforced for it. Run it on a provider and model the rate table prices, or drop the dollar cap and bound the run in tokens; then resume.", grades_selection: true, cli_command: "`nodes.{node}.config`, or `budget: {usd: null, tokens: N}`; then `resume`" },
-  "crashed": { label: "Crashed", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: true, next_step: "The run raised an error it did not expect, and its traceback is kept; resuming re-runs from the last closed round.", grades_selection: false, cli_command: "`resume`; the traceback is `index.json::error.traceback`" },
-  "input_refused": { label: "Input refused", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "The run declined its input at run init, so nothing was searched. A spend cap under one round is raised in the run limits or met by narrowing the round's nodes; then resume.", grades_selection: false, cli_command: "`set-limits --max-usd`, or narrow `optimization.nodes`; then `resume`" },
-  "not_admitted": { label: "Not admitted", outcome: "halted", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, cli_command: "" },
-  "producer_vanished": { label: "Producer vanished", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: false, cli_command: "" },
-  "render_error": { label: "Render error", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: true, next_step: "", grades_selection: true, cli_command: "" },
-  "diverged": { label: "Diverged", outcome: "failed", category: "failure", halts_mid_round: false, has_traceback: false, next_step: "A recorded decision no longer replays under the edited config: fork here to branch under it, or revert the edit to continue.", grades_selection: false, cli_command: "`resume --fork-on-divergence`, or revert the config edit" },
-  "optimizer_timeout": { label: "Optimizer timeout", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: true, cli_command: "" },
+  "perfect_score": { label: "Perfect score", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "This is one round's panel, not the dataset: verify the winner on more cells.", grades_selection: true, next_acts: [["verify-candidate", "", ""]] },
+  "rounds_budget": { label: "Rounds budget reached", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; else read the review.", grades_selection: true, next_acts: [["set-limits", "budget.rounds", "more"], ["start-run", "", ""]] },
+  "target_hit": { label: "Target reached", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
+  "lives_exhausted": { label: "Out of lives", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
+  "hard_cap_reached": { label: "Arm cap", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
+  "diag_complete": { label: "Diagnostic complete", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
+  "converged": { label: "Converged", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
+  "optimizer_exhausted": { label: "Optimizer out of moves", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
+  "rebased_to_fork": { label: "Rebased to fork", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
+  "paused": { label: "Paused", outcome: "paused", category: "operator", halts_mid_round: true, has_traceback: false, next_step: "Resuming picks it up at the next checkpoint.", grades_selection: false, next_acts: [["start-run", "", ""]] },
+  "panel_cut": { label: "Panel cut by a declared bound", outcome: "paused", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Cells were cut at their time bound. Give them room (the connector's cell envelope, or the backend deadline their rows name) before resuming, or turn the panel gate off to elect on the holed panel.", grades_selection: false, next_acts: [["start-run", "", ""]] },
+  "adapter_output_owed": { label: "Adapter output owed", outcome: "paused", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "The round before's adapter landed nothing in its re-runs; resuming re-runs it before the next walk.", grades_selection: false, next_acts: [["start-run", "", ""]] },
+  "optimizer_abort": { label: "Optimizer abort", outcome: "halted", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
+  "spend_budget": { label: "Spend budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "The spend cap counts every launch so far: raise it above what it already counts, then resume.", grades_selection: true, next_acts: [["set-limits", "budget.usd", "above what the cap already counts"], ["start-run", "", ""]] },
+  "token_budget": { label: "Token budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "Raise the token cap above what is already spent, then resume.", grades_selection: true, next_acts: [["set-limits", "budget.tokens", "above what is already spent"], ["start-run", "", ""]] },
+  "host_allowance": { label: "Host allowance used up", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "The box's allowance for this account is spent: a resume sends on the account's own key, and a backend's sends still run on the box's key.", grades_selection: true, next_acts: [["start-run", "", ""]] },
+  "wall_clock": { label: "Wall clock reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "Resuming runs another launch under the same clock; the run limits move it.", grades_selection: true, next_acts: [["start-run", "", ""], ["set-limits", "budget.wall_clock_s", ""]] },
+  "origin_gate": { label: "Origin gate (unhealthy origin)", outcome: "halted", category: "operator", halts_mid_round: false, has_traceback: false, next_step: "Fix the backend, then resume: resuming re-measures the cells the origin lost, and the gate grades it again; an origin still unhealthy when resumed passes on that resume. An edited origin is a new campaign or an operator-steered fork at round 0: resuming refuses it.", grades_selection: true, next_acts: [["start-run", "", ""], ["mint-campaign", "", ""], ["fork-cycle", "", ""]] },
+  "backend_unreachable": { label: "Backend unreachable", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "The unreached cell is a hole, not a score: restore the backend or the network it needs, then resuming re-measures it.", grades_selection: true, next_acts: [["start-run", "", ""]] },
+  "provider_credit_exhausted": { label: "Provider out of credit", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Raise the provider key's limit or top up its credit, then resume; a refused cell is a hole it re-measures.", grades_selection: true, next_acts: [["start-run", "", ""]] },
+  "provider_throttled": { label: "Provider rate-limited", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Use your own key for that provider (OpenRouter BYOK), route to another host, or wait out its quota, then resume; the refused cell is a hole it re-measures.", grades_selection: true, next_acts: [["start-run", "", ""]] },
+  "price_list_unreachable": { label: "Price list unreachable", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Nothing was sent and the backend is untouched: the gateway's host price list did not answer, so no send under the USD ceiling could be priced. Resume once it answers; a refused cell is a hole it re-measures.", grades_selection: true, next_acts: [["start-run", "", ""]] },
+  "no_rate": { label: "No rate under the spend cap", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "Nothing was sent: no rate bounds the call, so the dollar cap cannot be enforced for it. Run it on a provider and model the rate table prices, or drop the dollar cap and bound the run in tokens; then resume.", grades_selection: true, next_acts: [["start-run", "", ""]] },
+  "crashed": { label: "Crashed", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: true, next_step: "The run raised an error it did not expect, and its traceback is kept; resuming re-runs from the last closed round.", grades_selection: false, next_acts: [["start-run", "", ""]] },
+  "input_refused": { label: "Input refused", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "The run declined its input at run init, so nothing was searched. A spend cap under one round is raised in the run limits or met by narrowing the round's nodes; then resume.", grades_selection: false, next_acts: [["set-limits", "budget.usd", ""], ["start-run", "", ""]] },
+  "not_admitted": { label: "Not admitted", outcome: "halted", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
+  "producer_vanished": { label: "Producer vanished", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
+  "render_error": { label: "Render error", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: true, next_step: "", grades_selection: true, next_acts: [] },
+  "diverged": { label: "Diverged", outcome: "failed", category: "failure", halts_mid_round: false, has_traceback: false, next_step: "A recorded decision no longer replays under the edited config: fork here to branch under it, or revert the edit to continue.", grades_selection: false, next_acts: [["start-run", "mode.fork_on_divergence", ""]] },
+  "optimizer_timeout": { label: "Optimizer timeout", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
 };
 
 // Mirror of domain/pipeline_schema.py::MOVABLE_AGENT_LABELS, in display order.

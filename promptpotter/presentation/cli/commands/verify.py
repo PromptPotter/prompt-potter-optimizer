@@ -41,11 +41,9 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         "seed": args.seed,
     }
     payload = PayloadInvalidError.validating(VerifyCandidatePayload, fields)
-    pause = measuring.pass_pause(stores, payload, reason="Ctrl+C")
-    with ctrl_c_stops_pass(stores, pause):
-        dispatched = await CommandDispatcher(stores).answer(
-            measuring.verify_candidate, CommandCall(payload)
-        )
+    call = CommandCall(payload)
+    with ctrl_c_stops_pass(stores, call):
+        dispatched = await CommandDispatcher(stores).answer(measuring.verify_candidate, call)
 
     graded = dispatched.result
     if isinstance(graded, VerifySaturated):

@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { Button, FailureLine, Term } from "@/components/ui";
-import { commands } from "@/lib/api/commands";
+import { commands, mintCommandId } from "@/lib/api/commands";
 import { BENCH_REFUSAL_INFO } from "@/lib/api/types";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { encodeCyclePath, pathRoot } from "@/lib/ids";
@@ -10,19 +11,22 @@ import { useWorkspace } from "@/lib/workspace";
 export function BenchGradeAction() {
   const { viewedPath } = useWorkspace();
   const status = useViewedCourse()?.facts.bench?.status ?? null;
-  const cmd = useCommand<"grade-bench">("grade-bench", {
-    scope: viewedPath ? encodeCyclePath(viewedPath) : null,
-  });
+  const scope = viewedPath ? encodeCyclePath(viewedPath) : null;
+  const cmd = useCommand<"grade-bench">("grade-bench", { scope });
+  const stop = useCommand<"cancel">("cancel", { revalidate: false, scope });
+  const [acting, setActing] = useState<string | null>(null);
   if (!viewedPath || !status?.offered) return null;
   const grading = cmd.pending !== null || status.refusal === "in_flight";
   const campaignId = pathRoot(viewedPath).campaignId;
+  function grade() {
+    const commandId = mintCommandId();
+    setActing(commandId);
+    void cmd
+      .run("grade-bench", () => commands["grade-bench"]({ campaign_id: campaignId }, commandId))
+      .finally(() => setActing(null));
+  }
   const button = (
-    <Button
-      disabled={grading || !status.can_grade}
-      onClick={() =>
-        void cmd.run("grade-bench", () => commands["grade-bench"]({ campaign_id: campaignId }))
-      }
-    >
+    <Button disabled={grading || !status.can_grade} onClick={grade}>
       {grading ? "Grading…" : "Grade on bench"}
     </Button>
   );
@@ -33,7 +37,16 @@ export function BenchGradeAction() {
       ) : (
         <Term content={BENCH_REFUSAL_INFO[status.refusal]}>{button}</Term>
       )}
+      {acting && (
+        <Button
+          disabled={stop.pending !== null}
+          onClick={() => void stop.run("cancel", () => commands.cancel({ command_id: acting }))}
+        >
+          Stop
+        </Button>
+      )}
       <FailureLine failure={cmd.failure} />
+      <FailureLine failure={stop.failure} />
     </span>
   );
 }

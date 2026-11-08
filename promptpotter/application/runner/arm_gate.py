@@ -54,7 +54,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         return list(answered.proposals)
     logger.warning(
         "Arm gate: round %d holds for the operator's arms (%d draft(s)). Answer with "
-        "`python -m promptpotter submit-arms --arms <arms.yaml>`.",
+        "`submit-arms`.",
         ctx.round_num,
         len(drafts),
     )

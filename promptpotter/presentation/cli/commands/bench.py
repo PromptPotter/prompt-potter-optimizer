@@ -25,10 +25,9 @@ async def cmd_bench(args: argparse.Namespace) -> CommandResult:
         campaign_id = None if active is None else active.campaign_id
     if not campaign_id:
         raise NotFoundError("No active campaign to bench — name one with --campaign.")
-    payload = GradeBenchPayload(campaign_id=campaign_id)
-    # The pass scores the cycle holding the line, so that is the cycle a Ctrl+C pauses.
-    with ctrl_c_stops_pass(store, measuring.pass_pause(store, payload, reason="Ctrl+C")):
-        sent = await CommandDispatcher(store).answer(measuring.grade_bench, CommandCall(payload))
+    call = CommandCall(GradeBenchPayload(campaign_id=campaign_id))
+    with ctrl_c_stops_pass(store, call):
+        sent = await CommandDispatcher(store).answer(measuring.grade_bench, call)
     score, graded = sent.result, sent.payload.campaign_id
     logger.info("bench: %s -> graded", graded)
     return CommandResult(

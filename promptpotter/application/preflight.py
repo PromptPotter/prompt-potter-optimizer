@@ -174,7 +174,7 @@ def check_cap_funds_round(
     short = _round_short(config, selected, search, cell_usd, measured_cell_usd)
     if short is None:
         return None
-    advice = "Raise it with `set-limits --max-usd`, or narrow the round in `optimization.nodes`."
+    advice = "Raise it with `set-limits` (its `budget.usd`), or narrow the round in `optimization.nodes`."
     if short.billed:
         return PreflightWarning(
             code="spend_cap_below_round",
@@ -208,9 +208,9 @@ def _check_origin_already_run(origin_campaigns: Sequence[str]) -> PreflightWarni
         code="origin_already_run",
         title=f"identical origin already run in {', '.join(origin_campaigns)}",
         detail=(
-            "A fresh `new` re-measures the identical seed. `resume` continues one of those "
-            "instead; `new` is for an origin you have CHANGED (optimizer prompt, config, or "
-            "dataset)."
+            "A fresh `mint-campaign` re-measures the identical seed. A `start-run` continues one "
+            "of those instead; `mint-campaign` is for an origin you have CHANGED (optimizer "
+            "prompt, config, or dataset)."
         ),
     )
 
@@ -304,7 +304,7 @@ def refuse_arm_below_round(
         raise PayloadInvalidError(
             f"{where} cannot be shown to close one round under its {usd_text(cap)}: no archived run "
             f"prices a cell on these models and {bound}. Nothing was minted. Measure the origin "
-            "once with a plain `new` on this dataset, or bound the arms by tokens or rounds with "
+            "once with a plain `mint-campaign` on this dataset, or bound the arms by tokens or rounds with "
             "no dollar cap.",
             code="arm_unpriced",
         )

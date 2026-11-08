@@ -373,8 +373,7 @@ class FileKind(enum.Enum):
     MANIFEST = (
         "manifest_unreadable",
         409,
-        "No migration exists: `python -m promptpotter reset` wipes it with the rest of the run "
-        "data.",
+        "No migration exists: a reset of the data root wipes it with the rest of the run data.",
     )
     JOB = ("job_unreadable", 409, "No migration exists: delete it once no run it names is live.")
     # 500, not 422: the request was fine and the caller cannot fix a file the server persisted.
@@ -425,8 +424,8 @@ class LedgerUnreadableError(ConflictError):
         remedy = (
             "no verb repairs it"
             if campaign_id is None
-            else f"`python -m promptpotter delete-campaign {campaign_id}` removes its campaign and keeps "
-            "every measurement cache"
+            else f"a `delete-campaign` of {campaign_id} removes its campaign and keeps every "
+            "measurement cache"
         )
         where = ledger if offset is None else f"{ledger} line {offset}"
         super().__init__(

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Header, UploadFile
 from fastapi.routing import APIRoute
 
 from promptpotter.application.commands import launching, workspace_edits
@@ -20,6 +21,7 @@ from promptpotter.application.jobs.launcher.head_to_head import (
     HeadToHeadStarted,
 )
 from promptpotter.domain.command_kinds import (
+    COMMAND_ID_CHARS,
     PAYLOAD_MODEL_FOR_KIND,
     CommandAcceptedBody,
     CommandKind,
@@ -110,6 +112,13 @@ async def ingest_upload(
     return outcome.result
 
 
+# The id a caller files under, so it names the act's `cancel` before the act answers; absent,
+# `CommandCall` mints one.
+CommandIdHeader = Annotated[
+    str | None, Header(alias="Command-Id", min_length=1, max_length=COMMAND_ID_CHARS)
+]
+
+
 class _Dispatching:
     """The kind's payload is the body; the answer is the model the kind applies, where it applies
     one, else the `CommandRecord` it appended."""
@@ -121,6 +130,7 @@ class _Dispatching:
             inspect.Parameter("stores", keyword, annotation=StoresDep),
             inspect.Parameter("payload", keyword, annotation=model),
             inspect.Parameter("key", keyword, annotation=IdempotencyKeyDep),
+            inspect.Parameter("command_id", keyword, annotation=CommandIdHeader, default=None),
         ]
         self.answers = answers
         self.__signature__ = inspect.Signature(
@@ -134,9 +144,13 @@ class _Dispatching:
         stores: StoresDep,
         payload: CommandPayload,
         key: IdempotencyKeyDep,
+        command_id: CommandIdHeader = None,
     ) -> object:
         dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-        outcome = await dispatcher.dispatch(CommandCall(payload, key))
+        call = CommandCall(payload, key)
+        if command_id is not None:
+            call = replace(call, command_id=command_id)
+        outcome = await dispatcher.dispatch(call)
         return outcome.accepted if self.answers is None else outcome.result
 
 

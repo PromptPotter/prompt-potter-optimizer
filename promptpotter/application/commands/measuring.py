@@ -2,63 +2,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.commands.dispatcher import (
-    Applier,
-    CommandCall,
-    CommandDispatcher,
-    addressed,
-)
+from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.diagnostics import verify
-from promptpotter.application.jobs.launcher.admission import PassHold, campaign_sends, paid_pass
+from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
 from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.command_events import CommandEffect
-from promptpotter.domain.command_kinds import CyclePayload, LinePayload, PauseCyclePayload
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import VerifyGradedView
 from promptpotter.domain.run_records import NoEffect, VerifySaturated
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_verify
-from promptpotter.infrastructure.store.stores import owned_campaign
-from promptpotter.shared.errors import NotFoundError, TaskUncancellableError
+from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import DispatchedToCycle
     from promptpotter.domain.command_kinds import (
-        CommandPayload,
         GradeBenchPayload,
         VerifyCandidatePayload,
     )
-    from promptpotter.infrastructure.store.stores import Stores
-
-
-def pass_pause(stores: Stores, payload: CommandPayload, *, reason: str) -> PauseCyclePayload:
-    """The stop of a verify or bench pass in flight, as every door sends it: a pause of the cycle
-    it scores — the cycle a verify names, the line holder a bench grades — at the address the
-    dispatcher acts on (`addressed`), sent under the pass's own hold (`stop_pass`)."""
-    match acted := addressed(stores, payload):
-        case CyclePayload():
-            return PauseCyclePayload(
-                campaign_id=acted.campaign_id,
-                cycle_id=acted.cycle_id,
-                descend=acted.descend,
-                reason=reason,
-            )
-        case LinePayload():
-            campaign = owned_campaign(stores, acted.campaign_id)
-            holder = stores.campaigns.line_holder(campaign.root_hop)
-            return PauseCyclePayload(
-                campaign_id=holder.campaign_id, cycle_id=holder.cycle_id, reason=reason
-            )
-        case _:
-            raise TaskUncancellableError(f"no command stops a {payload.kind} in flight")
-
-
-async def stop_pass(stores: Stores, hold: PassHold, pause: CommandCall[PauseCyclePayload]) -> None:
-    """Every door's stop of a paid pass in flight: *pause*, sent under the pass's own hold
-    (`PassHold.stopping`), so it reaches the pass or is refused, never a run holding the cycle after."""
-    async with hold.stopping(stores, pause.payload):
-        await CommandDispatcher(stores).dispatch(pause)
 
 
 async def verify_candidate(

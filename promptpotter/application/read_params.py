@@ -25,6 +25,7 @@ from promptpotter.application.backend_listing import (
     list_backends,
 )
 from promptpotter.application.caller import Caller
+from promptpotter.application.command_reading import CommandReading, read_command
 from promptpotter.application.config_map import ConfigMapResponse, campaign_config_map
 from promptpotter.application.cycle_addressing import (
     ActiveSessionResponse,
@@ -100,7 +101,7 @@ from promptpotter.application.served_dashboard import (
 )
 from promptpotter.application.views.render.export import ExportFiles
 from promptpotter.domain.cells import Cell, CellsResponse, HardSampleOrder, HeatmapScope
-from promptpotter.domain.command_kinds import ReadKind
+from promptpotter.domain.command_kinds import COMMAND_ID_CHARS, ReadKind
 from promptpotter.domain.cycle_paths import (
     CyclePath,
     Subject,
@@ -266,6 +267,16 @@ class MachineStatusParams(ReadParams, read=ReadKind.MACHINE_STATUS, route="/mach
 
     def answer(self, caller: Caller) -> MachineStatusResponse:
         return machine_status(caller.jobs, identity=caller.stores.identity)
+
+
+class CommandParams(ReadParams, read=ReadKind.COMMAND, route="/commands/{command_id}"):
+    """One command the caller filed, by its id: where it stands, at the address it was filed
+    on; a launch's by the jobs it launched. Not found for another's."""
+
+    command_id: str = Field(min_length=1, max_length=COMMAND_ID_CHARS)
+
+    def answer(self, caller: Caller) -> CommandReading:
+        return read_command(caller.stores, caller.jobs, self.command_id)
 
 
 class OptimizersParams(ReadParams, read=ReadKind.OPTIMIZERS, route="/optimizers"):

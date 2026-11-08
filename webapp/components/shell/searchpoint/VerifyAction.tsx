@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
-import { commands, cycleAddress, type VerifyStrategy } from "@/lib/api/commands";
+import { commands, cycleAddress, mintCommandId, type VerifyStrategy } from "@/lib/api/commands";
 import {
   READING_STATE_INFO,
   VERIFY_STRATEGY_LABELS,
@@ -40,6 +40,8 @@ export function VerifyAction({
   path: CyclePath | null;
 }) {
   const cmd = useCommand<"verify-candidate">("verify-candidate");
+  const stop = useCommand<"cancel">("cancel", { revalidate: false });
+  const [acting, setActing] = useState<string | null>(null);
   const [strategy, setStrategy] = useState<VerifyStrategy>("random");
   const [samples, setSamples] = useState("");
   const [saturated, setSaturated] = useState<Saturated | null>(null);
@@ -61,18 +63,25 @@ export function VerifyAction({
   function run() {
     if (!path) return;
     setSaturated(null);
-    void cmd.run(
-      "verify-candidate",
-      () =>
-        // `samples` omitted is the server's count (`verify.py::derive_verify_samples`).
-        commands["verify-candidate"]({
-          ...cycleAddress(path),
-          candidate_id: candidate.arm,
-          strategy,
-          ...(samples === "" ? {} : { samples: Number(samples) }),
-        }),
-      (answer) => setSaturated(answer.kind === "verify_saturated" ? answer : null),
-    );
+    const commandId = mintCommandId();
+    setActing(commandId);
+    void cmd
+      .run(
+        "verify-candidate",
+        () =>
+          // `samples` omitted is the server's count (`verify.py::derive_verify_samples`).
+          commands["verify-candidate"](
+            {
+              ...cycleAddress(path),
+              candidate_id: candidate.arm,
+              strategy,
+              ...(samples === "" ? {} : { samples: Number(samples) }),
+            },
+            commandId,
+          ),
+        (answer) => setSaturated(answer.kind === "verify_saturated" ? answer : null),
+      )
+      .finally(() => setActing(null));
   }
 
   return (
@@ -87,6 +96,17 @@ export function VerifyAction({
         >
           {busy ? "Verifying…" : `Verify ${candidate.label}`}
         </button>
+        {acting && (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void stop.run("cancel", () => commands.cancel({ command_id: acting }))}
+            disabled={stop.pending !== null}
+            title="Stop at the next cell; what it measured is read and kept."
+          >
+            Stop
+          </button>
+        )}
         <Menu
           align="left"
           renderTrigger={({ open, toggle }) => (
@@ -140,6 +160,7 @@ export function VerifyAction({
         </p>
       )}
       <FailureLine failure={cmd.failure} />
+      <FailureLine failure={stop.failure} />
       {!busy && saturated && (
         <p className="verify-action-note">{filled(VERIFY_WORDS.saturated, saturated)}</p>
       )}

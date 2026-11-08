@@ -72,7 +72,7 @@ async def run_origin_gate(
             return StopReason.ORIGIN_GATE
         logger.warning(
             "Origin gate (%s): round-0 verdict is %s — holding before L1. Decide via "
-            "the webapp modal, the TTY prompt, or `python -m promptpotter origin-gate %s`.",
+            "the webapp modal, the TTY prompt, or an `origin-gate` command (%s).",
             mode,
             grade,
             "{" + ",".join(_DECISIONS) + "}",

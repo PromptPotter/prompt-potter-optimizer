@@ -37,6 +37,7 @@ from promptpotter.domain.job import (
     SlotHolder,
 )
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import open_text_robust, unlink_robust, write_json
 from promptpotter.shared.clock import iso_z, utcnow_iso
@@ -45,6 +46,7 @@ from promptpotter.shared.errors import (
     FileKind,
     FileUnreadableError,
     NotFoundError,
+    PotterError,
     ServiceUnavailableError,
     validation_reason,
 )
@@ -292,7 +294,8 @@ class JobRegistry:
             case StopReason():
                 self._end(job, ending=ended, stepped=stepped)
             case BaseException() if not job.admitted and not launch_interrupted(ended):
-                self._end(job, lapse="refused", refusal=str(ended))
+                refused = ended if isinstance(ended, PotterError) else PotterError(str(ended))
+                self._end(job, lapse="refused", refusal=Refusal.of(refused))
             case BaseException():
                 self._end(job, ending=run_stop_reason(ended))
             case None:
@@ -306,7 +309,7 @@ class JobRegistry:
         ending: StopReason | None = None,
         stepped: bool = False,
         lapse: JobLapse | None = None,
-        refusal: str = "",
+        refusal: Refusal | None = None,
     ) -> None:
         # Stamped once: a queue waiter waking on a job already ended raises into a second release.
         if job.released:

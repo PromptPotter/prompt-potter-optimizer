@@ -543,7 +543,7 @@ async def _run_inner_campaign(
         logger.warning(
             "inner cell %s MAY REWARD COLLAPSE: constant-answer floor %.3f >= this run's origin "
             "%.3f. One pass sits inside its own error bar — re-screen the seat "
-            "(`python -m promptpotter seed-screen`) before trusting the panel.",
+            "with a seed screen before trusting the panel.",
             cell.cell.id,
             floor,
             origin_acc,

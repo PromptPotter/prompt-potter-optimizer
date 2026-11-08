@@ -14,14 +14,20 @@ export type VerifyStrategy = VerifyReading["strategy"];
 
 type JsonKind = BrowserKind & keyof CommandPayloads;
 
+// The id a send files under, minted before it, so its `cancel` can name it while it acts.
+export function mintCommandId(): string {
+  return crypto.randomUUID();
+}
+
 // The body IS the kind's payload model, and the answer is its route's: neither is declared here.
 function json<K extends JsonKind>(kind: K) {
-  return async (payload: CommandPayloads[K]): Promise<CommandResponses[K]> => {
+  return async (payload: CommandPayloads[K], commandId?: string): Promise<CommandResponses[K]> => {
     const r = await send(`${API}/commands/${kind}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Idempotency-Key": mintIdempotencyKey(),
+        ...(commandId ? { "Command-Id": commandId } : {}),
       },
       body: JSON.stringify(payload),
     });
@@ -50,6 +56,7 @@ export const commands = {
   "accept-terms": json("accept-terms"),
   "archive-campaign": json("archive-campaign"),
   "bank-snippet": json("bank-snippet"),
+  cancel: json("cancel"),
   "cancel-queued": json("cancel-queued"),
   "set-limits": json("set-limits"),
   "cleanup-empty-cycles": json("cleanup-empty-cycles"),

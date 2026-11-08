@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from enum import StrEnum
-from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self
+from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self, get_args
 
 from pydantic import (
+    BaseModel,
     ConfigDict,
     Field,
     JsonValue,
@@ -32,6 +34,7 @@ from promptpotter.domain.phases import (
     INNER_LAUNCH_REFUSAL,
     INNER_PAUSE_REFUSAL,
     INNER_SKIP_REFUSAL,
+    STOP_REASON_INFO,
     GateDecision,
 )
 from promptpotter.domain.pipeline_schema import ParamIntent
@@ -230,6 +233,8 @@ class CommandKind(StrEnum):
         True,
         "task",
     )
+    # Its act is asking: the pass it names reads it as its pause (`run_phase_control.py::RunControl`).
+    CANCEL = "cancel", "cancelling:cancel", CAMPAIGN_RUN_CAP, anyone("cancel"), True
     SET_LIMITS = (
         "set-limits",
         "limits_and_queue:change_run_limits",
@@ -375,6 +380,9 @@ class CommandKind(StrEnum):
     )
 
 
+# The longest command id a door sends or names; `CommandCall` mints a uuid's 36.
+COMMAND_ID_CHARS = 64
+
 # Filled as each model declares the kind it carries: the ONE kind → payload table. Keyed `str`,
 # so a `CommandRecord.kind` read back off the command log finds its row.
 PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {}
@@ -388,6 +396,9 @@ class CommandPayload(RequestBody):
     ``DraftPayload`` its draft."""
 
     kind: ClassVar[CommandKind]
+    # A secret's text enters no digest, so a retry under a key cannot be matched to its act: it
+    # acts again, never answered as the first. Declared by each payload holding a `SecretStr`.
+    unmatched: ClassVar[bool] = False
     # What the terminal prints after the ack, where the ack alone leaves the next step unsaid; a
     # `{field}` in it reads that field of the applied answer.
     follow_up: ClassVar[str] = ""
@@ -407,8 +418,7 @@ class CommandPayload(RequestBody):
     def recorded(self) -> tuple[dict[str, JsonValue], str]:
         """The act as its `CommandRecord` keeps it, and what an idempotency key names, so one key
         never answers two acts: that one dump and the raw value of each excluded field, each hashed
-        as its bytes. A secret's text enters no stored digest: the kind carrying one replays
-        nothing (`set-api-key`), so no retry is matched on it."""
+        as its bytes. A secret's text enters no stored digest, so its payload is `unmatched`."""
         dump = self.model_dump(mode="json")
         digest = hashlib.sha256(f"{self.kind}\0".encode())
         digest.update(json.dumps(dump, ensure_ascii=False, separators=(",", ":")).encode())
@@ -560,7 +570,7 @@ _OUTER_OWNS_TREE = "An inner run's cycles live and die with the outer campaign."
 
 
 class DeleteCyclePayload(CyclePayload, kind=CommandKind.DELETE_CYCLE):
-    """Remove ONE stub cycle, the singular of `cleanup-empty-cycles`; refused for a cycle holding
+    """Remove ONE stub cycle, the singular of the empty-cycle sweep; refused for a cycle holding
     rounds or a live producer (pause it first)."""
 
     inner_refusal: ClassVar[str | None] = _OUTER_OWNS_TREE
@@ -576,7 +586,7 @@ class CleanupEmptyCyclesPayload(CyclePayload, kind=CommandKind.CLEANUP_EMPTY_CYC
 
 class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.SET_LIMITS):
     """Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or
-    round-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the
+    round-halted cycle continues by a higher ceiling, then a `start-run`. Spend is clamped against the
     account allowance. On an arm of a head-to-head it moves that arm alone, and leaves the
     comparison only when a ceiling moved."""
 
@@ -679,8 +689,8 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
 
 class VerifyCandidatePayload(CyclePayload, kind=CommandKind.VERIFY_CANDIDATE):
     """``samples`` omitted is the ANSWER, not an absence: the count is derived from the
-    per-candidate round budget and the rounds run since this cycle's last verification
-    (``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is
+    per-candidate round budget and the rounds run since this cycle's last verification. A larger
+    explicit count is
     refused, naming the budget — which is what keeps one click on a million-row dataset from being
     a million-cell bill.
 
@@ -754,6 +764,17 @@ class CancelQueuedRunPayload(CommandPayload, kind=CommandKind.CANCEL_QUEUED):
         max_length=128,
         pattern=r"^[A-Za-z0-9_-]+$",
         description="The queued job id, as `machine-status` lists it.",
+    )
+
+
+class CancelPayload(CommandPayload, kind=CommandKind.CANCEL):
+    """Stop a command still acting, by its id: a verify or bench pass stops at its next cell and
+    answers over what it measured. One that ended is left as it ended."""
+
+    command_id: str = Field(
+        min_length=1,
+        max_length=COMMAND_ID_CHARS,
+        description="The command's id, as its door answered it or was sent it.",
     )
 
 
@@ -1050,6 +1071,8 @@ class SetApiKeyPayload(CommandPayload, kind=CommandKind.SET_API_KEY):
     """Hold the caller's own key for a provider: its sends there go out on it, past the coupon.
     Never served back, and recorded masked."""
 
+    unmatched: ClassVar[bool] = True
+
     provider: str = Field(min_length=1, max_length=64)
     secret: SecretStr
 
@@ -1063,6 +1086,47 @@ class RemoveApiKeyPayload(CommandPayload, kind=CommandKind.REMOVE_API_KEY):
 # The last payload model is declared above, so a kind carrying none fails right here.
 if _unpaired := sorted(set(CommandKind) - PAYLOAD_MODEL_FOR_KIND.keys()):
     raise RuntimeError(f"command kinds carried by no payload model: {_unpaired}")
+# A tool's description is its model's docstring: it names kinds and fields, never a source path or
+# a terminal verb, which each door words its own way.
+_TICKED = re.compile(r"`+([^`]+)`+")
+_VERBS = frozenset(k.cli_verb for k in CommandKind if k.cli_verb)
+if _worded := sorted(
+    f"{k}: `{ticked}`"
+    for k in CommandKind
+    if k.host
+    for ticked in _TICKED.findall(vars(PAYLOAD_MODEL_FOR_KIND[k]).get("__doc__") or "")
+    if ".py::" in ticked or ticked.split()[0] in _VERBS
+):
+    raise RuntimeError(f"tool descriptions naming a path or a terminal verb: {_worded}")
+
+
+def _fills(model: object, dotted: str) -> bool:
+    for name in dotted.split("."):
+        if not (isinstance(model, type) and issubclass(model, BaseModel)):
+            return False
+        if (held := model.model_fields.get(name)) is None:
+            return False
+        model = held.annotation
+    return True
+
+
+# A stop's next act is a kind every door presses, filling a field its payload has.
+if _unacted := sorted(
+    f"{reason}: {act.kind} {act.field}"
+    for reason, info in STOP_REASON_INFO.items()
+    for act in info.next_acts
+    if act.kind not in PAYLOAD_MODEL_FOR_KIND
+    or (act.field and not _fills(PAYLOAD_MODEL_FOR_KIND[act.kind], act.field))
+):
+    raise RuntimeError(f"STOP_REASON_INFO next acts no kind takes: {_unacted}")
+# A secret no digest names would match two keys as one act.
+if _secretive := sorted(
+    k
+    for k, m in PAYLOAD_MODEL_FOR_KIND.items()
+    if not m.unmatched
+    and any(SecretStr in (f.annotation, *get_args(f.annotation)) for f in m.model_fields.values())
+):
+    raise RuntimeError(f"payloads holding a secret yet matched on a retry: {_secretive}")
 # A payload keeping an undeclared key carries a steer no handler owns, an endpoint among them.
 if _lax := sorted(
     k for k, m in PAYLOAD_MODEL_FOR_KIND.items() if m.model_config["extra"] != "forbid"
@@ -1074,6 +1138,11 @@ class CommandAcceptedBody(StrictModel):
     """What a command whose applied form answers nothing returns: the record it appended."""
 
     command_id: str = Field(description="Stable id of the appended `CommandRecord`.")
+    subject: str = Field(
+        description="The address the dispatcher resolved and filed it on: empty for the "
+        "workspace, `draft:<id>` for a draft, else its campaign or cycle as a subject spells it "
+        "(`campaign:<id>`, `course:<id>/<cycle>`, `;in=` its sandbox chain)."
+    )
 
 
 class ReadKind(StrEnum):
@@ -1089,6 +1158,7 @@ class ReadKind(StrEnum):
     ACTIVITY = "activity"
     ACTIVE_SESSION = "active-session"
     MACHINE_STATUS = "machine-status"
+    COMMAND = "command"
     OPTIMIZERS = "optimizers"
     LIBRARY = "library"
     BACKENDS = "backends"

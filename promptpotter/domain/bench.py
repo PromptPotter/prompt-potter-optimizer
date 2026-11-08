@@ -186,7 +186,7 @@ class PassStop(FrozenModel):
 
     @property
     def state(self) -> ReadingState:
-        """A pause leaves the pass owed, never faulted: `resume` sends it again."""
+        """A pause leaves the pass owed, never faulted: a `start-run` sends it again."""
         paused = (
             isinstance(self.cause, StopReason)
             and stop_reason_outcome(self.cause) is StopOutcome.PAUSED

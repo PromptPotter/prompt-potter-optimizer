@@ -120,7 +120,7 @@ def cycle_target(stores: Stores, campaign: str, cycle: str) -> CycleHop:
     hop = active_pointer(stores)
     if hop is None or not (cycle or hop.cycle_id):
         raise NotFoundError(
-            "No active cycle — name one with --campaign/--cycle, or start one with `new`."
+            "No active cycle — name its campaign and cycle, or start one with `mint-campaign`."
         )
     cycle_id = resolve_cycle_id(stores, hop.campaign_id, cycle) if cycle else hop.cycle_id
     return CycleHop(campaign_id=hop.campaign_id, cycle_id=cycle_id)

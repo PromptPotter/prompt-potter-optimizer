@@ -1877,6 +1877,35 @@
             "title": "InnerRun",
             "type": "object"
           },
+          "Refusal": {
+            "additionalProperties": false,
+            "description": "A refusal as served: the rest of the answer it rides in serves on beside it.",
+            "properties": {
+              "code": {
+                "description": "The code a client branches on: the refusal's kind.",
+                "title": "Code",
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "The refusal's facts, by name.",
+                "title": "Details",
+                "type": "object"
+              },
+              "message": {
+                "description": "The sentence an operator reads, naming its remedy and the Account tab it lives in, where it names one.",
+                "title": "Message",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "details"
+            ],
+            "title": "Refusal",
+            "type": "object"
+          },
           "ScoringPass": {
             "additionalProperties": false,
             "description": "A paid verb scoring outside any run: its hop is the cycle it scores, or none at all.",
@@ -2042,9 +2071,15 @@
             "type": "string"
           },
           "refusal": {
-            "default": "",
-            "title": "Refusal",
-            "type": "string"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Refusal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "released_at": {
             "anyOf": [

@@ -122,8 +122,8 @@ def winner_pointer(hop: CycleHop) -> str:
     """The one statement of a cycle's winner: `log.md`'s `## Winner` and the notebook cell both say it."""
     return (
         "Stated once, by the package — the prompt per node, `export.json` and the evidence: "
-        f"`python -m promptpotter export --campaign {hop.campaign_id} --cycle {hop.cycle_id} "
-        f"--tier package`. Its machine record is `cycles/{hop.cycle_id}/export.json`."
+        f"the `cycle-export` read of {hop.campaign_id}/{hop.cycle_id} at its `package` tier. "
+        f"Its machine record is `cycles/{hop.cycle_id}/export.json`."
     )
 
 

@@ -7,6 +7,7 @@ The run completes, the dashboard looks fine, and a different candidate should ha
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import dataclasses
 import json
@@ -19,7 +20,7 @@ from itertools import count, product
 from math import sqrt
 from pathlib import Path
 from statistics import fmean, mean, stdev
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import httpx
 import pytest
@@ -74,11 +75,10 @@ from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.caller import Caller
 from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import (
+    Applier,
     CommandCall,
     CommandDispatcher,
-    CommandOutcome,
 )
-from promptpotter.application.commands.measuring import stop_pass
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.head_to_head import GuardDifference, GuardState
 from promptpotter.application.evidence.read import subject_evidence
@@ -88,9 +88,8 @@ from promptpotter.application.host_surface import (
     CancelTask,
     HostSession,
     HostTask,
+    TaskResultOf,
     TaskStatusOf,
-    _Tracked,
-    host_tool,
 )
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import LaunchClock, Session
@@ -101,7 +100,6 @@ from promptpotter.application.intelligence.rasch import (
     theta_lift_over_parent,
 )
 from promptpotter.application.jobs.launcher.admission import (
-    PassHold,
     PassStoppedError,
     paid_pass,
 )
@@ -229,8 +227,9 @@ from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimiz
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes, unscoreable_cells
 from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
-from promptpotter.domain.command_events import CommandAckRecord, CommandRecord
+from promptpotter.domain.command_events import CommandAckRecord
 from promptpotter.domain.command_kinds import (
+    CancelPayload,
     CommandKind,
     CommandPayload,
     GradeBenchPayload,
@@ -275,6 +274,7 @@ from promptpotter.domain.phases import (
     PauseCause,
     RunPhase,
     StopLoop,
+    StopOutcome,
     StopReason,
     WalkEnd,
 )
@@ -340,15 +340,16 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import write_yaml
 from promptpotter.infrastructure.store.stores import Stores, descend_store
-from promptpotter.presentation.cli.commands import launch as launch_cli
+from promptpotter.presentation.cli.commands import noise_floor as noise_floor_cli
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.shared.answer_text import extract_gsm8k_number
 from promptpotter.shared.errors import (
     ConflictError,
     ErrorCategory,
+    NotFoundError,
     PayloadInvalidError,
+    PotterError,
     SendRefusedError,
-    TaskUncancellableError,
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal
 from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
@@ -1937,16 +1938,17 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert stores.inbox(_PEER_HOP).pause is None and not cycle_held(cycle_dir), (
             "the pass left its pause unapplied, or kept the cycle after it stopped"
         )
-        # Every other door stops the pass by its own hold, in one step: the host's cancel and the
-        # terminal's Ctrl+C each pause it while it holds its cycle, and once it let go the stop
-        # answers that it ended, leaving no pause for whatever holds the cycle next.
+        # Every other door stops the pass by its command's `cancel`: the host's task cancel and the
+        # terminal's Ctrl+C each name the id it was filed under, and a cancel of a command that
+        # ended stands for nothing, so no stop waits for whatever holds the cycle next.
         host = HostSession(Caller(stores))
 
-        def paused_by() -> list[str]:
+        def cancels() -> list[object]:
+            book = stores.commands.book()
             return [
-                record.payload["reason"]
-                for record in stores.commands.book().subject_events(stores.subject(_PEER_HOP))
-                if isinstance(record, CommandRecord) and record.kind == CommandKind.PAUSE
+                record.payload["command_id"]
+                for record in book.filed.values()
+                if record.kind == CommandKind.CANCEL and book.status[record.command_id] == "applied"
             ]
 
         async def _held_pass(stop: Callable[[], Awaitable[object]]) -> None:
@@ -1954,30 +1956,54 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget(), sends=()
             ):
                 await stop()
-                # What every wait inside a pass does once a pause stands on its cycle.
-                if (abort := get_abort_check()) is not None and abort():
+                # What the walk and every wait inside a pass do once its cancel stands.
+                walk = RunControl(commands=stores.commands, enclosing=(stores.subject(_PEER_HOP),))
+                if walk.pause_requested() and (abort := get_abort_check()) is not None and abort():
                     raise asyncio.CancelledError("aborted")
                 raise AssertionError("a stop left the pass running")
 
-        async def _host_cancel() -> HostTask:
-            hold = PassHold()
+        async def _replayed_none(_: object) -> None:
+            return None
 
-            async def _pass() -> tuple[CommandOutcome[Any, Any], None]:
-                with hold.bound():
-                    await _held_pass(lambda: host.answer(CancelTask("held")))
-                raise AssertionError("a host cancel left the pass running")
+        def _passing(stop: Callable[[], Awaitable[object]]) -> Callable[[Any], Awaitable[Any]]:
+            async def _verify(_: Any) -> Applier[None]:
+                return Applier(lambda: _held_pass(stop), _replayed_none)
 
-            running = asyncio.create_task(_pass())
-            # By an id prefix, as a terminal names its stop: it still addresses the pass's cycle.
-            by_prefix = pause.model_copy(update={"campaign_id": _PEER_HOP.campaign_id[:3]})
-            host._tasks["held"] = _Tracked(
-                host_tool("verify-candidate"), CommandCall(by_prefix), hold, running
+            return _verify
+
+        def _verify_call(candidate_id: str) -> CommandCall[Any]:
+            return CommandCall(
+                VerifyCandidatePayload(
+                    campaign_id=_PEER_HOP.campaign_id,
+                    cycle_id=_PEER_HOP.cycle_id,
+                    candidate_id=candidate_id,
+                )
             )
-            await asyncio.wait([running])
-            return await host.answer(TaskStatusOf("held"))
 
-        before = len(paused_by())
-        cancelled = asyncio.run(_host_cancel())
+        opened_task: dict[str, str] = {}
+
+        async def _host_cancel() -> tuple[HostTask, str]:
+            sent = {
+                "campaign_id": _PEER_HOP.campaign_id,
+                "cycle_id": _PEER_HOP.cycle_id,
+                "candidate_id": "held",
+                IDEMPOTENCY_KEY: "held",
+            }
+            opened = await host.answer(CallTool("verify-candidate", sent))
+            assert opened.task is not None
+            opened_task["held"] = opened.task.task_id
+            with pytest.raises(PotterError) as stopped:
+                await host.answer(TaskResultOf(opened.task.task_id))
+            return await host.answer(TaskStatusOf(opened.task.task_id)), stopped.value.code
+
+        before = len(cancels())
+        with monkeypatch.context() as patched:
+            patched.setattr(
+                measuring,
+                "verify_candidate",
+                _passing(lambda: host.answer(CancelTask(opened_task["held"]))),
+            )
+            cancelled, result_code = asyncio.run(_host_cancel())
         # A command addresses an L4 leaf by the id prefix a read takes, below its chain: one rule
         # resolves both, so the act reaches the leaf's campaign under its full id.
         leaf = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
@@ -2018,8 +2044,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             with pytest.raises(ConflictError):
                 asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(bench_by_prefix)))
         assert benched == [_PEER_HOP.campaign_id], "a campaign's command acted on the typed prefix"
-        # A host task tracks the address its dispatch acts on, so its stop names the pass's cycle
-        # even once another campaign shares the prefix it was sent by.
+        # A host task is its command, filed at the address its dispatch acted on, so it names the
+        # pass's cycle even once another campaign shares the prefix it was sent by.
         sent_by_prefix = {
             "campaign_id": _PEER_HOP.campaign_id[:3],
             "cycle_id": _PEER_HOP.cycle_id,
@@ -2027,77 +2053,81 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             IDEMPOTENCY_KEY: "verify-by-prefix",
         }
 
-        async def _tracked_by_prefix() -> object:
+        async def _tracked_by_prefix() -> HostTask:
             opened = await host.answer(CallTool("verify-candidate", sent_by_prefix))
             assert opened.task is not None
-            tracked = host._tasks[opened.task.task_id]
-            await asyncio.wait([tracked.dispatching])
-            return tracked.call.payload
+            return opened.task
+
+        async def _verify_filed(_: Any) -> Applier[None]:
+            async def _reached() -> None:
+                raise ConflictError("reached")
+
+            return Applier(_reached, _replayed_none)
 
         with monkeypatch.context() as patched:
-            patched.setattr(measuring, "verify_candidate", _verify_reached)
-            tracked_payload = asyncio.run(_tracked_by_prefix())
-        assert (
-            isinstance(tracked_payload, VerifyCandidatePayload)
-            and tracked_payload.campaign_id == _PEER_HOP.campaign_id
-        ), "a host task tracked the prefix it was sent by, which a later mint can make ambiguous"
-        by_full_id = GradeBenchPayload(campaign_id=_PEER_HOP.campaign_id)
-        assert measuring.pass_pause(stores, bench_by_prefix, reason="stop") == measuring.pass_pause(
-            stores, by_full_id, reason="stop"
-        ), "a bench's stop by a prefix missed the line holder of the campaign it grades"
+            patched.setattr(measuring, "verify_candidate", _verify_filed)
+            tracked = asyncio.run(_tracked_by_prefix())
+        filed = stores.commands.book().filed[tracked.task_id]
+        assert filed.payload["campaign_id"] == _PEER_HOP.campaign_id, (
+            "a host task filed the prefix it was sent by, which a later mint can make ambiguous"
+        )
 
         async def _ctrl_c() -> str:
-            stopped = asyncio.Event()
-
-            async def _stop(*args: Any) -> None:
-                try:
-                    await stop_pass(*args)
-                finally:
-                    stopped.set()
+            pressed_call = _verify_call("pressed")
 
             async def _press() -> None:
                 signal.raise_signal(signal.SIGINT)
-                # The stop it sent lands, then cancels this task.
-                await stopped.wait()
+                # Its cancel lands, then cancels this task.
+                await asyncio.Event().wait()
 
             with monkeypatch.context() as patched:
-                patched.setattr(launch_cli, "stop_pass", _stop)
-                with pytest.raises(PassStoppedError) as ended, ctrl_c_stops_pass(stores, pause):
-                    await _held_pass(_press)
+                patched.setattr(measuring, "verify_candidate", _passing(_press))
+                with (
+                    pytest.raises(PassStoppedError) as ended,
+                    ctrl_c_stops_pass(stores, pressed_call),
+                ):
+                    await CommandDispatcher(stores).dispatch(pressed_call)
             return str(ended.value)
 
         pressed = asyncio.run(_ctrl_c())
-        assert cancelled.status == "cancelled" and "pass stopped" in cancelled.status_message, (
+        assert cancelled.status == "cancelled" and "cancel by" in cancelled.status_message, (
             "a host cancel left the pass running"
         )
-        assert "pass stopped" in pressed, "a Ctrl+C left the pass running"
-        assert len(paused_by()) == before + 2 and paused_by()[-1] == pause.reason, (
-            "a host cancel or a Ctrl+C ended the pass without its pause"
+        assert result_code == PassStoppedError.code, "a stopped pass's result is not its refusal"
+        assert "cancel by" in pressed, "a Ctrl+C left the pass running"
+        assert len(cancels()) == before + 2 and opened_task["held"] in cancels(), (
+            "a host cancel or a Ctrl+C ended the pass without its cancel"
         )
-        assert stores.inbox(_PEER_HOP).pause is None and not cycle_held(cycle_dir), (
-            "a door's stop left its pause standing, or the pass kept its cycle"
+        assert stores.inbox(_PEER_HOP).stop is None and not cycle_held(cycle_dir), (
+            "a door's stop outlived its pass, or the pass kept its cycle"
         )
 
-        async def _stop_after(hold: PassHold) -> str:
-            with pytest.raises(TaskUncancellableError) as refused:
-                await stop_pass(stores, hold, CommandCall(pause))
-            return str(refused.value)
+        async def _cancel(command_id: str) -> str:
+            sent = CommandCall(CancelPayload(command_id=command_id))
+            return (await CommandDispatcher(stores).dispatch(sent)).ack
 
-        async def _let_go() -> str:
-            hold = PassHold()
-            with hold.bound():
-                async with paid_pass(
-                    stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget(), sends=()
-                ):
-                    pass
-            return await _stop_after(hold)
-
-        assert asyncio.run(_let_go()).startswith("the pass ended"), (
-            "a stop after the let-go still asked to be sent again"
+        assert asyncio.run(_cancel(opened_task["held"])) == "applied", (
+            "a cancel of an ended command was refused"
         )
-        assert stores.inbox(_PEER_HOP).pause is None, "a stop after the let-go left a pause"
-        assert "not yet" in asyncio.run(_stop_after(PassHold())), (
-            "a stop before the pass held its cycle sent a pause"
+        assert stores.inbox(_PEER_HOP).stop is None, "a cancel after its pass ended stood"
+        with pytest.raises(NotFoundError):
+            asyncio.run(_cancel("never-filed"))
+
+        # noise-floor files no command: a second terminal's pause stops it, and it exits paused.
+        async def _rescored(**_: Any) -> NoReturn:
+            await _held_pass(lambda: CommandDispatcher(stores).dispatch(CommandCall(pause)))
+            raise AssertionError("a pause left noise-floor running")
+
+        floor_args = argparse.Namespace(
+            verbose=False, campaign=_PEER_HOP.campaign_id, cycle=_PEER_HOP.cycle_id, k=2
+        )
+        with monkeypatch.context() as patched:
+            patched.setattr(noise_floor_cli, "measure_noise_floor", _rescored)
+            patched.setattr(noise_floor_cli, "open_stores", lambda _: stores)
+            patched.setattr(noise_floor_cli, "setup_logging", lambda **_: None)
+            floor = asyncio.run(noise_floor_cli.cmd_noise_floor(floor_args))
+        assert floor.exit_code == StopOutcome.PAUSED.exit_code and floor.data is None, (
+            "a stopped noise-floor let its pause escape, or answered a band"
         )
         # A spent budget stops the pass and names the bound; the held passes beside it stand.
         earlier = origin_pass.model_copy(update={"round": 7, "candidate_id": "an earlier pick"})

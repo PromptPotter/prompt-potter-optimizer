@@ -1304,8 +1304,8 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             (
                 "manifest_unreadable",
                 409,
-                "No migration exists: `python -m promptpotter reset` wipes it with the rest of "
-                "the run data.",
+                "No migration exists: a reset of the data root wipes it with the rest of the run "
+                "data.",
             ),
         ),
         (
@@ -1315,8 +1315,8 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             (
                 "manifest_unreadable",
                 409,
-                "No migration exists: `python -m promptpotter reset` wipes it with the rest of "
-                "the run data.",
+                "No migration exists: a reset of the data root wipes it with the rest of the run "
+                "data.",
             ),
         ),
         (

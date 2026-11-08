@@ -7,6 +7,7 @@ from pydantic import ConfigDict, Field, TypeAdapter
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.spend import Budget
 
 # The slot is held before the mint resolves the cycle it will name; `update_target` fills it in.
@@ -113,8 +114,8 @@ class Job:
     stepped: bool = False
     # How it ended where no run returned, stamped with `released_at` in place of an `ending`.
     lapse: JobLapse | None = None
-    # The words of a `lapse` of `refused`, set nowhere else.
-    refusal: str = ""
+    # What a `lapse` of `refused` was refused with, as its door served it; set nowhere else.
+    refusal: Refusal | None = None
 
     def __post_init__(self) -> None:
         if self.released_at is None and (self.ending, self.lapse) != (None, None):

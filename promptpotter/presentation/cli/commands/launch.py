@@ -13,8 +13,6 @@ from typing import TYPE_CHECKING, Any, get_args
 from promptpotter import connectors
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.measuring import stop_pass
-from promptpotter.application.jobs.launcher.admission import PassHold
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.views.render.phase import render_completion
@@ -22,6 +20,7 @@ from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import (
+    CancelPayload,
     CyclePayload,
     OriginGateDecisionPayload,
     PauseCyclePayload,
@@ -105,21 +104,18 @@ def ctrl_c_pauses(
     return _ctrl_c(stores, _pause_each)
 
 
-@contextlib.contextmanager
 def ctrl_c_stops_pass(
-    stores: Stores, pause: PauseCyclePayload
-) -> Iterator[Callable[[CyclePayload], None]]:
-    """A paid pass's Ctrl+C: *pause*, under the hold of the pass this task runs (`stop_pass`);
-    before it holds its cycle, or once it let go, the cancel alone ends it."""
-
-    hold = PassHold()
+    stores: Stores, call: CommandCall[Any]
+) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
+    """A paid pass's Ctrl+C: the `cancel` of *call*'s command, then of this task; before it is
+    filed, or once it ended, the task's cancel alone ends it."""
 
     async def _stop() -> None:
         with contextlib.suppress(PotterError):
-            await stop_pass(stores, hold, CommandCall(pause))
+            cancel = CancelPayload(command_id=call.command_id)
+            await CommandDispatcher(stores).dispatch(CommandCall(cancel))
 
-    with hold.bound(), _ctrl_c(stores, _stop) as dispatch:
-        yield dispatch
+    return _ctrl_c(stores, _stop)
 
 
 @contextlib.contextmanager

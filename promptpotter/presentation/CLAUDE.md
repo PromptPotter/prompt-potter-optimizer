@@ -6,6 +6,7 @@
 - **No campaign-artifact writes from entry-point code** — writes go through `CycleEventLog.append` or a declared projection.
 - **A router's gate is its mount's** (`main.py::API_ROUTERS`; `None` is public by declaration), never a dependency each route remembers; a cross-user campaign is a 404 (`owned_campaign`).
 - **A CLI-only verb says why on its `Verb` row (`terminal_only`), and a written verb spells each payload field of every kind naming it (`CommandKind.cli_verb`) or says why not (`unspelled`)** — refused at import (`cli/commands/verbs.py::_unsaid`).
+- **A paid pass no command files is CLI-only, and its terminal is its one door**: `seed-screen` and `probe-reasoning` (no cycle) stop by their Ctrl+C alone; `noise-floor` by its cycle's `pause`, from its Ctrl+C or another terminal. Every other pass stops by its command's `cancel` at every door (`application/commands/cancelling.py`).
 
 ## No ad-hoc mutating routes
 

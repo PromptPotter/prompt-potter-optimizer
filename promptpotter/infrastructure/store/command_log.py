@@ -26,6 +26,7 @@ from promptpotter.domain.command_events import (
 )
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
+    CommandKind,
     LoopPayload,
     OriginGateDecisionPayload,
     PauseCyclePayload,
@@ -67,9 +68,11 @@ class LookaheadAsk(NamedTuple):
 
 
 class Controls(NamedTuple):
-    """A running loop's inbox: the loop commands on its cycle accepted and not yet taken."""
+    """A running loop's inbox: the loop commands on its cycle accepted and not yet taken; and
+    ``stop``, the ``cancel`` of a pass still acting on it, which the pass reads as its pause."""
 
     pause: PauseAsk | None = None
+    stop: PauseAsk | None = None
     skips: tuple[str, ...] = ()
     lookahead: LookaheadAsk | None = None
     gate_decisions: tuple[tuple[str, str], ...] = ()
@@ -168,7 +171,8 @@ class _Inbox:
 
 class CommandBook(NamedTuple):
     """The log folded, as one snapshot: each command's filing and status, each subject's events in
-    log order (a landed draft's ahead of its cycle's), and each subject's inbox and last event."""
+    log order (a landed draft's ahead of its cycle's), each subject's inbox and last event, and the
+    ``cancel`` asked of each command still acting, which its end drops."""
 
     filed: Mapping[str, CommandRecord]
     status: Mapping[str, CommandStatus]
@@ -176,6 +180,9 @@ class CommandBook(NamedTuple):
     landed: Mapping[str, str]
     inboxes: Mapping[str, Controls]
     stamps: Mapping[str, int]
+    stopping: Mapping[str, str]
+    # The status event that last moved each command: its effect, or the refusal it kept.
+    ends: Mapping[str, CommandAckRecord]
 
     def subject_events(self, subject: Subject | str) -> tuple[_Event, ...]:
         return self.events.get(self._spelled(subject), ())
@@ -236,14 +243,14 @@ class CommandBook(NamedTuple):
         return self.landed.get(spelled, spelled)
 
 
-_EMPTY = CommandBook(*(MappingProxyType({}) for _ in range(6)))
+_EMPTY = CommandBook(*(MappingProxyType({}) for _ in range(8)))
 
 
 def _folded(base: CommandBook, rows: list[CommandLogRow]) -> CommandBook:
     """A fresh book over *base* and *rows*: the published one is never written again."""
     filed, status = dict(base.filed), dict(base.status)
     events = {subject: list(held) for subject, held in base.events.items()}
-    landed = dict(base.landed)
+    landed, stopping, ends = dict(base.landed), dict(base.stopping), dict(base.ends)
     touched: set[str] = set()
     for row in rows:
         if isinstance(row, CommandLanded):
@@ -261,17 +268,29 @@ def _folded(base: CommandBook, rows: list[CommandLogRow]) -> CommandBook:
             to = None if held is None else COMMAND_TRANSITIONS[held, row.status]
             if to is None:
                 continue
-            status[row.command_id] = to
-            subject = filed[row.command_id].subject
+            status[row.command_id], ends[row.command_id] = to, row
+            asked = filed[row.command_id]
+            subject = asked.subject
+            # Any move ends what a cancel stopped: no command is filed again.
+            stopping.pop(row.command_id, None)
+            if to == "applied" and asked.kind == CommandKind.CANCEL:
+                target = str(asked.payload["command_id"])
+                if status.get(target) == "filed":
+                    stopping[target] = row.command_id
+                    touched.add(landed.get(filed[target].subject, filed[target].subject))
         subject = landed.get(subject, subject)
         events.setdefault(subject, []).append(row)
         touched.add(subject)
+    stops: dict[str, PauseAsk] = {}
+    for target, cancel in stopping.items():
+        on, by = filed[target].subject, filed[cancel]
+        stops[landed.get(on, on)] = PauseAsk(cancel, by.issued_by, by.timestamp)
     inboxes, stamps = dict(base.inboxes), dict(base.stamps)
     for subject in touched:
         inbox = _Inbox()
         for event in events[subject]:
             inbox.feed(event)
-        inboxes[subject] = inbox.value()
+        inboxes[subject] = inbox.value()._replace(stop=stops.get(subject))
         stamps[subject] = int((epoch_seconds(events[subject][-1].timestamp) or 0.0) * 1e9)
     return CommandBook(
         MappingProxyType(filed),
@@ -280,6 +299,8 @@ def _folded(base: CommandBook, rows: list[CommandLogRow]) -> CommandBook:
         MappingProxyType(landed),
         MappingProxyType(inboxes),
         MappingProxyType(stamps),
+        MappingProxyType(stopping),
+        MappingProxyType(ends),
     )
 
 

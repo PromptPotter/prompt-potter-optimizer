@@ -13,6 +13,7 @@ from promptpotter.application.datasets.ingest import (
     ingest_draft,
 )
 from promptpotter.application.jobs.coupon import AccountKey, put_account_key, remove_account_key
+from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.domain.command_kinds import (
     ArchiveCampaignPayload,
     DeleteCampaignPayload,
@@ -22,7 +23,7 @@ from promptpotter.domain.run_records import DraftOpenedEffect
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import LedgerUnreadableError
+from promptpotter.shared.errors import LedgerUnreadableError, NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import Dispatched
@@ -144,7 +145,11 @@ async def set_user_settings(
     async def _apply() -> account.UserSettings:
         return account.set_user_settings(stores, sent)
 
-    return Applier(_apply, replay=None)
+    async def _set(_: CommandEffect) -> account.UserSettings:
+        # Its key names this payload, so the first act set exactly these.
+        return sent
+
+    return Applier(_apply, replay=_set)
 
 
 async def accept_terms(
@@ -155,7 +160,11 @@ async def accept_terms(
     async def _apply() -> account.TermsConsent:
         return account.accept_terms(stores, version)
 
-    return Applier(_apply, replay=None)
+    async def _accepted(_: CommandEffect) -> account.TermsConsent:
+        # One consent line per act: a retry writes none.
+        return account.TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=version)
+
+    return Applier(_apply, replay=_accepted)
 
 
 async def set_api_key(dispatched: Dispatched[SetApiKeyPayload]) -> Applier[AccountKey]:
@@ -164,7 +173,14 @@ async def set_api_key(dispatched: Dispatched[SetApiKeyPayload]) -> Applier[Accou
     async def _apply() -> AccountKey:
         return put_account_key(stores, payload.provider, payload.secret)
 
-    return Applier(_apply, replay=None)
+    async def _held(_: CommandEffect) -> AccountKey:
+        # Never reached by a retry, its payload `unmatched`: the key as the account holds it.
+        held = stores.api_keys.load().get(payload.provider)
+        if held is None:
+            raise NotFoundError(f"no {payload.provider} key is held")
+        return AccountKey(provider=payload.provider, last4=held.last4, added_at=held.added_at)
+
+    return Applier(_apply, replay=_held)
 
 
 async def remove_api_key(dispatched: Dispatched[RemoveApiKeyPayload]) -> Applier[object]:
