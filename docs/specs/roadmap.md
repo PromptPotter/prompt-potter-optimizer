@@ -26,7 +26,7 @@ names the earlier arc a ledger row may still cite.
 
 | Arc | Was | Closes | Decision first | Waits on |
 |---|---|---|---|---|
-| **M4** typed pipeline carrier | U1a, M4c | engine A but A2, `prompt_edits`, `PackRefusal`, the read stack's accessors (M9.7), all in its re-key; the setup screen's knob layer and Reset | `steps` leaves the params bag; every treatment digest re-keys (accepted) | — |
+| **M4** typed pipeline carrier | U1a, M4c | engine A but A2 and `prompt_edits`, in its re-key (M4.9 to M4.11; the salvage spans 75 files); the setup screen's knob layer and Reset | `steps` leaves the params bag; every treatment digest re-keys (accepted) | — |
 | **CONN** connector identity | M4b, with rows of M6, M7, M12, M18 | engine A2; one resolver that refuses an unregistered connector typed at every lookup; `init_services` takes the campaign's connector and refuses a mismatch; `backend_type` becomes `connector`, the definition key included; `PipelineSchema`'s name and version; `index_terms` once; the defaults' two owners; `DEFAULT_CONNECTOR` and the endpoint default; a connector's spend, payer and wire kind declared | the landing re-writes tenant definitions (yes) | M4 |
 | **LAND** the landing as a precondition | M17's landing rows | the landing at every process entry, keyed on the record schema the code writes; it drops unloadable run data by itself and refuses unknown files alone; `block_packs/_sources` and its builder move into the checkout; one remedy for an unreadable file; a shadowed manifest proven through its reader; `LedgerUnreadableError` folded into `FileUnreadableError` | yes (operator, 2026-11-07): every later wipe is a landing step | lands before the release that carries the first wipe (operator, 2026-11-08) |
 | **READS** | M17's read rows | `banks_sharing`, the `Fate.RUN` dict rows, a whole-file read refused four ways, `CACHE_PATH` | read through `io.py`'s readers | — |
@@ -57,8 +57,9 @@ first wipe (M2's, on main since batch 12; M9's round-audit cache, CONN, M10 and 
 **Critical path:** M4's re-key → M9 → M13 → M19, then the next paid run. M9 → FEED → M16 runs
 beside it.
 
-**Next:** batch 13: M4's re-key with M9.7, then M9's re-cut chained after it (census 7c: 14 shared
-files); then CONN on M4's tip, and LAND before the release.
+**Next:** batch 14: M4's re-key (M4.9 to M4.11; M9.7, `PackRefusal` and the typed next act landed in
+batch 13), then M9's re-cut chained after it (census 7c: 14 shared files); then CONN on M4's tip, and
+LAND before the release.
 
 **Re-keys.** M4, CONN, M8, M5 (the L4 cache) and M19 (decisions) land in any order before the next
 paid run. M4's and M8's re-keys share one cold cache only if no paid run lands

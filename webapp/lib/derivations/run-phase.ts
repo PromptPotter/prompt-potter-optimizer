@@ -33,12 +33,21 @@ export function isStopReason(v: unknown): v is StopReason {
   return typeof v === "string" && v in STOP_REASON_INFO;
 }
 
-/** An act past a stop in the browser's words: the kind it presses and the field it fills, or the
- * declared field set, or the file read. */
+// The control that presses each act kind; tsc refuses a kind `NextAct` gains and this omits.
+const ACT_CONTROL: Record<Exclude<NextAct["kind"], "">, string> = {
+  "start-run": "Resume run",
+  "set-limits": "Run limits",
+  "verify-candidate": "Verify",
+  "mint-campaign": "New campaign",
+  "fork-cycle": "Steer-fork",
+};
+
+/** An act past a stop in the browser's words: the control it presses and the field it fills, or
+ * the declared field set, or the file read. */
 function actText(act: NextAct): string {
   if (act.reads) return `read ${act.reads}`;
   const field = act.field && (act.value ? `${act.field} (${act.value})` : act.field);
-  return [act.kind, field].filter(Boolean).join(" ");
+  return [act.kind && ACT_CONTROL[act.kind], field].filter(Boolean).join(" ");
 }
 
 /** A stop's step and its acts, as one line. */

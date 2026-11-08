@@ -512,7 +512,7 @@ class NextAct(NamedTuple):
     terminal its verb and flag (`views/render/phase.py`). A kind is checked against the kind
     table at its import (`command_kinds.py`)."""
 
-    kind: str
+    kind: Literal["", "start-run", "set-limits", "verify-candidate", "mint-campaign", "fork-cycle"]
     field: str = ""
     value: str = ""
     reads: str = ""

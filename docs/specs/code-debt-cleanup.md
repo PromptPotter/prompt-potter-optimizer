@@ -309,6 +309,17 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   sends `EditDraftPatch.reset`'s delete, as M4.7's draft edit does. **Rides with:** M4. **Re-test:**
   clear a field in `SteerForkPanel`; the fork launches without the candidate's value.
 
+### Batch 13's review (2026-11-08)
+
+- **The cycle share has two readers**: `last` reads `CycleShareRecord` from the cycle alone
+  (`forks_inherit = False`), while `spend_book` folds it through `scan_cycle_share`. Action: the book
+  reads the share through `last`. **Rides with:** M12. **Re-test:**
+  `git grep -n "scan_cycle_share" -- promptpotter` is empty.
+- **`last` reads `forks_inherit` by `getattr` with a default**: ledger records subclass the general
+  `FrozenModel`, so no record base declares the field; `test_archive` pins the three that opt out.
+  Action: a ledger-record base declares it. **Rides with:** M11. **Re-test:**
+  `git grep -n "getattr(record, \"forks_inherit\"" -- promptpotter` is empty.
+
 ### The connector and entry-point seam audits (two unbiased reads, 2026-11-06)
 
 - **Resuming a campaign takes its connector from today's dataset file** —

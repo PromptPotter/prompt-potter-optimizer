@@ -131,6 +131,7 @@ from promptpotter.domain.run_records import (
     BenchCheckpointKind,
     ConfigOverrides,
     CycleSeed,
+    CycleShareRecord,
     ForkDirection,
     ForkSpec,
     ForkTrigger,
@@ -145,6 +146,7 @@ from promptpotter.domain.run_standing import line_reference, walked_slot
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
@@ -1023,6 +1025,12 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     bank = samples(4, "g")
     drawn = partition_bank(bank, DatasetSplit(bench=0), seed=0).record(dataset_hash="bank")
     store.append(scenario, drawn)
+    unheld = (
+        RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT),
+        CycleShareRecord(allotment=Budget(usd=1.0)),
+    )
+    for record in unheld:
+        store.append(scenario, record)
     criterion = "0.9 * accuracy + 0.1 * (1 - mean_latency_s)"
     fork_id = mint_operator_fork(
         stores=stores,
@@ -1039,6 +1047,10 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert store.last(applied, PartitionRecord) == drawn, (
         "a redrawn holdout reads the fork's bench lift on rows its parent never held out"
     )
+    for record in unheld:
+        assert store.last(applied, type(record)) is None, (
+            f"a fork read its parent's {type(record).__name__}: its phase or its share is the parent's"
+        )
     # OPERATOR_REWIND is the rebase branch, the one that lifts rounds 0..N-1.
     assert (index.fork.trigger, index.cut_round, index.fork.from_candidate) == (
         ForkTrigger.OPERATOR_REWIND,

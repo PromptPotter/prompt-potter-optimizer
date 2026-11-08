@@ -5541,7 +5541,7 @@ export interface StopReasonInfo {
 }
 
 export interface NextAct {
-  kind: string;
+  kind: '' | 'start-run' | 'set-limits' | 'verify-candidate' | 'mint-campaign' | 'fork-cycle';
   field: string;
   value: string;
   reads: string;

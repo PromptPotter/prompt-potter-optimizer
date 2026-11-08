@@ -58,8 +58,8 @@ from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import (
+    CycleIndexProjection,
     read_cycle_index,
-    write_cycle_index,
 )
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.runtime_flags import (
@@ -174,9 +174,9 @@ class CampaignStore:
         return self.layout(hop).ledger
 
     def append(self, hop: CycleHop, record: CycleRecord) -> int:
-        cycle_dir = self.cycle_dir(hop)
-        offset = CycleEventLog.open(CycleDir(cycle_dir)).append(record)
-        write_cycle_index(cycle_dir)
+        cycle_dir = CycleDir(self.cycle_dir(hop))
+        offset = CycleEventLog.open(cycle_dir).append(record)
+        CycleIndexProjection(cycle_dir).feed(record)
         return offset
 
     def _read_declared[M: (Campaign, HeadToHeadRecord)](
@@ -636,7 +636,7 @@ class CampaignStore:
         ledger.append(stop)
         if dashboard is not None:
             dashboard.drain()
-        write_cycle_index(cycle_dir)
+        CycleIndexProjection(cycle_dir).feed(stop)
 
     def claim_launch(
         self,

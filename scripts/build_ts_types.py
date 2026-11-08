@@ -132,8 +132,6 @@ def _emit_type(annotation: typing.Any) -> str:
         declared = hooked.__get_pydantic_json_schema__(own, lambda schema: schema)
         if declared["type"] == "list":
             return _array_of(declared["items_schema"]["cls"])
-        if declared["type"] == "dict":
-            return "Record<string, unknown>"
 
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return _export(annotation) if annotation.model_fields else "Record<string, unknown>"
