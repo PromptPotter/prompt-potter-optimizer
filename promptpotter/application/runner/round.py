@@ -542,8 +542,6 @@ async def close_round(
         optimizer=cycle.optimizer,
         framing=cycle.framing,
     )
-    if _rr := session.state.audit_projection:
-        _rr.flush()
     if cycle.sample_index is not None:
         cycle.sample_index.refresh(
             session.store,

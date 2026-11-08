@@ -265,4 +265,4 @@ def _finalize_run(
                 optimizer=cycle.optimizer,
                 framing=cycle.framing,
             )
-    observers.drain_all(interrupted=interrupted_round is not None)
+    observers.drain_all()

@@ -36,8 +36,8 @@ Optimizer findings surface as two lines — the observation in data terms, then 
   ↳ scored 0 (no backend call); the next l1_generate reads it in l1_wounds
 ```
 
-The structured finding goes to the round audit file (`AuditTrailProjection`); per-sample annotation order is `application/views/render/sample.py::fmt_query_result`'s; `↩` (toward a rerun trigger) is suppressed under a fatal warning.
+The structured finding goes to the round's audit, folded off the ledger (`projections/audit_trail.py::RoundAudits`); per-sample annotation order is `application/views/render/sample.py::fmt_query_result`'s; `↩` (toward a rerun trigger) is suppressed under a fatal warning.
 
 ## Reading what L2 wrote
 
-`rounds/round_NNNN.json::optimizer_state.slices.l2_memory.steer.l1_generate.config` is everything L2 moved; a fire that changed nothing there bought nothing. The rendered L2 prompt and parsed answer are `nodes.l2_context` in the audit twin `.runtime/cache/rounds/round_NNNN.json`. `task_context` is operator-authored. Deep dive: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md).
+`rounds/round_NNNN.json::optimizer_state.slices.l2_memory.steer.l1_generate.config` is everything L2 moved; a fire that changed nothing there bought nothing. The rendered L2 prompt and parsed answer are `nodes.l2_context` in the round's audit twin, served at `/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}/audit` (`application/cycle_reads.py::round_audit`). `task_context` is operator-authored. Deep dive: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md).

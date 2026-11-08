@@ -440,7 +440,7 @@ later arc deletes. **Rides with:** the arc each group names, by its "Was" name i
   and `live_dashboard/projection.py::DashboardCheckout` writing a `dashboard.json` only
   `scripts/offline_run.py` reads. Action: `RunScope`'s ledger is the one producer door (`RunCallbacks` and
   the telemetry `emit_*` go); `LedgerIndex` the one live fold with the writing projections on it;
-  accessors `append` and `last`; the audit sidecar a fold. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
+  accessors `append` and `last`. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
 - **ET, inside U3: tracing translates the ledger twice.** `tracing/bridge.py::TracingProjection` re-encodes
   records into a sink vocabulary, `tracing/langfuse_sink.py::LangfuseSink` re-encodes it again over
   `tracing/langfuse_client.py::LangfuseLogger`. Action:

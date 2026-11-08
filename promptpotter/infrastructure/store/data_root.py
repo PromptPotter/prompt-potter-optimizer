@@ -38,7 +38,6 @@ from promptpotter.domain.free_tier import FREE_TIER_ADAPTER
 from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
 from promptpotter.domain.prompt_block import BlockPack
-from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.ruler import RulerFold
 from promptpotter.domain.run_records import RECORD_ADAPTER
 from promptpotter.domain.sample import ArchiveConfig
@@ -376,12 +375,6 @@ def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
         CampaignRow(f"{where} producer lock", at(layout.producer_lock), Leaf.TRACE),
         CampaignRow(f"{where} pass lock", at(layout.pass_lock), Leaf.TRACE),
         CampaignRow(f"{where} job log", at(layout.job_log), Leaf.TRACE),
-        CampaignRow(
-            f"{where} round audit",
-            f"{at(layout.audit_rounds)}/{ROUND_GLOB}",
-            Leaf.CONNECTOR,
-            TypeAdapter(RoundAudit),
-        ),
         CampaignRow(f"{where} langfuse state", f"{lf}/state.json", Leaf.TRACE, keepsake=True),
     )
 
