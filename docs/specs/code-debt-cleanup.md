@@ -275,12 +275,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   every door and its task's result polls forever; its `cancel` stands for it alone. Action: the fold
   reads the filer's OS lock (§0.5), which no command names today (a pass's job is not on its
   record). **Rides with:** M6. **Re-test:** kill a verify mid-pass; its command reads ended.
-- **`StopReasonInfo.next_acts` reaches TS as `unknown[]`, and no screen renders it**: the webapp reads
-  `next_step` alone. The root is `scripts/build_ts_types.py`: a word-table row renders each column by
-  `json.dumps`, so a model column cannot be one, and a model row no served root reaches is never
-  exported. Action: the emitter types a table's model rows and columns, then `NextAct` is a model
-  and `lib/derivations/run-phase.ts` renders the act. **Rides with:** M4's re-key. **Re-test:**
-  `git grep -n "next_acts: unknown" -- webapp`.
 - **A knob's layer below the edit is read by value, and a draft's names none**: `optimizer_setup`
   rows carry `unset`, and `pipeline_resolve.py::_knob_layers` names the dataset where the edit set
   the dataset's own value, since the edit's keys never reach it. Action: the edit layer reaches the

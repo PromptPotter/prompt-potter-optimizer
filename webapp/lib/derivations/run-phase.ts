@@ -1,6 +1,7 @@
 import {
   type DashboardState,
   type LookaheadDepth,
+  type NextAct,
   type PauseReading,
   type RunPhase,
   type RunStatus,
@@ -32,16 +33,29 @@ export function isStopReason(v: unknown): v is StopReason {
   return typeof v === "string" && v in STOP_REASON_INFO;
 }
 
+/** An act past a stop in the browser's words: the kind it presses and the field it fills, or the
+ * declared field set, or the file read. */
+function actText(act: NextAct): string {
+  if (act.reads) return `read ${act.reads}`;
+  const field = act.field && (act.value ? `${act.field} (${act.value})` : act.field);
+  return [act.kind, field].filter(Boolean).join(" ");
+}
+
+/** A stop's step and its acts, as one line. */
+function stopNextStep(reason: StopReason): string {
+  const info = STOP_REASON_INFO[reason];
+  const acts = [...new Set(info.next_acts.map(actText))];
+  return acts.length > 0 ? `${info.next_step} Next: ${acts.join("; ")}.`.trim() : info.next_step;
+}
+
 /** What the operator does now, as the run's stop reason states it; empty where it owes nothing. */
 export function runNextStep(status: RunStatus): string {
-  return status.stop_reason === null ? "" : STOP_REASON_INFO[status.stop_reason].next_step;
+  return status.stop_reason === null ? "" : stopNextStep(status.stop_reason);
 }
 
 /** A pause's next step: its stop reason's, or — asked, not yet reached — where the run stops. */
 export function pauseNextStep(pause: PauseReading): string {
-  return pause.stop_reason === null
-    ? RUN_PHASE_INFO.paused.parked
-    : STOP_REASON_INFO[pause.stop_reason].next_step;
+  return pause.stop_reason === null ? RUN_PHASE_INFO.paused.parked : stopNextStep(pause.stop_reason);
 }
 
 /** How many more cells the spend limits admit, where money holds the walk. */

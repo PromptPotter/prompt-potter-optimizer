@@ -125,13 +125,18 @@ def _emit_type(annotation: typing.Any) -> str:
         _k, v_type = args
         return f"Record<string, {_emit_type(v_type)}>"
 
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return _export(annotation) if annotation.model_fields else "Record<string, unknown>"
-
+    # Before the model branch: a hooked model emits the schema it declares, unless that is its own.
     if isinstance(annotation, type) and "__get_pydantic_json_schema__" in vars(annotation):
         hooked: typing.Any = annotation
-        declared = hooked.__get_pydantic_json_schema__(None, lambda schema: schema)
-        return _array_of(declared["items_schema"]["cls"])
+        own = vars(hooked).get("__pydantic_core_schema__")
+        declared = hooked.__get_pydantic_json_schema__(own, lambda schema: schema)
+        if declared["type"] == "list":
+            return _array_of(declared["items_schema"]["cls"])
+        if declared["type"] == "dict":
+            return "Record<string, unknown>"
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return _export(annotation) if annotation.model_fields else "Record<string, unknown>"
 
     if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
         return _export(annotation)
@@ -287,12 +292,48 @@ def _emit_word_tables(emitted: set[str]) -> str:
             unions.setdefault(kind.__name__, body)
         return str(kind.__name__)
 
+    def is_row(kind: typing.Any) -> bool:
+        return isinstance(kind, type) and issubclass(kind, tuple) and hasattr(kind, "_fields")
+
+    def row_of(kind: type) -> str:
+        """A NamedTuple, a table's row or a model one of its columns holds, as its interface."""
+        if kind.__name__ not in rows_seen:
+            rows_seen[kind.__name__] = ""  # held before its columns are walked
+            rows_seen[kind.__name__] = (
+                f"export interface {kind.__name__} {{\n"
+                + "".join(
+                    f"  {col}: {column(hint)};\n"
+                    for col, hint in typing.get_type_hints(kind).items()
+                )
+                + "}"
+            )
+        return kind.__name__
+
     def column(hint: typing.Any) -> str:
-        members = [hint] if named(hint) else [a for a in typing.get_args(hint) if named(a)]
+        if is_row(hint):
+            return row_of(hint)
+        args = typing.get_args(hint)
+        if typing.get_origin(hint) is tuple and args[1:] == (Ellipsis,) and is_row(args[0]):
+            return f"{row_of(args[0])}[]"
+        members = [hint] if named(hint) else [a for a in args if named(a)]
         if not members:
             return _emit_type(hint)
-        nullable = ["null"] if type(None) in typing.get_args(hint) else []
+        nullable = ["null"] if type(None) in args else []
         return " | ".join([str(named(m)) for m in members] + nullable)
+
+    def literal(value: object) -> str:
+        if isinstance(value, BaseModel):
+            dumped = value.model_dump(mode="json").items()
+            return (
+                "{ "
+                + ", ".join(f"{c}: {json.dumps(v, ensure_ascii=False)}" for c, v in dumped)
+                + " }"
+            )
+        if isinstance(value, tuple) and hasattr(value, "_asdict"):
+            return "{ " + ", ".join(f"{c}: {literal(v)}" for c, v in value._asdict().items()) + " }"
+        if isinstance(value, tuple):
+            return "[" + ", ".join(literal(v) for v in value) + "]"
+        return json.dumps(_wire(value), ensure_ascii=False)
 
     tables: list[str] = []
     orders: list[str] = []
@@ -300,42 +341,8 @@ def _emit_word_tables(emitted: set[str]) -> str:
     for module, name, table, key_type, row_type in _word_tables():
         orders.append(f"  [{name}, {json.dumps([str(_wire(k)) for k in table])}],")
         keys = named(key_type) or _emit_type(key_type)
-        if isinstance(row_type, type) and issubclass(row_type, tuple):
-            row = row_type.__name__
-            rows_seen[row] = (
-                f"export interface {row} {{\n"
-                + "".join(
-                    f"  {col}: {column(hint)};\n"
-                    for col, hint in typing.get_type_hints(row_type).items()
-                )
-                + "}"
-            )
-
-            def render(info: typing.Any) -> str:
-                return (
-                    "{ "
-                    + ", ".join(
-                        f"{col}: {json.dumps(_wire(v), ensure_ascii=False)}"
-                        for col, v in info._asdict().items()
-                    )
-                    + " }"
-                )
-        else:
-            row = column(row_type)
-
-            def render(info: typing.Any) -> str:
-                if not isinstance(info, BaseModel):
-                    return json.dumps(info, ensure_ascii=False)
-                return (
-                    "{ "
-                    + ", ".join(
-                        f"{col}: {json.dumps(v, ensure_ascii=False)}"
-                        for col, v in info.model_dump(mode="json").items()
-                    )
-                    + " }"
-                )
-
-        body = "\n".join(f"  {json.dumps(str(_wire(k)))}: {render(v)}," for k, v in table.items())
+        row = column(row_type)
+        body = "\n".join(f"  {json.dumps(str(_wire(k)))}: {literal(v)}," for k, v in table.items())
         owner = module.removeprefix("promptpotter.").replace(".", "/")
         # A table over a subset of its key set is partial: a reader handles the member it lacks.
         domain = (
@@ -479,6 +486,14 @@ def main() -> int:
     for root in _served_roots():
         _emit_type(root)
     command_contract = _emit_command_contract()
+    emitted = {owner.__name__ for owner in _EXPORTED} | {
+        "RunPhase",
+        "ProducerState",
+        "DashboardState",
+        "Tone",
+    }
+    # Before the blocks are collected: a model only a table's column reaches is exported too.
+    word_tables = _emit_word_tables(emitted)
     # Two types of one name would MERGE into one TypeScript interface, silently.
     if clashes := len(_EXPORTED) - len({owner.__name__ for owner in _EXPORTED}):
         raise SystemExit(f"{clashes} exported type name(s) are shared by two types")
@@ -502,13 +517,7 @@ def main() -> int:
     blocks.append(_emit_lifecycle_filter())
     blocks.append(_emit_tones())
     blocks.append(command_contract)
-    emitted = {owner.__name__ for owner in _EXPORTED} | {
-        "RunPhase",
-        "ProducerState",
-        "DashboardState",
-        "Tone",
-    }
-    blocks.append(_emit_word_tables(emitted))
+    blocks.append(word_tables)
     blocks.append(_emit_served_words())
     blocks.append(_emit_live_windows())
     blocks.append(_emit_cycle_path_grammar())
