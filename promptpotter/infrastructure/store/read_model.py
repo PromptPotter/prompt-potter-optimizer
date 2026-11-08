@@ -540,12 +540,9 @@ _DERIVED: OrderedDict[Hashable, tuple[Hashable, Any]] = OrderedDict()
 _DERIVED_LOCK = threading.Lock()
 
 
-def derived[T](key: Hashable, *, sig: Hashable | None, compute: Callable[[], T]) -> T | None:
-    """The answer is shared between callers, so read-only; *compute* runs outside the lock and may run twice."""
-    if sig is None:
-        with _DERIVED_LOCK:
-            _DERIVED.pop(key, None)
-        return None
+def derived[T](key: Hashable, *, sig: Hashable, compute: Callable[[], T]) -> T:
+    """The answer is shared between callers, so read-only; *compute* runs outside the lock and may run twice.
+    An absent file's ``None`` is a signature like any other: its compute answers what absent reads as."""
     with _DERIVED_LOCK:
         hit = _DERIVED.get(key)
         if hit is not None and hit[0] == sig:

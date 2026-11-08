@@ -32,7 +32,7 @@ from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import RaceStandingRecord
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.ledger import ledger_chain
-from promptpotter.infrastructure.projections.audit_trail import load_round_audits
+from promptpotter.infrastructure.projections.audit_trail import round_audits
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     LedgerSpend,
     scan_ledger_spend,
@@ -311,7 +311,7 @@ def write_review_md(
         rounds = _banked_rounds(session, session.hop)
         cycle_dir = store.cycle_dir(session.hop)
         campaign = store.load_campaign(session.campaign_id)
-        round_audits = load_round_audits(cycle_dir, [r.round for r in rounds])
+        audits = round_audits(cycle_dir, [r.round for r in rounds])
         context_object = [
             framing.pipeline_purpose,
             framing.optimization_goals,
@@ -320,7 +320,7 @@ def write_review_md(
         content = render_review_md(
             index,
             rounds,
-            round_audits=round_audits,
+            round_audits=audits,
             context_object=context_object,
             accuracy_ceiling=accuracy_ceiling,
             optimizer=optimizer,

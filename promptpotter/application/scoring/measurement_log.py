@@ -383,8 +383,7 @@ def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
         )
 
     key = ("dataset_hard_samples", stores.ruler.path, scope, bank.dataset_hash, n_min, enable_2pl)
-    held = derived(key, sig=reach.version, compute=build)
-    return build() if held is None else held
+    return derived(key, sig=reach.version, compute=build)
 
 
 def _trim_unmeasured(

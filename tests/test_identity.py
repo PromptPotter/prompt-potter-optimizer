@@ -262,6 +262,7 @@ from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import rmtree_robust, write_json, write_yaml
 from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
+from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.errors import (
@@ -1401,6 +1402,21 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         ("columns", {loaders}, "a recipe's identity took code it does not run"),
     ):
         assert set(loaders.recipe_modules(recipe)) == imported, why
+
+    # A derived read is keyed by its file's signature, and an absent file's `None` is one like any
+    # other: its compute's absent answer, then the written file's.
+    probe = tmp_path / "derived_probe.json"
+
+    def sized() -> int:
+        return len(probe.read_bytes()) if probe.exists() else 0
+
+    assert derived(("probe", probe), sig=file_sig(probe), compute=sized) == 0, (
+        "an absent file answered no value"
+    )
+    probe.write_bytes(b"abc")
+    assert derived(("probe", probe), sig=file_sig(probe), compute=sized) == 3, (
+        "a written file kept its absent answer"
+    )
 
 
 # 2. The config a campaign runs

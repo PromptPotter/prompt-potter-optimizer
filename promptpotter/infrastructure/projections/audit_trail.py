@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import logging
 from pathlib import Path
+from typing import ClassVar
 
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase
 from promptpotter.domain.round_audit import (
     LoopWarning,
     NodeBlock,
@@ -16,46 +16,20 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundWarningRecord,
+    RunPhaseRecord,
 )
-from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_cycle_facts,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.io import read_json_tolerant, unlink_robust, write_json
-from promptpotter.infrastructure.store.layout import (
-    ROUND_GLOB,
-    CycleLayout,
-    round_basename,
-    round_number,
+from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, RecordClasses
+
+_STOPS = frozenset({RunPhase.TERMINAL, RunPhase.PAUSED})
+
+type _Record = (
+    LLMCallRecord | RoundClosedRecord | RoundEnteredRecord | RoundWarningRecord | RunPhaseRecord
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan
-
-logger = logging.getLogger(__name__)
-
-
-_ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
-
-
-def _audit_round_file(cycle_dir: Path, round_num: int) -> Path:
-    """A round's audit lives on the cycle that RAN it: nothing is carried across a fork's cut."""
-    while True:
-        layout = CycleLayout(cycle_dir)
-        minted = scan_cycle_facts(layout.ledger).minted
-        entered = scan_standing_rounds([LedgerSpan(layout.ledger)]).entered
-        parent = None if minted is None else minted.parent_cycle_dir(cycle_dir)
-        if parent is None or (entered is not None and round_num >= entered):
-            return layout.audit_round_file(round_num)
-        cycle_dir = parent
-
-
-def _read_audit(path: Path) -> RoundAudit | None:
-    document = read_json_tolerant(path)
-    return None if document is None else RoundAudit.model_validate(document)
-
-
-def load_round_audits(cycle_dir: Path, round_nums: list[int]) -> list[RoundAudit | None]:
-    return [_read_audit(_audit_round_file(cycle_dir, n)) for n in round_nums]
 
 
 def build_node_block(record: LLMCallRecord) -> NodeBlock:
@@ -84,92 +58,91 @@ def build_node_block(record: LLMCallRecord) -> NodeBlock:
     )
 
 
-class AuditTrailProjection(Projection):
-    def __init__(self, rounds_dir: Path) -> None:
-        if rounds_dir.parts[-len(_ROUNDS_SUBPATH) :] != _ROUNDS_SUBPATH:
-            raise ValueError(
-                f"AuditTrailProjection rounds_dir must end in {'/'.join(_ROUNDS_SUBPATH)}; "
-                f"got {rounds_dir}"
-            )
-        self.rounds_dir = rounds_dir
-        self._current_round: int = 0
+class RoundAudits:
+    """Each round's audit, folded off the cycle's OWN ledger: nothing is carried across a fork's cut.
+    A round answers once its close lands, an open one once the run's stop lands (``interrupted``);
+    a call landing after a close merges into the round just closed."""
+
+    records: ClassVar[RecordClasses] = (
+        LLMCallRecord,
+        RoundClosedRecord,
+        RoundEnteredRecord,
+        RoundWarningRecord,
+        RunPhaseRecord,
+    )
+
+    def __init__(self) -> None:
+        self._audits: dict[int, RoundAudit] = {}
+        self._round = 0
+        self._closed = False
         self._nodes: dict[str, NodeBlock] = {}
         self._warnings: list[LoopWarning] = []
         self._started_at: str | None = None
         self._finished_at: str | None = None
 
-    @classmethod
-    def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailProjection:
-        return cls(CycleLayout(Path(cycle_dir)).audit_rounds)
-
-    def begin_round(self, round_num: int, started_at: str) -> None:
-        """Flushes first: L2/L3 calls arriving after a close merge into the just-closed round."""
-        if self._nodes or self._warnings:
-            self.flush()
-        self._current_round = round_num
-        self._nodes = {}
-        self._warnings = []
-        self._started_at = started_at
-        self._finished_at = None
-
-    # Origin IS round 0: `emit_origin_round` closes it through the same `close_round` seam.
-    def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
-        self.begin_round(record.round, started_at=record.timestamp)
-        if record.rewound and self.rounds_dir.exists():
-            # A displaced round's audit left behind is read back as a round the cycle ran.
-            for path in sorted(self.rounds_dir.glob(ROUND_GLOB)):
-                if (n := round_number(path)) is not None and n >= record.round:
-                    unlink_robust(path)
-
-    def _handle_round_closed(self, record: RoundClosedRecord) -> None:
-        self._finished_at = record.timestamp
-        self.flush()
-
-    def _handle_llm_call(self, record: LLMCallRecord) -> None:
-        self._nodes[record.node] = build_node_block(record)
-
-    def _handle_round_warning(self, record: RoundWarningRecord) -> None:
-        self._warnings.append(
-            LoopWarning(
-                ts=record.timestamp,
-                kind=record.kind,
-                severity=record.severity,
-                message=record.message,
-                round=record.round,
-                detail=dict(record.detail),
+    def feed(self, record: _Record) -> None:
+        if isinstance(record, RoundEnteredRecord):
+            self._settle(interrupted=False)
+            self._round, self._closed = record.round, False
+            self._started_at, self._finished_at = record.timestamp, None
+            if record.rewound:
+                # A displaced round's audit is no round the cycle ran.
+                self._audits = {n: a for n, a in self._audits.items() if n < record.round}
+            return
+        if isinstance(record, RoundClosedRecord):
+            self._closed, self._finished_at = True, record.timestamp
+            self._settle(interrupted=False)
+            return
+        if isinstance(record, RunPhaseRecord):
+            if record.run_phase in _STOPS and record.stop_reason is not None:
+                cuts = STOP_REASON_INFO[record.stop_reason].halts_mid_round
+                self._settle(interrupted=cuts and not self._closed)
+            return
+        if isinstance(record, LLMCallRecord):
+            self._nodes[record.node] = build_node_block(record)
+        else:
+            self._warnings.append(
+                LoopWarning(
+                    ts=record.timestamp,
+                    kind=record.kind,
+                    severity=record.severity,
+                    message=record.message,
+                    round=record.round,
+                    detail=dict(record.detail),
+                )
             )
-        )
+        if self._closed:
+            self._settle(interrupted=False)
 
-    def flush(self, *, interrupted: bool = False) -> Path | None:
-        """A second flush MERGES into the existing file, so late L2/L3 records are not lost."""
+    def _settle(self, *, interrupted: bool) -> None:
         if not self._nodes and not self._warnings:
-            return None
-
-        self.rounds_dir.mkdir(parents=True, exist_ok=True)
-        path = self.rounds_dir / round_basename(self._current_round)
-
-        prior = _read_audit(path)
-        audit = RoundAudit(
-            round=self._current_round,
+            return
+        prior = self._audits.get(self._round)
+        self._audits[self._round] = RoundAudit(
+            round=self._round,
             started_at=(prior.started_at if prior else None) or self._started_at,
             finished_at=self._finished_at,
             nodes={**(prior.nodes if prior else {}), **self._nodes},
             warnings=[*(prior.warnings if prior else []), *self._warnings],
             interrupted=interrupted,
         )
-        write_json(path, audit.model_dump(), default=str)
-        logger.debug(
-            "Round %d recorded: %d nodes → %s",
-            self._current_round,
-            len(audit.nodes),
-            path.name,
-        )
+        self._nodes, self._warnings = {}, []
 
-        self._nodes = {}
-        self._warnings = []
-        return path
+    def value(self) -> dict[int, RoundAudit]:
+        return dict(self._audits)
 
-    def drain(self, *, interrupted: bool = False) -> None:
-        """The runner's teardown seam: a mid-candidate interrupt never closes its round."""
-        if self._nodes or self._warnings:
-            self.flush(interrupted=interrupted)
+
+def _ran_by(cycle_dir: Path, round_num: int) -> Path:
+    """The ledger of the cycle that RAN *round_num*: a fork's rounds below its cut are its parent's."""
+    while True:
+        ledger = CycleLayout(cycle_dir).ledger
+        minted = scan_cycle_facts(ledger).minted
+        entered = scan_standing_rounds([LedgerSpan(ledger)]).entered
+        parent = None if minted is None else minted.parent_cycle_dir(cycle_dir)
+        if parent is None or (entered is not None and round_num >= entered):
+            return ledger
+        cycle_dir = parent
+
+
+def round_audits(cycle_dir: Path, round_nums: list[int]) -> list[RoundAudit | None]:
+    return [LedgerIndex.of(_ran_by(cycle_dir, n), ()).view(RoundAudits).get(n) for n in round_nums]

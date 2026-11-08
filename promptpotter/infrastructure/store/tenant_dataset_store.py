@@ -170,7 +170,7 @@ class TenantDatasetStore:
         found: set[str] = set()
         for path in sorted(root.glob("*.json")) if root.is_dir() else ():
             held = derived(("bank_keys", path), sig=file_sig(path), compute=partial(_keys, path))
-            if held is not None and not held.isdisjoint(keys):
+            if not held.isdisjoint(keys):
                 found.add(path.stem)
         return frozenset(found)
 

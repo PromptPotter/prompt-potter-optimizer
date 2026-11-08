@@ -24,7 +24,7 @@ from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import Election
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.projections.audit_trail import load_round_audits
+from promptpotter.infrastructure.projections.audit_trail import round_audits
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.infrastructure.runtime_flags import run_phase_validator_epoch
 from promptpotter.infrastructure.store.family_ray_queries import (
@@ -81,8 +81,8 @@ def view_cycle(stores: Stores, path: CyclePath) -> ViewedCycle:
 
 
 def round_audit(cycle: ViewedCycle, round_num: int) -> RoundAudit | None:
-    """``None`` where none is on disk: a round still open, or one that ran no optimizer call."""
-    [audit] = load_round_audits(cycle.dir, [round_num])
+    """``None`` where the ledger holds none: a round still open, or one that ran no optimizer call."""
+    [audit] = round_audits(cycle.dir, [round_num])
     return audit
 
 

@@ -240,13 +240,6 @@ class CycleLayout:
         return cls(ledger.parent.parent)
 
     @property
-    def audit_rounds(self) -> Path:
-        return self.runtime / "cache" / "rounds"
-
-    def audit_round_file(self, round_num: int) -> Path:
-        return self.audit_rounds / round_basename(round_num)
-
-    @property
     def producer_lock(self) -> Path:
         """Never unlinked: every launch reuses the path."""
         return self.runtime / "producer.lock"

@@ -37,7 +37,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     reset_spend_book,
 )
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
-from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
@@ -185,7 +184,6 @@ def declare_run_wiring(
 class RunObservers:
     cycle_dir: CycleDir
     callbacks: RunCallbacks
-    audit: AuditTrailProjection
     dashboard: DashboardCheckout
     readout: ReadoutProjection
     tracing: TracingProjection
@@ -212,14 +210,13 @@ class RunObservers:
                 unreported.usd,
             )
 
-    def drain_all(self, *, interrupted: bool = False) -> None:
+    def drain_all(self) -> None:
         try:
-            self._drain(interrupted=interrupted)
+            self._drain()
         finally:
             release_cycle(self.cycle_dir)
 
-    def _drain(self, *, interrupted: bool) -> None:
-        self.audit.drain(interrupted=interrupted)
+    def _drain(self) -> None:
         self.dashboard.drain()
         self.tracing.drain()
         # The SSE stream is no subscriber — it tails the on-disk ledger — so nothing drains here.
@@ -272,8 +269,6 @@ def _bind_observers(
     readout_sink: StatusFn | None,
     forked_from: RunObservers | None,
 ) -> RunObservers:
-    audit = AuditTrailProjection.from_cycle_dir(cycle_dir)
-    session.state.audit_projection = audit
     readout = (
         ReadoutProjection.for_campaign(session, campaign_config, sink=readout_sink)
         if forked_from is None
@@ -288,7 +283,6 @@ def _bind_observers(
     ledger = open_with_history(cycle_dir)
 
     ledger.bind(dashboard)
-    ledger.bind(audit)
     readout.open_readout(cycle_dir)
     ledger.bind(readout)
     ledger.bind(CycleIndexProjection(cycle_dir))
@@ -312,7 +306,6 @@ def _bind_observers(
     return RunObservers(
         cycle_dir=cycle_dir,
         callbacks=callbacks,
-        audit=audit,
         dashboard=dashboard,
         readout=readout,
         tracing=tracing,
