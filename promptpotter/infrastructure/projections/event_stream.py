@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from itertools import islice
 from pathlib import Path
 from typing import Any, cast
 
-from promptpotter.domain.activity import ActivityFeed, ActivityState
+from promptpotter.domain.activity import ActivityFeed
 from promptpotter.domain.projection_envelope import ProjectionEnvelope, ProjectionKind
 from promptpotter.infrastructure.store.io import complete_lines
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -20,8 +21,8 @@ class CycleLedgerTail:
         self._byte_pos = 0
         self._line_index = 0
 
-    def _activity(self) -> ActivityState:
-        return LedgerIndex.of(self._ledger_path, ()).view(ActivityFeed, self._line_index).state()
+    def _index(self) -> LedgerIndex:
+        return LedgerIndex.of(self._ledger_path, ())
 
     def snapshot_frame(self, body: dict[str, Any]) -> ProjectionEnvelope:
         """Picks up one PAST ``at_offset``, not at EOF: records land after the debounced dashboard fold."""
@@ -36,16 +37,25 @@ class CycleLedgerTail:
             cycle_id=self._cycle_id,
             sequence=offset,
             payload=body,
-            activity=self._activity(),
+            activity=self._index().view(ActivityFeed, offset).state(),
         )
 
     def read_new(self) -> list[ProjectionEnvelope]:
-        """Every frame of one batch carries the activity at the batch's end."""
-        if not self._ledger_path.exists():
+        """A batch ends at the index's head, so its frames carry the activity there and no batch
+        refolds: a line landing after the view waits for the next batch."""
+        try:
+            if self._ledger_path.stat().st_size <= self._byte_pos:
+                return []
+        except FileNotFoundError:
+            return []
+        feed = self._index().view(ActivityFeed)
+        # The feeder stamps every line it reads on a `Positioned` fold, so this is the head's count.
+        head = feed.at_offset + 1
+        if head <= self._line_index:
             return []
         with self._ledger_path.open("rb") as fh:
             fh.seek(self._byte_pos)
-            lines = list(complete_lines(fh))
+            lines = list(islice(complete_lines(fh), head - self._line_index))
         read: list[tuple[int, dict[str, Any]]] = []
         for raw in lines:
             self._byte_pos += len(raw)
@@ -55,7 +65,7 @@ class CycleLedgerTail:
             self._line_index += 1
         if not read:
             return []
-        activity = self._activity()
+        activity = feed.state()
         return [
             ProjectionEnvelope(
                 kind=cast(ProjectionKind, rec["record_type"]),

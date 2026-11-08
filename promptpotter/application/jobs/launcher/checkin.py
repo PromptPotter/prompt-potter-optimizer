@@ -32,7 +32,6 @@ from promptpotter.application.jobs.mint import (
     fresh_campaign_id,
     mint,
     refuse_unrunnable,
-    relabel_minted,
     resolve_cycle_plan,
 )
 from promptpotter.application.jobs.quota import land_job
@@ -204,7 +203,6 @@ async def _commit_checkin(stores: Stores, request: CheckinStart) -> MintedCycle:
         campaign_id=fresh_campaign_id(session),
         billed=ledger if ledger.is_file() else None,
     )
-    relabel_minted(minted.session)
     stores.drafts.close(draft_id)
     return minted
 

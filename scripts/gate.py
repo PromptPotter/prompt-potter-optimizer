@@ -111,8 +111,11 @@ def _node(exe: str, *args: str) -> list[str]:
 
 def _rewrote(out: str) -> Outcome:
     # Every regenerator writes through `processes.py::replace_changed` and names each output on a
-    # line, `wrote` where it moved and `unchanged` where it did not.
-    stale = [line[len("wrote ") :] for line in out.splitlines() if line.startswith("wrote ")]
+    # line, `wrote` where it moved and `unchanged` where it did not: a run naming none is unjudged.
+    lines = out.splitlines()
+    if not any(line.startswith(("wrote ", "unchanged ")) for line in lines):
+        return 1, "named no output on a `wrote|unchanged` line, so nothing judged what it wrote."
+    stale = [line[len("wrote ") :] for line in lines if line.startswith("wrote ")]
     return (
         (1, f"{', '.join(stale)} stale — regenerated in place; re-run to confirm.")
         if stale

@@ -207,7 +207,7 @@ def _render_step_exit(v: OptimizerStepExitView) -> str:
     if v.audit is not None:
         label, node = v.audit
         out.append(
-            f"  {CYAN}{label}{RESET} {DIM}→ .runtime/cache/rounds/round_NNNN.json"
+            f"  {CYAN}{label}{RESET} {DIM}→ GET …/rounds/N/audit"
             f"::nodes.{node} (prompt · response · usage){RESET}"
         )
     return "\n".join(out)

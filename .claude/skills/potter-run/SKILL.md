@@ -33,7 +33,7 @@ over the shipped templates (`promptpotter/assets/datasets/`) — or a raw file p
 3. That cycle's `readout.log` tail.
 
 Then **one line**: `mode · what's live · next action`. Nothing before it. Node I/O:
-`.runtime/cache/rounds/round_NNNN.json`. Hand a result on with `export --tier <chat|report|notebook|deploy|package>`.
+`GET …/rounds/{n}/audit` (`cycle_reads.py::round_audit`). Hand a result on with `export --tier <chat|report|notebook|deploy|package>`.
 
 ## Tracks
 

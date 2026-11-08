@@ -48,7 +48,7 @@ A replayed round runs no proposer: its walk is the `round_proposed` record's `wa
 **Iterate with `resume`**; `new` only after a prompt/config change.
 
 **The cadence is self-firing and the interval is work**: each wake reads ALL of the below from the newest
-outer `.runtime/cache/rounds/round_NNNN.json` plus the ledger's rendered input. A log tail is not supervision.
+outer round's audit, `GET …/rounds/{n}/audit` (`cycle_reads.py::round_audit`), plus the ledger's rendered input. A log tail is not supervision.
 
 1. **`l1_generate`** — panels populated (`injection_dropped`; a name there that is also `L1_MANDATORY` is
    stop-and-diagnose)? Outer: `inner_narratives` present per seed? Variants: `evidence_grounding.field` in the

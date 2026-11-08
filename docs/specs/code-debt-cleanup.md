@@ -163,7 +163,10 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   **Re-test:** `git grep -n "refusal=str(" -- promptpotter` is empty.
 - **A taken name is read two ways** — `slug_exists` (the directory exists) against the definition's
   holders (`dataset.json` exists), across `stores.py`, `draft_patch.py`, `ingest.py` and
-  `mint_and_start.py`. Action: one read of a tenant name's hold. **Rides with:** M6. **Re-test:**
+  `mint_and_start.py`, and refused twice: `checkin.py:139` raises `LaunchError` (422
+  `payload_invalid`) beside `claim_own_definition`'s `SlugTakenError` (409 `slug_collision`).
+  Action: one read of a tenant name's hold, one raiser, and `mint_and_start.py::LaunchError` goes.
+  **Rides with:** M6. **Re-test:**
   `git grep -n "slug_exists" -- promptpotter` names one definition and its callers.
 - **The scripts' writer and the store's are two**: `store/io.py::_atomic_replace` and
   `scripts/processes.py::replace_changed` each state one bounded retry on Windows' WinError 5; the
@@ -195,10 +198,10 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   guard and an interlock against a live API running other code, then the landing at every entry that
   reads the root. **Rides with:** LAND. **Re-test:** boot a new build on an unlanded root; it lands or
   refuses typed, and no registry verb is refused.
-- **A whole-file read is refused in four ways outside `read_file`** — `infrastructure/identity/session.py`
+- **A whole-file read is refused in three ways outside `read_file`** — `infrastructure/identity/session.py`
   reads raw and deletes a session file that does not validate, `store/layout.py::read_sandbox_owner`
-  swallows an unusable owner into a log and answers `None`, `store/measurement_archive.py` reads archive
-  files raw, and `projections/audit_trail.py` reads a round tolerant outside a survey. Action: each
+  swallows an unusable owner into a log and answers `None`, and `store/measurement_archive.py` reads
+  archive files raw. Action: each
   refuses once as a `FileKind` through `read_file`, or is named a cache read. **Rides with:** READS.
   **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
   surveys and caches.
@@ -232,6 +235,51 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   (`round`, `candidate_id`). Action: fork init seeds from the named candidate's record, the panel
   sends only the operator's edit, and the verdict reads that edit. **Rides with:** M4. **Re-test:** a
   panel fork with no edit reads `steer_verdict` "clean".
+
+### Batch 11's fix pass (2026-11-08)
+
+- **One template-slot validation**: `task_context.py::checkin_template` and
+  `injections/registry.py::validate_template` each compute a template's unknown slots, and refuse one fact in two
+  types (`FileUnreadableError` with a path, a bare `PotterError` with a borrowed code). Action: one
+  function returns them; each reader refuses in its own type. **Rides with:** M8 (`injections/registry.py` is
+  digest-reached). **Re-test:** one `TEMPLATE_TOKEN_RE.findall` caller computes unknown slots.
+- **An edited template's unknown slot names no address**: `dispatch/prompts.py::load_optimizer_prompt`
+  validates `ctx.read(Calls).prompt(name)`, which carries `optimization.nodes.{node}.config` edits,
+  so the refusal names the node, not the edit. Action: refuse an edit's unknown slot where the overlay
+  is laid, named by its config address. **Rides with:** M4. **Re-test:** an overlay holding
+  `{{typo}}` is refused naming `optimization.nodes.l1_generate.config.instruction`.
+- **A 429 reads as a caller's mistake**: `client.ts::failureKind` keys `throttled` on the
+  `rate_limited` code, not on HTTP 429, and `mcp/server.py::_rpc_code` maps every status below 500 to
+  `INVALID_PARAMS`. Action: a throttle is read by its status at both clients. **Held:** a served
+  change at both clients that no chain carries yet. **Re-test:** a 429 of another code reads
+  `throttled`.
+- **Two per-category tables in two modules**: `domain/phases.py::REFUSAL_STOPS` and
+  `shared/errors.py::ERROR_IS_CHARGED` each key `ErrorCategory`. Action: one row per category holds
+  every column. **Held:** a digest re-key (`ERROR_IS_CHARGED` is reached). **Re-test:**
+  `git grep -nE "^(REFUSAL_STOPS|ERROR_IS_CHARGED)\b" -- promptpotter` names two tables.
+- **`scripts/build_optimizer_schemas.py` names its outputs by absolute path** and its siblings by
+  repo-relative; a plugin's manifest directory may lie outside the checkout, so it is no one-edit
+  `relative_to`. Action: repo-relative wherever the output is in the checkout. **Rides with:** any
+  pass in that script. **Re-test:** every regenerator prints `wrote|unchanged <repo-relative path>`.
+- **A resume's divergence is a second refusal shape**: `resume_command.py::_divergence_result` serves
+  `{"error": "resume_divergence", …}` on CLI `--json`, beside the `Refusal` (`code`) every other
+  refusal prints, and `shared/errors.py::ResumeDivergenceError` is a `RuntimeError` outside
+  `PotterError`. Action: the divergence is a `PotterError` row, its round, kind and outcomes its
+  details. **Rides with:** M6 (the one launch answer). **Re-test:**
+  `git grep -n "class ResumeDivergenceError(RuntimeError)" -- promptpotter`.
+- **A door's command address resolves twice**: `commands/measuring.py:38` and `host_surface.py:471`
+  call `dispatcher.py::addressed`, then `dispatch` resolves the payload again, each pass listing the
+  campaign ids. Action: one resolution per dispatch, the door reading the one it acted on. **Rides
+  with:** M2. **Re-test:** `git grep -n "addressed(" -- promptpotter/application` names the dispatcher
+  alone.
+- **A non-TTY `resume` says a config drift twice**: `resume_command.py::_pivot_to_fresh` prints
+  `str(drift)` and then re-raises it where no TTY answers, and the CLI's one catch says it again.
+  Action: print it only before the prompt a TTY answers. **Rides with:** M6. **Re-test:** a non-TTY
+  `resume` over a drifted config prints the drift once.
+- **CLI `--json` says a refusal on both streams**: `campaign_runner.py::main` prints the `Refusal` JSON
+  to stdout and `Error: …` with its notes to stderr (safe today: `_located` sanitizes the details).
+  Decision: whether `--json` keeps the sentence on stderr for a terminal. **Held:** the operator's.
+  **Re-test:** `python -m promptpotter resume --json --campaign nope 2>&1 >/dev/null` prints nothing.
 
 ### The connector and entry-point seam audits (two unbiased reads, 2026-11-06)
 
@@ -292,7 +340,8 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   in-process one too, where no endpoint, token or header applies. Action: the link rides the served
   connector's wire kind. **Rides with:** CONN. **Re-test:**
   `git grep -n "SECURITY_DOC_URL" -- webapp/components`.
-- **One act, two names** — 18 of 34 `CommandKind` rows have a `cli_verb` other than the kind, so served
+- **One act, two names** — 21 of 33 `CommandKind` rows have a `cli_verb` other than the kind (3 of
+  them browser-only, with no verb), so served
   refusals and descriptions name `set-limits`, `--max-usd`, `resume`, `new` to a host that has
   `change-run-limits`, `start-run`, `mint-campaign` (`spend.py`, `jobs/quota.py`, `preflight.py`,
   `campaign_config.py` budget, `origin_gate.py`'s log). Tool descriptions are developer docstrings
@@ -305,11 +354,12 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   - `rename-campaign` (both, for `set-campaign-label` / `rename`);
   - `verify-candidate` / `verify` and `grade-bench` / `bench` are M13's one held-out act.
 
-  Served text names kinds; `StopReasonInfo.cli_command` becomes a typed next act; a gate check
-  refuses `path::symbol` and CLI-verb backticks in a tool-describing docstring. A renamed kind
+  Served text names kinds; `StopReasonInfo.cli_command` becomes a typed next act; an import-time
+  check in `command_kinds.py` refuses `path::symbol` and CLI-verb backticks in a tool-describing
+  docstring. A renamed kind
   rewrites the stored command records, so this lands with M2's wipe. **Rides with:** DOORS D7.
-  **Re-test:** the `CommandKind` rows whose `cli_verb` is neither the kind, `new` nor `resume` are
-  M13's two.
+  **Re-test:** the rows whose `cli_verb` is neither the kind, `new`, `resume` nor `None` are M13's
+  two (11 now).
 - **A gate hold claims `input_required` and sends no input request** — `host_surface.py::HostSession`
   sets the status; `tasks/result` blocks until the run ends. Action: the hold becomes the task's input
   request (the gate's `GateDecision`, the arms shape for `submit-arms`), answered as the existing
@@ -419,12 +469,12 @@ later arc deletes. **Rides with:** the arc each group names, by its "Was" name i
   Rewritten modules land at Wave C's paths. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
 
 **Batch 4: the ledger (U3, with ET) and spend (S).**
-- **U3: the ledger read stack.** Three push paths (`ledger.py::CycleEventLog` subscribers,
-  `read_model.py::appended_here` and `event_stream.py::CycleLedgerTail` re-reading bytes into its own feed),
+- **U3: the ledger read stack.** Two push paths (`ledger.py::CycleEventLog` subscribers and
+  `read_model.py::appended_here`),
   three fold protocols, every `CycleEventLog.open` re-counting the ledger, store accessors four hops deep,
   and `live_dashboard/projection.py::DashboardCheckout` writing a `dashboard.json` only
-  `scripts/offline_run.py` reads. Action: `RunScope`'s ledger is the one producer door (`RunCallbacks` and
-  the telemetry `emit_*` go); `LedgerIndex` the one live fold with the writing projections on it;
+  `scripts/offline_run.py` reads. Action: `RunScope`'s ledger is the one producer door (`RunCallbacks`
+  goes, in M10; `emit_*` land on `RunScope`'s ledger); `LedgerIndex` the one live fold with the writing projections on it;
   accessors `append` and `last`. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
 - **ET, inside U3: tracing translates the ledger twice.** `tracing/bridge.py::TracingProjection` re-encodes
   records into a sink vocabulary, `tracing/langfuse_sink.py::LangfuseSink` re-encodes it again over
@@ -491,7 +541,7 @@ consistent by each site remembering a convention, so review finds one violation 
 fix adds a site. A leap gives the fact one owner and derives every other site by construction, held
 by an exhaustive table or state-machine test. Each is a pattern a mature project runs on. **Rides
 with:** the arcs that were the Q rows ([`roadmap.md`](roadmap.md) § The cleanup arcs (plan review,
-2026-11-07): M2, FEED, REFUSE and M14b, M5).
+2026-11-07): M2, FEED, M14b and M5).
 
 **Decided once, read by every arc before a leap.**
 - No arc before Q1 holds a command's state anywhere but the record `commands/dispatcher.py` writes
@@ -820,6 +870,9 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **A view family that is chrome**: `components/shell/families.tsx::FAMILIES` holds a family with a
   null pane (the phone's campaign list is the sidebar), so naming it on a wide screen opens a chip
   that draws nothing. **Re-test:** every family has a pane.
+- **The derivations barrel pulls the network layer into every chunk that imports it**
+  (`derivations/index.ts` → `candidate-search-point.ts` → `@/lib/poll` → `api/client`).
+  **Rides with:** LW. **Re-test:** `git grep -n "@/lib/poll" -- webapp/lib/derivations` is empty.
 - **Several doors into one state**: candidate selection minted at each
   `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
   `setSelectionForSampleSet` from several surfaces, `FileTree::onSelect` drilled through its parents.
@@ -1096,14 +1149,14 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   (batch 6's review). Action: the path resolves per call, through the store's reader. **Re-test:**
   `git grep -n "^CACHE_PATH = user_data_root()" -- promptpotter/infrastructure/llm/pricing.py`.
 
-**B. A refusal spelled per door.** **Rides with:** REFUSE.
+**B. A refusal spelled per door.**
 - `shared/errors.py::LedgerUnreadableError` stands beside `FileUnreadableError`. **Rides with:** LAND.
 - A taken slug is refused twice, as `LaunchError` and as `shared/errors.py::SlugTakenError`.
   **Rides with:** M6.
 - `prompt_block.py::PackRefusal` stands beside `Refusal`. Its deletion moves capo, capo-pobb and
   potter: `pools/members.py::BlockPoolInitializer.refusal` is a reached unit reading its `name` and
   `reason`. Action: the shelf holds `Refusal` values composed from one `PackRefusalKind` row each, in a
-  re-key. **Rides with:** the next accepted re-key of capo. **Re-test:**
+  re-key. **Rides with:** M4's re-key. **Re-test:**
   `git grep -nE "class PackRefusal\b" -- promptpotter` is empty.
 
 **C. One address resolved twice.** **Rides with:** M2.
@@ -1402,7 +1455,10 @@ word's `git grep -c` for that sense is 0.
   `GET /hierarchy?depth=1` waits on a full `LEDGER_FOLDS` pass over every `projects/` ledger, and
   the browser shows a sidebar stuck on "loading…". On 2026-10-30, with 91 MB / 129k lines in
   `projects/`, it took 33 s cold beside the boot sweep and 1.1 s warm (`.scratch/cold_real.py`).
-  One shape remains (the `run_state_stamps` ETag is Q2's,
+  On 2026-11-07 the cold fold cost 37 µs a line: census 7's `m9/cold_fold.py` over
+  `.gate_cache/offline-run` (25 ledgers, 29,341 lines, 28.4 MB) gave cold `LEDGER_FOLDS` 1.09 s, warm
+  0.003 s, and a cold dashboard fold 3.39 s, so the 33 s over 129k lines is 4.8 s at today's rate.
+  The box is unmeasured. One shape remains (the `run_state_stamps` ETag is Q2's,
   § The quantum-leap pass): `jobs/reaper.py::periodic_sweep` runs at boot, beside the first page. Over
   58 ledgers it folds 23 s, about 10 s of it on L4 inner-sandbox ledgers that no page reads.
 

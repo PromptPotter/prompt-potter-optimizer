@@ -82,7 +82,7 @@ else
     esac
 fi
 
-# --- 3. Node (CI's major; Vite 8 and @rolldown/plugin-babel need >= 22.12.0) ---
+# --- 3. Node (CI's major; Vite 8 needs >= 22.12.0) ---
 NODE_MAJOR=22
 NODE_MIN=22.12.0
 node_ok() {

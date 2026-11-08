@@ -94,16 +94,16 @@ def named_campaign(stores: Stores, needle: str) -> Campaign:
     return owned_campaign(stores, resolve_subject(stores, Subject(needle)).campaign_id)
 
 
-def resolve_course(stores: Stores, subject: Subject) -> tuple[Stores, Subject]:
+def resolve_course(stores: Stores, subject: Subject) -> Subject:
     """`resolve_subject`, then the course's cycle id prefix in the campaign it resolved, by the
-    same rule; with the stores of the sandbox its chain walked to, so the chain is walked once."""
+    same rule."""
     leaf_stores, resolved = _leaf(stores, subject)
     campaign_id, needle = resolved.campaign_id, resolved.cycle_id
     if campaign_id not in leaf_stores.campaigns.list_campaign_ids():
-        return leaf_stores, resolved
+        return resolved
     cycles = leaf_stores.campaigns.match_cycle_ids(campaign_id, needle)
     matches = _ambiguity_refused(needle, cycles, f"cycles in {campaign_id!r}")
-    return leaf_stores, resolved._replace(cycle_id=next(iter(matches), needle))
+    return resolved._replace(cycle_id=next(iter(matches), needle))
 
 
 def cycle_target(stores: Stores, campaign: str, cycle: str) -> CycleHop:

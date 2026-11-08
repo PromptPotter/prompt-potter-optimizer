@@ -60,7 +60,7 @@ class OriginIncompleteError(PayloadInvalidError):
         self.gaps = gaps
         fields = ", ".join(gap.field for gap in gaps) or "<none>"
         super().__init__(
-            f"origin incomplete — unresolved fields: {fields}",
+            f"origin incomplete, nothing minted — unresolved fields: {fields}",
             details={"gaps": [gap.model_dump() for gap in gaps]},
         )
 

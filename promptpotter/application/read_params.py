@@ -458,7 +458,8 @@ class CycleRoundAuditParams(
 ):
     """The round's audit twin: the per-node LLM I/O, which the round beside it does not carry.
 
-    A fork answers for the rounds it inherited; ``null`` where no twin is on disk.
+    A fork answers for the rounds it inherited; ``null`` where the ledger holds none: a round
+    still open, or one that ran no optimizer call.
     """
 
     round_num: int = Field(ge=0)
@@ -562,9 +563,10 @@ class EvidenceParams(ReadParams, read=ReadKind.EVIDENCE, route="/evidence"):
     dataset: str = Field(
         default="",
         description=(
-            "Expand to one `campaign:` subject per campaign bound to this dataset, in addition "
-            "to any named by `subject`. Read off each manifest, so it catches an A/B arm, a "
-            "fork and a rename that a name-shaped guess would skip."
+            "Expand to one `campaign:` subject per campaign measuring the bank this dataset "
+            "name labels now, in addition to any named by `subject`. Matched on the bank hash "
+            "each manifest declares, so it catches an A/B arm, a fork and a rename, and two "
+            "banks under one name never pool."
         ),
     )
     ranking: bool = Field(

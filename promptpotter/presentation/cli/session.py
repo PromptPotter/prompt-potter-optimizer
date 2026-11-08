@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from promptpotter.application.cycle_addressing import named_campaign
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.shared.errors import NotFoundError
@@ -34,9 +35,9 @@ class SessionCtx:
 
 
 def load_session(store: Stores, hop: CycleHop) -> SessionCtx:
-    campaign = store.campaigns.load_campaign(hop.campaign_id)
-    if campaign is None:
-        refused = NotFoundError(f"Campaign manifest not found for '{hop.campaign_id}'.")
+    try:
+        campaign = named_campaign(store, hop.campaign_id)
+    except NotFoundError as refused:
         refused.add_note("Run `python -m promptpotter new <dataset>` to mint a fresh campaign.")
-        raise refused
+        raise
     return SessionCtx(store, campaign, hop.cycle_id)

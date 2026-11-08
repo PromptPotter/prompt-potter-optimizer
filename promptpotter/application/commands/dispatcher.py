@@ -23,7 +23,7 @@ from promptpotter.domain.command_kinds import (
     LinePayload,
     PauseCyclePayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, decode_cycle_path
 from promptpotter.domain.run_records import (
     CommandAckRecord,
     CommandAckStatus,
@@ -36,8 +36,11 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import emit_command, emit_command_ack
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.draft_store import DraftClaim
-from promptpotter.infrastructure.store.io import validate_path_component
-from promptpotter.infrastructure.store.stores import Stores, owned_campaign
+from promptpotter.infrastructure.store.stores import (
+    Stores,
+    owned_campaign,
+    resolve_cycle_path,
+)
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
@@ -197,29 +200,22 @@ class CommandOutcome[R, P: CommandPayload]:
 type Handler[R] = Callable[[Any], Awaitable[Applier[R]]]
 
 
-def _resolved[P: CommandPayload](stores: Stores, payload: P) -> tuple[P, Stores]:
-    """`addressed`, with the stores its cycle command's leaf lives in: the ``descend`` chain is
-    walked here once, and `_on_cycle` acts on that leaf."""
-    if not isinstance(payload, CampaignPayload):
-        return payload, stores
-    leaf_stores = stores
-    if isinstance(payload, CyclePayload):
-        subject = Subject.below(payload.campaign_id, payload.cycle_id, payload.descend)
-        leaf_stores, resolved = resolve_course(stores, subject)
-        fields: dict[str, str | None] = {"descend": None, **resolved.command_fields}
-    else:
-        subject = Subject(payload.campaign_id)
-        resolved = resolve_subject(stores, subject)
-        fields = {"campaign_id": resolved.campaign_id}
-    return (payload if resolved == subject else payload.model_copy(update=fields)), leaf_stores
-
-
 def addressed[P: CommandPayload](stores: Stores, payload: P) -> P:
     """*payload* as the dispatcher acts on it: its addressed campaign id and a cycle command's
     cycle id — the leaf's, below its ``descend`` chain — resolved from the prefixes any door sent
     by the one rule every read takes (`resolve_subject`). A door that names a pass's stop before
     the pass ends holds this."""
-    return _resolved(stores, payload)[0]
+    if not isinstance(payload, CampaignPayload):
+        return payload
+    if isinstance(payload, CyclePayload):
+        subject = Subject.below(payload.campaign_id, payload.cycle_id, payload.descend)
+        resolved = resolve_course(stores, subject)
+        fields: dict[str, str | None] = {"descend": None, **resolved.command_fields}
+    else:
+        subject = Subject(payload.campaign_id)
+        resolved = resolve_subject(stores, subject)
+        fields = {"campaign_id": resolved.campaign_id}
+    return payload if resolved == subject else payload.model_copy(update=fields)
 
 
 def handler_of(kind: CommandKind) -> Handler[Any]:
@@ -284,12 +280,12 @@ class CommandDispatcher:
     async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[object, Any]:
         """The payload's address base IS its target ledger, acted on as `addressed` resolves it;
         `answer` types what it answers."""
-        acted, leaf_stores = await asyncio.to_thread(_resolved, self.stores, call.payload)
+        acted = await asyncio.to_thread(addressed, self.stores, call.payload)
         if acted is not call.payload:
             call = replace(call, payload=acted)
         match call.payload:
             case CyclePayload():
-                return await self._on_cycle(call, leaf_stores)
+                return await self._on_cycle(call)
             case LinePayload():
                 return await self._on_line(call)
             case CampaignPayload():
@@ -318,26 +314,21 @@ class CommandDispatcher:
         return await self._record_and_apply(ledger, call, applier)
 
     async def _on_cycle(
-        self, call: CommandCall[CyclePayload], leaf_stores: Stores
+        self, call: CommandCall[CyclePayload]
     ) -> CommandOutcome[object, CyclePayload]:
-        """*leaf_stores* is the sandbox `_resolved` walked the payload's ``descend`` chain to."""
         payload = call.payload
-        leaf = Subject.below(payload.campaign_id, payload.cycle_id, payload.descend)
-        if leaf.inside and payload.inner_refusal is not None:
+        hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
+        tail = decode_cycle_path(payload.descend)
+        if tail and payload.inner_refusal is not None:
             raise PayloadInvalidError(payload.inner_refusal, code="inner_cycle_unaddressed")
-        try:
-            validate_path_component(leaf.campaign_id)
-            validate_path_component(leaf.cycle_id)
-        except ValueError as exc:
-            raise BadRequestError(str(exc)) from exc
-        if leaf.inside:
+        leaf_stores, leaf = resolve_cycle_path(self.stores, (hop, *tail))
+        if tail:
             inner = payload.model_copy(
                 update={"campaign_id": leaf.campaign_id, "cycle_id": leaf.cycle_id, "descend": None}
             )
             return await CommandDispatcher(
                 leaf_stores, job_registry=self._attached, inline=self.inline
-            )._on_cycle(CommandCall(inner, call.idempotency_key), leaf_stores)
-        hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
+            )._on_cycle(CommandCall(inner, call.idempotency_key))
         campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
         campaign = owned_campaign(self.stores, campaign_id)
         if self.stores.campaigns.load(hop, moment=None) is None:

@@ -578,6 +578,8 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
             lifecycle_changed_at=now,
         )
     )
+    # The name labels the bank its newest campaign declares, an L4 inner cell's as every other.
+    session.store.tenant_datasets.relabel(session.measured_dataset, declaration.dataset_hash)
     ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
     declare_run_wiring(session, plan.cycle.config, ledger, selected=plan.optimizer, tracing=None)
     campaigns.mint_cycle(hop)
@@ -648,7 +650,6 @@ def mint_arms(plans: Sequence[CyclePlan], *, billed: Path | None) -> list[Minted
             billed=billed,
             stored=stored,
         )
-    relabel_minted(minted[0].session)
     return minted
 
 
@@ -673,7 +674,6 @@ async def _mint_framed(
             minted = await _mint_after_framing(
                 session, plans, description, campaign_ids=campaign_ids, stored=stored
             )
-    relabel_minted(minted[0].session)
     return minted
 
 
@@ -744,8 +744,3 @@ async def _mint_after_framing(
         raise
     drafts.close(draft_id)
     return minted
-
-
-def relabel_minted(session: Session) -> None:
-    """The one label move; an L4 inner cell mints through ``mint``, so it moves none."""
-    session.store.tenant_datasets.relabel(session.measured_dataset, session.bank.dataset_hash)

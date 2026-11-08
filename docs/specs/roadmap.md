@@ -14,7 +14,7 @@ N" is [`host-assistant.md`](host-assistant.md) § Build order. How a link is siz
 reviewed and stopped is [`../developer/refactor-arcs.md`](../developer/refactor-arcs.md)'s. "Was"
 names the earlier arc a ledger row may still cite.
 
-- **The backbone first.** K0, M3 and DOORS D1–D6 landed in batch 10 with most of M1. M2, M4 and CONN
+- **The backbone first.** K0, M3, M1 and DOORS D1–D6 landed in batches 10 and 11. M2, M4 and CONN
   finish the backbone.
 - **Where.** A chain that needs no box, no TermNorm checkout, no paid call and no phone shot runs in
   the cloud, one session per chain. Docs, the gate, phone shots, TermNorm and fix passes run locally.
@@ -26,24 +26,22 @@ names the earlier arc a ledger row may still cite.
 
 | Arc | Was | Closes | Decision first | Waits on |
 |---|---|---|---|---|
-| **M1** gate cost, the rest | T rest | the Vite leftovers | — | — |
 | **DOORS** D7 | M6's, M12's and M4c's door rows | one short name per act, the kind and the CLI verb alike, but the composite `new` and `resume` | the names in the ledger row (operator, 2026-11-07: short and intuitive) | lands with M2's wipe |
-| **M2** command log | Q1 | Q1, census C, the `_tasks` test, the noise-floor stop, the pass with no address, the idempotency promise; `salvage/ea-8`'s command-state table is its acceptance test | commands leave the cycle ledger for one account log, amending architecture §0 Control-remote and decision 0001 in its commit (operator, 2026-11-07); wipes run data | — |
-| **M4** typed pipeline carrier | U1a, M4c | engine A, config items 8 and 9, the free-tier layer and its model axis, the three merges as one wherever behaviour equals main, `prompt_edits`, the stale-data outcome, a changed knob's source, an override's delete; ports `salvage/m4-2` | `steps` leaves the params bag; every treatment digest re-keys (accepted) | — |
-| **CONN** connector identity | M4b, with rows of M6, M7, M12, M18 | one resolver that refuses an unregistered connector typed at every lookup; `init_services` takes the campaign's connector and refuses a mismatch; `backend_type` becomes `connector`, the definition key included; `PipelineSchema`'s name and version; `index_terms` once; the defaults' two owners; `DEFAULT_CONNECTOR` and the endpoint default; a connector's spend, payer and wire kind declared | the landing re-writes tenant definitions (yes) | M4 |
-| **REFUSE** one refusal | M14a | census B, a refusal answered four ways, a launch refusal's three shapes, the unknown-slot refusal | — | — |
-| **LAND** the landing as a precondition | M17's landing rows | the landing at every process entry, keyed on the record schema the code writes; it drops unloadable run data by itself and refuses unknown files alone; `block_packs/_sources` and its builder move into the checkout; one remedy for an unreadable file; a shadowed manifest proven through its reader | yes (operator, 2026-11-07): every later wipe is a landing step | lands before the first wipe |
+| **M2** command log | Q1 | Q1, census C, the `_tasks` test, the noise-floor stop, the pass with no address (a CLI-only carve-out), the idempotency promise; `salvage/ea-8`'s command-state table is its acceptance test | commands leave the cycle ledger for one account log, amending architecture §0 Control-remote and decision 0001 in its commit (operator, 2026-11-07); wipes run data | — |
+| **M4** typed pipeline carrier | U1a, M4c | engine A but A2, config items 8 and 9, the free-tier layer and its model axis, the three merges as one wherever behaviour equals main, `prompt_edits`, the stale-data outcome, a changed knob's source, an override's delete, `PackRefusal` in its re-key; ports `salvage/m4-2` | `steps` leaves the params bag; every treatment digest re-keys (accepted) | — |
+| **CONN** connector identity | M4b, with rows of M6, M7, M12, M18 | engine A2; one resolver that refuses an unregistered connector typed at every lookup; `init_services` takes the campaign's connector and refuses a mismatch; `backend_type` becomes `connector`, the definition key included; `PipelineSchema`'s name and version; `index_terms` once; the defaults' two owners; `DEFAULT_CONNECTOR` and the endpoint default; a connector's spend, payer and wire kind declared | the landing re-writes tenant definitions (yes) | M4 |
+| **LAND** the landing as a precondition | M17's landing rows | the landing at every process entry, keyed on the record schema the code writes; it drops unloadable run data by itself and refuses unknown files alone; `block_packs/_sources` and its builder move into the checkout; one remedy for an unreadable file; a shadowed manifest proven through its reader; `LedgerUnreadableError` folded into `FileUnreadableError` | yes (operator, 2026-11-07): every later wipe is a landing step | lands before the release that carries the first wipe (operator, 2026-11-08) |
 | **READS** | M17's read rows | `banks_sharing`, the `Fate.RUN` dict rows, a whole-file read refused four ways, `CACHE_PATH` | read through `io.py`'s readers | — |
 | **M5** running set | RS | RS, census F's `exclude_nodes`, the one-node rule | accept the L4 cache miss (yes) | M2 (kept until a pass shows it is no file dependency; operator, 2026-11-07), M4 |
-| **M6** one start | U2 | `RunStart` and `HeldRun`, config item 6 (slot lifetime), the one launch answer, the double selection, `draft_declared`, a task opened only for an admitted act, a queued launch promoted by whoever frees the slot | plan and price before admission for every start (yes) | M2 |
+| **M6** one start | U2 | `RunStart` and `HeldRun`, `LaunchError`, config item 6 (slot lifetime), the one launch answer, the double selection, `draft_declared`, a task opened only for an admitted act, a queued launch promoted by whoever frees the slot | plan and price before admission for every start (yes) | M2 |
 | **M7** run init and round 0 | U2 | batch 3's init and round-0 rows, config item 5, `--diag` as a mode, the test builders, the origin-gate rows, `_peer_cycle`, a resume that takes 72 s to apply | halt a degraded origin (yes) | M6 |
 | **ADDR** an address off its record | — | the fork-summary kind, the webapp's id parses (`rootCycleId`, the short labels), parent counting | the mint record serves the kind and the short label | M7 |
 | **M8** potter call door, served roster | U1b, EP | `InjectionBundle`, `Calls.ask`, the seed rule, `PROMPT_FIELD`, swept F, the `[#N]` slots, the panel's money text, a refused L4 arm's identity | a failed critique is a typed fault (yes) | M4 |
-| **M9** ledger read stack | U3 | the read stack, `_unlanded`, the cold-fold snapshot, the `dashboard.json` checkout, the artifact writers outside the roster, the swallowed round checkout | keep `dashboard.json` / `index.json` as projections (yes, §0) | — |
+| **M9** ledger read stack | U3 | the read stack's accessors, `_unlanded`, the cold-fold snapshot (held: re-measured on the box first), the `dashboard.json` checkout, the swallowed round checkout; a derived file's fault never unwinds or stops a landed line | keep `dashboard.json` / `index.json` as projections (yes, §0) | — |
 | **M10** narration and tracing | U3, ET | one narration table, the typed phase act, ET, `ActivityItem` as `Said`, a pause's cause served | — | M9 |
 | **M11** typed run records | U3 | engine B and C, `StatusMark`, `rewound`, the act record, the cell beat, `cached` / `key_source`, the export's spend, the on-disk renames (`ArmSlot`, `CycleSeed`, `LinePayload`) | — | M9 |
 | **M12** spend | S | the book counted once, one charge value, the lost mirror, the reserved hold, stale `run_limits`, a grant verb, the host-coupon rows | a re-grant counts from `granted_at` (yes); migrates `charges.jsonl` | M9 |
-| **M13** one scoring pass | U4 | § One record shape, the skipped verify, noise-floor and seed-screen on the ledger, the catch-up cells, the verify that starts 38 s late and is never acked `accepted` | the verb is "held-out" (yes) | M2, M9 |
+| **M13** one scoring pass | U4 | § One record shape, the artifact writers outside the roster, the skipped verify, noise-floor and seed-screen on the ledger, the catch-up cells, the verify that starts 38 s late and is never acked `accepted` | the verb is "held-out" (yes) | M2, M9 |
 | **M14b** faults as values | Q3 | `logging` leaves `application/` and `domain/`: a mechanical sweep with no other arc open | — | M9, M10 |
 | **FEED** change feed | Q2, M15 | Q2, census E | a subject is the `Subject` path (yes) | M2, M9 |
 | **M16** webapp (a, b) | swept C, U5 | lineage reads the served tree; one arm row; the selection in the hash | a swiped-in column stays blank until its reads land (yes) | FEED |
@@ -55,16 +53,17 @@ names the earlier arc a ledger row may still cite.
 | **M23** host step 6 | A5 | host step 6, with the "Run the resolver now" row | — | M22, M6 |
 
 **Edges** (→ means before): M4 → CONN, M5, M8. M2 → M6 → M7 → ADDR. M9 → M10, M11, M12, M13, FEED.
-M2 → M13, FEED, M20. M13 → M19. FEED → M16. M10 → M14b. CONN → M18. LAND lands before the first
-wipe (M2, CONN, M10 and M11, M12, M13).
+M2 → M13, FEED, M20. M13 → M19. FEED → M16. M10 → M14b. CONN → M18. LAND lands before the release
+that carries the first wipe (M9's round-audit cache, M2, CONN, M10 and M11, M12, M13).
 
 **Critical path:** M2 and M9 → M13 → M19, then the next paid run. M9 → FEED → M16 runs beside it.
 
-**Next:** a census for M2 with D7 on its tip, M9, M4 and REFUSE, the chains batch 10 unblocked; then
-CONN on M4's tip, and LAND.
+**Next:** census 7's batches: 12 (M2's rest with D7, M4 short of its re-key), 13 (M9's accessors,
+M4's re-key); M9's projection checkouts re-cut on M2's account log; then CONN on M4's tip, and LAND
+before the release.
 
-**Re-keys.** M4, CONN, M8, M5 (the L4 cache), DOORS's verb renames and M19 (decisions) land in any
-order before the next paid run. M4's and M8's re-keys share one cold cache only if no paid run lands
+**Re-keys.** M4, CONN, M8, M5 (the L4 cache) and M19 (decisions) land in any order before the next
+paid run. M4's and M8's re-keys share one cold cache only if no paid run lands
 between their merges.
 
 **Last, at sync points with no open chain in their trees:**
