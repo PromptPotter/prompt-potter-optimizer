@@ -439,7 +439,7 @@ export function useIngestFlow({
       tail = draftWrites.current;
       await tail;
     } while (tail !== draftWrites.current);
-    // Sparse, so the `CommandRecord` shows what the operator declared.
+    // Sparse, so the filed `CommandRecord` shows what the operator declared.
     const r = await starting.run("start", () =>
       commands["start-checkin"]({ draft_id: id, ...limits }),
     );

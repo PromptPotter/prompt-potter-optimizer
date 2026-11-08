@@ -8,4 +8,4 @@
 
 - **The inner campaign runs in its own `asyncio.Task`** (`spawn.py::_run_inner_campaign`): the child's context copy carries the outer's pause inward. **The outer L1's mutations are laid into the cell's `optimization.nodes` at spawn** (`spawn.py::_laid_arm`), so they reach the inner optimizer only, never the outer's. A mutation no render can apply is refused at selection and banked as the cell's fault (`CellUnscoreableError`), never dropped.
 - **Sandboxes are a FLAT per-cycle registry** `<workspace>/.inner/<key>/` (`infrastructure/store/layout.py`), never nested, so the recursion stays re-entrant.
-- **The sandbox owner is `spawn_cycle_id`, the asker the last of `enclosing`; a fork moves only the asker** (`spawn_context.py::retarget_inner_spawn`).
+- **The sandbox owner is the last of `inside`, the asker the last of `enclosing`; a fork moves only the asker** (`spawn_context.py::retarget_inner_spawn`).

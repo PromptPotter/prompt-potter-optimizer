@@ -32,7 +32,7 @@ from promptpotter.infrastructure.store.account_trail import (
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import held_lock
-from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.store.stores import Stores, build_stores, tenant_stores
 from promptpotter.infrastructure.store.user_store import (
     AccountDir,
     ConsentEvent,
@@ -309,19 +309,19 @@ class Trail(NamedTuple):
 def tenant_trail(stores: Stores) -> Trail:
     return Trail(
         frozenset({acting_principal(stores.identity).id}),
-        in_time_order(workspace_lines(stores.campaigns)),
+        in_time_order(workspace_lines(stores)),
         [],
     )
 
 
 def _scanned(
-    accounts: Iterable[AccountDir], unreadable: list[str]
+    projects_root: Path, accounts: Iterable[AccountDir], unreadable: list[str]
 ) -> Iterator[tuple[AccountDir, list[TrailLine]]]:
     """A ledger or file that will not read costs its own workspace and no other: it is named, then
     skipped."""
     for account in accounts:
         try:
-            found = list(workspace_lines(CampaignStore(account.workspace)))
+            found = list(workspace_lines(tenant_stores(projects_root, account.workspace)))
         except (OSError, FileUnreadableError, LedgerUnreadableError):
             if (who := _who(account)) not in unreadable:
                 unreadable.append(who)
@@ -355,7 +355,7 @@ def trail_by_email(projects_root: Path, email: str) -> Trail:
     )
     unreadable = [account.workspace.name for account in accounts if isinstance(account.user, Torn)]
     lines: list[TrailLine] = []
-    for account, found in _scanned(accounts if own else (), unreadable):
+    for account, found in _scanned(projects_root, accounts if own else (), unreadable):
         if not isinstance(account.user, Torn) and account.user.user_id in own:
             lines += found
         else:
@@ -392,7 +392,7 @@ def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail],
     accounts = read_accounts(projects_root)
     unreadable = [account.workspace.name for account in accounts if isinstance(account.user, Torn)]
     trails: list[AccountTrail] = []
-    for account, found in _scanned(accounts, unreadable):
+    for account, found in _scanned(projects_root, accounts, unreadable):
         recent = [line for line in found if (epoch_seconds(line.at) or 0.0) >= since]
         if recent and not isinstance(account.user, Torn):
             store = CampaignStore(account.workspace)

@@ -232,26 +232,27 @@ async def run_checkin(
     response_model: type[CheckinOutput],
     consultation_instruction: str,
     user_content: str,
-    context: LLMCallContext,
+    stores: Stores,
+    ledger: CycleEventLog,
 ) -> tuple[CheckinOutput, int]:
-    raw, _prompt, repair_attempts = await run_optimizer_node(
-        template=checkin_template(),
-        prompt_vars={"consultation_instruction": consultation_instruction},
-        response_model=response_model,
-        user_content=user_content,
-        context=context,
-    )
+    """Every record the call writes lands on *ledger*, bound for it: no run scope stands at a turn."""
+    with scoped(ledger=ledger):
+        raw, _prompt, repair_attempts = await run_optimizer_node(
+            template=checkin_template(),
+            prompt_vars={"consultation_instruction": consultation_instruction},
+            response_model=response_model,
+            user_content=user_content,
+            context=checkin_call_context(stores, ledger),
+        )
     assert isinstance(raw, CheckinOutput), (
         f"checkin must return CheckinOutput, got {type(raw).__name__}"
     )
     return raw, repair_attempts
 
 
-def draft_call_context(stores: Stores, draft_id: str) -> LLMCallContext:
-    """Billed to the draft's ledger, which Start moves into the root cycle it mints."""
-    return checkin_call_context(
-        stores, CycleEventLog.open(CycleDir(stores.drafts.draft_dir(draft_id)))
-    )
+def draft_ledger(stores: Stores, draft_id: str) -> CycleEventLog:
+    """What a draft's resolver turn bills, which Start moves into the root cycle it mints."""
+    return CycleEventLog.open(CycleDir(stores.drafts.draft_dir(draft_id)))
 
 
 def checkin_call_context(stores: Stores, ledger: CycleEventLog) -> LLMCallContext:
@@ -273,20 +274,19 @@ async def commit_task_framing(
     ledger: CycleEventLog,
 ) -> None:
     """*prompt_fields*: each the chain's prompt nodes declare, once per node declaring it."""
-    context = checkin_call_context(stores, ledger)
-    with scoped(ledger=ledger):
-        result, _ = await run_checkin(
-            response_model=checkin_output(prompt_fields),
-            consultation_instruction=(
-                "Return a JSON object with exactly these keys. Be concise and actionable."
-            ),
-            user_content=(
-                "The user has provided a raw context description. Parse it into "
-                "structured Layer 1 prompt fields.\n\n"
-                f"Context:\n{description}"
-            ),
-            context=context,
-        )
+    result, _ = await run_checkin(
+        response_model=checkin_output(prompt_fields),
+        consultation_instruction=(
+            "Return a JSON object with exactly these keys. Be concise and actionable."
+        ),
+        user_content=(
+            "The user has provided a raw context description. Parse it into "
+            "structured Layer 1 prompt fields.\n\n"
+            f"Context:\n{description}"
+        ),
+        stores=stores,
+        ledger=ledger,
+    )
     stores.tenant_datasets.save_task_context(
         dataset_name,
         TaskDecomposition.from_dict(

@@ -11,7 +11,7 @@ from promptpotter.application.runner.inner.tasks import (
     InnerCells,
     parse_resolved,
 )
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
 from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.store.archive_queries import CampaignWalks, CellOf
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
@@ -37,10 +37,10 @@ class InnerSpawnContext:
     # The spawner's tiers, so a cell resolves its dataset where the spawner does.
     install_datasets_root: Path
     research_datasets_root: Path | None
-    spawn_campaign_id: str
-    spawn_cycle_id: str
-    # Outermost first, ending at the asker's: a pause on any of their ledgers stops the cell.
-    enclosing: tuple[Path, ...]
+    # The chain the cell's sandbox sits in, ending at its owner: the spawner's cycle.
+    inside: CyclePath
+    # Outermost first, ending at the asker's: a pause filed on any of them stops the cell.
+    enclosing: tuple[Subject, ...]
     # What the spawner is FOR: each cell declares it, so withholds what the spawner would.
     purpose: Purpose
     # The tenant ruler lines the spawner's open round reads, which every cell it spawns reads too.
@@ -78,12 +78,8 @@ def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
         shared_root=shared_root,
         install_datasets_root=session.store.install_datasets_root,
         research_datasets_root=session.store.research_datasets_root,
-        spawn_campaign_id=session.campaign_id,
-        spawn_cycle_id=cycle_id,
-        enclosing=(
-            *session.state.control.enclosing,
-            session.store.campaigns.cycle_dir(session.hop),
-        ),
+        inside=(*session.store.inside, session.hop),
+        enclosing=(*session.state.control.enclosing, session.store.subject(session.hop)),
         purpose=session.purpose,
         ruler=ruler_clock(session),
         cells=cells,
@@ -128,7 +124,7 @@ def retarget_inner_spawn(session: Session) -> None:
     cycle_id = session.cycle_id
     if ctx is None or not cycle_id:
         return
-    asking_dir = session.store.campaigns.cycle_dir(session.hop)
-    if ctx.enclosing[-1] == asking_dir:
+    asking = session.store.subject(session.hop)
+    if ctx.enclosing[-1] == asking:
         return
-    rescope(spawn=replace(ctx, enclosing=(*ctx.enclosing[:-1], asking_dir)))
+    rescope(spawn=replace(ctx, enclosing=(*ctx.enclosing[:-1], asking)))

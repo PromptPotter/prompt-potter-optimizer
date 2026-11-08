@@ -269,7 +269,7 @@ async def run_head_to_head(
     """Arms of one head-to-head on the session's dataset, each answered by its key: every arm
     planned and admitted before any is minted, then run one after another in the host's loop.
 
-    Raises what ``mint-head-to-head`` refuses the browser's and the terminal's act on.
+    Raises what ``head-to-head`` refuses the browser's and the terminal's act on.
     """
     if session.campaign_id:
         raise PayloadInvalidError(

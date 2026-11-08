@@ -372,7 +372,9 @@ async def run_optimization(
             )
             refresh_rates_in_background()
             # Fresh per launch, keeping only the cycles this run measures FOR.
-            session.state.control = RunControl(enclosing=session.state.control.enclosing)
+            session.state.control = RunControl(
+                commands=session.store.commands, enclosing=session.state.control.enclosing
+            )
             try:
                 prep = await prepare_run(
                     dataset,

@@ -3,8 +3,9 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import (
     GateKind,
     LaunchStage,
@@ -20,24 +21,21 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.producer_lock import cycle_held, held, pass_held
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    Controls,
     Progress,
     scan_last,
     scan_launch_claim,
-    scan_ledger_controls,
     scan_ledger_progress,
 )
+from promptpotter.infrastructure.store.command_log import Controls
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
     campaign_cycles_dir,
-    in_inner_sandbox,
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 
-
-def standing_controls(cycle_dir: Path) -> Controls:
-    return scan_ledger_controls(CycleLayout(cycle_dir).ledger)
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 def effective_lookahead(requested: int, ceiling: int) -> int:
@@ -56,10 +54,6 @@ def standing_budget(cycle_dir: Path) -> StandingBudgetRecord:
     # No record stands no axis, which the empty record says.
     held = scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], StandingBudgetRecord)
     return held or StandingBudgetRecord()
-
-
-def _campaign_dir(cycle_dir: Path) -> Path:
-    return cycle_dir.parent.parent
 
 
 # `RUN_FRESH_S` bounds ANY ledger append (a heartbeat is one); the other two, the last NON-heartbeat one.
@@ -130,7 +124,7 @@ def read_run_state(
     return RunState(RunPhase.RUNNING if producer.attached else RunPhase.DETACHED, producer)
 
 
-def derive_run_state(cycle_dir: Path) -> RunState:
+def derive_run_state(cycle_dir: Path, inbox: Controls) -> RunState:
     ledger = CycleLayout(cycle_dir).ledger
     last = scan_last([LedgerSpan(ledger)], RunPhaseRecord)
     declared = "" if last is None else last.run_phase.value
@@ -138,7 +132,7 @@ def derive_run_state(cycle_dir: Path) -> RunState:
     producer_held = cycle_held(cycle_dir)
     scoring = producer_held and pass_held(cycle_dir)
     progress = scan_ledger_progress(ledger) if producer_held else Progress()
-    asked = standing_controls(cycle_dir).pause if scoring or not terminal else None
+    asked = inbox.pause if scoring or not terminal else None
     claim = None if producer_held else scan_launch_claim(ledger)
     now = time.time()
     run = read_run_state(
@@ -157,7 +151,7 @@ def derive_run_state(cycle_dir: Path) -> RunState:
         claimed=None if claim is None or not held(Path(claim.claimant_lock)) else claim.stage,
         gate=None if last is None else last.gate,
         drafts=0 if last is None else len(last.drafts),
-    )._replace(inner=in_inner_sandbox(cycle_dir))
+    )
     if run.run_phase is not RunPhase.PAUSED:
         return run
     # A pass declares no stop: the pause it reads as is the one asked of it.
@@ -177,10 +171,15 @@ def derive_run_state(cycle_dir: Path) -> RunState:
         pause=PauseReading(
             stop_reason=None,
             cause=PauseCause.COMMAND,
-            detail=f"pause-cycle by {asked.issued_by.display}",
+            detail=f"pause by {asked.issued_by.display}",
             at=asked.at,
         )
     )
+
+
+def producer_attached(cycle_dir: Path) -> bool:
+    """Attachment reads no command: a pause never moves it (`read_run_state`)."""
+    return derive_run_state(cycle_dir, Controls()).producer.attached
 
 
 def _mtime_ns(path: Path) -> int | None:
@@ -207,19 +206,21 @@ def run_state_stamps(cycle_dir: Path) -> tuple[int | None, ...]:
     )
 
 
-def run_phase_validator_epoch(cycle_dir: Path) -> float | None:
+def run_phase_validator_epoch(stores: Stores, hop: CycleHop) -> float | None:
     """Stats only, no parse: this is the 2 s poll's 304 path."""
-    campaign = CampaignLayout(_campaign_dir(cycle_dir))
+    campaign = CampaignLayout(stores.campaigns.campaign_root_dir(hop.campaign_id))
     cycles = campaign_cycles_dir(campaign.campaign_dir)
     # The campaign's metered spend is served too: every cycle's ledger, and a deleted one's tombstone.
     siblings = (
         [CycleLayout(sibling).ledger for sibling in cycles.iterdir()] if cycles.is_dir() else []
     )
-    tombstones = CycleEventLog.workspace_path(WorkspaceDir(campaign.campaign_dir.parent.parent))
+    tombstones = CycleEventLog.workspace_path(stores.campaigns.workspace)
     stamps = [
         stamp
         for stamp in (
-            *run_state_stamps(cycle_dir),
+            *run_state_stamps(stores.campaigns.cycle_dir(hop)),
+            # A filed control moves its own cycle's reads, never the log's other subjects'.
+            stores.commands.book().stamp(stores.subject(hop)),
             *map(_mtime_ns, (campaign.manifest, cycles, *siblings, tombstones)),
         )
         if stamp is not None

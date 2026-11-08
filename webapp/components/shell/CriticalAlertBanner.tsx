@@ -16,7 +16,7 @@ export function CriticalAlertBanner() {
   const { viewedPath, cycleId, pinned, goneAddress } = useWorkspace();
   const registryFailure = failureOf(useRegistry().read);
   const pointerFailure = failureOf(useActivePointer().read);
-  const pause = useCommand<"pause-cycle">("critical-alert", { scope: cycleId });
+  const pause = useCommand<"pause">("critical-alert", { scope: cycleId });
   const { health } = useBackend();
 
   // The workspace's verdict wins: the dashboard has already reset onto another address. With no
@@ -52,8 +52,8 @@ export function CriticalAlertBanner() {
             className="critical-alert-stop"
             disabled={pause.pending !== null}
             onClick={() =>
-              void pause.run("pause-cycle", () =>
-                commands["pause-cycle"](cycleAddress(viewedPath)),
+              void pause.run("pause", () =>
+                commands["pause"](cycleAddress(viewedPath)),
               )
             }
             aria-label="Pause the campaign"

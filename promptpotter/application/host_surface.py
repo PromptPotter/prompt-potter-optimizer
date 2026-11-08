@@ -21,7 +21,6 @@ import secrets
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from typing import Any, Literal, cast, get_origin
 from urllib.parse import quote, unquote
 
@@ -60,7 +59,6 @@ from promptpotter.domain.command_kinds import (
     PauseCyclePayload,
     ReadKind,
 )
-from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
 from promptpotter.domain.job import UNRESOLVED_HOP, InnerRun, Job
 from promptpotter.domain.phases import (
@@ -72,8 +70,7 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.run_records import LaunchedJob
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.layout import cycle_dir_for
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     NotFoundError,
@@ -276,12 +273,11 @@ def job_status(job: Job, *, held: bool) -> tuple[TaskStatus, str]:
     return "working", f"{job.what}: {job.stage}"
 
 
-def _held(job: Job) -> bool:
+def _held(stores: Stores, job: Job) -> bool:
     """Its cycle holds at a gate (`RunState.gate`) while the run waits on an answer."""
     if job.released or job.hop == UNRESOLVED_HOP:
         return False
-    cycle_dir = cycle_dir_for(WorkspaceDir(Path(job.workspace)), job.hop)
-    return derive_run_state(cycle_dir).gate is not None
+    return stores.run_state(job.hop).gate is not None
 
 
 class HostTask(FrozenModel):
@@ -498,7 +494,10 @@ class HostSession:
     def _launch_reads(self, launches: list[LaunchedJob]) -> list[tuple[TaskStatus, str, str]]:
         """Each launched job's status, words and last update, as its registry reads it."""
         return [
-            (*job_status(job, held=_held(job)), job.released_at or job.started_at or job.created_at)
+            (
+                *job_status(job, held=_held(self.caller.stores, job)),
+                job.released_at or job.started_at or job.created_at,
+            )
             for job in self._jobs(launches)
         ]
 
@@ -556,7 +555,7 @@ class HostSession:
             return await self._status(task_id)
         _, launches = await asyncio.shield(tracked.dispatching)
         jobs = [] if launches is None else await _off_loop(lambda: self._jobs(launches))
-        acts = await _off_loop(lambda: cancel_acts(jobs, stores.campaigns.workspace))
+        acts = await _off_loop(lambda: cancel_acts(jobs, stores))
         dispatcher = self._dispatcher()
         for act in acts:
             await dispatcher.dispatch(act)
@@ -596,10 +595,10 @@ class HostSession:
 _CANCELLED = "host task cancelled"
 
 
-def cancel_acts(jobs: list[Job], workspace: WorkspaceDir) -> list[CommandCall[CommandPayload]]:
+def cancel_acts(jobs: list[Job], stores: Stores) -> list[CommandCall[CommandPayload]]:
     """Each live job's own cancel, resolved for every job before any is dispatched: a queued one
-    withdrawn, a running run or paid pass paused on its own cycle in *workspace*, each keyed by
-    the job so a retried cancel acts once. A job no command of *workspace* cancels now — its cycle
+    withdrawn, a running run or paid pass paused on its own cycle in *stores*, each keyed by
+    the job so a retried cancel acts once. A job no command of *stores* cancels now — its cycle
     refusing the pause (`RunState.pause_refusal`) among them — refuses them all."""
     acts: list[CommandCall[CommandPayload]] = []
     for job in jobs:
@@ -613,11 +612,11 @@ def cancel_acts(jobs: list[Job], workspace: WorkspaceDir) -> list[CommandCall[Co
             raise TaskUncancellableError(f"{job.what}: {INNER_PAUSE_REFUSAL}")
         if job.hop == UNRESOLVED_HOP:
             raise TaskUncancellableError(f"{job.what} names no cycle to pause yet; cancel again")
-        if job.workspace != str(workspace):
+        if job.workspace != str(stores.campaigns.workspace):
             raise TaskUncancellableError(
                 f"{job.what} runs in a workspace this caller does not hold"
             )
-        if refusal := derive_run_state(cycle_dir_for(workspace, job.hop)).pause_refusal:
+        if refusal := stores.run_state(job.hop).pause_refusal:
             raise TaskUncancellableError(f"{job.what}: {refusal}")
         pause = PauseCyclePayload(
             campaign_id=job.campaign_id, cycle_id=job.cycle_id, reason=_CANCELLED
@@ -662,5 +661,5 @@ _TO_THE_GATE = (
     "run. It holds at the round-0 origin gate only where the origin's health trips the gate, and "
     "its task then reads `input_required`; a healthy origin goes straight on into the search. If "
     f"it holds, read its `{ReadKind.CYCLE_DASHBOARD}` and answer with "
-    f"`{CommandKind.ORIGIN_GATE_DECISION}` only once the operator says."
+    f"`{CommandKind.ORIGIN_GATE}` only once the operator says."
 )

@@ -59,7 +59,7 @@ test.afterAll(async ({ request }) => {
   made = (await campaigns(request).catch(() => []))[0] ?? made;
   if (!made) return;
   // A refusal is reported, never swallowed: it may mean the safety net did not catch.
-  const { status, body } = await command(request, "pause-cycle", {
+  const { status, body } = await command(request, "pause", {
     campaign_id: made.id,
     cycle_id: made.cycleId,
   });

@@ -61,7 +61,7 @@ class ViewedCycle:
     @property
     def dashboard_changed_at(self) -> float | None:
         """Covers the DERIVED phase: an mtime alone would 304 a dead producer at ``running``."""
-        return run_phase_validator_epoch(self.dir)
+        return run_phase_validator_epoch(self.stores, self.path[-1])
 
     def moment(self, at: int | None) -> Moment | None:
         return None if at is None else Moment(CycleLayout(self.dir).ledger, at)

@@ -14,7 +14,7 @@ from promptpotter.domain.l4.proxies import inner_facts_of
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host
-from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.runtime_flags import producer_attached
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.infrastructure.store.measurement_archive import (
     ArchiveFile,
@@ -54,7 +54,7 @@ def iter_cycle_ledgers(root: pathlib.Path) -> list[pathlib.Path]:
 def archive_writers(root: pathlib.Path) -> int:
     n = 0
     for ledger_path in iter_cycle_ledgers(root):
-        if derive_run_state(ledger_path.parent.parent).producer.attached:
+        if producer_attached(ledger_path.parent.parent):
             n += 1
     return n
 

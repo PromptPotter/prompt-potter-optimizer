@@ -17,7 +17,7 @@ _Key = Annotated[str, Field(min_length=1, max_length=15, pattern=r"^[A-Za-z0-9_]
 
 
 class HeadToHeadPlan(RequestBody):
-    """A head-to-head declared before it is minted: each budget point is one `mint-head-to-head`
+    """A head-to-head declared before it is minted: each budget point is one `head-to-head`
     of every arm × replicate, the budget being what its arms share."""
 
     head_to_head_id: str = Field(

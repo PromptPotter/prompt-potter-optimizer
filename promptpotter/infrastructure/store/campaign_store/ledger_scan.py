@@ -9,15 +9,6 @@ from typing import Any, ClassVar, NamedTuple, cast, get_args
 from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
 from promptpotter.domain.bench import BenchPasses, BenchReading, PartitionRecord
 from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.command_kinds import (
-    PAYLOAD_MODEL_FOR_KIND,
-    LoopPayload,
-    OriginGateDecisionPayload,
-    PauseCyclePayload,
-    SetSampleLookaheadPayload,
-    SkipSearchpointPayload,
-    SubmitArmsPayload,
-)
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import (
     BenchGradedView,
@@ -33,8 +24,6 @@ from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
     CampaignCeilingRecord,
-    CommandAckRecord,
-    CommandRecord,
     ComparisonExit,
     CycleFinalRecord,
     CycleMintedRecord,
@@ -92,7 +81,6 @@ from promptpotter.infrastructure.store.read_model import (
     RecordClasses,
 )
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import IndividualWalk, MeasurementRole
 
 
@@ -271,123 +259,6 @@ class _CycleFacts:
         self._held = held._replace(updated_at=record.timestamp)
 
     def value(self) -> CycleFacts:
-        return self._held
-
-
-class PauseAsk(NamedTuple):
-    command_id: str
-    issued_by: Principal
-    at: str
-
-
-class LookaheadAsk(NamedTuple):
-    command_id: str
-    cells: int
-    auto: bool
-    taken: bool = False
-
-
-class Controls(NamedTuple):
-    pause: PauseAsk | None = None
-    skips: tuple[str, ...] = ()
-    lookahead: LookaheadAsk | None = None
-    gate_decisions: tuple[tuple[str, str], ...] = ()
-    submissions: tuple[tuple[str, SubmitArmsPayload], ...] = ()
-
-
-_LOOP_TAKEN = frozenset(
-    kind for kind, model in PAYLOAD_MODEL_FOR_KIND.items() if issubclass(model, LoopPayload)
-)
-
-
-class _Controls:
-    records: ClassVar[RecordClasses] = (CommandRecord, CommandAckRecord, RunPhaseRecord)
-
-    def __init__(self) -> None:
-        self._held = Controls()
-        self._asked: dict[str, CommandRecord] = {}
-        self._kinds: dict[str, type[LoopPayload]] = {}
-        self._declared: RunPhase | None = None
-
-    def feed(self, record: CommandRecord | CommandAckRecord | RunPhaseRecord) -> None:
-        match record:
-            case CommandRecord():
-                if record.kind in _LOOP_TAKEN:
-                    self._asked[record.command_id] = record
-            case CommandAckRecord(command_id=command_id, status="accepted"):
-                if asked := self._asked.pop(command_id, None):
-                    self._arm(asked)
-            case CommandAckRecord(command_id=command_id, status="rejected"):
-                self._asked.pop(command_id, None)
-            case CommandAckRecord(command_id=command_id):
-                if asked := self._asked.pop(command_id, None):
-                    # Applied with no accept before it: a look-ahead DISARM, nothing to take.
-                    self._arm(asked)
-                elif kind := self._kinds.pop(command_id, None):
-                    self._take(command_id, kind)
-            case RunPhaseRecord(run_phase=declared):
-                launched = declared is RunPhase.RUNNING and self._declared is not RunPhase.GATE
-                if launched or declared in (RunPhase.PAUSED, RunPhase.TERMINAL):
-                    # A stop or a new launch empties the inbox; an ``auto`` look-ahead is a mode.
-                    kept = self._held.lookahead
-                    kept = kept if kept is not None and kept.auto else None
-                    self._held = Controls(lookahead=kept)
-                    self._kinds = (
-                        {} if kept is None else {kept.command_id: SetSampleLookaheadPayload}
-                    )
-                self._declared = declared
-
-    def _arm(self, asked: CommandRecord) -> None:
-        command_id, held = asked.command_id, self._held
-        kind = PAYLOAD_MODEL_FOR_KIND[asked.kind]
-        assert issubclass(kind, LoopPayload), "only a kind in `_LOOP_TAKEN` is asked"
-        match kind.model_validate(asked.payload):
-            case PauseCyclePayload():
-                if held.pause is not None:
-                    return
-                held = held._replace(pause=PauseAsk(command_id, asked.issued_by, asked.timestamp))
-            case SkipSearchpointPayload():
-                held = held._replace(skips=(*held.skips, command_id))
-            case OriginGateDecisionPayload(decision=decision):
-                held = held._replace(gate_decisions=(*held.gate_decisions, (command_id, decision)))
-            case SubmitArmsPayload() as submitted:
-                held = held._replace(submissions=(*held.submissions, (command_id, submitted)))
-            case SetSampleLookaheadPayload(cells=cells, auto=auto):
-                if held.lookahead is not None:
-                    self._kinds.pop(held.lookahead.command_id, None)
-                armed = auto or cells > 1
-                held = held._replace(
-                    lookahead=LookaheadAsk(command_id, cells, auto) if armed else None
-                )
-                if not armed:
-                    self._held = held
-                    return
-        self._kinds[command_id] = kind
-        self._held = held
-
-    def _take(self, command_id: str, kind: type[LoopPayload]) -> None:
-        held = self._held
-        if kind is PauseCyclePayload:
-            held = held._replace(pause=None)
-        elif kind is SkipSearchpointPayload:
-            held = held._replace(skips=tuple(s for s in held.skips if s != command_id))
-        elif kind is OriginGateDecisionPayload:
-            held = held._replace(
-                gate_decisions=tuple(d for d in held.gate_decisions if d[0] != command_id)
-            )
-        elif kind is SubmitArmsPayload:
-            held = held._replace(
-                submissions=tuple(s for s in held.submissions if s[0] != command_id)
-            )
-        else:
-            ask = held.lookahead
-            if ask is not None and ask.auto:
-                held = held._replace(lookahead=ask._replace(taken=True))
-            else:
-                held = held._replace(lookahead=None)
-        self._held = held
-
-    def value(self) -> Controls:
         return self._held
 
 
@@ -899,7 +770,6 @@ LEDGER_FOLDS = (
     _LeftComparison,
     _LaunchClocks,
     _CycleFacts,
-    _Controls,
     _LaunchClaim,
     _Standing,
     _Answers,
@@ -959,10 +829,6 @@ def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
         for span in spans
         for clock in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_LaunchClocks, span.until)
     ]
-
-
-def scan_ledger_controls(ledger_path: Path) -> Controls:
-    return _view(ledger_path, _Controls)
 
 
 def scan_cycle_share(ledger_path: Path) -> CycleShareRecord | None:

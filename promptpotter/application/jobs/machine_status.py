@@ -191,7 +191,7 @@ class MachineStatusResponse(StrictModel):
         default_factory=list,
         description="The CALLER's own waiting launches, oldest first — everything a client needs "
         "to say 'queued, position 3' and to offer a cancel. Own is the PRINCIPAL that launched "
-        "them, the test `cancel-queued-run` applies. Other entries are counted in `queued` and "
+        "them, the test `cancel-queued` applies. Other entries are counted in `queued` and "
         "never listed.",
     )
     refused: list[MachineRefusal] = Field(

@@ -32,6 +32,7 @@ from promptpotter.config.paths import (
 from promptpotter.config.prompt_blocks import PACK_FILE
 from promptpotter.domain.campaign import Campaign, HeadToHeadRecord
 from promptpotter.domain.checkin_draft import DraftFile, OriginResolution
+from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.diagnostic_run import DiagnosticRunRecord
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER
@@ -49,6 +50,7 @@ from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.infrastructure.llm.capabilities import CAPABILITIES_CACHE, CAPABILITY_FILE
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
+from promptpotter.infrastructure.store.command_log import COMMAND_LOG_FILE
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -422,6 +424,14 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
         TypeAdapter(CycleHop),
     ),
     Kind("workspace ledger", _WS, f"{WORKSPACE_STATE_DIR}/events.jsonl", Fate.RUN, RECORD_ADAPTER),
+    # What was asked, of every subject: a loop's inbox and the trail read it, no survivor fact.
+    Kind(
+        "command log",
+        _WS,
+        f"{WORKSPACE_STATE_DIR}/{COMMAND_LOG_FILE}",
+        Fate.RUN,
+        COMMAND_LOG_ADAPTER,
+    ),
     Kind(
         "head-to-head",
         _WS,

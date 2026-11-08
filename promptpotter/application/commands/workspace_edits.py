@@ -26,6 +26,7 @@ from promptpotter.shared.errors import LedgerUnreadableError
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import Dispatched
+    from promptpotter.domain.command_events import CommandEffect
     from promptpotter.domain.command_kinds import (
         AcceptTermsPayload,
         BankSnippetPayload,
@@ -38,7 +39,6 @@ if TYPE_CHECKING:
         SetCampaignLabelPayload,
         SetUserSettingsPayload,
     )
-    from promptpotter.domain.run_records import CommandEffect
     from promptpotter.infrastructure.store.stores import Stores
 
 

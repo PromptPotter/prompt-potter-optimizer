@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.diagnostics.seed_screen import class_floor, draw_bank, draw_bench
@@ -59,7 +60,6 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import SpawnedBy
 from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts
 from promptpotter.infrastructure.llm.telemetry import current_round
-from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.io import write_text
 from promptpotter.infrastructure.store.layout import (
     SandboxOwner,
@@ -117,7 +117,7 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
         "round": round_num,
         "individual_id": cand.individual_id if cand else None,
         "role": cand.role if cand else None,
-        "cycle_id": ctx.enclosing[-1].name if cand else None,
+        "cycle_id": ctx.enclosing[-1].cycle_id if cand else None,
         "task": query,
     }
 
@@ -308,21 +308,23 @@ def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
 
 def sandbox_stores(ctx: InnerSpawnContext) -> Stores:
     """Only campaign STATE is sandboxed; the caches stay on the real tenant tree via ``shared_root``."""
-    return build_stores(
+    built = build_stores(
         ctx.identity,
         projects_root=ctx.inner_sandbox_root,
         install_datasets_root=ctx.install_datasets_root,
         research_datasets_root=ctx.research_datasets_root,
         shared_root=ctx.shared_root,
     )
+    return replace(built, inside=ctx.inside)
 
 
 def claim_sandbox(ctx: InnerSpawnContext) -> Stores:
     """Inside a cell, never at `spawn_context.py::inner_spawn_of`, which fires for EVERY cycle."""
+    owned_by = ctx.inside[-1]
     owner = SandboxOwner(
         tenant_id=str(ctx.identity.tenant_id),
-        campaign_id=ctx.spawn_campaign_id,
-        cycle_id=ctx.spawn_cycle_id,
+        campaign_id=owned_by.campaign_id,
+        cycle_id=owned_by.cycle_id,
     )
     write_text(sandbox_owner_path(ctx.inner_sandbox_root), owner.model_dump_json())
     return sandbox_stores(ctx)
@@ -357,7 +359,7 @@ def _continue_inner_campaign(
     store = session.store.campaigns
     # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.
     hop = store.line_holder(campaign.root_hop)
-    run = derive_run_state(store.cycle_dir(hop))
+    run = session.store.run_state(hop)
     if store.load(hop, moment=None) is None:
         raise CellUnscoreableError(
             f"its campaign {campaign.campaign_id} names successor {hop.cycle_id}, which has no "
@@ -444,7 +446,7 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
         stores=store,
         enable_tracing=False,
     )
-    session.state.control = RunControl(enclosing=ctx.enclosing)
+    session.state.control = RunControl(commands=store.commands, enclosing=ctx.enclosing)
     all_samples = session.bank.samples
     if not all_samples:
         raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")

@@ -284,7 +284,7 @@ class RunState(NamedTuple):
 
     @property
     def pause_refusal(self) -> str:
-        """Why `pause-cycle` is refused; empty where it is admitted."""
+        """Why `pause` is refused; empty where it is admitted."""
         if self.inner:
             return INNER_PAUSE_REFUSAL
         if self.producer.state is ProducerState.CLAIMED:
@@ -294,7 +294,7 @@ class RunState(NamedTuple):
 
     @property
     def gate_refusal(self) -> str:
-        """Why `origin-gate-decision` is refused; empty where it is admitted."""
+        """Why `origin-gate` is refused; empty where it is admitted."""
         if self.inner:
             return INNER_GATE_REFUSAL
         return "" if self.gate == "origin" else "This cycle is not holding at its origin gate."

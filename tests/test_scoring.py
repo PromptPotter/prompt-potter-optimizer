@@ -229,6 +229,7 @@ from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimiz
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes, unscoreable_cells
 from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
+from promptpotter.domain.command_events import CommandAckRecord, CommandRecord
 from promptpotter.domain.command_kinds import (
     CommandKind,
     CommandPayload,
@@ -288,8 +289,6 @@ from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import CellScopes, ThetaCaveat
 from promptpotter.domain.run_records import (
-    CommandAckRecord,
-    CommandRecord,
     ComparisonExit,
     ForkSpec,
     ForkTrigger,
@@ -334,7 +333,6 @@ from promptpotter.infrastructure.llm.spend_book import (
 )
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import cycle_held, release_cycle
-from promptpotter.infrastructure.runtime_flags import derive_run_state, standing_controls
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
@@ -1884,7 +1882,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         cycle_dir = stores.campaigns.cycle_dir(_PEER_HOP)
         loop_control, session.state.control = (
             session.state.control,
-            RunControl(enclosing=(cycle_dir,)),
+            RunControl(commands=stores.commands, enclosing=(stores.subject(_PEER_HOP),)),
         )
         pause = PauseCyclePayload(
             campaign_id=_PEER_HOP.campaign_id, cycle_id=_PEER_HOP.cycle_id, reason="stop"
@@ -1897,9 +1895,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         async def _stopped_mid_pass(sample: Sample, at: Any, pipeline_params: Any) -> MeasuredCell:
             walked.append(sample.id)
             if len(walked) == 2:
-                phases.append(derive_run_state(cycle_dir).run_phase)
+                phases.append(stores.run_state(_PEER_HOP).run_phase)
                 acks.append((await CommandDispatcher(stores).dispatch(CommandCall(pause))).ack)
-                phases.append(derive_run_state(cycle_dir).run_phase)
+                phases.append(stores.run_state(_PEER_HOP).run_phase)
             cell: MeasuredCell = await measure(sample, at, pipeline_params)
             return cell
 
@@ -1936,7 +1934,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert paused_pass.stop.cause is StopReason.PAUSED and 0 < len(paused_pass.cells) < 4, (
             "a paused pass banked no record of the cells it walked, or never stopped"
         )
-        assert standing_controls(cycle_dir).pause is None and not cycle_held(cycle_dir), (
+        assert stores.inbox(_PEER_HOP).pause is None and not cycle_held(cycle_dir), (
             "the pass left its pause unapplied, or kept the cycle after it stopped"
         )
         # Every other door stops the pass by its own hold, in one step: the host's cancel and the
@@ -1947,8 +1945,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         def paused_by() -> list[str]:
             return [
                 record.payload["reason"]
-                for _, record in CycleEventLog.open(CycleDir(cycle_dir)).iter()
-                if isinstance(record, CommandRecord) and record.kind == CommandKind.PAUSE_CYCLE
+                for record in stores.commands.book().subject_events(stores.subject(_PEER_HOP))
+                if isinstance(record, CommandRecord) and record.kind == CommandKind.PAUSE
             ]
 
         async def _held_pass(stop: Callable[[], Awaitable[object]]) -> None:
@@ -2076,7 +2074,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert len(paused_by()) == before + 2 and paused_by()[-1] == pause.reason, (
             "a host cancel or a Ctrl+C ended the pass without its pause"
         )
-        assert standing_controls(cycle_dir).pause is None and not cycle_held(cycle_dir), (
+        assert stores.inbox(_PEER_HOP).pause is None and not cycle_held(cycle_dir), (
             "a door's stop left its pause standing, or the pass kept its cycle"
         )
 
@@ -2097,7 +2095,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert asyncio.run(_let_go()).startswith("the pass ended"), (
             "a stop after the let-go still asked to be sent again"
         )
-        assert standing_controls(cycle_dir).pause is None, "a stop after the let-go left a pause"
+        assert stores.inbox(_PEER_HOP).pause is None, "a stop after the let-go left a pause"
         assert "not yet" in asyncio.run(_stop_after(PassHold())), (
             "a stop before the pass held its cycle sent a pause"
         )
@@ -2296,7 +2294,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             "potter",
             {},
             operator_solves,
-            control=RunControl(cycle_dir=cycle_dir),
+            control=RunControl(commands=authored.commands, cycle=authored.subject(hop)),
             arm_gate="author",
         ) as (cycle, callbacks):
             offline.llm.says = lambda _body: "ok"
@@ -2331,7 +2329,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
 
                 async def answer() -> None:
                     await held.wait()
-                    assert derive_run_state(cycle_dir).gate == "arms", (
+                    assert authored.run_state(hop).gate == "arms", (
                         "the hold never reached the ledger"
                     )
                     await submit("arms-at-the-hold")
@@ -3388,7 +3386,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     commanded = workspace(tmp_path / "commands")
     command_hop, command_dir = walking_cycle(commanded)
     commands = CycleEventLog.open(CycleDir(command_dir))
-    control = RunControl(cycle_dir=command_dir)
+    control = RunControl(commands=commanded.commands, cycle=commanded.subject(command_hop))
     address = {"campaign_id": command_hop.campaign_id, "cycle_id": command_hop.cycle_id}
 
     def press(payload: CommandPayload, key: str) -> str:
@@ -3398,7 +3396,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     def acks(command_id: str) -> list[str]:
         return [
             record.status
-            for _, record in commands.iter()
+            for record in commanded.commands.book().subject_events(commanded.subject(command_hop))
             if isinstance(record, CommandAckRecord) and record.command_id == command_id
         ]
 
@@ -3415,13 +3413,14 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         assert not intervened(), "the press alone marked the cycle babysat"
         # A second RUNNING record is a new launch: the press the last one never reached is not its.
         commands.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
-        assert standing_controls(command_dir).skips == ()
+        commanded.void_inbox(command_hop)
+        assert commanded.inbox(command_hop).skips == ()
         with scoped(ledger=commands):
             assert not control.spend_skip(), "a skip no walk took cut the next launch's arm"
             taken = press(skip, "skip-2")
             assert control.spend_skip()
             assert not control.spend_skip(), "one press cut two searchpoints"
-            assert (acks(taken), acks(untaken)) == (["accepted", "applied"], ["accepted"])
+            assert (acks(taken), acks(untaken)) == (["accepted", "applied"], ["accepted", "voided"])
             with pytest.raises(ConflictError):
                 press(gate_abort, "gate-early")
             assert control.take_gate_decision() is None, "a refused decision reached the gate"
@@ -3432,7 +3431,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             commands.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
             press(PauseCyclePayload(**address), "pause-1")
             assert control.pause_requested()
-            waiting = derive_run_state(command_dir).pause
+            waiting = commanded.run_state(command_hop).pause
             assert waiting is not None and waiting.stop_reason is None, (
                 "a pause the loop has not reached read as a run already stopped"
             )
@@ -3443,13 +3442,13 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             )
     finally:
         release_cycle(command_dir)
-    paused = derive_run_state(command_dir)
+    paused = commanded.run_state(command_hop)
     assert paused.run_phase is RunPhase.PAUSED
     assert paused.pause is not None and paused.pause.cause is PauseCause.COMMAND
     for late, key in ((skip, "skip-3"), (PauseCyclePayload(**address), "pause-2")):
         with pytest.raises(ConflictError):
             press(late, key)
-    assert standing_controls(command_dir).skips == ()
+    assert commanded.inbox(command_hop).skips == ()
     assert not control.pause_requested(), "a pause with no run to stop was left standing"
 
 

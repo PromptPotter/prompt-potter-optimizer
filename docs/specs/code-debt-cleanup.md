@@ -176,7 +176,7 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   **Rides with:** READS. **Re-test:** `git grep -n "def _atomic_replace\|def replace_changed" --
   promptpotter scripts`: 2 lines now, 1 at target.
 - **A workspace and a hop are re-derived from a path by parent counting** —
-  `jobs/reaper.py::_tenant_root_of` and `sweep_dead_cycles`, `campaign_store/store.py` (the cycle's
+  `campaign_store/store.py` (the cycle's
   hop beside `cycle_dir.parent.parent`) and `store/account_trail.py` (a campaign id from
   `parent.parent.name`). Action: read the address from `Subject` / `CycleHop`, never from the layout.
   **Rides with:** ADDR. **Re-test:** `git grep -nE "\.parents\[[0-9]\]|\.parent\.parent" -- promptpotter`
@@ -340,26 +340,15 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   in-process one too, where no endpoint, token or header applies. Action: the link rides the served
   connector's wire kind. **Rides with:** CONN. **Re-test:**
   `git grep -n "SECURITY_DOC_URL" -- webapp/components`.
-- **One act, two names** — 21 of 33 `CommandKind` rows have a `cli_verb` other than the kind (3 of
-  them browser-only, with no verb), so served
-  refusals and descriptions name `set-limits`, `--max-usd`, `resume`, `new` to a host that has
-  `change-run-limits`, `start-run`, `mint-campaign` (`spend.py`, `jobs/quota.py`, `preflight.py`,
-  `campaign_config.py` budget, `origin_gate.py`'s log). Tool descriptions are developer docstrings
-  ("waits on a click", source paths, "the SSE tail"). Action: one short name per act, the kind and
-  the CLI verb alike, except the composite `new` / `resume` (operator, 2026-11-07: short and
-  intuitive):
-  - `pause`, `origin-gate`, `head-to-head`, `set-limits`, `cancel-queued` (the kind takes the verb);
-  - `archive-campaign`, `unarchive-campaign`, `delete-campaign` (the verb takes the kind: "archive"
-    is the measurement archive, and `delete-cycle` stands beside it);
-  - `rename-campaign` (both, for `set-campaign-label` / `rename`);
-  - `verify-candidate` / `verify` and `grade-bench` / `bench` are M13's one held-out act.
-
-  Served text names kinds; `StopReasonInfo.cli_command` becomes a typed next act; an import-time
-  check in `command_kinds.py` refuses `path::symbol` and CLI-verb backticks in a tool-describing
-  docstring. A renamed kind
-  rewrites the stored command records, so this lands with M2's wipe. **Rides with:** DOORS D7.
-  **Re-test:** the rows whose `cli_verb` is neither the kind, `new`, `resume` nor `None` are M13's
-  two (11 now).
+- **One act, two names** — served refusals and descriptions name `--max-usd`, `resume`, `new` to a
+  host that has `start-run`, `mint-campaign` (`spend.py`, `jobs/quota.py`, `preflight.py`,
+  `campaign_config.py` budget, `origin_gate.py`'s log), and tool descriptions are developer
+  docstrings ("waits on a click", source paths, "the SSE tail"). Each act has one name, kind and CLI
+  verb alike, but for the composite `new` / `resume` and M13's held-out `verify-candidate` / `verify`,
+  `grade-bench` / `bench`. Action: served text names kinds; `StopReasonInfo.cli_command` becomes a
+  typed next act; an import-time check in `command_kinds.py` refuses `path::symbol` and CLI-verb
+  backticks in a tool-describing docstring. **Rides with:** DOORS D7. **Re-test:** no served refusal
+  names a CLI verb or flag.
 - **A gate hold claims `input_required` and sends no input request** — `host_surface.py::HostSession`
   sets the status; `tasks/result` blocks until the run ends. Action: the hold becomes the task's input
   request (the gate's `GateDecision`, the arms shape for `submit-arms`), answered as the existing
@@ -550,44 +539,22 @@ with:** the arcs that were the Q rows ([`roadmap.md`](roadmap.md) § The cleanup
   read polls on the descriptor it has, and A4's conversation opens no second `EventSource`.
 - No arc before Q3 adds a `logger.warning` in `application/`: a new fault is a record kind with a reader.
 
-- **Q1: one command log.** The fact: what was asked of the system and where it stands. Today it is
-  split: `run_records.py::CommandRecord` and `run_records.py::CommandAckRecord` land on whichever
-  ledger `commands/dispatcher.py::dispatch` picks (the cycle's, its root's for a delete, the draft's,
-  the workspace's), a draft's records move with its ledger (`campaign_store/store.py::adopt_ledger`,
-  from `jobs/mint.py::_mint_campaign`), a deleted cycle's go to the root's, the loop reads its
-  standing commands off its own ledger (`runtime_flags.py::standing_controls`), the trail folds
-  command lines out of every ledger and a tombstone's copies (`store/account_trail.py`), idempotency
-  is a ledger scan (`commands/dispatcher.py::_find_idempotent_command`), and whether the filer is alive
-  is asked beside all of it. A running act's status and stop live only in MCP memory
-  (`host_surface.py::HostSession._tasks`, `HostSession._cancel_task`, `host_surface.py::cancel_acts`):
-  REST serves no job read, and the webapp has no stop for verify or bench. A pass's stop address is
-  built per door (`commands/measuring.py::pass_pause`, `cancel_acts`, the CLI's Ctrl+C in
-  `cli/commands/launch.py`, `new.py` and `noise_floor.py`), and the answer a door returns
-  (`command_kinds.py::CommandAcceptedBody`) does not name the address the dispatcher resolved. Sites:
-  `git grep -l "CommandRecord\|CommandAckRecord\|standing_controls(" -- promptpotter`. Owner: one
-  account-scoped append-only log; a command is one record stream in it (filed, applied, refused,
-  voided, cancelled), each event written with its filing in one step, its status a fold of its own
-  events, its subject the address it was filed on and the one it landed on (a draft's Start lands on
-  the cycle the mint adopts, so the adopt step moves no record). The ledger keeps what HAPPENED
-  (`RunPhaseRecord`, the effects); the log keeps what was ASKED. The pattern: event sourcing's
-  per-aggregate stream with status a fold (EventStoreDB, Axon). Deletes: the two record kinds from
-  the ledger, `ledger_scan.py`'s command fold, the trail's per-ledger walk and
-  `run_records.py::TrailTombstoneRecord`'s copied commands, the idempotency scan, `HostSession._tasks`
-  and `_cancel_task`, the per-door stop addresses; a pass with no cycle (`launcher/admission.py::paid_pass`, `hop=None`)
-  is addressed by its command id, so its stop is one command at every entry point. Shares with U2:
-  the adopt step and U2's one launch answer, which is a log read. Edges inside: the loop's pending
-  read becomes a by-subject read of the log, so the log keeps its own per-subject offsets, a fold,
-  never a file beside it; a command filed by a process that died before applying stays "filed", and
-  the fold reads the filer's OS lock (§0.5) to derive "filed, filer gone". Invariant tests: the
-  exhaustive `(status, event)` table yields one status or a refusal for every pair; for any
-  interleaving of file, apply, refuse, cancel and void with any ledger move or delete, the fold after
-  the move equals the fold before. Its acceptance table is the command-state table of
-  `b79e18678:tests/test_security.py` § 5, "The command state machine" (branch `arc/ea-8`, cut from
-  batch E), plus a
-  `RunState.scoring` row: a sandbox's pause, and a line run selecting. Amends
-  [`../architecture.md`](../architecture.md) § Control-remote and [`../decisions.md`](../decisions.md)
-  § 0001 in its commit (operator, 2026-11-07): both place the record on the cycle's ledger. **Re-test:**
-  `git grep -n "class CommandRecord" -- promptpotter/domain/run_records.py`;
+- **Q1: one command log.** The fact: what was asked of the system and where it stands. The log
+  stands (`store/command_log.py::CommandLog`, its events `domain/command_events.py`): every command
+  is filed on its subject, its status the fold of its own events, a draft's landed on the cycle its
+  mint adopts, a run boundary's untaken ones `voided`. What is left split: a running act's status
+  and stop live only in MCP memory (`host_surface.py::HostSession._tasks`,
+  `HostSession._cancel_task`, `host_surface.py::cancel_acts`): REST serves no job read, and the
+  webapp has no stop for verify or bench. A pass's stop address is built per door
+  (`commands/measuring.py::pass_pause`, `cancel_acts`, the CLI's Ctrl+C in `cli/commands/launch.py`,
+  `new.py` and `noise_floor.py`), and the answer a door returns
+  (`command_kinds.py::CommandAcceptedBody`) does not name the address the dispatcher resolved; a
+  retry under a key replays main's way (an accepted command answers its retry after a void too).
+  Owner: the log. Deletes: `HostSession._tasks` and `_cancel_task`, the per-door stop addresses; a
+  pass with no cycle (`launcher/admission.py::paid_pass`, `hop=None`) is addressed by its command id,
+  so its stop is one command at every entry point. Shares with U2: U2's one launch answer, which is a
+  log read. Edge inside: a command filed by a process that died before applying stays "filed", and
+  the fold reads the filer's OS lock (§0.5) to derive "filed, filer gone". **Re-test:**
   `git grep -n "def _cancel_task" -- promptpotter`.
 - **Q2: one change feed — the server says what moved.** The fact: that a served subject moved. The
   webapp guesses it at many sites: a cadence per read (a descriptor's `cadence` on
@@ -1017,7 +984,7 @@ fixtures.
   24 h whenever no digest is kept for today, so the deploy that began recording sent "last 24 h … Nobody"
   at 22:53. The window must start where recording did, which no record holds yet.
 - **Left by the payer rule (2026-11-02)**:
-  - `quota.py::sends_on` raises `NoApiKeyError` for a provider no key pays, so `change-run-limits`
+  - `quota.py::sends_on` raises `NoApiKeyError` for a provider no key pays, so `set-limits`
     (`clamp_budget_change`) refuses a limit over a missing key. Action: `sends_on` is total (a no-key
     send's payer is `None`); `launch_refusal` refuses `NO_KEY`, and `coupon.py::keyed_client` is the one
     raise at send (today `provider_send` spells it again). **Re-test:** `git grep -n "NoApiKeyError(" -- promptpotter/application/jobs`.
@@ -1158,10 +1125,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `reason`. Action: the shelf holds `Refusal` values composed from one `PackRefusalKind` row each, in a
   re-key. **Rides with:** M4's re-key. **Re-test:**
   `git grep -nE "class PackRefusal\b" -- promptpotter` is empty.
-
-**C. One address resolved twice.** **Rides with:** M2.
-- `run_records.py::BankedSubject` is a second address. Action: the spend tombstone addresses by
-  `Subject`. **Re-test:** `git grep -n "BankedSubject" -- promptpotter`.
 
 **D. Spelled by hand beside the rows.** **Rides with:** the next read added.
 - `api/deps.py::read_input`'s pattern, `cli/parsers.py`' read help,

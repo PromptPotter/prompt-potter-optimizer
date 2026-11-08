@@ -41,7 +41,7 @@ test.afterAll(async ({ request }) => {
   outer = (await findOuter(request)) ?? outer;
   if (!outer) return;
   // Pausing the outer stops the inner too: it cannot outlive the process that spawned it.
-  const { status, body } = await command(request, "pause-cycle", {
+  const { status, body } = await command(request, "pause", {
     campaign_id: outer.id,
     cycle_id: outer.cycleId,
   });
@@ -121,7 +121,7 @@ test.describe("the recursion, end to end", () => {
           stopped = String(d?.stop_reason ?? "");
           if (!gated && /origin_gate/.test(blob)) {
             gated = true;
-            const ans = await command(request, "origin-gate-decision", {
+            const ans = await command(request, "origin-gate", {
               campaign_id: outer!.id,
               cycle_id: outer!.cycleId,
               decision: "proceed",

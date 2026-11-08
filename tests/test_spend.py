@@ -193,7 +193,6 @@ from promptpotter.domain.results import CycleResult
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
-    BankedSubject,
     ConfigOverrides,
     CycleSeed,
     CycleSeedRecord,
@@ -1166,8 +1165,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         shared_root=built_stores.shared_root,
         install_datasets_root=built_stores.install_datasets_root,
         research_datasets_root=None,
-        spawn_campaign_id=owner.campaign_id,
-        spawn_cycle_id=owner.cycle_id,
+        inside=(owner,),
         enclosing=(),
         cells=seats,
         purpose=Optimize(),
@@ -3524,7 +3522,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         bank_spend(
             workspace=stores.campaigns.workspace,
             cycle_dirs=[stores.campaigns.cycle_dir(retried_hop)],
-            subject=BankedSubject(campaign_id="camp-2", cycle_id=retried),
+            subject=stores.subject(retried_hop),
             metered={
                 meter: stores.campaigns.cycle_metered(retried_hop, meter)
                 for meter in get_args(CeilingMeter)

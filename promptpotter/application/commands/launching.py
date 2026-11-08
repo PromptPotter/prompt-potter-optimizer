@@ -52,13 +52,13 @@ from promptpotter.application.pipeline_resolve import (
     steer_verdict,
 )
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
+from promptpotter.domain.command_events import CommandEffect
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineSchema, narrowing_of
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
-    CommandEffect,
     ComparisonExit,
     CycleSeed,
     LaunchedEffect,

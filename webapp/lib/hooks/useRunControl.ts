@@ -26,7 +26,7 @@ interface RunControl {
 export function useRunControl(): RunControl | null {
   const { dash } = useViewedDashboard();
   const { viewedPath } = useWorkspace();
-  const cmd = useCommand<"pause-cycle" | "start-run">("run-control");
+  const cmd = useCommand<"pause" | "start-run">("run-control");
   const [pausing, setPausing] = useState(false);
 
   const runPhase = dash?.run_phase;
@@ -46,7 +46,7 @@ export function useRunControl(): RunControl | null {
     if (action === null) return;
     if (action === "pause") {
       setPausing(true);
-      void cmd.run("pause-cycle", () => commands["pause-cycle"](cycleAddress(viewedPath)));
+      void cmd.run("pause", () => commands["pause"](cycleAddress(viewedPath)));
       return;
     }
     // A paused cycle's worker has exited, so resume is a relaunch: the same branch as start.

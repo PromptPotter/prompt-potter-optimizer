@@ -250,7 +250,7 @@ function QueueTable({ queue }: { queue: MachineQueueEntry[] }) {
         <Button
           disabled={cmd.pending !== null}
           onClick={() =>
-            void cmd.run(q.job_id, () => commands["cancel-queued-run"]({ job_id: q.job_id }))
+            void cmd.run(q.job_id, () => commands["cancel-queued"]({ job_id: q.job_id }))
           }
         >
           {cmd.pending === q.job_id ? "Cancelling…" : "Cancel"}

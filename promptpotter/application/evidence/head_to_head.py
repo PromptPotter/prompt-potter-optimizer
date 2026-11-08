@@ -51,7 +51,6 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
-from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.statistics import bh_adjusted
@@ -570,7 +569,7 @@ def _campaign(entry: HeadToHeadEntry) -> Campaign:
 def _status(stores: Stores, campaign: Campaign) -> RunStatus:
     holder = stores.campaigns.line_holder(campaign.root_hop)
     index = stores.campaigns.load(holder, moment=None)
-    run = derive_run_state(stores.campaigns.cycle_dir(holder))
+    run = stores.run_state(holder)
     return RunStatus.of(
         run.run_phase,
         None if index is None else index.stop_reason,

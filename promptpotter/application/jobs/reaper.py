@@ -7,36 +7,21 @@ from pathlib import Path
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.phases import ProducerState
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.layout import (
+    campaigns_root_dir_for,
     inner_sandboxes_dir,
     read_sandbox_owner,
     tenant_workspace,
 )
+from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, tenant_stores
 from promptpotter.shared.errors import LedgerUnreadableError
 
 logger = logging.getLogger(__name__)
 
 # Scheduling only: what counts as dead has no clock in it.
 SWEEP_EVERY_S = 900.0
-
-
-def _tenant_root_of(cycle_dir: Path) -> WorkspaceDir:
-    """*cycle_dir* is `…/{tenant}/campaigns/{cid}/cycles/{cyid}`."""
-    return WorkspaceDir(cycle_dir.parents[3])
-
-
-def _store_for(cycle_dir: Path) -> CampaignStore:
-    return CampaignStore(_tenant_root_of(cycle_dir))
-
-
-def _sweep_roots(projects_root: Path) -> list[Path]:
-    """Each L4 inner sandbox is a projects-root-shaped tree, and none nests inside another."""
-    roots = [projects_root]
-    inner_dir = inner_sandboxes_dir(projects_root)
-    if inner_dir.is_dir():
-        roots.extend(p for p in inner_dir.iterdir() if p.is_dir())
-    return roots
 
 
 def reclaim_orphan_sandboxes(projects_root: Path) -> int:
@@ -66,20 +51,31 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
     return reclaimed
 
 
-def sweep_dead_cycles(projects_root: Path) -> int:
+def _reap(stores: Stores) -> int:
+    """Each cycle of *stores*, then each sandbox one of its cycles owns: none nests by path."""
     reaped = 0
-    for root in _sweep_roots(projects_root):
-        for ledger_path in root.glob("*/campaigns/*/cycles/*/.runtime/ledger.jsonl"):
-            cycle_dir = ledger_path.parent.parent
+    for campaign_id in stores.campaigns.list_campaign_ids():
+        for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign_id):
+            hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name)
             try:
-                vanished = _store_for(cycle_dir).mark_producer_vanished(
-                    CycleHop(campaign_id=cycle_dir.parents[1].name, cycle_id=cycle_dir.name)
-                )
+                silent = stores.run_state(hop).producer.state is ProducerState.SILENT
+                if silent and stores.campaigns.mark_producer_vanished(hop):
+                    stores.void_inbox(hop)
+                    reaped += 1
             except LedgerUnreadableError as refused:
                 # A refused cycle is no answer for the cycles after it: each is reaped on its own.
                 logger.warning("sweep left a refused cycle: %s", refused)
-                continue
-            reaped += vanished
+            if (inner := inner_sandbox_store(stores, campaign_id, cycle_dir.name)) is not None:
+                reaped += _reap(inner)
+    return reaped
+
+
+def sweep_dead_cycles(projects_root: Path) -> int:
+    reaped = sum(
+        _reap(tenant_stores(projects_root, WorkspaceDir(tenant)))
+        for tenant in sorted(projects_root.iterdir() if projects_root.is_dir() else ())
+        if campaigns_root_dir_for(WorkspaceDir(tenant)).is_dir()
+    )
     if reaped:
         logger.info("sweep stamped %d dead cycle(s) terminal", reaped)
     return reaped

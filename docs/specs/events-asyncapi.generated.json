@@ -165,7 +165,7 @@
             "items": {
               "discriminator": {
                 "mapping": {
-                  "origin-gate-decision": "#/components/schemas/GateAction",
+                  "origin-gate": "#/components/schemas/GateAction",
                   "submit-arms": "#/components/schemas/KeepDraftsAction"
                 },
                 "propertyName": "kind"
@@ -1109,36 +1109,6 @@
         "title": "BandedValue",
         "type": "object"
       },
-      "BankedCommand": {
-        "additionalProperties": false,
-        "description": "A cycle's trail line — a command, or the run's abnormal stop — banked before the cycle went.",
-        "properties": {
-          "at": {
-            "title": "At",
-            "type": "string"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "subject": {
-            "title": "Subject",
-            "type": "string"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "at",
-          "kind",
-          "subject",
-          "user_id"
-        ],
-        "title": "BankedCommand",
-        "type": "object"
-      },
       "BankedSpend": {
         "additionalProperties": false,
         "description": "One wallet's `UserSpend`, as a tombstone banks it.",
@@ -1177,6 +1147,26 @@
           "unreported_tokens"
         ],
         "title": "BankedSpend",
+        "type": "object"
+      },
+      "BankedStop": {
+        "additionalProperties": false,
+        "description": "A cycle's abnormal run stop, banked before the cycle went; its commands are the account log's.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "subject"
+        ],
+        "title": "BankedStop",
         "type": "object"
       },
       "BenchEnterView": {
@@ -1979,122 +1969,6 @@
         "title": "CellSetName",
         "type": "string"
       },
-      "CommandAckRecord": {
-        "additionalProperties": false,
-        "description": "``applied`` = it HAPPENED; a loop command is ``accepted`` first, and stays so if untaken.",
-        "properties": {
-          "command_id": {
-            "title": "Command Id",
-            "type": "string"
-          },
-          "detail": {
-            "default": "",
-            "title": "Detail",
-            "type": "string"
-          },
-          "effect": {
-            "discriminator": {
-              "mapping": {
-                "draft_opened": "#/components/schemas/DraftOpenedEffect",
-                "launched": "#/components/schemas/LaunchedEffect",
-                "none": "#/components/schemas/NoEffect",
-                "verify_saturated": "#/components/schemas/VerifySaturated"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/NoEffect"
-              },
-              {
-                "$ref": "#/components/schemas/DraftOpenedEffect"
-              },
-              {
-                "$ref": "#/components/schemas/LaunchedEffect"
-              },
-              {
-                "$ref": "#/components/schemas/VerifySaturated"
-              }
-            ],
-            "title": "Effect"
-          },
-          "record_type": {
-            "const": "command_ack",
-            "default": "command_ack",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "status": {
-            "enum": [
-              "accepted",
-              "applied",
-              "rejected"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "command_id",
-          "status",
-          "effect"
-        ],
-        "title": "CommandAckRecord",
-        "type": "object"
-      },
-      "CommandRecord": {
-        "additionalProperties": false,
-        "description": "``CommandDispatcher`` alone writes it, to the cycle's, its root's or the workspace ledger.",
-        "properties": {
-          "act_digest": {
-            "title": "Act Digest",
-            "type": "string"
-          },
-          "command_id": {
-            "title": "Command Id",
-            "type": "string"
-          },
-          "idempotency_key": {
-            "title": "Idempotency Key",
-            "type": "string"
-          },
-          "issued_by": {
-            "$ref": "#/components/schemas/Principal"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
-          },
-          "record_type": {
-            "const": "command",
-            "default": "command",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "command_id",
-          "kind",
-          "idempotency_key",
-          "act_digest",
-          "issued_by"
-        ],
-        "title": "CommandRecord",
-        "type": "object"
-      },
       "ComparisonExit": {
         "description": "An act that runs an arm off the comparison its head-to-head declared: admitted like on any\ncampaign, its event is the arm's exit (decisions.md § 0009).",
         "enum": [
@@ -2561,8 +2435,6 @@
             "backend_warning": "#/components/schemas/BackendWarningRecord",
             "bank_partition": "#/components/schemas/PartitionRecord",
             "campaign_ceiling": "#/components/schemas/CampaignCeilingRecord",
-            "command": "#/components/schemas/CommandRecord",
-            "command_ack": "#/components/schemas/CommandAckRecord",
             "cycle_final": "#/components/schemas/CycleFinalRecord",
             "cycle_minted": "#/components/schemas/CycleMintedRecord",
             "cycle_seed": "#/components/schemas/CycleSeedRecord",
@@ -2629,12 +2501,6 @@
           },
           {
             "$ref": "#/components/schemas/PricedKeyRecord"
-          },
-          {
-            "$ref": "#/components/schemas/CommandAckRecord"
-          },
-          {
-            "$ref": "#/components/schemas/CommandRecord"
           },
           {
             "$ref": "#/components/schemas/CycleFinalRecord"
@@ -3135,27 +3001,6 @@
           "ability"
         ],
         "type": "string"
-      },
-      "DraftOpenedEffect": {
-        "additionalProperties": false,
-        "description": "A check-in draft opened by upload, dataset or origin: the draft a retry under its key answers.",
-        "properties": {
-          "draft_id": {
-            "title": "Draft Id",
-            "type": "string"
-          },
-          "kind": {
-            "const": "draft_opened",
-            "default": "draft_opened",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "draft_id"
-        ],
-        "title": "DraftOpenedEffect",
-        "type": "object"
       },
       "Election": {
         "additionalProperties": false,
@@ -3722,7 +3567,7 @@
             "type": "string"
           },
           "kind": {
-            "const": "origin-gate-decision",
+            "const": "origin-gate",
             "title": "Kind",
             "type": "string"
           },
@@ -4397,61 +4242,6 @@
           "detail"
         ],
         "title": "LaunchReleasedRecord",
-        "type": "object"
-      },
-      "LaunchedEffect": {
-        "additionalProperties": false,
-        "description": "A launch, of any kind: each job it launched, in launch order, which a retry under its key\nanswers — after a job's record is reaped too.",
-        "properties": {
-          "kind": {
-            "const": "launched",
-            "default": "launched",
-            "title": "Kind",
-            "type": "string"
-          },
-          "launches": {
-            "items": {
-              "$ref": "#/components/schemas/LaunchedJob"
-            },
-            "title": "Launches",
-            "type": "array"
-          }
-        },
-        "required": [
-          "launches"
-        ],
-        "title": "LaunchedEffect",
-        "type": "object"
-      },
-      "LaunchedJob": {
-        "additionalProperties": false,
-        "description": "What a launch answers of one job it launched: the job, the cycle it holds or will (``None``\nwhere a queued mint names none yet) and the words every surface names it by.",
-        "properties": {
-          "hop": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CycleHop"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          },
-          "what": {
-            "title": "What",
-            "type": "string"
-          }
-        },
-        "required": [
-          "job_id",
-          "hop",
-          "what"
-        ],
-        "title": "LaunchedJob",
         "type": "object"
       },
       "LeftComparisonRecord": {
@@ -5218,20 +5008,6 @@
           }
         },
         "title": "NearMiss",
-        "type": "object"
-      },
-      "NoEffect": {
-        "additionalProperties": false,
-        "description": "An ack whose command names no effect beyond having happened.",
-        "properties": {
-          "kind": {
-            "const": "none",
-            "default": "none",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "title": "NoEffect",
         "type": "object"
       },
       "NodePrompt": {
@@ -6189,8 +5965,6 @@
               "bank_partition",
               "campaign_ceiling",
               "decision",
-              "command",
-              "command_ack",
               "cycle_final",
               "cycle_minted",
               "cycle_seed",
@@ -9207,28 +8981,15 @@
       },
       "TrailTombstoneRecord": {
         "additionalProperties": false,
-        "description": "On the WORKSPACE ledger, so deleting what was commanded cannot delete that it was.",
+        "description": "On the WORKSPACE ledger, so deleting a cycle cannot delete that its run stopped.",
         "properties": {
           "campaign_id": {
-            "default": "",
             "title": "Campaign Id",
             "type": "string"
-          },
-          "commands": {
-            "items": {
-              "$ref": "#/components/schemas/BankedCommand"
-            },
-            "title": "Commands",
-            "type": "array"
           },
           "cycle_id": {
             "default": "",
             "title": "Cycle Id",
-            "type": "string"
-          },
-          "draft_id": {
-            "default": "",
-            "title": "Draft Id",
             "type": "string"
           },
           "record_type": {
@@ -9237,13 +8998,21 @@
             "title": "Record Type",
             "type": "string"
           },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/BankedStop"
+            },
+            "title": "Stops",
+            "type": "array"
+          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
           }
         },
         "required": [
-          "commands"
+          "campaign_id",
+          "stops"
         ],
         "title": "TrailTombstoneRecord",
         "type": "object"
@@ -9615,32 +9384,6 @@
           "held_absent"
         ],
         "title": "VerifyReading",
-        "type": "object"
-      },
-      "VerifySaturated": {
-        "additionalProperties": false,
-        "description": "A verify that bought nothing: every sample of the candidate's search split was already\nmeasured for its config. Its answer, and the effect a retry under its key answers.",
-        "properties": {
-          "already_measured": {
-            "title": "Already Measured",
-            "type": "integer"
-          },
-          "dataset_name": {
-            "title": "Dataset Name",
-            "type": "string"
-          },
-          "kind": {
-            "const": "verify_saturated",
-            "default": "verify_saturated",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "dataset_name",
-          "already_measured"
-        ],
-        "title": "VerifySaturated",
         "type": "object"
       },
       "ViewAnchors": {

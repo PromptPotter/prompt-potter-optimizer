@@ -16,7 +16,7 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
@@ -505,21 +505,6 @@ class PricedKeyRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class BankedSubject(NamedTuple):
-    """What a tombstone banks: a campaign, one of its cycles, or a draft that never minted one."""
-
-    campaign_id: str = ""
-    cycle_id: str = ""
-    draft_id: str = ""
-
-
-def _one_subject(subject: BankedSubject) -> None:
-    if bool(subject.campaign_id) is bool(subject.draft_id):
-        raise ValueError("a tombstone banks a campaign (or its cycle) or a draft, exactly one")
-    if subject.cycle_id and not subject.campaign_id:
-        raise ValueError("a banked cycle names its campaign")
-
-
 class BankedSpend(FrozenModel):
     """One wallet's `UserSpend`, as a tombstone banks it."""
 
@@ -556,39 +541,31 @@ class SpendTombstoneRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
-    def subject(self) -> BankedSubject:
-        return BankedSubject(self.campaign_id, self.cycle_id)
+    def subject(self) -> Subject:
+        return Subject(self.campaign_id, self.cycle_id)
 
 
-class BankedCommand(FrozenModel):
-    """A cycle's trail line — a command, or the run's abnormal stop — banked before the cycle went."""
+class BankedStop(FrozenModel):
+    """A cycle's abnormal run stop, banked before the cycle went; its commands are the account log's."""
 
     at: str
-    kind: str
-    # The campaign and cycle it addressed, as the trail read it before they went.
+    # The campaign and cycle it stopped, as the trail read it before they went, then why.
     subject: str
-    user_id: str
 
 
 class TrailTombstoneRecord(FrozenModel):
-    """On the WORKSPACE ledger, so deleting what was commanded cannot delete that it was."""
+    """On the WORKSPACE ledger, so deleting a cycle cannot delete that its run stopped."""
 
     record_type: Literal["trail_tombstone"] = "trail_tombstone"
-    campaign_id: str = ""
+    campaign_id: str
     # Empty for a whole-campaign bank.
     cycle_id: str = ""
-    draft_id: str = ""
-    commands: tuple[BankedCommand, ...]
+    stops: tuple[BankedStop, ...]
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
-    def subject(self) -> BankedSubject:
-        return BankedSubject(self.campaign_id, self.cycle_id, self.draft_id)
-
-    @model_validator(mode="after")
-    def _one(self) -> TrailTombstoneRecord:
-        _one_subject(self.subject)
-        return self
+    def subject(self) -> Subject:
+        return Subject(self.campaign_id, self.cycle_id)
 
 
 class LLMCallStartRecord(FrozenModel):
@@ -687,23 +664,6 @@ class AccountEventRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-CommandAckStatus = Literal["accepted", "applied", "rejected"]
-
-
-class CommandRecord(FrozenModel):
-    """``CommandDispatcher`` alone writes it, to the cycle's, its root's or the workspace ledger."""
-
-    record_type: Literal["command"] = "command"
-    command_id: str
-    kind: str
-    payload: dict[str, Any] = Field(default_factory=dict)
-    idempotency_key: str
-    # `CommandPayload.recorded`: the act its key names, the fields `payload` leaves out included.
-    act_digest: str
-    issued_by: Principal
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
 class NoEffect(FrozenModel):
     """An ack whose command names no effect beyond having happened."""
 
@@ -761,22 +721,6 @@ VERIFY_WORDS: Worded[VerifyWord, str] = Worded(
         "this config ({already_measured} total). Nothing to add.",
     }
 )
-
-
-CommandEffect = Annotated[
-    NoEffect | DraftOpenedEffect | LaunchedEffect | VerifySaturated, Field(discriminator="kind")
-]
-
-
-class CommandAckRecord(FrozenModel):
-    """``applied`` = it HAPPENED; a loop command is ``accepted`` first, and stays so if untaken."""
-
-    record_type: Literal["command_ack"] = "command_ack"
-    command_id: str
-    status: CommandAckStatus
-    detail: str = ""
-    effect: CommandEffect
-    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 # A halt is its `StopReason`, and an outcome the loop decided is a field of the record of its step.
@@ -1312,8 +1256,6 @@ CycleRecord = Annotated[
     | CampaignCeilingRecord
     | FlightRecord
     | PricedKeyRecord
-    | CommandAckRecord
-    | CommandRecord
     | CycleFinalRecord
     | CycleMintedRecord
     | CycleSeedRecord

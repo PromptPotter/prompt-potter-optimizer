@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -8,9 +8,12 @@ from promptpotter.config import paths
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject, WorkspaceDir
+from promptpotter.domain.phases import RunState
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.command_log import CommandLog, Controls
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -24,7 +27,6 @@ from promptpotter.infrastructure.store.io import validate_path_component, write_
 from promptpotter.infrastructure.store.layout import (
     ArchiveHome,
     archive_home,
-    in_inner_sandbox,
     inner_sandbox_dir,
     tenant_workspace,
 )
@@ -39,7 +41,7 @@ from promptpotter.infrastructure.store.wallet_store import (
     TenantApiKeyStore,
 )
 from promptpotter.shared.errors import BadRequestError, NotFoundError
-from promptpotter.shared.identity import IdentityContext, TenantId
+from promptpotter.shared.identity import IdentityContext, TenantId, default_identity
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,10 @@ class Stores:
     grant: GrantStore
     api_keys: TenantApiKeyStore
     charges: ChargeBook
+    # The account's, shared by every sandbox under it: what was asked, of every subject.
+    commands: CommandLog
+    # The L4 sandbox chain this store sits in, outermost first: ``()`` is the account's own.
+    inside: CyclePath = ()
 
     @property
     def tenant_id(self) -> TenantId:
@@ -85,7 +91,21 @@ class Stores:
     @property
     def inner(self) -> bool:
         """An L4 inner run's sandbox: every cycle under it answers every run verb for itself."""
-        return in_inner_sandbox(self.projects_root)
+        return bool(self.inside)
+
+    def subject(self, hop: CycleHop) -> Subject:
+        return Subject.of((*self.inside, hop))
+
+    def inbox(self, hop: CycleHop) -> Controls:
+        return self.commands.book().controls(self.subject(hop))
+
+    def run_state(self, hop: CycleHop) -> RunState:
+        state = derive_run_state(self.campaigns.cycle_dir(hop), self.inbox(hop))
+        return state._replace(inner=self.inner)
+
+    def void_inbox(self, hop: CycleHop) -> None:
+        """A run boundary: what the cycle's loop was asked and never took stands no more."""
+        self.commands.void(self.subject(hop), f"run boundary of {hop.cycle_id}")
 
     def write_own_definition(
         self,
@@ -166,7 +186,13 @@ def build_stores(
         grant=GrantStore(account),
         api_keys=TenantApiKeyStore(account),
         charges=ChargeBook(account),
+        commands=CommandLog(account),
     )
+
+
+def tenant_stores(projects_root: Path, workspace: WorkspaceDir) -> Stores:
+    """A tenant dir's Stores, as the CLI's `--tenant` builds them: no `user.json` asked."""
+    return build_stores(default_identity(tenant_id=workspace.name), projects_root=projects_root)
 
 
 def inner_sandbox_store(
@@ -180,12 +206,16 @@ def inner_sandbox_store(
     )
     if not (sandbox_root / stores.tenant_id).is_dir():
         return None
-    return build_stores(
+    built = build_stores(
         stores.identity,
         projects_root=sandbox_root,
         install_datasets_root=stores.install_datasets_root,
         research_datasets_root=stores.research_datasets_root,
         shared_root=stores.shared_root,
+    )
+    return replace(
+        built,
+        inside=(*stores.inside, CycleHop(campaign_id=outer_campaign_id, cycle_id=outer_cycle_id)),
     )
 
 

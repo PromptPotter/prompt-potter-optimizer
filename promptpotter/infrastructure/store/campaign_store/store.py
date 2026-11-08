@@ -20,13 +20,12 @@ from promptpotter.domain.campaign import (
 )
 from promptpotter.domain.campaign_config import LaidSpan
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.export import PromptExport, parse_prompt_export
-from promptpotter.domain.phases import ErrorRecord, LaunchStage, ProducerState, StopReason
+from promptpotter.domain.phases import ErrorRecord, LaunchStage, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.run_records import (
-    BankedSubject,
     CampaignCeilingRecord,
     ComparisonExit,
     CycleFinal,
@@ -68,7 +67,7 @@ from promptpotter.infrastructure.projections.cycle_index import (
 )
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.runtime_flags import (
-    derive_run_state,
+    producer_attached,
     run_state_stamps,
     standing_budget,
 )
@@ -368,7 +367,7 @@ class CampaignStore:
             return []
         attached: list[str] = []
         for cdir in sorted(p for p in cycles_dir.iterdir() if p.is_dir()):
-            if derive_run_state(cdir).producer.attached:
+            if producer_attached(cdir):
                 attached.append(cdir.name)
         return attached
 
@@ -418,7 +417,7 @@ class CampaignStore:
         bank_before_removal(
             workspace=self._base_dir,
             cycle_dirs=cycle_dirs,
-            subject=BankedSubject(campaign_id=campaign_id, cycle_id=cycle_id),
+            subject=Subject(campaign_id, cycle_id),
             metered=metered,
         )
 
@@ -595,10 +594,10 @@ class CampaignStore:
             self.layout(hop).export, lambda raw: parse_prompt_export(raw.decode()), FileKind.EXPORT
         )
 
-    def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> None:
+    def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> bool:
         # The relation always lands; the ending only where none stands, or it replaces why it ended.
         self._append(hop, CycleSupersededRecord(successor_cycle_id=successor_cycle_id))
-        self._declare_ended(hop, StopReason.REBASED)
+        return self._declare_ended(hop, StopReason.REBASED)
 
     def line(self, hop: CycleHop, *, moment: Moment | None = None) -> list[CycleHop]:
         """The supersede chain from *hop*; *moment* walks it as it stood then."""
@@ -680,8 +679,6 @@ class CampaignStore:
             producer_lock.release(lock)
 
     def mark_producer_vanished(self, hop: CycleHop) -> bool:
-        if derive_run_state(self.cycle_dir(hop)).producer.state is not ProducerState.SILENT:
-            return False
         return self._declare_ended(hop, StopReason.PRODUCER_VANISHED)
 
     def enumerate_cycles(self) -> list[tuple[CycleHop, CycleIndex]]:
@@ -696,7 +693,7 @@ class CampaignStore:
         cycle_dir = self.cycle_dir(hop)
         if self.load(hop, moment=None) is None:
             return "not on disk"
-        if derive_run_state(cycle_dir).producer.attached:
+        if producer_attached(cycle_dir):
             return "a producer holds it — pause it or let it end first"
         if root_cycle_id(hop.cycle_id) == hop.cycle_id:
             return "family root — deletion is for sibling stubs only"

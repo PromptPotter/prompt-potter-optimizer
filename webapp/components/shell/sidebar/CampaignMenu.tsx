@@ -33,7 +33,7 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
     setRenaming(false);
     // `""` is a real value: it clears the label back to the dataset-name fallback.
     void cmd.run("rename", () =>
-      commands["set-campaign-label"]({
+      commands["rename-campaign"]({
         campaign_id: campaign.address,
         label: draft.trim(),
       }),

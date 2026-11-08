@@ -27,7 +27,7 @@ One definition, `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, from which `OWNER_CO
 
 **Ownership within a tenant is one rule:** `stores.py::owned_campaign` returns the campaign iff it exists and is the caller's, else `NotFoundError`; `read_params.py::OriginsParams` alone is tenant-scoped (a CLI-minted campaign's owner differs from a browser session's `user_id`).
 
-**A block pack is the install's or one account's, and only an account's is written** (`config/paths.py::block_packs_root` read-only; `Stores.block_packs` per account; a name both hold is refused). **All writes** flow through one `CommandDispatcher`, stamping `issued_by` (`shared/identity.py::Principal`) on a `CommandRecord`.
+**A block pack is the install's or one account's, and only an account's is written** (`config/paths.py::block_packs_root` read-only; `Stores.block_packs` per account; a name both hold is refused). **All writes** flow through one `CommandDispatcher`, stamping `issued_by` (`shared/identity.py::Principal`) on a `CommandRecord` filed on the account's command log.
 
 ## loop ↔ everything — OS privilege
 
@@ -61,4 +61,4 @@ The scarce things — the provider's rate limit and the host's wallet — are ex
 | Accounts the box holds | `Settings.MAX_ACCOUNTS` (`accounts_full`) | no |
 | Requests one principal may send, a free verb's included | `quota.py::refuse_request_rate` at each request's one entry (`deps.py::open_caller` on a session mount, `host_surface.py::HostSession` for a host): a `command_kinds.py::ReadKind` row draws a read bucket sized above the webapp's polls, every other row the write one; the host exempt (429 `rate_limited`) | no |
 
-A throttle is logged, never banked (`quota.py::RateLimitedError`). **The first gate WAITS; the third refuses.** A full machine queues the launch (`JobRegistry.request_slot`), drained least-served-first, bounded by `Settings.QUEUE_MAX_WAIT_S`; `cancel-queued-run` withdraws a launch, only by the principal that launched it (`shared/identity.py::acting_principal`). `machine-status` names only the caller's slots unless `MACHINE_STATUS_SCOPE=all`. The memory guard is the unit's `MemoryMax`.
+A throttle is logged, never banked (`quota.py::RateLimitedError`). **The first gate WAITS; the third refuses.** A full machine queues the launch (`JobRegistry.request_slot`), drained least-served-first, bounded by `Settings.QUEUE_MAX_WAIT_S`; `cancel-queued` withdraws a launch, only by the principal that launched it (`shared/identity.py::acting_principal`). `machine-status` names only the caller's slots unless `MACHINE_STATUS_SCOPE=all`. The memory guard is the unit's `MemoryMax`.

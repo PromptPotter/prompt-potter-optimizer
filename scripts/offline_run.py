@@ -84,6 +84,7 @@ from promptpotter.domain.campaign_config import (
     OptimizationConfig,
     OptimizerChoice,
 )
+from promptpotter.domain.command_events import WORKSPACE_SUBJECT, CommandRecord, subject_key
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     ForkCyclePayload,
@@ -103,7 +104,7 @@ from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
-from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.runtime_flags import producer_attached
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
@@ -609,7 +610,7 @@ def forked_at_init(stores: Stores, parent: CycleHop, fork: CycleHop) -> None:
     ]
     if [r["spend"] is not None for r in rebased] != [True]:
         raise SystemExit(f"offline run: the parent ended on {rebased}, not one REBASED with spend")
-    if derive_run_state(layout.cycle_dir).producer.attached:
+    if producer_attached(layout.cycle_dir):
         raise SystemExit("offline run: the fork left its parent's producer lock held")
     last = layout.readout.read_text(encoding="utf-8").rstrip().splitlines()[-1]
     if fork.cycle_id not in last:
@@ -983,17 +984,13 @@ def run_terminal(
     campaign_runner.main()
 
 
-def _commands(ledger: Path) -> dict[str, list[dict[str, Any]]]:
-    records = _jsonl(ledger)
-    applied = {
-        r["command_id"]
-        for r in records
-        if r.get("record_type") == "command_ack" and r.get("status") == "applied"
-    }
+def _commands(stores: Stores, subject: str) -> dict[str, list[dict[str, Any]]]:
+    """The payloads of what *subject* was commanded and applied, by kind, off the account's log."""
+    book = stores.commands.book()
     out: dict[str, list[dict[str, Any]]] = {}
-    for r in records:
-        if r.get("record_type") == "command" and r["command_id"] in applied:
-            out.setdefault(r["kind"], []).append(r["payload"])
+    for r in book.subject_events(subject):
+        if isinstance(r, CommandRecord) and book.status[r.command_id] == "applied":
+            out.setdefault(r.kind, []).append(r.payload)
     return out
 
 
@@ -1003,20 +1000,23 @@ def interrupted(
     workspace.mkdir()
     if (rc := spawn_terminal(workspace, "new", interrupts)) != StopOutcome.PAUSED.exit_code:
         return False, f"`new` under {interrupts} SIGINT exited {rc}, not as a pause does"
-    (cycle,) = (Path(long_path(workspace)) / "projects").glob("*/campaigns/*/cycles/*")
-    stopped = derive_run_state(cycle)
+    stores = build_stores(default_identity(), projects_root=Path(long_path(workspace)) / "projects")
+    (campaign_id,) = stores.campaigns.list_campaign_ids()
+    (cycle,) = stores.campaigns.campaign_cycle_dirs(campaign_id)
+    hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle.name)
+    stopped = stores.run_state(hop)
     jobs = [json.loads(p.read_text(encoding="utf-8")) for p in (workspace / "jobs").glob("*.json")]
     if stopped.producer.attached or any(j["released_at"] is None for j in jobs):
         return False, f"`new` exited 130 still holding its cycle or its slot ({stopped})"
     if interrupts == 1 and stopped.run_phase is not RunPhase.PAUSED:
         return False, f"one SIGINT left the cycle {stopped.run_phase}, not paused"
-    (mint,) = _commands(cycle.parents[3] / ".workspace" / "events.jsonl")["mint-campaign"]
+    (mint,) = _commands(stores, WORKSPACE_SUBJECT)["mint-campaign"]
     if not mint["campaign_config"]:
         return False, f"the mint-campaign record carries no config: {sorted(mint)}"
     if rc := spawn_terminal(workspace, "resume", 0):
         return False, f"`resume` after {interrupts} SIGINT exited {rc}"
-    ended = derive_run_state(cycle)
-    started = _commands(cycle / ".runtime" / "ledger.jsonl").get("start-run", [])
+    ended = stores.run_state(hop)
+    started = _commands(stores, subject_key(stores.subject(hop))).get("start-run", [])
     if ended.run_phase is not RunPhase.TERMINAL or len(started) != 1:
         return False, f"`resume` left the cycle {ended.run_phase} on {len(started)} start-run"
     return True, f"exit 130 {stopped.run_phase}, slot released; `resume` ran it to its end"

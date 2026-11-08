@@ -31,14 +31,18 @@ from typing import Any, cast, override
 
 import pytest
 from factories import (
+    PROMPT_INFO,
     SANDBOX_CAMPAIGN,
     arm_state,
     close_round,
     cycle_result,
     inner_sandbox,
+    loop_session,
     minted_campaign,
     optimizer_state,
+    pipeline_schema,
     round_result,
+    samples,
     seat,
     stored_campaign,
     workspace,
@@ -54,7 +58,7 @@ from starlette.types import Message, Receive, Scope, Send
 from promptpotter.application import account, health, site_records
 from promptpotter.application.app_visits import APP_VISITS
 from promptpotter.application.caller import Caller
-from promptpotter.application.commands import measuring
+from promptpotter.application.commands import draft_editing, measuring
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import cycle_target
 from promptpotter.application.cycle_files import FileScope, read_cycle_file
@@ -72,11 +76,13 @@ from promptpotter.application.jobs import quota
 from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.launcher import launch as launcher_launch
 from promptpotter.application.jobs.launcher.admission import (
+    PassStoppedError,
     paid_pass,
     request_jobs,
     withdraw_queued,
 )
 from promptpotter.application.jobs.machine_status import machine_status
+from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import library
@@ -94,34 +100,47 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     unplaceable_edit,
 )
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
+from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import block_packs_root, default_projects_root
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
-from promptpotter.domain.campaign_config import OptimizerChoice
+from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.checkin_draft import DatasetBasis
+from promptpotter.domain.command_events import WORKSPACE_SUBJECT, CommandAckRecord, CommandRecord
 from promptpotter.domain.command_kinds import (
     BankSnippetPayload,
     CancelQueuedRunPayload,
     CommandKind,
+    DeleteCampaignPayload,
+    DeleteCyclePayload,
+    DiscardDraftPayload,
+    EditDraftCampaignPayload,
     MintCampaignPayload,
+    PauseCyclePayload,
     ReadKind,
+    SkipSearchpointPayload,
     StartRunPayload,
+    VerifyCandidatePayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
+from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.job import JOB_ADAPTER, CampaignLaunch, Job, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
+    INNER_PAUSE_REFUSAL,
     PRODUCER_STATE_INFO,
+    RUN_PHASE_INFO,
     ProducerState,
     RunPhase,
     StopReason,
 )
-from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.prompt_block import (
     ACCOUNT_PACK,
     Authored,
@@ -132,7 +151,7 @@ from promptpotter.domain.prompt_block import (
 )
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
-from promptpotter.domain.run_records import CommandRecord, RunPhaseRecord, RunWiringRecord
+from promptpotter.domain.run_records import RunPhaseRecord, RunWiringRecord
 from promptpotter.domain.said import Said, pins
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
@@ -163,9 +182,11 @@ from promptpotter.infrastructure.identity.provider_config import (
 from promptpotter.infrastructure.identity.session import OIDCSessionStore, SessionData
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
-from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.runtime_flags import derive_run_state, producer_attached
 from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs
-from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_jsonl
+from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
+from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
+from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_jsonl, write_yaml
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
@@ -183,7 +204,7 @@ from promptpotter.infrastructure.store.site_records import (
     SiteRecordStore,
     default_site_record_store,
 )
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.infrastructure.store.user_store import (
     CONSENT_FILE,
     User,
@@ -215,6 +236,7 @@ from promptpotter.shared.errors import (
     FileUnreadableError,
     IdempotencyKeyReusedError,
     NotFoundError,
+    PayloadInvalidError,
     PotterError,
     ServiceUnavailableError,
     TaskUncancellableError,
@@ -826,7 +848,7 @@ async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) 
 
     def label() -> Any:
         return browser.post(
-            f"/api/v1/commands/{CommandKind.SET_CAMPAIGN_LABEL}",
+            f"/api/v1/commands/{CommandKind.RENAME_CAMPAIGN}",
             json={"campaign_id": "nobody", "label": "x"},
             headers={"Idempotency-Key": uuid.uuid4().hex},
         )
@@ -1178,30 +1200,31 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     stores = workspace(tmp_path, identity)
     account.accept_terms(stores, TERMS_VERSION)
 
-    def command(kind: str, at: str) -> CommandRecord:
+    def command(kind: str, at: str, subject: str) -> CommandRecord:
         return CommandRecord(
             command_id=kind,
             kind=kind,
             idempotency_key=kind,
             act_digest=kind,
             issued_by=SYSTEM_PRINCIPAL,
+            subject=subject,
             timestamp=at,
         )
 
-    # One before every account event and one after, on two ledgers: only a merge by time places both.
+    # One before every account event and one after, on two subjects: only a merge by time places both.
     trail_hop = CycleHop(campaign_id="camp-trail", cycle_id="cycle_trail0000000")
     stores.campaigns.create_campaign(minted_campaign(trail_hop))
     stores.campaigns.mint_cycle(trail_hop)
-    CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(trail_hop))).append(
-        command("start-run", "2000-01-01T00:00:00Z")
+    stores.commands.append(
+        command("start-run", "2000-01-01T00:00:00Z", stores.subject(trail_hop).key),
+        command("mint-campaign", "2999-01-01T00:00:00Z", WORKSPACE_SUBJECT),
     )
-    CycleEventLog.open_workspace(stores.base_dir).append(
-        command("mint-campaign", "2999-01-01T00:00:00Z")
-    )
-    # A third ledger, off the workspace tree: the campaign's inner sandbox.
+    # A third subject, off the workspace tree: a cycle of the campaign's inner sandbox.
     sandbox = inner_sandbox(stores, trail_hop.campaign_id, trail_hop.cycle_id)
     (inner_cycle,) = sandbox_cycle_dirs(sandbox)
-    CycleEventLog.open(CycleDir(inner_cycle)).append(command("inner-run", "1999-01-01T00:00:00Z"))
+    inner_hop = CycleHop(campaign_id=inner_cycle.parent.parent.name, cycle_id=inner_cycle.name)
+    inner_subject = Subject.of((trail_hop, inner_hop)).key
+    stores.commands.append(command("inner-run", "1999-01-01T00:00:00Z", inner_subject))
     inner_line = ("inner-run", f"camp-trail>{inner_cycle.parent.parent.name}/{inner_cycle.name}")
     trail = account.tenant_trail(stores)
     assert trail.lines[0][1:3] == inner_line, "what ran in a campaign's inner sandbox left no line"
@@ -1264,8 +1287,8 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         hop = CycleHop(campaign_id=campaign_id, cycle_id="cycle_survey000000")
         stores.campaigns.create_campaign(minted_campaign(hop))
         stores.campaigns.mint_cycle(hop)
-        CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))).append(
-            command(f"run-{campaign_id}", "2001-01-01T00:00:00Z")
+        stores.commands.append(
+            command(f"run-{campaign_id}", "2001-01-01T00:00:00Z", stores.subject(hop).key)
         )
     torn = CampaignLayout(stores.campaigns.campaign_root_dir("camp-torn")).manifest
     held_manifest = torn.read_bytes()
@@ -1310,6 +1333,16 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     campaigns.mint_cycle(hop)
     cycle_dir = campaigns.cycle_dir(hop)
 
+    def attached_alike() -> None:
+        # Attachment reads no command: a standing pause moves it for no cycle, held, claimed or free.
+        asked = Controls(pause=PauseAsk("pause", acting_principal(built_stores.identity), "now"))
+        held = built_stores.run_state(hop).producer.attached
+        assert (
+            producer_attached(cycle_dir)
+            is held
+            is derive_run_state(cycle_dir, asked).producer.attached
+        )
+
     def delete_refused() -> None:
         assert campaigns.attached_cycle_ids(hop.campaign_id) == [hop.cycle_id], (
             "a delete or archive was let past a cycle its producer still holds"
@@ -1321,7 +1354,8 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
     )
     assert job.queued
-    claimed = derive_run_state(cycle_dir)
+    claimed = built_stores.run_state(hop)
+    attached_alike()
     assert (claimed.run_phase, claimed.producer.state) == (RunPhase.QUEUED, ProducerState.CLAIMED)
     assert claimed.producer.attached and not claimed.resumable
     assert claimed.pause_refusal, "a queued launch was offered a pause no loop can take"
@@ -1338,7 +1372,8 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert withdraw_queued(built_stores, registry, job.job_id, principal_id=job.principal_id), (
         "the launch's own principal could not withdraw it"
     )
-    assert not derive_run_state(cycle_dir).producer.attached, "a withdrawn launch held its cycle"
+    assert not built_stores.run_state(hop).producer.attached, "a withdrawn launch held its cycle"
+    attached_alike()
     assert campaigns.attached_cycle_ids(hop.campaign_id) == [], (
         "a withdrawn launch refused a delete"
     )
@@ -1364,7 +1399,8 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     ledger = CycleLayout(cycle_dir).ledger
     hold_cycle(cycle_dir)
     os.utime(ledger, (0, 0))
-    quiet = derive_run_state(cycle_dir).producer
+    quiet = built_stores.run_state(hop).producer
+    attached_alike()
     assert (quiet.state, quiet.attached) == (ProducerState.WEDGED, True)
     # A wedge is read against the clock: the dashboard pins it, the listing a 304 answers never does.
     dash = served_dashboard(built_stores, hop)
@@ -1386,7 +1422,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     # A terminal's act by an id prefix reports the campaign it acted on, never the typed prefix.
     prefix = SANDBOX_CAMPAIGN.split("__")[0]
     renamed = await cmd_command(
-        argparse.Namespace(command="rename", campaign_id=prefix, label="held", tenant=None)
+        argparse.Namespace(command="rename-campaign", campaign_id=prefix, label="held", tenant=None)
     )
     assert renamed.data is not None and renamed.data["campaign_id"] == SANDBOX_CAMPAIGN, (
         "a terminal's act by an id prefix recorded the prefix as what it acted on"
@@ -1423,7 +1459,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     # A fresh heartbeat with no lock held is still dead.
     release_cycle(cycle_dir)
     os.utime(ledger)
-    gone = derive_run_state(cycle_dir).producer
+    gone = built_stores.run_state(hop).producer
     assert (gone.state, gone.attached) == (ProducerState.SILENT, False)
     assert sweep_dead_cycles(built_stores.projects_root) == 1
     swept = campaigns.load(hop, moment=None)
@@ -1431,11 +1467,11 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert sweep_dead_cycles(built_stores.projects_root) == 0, "one dead producer was swept twice"
     # A finished run still writing its last files holds the cycle against a delete.
     hold_cycle(cycle_dir)
-    finishing = derive_run_state(cycle_dir)
+    finishing = built_stores.run_state(hop)
     assert (finishing.run_phase, finishing.producer.attached) == (RunPhase.TERMINAL, True)
     delete_refused()
     release_cycle(cycle_dir)
-    ended = derive_run_state(cycle_dir)
+    ended = built_stores.run_state(hop)
     assert (ended.run_phase, ended.producer.state) == (RunPhase.TERMINAL, ProducerState.ABSENT)
     # Only a producer that stopped appending while it still owes the run pins a line.
     for state in ProducerState:
@@ -1605,6 +1641,332 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         check=False,
     )
     assert fresh.returncode == 0, f"a fresh process could not prove a banked state: {fresh.stderr}"
+
+
+# 5. The command state machine
+
+
+async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_and_its_owners_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each row is a state a command reaches and the event that put it there, read off the
+    account's log: its status, a retry's answer under its key, and its acks. Deleting or moving
+    what it was filed on moves nothing of it, and an ended status never moves again."""
+    stores = workspace(tmp_path)
+    sender = CommandDispatcher(stores)
+    acts_hop = CycleHop(campaign_id="acts", cycle_id="cycle_acts")
+    stores.campaigns.create_campaign(minted_campaign(acts_hop))
+    stores.campaigns.mint_cycle(acts_hop)
+    acts: dict[str, Callable[[], Awaitable[object]]] = {}
+
+    async def _replayed(_: object) -> None:
+        return None
+
+    async def _acting(dispatched: Any) -> Any:
+        named = getattr(dispatched.payload, "candidate_id", "settings")
+        return Applier(acts[named], replay=_replayed)
+
+    monkeypatch.setattr(measuring, "verify_candidate", _acting)
+
+    async def _returns() -> None:
+        return None
+
+    def verify(key: str, hop: CycleHop = acts_hop) -> CommandCall[Any]:
+        payload = VerifyCandidatePayload(
+            campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, candidate_id=key
+        )
+        return CommandCall(payload, key)
+
+    def first(key: str) -> str | None:
+        book = stores.commands.book()
+        return next((c for c, r in book.filed.items() if r.idempotency_key == key), None)
+
+    def folded(key: str) -> tuple[str, int]:
+        """Its status and its acks, as the log folds them."""
+        book, command_id = stores.commands.book(), first(key)
+        if command_id is None:
+            return "-", 0
+        acked = sum(
+            isinstance(e, CommandAckRecord) and e.command_id == command_id
+            for events in book.events.values()
+            for e in events
+        )
+        return book.status[command_id], acked
+
+    async def retried(key: str, call: CommandCall[Any] | None) -> str:
+        if call is None:
+            return "-"
+        acts[key], filed = _returns, first(key)
+        try:
+            got = await sender.dispatch(call)
+        except PotterError as refused:
+            return type(refused).__name__
+        return "replayed" if got.accepted.command_id == filed else "re-filed"
+
+    table: dict[tuple[str, str], tuple[str, str, int]] = {}
+
+    async def seen(row: tuple[str, str], key: str, call: CommandCall[Any] | None) -> None:
+        status, acked = folded(key)
+        table[row] = (status, await retried(key, call), acked)
+
+    acts["done"] = _returns
+    await sender.dispatch(verify("done"))
+    await seen(("applied", "act returned"), "done", verify("done"))
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def _midway() -> None:
+        started.set()
+        await release.wait()
+
+    acts["alive"] = _midway
+    flight = asyncio.ensure_future(sender.dispatch(verify("alive")))
+    await started.wait()
+    await seen(("filed", "its act runs"), "alive", verify("alive"))
+    release.set()
+    await flight
+
+    real_append = CommandLog.append
+
+    def _record_cut(log: CommandLog, *rows: Any) -> None:
+        if any(isinstance(r, CommandRecord) and r.idempotency_key == "cut" for r in rows):
+            raise OSError("disk gone at the filing")
+        real_append(log, *rows)
+
+    acts["cut"] = _returns
+    with monkeypatch.context() as cut:
+        cut.setattr(CommandLog, "append", _record_cut)
+        with pytest.raises(OSError):
+            await sender.dispatch(verify("cut"))
+    await seen(("unfiled", "its filing raised"), "cut", verify("cut"))
+
+    started, release = asyncio.Event(), asyncio.Event()
+    acts["cancelled"] = _midway
+    flight = asyncio.ensure_future(sender.dispatch(verify("cancelled")))
+    await started.wait()
+    flight.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await flight
+    await seen(("cancelled", "its call cancelled mid-act"), "cancelled", verify("cancelled"))
+
+    async def _interrupted() -> None:
+        raise KeyboardInterrupt
+
+    async def _exited() -> None:
+        raise SystemExit(1)
+
+    async def _blank() -> None:
+        raise RuntimeError
+
+    for name, raised, act in (
+        ("interrupted", KeyboardInterrupt, _interrupted),
+        ("exited", SystemExit, _exited),
+        ("blank", RuntimeError, _blank),
+    ):
+        acts[name] = act
+        with pytest.raises(raised):
+            await sender.dispatch(verify(name))
+        await seen(("ended", f"{raised.__name__} left its act"), name, verify(name))
+
+    # Its owner deleted or moved: the log is the account's, so nothing of the command moves.
+    def standing(key: str) -> tuple[object, ...]:
+        book, command_id = stores.commands.book(), first(key)
+        assert command_id is not None
+        return book.filed[command_id], book.status[command_id], folded(key)
+
+    for campaign_id, keep in (("kept", True), ("dropped", False)):
+        owner = CycleHop(campaign_id=campaign_id, cycle_id=f"cycle_{campaign_id}")
+        stores.campaigns.create_campaign(minted_campaign(owner))
+        stores.campaigns.mint_cycle(owner)
+        acts[campaign_id] = _returns
+        await sender.dispatch(verify(campaign_id, owner))
+        before = standing(campaign_id)
+        await sender.dispatch(
+            CommandCall(DeleteCampaignPayload(campaign_id=campaign_id, keep_results=keep))
+        )
+        assert standing(campaign_id) == before, f"deleting {campaign_id} moved its command"
+        await seen(
+            ("applied", f"its campaign deleted, keep_results={keep}"),
+            campaign_id,
+            verify(campaign_id, owner),
+        )
+
+    stub = CycleHop(campaign_id="acts", cycle_id="cycle_acts_fork_1")
+    stores.campaigns.mint_cycle(stub)
+    acts["stub"] = _returns
+    await sender.dispatch(verify("stub", stub))
+    before = standing("stub")
+    await sender.dispatch(
+        CommandCall(DeleteCyclePayload(campaign_id=stub.campaign_id, cycle_id=stub.cycle_id))
+    )
+    assert standing("stub") == before, "deleting its cycle moved its command"
+    await seen(("applied", "its cycle deleted"), "stub", verify("stub", stub))
+
+    async def _edited(_: object) -> Any:
+        return Applier.silent(_returns)
+
+    monkeypatch.setattr(draft_editing, "edit_draft_campaign", _edited)
+
+    async def drafted(key: str) -> tuple[str, CommandCall[Any]]:
+        draft = new_draft(
+            owner_user_id=str(stores.identity.user_id),
+            slug=key,
+            basis=DatasetBasis(dataset=key),
+            n_samples=1,
+            sample_preview=[],
+            headers=[],
+        )
+        stores.drafts.write_draft(draft)
+        edit = CommandCall(
+            EditDraftCampaignPayload(draft_id=draft.draft_id, patch=EditDraftPatch()), key
+        )
+        await sender.dispatch(edit)
+        return draft.draft_id, edit
+
+    discarded, edit = await drafted("discarded")
+    before = standing("discarded")
+    await sender.dispatch(CommandCall(DiscardDraftPayload(draft_id=discarded)))
+    assert standing("discarded") == before, "discarding its draft moved its command"
+    await seen(("applied", "its draft discarded"), "discarded", edit)
+
+    # A Start's mint of a real plan, its draft's ledger billed in: its commands land on the cycle.
+    unframed = {"optimization": {"degradation_threshold": 0.4}}
+    write_yaml(
+        stores.tenant_datasets.dataset_dir("acts") / DEFINITION_FILE,
+        {"pipeline": {"backend_type": "termnorm"}, "campaign": unframed},
+    )
+    rows = samples(30)
+    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
+    starting = loop_session(
+        stores, pipeline_schema([solve], name="acts"), rows, dataset=resolve_dataset(stores, "acts")
+    )
+    declared = declare(starting, CampaignConfig.model_validate(unframed), purpose=Optimize())
+    plan = resolve_cycle_plan(starting, declared, rows)
+    moved, edit = await drafted("moved")
+    before = standing("moved")
+    mint(plan, campaign_id="adopted", billed=stores.drafts.ledger(moved))
+    stores.drafts.close(moved)
+    assert standing("moved") == before, "its draft's mint moved its command"
+    adopted = stores.subject(CycleHop(campaign_id="adopted", cycle_id=plan.cycle_id))
+    assert first("moved") in {
+        e.command_id for e in stores.commands.book().subject_events(adopted)
+    }, "a minted draft's command does not read as its cycle's"
+    await seen(("applied", "its draft minted and closed"), "moved", edit)
+
+    await seen(("unfiled", "never sent"), "never-sent", None)
+
+    # An inner cycle: its own loop's run, a pass on it, and a kind that never addresses it.
+    leaf = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
+    sandbox = inner_sandbox(stores, acts_hop.campaign_id, acts_hop.cycle_id)
+    (sandbox / stores.tenant_id).mkdir(exist_ok=True)
+    inner = descend_store(stores, (acts_hop,))
+    inner.campaigns.create_campaign(
+        minted_campaign(leaf, owner_user_id=str(stores.identity.user_id))
+    )
+    inner.campaigns.mint_cycle(leaf)
+    leaf_dir = inner.campaigns.cycle_dir(leaf)
+    into_leaf = Subject.of((acts_hop, leaf)).command_fields
+    controls: dict[str, str] = {}
+    CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    hold_cycle(leaf_dir)
+    controls["inner, its own loop running"] = inner.run_state(leaf).admission.refusal
+    paused = CommandCall(PauseCyclePayload(**into_leaf, reason="stop"), "inner-run")
+    with pytest.raises(PayloadInvalidError):
+        await sender.dispatch(paused)
+    await seen(("unfiled", "a pause into an inner cycle its own loop runs"), "inner-run", paused)
+    release_cycle(leaf_dir)
+
+    held = CycleHop(campaign_id="held", cycle_id="cycle_held")
+    stores.campaigns.create_campaign(minted_campaign(held))
+    stores.campaigns.mint_cycle(held)
+
+    with pytest.raises(PassStoppedError):
+        async with paid_pass(stores=stores, verb="bench", hop=held, declared=Budget(), sends=()):
+            pause = PauseCyclePayload(campaign_id="held", cycle_id="cycle_held", reason="stop")
+            await sender.dispatch(CommandCall(pause))
+            controls["outer, paused under a pass"] = stores.run_state(held).admission.refusal
+            raise asyncio.CancelledError("aborted")
+
+    # A loop command: accepted by its act, then taken by its loop, or voided as its loop ends.
+    looped = CycleHop(campaign_id="looped", cycle_id="cycle_looped")
+    stores.campaigns.create_campaign(minted_campaign(looped))
+    stores.campaigns.mint_cycle(looped)
+    looped_dir = stores.campaigns.cycle_dir(looped)
+    CycleEventLog.open(CycleDir(looped_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    hold_cycle(looped_dir)
+    asked = CommandCall(
+        PauseCyclePayload(campaign_id="looped", cycle_id="cycle_looped", reason="stop"),
+        "loop-pause",
+    )
+    await sender.dispatch(asked)
+    await seen(("accepted", "standing for its loop"), "loop-pause", asked)
+    loop = RunControl(commands=stores.commands, cycle=stores.subject(looped))
+    assert loop.take_pause() is not None, "its loop never took a standing pause"
+    await seen(("applied", "taken by its loop"), "loop-pause", asked)
+    skipped = CommandCall(
+        SkipSearchpointPayload(campaign_id="looped", cycle_id="cycle_looped"), "loop-left"
+    )
+    await sender.dispatch(skipped)
+    release_cycle(looped_dir)
+    assert sweep_dead_cycles(stores.projects_root) == 2, "a dead loop's cycle was not reaped"
+    await seen(("voided", "its loop ended without taking it"), "loop-left", None)
+
+    unaddressed = CommandCall(DeleteCyclePayload(**into_leaf), "inner-422")
+    with pytest.raises(PayloadInvalidError) as static:
+        await sender.dispatch(unaddressed)
+    assert static.value.code == "inner_cycle_unaddressed"
+    await seen(("unfiled", "a kind no inner cycle takes, sent into one"), "inner-422", unaddressed)
+
+    # (status, a retry's answer, its acks)
+    gone = "NotFoundError"
+    owed: dict[tuple[str, str], tuple[str, str, int]] = {
+        ("applied", "act returned"): ("applied", "replayed", 1),
+        ("filed", "its act runs"): ("filed", "re-filed", 0),
+        ("unfiled", "its filing raised"): ("-", "re-filed", 0),
+        ("cancelled", "its call cancelled mid-act"): ("cancelled", "re-filed", 1),
+        ("ended", "KeyboardInterrupt left its act"): ("cancelled", "re-filed", 1),
+        ("ended", "SystemExit left its act"): ("cancelled", "re-filed", 1),
+        ("ended", "RuntimeError left its act"): ("rejected", "re-filed", 1),
+        ("applied", "its campaign deleted, keep_results=True"): ("applied", gone, 1),
+        ("applied", "its campaign deleted, keep_results=False"): ("applied", gone, 1),
+        ("applied", "its cycle deleted"): ("applied", gone, 1),
+        ("applied", "its draft discarded"): ("applied", gone, 1),
+        ("applied", "its draft minted and closed"): ("applied", gone, 1),
+        ("unfiled", "a pause into an inner cycle its own loop runs"): (
+            "-",
+            "PayloadInvalidError",
+            0,
+        ),
+        ("accepted", "standing for its loop"): ("accepted", "replayed", 1),
+        ("applied", "taken by its loop"): ("applied", "replayed", 2),
+        ("voided", "its loop ended without taking it"): ("voided", "-", 2),
+        ("unfiled", "never sent"): ("-", "-", 0),
+        ("unfiled", "a kind no inner cycle takes, sent into one"): ("-", "PayloadInvalidError", 0),
+    }
+    assert set(table) == set(owed), "a row of the table was never reached"
+    wrong = [
+        f"{row}: read {read}, owed {owed[row]}" for row, read in table.items() if read != owed[row]
+    ]
+    # An ended command never moves again: a stray ack after its end folds to nothing.
+    for key in ("done", "cancelled", "blank", "loop-left"):
+        ended = folded(key)
+        command_id = first(key)
+        assert command_id is not None
+        stores.commands.append(CommandAckRecord(command_id=command_id, status="accepted"))
+        stores.commands.ack(command_id, "applied")
+        if stores.commands.book().status[command_id] != ended[0]:
+            wrong.append(f"{key}: ended {ended[0]}, moved by a stray ack")
+    parked = f"{RUN_PHASE_INFO[RunPhase.PAUSED].parked.capitalize()}."
+    owed_controls = {
+        "inner, its own loop running": INNER_PAUSE_REFUSAL,
+        "outer, paused under a pass": parked,
+    }
+    wrong += [
+        f"{row}: its run control reads {controls.get(row)!r}, owed {said!r}"
+        for row, said in owed_controls.items()
+        if controls.get(row) != said
+    ]
+    assert not wrong, "\n".join(wrong)
 
 
 # 4. The host surface
@@ -1812,19 +2174,19 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
     run_dir = cycle_dir_for(workspace, run_hop)
     run_dir.mkdir(parents=True)
     with pytest.raises(TaskUncancellableError):
-        cancel_acts([queued, running], workspace)
+        cancel_acts([queued, running], caller.stores)
     CycleEventLog.open(CycleDir(run_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
     hold_cycle(run_dir)
-    acts = cancel_acts([queued, running], workspace)
+    acts = cancel_acts([queued, running], caller.stores)
     release_cycle(run_dir)
     assert [(a.payload.kind, a.idempotency_key) for a in acts] == [
-        (CommandKind.CANCEL_QUEUED_RUN, f"host-task-cancel:{queued.job_id}"),
-        (CommandKind.PAUSE_CYCLE, f"host-task-cancel:{running.job_id}"),
+        (CommandKind.CANCEL_QUEUED, f"host-task-cancel:{queued.job_id}"),
+        (CommandKind.PAUSE, f"host-task-cancel:{running.job_id}"),
     ]
     hold_cycle(run_dir)
     elsewhere = dataclasses.replace(running, workspace=str(tmp_path / "sandbox"))
     with pytest.raises(TaskUncancellableError):
-        cancel_acts([queued, elsewhere], workspace)
+        cancel_acts([queued, elsewhere], caller.stores)
     release_cycle(run_dir)
     assert registry.cancel_queued(queued.job_id, principal_id=principal)
     assert read(queued) == "cancelled", "a withdrawn launch reads as run"

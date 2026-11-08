@@ -1,4 +1,4 @@
-"""The `/commands/{kind}` vocabulary, in `domain/` so the terminal and the ledger folds read it without the dispatcher."""
+"""The `/commands/{kind}` vocabulary, in `domain/` so the terminal and the command log's fold read it without the dispatcher."""
 
 from __future__ import annotations
 
@@ -135,15 +135,15 @@ class CommandKind(StrEnum):
         """Reached through the webapp alone: no terminal verb and no host tool."""
         return self.press is None
 
-    PAUSE_CYCLE = (
-        "pause-cycle",
+    PAUSE = (
+        "pause",
         "loop_commands:pause_cycle",
         CAMPAIGN_STEP_CAP,
         anyone("pause"),
         True,
     )
-    ORIGIN_GATE_DECISION = (
-        "origin-gate-decision",
+    ORIGIN_GATE = (
+        "origin-gate",
         "loop_commands:origin_gate_decision",
         CAMPAIGN_STEP_CAP,
         anyone("origin-gate"),
@@ -195,8 +195,8 @@ class CommandKind(StrEnum):
         False,
         "task",
     )
-    MINT_HEAD_TO_HEAD = (
-        "mint-head-to-head",
+    HEAD_TO_HEAD = (
+        "head-to-head",
         "launching:mint_head_to_head",
         CAMPAIGN_CREATE_CAP,
         anyone("head-to-head", no_browser=_MINTS_THROUGH_CHECKIN),
@@ -230,8 +230,8 @@ class CommandKind(StrEnum):
         True,
         "task",
     )
-    CHANGE_RUN_LIMITS = (
-        "change-run-limits",
+    SET_LIMITS = (
+        "set-limits",
         "limits_and_queue:change_run_limits",
         CAMPAIGN_BUDGET_CAP,
         anyone("set-limits"),
@@ -246,8 +246,8 @@ class CommandKind(StrEnum):
         True,
     )
     # A queued MINT has no cycle to address yet, and WHOSE launch it is `JobRegistry.cancel_queued` checks.
-    CANCEL_QUEUED_RUN = (
-        "cancel-queued-run",
+    CANCEL_QUEUED = (
+        "cancel-queued",
         "limits_and_queue:cancel_queued_run",
         CAMPAIGN_RUN_CAP,
         anyone("cancel-queued"),
@@ -271,29 +271,29 @@ class CommandKind(StrEnum):
         "archive-campaign",
         "workspace_edits:campaign_lifecycle",
         CAMPAIGN_LIFECYCLE_CAP,
-        anyone("archive"),
+        anyone("archive-campaign"),
         True,
     )
     UNARCHIVE_CAMPAIGN = (
         "unarchive-campaign",
         "workspace_edits:campaign_lifecycle",
         CAMPAIGN_LIFECYCLE_CAP,
-        anyone("unarchive"),
+        anyone("unarchive-campaign"),
         True,
     )
     DELETE_CAMPAIGN = (
         "delete-campaign",
         "workspace_edits:campaign_lifecycle",
         CAMPAIGN_LIFECYCLE_CAP,
-        anyone("delete"),
+        anyone("delete-campaign"),
         True,
     )
     # The label is how every other surface addresses the campaign to a human.
-    SET_CAMPAIGN_LABEL = (
-        "set-campaign-label",
+    RENAME_CAMPAIGN = (
+        "rename-campaign",
         "workspace_edits:set_campaign_label",
         CAMPAIGN_LIFECYCLE_CAP,
-        anyone("rename"),
+        anyone("rename-campaign"),
         True,
     )
     # Its purge step destroys paid spend.
@@ -327,7 +327,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_CREATE_CAP,
         anyone("bank-snippet"),
     )
-    # Its apply removes the draft's ledger, so it is recorded on the workspace's.
+    # Filed on the workspace: the draft it discards goes with its apply.
     DISCARD_DRAFT = (
         "discard-draft",
         "draft_editing:discard_draft",
@@ -335,7 +335,7 @@ class CommandKind(StrEnum):
         anyone("discard-draft"),
         True,
     )
-    # The three doors a check-in draft opens by; each records on the workspace's ledger, as no draft has one yet.
+    # The three doors a check-in draft opens by; each is filed on the workspace, as no draft is open yet.
     INGEST_UPLOAD = (
         "ingest-upload",
         "workspace_edits:ingest_upload",
@@ -376,15 +376,16 @@ class CommandKind(StrEnum):
 
 
 # Filled as each model declares the kind it carries: the ONE kind → payload table. Keyed `str`,
-# so a `CommandRecord.kind` read back off the ledger finds its row.
+# so a `CommandRecord.kind` read back off the command log finds its row.
 PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {}
 
 
 class CommandPayload(RequestBody):
     """Base of every payload on the generic ``POST /commands/{kind}`` route. ``StrictModel`` forbids
     extras, so THE MODEL IS the accepted-key set — there is no list to fall out of step with it.
-    A payload's address base is its target ledger: ``CyclePayload`` the cycle's, ``LinePayload`` its
-    line holder's, ``CampaignPayload`` and a bare one the workspace's, a ``DraftPayload`` its draft's."""
+    A payload's address base is the subject it is filed on: ``CyclePayload`` its cycle,
+    ``LinePayload`` its line holder, ``CampaignPayload`` its campaign, a bare one the workspace, a
+    ``DraftPayload`` its draft."""
 
     kind: ClassVar[CommandKind]
     # What the terminal prints after the ack, where the ack alone leaves the next step unsaid; a
@@ -454,11 +455,11 @@ class CyclePayload(CampaignPayload):
 
 
 class LoopPayload(CyclePayload):
-    """Only a RUNNING loop takes it, off its own ledger (`ledger_scan.py::Controls`) — which is why these sit below `application/`."""
+    """Only a RUNNING loop takes it, off its cycle's inbox (`command_log.py::Controls`) — which is why these sit below `application/`."""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        # `ledger_scan.py::_LOOP_TAKEN` reads the kind table having imported this module alone.
+        # `command_log.py::LOOP_KINDS` reads the kind table having imported this module alone.
         if cls.__module__ != __name__:
             raise TypeError(f"{cls.__name__} is a loop payload declared outside {__name__}")
 
@@ -470,7 +471,7 @@ class SkipSearchpointPayload(LoopPayload, kind=CommandKind.SKIP_SEARCHPOINT):
     follow_up: ClassVar[str] = "The round goes on with the rest."
 
 
-class PauseCyclePayload(ReasonedPayload, LoopPayload, kind=CommandKind.PAUSE_CYCLE):
+class PauseCyclePayload(ReasonedPayload, LoopPayload, kind=CommandKind.PAUSE):
     """Ask a running cycle to stop at its next checkpoint; it resumes from there."""
 
     inner_refusal: ClassVar[str | None] = INNER_PAUSE_REFUSAL
@@ -490,7 +491,7 @@ class SetSampleLookaheadPayload(LoopPayload, kind=CommandKind.SET_SAMPLE_LOOKAHE
     )
 
 
-class OriginGateDecisionPayload(LoopPayload, kind=CommandKind.ORIGIN_GATE_DECISION):
+class OriginGateDecisionPayload(LoopPayload, kind=CommandKind.ORIGIN_GATE):
     """Answer a cycle holding at the round-0 origin gate; refused where the cycle is not holding."""
 
     inner_refusal: ClassVar[str | None] = INNER_GATE_REFUSAL
@@ -573,7 +574,7 @@ class CleanupEmptyCyclesPayload(CyclePayload, kind=CommandKind.CLEANUP_EMPTY_CYC
     inner_refusal: ClassVar[str | None] = _OUTER_OWNS_TREE
 
 
-class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.CHANGE_RUN_LIMITS):
+class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.SET_LIMITS):
     """Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or
     round-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the
     account allowance. On an arm of a head-to-head it moves that arm alone, and leaves the
@@ -726,7 +727,7 @@ class DeleteCampaignPayload(ReasonedPayload, CampaignPayload, kind=CommandKind.D
 LifecyclePayload = ArchiveCampaignPayload | UnarchiveCampaignPayload | DeleteCampaignPayload
 
 
-class SetCampaignLabelPayload(CampaignPayload, kind=CommandKind.SET_CAMPAIGN_LABEL):
+class SetCampaignLabelPayload(CampaignPayload, kind=CommandKind.RENAME_CAMPAIGN):
     """Name a campaign wherever it is named to a human; its id still addresses it."""
 
     # Required, and `""` is the CLEAR: a default would give "clear" two spellings.
@@ -738,14 +739,14 @@ class DraftAddressedPayload(CommandPayload):
 
 
 class DraftPayload(DraftAddressedPayload):
-    """Recorded on the draft's own ledger, which its Start moves into the root cycle."""
+    """Filed on the draft, whose Start lands what it was commanded on the root cycle."""
 
 
 class DiscardDraftPayload(DraftAddressedPayload, kind=CommandKind.DISCARD_DRAFT):
     """Close an open check-in without minting; its check-in calls stay billed to the workspace."""
 
 
-class CancelQueuedRunPayload(CommandPayload, kind=CommandKind.CANCEL_QUEUED_RUN):
+class CancelQueuedRunPayload(CommandPayload, kind=CommandKind.CANCEL_QUEUED):
     """Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent."""
 
     job_id: str = Field(
@@ -903,7 +904,7 @@ class HeadToHeadRequest(StrictModel):
 
 class StartCheckinPayload(DraftPayload, kind=CommandKind.START_CHECKIN):
     """The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no
-    draft field holds it. Acked at admission, so it rides the draft's ledger into the root cycle."""
+    draft field holds it. Acked at admission, so it lands with the draft on the root cycle."""
 
     budget: Budget = Budget()
     diag: bool = Field(default=False, description="Run the diagnostic shape.")
@@ -921,7 +922,7 @@ class StartCheckinPayload(DraftPayload, kind=CommandKind.START_CHECKIN):
         return self
 
 
-class MintHeadToHeadPayload(CommandPayload, kind=CommandKind.MINT_HEAD_TO_HEAD):
+class MintHeadToHeadPayload(CommandPayload, kind=CommandKind.HEAD_TO_HEAD):
     """Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned,
     priced and admitted before any is minted, so a refused arm leaves none behind."""
 

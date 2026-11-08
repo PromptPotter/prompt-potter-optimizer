@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, NoReturn, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of
-from promptpotter.application.initialization.loop_start import verb_ledger
 from promptpotter.application.jobs.coupon import Send, bind_account
 from promptpotter.application.jobs.quota import (
     admit_launch,
@@ -67,7 +66,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     spending_under,
 )
 from promptpotter.infrastructure.producer_lock import hold_pass, release_pass
-from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import (
     ConflictError,
@@ -126,6 +124,7 @@ def release_slot(
                 else ErrorRecord.raised(exc, kind="launch_failed", stop_reason=stop_reason)
             ),
         )
+        stores.void_inbox(hop)
     except Exception:
         logger.exception("failed to record launch stop for job %s", job_id)
 
@@ -184,7 +183,7 @@ def request_jobs(
 
 def _refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> None:
     """ONE check for launches and passes alike: a run attached, or a pass scoring it."""
-    run = derive_run_state(stores.campaigns.cycle_dir(hop))
+    run = stores.run_state(hop)
     # The pass first: it registers before it holds the cycle, and holding reads as attached.
     if (holder := job_registry.pass_on(stores.campaigns.workspace, hop)) is not None:
         status = RunPhase.SCORING.value
@@ -637,7 +636,8 @@ async def paid_pass(
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
             RunCallbacks(CycleEventLog.open(CycleDir(cycle_dir))).close_dead_bench()
             # The rate-limit and slot waits poll it too, as a loop's do.
-            set_abort_check(RunControl(cycle_dir=cycle_dir).pause_requested)
+            control = RunControl(commands=stores.commands, cycle=stores.subject(hop))
+            set_abort_check(control.pause_requested)
             ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)
             declared = ceiling.over(declared)
         held = await asyncio.to_thread(
@@ -682,11 +682,10 @@ async def paid_pass(
 
 def _take_pause(stores: Stores, hop: CycleHop) -> str | None:
     """Acks the pause standing on *hop* applied; who asked it, ``None`` where none stands."""
-    control = RunControl(cycle_dir=stores.campaigns.cycle_dir(hop))
+    control = RunControl(commands=stores.commands, cycle=stores.subject(hop))
     if not control.pause_requested():
         return None
-    with verb_ledger(stores, hop):
-        taken = control.take_pause()
+    taken = control.take_pause()
     return None if taken is None else taken[1]
 
 

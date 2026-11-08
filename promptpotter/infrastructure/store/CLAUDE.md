@@ -7,7 +7,7 @@
 - **`store/__init__.py` re-exports nothing** — import each leaf, or a leaf import cycles back through `ledger`. <!-- probe: git grep -cE "^(from|import) " -- promptpotter/infrastructure/store/__init__.py == 0 -->
 - **JSON for what code writes, YAML for the operator-authored tier; there is no tolerant YAML reader.** <!-- probe: git grep -cE "read_yaml_tolerant" -- promptpotter/*.py == 0 -->
 - **`account_spend.py` banks a cycle's spend inside every destroyer**; `mirrored` L4 inner copies are skipped, or that money banks twice.
-- **A cycle's own facts are ledger records; `index.json` is their fold** (`projections/cycle_index.py::write_cycle_index`, read back through `read_cycle_index` off the ledger, never the file). So are the cycle seed (`CycleSeedRecord`), the standing budget (`StandingBudgetRecord`, last-wins, never inherited by a fork) and running-loop commands (`runtime_flags.py::standing_controls`): no mirror or control file. The δ ruler is the tenant's `ruler.jsonl`, one `RulerFold` per election, never rewritten.
+- **A cycle's own facts are ledger records; `index.json` is their fold** (`projections/cycle_index.py::write_cycle_index`, read back through `read_cycle_index` off the ledger, never the file). So are the cycle seed (`CycleSeedRecord`), the standing budget (`StandingBudgetRecord`, last-wins, never inherited by a fork): no mirror or control file. What a cycle's loop was asked is not its fact but the account's command log's (`command_log.py::CommandBook.controls`), which no ledger move or delete reaches. The δ ruler is the tenant's `ruler.jsonl`, one `RulerFold` per election, never rewritten.
 
 ## The lineage tree
 

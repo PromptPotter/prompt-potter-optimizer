@@ -59,7 +59,6 @@ from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend, usd_text
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
-from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import billed_spend, campaign_spend
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.dataset_access import definition_version
@@ -281,7 +280,7 @@ def course_entry(
 ) -> HierarchyCourse:
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
     # The producer as it is now: a moment replays the record, never a process.
-    run = derive_run_state(cycle_dir)
+    run = stores.run_state(hop)
     limits = binding_run_limits(stores, hop, line.config, run)
     # Before its first launch a course declares no wiring, so its campaign's declared cap binds.
     cap = (
@@ -452,7 +451,7 @@ def campaign_entry(
     line = courses.get(holder.cycle_id)
     state = (
         HierarchyState.of(
-            derive_run_state(stores.campaigns.cycle_dir(holder)),
+            stores.run_state(holder),
             None,
             lifecycle=campaign.lifecycle_status,
         )
@@ -526,7 +525,7 @@ def unstarted_entry(
 
 def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
     """Stats only: every input an entry reads in *held* — run state, the archive rows its bench and
-    lens grade, the ruler, each dataset's scorer — so a client holding it is answered unread."""
+    lens grade, the ruler, the command log, each dataset's scorer — so a client holding it is answered unread."""
     stores = {s.base_dir: s for s in held}.values()
     archives = {s.archive.base_dir: s.archive for s in stores}.values()
     rulers = sorted({s.ruler.path for s in stores})
@@ -546,6 +545,8 @@ def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
         *(sorted(draft_starts(s).items()) for s in stores if s.drafts.draft_ids()),
         *(archive.version() for archive in archives),
         *(file_sig(path) for path in rulers),
+        # The run state an entry serves reads its inbox, which every command filed moves.
+        *(file_sig(path) for path in sorted({s.commands.path for s in stores})),
         *(definition_version(s, name) for (_, name), s in definitions),
     )
 

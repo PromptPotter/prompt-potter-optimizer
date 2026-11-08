@@ -11,15 +11,12 @@ from promptpotter.domain.phases import (
     PauseCause,
     StopReason,
 )
-from promptpotter.domain.run_records import NoEffect
-from promptpotter.infrastructure.llm.telemetry import emit_command_ack
-from promptpotter.infrastructure.runtime_flags import requested_lookahead, standing_controls
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import Controls
+from promptpotter.infrastructure.runtime_flags import requested_lookahead
+from promptpotter.infrastructure.store.command_log import CommandLog, Controls
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from promptpotter.domain.command_kinds import SubmitArmsPayload
+    from promptpotter.domain.cycle_paths import Subject
     from promptpotter.infrastructure.llm.spend_book import SpendBook
 
 
@@ -72,23 +69,42 @@ class FlightGauge:
 
 @dataclass(frozen=True)
 class RunControl:
-    """Every ``take_*`` / ``spend_*`` acks on the run's own ledger: call inside the launch that bound it."""
+    """Every ``take_*`` / ``spend_*`` acks ``applied`` on the account's log, on *cycle*'s commands.
+    Unarmed, it reads an empty inbox."""
 
-    cycle_dir: Path | None = None
+    commands: CommandLog | None = None
+    cycle: Subject | None = None
     # Outermost first. Their pause stops this run; their look-ahead never reaches it — inherited,
     # one arming would multiply concurrency at every nested level.
-    enclosing: tuple[Path, ...] = ()
+    enclosing: tuple[Subject, ...] = ()
     # Held, never spent, where no round spends a press (a screen, a bench pass); ``None`` reads the inbox.
     held_lookahead: int | None = None
 
+    def __post_init__(self) -> None:
+        if self.commands is None and (self.cycle is not None or self.enclosing):
+            raise ValueError("a control over a cycle reads that cycle's commands off the log")
+
+    def _log(self) -> CommandLog:
+        assert self.commands is not None, "an armed control holds the log (`__post_init__`)"
+        return self.commands
+
     def _inbox(self) -> Controls:
-        return Controls() if self.cycle_dir is None else standing_controls(self.cycle_dir)
+        return Controls() if self.cycle is None else self._log().book().controls(self.cycle)
+
+    def _outer_paused(self) -> Subject | None:
+        """The innermost enclosing run a pause stands on."""
+        if not self.enclosing:
+            return None
+        book = self._log().book()
+        return next(
+            (o for o in reversed(self.enclosing) if book.controls(o).pause is not None), None
+        )
 
     def pause_requested(self) -> bool:
         """A pause is a CLEAN EXIT: poll it only where work already done is on disk."""
         if self._inbox().pause is not None:
             return True
-        return any(standing_controls(outer).pause is not None for outer in self.enclosing)
+        return self._outer_paused() is not None
 
     def paused(self, stop: KeyboardInterrupt | asyncio.CancelledError) -> bool:
         """*stop* is a pause this control was asked, never a cancel of the task itself: the one stop
@@ -103,11 +119,10 @@ class RunControl:
         """``None`` where nothing on a ledger asked: a signal or a cancellation, which the caller names."""
         asked = self._inbox().pause
         if asked is not None:
-            emit_command_ack(command_id=asked.command_id, status="applied", effect=NoEffect())
-            return PauseCause.COMMAND, f"pause-cycle by {asked.issued_by.display}"
-        for outer in reversed(self.enclosing):
-            if standing_controls(outer).pause is not None:
-                return PauseCause.ENCLOSING, f"enclosing run {outer.name} was paused"
+            self._log().ack(asked.command_id, "applied")
+            return PauseCause.COMMAND, f"pause by {asked.issued_by.display}"
+        if (outer := self._outer_paused()) is not None:
+            return PauseCause.ENCLOSING, f"enclosing run {outer.cycle_id} was paused"
         return None
 
     def skip_requested(self) -> bool:
@@ -117,7 +132,7 @@ class RunControl:
         skips = self._inbox().skips
         if not skips:
             return False
-        emit_command_ack(command_id=skips[0], status="applied", effect=NoEffect())
+        self._log().ack(skips[0], "applied")
         return True
 
     def take_gate_decision(self) -> GateDecision | None:
@@ -125,7 +140,7 @@ class RunControl:
         if not standing:
             return None
         command_id, asked = standing[0]
-        emit_command_ack(command_id=command_id, status="applied", effect=NoEffect())
+        self._log().ack(command_id, "applied")
         return cast("GateDecision", asked)
 
     def standing_submission(self) -> tuple[str, SubmitArmsPayload] | None:
@@ -134,7 +149,7 @@ class RunControl:
         return standing[0] if standing else None
 
     def take_submission(self, command_id: str) -> None:
-        emit_command_ack(command_id=command_id, status="applied", effect=NoEffect())
+        self._log().ack(command_id, "applied")
 
     def sample_lookahead(self) -> int:
         if self.held_lookahead is not None:
@@ -147,7 +162,7 @@ class RunControl:
             return
         asked = self._inbox().lookahead
         if asked is not None and not asked.taken:
-            emit_command_ack(command_id=asked.command_id, status="applied", effect=NoEffect())
+            self._log().ack(asked.command_id, "applied")
 
 
 def budget_stop(book: SpendBook) -> StopReason | None:

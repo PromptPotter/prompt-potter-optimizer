@@ -63,7 +63,7 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
     setPrevKey(key);
     setDrafts(draftsOf(budget));
   }
-  const cmd = useCommand<"change-run-limits">("run-limits", { scope: leafCycleId });
+  const cmd = useCommand<"set-limits">("run-limits", { scope: leafCycleId });
   const [confirmingHalt, setConfirmingHalt] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const pending = cmd.pending !== null;
@@ -87,8 +87,8 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
     if (!viewedPath) return;
     setConfirmingHalt(false);
     setNote(null);
-    const r = await cmd.run("change-run-limits", () =>
-      commands["change-run-limits"]({ ...cycleAddress(viewedPath), budget: change }),
+    const r = await cmd.run("set-limits", () =>
+      commands["set-limits"]({ ...cycleAddress(viewedPath), budget: change }),
     );
     if (r.ok) setNote(applied);
   };

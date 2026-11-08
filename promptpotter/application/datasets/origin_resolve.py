@@ -10,7 +10,7 @@ from promptpotter.application.bench.task_context import (
     CheckinOutput,
     checkin_output,
     checkin_provider,
-    draft_call_context,
+    draft_ledger,
     run_checkin,
 )
 from promptpotter.application.datasets.origin_readiness import (
@@ -149,7 +149,8 @@ async def resolve_origin_turn(
             response_model=consultation.response_model,
             consultation_instruction=consultation.instruction,
             user_content=consultation.user_content,
-            context=draft_call_context(stores, draft.draft_id),
+            stores=stores,
+            ledger=draft_ledger(stores, draft.draft_id),
         )
 
     raised = raised_commands(draft, raw)

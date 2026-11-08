@@ -200,7 +200,7 @@ async def open_diagnostic(
     session = configure_and_apply_pipeline(await bind_cycle_session(stores, campaign, hop), cycle)
     config = cycle.config
     # Its cycle's pause stops the pass; the loop's skip and look-ahead are the loop's to spend.
-    session.state.control = RunControl(enclosing=(stores.campaigns.cycle_dir(hop),))
+    session.state.control = RunControl(commands=stores.commands, enclosing=(stores.subject(hop),))
     # Its scope spawns as `run_optimization`'s: a pp-self point's connector dispatches no inner run without it.
     with arm_diagnostic_scoring(session, config, source=source):
         yield OpenedDiagnostic(

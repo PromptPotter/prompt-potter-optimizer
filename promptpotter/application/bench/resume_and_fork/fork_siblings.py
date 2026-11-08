@@ -206,8 +206,10 @@ def mint_fork(
         seed=seed,
     )
     # An offshoot's parent keeps running, hence the DIRECTION.
-    if direction is ForkDirection.SUPERSEDE:
-        campaign_store.mark_superseded(parent, child.cycle_id)
+    if direction is ForkDirection.SUPERSEDE and campaign_store.mark_superseded(
+        parent, child.cycle_id
+    ):
+        stores.void_inbox(parent)
     return child.cycle_id
 
 

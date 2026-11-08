@@ -56,7 +56,6 @@ logger = logging.getLogger(__name__)
 UNREPORTED_KINDS: frozenset[str] = frozenset(
     {
         "decision",  # replayed on resume (`resume_and_fork/replayers.py`)
-        "command",  # the dispatcher's idempotency and the command state (`ledger_scan.py`)
         "cycle_seed",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "account_event",  # the account trail's (`store/account_trail.py`)
         "trail_tombstone",  # the account trail's (`store/account_trail.py`)
@@ -136,10 +135,12 @@ def declare_run_stop(
     )
     ledger = observers.callbacks.ledger
     if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
-        ledger.append(RunPhaseRecord.stop(stop_reason, spend=spend))
-        return
-    cause, detail = session.state.control.take_pause() or (interrupted_by, "")
-    ledger.append(RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend))
+        stop = RunPhaseRecord.stop(stop_reason, spend=spend)
+    else:
+        cause, detail = session.state.control.take_pause() or (interrupted_by, "")
+        stop = RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend)
+    ledger.append(stop)
+    session.store.void_inbox(session.hop)
 
 
 def declare_run_wiring(
@@ -235,6 +236,7 @@ def build_run_observers(
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
     hold_cycle(cycle_dir)
     try:
+        prior = session.store.campaigns.last(session.hop, RunPhaseRecord)
         observers = _bind_observers(
             cycle_dir,
             session=session,
@@ -242,6 +244,9 @@ def build_run_observers(
             readout_sink=readout_sink,
             forked_from=forked_from,
         )
+        # A launch is a run boundary; the run a gate held resumes, what it was asked standing.
+        if prior is None or prior.run_phase is not RunPhase.GATE:
+            session.store.void_inbox(session.hop)
     except BaseException:
         release_cycle(cycle_dir)
         raise

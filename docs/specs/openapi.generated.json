@@ -226,7 +226,7 @@
             "items": {
               "discriminator": {
                 "mapping": {
-                  "origin-gate-decision": "#/components/schemas/GateAction",
+                  "origin-gate": "#/components/schemas/GateAction",
                   "submit-arms": "#/components/schemas/KeepDraftsAction"
                 },
                 "propertyName": "kind"
@@ -7316,7 +7316,7 @@
             "type": "string"
           },
           "kind": {
-            "const": "origin-gate-decision",
+            "const": "origin-gate",
             "title": "Kind",
             "type": "string"
           },
@@ -7513,7 +7513,7 @@
       },
       "HeadToHeadPlan": {
         "additionalProperties": false,
-        "description": "A head-to-head declared before it is minted: each budget point is one `mint-head-to-head`\nof every arm × replicate, the budget being what its arms share.",
+        "description": "A head-to-head declared before it is minted: each budget point is one `head-to-head`\nof every arm × replicate, the budget being what its arms share.",
         "properties": {
           "arms": {
             "description": "Each arm's optimizer and its knobs over the dataset's own, as `head-to-head --arm` lays them; never a budget.",
@@ -7605,7 +7605,7 @@
             "type": "string"
           },
           "heads": {
-            "description": "One per budget point: dispatched as `mint-head-to-head`, it mints the arms priced.",
+            "description": "One per budget point: dispatched as `head-to-head`, it mints the arms priced.",
             "items": {
               "$ref": "#/components/schemas/MintHeadToHeadPayload-Output"
             },
@@ -9784,7 +9784,7 @@
             "type": "integer"
           },
           "queue": {
-            "description": "The CALLER's own waiting launches, oldest first — everything a client needs to say 'queued, position 3' and to offer a cancel. Own is the PRINCIPAL that launched them, the test `cancel-queued-run` applies. Other entries are counted in `queued` and never listed.",
+            "description": "The CALLER's own waiting launches, oldest first — everything a client needs to say 'queued, position 3' and to offer a cancel. Own is the PRINCIPAL that launched them, the test `cancel-queued` applies. Other entries are counted in `queued` and never listed.",
             "items": {
               "$ref": "#/components/schemas/MachineQueueEntry"
             },
@@ -11531,7 +11531,7 @@
           },
           "origin_gate": {
             "default": "strict",
-            "description": "Hold after round 0 for the operator's decision when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds only on a structurally-broken origin; ``off`` disarms the gate. The decision (`origin-gate-decision`) proceeds into the search anyway, re-scores the origin, or aborts the cycle. An origin that scored no cell halts instead, and starting the cycle again re-measures it.",
+            "description": "Hold after round 0 for the operator's decision when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds only on a structurally-broken origin; ``off`` disarms the gate. The decision (`origin-gate`) proceeds into the search anyway, re-scores the origin, or aborts the cycle. An origin that scored no cell halts instead, and starting the cycle again re-measures it.",
             "enum": [
               "strict",
               "critical_only",
@@ -13090,7 +13090,7 @@
                 "type": "null"
               }
             ],
-            "description": "Hold after round 0 for the operator's decision when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds only on a structurally-broken origin; ``off`` disarms the gate. The decision (`origin-gate-decision`) proceeds into the search anyway, re-scores the origin, or aborts the cycle. An origin that scored no cell halts instead, and starting the cycle again re-measures it.",
+            "description": "Hold after round 0 for the operator's decision when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds only on a structurally-broken origin; ``off`` disarms the gate. The decision (`origin-gate`) proceeds into the search anyway, re-scores the origin, or aborts the cycle. An origin that scored no cell halts instead, and starting the cycle again re-measures it.",
             "title": "Origin Gate"
           },
           "panel_gate": {
@@ -13687,8 +13687,6 @@
               "bank_partition",
               "campaign_ceiling",
               "decision",
-              "command",
-              "command_ack",
               "cycle_final",
               "cycle_minted",
               "cycle_seed",
@@ -16385,7 +16383,7 @@
       },
       "StartCheckinPayload": {
         "additionalProperties": false,
-        "description": "The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no\ndraft field holds it. Acked at admission, so it rides the draft's ledger into the root cycle.",
+        "description": "The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no\ndraft field holds it. Acked at admission, so it lands with the draft on the root cycle.",
         "properties": {
           "budget": {
             "$ref": "#/components/schemas/Budget",
@@ -19905,10 +19903,10 @@
         ]
       }
     },
-    "/api/v1/commands/cancel-queued-run": {
+    "/api/v1/commands/cancel-queued": {
       "post": {
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
-        "operationId": "cancel_queued_run_api_v1_commands_cancel_queued_run_post",
+        "operationId": "cancel_queued_api_v1_commands_cancel_queued_post",
         "parameters": [
           {
             "in": "header",
@@ -19954,62 +19952,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Cancel-Queued-Run",
-        "tags": [
-          "Commands"
-        ]
-      }
-    },
-    "/api/v1/commands/change-run-limits": {
-      "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
-        "operationId": "change_run_limits_api_v1_commands_change_run_limits_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 256,
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChangeRunLimitsPayload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Change-Run-Limits",
+        "summary": "Cancel-Queued",
         "tags": [
           "Commands"
         ]
@@ -20455,6 +20398,61 @@
         ]
       }
     },
+    "/api/v1/commands/head-to-head": {
+      "post": {
+        "description": "Mint and detach every arm, or none; a retry under the same key answers the same arms.",
+        "operationId": "head_to_head_api_v1_commands_head_to_head_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MintHeadToHeadPayload-Input"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeadToHeadStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Head-To-Head",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/ingest-upload": {
       "post": {
         "description": "The kind's payload as a form: the file is its ``blob`` and ``filename``.",
@@ -20560,61 +20558,6 @@
           }
         },
         "summary": "Mint-Campaign",
-        "tags": [
-          "Commands"
-        ]
-      }
-    },
-    "/api/v1/commands/mint-head-to-head": {
-      "post": {
-        "description": "Mint and detach every arm, or none; a retry under the same key answers the same arms.",
-        "operationId": "mint_head_to_head_api_v1_commands_mint_head_to_head_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 256,
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MintHeadToHeadPayload-Input"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HeadToHeadStarted"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Mint-Head-To-Head",
         "tags": [
           "Commands"
         ]
@@ -20730,10 +20673,10 @@
         ]
       }
     },
-    "/api/v1/commands/origin-gate-decision": {
+    "/api/v1/commands/origin-gate": {
       "post": {
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
-        "operationId": "origin_gate_decision_api_v1_commands_origin_gate_decision_post",
+        "operationId": "origin_gate_api_v1_commands_origin_gate_post",
         "parameters": [
           {
             "in": "header",
@@ -20779,16 +20722,16 @@
             "description": "Default Response"
           }
         },
-        "summary": "Origin-Gate-Decision",
+        "summary": "Origin-Gate",
         "tags": [
           "Commands"
         ]
       }
     },
-    "/api/v1/commands/pause-cycle": {
+    "/api/v1/commands/pause": {
       "post": {
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
-        "operationId": "pause_cycle_api_v1_commands_pause_cycle_post",
+        "operationId": "pause_api_v1_commands_pause_post",
         "parameters": [
           {
             "in": "header",
@@ -20834,7 +20777,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Pause-Cycle",
+        "summary": "Pause",
         "tags": [
           "Commands"
         ]
@@ -20890,6 +20833,61 @@
           }
         },
         "summary": "Remove-Api-Key",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/rename-campaign": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "operationId": "rename_campaign_api_v1_commands_rename_campaign_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCampaignLabelPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Rename-Campaign",
         "tags": [
           "Commands"
         ]
@@ -21005,61 +21003,6 @@
         ]
       }
     },
-    "/api/v1/commands/set-campaign-label": {
-      "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
-        "operationId": "set_campaign_label_api_v1_commands_set_campaign_label_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 256,
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetCampaignLabelPayload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Set-Campaign-Label",
-        "tags": [
-          "Commands"
-        ]
-      }
-    },
     "/api/v1/commands/set-concurrent-cycles": {
       "post": {
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
@@ -21110,6 +21053,61 @@
           }
         },
         "summary": "Set-Concurrent-Cycles",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/set-limits": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "operationId": "set_limits_api_v1_commands_set_limits_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeRunLimitsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Set-Limits",
         "tags": [
           "Commands"
         ]
@@ -22109,7 +22107,7 @@
     },
     "/api/v1/head-to-head/price": {
       "post": {
-        "description": "What a head-to-head plan costs before any of it is minted, in dollars, calls and wall\nclock; each budget point carries the ``mint-head-to-head`` payload that mints its arms.\n\nA read despite the POST: no LLM call is made and nothing is minted.",
+        "description": "What a head-to-head plan costs before any of it is minted, in dollars, calls and wall\nclock; each budget point carries the ``head-to-head`` payload that mints its arms.\n\nA read despite the POST: no LLM call is made and nothing is minted.",
         "operationId": "head_to_head_price_api_v1_head_to_head_price_post",
         "requestBody": {
           "content": {

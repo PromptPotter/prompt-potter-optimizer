@@ -79,7 +79,7 @@ def _live(
     drops: tuple[Drop, ...],
     staged: Mapping[Path, bytes],
 ) -> str | None:
-    """`delete`'s guard over every cycle the reset reaches, and every run a job holds there."""
+    """`delete-campaign`'s guard over every cycle the reset reaches, and every run a job holds there."""
     for drop in drops:
         if drop.kind in PRODUCER_LOCKS and producer_lock.held(drop.path):
             return f"{drop.path.parent} has a live producer — pause or stop it first"

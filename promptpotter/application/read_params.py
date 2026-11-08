@@ -639,7 +639,7 @@ class HeadToHeadPriceParams(
     ReadParams, read=ReadKind.HEAD_TO_HEAD_PRICE, route="/head-to-head/price", method="POST"
 ):
     """What a head-to-head plan costs before any of it is minted, in dollars, calls and wall
-    clock; each budget point carries the ``mint-head-to-head`` payload that mints its arms.
+    clock; each budget point carries the ``head-to-head`` payload that mints its arms.
 
     A read despite the POST: no LLM call is made and nothing is minted.
     """

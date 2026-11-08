@@ -81,8 +81,7 @@ class HeadToHeadPrice(StrictModel):
     """Every arm of every budget point, priced at what the archive says a cell of this bank costs."""
 
     heads: list[MintHeadToHeadPayload] = Field(
-        description="One per budget point: dispatched as `mint-head-to-head`, it mints the arms "
-        "priced."
+        description="One per budget point: dispatched as `head-to-head`, it mints the arms priced."
     )
     dataset_hash: str
     search_rows: int

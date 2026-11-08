@@ -256,7 +256,7 @@ class OptimizationConfig(OptimizerChoice):
             "common failure while bringing up a new connector. ``strict`` (default) holds "
             "on ``critical`` or ``degraded``; ``critical_only`` holds only on a "
             "structurally-broken origin; ``off`` disarms the gate. The decision "
-            "(`origin-gate-decision`) proceeds into the search anyway, re-scores the origin, "
+            "(`origin-gate`) proceeds into the search anyway, re-scores the origin, "
             "or aborts the cycle. An origin that scored no cell halts instead, and starting "
             "the cycle again re-measures it."
         ),

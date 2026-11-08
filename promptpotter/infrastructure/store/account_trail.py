@@ -1,4 +1,4 @@
-"""What was done in one workspace, read off its consent trail and ledgers; `account_spend.py` reads what it cost."""
+"""What was done in one workspace, read off its consent trail, command log and ledgers; `account_spend.py` reads what it cost."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.command_events import draft_of, subject_of
+from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     StopOutcome,
@@ -15,9 +16,7 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.run_records import (
     AccountEventRecord,
-    BankedCommand,
-    BankedSubject,
-    CommandRecord,
+    BankedStop,
     Device,
     RunPhaseRecord,
     TrailTombstoneRecord,
@@ -27,7 +26,6 @@ from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_
 from promptpotter.infrastructure.store.layout import (
     DRAFTS_DIR,
     CycleLayout,
-    draft_dirs,
     inner_sandboxes_dir,
     read_sandbox_owner,
 )
@@ -37,7 +35,7 @@ from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
     from promptpotter.domain.spend import Budget, CeilingMeter
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 RUN_STOPPED = "run_stopped"
@@ -60,18 +58,15 @@ class TrailLine(NamedTuple):
 class _Trail:
     records: ClassVar[RecordClasses] = (
         AccountEventRecord,
-        CommandRecord,
         RunPhaseRecord,
         TrailTombstoneRecord,
     )
 
     def __init__(self) -> None:
         self._found: list[TrailLine] = []
-        self._banked: set[BankedSubject] = set()
+        self._banked: set[Subject] = set()
 
-    def feed(
-        self, record: AccountEventRecord | CommandRecord | RunPhaseRecord | TrailTombstoneRecord
-    ) -> None:
+    def feed(self, record: AccountEventRecord | RunPhaseRecord | TrailTombstoneRecord) -> None:
         match record:
             case RunPhaseRecord(stop_reason=StopReason() as reason) if (
                 stop_reason_outcome(reason) is not StopOutcome.SUCCESS
@@ -90,32 +85,30 @@ class _Trail:
                 self._found.append(
                     TrailLine(record.timestamp, record.event, record.subject, record.user_id, "")
                 )
-            case CommandRecord():
-                self._found.append(
-                    TrailLine(record.timestamp, record.kind, "", record.issued_by.id, "")
-                )
             case TrailTombstoneRecord():
                 self._banked.add(record.subject)
                 self._found.extend(
-                    TrailLine(done.at, done.kind, done.subject, done.user_id, record.campaign_id)
-                    for done in record.commands
+                    TrailLine(stop.at, RUN_STOPPED, stop.subject, "", record.campaign_id)
+                    for stop in record.stops
                 )
 
-    def value(self) -> tuple[tuple[TrailLine, ...], frozenset[BankedSubject]]:
+    def value(self) -> tuple[tuple[TrailLine, ...], frozenset[Subject]]:
         return tuple(self._found), frozenset(self._banked)
 
 
 # A roster is per PROCESS (`LedgerIndex._screened`): once a read names this one, every ledger that
-# process indexes keeps its commands. The admin bot, the `trail` verb and a delete pay that.
+# process indexes keeps its run stops. The admin bot, the `trail` verb and a delete pay that.
 _TRAIL_FOLDS = (_Trail,)
 
 
+def _where(campaign_id: str, cycle_id: str, inside: str) -> str:
+    return f"{inside}>{campaign_id}/{cycle_id}" if inside else f"{campaign_id}/{cycle_id}"
+
+
 def _cycle_lines(cycle_dir: Path, *, inside: str = "") -> list[TrailLine]:
-    """``inside`` names the campaign whose inner sandbox holds the cycle; a draft is addressed as one."""
-    parent = cycle_dir.parent
-    campaign_id = "" if parent.name == DRAFTS_DIR else parent.parent.name
-    address = f"{campaign_id or parent.name}/{cycle_dir.name}"
-    where = f"{inside}>{address}" if inside else address
+    """``inside`` names the campaign whose inner sandbox holds the cycle."""
+    campaign_id = cycle_dir.parent.parent.name
+    where = _where(campaign_id, cycle_dir.name, inside)
     lines, _ = LedgerIndex.of(CycleLayout(cycle_dir).ledger, _TRAIL_FOLDS).view(_Trail)
     return [
         line._replace(
@@ -126,13 +119,30 @@ def _cycle_lines(cycle_dir: Path, *, inside: str = "") -> list[TrailLine]:
     ]
 
 
-def workspace_lines(campaigns: CampaignStore) -> Iterator[TrailLine]:
-    """Unordered: the account's consent trail, the workspace's own ledgers, then the cycles of
-    every inner sandbox it owns."""
+def _command_line(spelled: str, at: str, kind: str, actor: str) -> TrailLine:
+    """A course's command is addressed as its cycle, in the sandbox chain above it; a draft's as
+    one; a campaign's and the workspace's as nothing."""
+    if (draft_id := draft_of(spelled)) is not None:
+        return TrailLine(at, kind, f"{DRAFTS_DIR}/{draft_id}", actor, "")
+    subject = subject_of(spelled)
+    if subject is None or not subject.cycle_id:
+        return TrailLine(at, kind, "", actor, "")
+    inside = subject.inside[-1].campaign_id if subject.inside else ""
+    where = _where(subject.campaign_id, subject.cycle_id, inside)
+    owner = subject.inside[0].campaign_id if subject.inside else subject.campaign_id
+    return TrailLine(at, kind, where, actor, owner)
+
+
+def workspace_lines(stores: Stores) -> Iterator[TrailLine]:
+    """Unordered: the account's consent trail and command log, the workspace's own ledgers, then the
+    cycles of every inner sandbox it owns."""
+    campaigns = stores.campaigns
     yield from (
         TrailLine(line.at, line.event, line.subject, line.user_id, "", line.device)
         for line in UserStore(campaigns.workspace).consent_trail()
     )
+    for spelled, command in stores.commands.book().lines():
+        yield _command_line(spelled, command.timestamp, command.kind, command.issued_by.id)
     lines, _ = LedgerIndex.of(CycleEventLog.workspace_path(campaigns.workspace), _TRAIL_FOLDS).view(
         _Trail
     )
@@ -140,8 +150,6 @@ def workspace_lines(campaigns: CampaignStore) -> Iterator[TrailLine]:
     for campaign_dir in campaigns.iter_campaign_dirs():
         for cycle_dir in campaigns.campaign_cycle_dirs(campaign_dir.name):
             yield from _cycle_lines(cycle_dir)
-    for draft_dir in draft_dirs(campaigns.workspace):
-        yield from _cycle_lines(draft_dir)
     inner = inner_sandboxes_dir(campaigns.workspace.parent)
     for sandbox in sorted(inner.iterdir()) if inner.is_dir() else ():
         owner = read_sandbox_owner(sandbox) if sandbox.is_dir() else None
@@ -154,7 +162,7 @@ def bank_before_removal(
     *,
     workspace: WorkspaceDir,
     cycle_dirs: list[Path],
-    subject: BankedSubject,
+    subject: Subject,
     metered: dict[CeilingMeter, Budget],
 ) -> None:
     """A campaign destroyer's one bank; a tombstone already standing is a crashed delete's, kept for the retry."""
@@ -162,22 +170,26 @@ def bank_before_removal(
     bank_trail(workspace=workspace, cycle_dirs=cycle_dirs, subject=subject)
 
 
-def bank_trail(*, workspace: WorkspaceDir, cycle_dirs: list[Path], subject: BankedSubject) -> None:
-    """A draft's whole bank: no campaign ceiling counted its calls, and the account's charges hold them."""
-    commands = [
-        BankedCommand(at=line.at, kind=line.what, subject=line.subject, user_id=line.actor)
+def bank_trail(*, workspace: WorkspaceDir, cycle_dirs: list[Path], subject: Subject) -> None:
+    """The run stops alone: what was commanded is the account log's, which no delete reaches."""
+    stops = [
+        BankedStop(at=line.at, subject=line.subject)
         for cycle_dir in cycle_dirs
         # A cycle outside the workspace is an inner sandbox's, and the campaign names its owner.
         for line in _cycle_lines(
             cycle_dir, inside="" if cycle_dir.is_relative_to(workspace) else subject.campaign_id
         )
     ]
-    if not commands:
+    if not stops:
         return
     log = CycleEventLog.open_workspace(workspace)
     _, banked = LedgerIndex.of(log.path, _TRAIL_FOLDS).view(_Trail)
     if subject not in banked:
-        log.append(TrailTombstoneRecord(**subject._asdict(), commands=tuple(commands)))
+        log.append(
+            TrailTombstoneRecord(
+                campaign_id=subject.campaign_id, cycle_id=subject.cycle_id, stops=tuple(stops)
+            )
+        )
 
 
 def in_time_order(lines: Iterable[TrailLine]) -> list[TrailLine]:

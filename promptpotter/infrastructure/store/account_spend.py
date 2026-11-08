@@ -9,10 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
 from promptpotter.domain.run_records import (
     BankedSpend,
-    BankedSubject,
     SpendHoldRecord,
     SpendTombstoneRecord,
     TokenUsageRecord,
@@ -30,7 +29,7 @@ from promptpotter.domain.spend import (
     bill_or_rate_usd,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.runtime_flags import producer_attached
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     HOLD_TRAIL,
@@ -126,7 +125,7 @@ class _Tombstones:
     def __init__(self) -> None:
         self._by_campaign: dict[str, PaidSpend] = {}
         self._metered: dict[tuple[str, CeilingMeter], Budget] = {}
-        self._subjects: set[BankedSubject] = set()
+        self._subjects: set[Subject] = set()
 
     def feed(self, banked: SpendTombstoneRecord) -> None:
         self._subjects.add(banked.subject)
@@ -146,7 +145,7 @@ class _Tombstones:
 class _Banked(NamedTuple):
     spent: dict[str, PaidSpend]
     metered: dict[tuple[str, CeilingMeter], Budget]
-    subjects: frozenset[BankedSubject]
+    subjects: frozenset[Subject]
 
 
 _SPEND_FOLDS = (_Spend, _Tombstones)
@@ -156,8 +155,7 @@ def _unreported_once_stopped(ledger: Path, held: PaidSpend) -> PaidSpend:
     """While a producer is attached the account wallet already reserves the run's ceiling: counting a hold too reads it twice."""
     if held == NOTHING_PAID:
         return held
-    run = derive_run_state(CycleLayout.of_ledger(ledger).cycle_dir)
-    return NOTHING_PAID if run.producer.attached else held
+    return NOTHING_PAID if producer_attached(CycleLayout.of_ledger(ledger).cycle_dir) else held
 
 
 def _summed(ledgers: Iterable[Path]) -> _Spent:
@@ -280,7 +278,7 @@ def account_bill(charges: ChargeBook) -> PaidSpend:
         # Whether what is held is unreported moves with the run, not the file: asked per read.
         if hold.ledger not in attached:
             cycle_dir = CycleLayout.of_ledger(charges.ledger_of(hold)).cycle_dir
-            attached[hold.ledger] = derive_run_state(cycle_dir).producer.attached
+            attached[hold.ledger] = producer_attached(cycle_dir)
         return not attached[hold.ledger]
 
     held = _still_held(
@@ -293,7 +291,7 @@ def bank_spend(
     *,
     workspace: WorkspaceDir,
     cycle_dirs: list[Path],
-    subject: BankedSubject,
+    subject: Subject,
     metered: dict[CeilingMeter, Budget],
 ) -> PaidSpend:
     """Destroyers only (archiving keeps the rows); a tombstone already standing is a crashed delete's, kept for the retry."""

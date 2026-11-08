@@ -130,7 +130,7 @@ export function PromptFieldsEditor({
 
   const setField = (key: string, v: string) => setDraft((prev) => ({ ...prev, [key]: v }));
 
-  // Never re-sends a sent value: each patch is a CommandRecord on the draft's ledger.
+  // Never re-sends a sent value: each patch is a CommandRecord filed on the draft.
   const commit = (next: Record<string, string>) => {
     if (readOnly || !onApply) return;
     bankEdits(next);

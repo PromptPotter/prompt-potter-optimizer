@@ -46,10 +46,8 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     WaitingOn,
 )
 from promptpotter.infrastructure.runtime_flags import (
-    derive_run_state,
     effective_lookahead,
     requested_lookahead,
-    standing_controls,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     VerifyLedger,
@@ -443,7 +441,7 @@ def _remainder(stores: Stores, hop: CycleHop, limits: RunLimits | None) -> ForkR
 
 def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    run = derive_run_state(cycle_dir_for(stores.base_dir, hop))
+    run = stores.run_state(hop)
     config = None if campaign is None else cycle_config(stores, campaign, hop).config
     return _remainder(stores, hop, binding_run_limits(stores, hop, config, run))
 
@@ -591,7 +589,7 @@ def served_dashboard(
 ) -> ServedDashboard | WarmingDashboard:
     """``at`` replays to that ledger offset: live ``run_phase`` and ``producer``, nothing armed."""
     cycle_path = cycle_dir_for(stores.base_dir, hop)
-    run = derive_run_state(cycle_path)
+    run = stores.run_state(hop)
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     meter = None if campaign is None else ceiling_meter(campaign.declaration.purpose)
 
@@ -609,7 +607,7 @@ def served_dashboard(
         return _serve(state, hop=hop, run=run, meter=meter, standing=None)
     config = None if campaign is None else cycle_config(stores, campaign, hop).config
     limits = _binding(stores, hop, config, run, state.run_limits)
-    armed = standing_controls(cycle_path)
+    armed = stores.inbox(hop)
     return _serve(
         state,
         hop=hop,

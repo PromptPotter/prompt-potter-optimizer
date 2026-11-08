@@ -12,10 +12,11 @@ from promptpotter.application.diagnostics import verify
 from promptpotter.application.jobs.launcher.admission import PassHold, campaign_sends, paid_pass
 from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.command_events import CommandEffect
 from promptpotter.domain.command_kinds import CyclePayload, LinePayload, PauseCyclePayload
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import VerifyGradedView
-from promptpotter.domain.run_records import CommandEffect, NoEffect, VerifySaturated
+from promptpotter.domain.run_records import NoEffect, VerifySaturated
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_verify
 from promptpotter.infrastructure.store.stores import owned_campaign

@@ -64,9 +64,9 @@ async def start_checkin(
 
 
 @commands_router.post(
-    f"/{CommandKind.MINT_HEAD_TO_HEAD}",
+    f"/{CommandKind.HEAD_TO_HEAD}",
     response_model=HeadToHeadStarted,
-    name=CommandKind.MINT_HEAD_TO_HEAD,
+    name=CommandKind.HEAD_TO_HEAD,
 )
 async def mint_head_to_head(
     job_registry: JobRegistryDep,
@@ -141,7 +141,7 @@ class _Dispatching:
 
 
 # Each kind is PATHED and NAMED by its `CommandKind`, so no route names a kind no capability gates
-# and no ledger records.
+# and the command log never files.
 _TYPED = {route.path for route in commands_router.routes if isinstance(route, APIRoute)}
 for _kind in CommandKind:
     if f"/commands/{_kind}" not in _TYPED:

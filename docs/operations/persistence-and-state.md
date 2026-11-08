@@ -48,7 +48,7 @@ One minter and reader, `domain/cycle_paths.py::Subject` (`address` / `parse_addr
 | `compact-archive <inventory \| compact \| restore \| purge-cold> [--apply]` | the only verb that can destroy a measurement: `compact` moves `domain/scoring.py::UNREAD_PIPELINE_KEYS` off `panel` answers into `measurements/cold/`, `restore` puts them back, `purge-cold` is irreversible; `origin`/`parent` answers are never eligible |
 | `reset`, `land-data`, `close-admission` | the data-root verbs — [`../decisions.md`](../decisions.md) § 0011 |
 | `reindex`, `pin-roster`, `offer-extras`, `health` | rebuild `measurements/index.jsonl`; pin a Harbor roster; list the extras the offered datasets need; check backends and sign-in providers |
-| `pause`, `origin-gate`, `submit-arms`, `skip-searchpoint`, `set-limits`, `set-concurrent-cycles`, `cancel-queued`, `delete-cycle`, `cleanup-empty-cycles`, `archive`, `unarchive`, `delete [--keep-results]`, `rename`, `bank-snippet`, `discard-draft` | `CommandKind` verbs, each a `CommandRecord` the dispatcher acks |
+| `pause`, `origin-gate`, `submit-arms`, `skip-searchpoint`, `set-limits`, `set-concurrent-cycles`, `cancel-queued`, `delete-cycle`, `cleanup-empty-cycles`, `archive`, `unarchive`, `delete [--keep-results]`, `rename`, `bank-snippet`, `discard-draft` | `CommandKind` verbs, each a `CommandRecord` the dispatcher files on the account's command log (`.workspace/commands.jsonl`) and acks |
 
 Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only where that stops its bill (`Connector.cancel_stops_billing`). Nothing the loop decides reads a diagnostic. A paid diagnostic or `bench` holds a machine slot and an account reservation, refused `409 cycle_busy` / `409 machine_busy` rather than queued (`application/jobs/launcher/admission.py::paid_pass`).
 
@@ -115,7 +115,7 @@ Each file's contract is its model; this table says only what the type cannot.
 
 **Ledger tail → `cycles` → process table by command line → only then mtimes.**
 
-1. **Ledger tail** (`.runtime/ledger.jsonl`) — the chronology, and each `command`'s `command_ack`: `accepted` (armed), `applied` (taken), `rejected` (no loop will).
+1. **Ledger tail** (`.runtime/ledger.jsonl`) — the chronology; what the loop was asked is the account's `.workspace/commands.jsonl`, each `command`'s `command_ack`: `accepted` (armed), `applied` (taken), `rejected` (no loop will), `voided` (its run ended untaken), `cancelled` (its act was interrupted).
 2. **`python -m promptpotter cycles`** — derived `run_phase`, the producer reading, the pause cause.
 3. **Process table, by command line** — which process holds the cycle.
 4. **Mtimes** — only to date what the above explained.
@@ -128,7 +128,7 @@ A command is taken at the next **per-sample** checkpoint, so a pause asked mid-c
 
 ### Commands ride the ledger
 
-`.runtime/` holds no control file: a command is acked `accepted` into the cycle's inbox (`ledger_scan.py::Controls`) and `applied` at the checkpoint that takes it; a new `running` declaration or any stop clears what stood. The standing budget is the last `standing_budget` record on the cycle's ledger (`runtime_flags.py::standing_budget`); its money axes are the campaign's, the last `campaign_ceiling` record on the ROOT's ledger (`ledger_scan.py::scan_campaign_ceiling`).
+`.runtime/` holds no control file: a command is acked `accepted` into the cycle's inbox on the account's command log (`command_log.py::Controls`) and `applied` at the checkpoint that takes it; a launch not resuming a gate, and any stop, ack `voided` what stood (`stores.py::Stores.void_inbox`). The standing budget is the last `standing_budget` record on the cycle's ledger (`runtime_flags.py::standing_budget`); its money axes are the campaign's, the last `campaign_ceiling` record on the ROOT's ledger (`ledger_scan.py::scan_campaign_ceiling`).
 
 ### Where the error text is
 
@@ -143,7 +143,7 @@ A failed cell's `ErrorCategory` and message land in the latest `rounds/round_NNN
 | Operator rewind | `resume --rewind N` | Fork a sibling lifting rounds `0..N-1`, continue at N under the fork's overrides. |
 | Fork on divergence | `resume --fork-on-divergence` | Mint a sibling cycle rooted at the divergent round and continue. |
 
-Until an L1 round closes, a resume re-enters round 0 and holds at the origin gate. Refusals, from every way in: `409 cycle_busy`; `409 config_drift` (the dataset no longer resolves to the minted origin, unless policy-only — `application/jobs/mint.py::resolve_resume`); `409 ledger_unreadable` (remedy `delete <campaign>`, which keeps the caches). **Which edits need a fork** is a knob's `Scope` (`domain/campaign_config.py`): `POLICY` resumes in place; `DATA` and `IDENTITY` run divergence detection and halt rather than drift — revert, or fork.
+Until an L1 round closes, a resume re-enters round 0 and holds at the origin gate. Refusals, from every way in: `409 cycle_busy`; `409 config_drift` (the dataset no longer resolves to the minted origin, unless policy-only — `application/jobs/mint.py::resolve_resume`); `409 ledger_unreadable` (remedy `delete-campaign <campaign>`, which keeps the caches). **Which edits need a fork** is a knob's `Scope` (`domain/campaign_config.py`): `POLICY` resumes in place; `DATA` and `IDENTITY` run divergence detection and halt rather than drift — revert, or fork.
 
 ### The primitive
 
@@ -153,7 +153,7 @@ A fork is a new cycle whose first record (`cycle_minted`) names its `parent`, `f
 
 ### Human in the loop
 
-HITL is the fork primitive: the webapp **Steer & fork** (`SteerForkPanel`) and the terminal's `--steer` / `--rewind` fork a sibling via `CycleEventLog.inherit_from(parent, offset)`; `keep_rounds` picks the act, the shape an applied mask takes ([`mask-projection.md`](mask-projection.md) § Applying one). The button, `pause` and the first Ctrl+C all fire `pause-cycle` through `CommandDispatcher`. **The arm gate** (`optimization.arm_gate`: `off` · `review` · `author`) holds a round before any arm is measured; `submit-arms` answers it (`SubmittedArm`), banked as a second `round_proposed` record so a resume re-holds only where no answer stands. An inner cycle stops when its owner does (cause `enclosing`). The look-ahead's request is the accepted `set-sample-lookahead` ([`access-model.md`](access-model.md) § host-admin ↔ user).
+HITL is the fork primitive: the webapp **Steer & fork** (`SteerForkPanel`) and the terminal's `--steer` / `--rewind` fork a sibling via `CycleEventLog.inherit_from(parent, offset)`; `keep_rounds` picks the act, the shape an applied mask takes ([`mask-projection.md`](mask-projection.md) § Applying one). The button, `pause` and the first Ctrl+C all fire `pause` through `CommandDispatcher`. **The arm gate** (`optimization.arm_gate`: `off` · `review` · `author`) holds a round before any arm is measured; `submit-arms` answers it (`SubmittedArm`), banked as a second `round_proposed` record so a resume re-holds only where no answer stands. An inner cycle stops when its owner does (cause `enclosing`). The look-ahead's request is the accepted `set-sample-lookahead` ([`access-model.md`](access-model.md) § host-admin ↔ user).
 
 ## Will a config change re-score? — the measurement cache
 
@@ -165,4 +165,4 @@ The scorer compiles once at run init (`initialization/loop_start.py::populate_se
 
 ## Lifecycle — archive, delete
 
-`archive` is a flag (`lifecycle_status`), restorable by `unarchive`; `delete` removes the tree, or with `--keep-results` spares the keepsake. Both refuse only while a cycle is LIVE, record on the **workspace** ledger first, and never touch the measurement store. Every byte lands in one `store/data_root.py::Leaf`, its `CAMPAIGN_ROWS` row's or `UNCLASSIFIED` where no row names it, reported by `application/maintenance/storage_report.py` off `store/layout.py::declared_files`: a surface missing from it is deleted by `--keep-results`.
+`archive-campaign` is a flag (`lifecycle_status`), restorable by `unarchive-campaign`; `delete-campaign` removes the tree, or with `--keep-results` spares the keepsake. Both refuse only while a cycle is LIVE, record on the **workspace** ledger first, and never touch the measurement store. Every byte lands in one `store/data_root.py::Leaf`, its `CAMPAIGN_ROWS` row's or `UNCLASSIFIED` where no row names it, reported by `application/maintenance/storage_report.py` off `store/layout.py::declared_files`: a surface missing from it is deleted by `--keep-results`.

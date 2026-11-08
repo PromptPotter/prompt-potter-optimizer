@@ -425,7 +425,7 @@ class LedgerUnreadableError(ConflictError):
         remedy = (
             "no verb repairs it"
             if campaign_id is None
-            else f"`python -m promptpotter delete {campaign_id}` removes its campaign and keeps "
+            else f"`python -m promptpotter delete-campaign {campaign_id}` removes its campaign and keeps "
             "every measurement cache"
         )
         where = ledger if offset is None else f"{ledger} line {offset}"

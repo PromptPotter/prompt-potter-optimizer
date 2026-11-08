@@ -131,8 +131,7 @@ async def _mint(source: ArmSource, plans: list[CyclePlan]) -> list[MintedCycle]:
             return await mint_framed_arms(session, plans)
         case CheckinArms(opened=opened):
             drafts = opened.session.store.drafts
-            ledger = drafts.ledger(opened.draft.draft_id)
-            minted = mint_arms(plans, billed=ledger if ledger.is_file() else None)
+            minted = mint_arms(plans, billed=drafts.ledger(opened.draft.draft_id))
             drafts.close(opened.draft.draft_id)
             return minted
         case _:

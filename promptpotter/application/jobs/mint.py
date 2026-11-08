@@ -68,6 +68,7 @@ from promptpotter.domain.campaign_config import (
     declare_run,
     effective_config,
 )
+from promptpotter.domain.command_events import CommandLanded, draft_subject, subject_key
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -85,6 +86,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     runnable_definition,
 )
 from promptpotter.infrastructure.store.io import validate_path_component
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError
@@ -550,7 +552,8 @@ def _write_plan(
 
 
 def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Session:
-    """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran."""
+    """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran;
+    *billed* is the ledger of the draft it adopts, which it moves where the draft billed."""
     validate_path_component(hop.cycle_id)
     validate_path_component(hop.campaign_id)
     declaration = plan.declaration
@@ -558,7 +561,13 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
     session = plan.session
     campaigns = session.store.campaigns
     if billed is not None:
-        campaigns.adopt_ledger(hop, billed)
+        if billed.is_file():
+            campaigns.adopt_ledger(hop, billed)
+        # What was filed on the draft reads as this cycle's, ahead of its own.
+        drafted = draft_subject(CycleLayout.of_ledger(billed).cycle_dir.name)
+        log = session.store.commands
+        if log.book().subject_events(drafted):
+            log.append(CommandLanded(subject=drafted, onto=subject_key(session.store.subject(hop))))
     _write_plan(session.store, hop, plan.drawn, plan.cycle.own_seed)
     session = session.bound(hop, purpose=declaration.purpose)
     # What the origin hash was taken under, appended before the campaign is visible, so every

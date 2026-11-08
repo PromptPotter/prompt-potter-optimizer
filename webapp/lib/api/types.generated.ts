@@ -231,7 +231,7 @@ export interface MachineStatusResponse {
   busy: boolean;
   /** The CALLER's own waiting launches, oldest first — everything a client needs to
    * say 'queued, position 3' and to offer a cancel. Own is the PRINCIPAL that
-   * launched them, the test `cancel-queued-run` applies. Other entries are
+   * launched them, the test `cancel-queued` applies. Other entries are
    * counted in `queued` and never listed. */
   queue: MachineQueueEntry[];
   /** The CALLER's own launches refused today, newest first. A launch that queued
@@ -2499,7 +2499,7 @@ export interface LoopWarning {
  * signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'campaign_ceiling' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_share' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'left_comparison' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'campaign_ceiling' | 'decision' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_share' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'left_comparison' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -2546,7 +2546,7 @@ export interface ActivityDecision {
 export interface GateAction {
   label: string;
   variant: 'primary' | 'ghost' | 'danger';
-  kind: 'origin-gate-decision';
+  kind: 'origin-gate';
   decision: 'rescore' | 'proceed' | 'abort';
 }
 
@@ -3159,8 +3159,7 @@ export interface EditSpread {
 /** Every arm of every budget point, priced at what the archive says a cell of
  * this bank costs. */
 export interface HeadToHeadPrice {
-  /** One per budget point: dispatched as `mint-head-to-head`, it mints the arms
-   * priced. */
+  /** One per budget point: dispatched as `head-to-head`, it mints the arms priced. */
   heads: MintHeadToHeadPayload[];
   dataset_hash: string;
   search_rows: number;
@@ -3600,9 +3599,9 @@ export interface OptimizationConfig {
    * the common failure while bringing up a new connector. ``strict``
    * (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds
    * only on a structurally-broken origin; ``off`` disarms the gate. The
-   * decision (`origin-gate-decision`) proceeds into the search anyway, re-
-   * scores the origin, or aborts the cycle. An origin that scored no cell
-   * halts instead, and starting the cycle again re-measures it. */
+   * decision (`origin-gate`) proceeds into the search anyway, re-scores the
+   * origin, or aborts the cycle. An origin that scored no cell halts instead,
+   * and starting the cycle again re-measures it. */
   origin_gate: 'strict' | 'critical_only' | 'off';
   /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
    * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
@@ -4694,20 +4693,6 @@ export interface CancelQueuedRunPayload {
   job_id: string;
 }
 
-/** Raise or lower an existing cycle's spend, token, round or wall-clock bound; a
- * budget- or round-halted cycle continues by a higher ceiling, then `resume`.
- * Spend is clamped against the account allowance. On an arm of a head-to-head
- * it moves that arm alone, and leaves the comparison only when a ceiling
- * moved. */
-export interface ChangeRunLimitsPayload {
-  /** The campaign acted on, by its id or a prefix naming one, resolved by the
-   * dispatcher for every door; the root of a `descend` chain is named by its
-   * full id. */
-  campaign_id: string;
-  cycle_id: string;
-  budget: Budget;
-}
-
 /** Remove the stub cycles a mint left behind when it never reached round 0. */
 export interface CleanupEmptyCyclesPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
@@ -5027,9 +5012,9 @@ export interface PartialOptimizationConfig {
    * the common failure while bringing up a new connector. ``strict``
    * (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds
    * only on a structurally-broken origin; ``off`` disarms the gate. The
-   * decision (`origin-gate-decision`) proceeds into the search anyway, re-
-   * scores the origin, or aborts the cycle. An origin that scored no cell
-   * halts instead, and starting the cycle again re-measures it. */
+   * decision (`origin-gate`) proceeds into the search anyway, re-scores the
+   * origin, or aborts the cycle. An origin that scored no cell halts instead,
+   * and starting the cycle again re-measures it. */
   origin_gate: 'strict' | 'critical_only' | 'off' | null;
   /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
    * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
@@ -5088,6 +5073,16 @@ export interface RemoveApiKeyPayload {
   provider: string;
 }
 
+/** Name a campaign wherever it is named to a human; its id still addresses it. */
+export interface SetCampaignLabelPayload {
+  /** The campaign acted on, by its id or a prefix naming one, resolved by the
+   * dispatcher for every door; the root of a `descend` chain is named by its
+   * full id. */
+  campaign_id: string;
+  /** `""` restores the dataset-name fallback. */
+  label: string;
+}
+
 /** One resolver turn over the draft's open gaps; what it proposes waits on a
  * click. */
 export interface ResolveOriginPayload {
@@ -5101,21 +5096,25 @@ export interface SetApiKeyPayload {
   secret: string;
 }
 
-/** Name a campaign wherever it is named to a human; its id still addresses it. */
-export interface SetCampaignLabelPayload {
-  /** The campaign acted on, by its id or a prefix naming one, resolved by the
-   * dispatcher for every door; the root of a `descend` chain is named by its
-   * full id. */
-  campaign_id: string;
-  /** `""` restores the dataset-name fallback. */
-  label: string;
-}
-
 /** How many campaigns this account may hold at once, queued launches included; at
  * most the machine's capacity, and set only by whoever runs this server. */
 export interface SetConcurrentCyclesPayload {
   /** The new limit. */
   max_concurrent_cycles: number;
+}
+
+/** Raise or lower an existing cycle's spend, token, round or wall-clock bound; a
+ * budget- or round-halted cycle continues by a higher ceiling, then `resume`.
+ * Spend is clamped against the account allowance. On an arm of a head-to-head
+ * it moves that arm alone, and leaves the comparison only when a ceiling
+ * moved. */
+export interface ChangeRunLimitsPayload {
+  /** The campaign acted on, by its id or a prefix naming one, resolved by the
+   * dispatcher for every door; the root of a `descend` chain is named by its
+   * full id. */
+  campaign_id: string;
+  cycle_id: string;
+  budget: Budget;
 }
 
 /** Arm how many cells ahead the walk sends. */
@@ -5147,8 +5146,8 @@ export interface SkipSearchpointPayload {
 }
 
 /** The draft says what the campaign IS; ``budget`` bounds what THIS launch
- * spends, and no draft field holds it. Acked at admission, so it rides the
- * draft's ledger into the root cycle. */
+ * spends, and no draft field holds it. Acked at admission, so it lands with
+ * the draft on the root cycle. */
 export interface StartCheckinPayload {
   draft_id: string;
   budget: Budget;
@@ -5247,7 +5246,7 @@ export const TONES = ["quiet", "success", "live", "attention", "warn", "danger"]
 export type Tone = (typeof TONES)[number];
 
 // Each kind whose `Press` claims the browser door (domain/command_kinds.py::CommandKind.browser).
-export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "ingest-upload" | "open-dataset-draft" | "open-origin-draft" | "origin-gate-decision" | "pause-cycle" | "remove-api-key" | "resolve-origin" | "set-api-key" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "ingest-upload" | "open-dataset-draft" | "open-origin-draft" | "origin-gate" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -5260,8 +5259,7 @@ export interface CommandPayloads {
   "accept-terms": CommandSent<AcceptTermsPayload, "version">;
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
   "bank-snippet": CommandSent<BankSnippetPayload, "supersedes" | "text" | "experiment">;
-  "cancel-queued-run": CommandSent<CancelQueuedRunPayload, "job_id">;
-  "change-run-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id" | "budget">;
+  "cancel-queued": CommandSent<CancelQueuedRunPayload, "job_id">;
   "cleanup-empty-cycles": CommandSent<CleanupEmptyCyclesPayload, "campaign_id" | "cycle_id">;
   "compact-archive": CommandSent<CompactArchivePayload, "mode">;
   "delete-campaign": CommandSent<DeleteCampaignPayload, "campaign_id">;
@@ -5270,17 +5268,18 @@ export interface CommandPayloads {
   "edit-draft-campaign": CommandSent<EditDraftCampaignPayload, "draft_id" | "patch">;
   "fork-cycle": CommandSent<ForkCyclePayload, "campaign_id" | "cycle_id">;
   "grade-bench": CommandSent<GradeBenchPayload, "campaign_id">;
+  "head-to-head": CommandSent<MintHeadToHeadPayload, "dataset_name" | "head_to_head">;
   "mint-campaign": CommandSent<MintCampaignPayload, "dataset_name">;
-  "mint-head-to-head": CommandSent<MintHeadToHeadPayload, "dataset_name" | "head_to_head">;
   "open-dataset-draft": CommandSent<OpenDatasetDraftPayload, "dataset_name">;
   "open-origin-draft": CommandSent<OpenOriginDraftPayload, "origin_id">;
-  "origin-gate-decision": CommandSent<OriginGateDecisionPayload, "campaign_id" | "cycle_id" | "decision">;
-  "pause-cycle": CommandSent<PauseCyclePayload, "campaign_id" | "cycle_id">;
+  "origin-gate": CommandSent<OriginGateDecisionPayload, "campaign_id" | "cycle_id" | "decision">;
+  "pause": CommandSent<PauseCyclePayload, "campaign_id" | "cycle_id">;
   "remove-api-key": CommandSent<RemoveApiKeyPayload, "provider">;
+  "rename-campaign": CommandSent<SetCampaignLabelPayload, "campaign_id" | "label">;
   "resolve-origin": CommandSent<ResolveOriginPayload, "draft_id">;
   "set-api-key": CommandSent<SetApiKeyPayload, "provider" | "secret">;
-  "set-campaign-label": CommandSent<SetCampaignLabelPayload, "campaign_id" | "label">;
   "set-concurrent-cycles": CommandSent<SetConcurrentCyclesPayload, "max_concurrent_cycles">;
+  "set-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id" | "budget">;
   "set-sample-lookahead": CommandSent<SetSampleLookaheadPayload, "campaign_id" | "cycle_id" | "cells">;
   "set-user-settings": CommandSent<SetUserSettingsPayload, "demo_mode_enabled">;
   "skip-searchpoint": CommandSent<SkipSearchpointPayload, "campaign_id" | "cycle_id">;
@@ -5296,8 +5295,7 @@ export interface CommandResponses {
   "accept-terms": TermsConsent;
   "archive-campaign": CommandAcceptedBody;
   "bank-snippet": CommandAcceptedBody;
-  "cancel-queued-run": CommandAcceptedBody;
-  "change-run-limits": CommandAcceptedBody;
+  "cancel-queued": CommandAcceptedBody;
   "cleanup-empty-cycles": CommandAcceptedBody;
   "compact-archive": ArchiveReport;
   "delete-campaign": CommandAcceptedBody;
@@ -5306,18 +5304,19 @@ export interface CommandResponses {
   "edit-draft-campaign": DraftCampaignWire;
   "fork-cycle": CommandAcceptedBody;
   "grade-bench": BenchScore;
+  "head-to-head": HeadToHeadStarted;
   "ingest-upload": DraftCampaignWire;
   "mint-campaign": CommandAcceptedBody;
-  "mint-head-to-head": HeadToHeadStarted;
   "open-dataset-draft": DraftCampaignWire;
   "open-origin-draft": DraftCampaignWire;
-  "origin-gate-decision": CommandAcceptedBody;
-  "pause-cycle": CommandAcceptedBody;
+  "origin-gate": CommandAcceptedBody;
+  "pause": CommandAcceptedBody;
   "remove-api-key": CommandAcceptedBody;
+  "rename-campaign": CommandAcceptedBody;
   "resolve-origin": ResolveOriginResponse;
   "set-api-key": AccountKey;
-  "set-campaign-label": CommandAcceptedBody;
   "set-concurrent-cycles": CommandAcceptedBody;
+  "set-limits": CommandAcceptedBody;
   "set-sample-lookahead": CommandAcceptedBody;
   "set-user-settings": UserSettings;
   "skip-searchpoint": CommandAcceptedBody;

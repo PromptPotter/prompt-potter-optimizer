@@ -197,11 +197,8 @@ async def _commit_checkin(stores: Stores, request: CheckinStart) -> MintedCycle:
         session.bank.samples,
         origin_override=opened.origin_override,
     )
-    ledger = stores.drafts.ledger(draft_id)
     minted = mint(
-        plan,
-        campaign_id=fresh_campaign_id(session),
-        billed=ledger if ledger.is_file() else None,
+        plan, campaign_id=fresh_campaign_id(session), billed=stores.drafts.ledger(draft_id)
     )
     stores.drafts.close(draft_id)
     return minted

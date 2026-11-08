@@ -22,7 +22,6 @@ from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import LaunchClockRecord
 from promptpotter.domain.run_standing import LineOutlay
 from promptpotter.domain.spend import Budget, SpendRollup
-from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     LedgerSpend,
     scan_bench_open,
@@ -179,7 +178,7 @@ def line_run(stores: Stores, hop: CycleHop) -> LineRun:
     index = stores.campaigns.load(hop, moment=None) if named else None
     standing = None if index is None else index.standing
     # A pass holds the cycle too, and reads SCORING: only the loop's hold is a run still selecting.
-    run = derive_run_state(stores.campaigns.cycle_dir(hop)) if named else None
+    run = stores.run_state(hop) if named else None
     attached = run is not None and run.producer.attached
     scoring = run is not None and run.run_phase is RunPhase.SCORING
     return LineRun(
