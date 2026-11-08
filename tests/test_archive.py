@@ -99,7 +99,7 @@ from promptpotter.application.scoring.search_point_scorer import replayable_on
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.arms import ArmSlot, PointContext
-from promptpotter.domain.bench import DatasetSplit, partition_bank
+from promptpotter.domain.bench import DatasetSplit, PartitionRecord, partition_bank
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -1022,7 +1022,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     bank = samples(4, "g")
     drawn = partition_bank(bank, DatasetSplit(bench=0), seed=0).record(dataset_hash="bank")
-    store.write_bank_partition(scenario, drawn)
+    store.append(scenario, drawn)
     criterion = "0.9 * accuracy + 0.1 * (1 - mean_latency_s)"
     fork_id = mint_operator_fork(
         stores=stores,
@@ -1036,7 +1036,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     index = store.load(applied, moment=None)
     assert index is not None and index.fork is not None
     assert index.fork.issued_by.id == str(stores.identity.user_id), "the fork names no issuer"
-    assert store.read_bank_partition(applied) == drawn, (
+    assert store.last(applied, PartitionRecord) == drawn, (
         "a redrawn holdout reads the fork's bench lift on rows its parent never held out"
     )
     # OPERATOR_REWIND is the rebase branch, the one that lifts rounds 0..N-1.
@@ -1663,7 +1663,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         stored_campaign(stores, minted_campaign(hop, owner_user_id=str(stores.identity.user_id)))
         stores.campaigns.mint_cycle(hop)
         drawn = partition_bank(repair_bank, DatasetSplit(bench=0), seed=0)
-        stores.campaigns.write_bank_partition(hop, drawn.record(dataset_hash="bank"))
+        stores.campaigns.append(hop, drawn.record(dataset_hash="bank"))
         rows = [
             measurement(i, 1.0, sample_key=s.key, predicted="g") for i, s in enumerate(repair_bank)
         ]

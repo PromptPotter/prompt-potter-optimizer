@@ -130,11 +130,7 @@ export function SnippetLibrary({
           return (
             <>
               {library.refused.map((r) => (
-                <FailureLine
-                  key={r.name}
-                  lead={`Pack ${r.name} refused:`}
-                  failure={{ message: r.reason }}
-                />
+                <FailureLine key={r.message} failure={{ message: r.message }} />
               ))}
               <div className="snippet-filters">
                 <div className="snippet-head">

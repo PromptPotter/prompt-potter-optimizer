@@ -168,7 +168,12 @@ from promptpotter.config.paths import block_packs_root, install_datasets_root
 from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.domain.arms import PointContext
-from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
+from promptpotter.domain.bench import (
+    DatasetSplit,
+    PartitionRecord,
+    partition_bank,
+    restored_partition,
+)
 from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, run_clamp
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
@@ -235,6 +240,7 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     CycleSeed,
+    CycleSeedRecord,
     PipelineRead,
     ScoringLockedRecord,
 )
@@ -1797,7 +1803,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         optimizer_narrowing={"a": NodeSearchNarrowing(param_keys=[])},
         config_overrides=ConfigOverrides(budget=Budget(rounds=4)),
     )
-    stores.campaigns.write_cycle_seed(campaign.root_hop, seed)
+    stores.campaigns.append(campaign.root_hop, CycleSeedRecord(seed=seed))
     forked = cycle_config(stores, campaign, campaign.root_hop).config
     assert forked.optimization.budget.rounds == 4, "a seed's override did not reach its cycle"
     assert [forked.optimizer_narrowing[n].param_keys for n in "ab"] == [[], ["k"]], (
@@ -2197,7 +2203,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "a drifted origin re-minted over the campaign its banked rounds stand on"
     )
     stores.campaigns.mint_cycle(held_campaign.root_hop)
-    stores.campaigns.write_bank_partition(
+    stores.campaigns.append(
         held_campaign.root_hop,
         partition_bank(rows_30, door.dataset_split, seed=0).record(
             dataset_hash=opened.bank.dataset_hash
@@ -2260,11 +2266,12 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # A steering seed is its fork's declared delta, never a waiver of the root's own drift.
     steered_hop = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_steered")
     stores.campaigns.mint_cycle(steered_hop)
-    partition = stores.campaigns.read_bank_partition(held_campaign.root_hop)
+    partition = stores.campaigns.last(held_campaign.root_hop, PartitionRecord)
     assert partition is not None, "the held campaign banked no partition"
-    stores.campaigns.write_bank_partition(steered_hop, partition)
-    stores.campaigns.write_cycle_seed(
-        steered_hop, CycleSeed(pipeline_overlay={"solve": {"temperature": 0.3}})
+    stores.campaigns.append(steered_hop, partition)
+    stores.campaigns.append(
+        steered_hop,
+        CycleSeedRecord(seed=CycleSeed(pipeline_overlay={"solve": {"temperature": 0.3}})),
     )
     steered_fork = opened.bound(steered_hop, purpose=Optimize())
     steered_fork.record_resolved_run()
@@ -2792,7 +2799,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         built_stores.tenant_datasets.put_bank(held_bank)
     built_stores.tenant_datasets.relabel("recut", recut.dataset_hash)
     hop = CycleHop(campaign_id="camp-recut", cycle_id="cycle_recut")
-    built_stores.campaigns.write_bank_partition(
+    built_stores.campaigns.append(
         hop,
         partition_bank(l4_bank, DatasetSplit(bench=0), seed=0).record(
             dataset_hash=drawn_bank.dataset_hash

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import PointContext
-from promptpotter.domain.bench import BankPartition, restored_partition
+from promptpotter.domain.bench import BankPartition, PartitionRecord, restored_partition
 from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
@@ -139,7 +139,7 @@ class Session:
 
     def bound(self, hop: CycleHop, *, purpose: Purpose) -> Session:
         """*purpose* is the campaign's declaration's; the bank and partition are what *hop*'s chain drew."""
-        drawn = self.store.campaigns.read_bank_partition(hop)
+        drawn = self.store.campaigns.last(hop, PartitionRecord)
         if drawn is None:
             raise ConflictError(
                 f"cycle {hop.cycle_id} holds no drawn partition over its chain: its mint draws "

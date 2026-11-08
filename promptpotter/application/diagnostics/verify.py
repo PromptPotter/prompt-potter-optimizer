@@ -25,7 +25,7 @@ from promptpotter.application.scoring.closed_rounds import cycle_instrument, wal
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, read_pair
 from promptpotter.application.scoring.search_point_scorer import reread_cells, score_search_point
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
-from promptpotter.domain.bench import BandedValue
+from promptpotter.domain.bench import BandedValue, PartitionRecord
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import (
@@ -209,7 +209,7 @@ def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Score
             f"{hop.campaign_id}/{hop.cycle_id} holds no closed round 0, so {banked.arm.label} has "
             "no origin to be read over."
         )
-    instrument_id = cycle_instrument(stores.campaigns.read_bank_partition(hop), standing)
+    instrument_id = cycle_instrument(stores.campaigns.last(hop, PartitionRecord), standing)
     assert instrument_id is not None, "a cycle that closed round 0 drew its bank"
     c0 = standing[0].close.origin
     origin = ArmName(key=ArmKey(c0.individual.id), round=0, label=c0.label)

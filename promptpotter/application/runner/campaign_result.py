@@ -15,7 +15,7 @@ from promptpotter.application.runner.bench import (
 )
 from promptpotter.application.scoring.closed_rounds import cycle_instrument
 from promptpotter.domain.arms import candidate_label
-from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun
+from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun, PartitionRecord
 from promptpotter.domain.campaign import Campaign, worked_seconds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase
@@ -228,7 +228,7 @@ def bench_line(
     run: LineRun,
 ) -> BenchLine:
     holder = stores.campaigns.line_holder(campaign.root_hop)
-    drawn = stores.campaigns.read_bank_partition(hop)
+    drawn = stores.campaigns.last(hop, PartitionRecord)
     split = config.dataset_split
     return BenchLine(
         hop=hop,

@@ -26,7 +26,13 @@ from promptpotter.application.scoring.paired import (
     read_arms,
 )
 from promptpotter.domain.arm_reading import ArmAbility, ElectionColumn
-from promptpotter.domain.bench import BENCH_HEADLINE, COLUMN_GRADE, BenchColumn, BenchScore
+from promptpotter.domain.bench import (
+    BENCH_HEADLINE,
+    COLUMN_GRADE,
+    BenchColumn,
+    BenchScore,
+    PartitionRecord,
+)
 from promptpotter.domain.campaign import (
     BenchSet,
     Campaign,
@@ -596,7 +602,7 @@ def _read(
         (None, None) if passes is None else bench_members(stores, passes, scorer, line=line)
     )
 
-    drawn = stores.campaigns.read_bank_partition(hop)
+    drawn = stores.campaigns.last(hop, PartitionRecord)
     rounds = stores.campaigns.standing_rounds(hop, moment=None).rounds
     origin_round = rounds.get(0)
     pick = run.selection

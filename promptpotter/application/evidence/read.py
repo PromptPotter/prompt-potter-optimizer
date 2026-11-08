@@ -70,6 +70,7 @@ from promptpotter.application.scoring.closed_rounds import (
 )
 from promptpotter.application.scoring.paired import MemberRows, as_family
 from promptpotter.domain.arms import Concluded, Proposed, arm_name
+from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
     flatten_prompts,
@@ -810,7 +811,7 @@ def _cycle_facts(stores: Stores, campaign: Campaign, hop: CycleHop, cycle_dir: P
     origin = standing[0].close if 0 in standing else None
     spend_by_round = scan_ledger_spend_by_round(chain)
     hashes = origin.closed_state.prompt_hashes if origin else None
-    instrument_id = cycle_instrument(stores.campaigns.read_bank_partition(hop), standing)
+    instrument_id = cycle_instrument(stores.campaigns.last(hop, PartitionRecord), standing)
     if instrument_id is None:
         raise NotFoundError(f"cycle {hop.cycle_id} drew no bank, so it names no instrument")
     opt = cycle_config(stores, campaign, hop).config.optimization

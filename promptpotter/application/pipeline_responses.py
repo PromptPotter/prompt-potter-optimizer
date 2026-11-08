@@ -26,7 +26,7 @@ from promptpotter.domain.pipeline_schema import (
     reach_map,
 )
 from promptpotter.domain.pool import Access, PoolOffer, PoolSource, kept, offers
-from promptpotter.domain.prompt_block import PackRefusal
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.said import Tone
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
@@ -113,9 +113,9 @@ class PoolRow(StrictModel):
         "order; none for a pool no pack feeds or no member draws, and none before the facts a "
         "Start mints against are known"
     )
-    refused: list[PackRefusal] = Field(
-        description="The packs it would offer but refuses, each with why, served beside `packs`: "
-        "one bad pack never hides the rest"
+    refused: list[Refusal] = Field(
+        description="The packs it would offer but refuses, each with why and its pack in "
+        "`details.pack`, served beside `packs`: one bad pack never hides the rest"
     )
 
 
@@ -345,20 +345,18 @@ def _pool_fills(
 
 def _pack_offers(
     selected: SelectedOptimizer, initializer: Initializer, mint: MintFacts | None
-) -> tuple[list[PackOffer], list[PackRefusal]]:
+) -> tuple[list[PackOffer], list[Refusal]]:
     if (named := initializer.packs(selected)) is None or mint is None:
         return [], []
-    shelved = mint.shelf.shelved()
     offered = [
         PackOffer(
             name=name,
             entries=len(mint.shelf.entries([name], admits=mint.admits)),
             on=name in named,
         )
-        for name, pack in shelved.items()
-        if not isinstance(pack, PackRefusal)
+        for name in mint.shelf.names()
     ]
-    return offered, [pack for pack in shelved.values() if isinstance(pack, PackRefusal)]
+    return offered, mint.shelf.refusals()
 
 
 def _opened_parts(target: PipelineSchema) -> set[str]:

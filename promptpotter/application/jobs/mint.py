@@ -75,8 +75,10 @@ from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     BackendRevision,
     CycleSeed,
+    CycleSeedRecord,
     DefaultsDrift,
     OriginSource,
+    RunWiringRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
@@ -358,7 +360,7 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
         return plan
     campaigns = session.store.campaigns
     recorded = campaigns.read_resolved_run(campaign.root_hop)
-    wired = campaigns.read_run_wiring(campaign.root_hop)
+    wired = campaigns.last(campaign.root_hop, RunWiringRecord)
     raise ConfigDriftError(
         campaign,
         current_hash=checked.origin_hash,
@@ -544,9 +546,9 @@ def _write_plan(
     stores: Stores, hop: CycleHop, drawn: PartitionRecord, seed: CycleSeed | None
 ) -> None:
     """At the mint, so a cycle's draw is on disk before any launch, fork or read of it."""
-    stores.campaigns.write_bank_partition(hop, drawn)
+    stores.campaigns.append(hop, drawn)
     if seed is not None:
-        stores.campaigns.write_cycle_seed(hop, seed)
+        stores.campaigns.append(hop, CycleSeedRecord(seed=seed))
 
 
 def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> Session:

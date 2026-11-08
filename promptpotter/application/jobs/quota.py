@@ -38,6 +38,11 @@ from promptpotter.domain.job import (
     JobHolder,
     ScoringPass,
 )
+from promptpotter.domain.run_records import (
+    CampaignCeilingRecord,
+    CycleShareRecord,
+    StandingBudgetRecord,
+)
 from promptpotter.domain.said import Said
 from promptpotter.domain.spend import (
     CEILING_METER_LABELS,
@@ -605,7 +610,7 @@ def _allotment(left: _Left, *, own: Budget) -> Budget:
 
 def cycle_share(stores: Stores, job: Job) -> Budget:
     """A live job's share, off its cycle: admission lands it there before the job is on the campaign."""
-    record = stores.campaigns.read_cycle_share(job.hop)
+    record = stores.campaigns.last(job.hop, CycleShareRecord)
     if record is None:
         raise RuntimeError(f"job {job.job_id} holds spend on {job.hop} with no share landed there")
     return record.allotment
@@ -695,10 +700,10 @@ def _reshare_campaign_ceiling(
 
 def hold_moved(stores: Stores, hop: CycleHop, allotment: Budget) -> None:
     """THE move of a cycle's share: its record is the one store, which its running book reads live."""
-    held = stores.campaigns.read_cycle_share(hop)
+    held = stores.campaigns.last(hop, CycleShareRecord)
     if held is not None and held.allotment == allotment:
         return
-    stores.campaigns.write_cycle_share(hop, allotment)
+    stores.campaigns.append(hop, CycleShareRecord(allotment=allotment))
 
 
 def land_job(
@@ -725,7 +730,7 @@ def move_campaign_money(
         standing = prior.over(money)
         if standing == prior:
             return
-        stores.campaigns.write_campaign_ceiling(campaign, standing)
+        stores.campaigns.append(campaign.root_hop, CampaignCeilingRecord(budget=standing))
         _reshare_campaign_ceiling(
             money, stores=stores, job_registry=job_registry, campaign_id=campaign_id
         )
@@ -894,8 +899,11 @@ def hold_budget_change(
     cycle = change.only(CYCLE_AXES)
     if cycle.named:
         prior = campaigns.read_standing_budget(hop)
-        campaigns.write_standing_budget(
-            hop, prior.budget.over(cycle), pause_at_round=prior.pause_at_round
+        campaigns.append(
+            hop,
+            StandingBudgetRecord(
+                budget=prior.budget.over(cycle), pause_at_round=prior.pause_at_round
+            ),
         )
     return (
         campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import LaunchState
 from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.results import RoundOutcome, RoundResult
@@ -25,7 +26,6 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError, graceful
 
 if TYPE_CHECKING:
-    from promptpotter.domain.bench import PartitionRecord
     from promptpotter.domain.run_records import (
         RoundClosedRecord,
         RoundEnteredRecord,
@@ -89,7 +89,7 @@ def cycle_instrument(
 
 
 def cycle_bank(stores: Stores, hop: CycleHop) -> Bank:
-    drawn = stores.campaigns.read_bank_partition(hop)
+    drawn = stores.campaigns.last(hop, PartitionRecord)
     bank = None if drawn is None else stores.tenant_datasets.bank(drawn.dataset_hash)
     if bank is None:
         raise NotFoundError(f"cycle {hop.cycle_id} names no bank still held")

@@ -58,7 +58,7 @@ from promptpotter.application.scoring.formula.matchers import matcher_of
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.arms import Concluded
-from promptpotter.domain.bench import partition_bank, restored_partition
+from promptpotter.domain.bench import PartitionRecord, partition_bank, restored_partition
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
@@ -791,7 +791,7 @@ def _draft_mint(stores: Stores, draft: DraftFile, m: _Merge) -> MintFacts | None
 
 
 def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
-    drawn = stores.campaigns.read_bank_partition(m.hop)
+    drawn = stores.campaigns.last(m.hop, PartitionRecord)
     bank = None if drawn is None else stores.tenant_datasets.bank(drawn.dataset_hash)
     if drawn is None or bank is None:
         return None

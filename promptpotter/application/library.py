@@ -11,12 +11,12 @@ from promptpotter.domain.prompt_block import (
     Authored,
     BlockPack,
     Cited,
-    PackRefusal,
     Presumption,
     PromptPart,
     Snippet,
     snippet_id,
 )
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_packs import bank_into_account_pack
 from promptpotter.infrastructure.store.stores import caller_owns
@@ -85,18 +85,18 @@ class LibraryResponse(StrictModel):
     snippets: list[LibrarySnippet] = Field(
         description="The install's packs by name, then the account's, each in its own order"
     )
-    refused: list[PackRefusal] = Field(
+    refused: list[Refusal] = Field(
         description="Each pack held but served none of, then each snippet of the account's "
-        "skipped as an install pack's, and why: the rest serve on"
+        "skipped as an install pack's, and why, its pack in `details.pack`: the rest serve on"
     )
 
 
 def library(shelf: PackShelf) -> LibraryResponse:
     snippets: list[LibrarySnippet] = []
     sources: dict[str, LibrarySource] = {}
-    refused: list[PackRefusal] = []
+    refused: list[Refusal] = []
     for name, pack in shelf.shelved().items():
-        if isinstance(pack, PackRefusal):
+        if isinstance(pack, Refusal):
             refused.append(pack)
             continue
         for s in pack.snippets:

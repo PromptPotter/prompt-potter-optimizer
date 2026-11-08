@@ -339,7 +339,7 @@ function PoolInPlace({ pool, onChange }: { pool: PoolRow; onChange: OnChange }) 
       ) : null}
       {/* A refused pack serves nothing, so it sits beside the chips it would have been. */}
       {pool.refused.map((r) => (
-        <FailureLine key={r.name} lead={`Pack ${r.name} refused:`} failure={{ message: r.reason }} />
+        <FailureLine key={r.message} failure={{ message: r.message }} />
       ))}
       {pool.fills.length > 0 ? (
         <ul className="mech-fills" aria-label={`Where ${noun.many} land`}>

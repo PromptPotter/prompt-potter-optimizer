@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any, Unpack, get_args
 
-from promptpotter.domain.bench import BenchScore, PartitionRecord
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import (
     Campaign,
     CampaignEdit,
@@ -26,15 +26,12 @@ from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.phases import ErrorRecord, LaunchStage, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.run_records import (
-    CampaignCeilingRecord,
     ComparisonExit,
     CycleFinal,
     CycleFinalRecord,
     CycleMintedRecord,
     CycleRecord,
-    CycleSeed,
     CycleSeedRecord,
-    CycleShareRecord,
     CycleSupersededRecord,
     ForkDirection,
     ForkGradedRecord,
@@ -49,7 +46,6 @@ from promptpotter.domain.run_records import (
     RoundProposedRecord,
     RoundRestatedRecord,
     RunPhaseRecord,
-    RunWiringRecord,
     ScoringLockedRecord,
     SpawnedBy,
     SpawnedRecord,
@@ -78,7 +74,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     StandingRounds,
     scan_campaign_ceiling,
     scan_cycle_facts,
-    scan_cycle_share,
     scan_each_last,
     scan_last,
     scan_launch_claim,
@@ -178,7 +173,7 @@ class CampaignStore:
     def ledger(self, hop: CycleHop) -> Path:
         return self.layout(hop).ledger
 
-    def _append(self, hop: CycleHop, record: CycleRecord) -> int:
+    def append(self, hop: CycleHop, record: CycleRecord) -> int:
         cycle_dir = self.cycle_dir(hop)
         offset = CycleEventLog.open(CycleDir(cycle_dir)).append(record)
         write_cycle_index(cycle_dir)
@@ -497,13 +492,13 @@ class CampaignStore:
 
     def mint_cycle(self, hop: CycleHop) -> None:
         if scan_cycle_facts(self.ledger(hop)).minted is None:
-            self._append(hop, CycleMintedRecord())
+            self.append(hop, CycleMintedRecord())
 
     def mint_fork_cycle(
         self, child: CycleHop, parent_dir: Path, spec: ForkSpec, *, cut: int, cut_round: int
     ) -> None:
         """*parent_dir* may lie in another tree: the record names it by path, never by id."""
-        self._append(
+        self.append(
             child,
             CycleMintedRecord(
                 parent=parent_address(self.cycle_dir(child), parent_dir),
@@ -512,13 +507,13 @@ class CampaignStore:
                 fork=spec,
             ),
         )
-        self._append(child, RoundEnteredRecord(round=cut_round, rewound=True))
+        self.append(child, RoundEnteredRecord(round=cut_round, rewound=True))
 
     def grade_fork(self, hop: CycleHop, direction: ForkDirection) -> None:
-        self._append(hop, ForkGradedRecord(direction=direction))
+        self.append(hop, ForkGradedRecord(direction=direction))
 
     def record_intervention(self, hop: CycleHop, *, kind: str) -> None:
-        self._append(hop, InterventionRecord(kind=kind))
+        self.append(hop, InterventionRecord(kind=kind))
 
     def leave_comparison(self, hop: CycleHop, act: ComparisonExit) -> None:
         """decisions.md § 0009: every act on an arm is admitted, and this is the event it leaves by."""
@@ -526,7 +521,7 @@ class CampaignStore:
         if campaign is None:
             raise NotFoundError(f"campaign not found: {hop.campaign_id}")
         if isinstance(campaign.declaration.purpose, Compare):
-            self._append(hop, LeftComparisonRecord(act=act))
+            self.append(hop, LeftComparisonRecord(act=act))
 
     def left_comparison(self, campaign_id: str) -> list[ComparisonExit]:
         """Off every cycle of the campaign: the arm is the campaign, whichever line an act ran on."""
@@ -535,7 +530,7 @@ class CampaignStore:
         )
 
     def record_spawned(self, hop: CycleHop, spawned_by: SpawnedBy) -> None:
-        self._append(hop, SpawnedRecord(spawned_by=spawned_by))
+        self.append(hop, SpawnedRecord(spawned_by=spawned_by))
 
     def standing_rounds(self, hop: CycleHop, *, moment: Moment | None) -> StandingRounds:
         return scan_standing_rounds(ledger_chain(CycleDir(self.cycle_dir(hop)), moment=moment))
@@ -548,11 +543,11 @@ class CampaignStore:
         return self.standing_rounds(hop, moment=None).submitted.get(round_num)
 
     def propose_round(self, hop: CycleHop, proposed: RoundProposedRecord) -> int:
-        return self._append(hop, proposed)
+        return self.append(hop, proposed)
 
     def rebank_round(self, hop: CycleHop, statement: RoundRestatedRecord) -> int:
         """A closed round stated again on a cycle no run holds; a running cycle restates on its live ledger."""
-        return self._append(hop, statement)
+        return self.append(hop, statement)
 
     def rewind_enters(self, hop: CycleHop, after_round: int) -> int:
         if not self.ledger(hop).exists():
@@ -565,7 +560,7 @@ class CampaignStore:
 
     def rewind_to_round(self, hop: CycleHop, after_round: int) -> None:
         entered = self.rewind_enters(hop, after_round)
-        self._append(hop, RoundEnteredRecord(round=entered, rewound=True))
+        self.append(hop, RoundEnteredRecord(round=entered, rewound=True))
 
     def bank_final(
         self,
@@ -575,7 +570,7 @@ class CampaignStore:
         interrupted_round: int | None = None,
         export: PromptExport | None = None,
     ) -> None:
-        self._append(hop, CycleFinalRecord(final=final, interrupted_round=interrupted_round))
+        self.append(hop, CycleFinalRecord(final=final, interrupted_round=interrupted_round))
         if export is not None:
             with graceful("Export artifact write failed"):
                 self._write_export(hop, export)
@@ -596,7 +591,7 @@ class CampaignStore:
 
     def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> bool:
         # The relation always lands; the ending only where none stands, or it replaces why it ended.
-        self._append(hop, CycleSupersededRecord(successor_cycle_id=successor_cycle_id))
+        self.append(hop, CycleSupersededRecord(successor_cycle_id=successor_cycle_id))
         return self.declare_ended(hop, StopReason.REBASED)
 
     def line(self, hop: CycleHop, *, moment: Moment | None = None) -> list[CycleHop]:
@@ -651,7 +646,7 @@ class CampaignStore:
         job_id: str,
         claimant_lock: Path,
     ) -> None:
-        self._append(
+        self.append(
             hop,
             LaunchClaimRecord(stage=stage, job_id=job_id, claimant_lock=str(claimant_lock)),
         )
@@ -662,7 +657,7 @@ class CampaignStore:
     def release_claim(self, hop: CycleHop, *, job_id: str, detail: str) -> None:
         claim = self.launch_claim(hop)
         if claim is not None and claim.job_id == job_id:
-            self._append(hop, LaunchReleasedRecord(job_id=job_id, detail=detail))
+            self.append(hop, LaunchReleasedRecord(job_id=job_id, detail=detail))
 
     def declare_ended(self, hop: CycleHop, reason: StopReason) -> bool:
         """Ends a minted cycle no producer holds on *reason*, where it has not ended."""
@@ -735,13 +730,10 @@ class CampaignStore:
         rmtree_robust(cycle_dir)
         return True, ""
 
-    def write_cycle_seed(self, hop: CycleHop, seed: CycleSeed) -> None:
-        cycle_dir = self.cycle_dir(hop)
-        CycleEventLog.open(CycleDir(cycle_dir)).append(CycleSeedRecord(seed=seed))
-
     def last[R: StrictModel](self, hop: CycleHop, record: type[R]) -> R | None:
-        """The cycle's OWN last *record*: a fork inherits none from its parent's prefix."""
-        return scan_last([LedgerSpan(self.ledger(hop))], record)
+        """The chain's last *record*, or the cycle's OWN where the record says a fork never inherits it."""
+        inherited = getattr(record, "forks_inherit", True)
+        return scan_last(self._chain(hop) if inherited else [LedgerSpan(self.ledger(hop))], record)
 
     def read_laid_spans(self, hop: CycleHop) -> list[LaidSpan]:
         """One per ledger of *hop*'s chain, its root's first: a child's lays over its parent's."""
@@ -755,22 +747,8 @@ class CampaignStore:
             )
         ]
 
-    def write_standing_budget(
-        self, hop: CycleHop, budget: Budget, *, pause_at_round: int | None
-    ) -> None:
-        """Whole, last wins: an axis it leaves unnamed, or a ``None`` ``pause_at_round``, stands no more."""
-        CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
-            StandingBudgetRecord(budget=budget, pause_at_round=pause_at_round)
-        )
-
     def read_standing_budget(self, hop: CycleHop) -> StandingBudgetRecord:
         return standing_budget(self.cycle_dir(hop))
-
-    def write_campaign_ceiling(self, campaign: Campaign, money: Budget) -> None:
-        """Whole, last wins, on the campaign's root: an axis it leaves unnamed stands no more."""
-        CycleEventLog.open(CycleDir(self.cycle_dir(campaign.root_hop))).append(
-            CampaignCeilingRecord(budget=money)
-        )
 
     def read_campaign_ceiling(self, hop: CycleHop) -> Budget:
         """Off any cycle of the campaign: each reads its root's, which its manifest names."""
@@ -784,14 +762,6 @@ class CampaignStore:
         fold; the campaign's ceiling rides its root's ledger, which no fold of this cycle reads."""
         armed = folded.budget.over(self.read_campaign_ceiling(hop))
         return folded.model_copy(update={"budget": armed})
-
-    def write_cycle_share(self, hop: CycleHop, allotment: Budget) -> None:
-        CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
-            CycleShareRecord(allotment=allotment)
-        )
-
-    def read_cycle_share(self, hop: CycleHop) -> CycleShareRecord | None:
-        return scan_cycle_share(self.ledger(hop))
 
     def _chain(self, hop: CycleHop) -> list[LedgerSpan]:
         return ledger_chain(CycleDir(self.cycle_dir(hop)), moment=None)
@@ -818,23 +788,13 @@ class CampaignStore:
             )
         landed = held.then(ResolvedRun(read, doc, model_capabilities=model_capabilities))
         if panel_moved or landed != held:
-            self._append(
+            self.append(
                 hop,
                 ResolvedRunRecord(read=read, experiment=doc, model_capabilities=model_capabilities),
             )
 
     def read_resolved_run(self, hop: CycleHop) -> ResolvedRun:
         return scan_resolved_run(self._chain(hop))
-
-    def read_run_wiring(self, hop: CycleHop) -> RunWiringRecord | None:
-        """The chain's last launch's wiring; ``None`` before the first is declared."""
-        return scan_last(self._chain(hop), RunWiringRecord)
-
-    def read_bank_partition(self, hop: CycleHop) -> PartitionRecord | None:
-        return scan_last(self._chain(hop), PartitionRecord)
-
-    def write_bank_partition(self, hop: CycleHop, record: PartitionRecord) -> None:
-        self._append(hop, record)
 
     def write_optimized_surface(self, hop: CycleHop, leaves: Sequence[ValueLeaf]) -> None:
         by_delivery: dict[str, list[ValueLeaf]] = {}

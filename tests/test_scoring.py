@@ -289,6 +289,7 @@ from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import CellScopes, ThetaCaveat
 from promptpotter.domain.run_records import (
+    CampaignCeilingRecord,
     ComparisonExit,
     ForkSpec,
     ForkTrigger,
@@ -3614,9 +3615,7 @@ def _evidence_campaign(
     stores.tenant_datasets.put_bank(held)
     for cycle in {root, hop}:
         stores.campaigns.mint_cycle(cycle)
-        stores.campaigns.write_bank_partition(
-            cycle, partition.record(dataset_hash=held.dataset_hash)
-        )
+        stores.campaigns.append(cycle, partition.record(dataset_hash=held.dataset_hash))
         ledgers[cycle] = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(cycle)))
         arm_walk(
             ledgers[cycle],
@@ -4443,7 +4442,9 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         if "capped" in arms:
             capped = h2h_stores.campaigns.load_campaign(f"capo_capped_{h2h_id}")
             assert capped is not None
-            h2h_stores.campaigns.write_campaign_ceiling(capped, Budget(usd=1.0))
+            h2h_stores.campaigns.append(
+                capped.root_hop, CampaignCeilingRecord(budget=Budget(usd=1.0))
+            )
         if "rewound" in arms:
             rewound = h2h_stores.campaigns.load_campaign(f"capo_rewound_{h2h_id}")
             assert rewound is not None

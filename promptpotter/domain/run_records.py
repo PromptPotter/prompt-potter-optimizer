@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
+from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
@@ -101,6 +101,7 @@ class PhaseRecord(FrozenModel):
 class RunPhaseRecord(FrozenModel):
     """The runner's own declaration: every other phase is derived off the last one, never said."""
 
+    forks_inherit: ClassVar[bool] = False
     record_type: Literal["run_phase"] = "run_phase"
     run_phase: RunPhase
     stop_reason: StopReason | None = None
@@ -930,6 +931,7 @@ class ElectionRecord(Election):
 class StandingBudgetRecord(FrozenModel):
     """A cycle's standing budget, LAST wins; read PHYSICALLY, so a fork never inherits one."""
 
+    forks_inherit: ClassVar[bool] = False
     record_type: Literal["standing_budget"] = "standing_budget"
     # The cycle axes an operator named; the money axes are the campaign's (`CampaignCeilingRecord`).
     budget: Budget = Budget()
@@ -956,6 +958,7 @@ class CycleShareRecord(FrozenModel):
     the book spending on the cycle and every sibling's admission read. Every move lands through
     `jobs/quota.py::hold_moved`; the account's reserve is the job's (`Job.reserve`)."""
 
+    forks_inherit: ClassVar[bool] = False
     record_type: Literal["cycle_share"] = "cycle_share"
     # The most the cycle may have metered of its campaign's ceiling, in all.
     allotment: Budget

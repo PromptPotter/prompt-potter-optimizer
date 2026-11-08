@@ -487,11 +487,10 @@ later arc deletes. **Rides with:** the arc each group names, by its "Was" name i
 **Batch 4: the ledger (U3, with ET) and spend (S).**
 - **U3: the ledger read stack.** Two push paths (`ledger.py::CycleEventLog` subscribers and
   `read_model.py::appended_here`),
-  three fold protocols, every `CycleEventLog.open` re-counting the ledger, store accessors four hops deep,
+  three fold protocols, every `CycleEventLog.open` re-counting the ledger,
   and `live_dashboard/projection.py::DashboardCheckout` writing a `dashboard.json` only
   `scripts/offline_run.py` reads. Action: `RunScope`'s ledger is the one producer door (`RunCallbacks`
-  goes, in M10; `emit_*` land on `RunScope`'s ledger); `LedgerIndex` the one live fold with the writing projections on it;
-  accessors `append` and `last`. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
+  goes, in M10; `emit_*` land on `RunScope`'s ledger); `LedgerIndex` the one live fold with the writing projections on it. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
 - **ET, inside U3: tracing translates the ledger twice.** `tracing/bridge.py::TracingProjection` re-encodes
   records into a sink vocabulary, `tracing/langfuse_sink.py::LangfuseSink` re-encodes it again over
   `tracing/langfuse_client.py::LangfuseLogger`. Action:
@@ -1112,11 +1111,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
 - `shared/errors.py::LedgerUnreadableError` stands beside `FileUnreadableError`. **Rides with:** LAND.
 - A taken slug is refused twice, as `LaunchError` and as `shared/errors.py::SlugTakenError`.
   **Rides with:** M6.
-- `prompt_block.py::PackRefusal` stands beside `Refusal`. Its deletion moves capo, capo-pobb and
-  potter: `pools/members.py::BlockPoolInitializer.refusal` is a reached unit reading its `name` and
-  `reason`. Action: the shelf holds `Refusal` values composed from one `PackRefusalKind` row each, in a
-  re-key. **Rides with:** M4's re-key. **Re-test:**
-  `git grep -nE "class PackRefusal\b" -- promptpotter` is empty.
 
 **D. Spelled by hand beside the rows.** **Rides with:** the next read added.
 - `api/deps.py::read_input`'s pattern, `cli/parsers.py`' read help,

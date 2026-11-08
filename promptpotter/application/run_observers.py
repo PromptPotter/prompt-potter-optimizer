@@ -27,7 +27,12 @@ from promptpotter.domain.phases import (
     StopReason,
     stop_reason_outcome,
 )
-from promptpotter.domain.run_records import CycleRecord, RunPhaseRecord, RunWiringRecord
+from promptpotter.domain.run_records import (
+    CycleRecord,
+    CycleShareRecord,
+    RunPhaseRecord,
+    RunWiringRecord,
+)
 from promptpotter.domain.spend import MONEY_AXES, Budget
 from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
 from promptpotter.infrastructure.llm.spend_book import (
@@ -125,7 +130,7 @@ def declare_run_stop(
     ).budget
     meter = ceiling_meter(session.purpose)
     # The cycle's share record, which its book reads live; none lands before admission's.
-    held = session.store.campaigns.read_cycle_share(session.hop)
+    held = session.store.campaigns.last(session.hop, CycleShareRecord)
     spend = run_spend_view(
         observers.dashboard.spend_metered(meter),
         campaign_metered=session.store.campaigns.metered_spend(session.campaign_id, meter),

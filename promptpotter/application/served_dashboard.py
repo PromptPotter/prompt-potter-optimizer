@@ -26,7 +26,7 @@ from promptpotter.domain.phases import (
     RunState,
 )
 from promptpotter.domain.round_health import HEALTH_GRADE_INFO
-from promptpotter.domain.run_records import ForkRemainder
+from promptpotter.domain.run_records import CycleShareRecord, ForkRemainder
 from promptpotter.domain.run_standing import closed_after_origin
 from promptpotter.domain.said import Said, pinned
 from promptpotter.domain.sample import sample_tag
@@ -426,7 +426,7 @@ def _allotment(stores: Stores, hop: CycleHop, run: RunState) -> Budget | None:
     # The share the book opened over, or the reshare that last moved it; no run, no share.
     if not run.producer.appending:
         return None
-    held = stores.campaigns.read_cycle_share(hop)
+    held = stores.campaigns.last(hop, CycleShareRecord)
     return None if held is None else held.allotment
 
 

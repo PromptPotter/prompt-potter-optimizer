@@ -21,6 +21,7 @@ from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
+from promptpotter.domain.run_records import StandingBudgetRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.llm.send_pacing import set_abort_check
@@ -131,7 +132,7 @@ def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
     """This cycle's own axes; its money is the campaign's (``move_campaign_money``), its hold the job's."""
     cycle = held.standing.only(CYCLE_AXES)
     if stores.campaigns.read_standing_budget(hop).budget != cycle:
-        stores.campaigns.write_standing_budget(hop, cycle, pause_at_round=None)
+        stores.campaigns.append(hop, StandingBudgetRecord(budget=cycle))
 
 
 def rebase_held(session: Session, parent: CycleHop) -> None:
@@ -162,4 +163,7 @@ def declare_round_allowance(session: Session, step_rounds: int | None) -> None:
         None if step_rounds is None else max(session.state.resumed_from_round - 1, 0) + step_rounds
     )
     if standing.pause_at_round != pause_at_round:
-        campaigns.write_standing_budget(session.hop, standing.budget, pause_at_round=pause_at_round)
+        campaigns.append(
+            session.hop,
+            StandingBudgetRecord(budget=standing.budget, pause_at_round=pause_at_round),
+        )

@@ -104,8 +104,10 @@ class BlockPoolInitializer(_PoolInitializer):
             return None
         if mint is not None and (absent := mint.shelf.missing(packs)):
             return f"{self.name}.packs names {absent}, which neither the install nor this account holds"
-        if mint is not None and (refused := [r for r in mint.shelf.refusals() if r.name in packs]):
-            why = "; ".join(f"{r.name}: {r.reason}" for r in refused)
+        if mint is not None and (
+            refused := [r for r in mint.shelf.refusals() if r.details["pack"] in packs]
+        ):
+            why = "; ".join(r.message for r in refused)
             return f"{self.name}.packs names a refused pack ({why})"
         paths = self.active(selected)
         held = [(e.id, e.group) for e in self.held(selected, mint)]

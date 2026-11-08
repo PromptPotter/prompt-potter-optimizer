@@ -14,6 +14,7 @@ from promptpotter.application.bench.resume_and_fork.decisions import (
 from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.arms import Proposed
+from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
@@ -22,6 +23,7 @@ from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
     BenchCheckpointKind,
+    CycleSeedRecord,
     ForkDirection,
     ForkSpec,
     ForkTrigger,
@@ -98,7 +100,7 @@ def _fork_sibling_setup(
     )
     if seed is not None:
         # Without its own record a rebase's config unlock silently re-locks on the fork's first `resume`.
-        campaign_store.write_cycle_seed(child, seed)
+        campaign_store.append(child, CycleSeedRecord(seed=seed))
     # decisions.md § 0005: stamped once, at the mint every fork takes, its own steer or its line's.
     if babysat:
         campaign_store.record_intervention(child, kind="disallowed_model_override")
@@ -190,7 +192,7 @@ def mint_fork(
             f"mint_fork({trigger.value}) branches from the origin and lifts no parent "
             f"round, so fork_from_round must be 0; got {fork_from_round}"
         )
-    if campaign_store.read_bank_partition(parent) is None:
+    if campaign_store.last(parent, PartitionRecord) is None:
         raise ConflictError(
             f"cycle {parent.cycle_id} holds no drawn partition over its chain, "
             "so no fork can stand on it"

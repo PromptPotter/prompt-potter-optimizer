@@ -27,6 +27,7 @@ from promptpotter.application.scoring.closed_rounds import (
 )
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
 from promptpotter.domain.arms import Cut, Measuring, Proposed, arm_name
+from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.cells import (
     Cell,
     CellCandidate,
@@ -69,7 +70,6 @@ from promptpotter.shared.measurement_context import RoleScope, individual_cells
 from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
-    from promptpotter.domain.bench import PartitionRecord
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
@@ -436,7 +436,7 @@ def _leaderboard_page(
         wanted = {shown[sid].key: sid for sid in selected}
         candidates, rows = _dataset_cells(art_store, cells.name, bank, wanted)
     else:
-        drawn = art_store.campaigns.read_bank_partition(hop)
+        drawn = art_store.campaigns.last(hop, PartitionRecord)
         view = _cycle_view(art_store, hop)
         members = frozenset() if drawn is None else drawn.bank_ids
         selected = _selected(view, members, max_unmeasured, limit)

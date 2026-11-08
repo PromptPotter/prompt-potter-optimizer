@@ -206,6 +206,7 @@ from promptpotter.domain.run_records import (
     SampleStartedRecord,
     SpendHoldRecord,
     SpendTombstoneRecord,
+    StandingBudgetRecord,
     TokenUsageRecord,
 )
 from promptpotter.domain.sample import Bank, Sample
@@ -347,7 +348,7 @@ def _armed(
 ) -> SpendBook:
     """A run's book, live on its job and its cycle's records where it has one; its share lands
     there first, as admission lands it, unless one already stands."""
-    if hop is not None and stores.campaigns.read_cycle_share(hop) is None:
+    if hop is not None and stores.campaigns.last(hop, CycleShareRecord) is None:
         hold_moved(stores, hop, held.share)
     return open_spend_book(
         held,
@@ -1484,7 +1485,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
 
     def declare(budget: Budget) -> None:
         # Money binds on the cycle's share, the rest on its own axes: both records, both live.
-        campaigns.write_standing_budget(hop, budget.only(CYCLE_AXES), pause_at_round=None)
+        campaigns.append(hop, StandingBudgetRecord(budget=budget.only(CYCLE_AXES)))
         hold_moved(built_stores, hop, budget.only(MONEY_AXES))
 
     CycleEventLog.open(CycleDir(cycle_dir)).append(billed_call(1.0, input_tokens=9_000))
