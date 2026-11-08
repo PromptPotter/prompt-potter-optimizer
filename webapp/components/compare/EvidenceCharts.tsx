@@ -12,7 +12,8 @@ import {
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { fmtMetric, fmtMetricInterval, shortId, type MetricFormat } from "@/lib/format";
-import { barChartDefaults, ensureChartRegistered, getCss, lineChartDefaults, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
+import { barChartDefaults, ensureChartRegistered, lineChartDefaults } from "@/lib/chart";
+import { getCss, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
 
 ensureChartRegistered();
 

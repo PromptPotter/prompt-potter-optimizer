@@ -20,8 +20,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.config.paths import PACKAGE_ROOT
+from promptpotter.domain.campaign import LifecycleFilter
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
+from promptpotter.domain.cycle_paths import (
+    ALL_DOTS_PATTERN,
+    HOP_SEP,
+    ID_COMPONENT_PATTERN,
+    UNIT_SEP,
+)
+from promptpotter.domain.phases import DashboardState, ProducerState, RunPhase
+from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTION_PREFIX
 from promptpotter.domain.said import TONES
+from promptpotter.domain.sample import SAMPLE_TAG_DIGITS
+from promptpotter.domain.spend import RATE_PRICED_LABEL
+from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
+from promptpotter.infrastructure.runtime_flags import RECENT_STEP_S
 from promptpotter.main import API_ROUTERS, app
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.shared.worded import Worded, registered
@@ -169,8 +182,6 @@ def _emit_enum_union(enum_cls: type[enum.Enum], note: str) -> str:
 
 
 def _emit_lifecycle_filter() -> str:
-    from promptpotter.domain.campaign import LifecycleFilter
-
     members = " | ".join(repr(m) for m in typing.get_args(LifecycleFilter.__value__))
     note = "`GET /hierarchy?lifecycle=` (domain/campaign.py::LifecycleFilter); absent = 'active'."
     return f"// {note}\nexport type LifecycleFilter = {members};"
@@ -350,10 +361,6 @@ def _emit_word_tables(emitted: set[str]) -> str:
 
 
 def _emit_served_words() -> str:
-    from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTION_PREFIX
-    from promptpotter.domain.sample import SAMPLE_TAG_DIGITS
-    from promptpotter.domain.spend import RATE_PRICED_LABEL
-
     return (
         "// domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX.\n"
         f"export const SCHEMA_DESCRIPTION_PREFIX = {json.dumps(SCHEMA_DESCRIPTION_PREFIX)};\n"
@@ -373,9 +380,6 @@ def _emit_tones() -> str:
 
 
 def _emit_live_windows() -> str:
-    from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
-    from promptpotter.infrastructure.runtime_flags import RECENT_STEP_S
-
     return (
         "// How often an open call beats (infrastructure/llm/heartbeat.py::HEARTBEAT_INTERVAL_S).\n"
         f"export const HEARTBEAT_INTERVAL_S = {HEARTBEAT_INTERVAL_S:g};\n"
@@ -386,13 +390,6 @@ def _emit_live_windows() -> str:
 
 
 def _emit_cycle_path_grammar() -> str:
-    from promptpotter.domain.cycle_paths import (
-        ALL_DOTS_PATTERN,
-        HOP_SEP,
-        ID_COMPONENT_PATTERN,
-        UNIT_SEP,
-    )
-
     for pattern in (ID_COMPONENT_PATTERN, ALL_DOTS_PATTERN):
         if "/" in pattern:
             raise ValueError(
@@ -479,8 +476,6 @@ _HEADER = """\
 
 
 def main() -> int:
-    from promptpotter.domain.phases import DashboardState, ProducerState, RunPhase
-
     for root in _served_roots():
         _emit_type(root)
     command_contract = _emit_command_contract()

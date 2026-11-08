@@ -223,12 +223,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   edit's model, on that edit's provider, on every llm node, as main did, so L4 cannot search a model
   per inner node. Decision: one model per arm, or an edit's model on its own node. **Held:** the
   operator's. **Re-test:** an arm naming a model on `l1_critique` alone answers it on every llm node.
-- **The regenerator checks probe two ways** — `scripts/gate.py`'s `ts-types`, `vendor-marks` and
-  `specs` compare a snapshot, `optimizer-schemas` reads the lines its regenerator printed. Action: one
-  probe for every regenerator. **Rides with:** M1. **Re-test:** read the four checks' functions.
-- **`scripts/build_ts_types.py` imports our package inside functions** — `_emit_lifecycle_filter`
-  and the served-words emitter. Action: module-level imports, as its others. **Rides with:** M1.
-  **Re-test:** `grep -nE "^ +from promptpotter" scripts/build_ts_types.py` is empty.
 - **`tests/test_identity.py` reaches the spawn's private `_laid_arm`** (`_l4_arm`, `_l4_laid`, the
   depth step): the journey cannot lay an arm through `_open_seat`, since no inner campaign stands in
   it, and no depth-2 cell exists (the recursion's nodes carry no `prompt_info`, so
@@ -831,12 +825,6 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **A view family that is chrome**: `components/shell/families.tsx::FAMILIES` holds a family with a
   null pane (the phone's campaign list is the sidebar), so naming it on a wide screen opens a chip
   that draws nothing. **Re-test:** every family has a pane.
-- **The Vite build leaves three things standing**:
-  - The derivations barrel pulls the network layer into every chunk that imports it.
-  - Babel (React Compiler) is 87% of build time.
-  - Chunks exceed 500 kB.
-
-  **Rides with:** M1.
 - **Several doors into one state**: candidate selection minted at each
   `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
   `setSelectionForSampleSet` from several surfaces, `FileTree::onSelect` drilled through its parents.
@@ -1409,8 +1397,7 @@ word's `git grep -c` for that sense is 0.
 **Rides with:** any change to the file named. **Re-test:** the `file::symbol` still holding it.
 
 - **Seen in the `lib/` regroup**: `lib/hooks/useRegistry.ts` and `lib/workspace.tsx` import `derivations/hierarchy` past the barrel
-  to dodge a cycle (barrel → search-point → poll → workspace); `lib/theme.ts` mixes chart setup with
-  the theme preference.
+  to dodge a cycle (barrel → search-point → poll → workspace).
 
 - **A scored but unhealthy origin still holds a live process**: `runner/origin_gate.py::run_origin_gate`
   halts an origin with no scored cell, but holds a degraded one, and its three answers repeat run verbs

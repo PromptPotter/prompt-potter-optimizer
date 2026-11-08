@@ -1,6 +1,5 @@
 import path from "node:path";
-import babel from "@rolldown/plugin-babel";
-import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin } from "vite";
 import { brandOf, softwareApplicationLd, type Brand } from "./lib/brand-of.ts";
 
@@ -99,11 +98,7 @@ export default defineConfig(({ command, mode }) => {
     envDir: WEBAPP,
     resolve: RESOLVE,
     define: defines(brand, build),
-    plugins: [
-      react(),
-      babel({ presets: [reactCompilerPreset()] }),
-      shell(brand, build),
-    ],
+    plugins: [react(), shell(brand, build)],
     build: {
       outDir: path.join(WEBAPP, "out"),
       emptyOutDir: true,

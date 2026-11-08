@@ -1,64 +1,5 @@
 import { useSyncExternalStore } from "react";
 import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
-import {
-  Chart as ChartJS,
-  BarElement,
-  LineElement,
-  PointElement,
-  CategoryScale,
-  LinearScale,
-  Filler,
-  BarController,
-  LineController,
-  type ChartOptions,
-} from "chart.js";
-
-// Chart.js v4 requires explicit registration of the components used. Never its tooltip plugin: a
-// canvas paints no detail over its own marks — what a tap reads opens in the DOM below the chart.
-let registered = false;
-
-export function ensureChartRegistered(): void {
-  if (registered) return;
-  ChartJS.register(
-    BarElement,
-    LineElement,
-    PointElement,
-    CategoryScale,
-    LinearScale,
-    Filler,
-    BarController,
-    LineController,
-  );
-  registered = true;
-}
-
-// `animation: false`: a tween would re-animate every bar on each poll.
-export function lineChartDefaults(
-  over?: Partial<ChartOptions<"line">>,
-): ChartOptions<"line"> {
-  return { responsive: true, maintainAspectRatio: false, animation: false, ...over };
-}
-
-export function lineLook(ink: string, dashed = false) {
-  return {
-    borderColor: ink,
-    backgroundColor: ink,
-    borderWidth: 1.5,
-    tension: 0.3,
-    pointRadius: 2,
-    ...(dashed ? { borderDash: [4, 3] } : {}),
-  };
-}
-
-export function lineMotion(reducedMotion: boolean) {
-  return reducedMotion ? (false as const) : { duration: 1000, easing: "easeOutQuart" as const };
-}
-
-export function barChartDefaults(
-  over?: Partial<ChartOptions<"bar">>,
-): ChartOptions<"bar"> {
-  return { responsive: true, maintainAspectRatio: false, animation: false, ...over };
-}
 
 export function getCss(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -77,11 +18,6 @@ export function seriesColor(index: number): string {
 
 export function seriesVar(index: number): string {
   return `var(${seriesToken(index)})`;
-}
-
-export function applyChartDefaults(): void {
-  ChartJS.defaults.color = getCss("--color-text-secondary");
-  ChartJS.defaults.borderColor = getCss("--color-border");
 }
 
 type Theme = "light" | "dark";
@@ -115,11 +51,10 @@ const themeListeners = new Set<() => void>();
 
 function bumpThemeVersion(): void {
   themeVersion += 1;
-  applyChartDefaults();
   for (const l of themeListeners) l();
 }
 
-function subscribeTheme(cb: () => void): () => void {
+export function subscribeTheme(cb: () => void): () => void {
   themeListeners.add(cb);
   return () => themeListeners.delete(cb);
 }

@@ -113,9 +113,8 @@ export const VENDOR_MARKS: Record<string, VendorMark> = {{
 }};
 """,
     )
-    print(
-        f"vendor-marks.generated.ts{'' if written else ' (unchanged)'}: {len(VENDORS)} vendors, {drawn} marks, {len(VENDORS) - drawn} initials"
-    )
+    print(f"{'wrote' if written else 'unchanged'} {_DEST.relative_to(_REPO)}")
+    print(f"{len(VENDORS)} vendors, {drawn} marks, {len(VENDORS) - drawn} initials")
     return 0
 
 

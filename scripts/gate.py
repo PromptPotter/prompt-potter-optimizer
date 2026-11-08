@@ -109,42 +109,14 @@ def _node(exe: str, *args: str) -> list[str]:
     return [shutil.which(exe) or exe, *args]
 
 
-# A file as a regenerator leaves it: its bytes, and the mtime a rewrite moves.
-_Written = tuple[bytes, int] | None
-
-
-def _snapshot(paths: Sequence[str]) -> list[_Written]:
-    # Prior CONTENT, never the index: a model edit leaves the regenerated file right but unstaged.
-    def written(path: Path) -> _Written:
-        with contextlib.suppress(FileNotFoundError):
-            mtime = path.stat().st_mtime_ns
-            return path.read_bytes(), mtime
-        return None
-
-    return [written(REPO / p) for p in paths]
-
-
-def _stale(paths: Sequence[str], before: Sequence[_Written]) -> Outcome:
-    moved = list(zip(paths, _snapshot(paths), before, strict=True))
-    stale = [p for p, now, was in moved if now != was]
-    # Equal bytes written anew: a `light` regenerator writes nothing when green.
-    if rewritten := [p for p, now, was in moved if now and was and now != was and now[0] == was[0]]:
-        return 1, f"{', '.join(rewritten)} rewritten unchanged — write through `replace_changed`."
-    return _regenerated(stale)
-
-
-def _regenerated(stale: Sequence[str]) -> Outcome:
+def _rewrote(out: str) -> Outcome:
+    # Every regenerator writes through `processes.py::replace_changed` and names each output on a
+    # line, `wrote` where it moved and `unchanged` where it did not.
+    stale = [line[len("wrote ") :] for line in out.splitlines() if line.startswith("wrote ")]
     return (
         (1, f"{', '.join(stale)} stale — regenerated in place; re-run to confirm.")
         if stale
         else (0, "")
-    )
-
-
-def _rewrote(out: str) -> Outcome:
-    # A regenerator that declares its own outputs names each on a line, `wrote` where it moved.
-    return _regenerated(
-        [line[len("wrote ") :] for line in out.splitlines() if line.startswith("wrote ")]
     )
 
 
@@ -323,8 +295,7 @@ print({_ANSWERS!r} + json.dumps(answers))
 @dataclass(frozen=True)
 class _Probe:
     source: str
-    regenerates: tuple[str, ...] = ()
-    judge: Callable[[str], Outcome] | None = None
+    judge: Callable[[str], Outcome]
     fresh: bool = False
 
     def __call__(self, sel: Selection) -> Outcome:
@@ -345,7 +316,6 @@ _HOSTS: list[_Hosted] = []
 @cache
 def _ask_together(probes: tuple[_Probe, ...]) -> dict[_Probe, Outcome]:
     ordered = sorted(probes, key=lambda probe: not probe.fresh)
-    before = [_snapshot(probe.regenerates) for probe in ordered]
     sources = json.dumps([probe.source for probe in ordered])
     began = time.monotonic()
     asking, metered.job = metered.job, (job := open_job())
@@ -359,13 +329,8 @@ def _ask_together(probes: tuple[_Probe, ...]) -> dict[_Probe, Outcome]:
         return dict.fromkeys(ordered, (rc or 1, out))
     verdicts: dict[_Probe, Outcome] = {}
     answers = json.loads(marked[-1][len(_ANSWERS) :])
-    for probe, prior, (code, text) in zip(ordered, before, answers, strict=True):
-        if code:
-            verdicts[probe] = code, text
-        elif probe.judge is not None:
-            verdicts[probe] = probe.judge(text)
-        else:
-            verdicts[probe] = _stale(probe.regenerates, prior)
+    for probe, (code, text) in zip(ordered, answers, strict=True):
+        verdicts[probe] = (code, text) if code else probe.judge(text)
     return verdicts
 
 
@@ -1267,7 +1232,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         "ts-types",
         "py",
-        _Probe("scripts/build_ts_types.py", ("webapp/lib/api/types.generated.ts",)),
+        _Probe("scripts/build_ts_types.py", judge=_rewrote),
         on_commit=True,
         light=True,
         reads=(*_ENGINE, "webapp/lib/api/types.generated.ts"),
@@ -1276,9 +1241,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         "vendor-marks",
         "web",
-        _Probe(
-            "scripts/build_vendor_marks.py", ("webapp/components/ui/vendor-marks.generated.ts",)
-        ),
+        _Probe("scripts/build_vendor_marks.py", judge=_rewrote),
         on_commit=True,
         light=True,
         reads=(
@@ -1299,14 +1262,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         "specs",
         "py",
-        _Probe(
-            "scripts/build_specs.py",
-            (
-                "docs/specs/openapi.generated.json",
-                "docs/specs/events-asyncapi.generated.json",
-                "docs/specs/data-root.generated.json",
-            ),
-        ),
+        _Probe("scripts/build_specs.py", judge=_rewrote),
         on_commit=True,
         light=True,
     ),

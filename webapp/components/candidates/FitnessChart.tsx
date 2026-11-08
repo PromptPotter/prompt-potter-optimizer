@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { Chart } from "react-chartjs-2";
-import { ensureChartRegistered, getCss, lineLook, lineMotion, useThemeVersion } from "@/lib/theme";
+import { ensureChartRegistered, lineLook, lineMotion } from "@/lib/chart";
+import { getCss, useThemeVersion } from "@/lib/theme";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { liftOf } from "@/lib/derivations";
 import { fmtLift } from "@/lib/format";

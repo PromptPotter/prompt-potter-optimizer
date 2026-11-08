@@ -1,7 +1,7 @@
 import { useEffect, type CSSProperties } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { SIDEBAR_WIDTH, useSidebarCollapsed, useSidebarWidth } from "@/lib/prefs/sidebar";
-import { applyChartDefaults } from "@/lib/theme";
+import { applyChartDefaults } from "@/lib/chart";
 import { cx } from "@/lib/cx";
 import { VendorSprite } from "@/components/ui";
 import { Sidebar } from "@/components/shell/sidebar/Sidebar";
