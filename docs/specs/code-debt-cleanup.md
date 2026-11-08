@@ -209,9 +209,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   refuses once as a `FileKind` through `read_file`, or is named a cache read. **Rides with:** READS.
   **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
   surveys and caches.
-- **A failed round checkout is swallowed into a log** — `application/scoring/closed_rounds.py` wraps the
-  checkout in `graceful(...)`. Action: the read refuses or serves the row typed. **Rides with:** M9.
-  **Re-test:** `git grep -n "graceful(" -- promptpotter/application/scoring/closed_rounds.py` is empty.
 
 ### Batch 10's fix pass (2026-11-07)
 
