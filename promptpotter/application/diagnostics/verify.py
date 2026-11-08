@@ -256,12 +256,13 @@ async def verify_candidate(
     samples: int | None,
     strategy: VerifyStrategy,
     seed: int | None,
+    acting: str | None = None,
 ) -> VerifyOutcome:
     round_num, entry = _scored_candidate(stores, hop, candidate_id)
     arm = arm_name(ArmKey(candidate_id), entry, round_num)
     label = arm.label
 
-    async with open_diagnostic(stores, hop, source=RunSource.VERIFY) as opened:
+    async with open_diagnostic(stores, hop, source=RunSource.VERIFY, acting=acting) as opened:
         session, campaign_config, campaign = opened.session, opened.config, opened.campaign
         schema = session.pipeline_schema
         # Before a cell is bought: fresh cells of another searchpoint would read as this one's.

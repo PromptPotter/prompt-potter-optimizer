@@ -1947,27 +1947,35 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             book = stores.commands.book()
             return [
                 record.payload["command_id"]
-                for record in book.filed.values()
-                if record.kind == CommandKind.CANCEL and book.status[record.command_id] == "applied"
+                for _, record in book.lines()
+                if record.kind == CommandKind.CANCEL and book.status(record.command_id) == "applied"
             ]
 
-        async def _held_pass(stop: Callable[[], Awaitable[object]]) -> None:
+        async def _held_pass(
+            stop: Callable[[], Awaitable[object]], acting: str | None = None
+        ) -> None:
             async with paid_pass(
-                stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget(), sends=()
+                stores=stores,
+                verb="bench",
+                hop=_PEER_HOP,
+                declared=Budget(),
+                sends=(),
+                acting=acting,
             ):
                 await stop()
                 # What the walk and every wait inside a pass do once its cancel stands.
-                walk = RunControl(commands=stores.commands, enclosing=(stores.subject(_PEER_HOP),))
+                walk = RunControl(
+                    commands=stores.commands,
+                    enclosing=(stores.subject(_PEER_HOP),),
+                    acting=() if acting is None else (acting,),
+                )
                 if walk.pause_requested() and (abort := get_abort_check()) is not None and abort():
                     raise asyncio.CancelledError("aborted")
                 raise AssertionError("a stop left the pass running")
 
-        async def _replayed_none(_: object) -> None:
-            return None
-
         def _passing(stop: Callable[[], Awaitable[object]]) -> Callable[[Any], Awaitable[Any]]:
-            async def _verify(_: Any) -> Applier[None]:
-                return Applier(lambda: _held_pass(stop), _replayed_none)
+            async def _verify(dispatched: Any) -> Applier[None]:
+                return Applier(lambda: _held_pass(stop, dispatched.command_id))
 
             return _verify
 
@@ -2062,13 +2070,13 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             async def _reached() -> None:
                 raise ConflictError("reached")
 
-            return Applier(_reached, _replayed_none)
+            return Applier(_reached)
 
         with monkeypatch.context() as patched:
             patched.setattr(measuring, "verify_candidate", _verify_filed)
             tracked = asyncio.run(_tracked_by_prefix())
-        filed = stores.commands.book().filed[tracked.task_id]
-        assert filed.payload["campaign_id"] == _PEER_HOP.campaign_id, (
+        filed = stores.commands.book().filing(tracked.task_id)
+        assert filed is not None and filed.payload["campaign_id"] == _PEER_HOP.campaign_id, (
             "a host task filed the prefix it was sent by, which a later mint can make ambiguous"
         )
 
@@ -2098,9 +2106,10 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert len(cancels()) == before + 2 and opened_task["held"] in cancels(), (
             "a host cancel or a Ctrl+C ended the pass without its cancel"
         )
-        assert stores.inbox(_PEER_HOP).stop is None and not cycle_held(cycle_dir), (
-            "a door's stop outlived its pass, or the pass kept its cycle"
+        assert stores.commands.book().stop(opened_task["held"]) is None, (
+            "a door's stop outlived its pass"
         )
+        assert not cycle_held(cycle_dir), "the pass kept its cycle"
 
         async def _cancel(command_id: str) -> str:
             sent = CommandCall(CancelPayload(command_id=command_id))
@@ -2109,7 +2118,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert asyncio.run(_cancel(opened_task["held"])) == "applied", (
             "a cancel of an ended command was refused"
         )
-        assert stores.inbox(_PEER_HOP).stop is None, "a cancel after its pass ended stood"
+        assert stores.commands.book().stop(opened_task["held"]) is None, (
+            "a cancel after its pass ended stood"
+        )
         with pytest.raises(NotFoundError):
             asyncio.run(_cancel("never-filed"))
 

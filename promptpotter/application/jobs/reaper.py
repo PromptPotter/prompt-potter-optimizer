@@ -7,7 +7,6 @@ from pathlib import Path
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.domain.phases import ProducerState
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.layout import (
     campaigns_root_dir_for,
@@ -58,9 +57,7 @@ def _reap(stores: Stores) -> int:
         for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign_id):
             hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name)
             try:
-                silent = stores.run_state(hop).producer.state is ProducerState.SILENT
-                if silent and stores.campaigns.mark_producer_vanished(hop):
-                    stores.void_inbox(hop)
+                if stores.mark_producer_vanished(hop):
                     reaped += 1
             except LedgerUnreadableError as refused:
                 # A refused cycle is no answer for the cycles after it: each is reaped on its own.

@@ -31,7 +31,6 @@ from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import (
     TERMINAL,
     CommandReading,
-    OwnedCommand,
     TaskStatus,
     owned_command,
     read_command,
@@ -41,6 +40,7 @@ from promptpotter.application.commands.dispatcher import (
     CommandCall,
     CommandDispatcher,
     command_answer,
+    kept_answer,
 )
 from promptpotter.application.jobs.launcher.head_to_head import AdmittedHeadToHead
 from promptpotter.application.jobs.launcher.launch import Admitted
@@ -51,14 +51,13 @@ from promptpotter.application.read_params import (
     HierarchySubtreeParams,
     ReadParams,
 )
-from promptpotter.domain.command_events import CommandAckRecord, KeptRefusal, subject_of
+from promptpotter.domain.command_events import CommandAckRecord, KeptRefusal
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CancelPayload,
     CommandAcceptedBody,
     CommandKind,
     CommandPayload,
-    CyclePayload,
     ReadKind,
 )
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
@@ -241,17 +240,6 @@ async def _launched(result: object) -> None:
         await result.launched()
 
 
-def _kept_call(owned: OwnedCommand) -> CommandCall[CommandPayload]:
-    """The call *owned* was filed by, under its own key and id: dispatched, it replays the first
-    act's answer, or is refused as a reused id, never acting again."""
-    filed = owned.filed
-    model = PAYLOAD_MODEL_FOR_KIND[filed.kind]
-    fields = dict(filed.payload)
-    if issubclass(model, CyclePayload) and (subject := subject_of(filed.subject)) is not None:
-        fields |= subject.command_fields
-    return CommandCall(model.model_validate(fields), filed.idempotency_key, filed.command_id)
-
-
 @dataclass(frozen=True, slots=True)
 class HostAnswer:
     """What a tool call answers: a JSON value, or the task tracking it."""
@@ -318,8 +306,8 @@ class TaskStatusOf(HostRequest[HostTask]):
 @dataclass(frozen=True, slots=True)
 class TaskResultOf(HostRequest[tuple[str, HostAnswer]]):
     """Once the task is terminal, its tool's name and answer, read from what its command's end
-    kept and never acted again: a launch answers its record, any other kind its handler's answer
-    replayed off that end, a refusal the one its door served. A gate's hold is no end: the result
+    kept and never acted again: a launch answers its record, any other kind the answer that end
+    keeps (`keeps_answer`), a refusal the one its door served. A gate's hold is no end: the result
     waits past it."""
 
     task_id: str
@@ -406,7 +394,7 @@ class HostSession:
         self._acting[sent.command_id] = acting
         acting.add_done_callback(functools.partial(self._settled, sent.command_id))
         log = self.caller.stores.commands
-        while not await _off_loop(lambda: sent.command_id in log.book().filed):
+        while await _off_loop(lambda: log.book().filing(sent.command_id) is None):
             if acting.done():
                 # Answered as a retry of the first act, or refused before any filing.
                 return await self._read(await acting)
@@ -443,8 +431,9 @@ class HostSession:
         if tool.answers() is None:
             accepted = CommandAcceptedBody(command_id=task_id, subject=read.subject)
             return tool.name, HostAnswer(_jsonable(accepted))
-        replayed = await self._dispatcher().dispatch(_kept_call(owned))
-        return tool.name, HostAnswer(_jsonable(replayed.result))
+        assert owned.end is not None, "a terminal command has ended"
+        assert isinstance(tool.kind, CommandKind), "a task is a command's"
+        return tool.name, HostAnswer(_jsonable(kept_answer(tool.kind, owned.end)))
 
     async def _cancel(self, command_id: str) -> CommandReading:
         """Its one `cancel`, keyed by it so a retried cancel acts once."""

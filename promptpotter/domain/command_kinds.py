@@ -1110,13 +1110,18 @@ def _fills(model: object, dotted: str) -> bool:
     return True
 
 
-# A stop's next act is a kind every door presses, filling a field its payload has.
+# A stop's next act is a kind every door presses, filling a field its payload has; or, kind-less,
+# a field set or a file read, never both and never neither.
 if _unacted := sorted(
-    f"{reason}: {act.kind} {act.field}"
+    f"{reason}: {act.kind} {act.field} {act.reads}"
     for reason, info in STOP_REASON_INFO.items()
     for act in info.next_acts
-    if act.kind not in PAYLOAD_MODEL_FOR_KIND
-    or (act.field and not _fills(PAYLOAD_MODEL_FOR_KIND[act.kind], act.field))
+    if (
+        act.kind not in PAYLOAD_MODEL_FOR_KIND
+        or (act.field and not _fills(PAYLOAD_MODEL_FOR_KIND[act.kind], act.field))
+        or act.reads
+    )
+    if act.kind or bool(act.field) == bool(act.reads)
 ):
     raise RuntimeError(f"STOP_REASON_INFO next acts no kind takes: {_unacted}")
 # A secret no digest names would match two keys as one act.

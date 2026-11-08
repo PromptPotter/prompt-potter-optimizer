@@ -15,14 +15,14 @@ if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import Dispatched
     from promptpotter.domain.command_kinds import CancelPayload
 
-# A paid pass reads its cancel as its pause (`RunControl.pause_requested`): it stops at its next
-# cell and answers over what it banked. Every kind `measuring.py` answers is one.
+# A paid pass reads its cancel as its pause, by its own command id (`RunControl.acting`): it stops
+# at its next cell and answers over what it banked. Every kind `measuring.py` answers is one.
 _PASS_KINDS = frozenset(k for k in CommandKind if k.handler.startswith("measuring:"))
 
 
 async def cancel(dispatched: Dispatched[CancelPayload]) -> Applier[object]:
-    """A pass still acting: applied, it stands on the log until the pass ends
-    (`CommandBook.stopping`). A launch: each job it launched, by its own act
+    """A pass still acting: applied, it stands on the log until the pass ends, read by that pass
+    alone (`CommandBook.stop`). A launch: each job it launched, by its own act
     (`launching.py::launch_cancels`). A command that ended otherwise is left as it ended, and
     anything else acting is refused, nothing touched."""
     dispatcher, target = dispatched.dispatcher, dispatched.payload.command_id

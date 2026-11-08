@@ -41,6 +41,8 @@ class InnerSpawnContext:
     inside: CyclePath
     # Outermost first, ending at the asker's: a pause filed on any of them stops the cell.
     enclosing: tuple[Subject, ...]
+    # The commands the spawner's passes act for: a `cancel` of one stops the cell.
+    acting: tuple[str, ...]
     # What the spawner is FOR: each cell declares it, so withholds what the spawner would.
     purpose: Purpose
     # The tenant ruler lines the spawner's open round reads, which every cell it spawns reads too.
@@ -80,6 +82,7 @@ def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
         research_datasets_root=session.store.research_datasets_root,
         inside=(*session.store.inside, session.hop),
         enclosing=(*session.state.control.enclosing, session.store.subject(session.hop)),
+        acting=session.state.control.acting,
         purpose=session.purpose,
         ruler=ruler_clock(session),
         cells=cells,

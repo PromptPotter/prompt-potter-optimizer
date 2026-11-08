@@ -539,13 +539,13 @@ class PassStoppedError(ConflictError):
     code = "pass_stopped"
 
 
-def _let_go(stores: Stores, holding: CycleHop | None) -> str | None:
+def _let_go(stores: Stores, holding: CycleHop | None, acting: str | None) -> str | None:
     """Applies a pause asked of the pass, however it ended, before the cycle is let go; who asked
-    it, or the pass's `cancel`."""
+    it, or the `cancel` of the command it acted for."""
     if holding is None:
         return None
     try:
-        return _take_pause(stores, holding)
+        return _take_pause(stores, holding, acting)
     finally:
         release_pass(stores.campaigns.cycle_dir(holding))
 
@@ -558,8 +558,10 @@ async def paid_pass(
     hop: CycleHop | None,
     declared: Budget,
     sends: tuple[Send, ...],
+    acting: str | None = None,
 ) -> AsyncIterator[SpendBook]:
-    """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops it."""
+    """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops
+    it; *acting* is the command it acts for, whose `cancel` stops it too."""
     job_registry = JobRegistry.attach(stores.jobs_dir)
     (job,) = await asyncio.to_thread(
         request_jobs,
@@ -580,11 +582,11 @@ async def paid_pass(
             hold_pass(cycle_dir)
             holding = hop
             # Asked of a producer gone since, as a launch's RUNNING record empties the inbox.
-            _take_pause(stores, hop)
+            _take_pause(stores, hop, None)
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
             RunCallbacks(CycleEventLog.open(CycleDir(cycle_dir))).close_dead_bench()
             # The rate-limit and slot waits poll it too, as a loop's do.
-            control = RunControl(commands=stores.commands, cycle=stores.subject(hop))
+            control = _pass_control(stores, hop, acting)
             set_abort_check(control.pause_requested)
             ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)
             declared = ceiling.over(declared)
@@ -617,7 +619,7 @@ async def paid_pass(
             unbind()
     except BaseException as exc:
         job_registry.release(job.job_id, exc)
-        stopped_by = _let_go(stores, holding)
+        stopped_by = _let_go(stores, holding, acting)
         if stopped_by is not None and launch_interrupted(exc):
             raise PassStoppedError(
                 f"The {verb} pass stopped: {stopped_by}. Every cell it measured is banked, and a "
@@ -625,12 +627,21 @@ async def paid_pass(
             ) from None
         raise
     job_registry.release(job.job_id)
-    _let_go(stores, holding)
+    _let_go(stores, holding, acting)
 
 
-def _take_pause(stores: Stores, hop: CycleHop) -> str | None:
-    """Acks the pause standing on *hop* applied; who asked it, ``None`` where none stands."""
-    control = RunControl(commands=stores.commands, cycle=stores.subject(hop))
+def _pass_control(stores: Stores, hop: CycleHop, acting: str | None) -> RunControl:
+    return RunControl(
+        commands=stores.commands,
+        cycle=stores.subject(hop),
+        acting=() if acting is None else (acting,),
+    )
+
+
+def _take_pause(stores: Stores, hop: CycleHop, acting: str | None) -> str | None:
+    """Acks the pause standing on *hop* applied; who asked it, or the `cancel` of *acting*;
+    ``None`` where neither stands."""
+    control = _pass_control(stores, hop, acting)
     if not control.pause_requested():
         return None
     taken = control.take_pause()

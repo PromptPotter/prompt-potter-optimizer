@@ -707,7 +707,7 @@ class LaunchedEffect(FrozenModel):
 
 class VerifySaturated(FrozenModel):
     """A verify that bought nothing: every sample of the candidate's search split was already
-    measured for its config. Its answer, and the effect a retry under its key answers."""
+    measured for its config: its answer, kept on its end as a graded one is."""
 
     kind: Literal["verify_saturated"] = "verify_saturated"
     dataset_name: str

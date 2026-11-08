@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
 
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from promptpotter.application.cycle_addressing import resolve_course, resolve_subject
 from promptpotter.application.datasets.draft_campaign import owned_draft
@@ -101,18 +101,45 @@ class CommandCall[P: CommandPayload]:
         return self.payload.kind
 
 
-async def _no_body(_: CommandEffect) -> None:
+@dataclass(frozen=True, slots=True)
+class Replaying[P: CommandPayload]:
+    """A retry's first act, answered off its end: never off the target it named, which that act
+    may have moved, minted or deleted since."""
+
+    stores: Stores
+    payload: P
+    end: CommandAckRecord
+
+
+type Replay[R] = Callable[[Replaying[Any]], Awaitable[R]]
+
+_REPLAYS: dict[CommandKind, Replay[Any]] = {}
+
+
+def replays[R](*kinds: CommandKind) -> Callable[[Replay[R]], Replay[R]]:
+    """Registers how a retry of *kinds* answers its first act. A kind answering nothing, or one
+    whose end keeps its answer (`keeps_answer`), registers none."""
+
+    def _registered(replay: Replay[R]) -> Replay[R]:
+        for kind in kinds:
+            if kind in _REPLAYS:
+                raise TypeError(f"{kind} already replays by {_REPLAYS[kind]!r}")
+            _REPLAYS[kind] = replay
+        return replay
+
+    return _registered
+
+
+async def _no_body(_: Replaying[Any]) -> None:
     """What a deduped retry answers for a command whose applied form answers nothing either."""
 
 
 @dataclass(frozen=True, slots=True)
 class Applier[R]:
-    """`effect_fn` reads the ack's effect off what `run` applied, and `replay` answers a retry from
-    the first act's, every kind's but an unmatched payload's (`CommandPayload.unmatched`);
-    `ack="accepted"` leaves `run` the guard alone, the loop acking `applied`."""
+    """`effect_fn` reads the ack's effect off what `run` applied; `ack="accepted"` leaves `run`
+    the guard alone, the loop acking `applied`. A retry never reaches it (`replay_of`)."""
 
     run: Callable[[], Awaitable[R]]
-    replay: Callable[[CommandEffect], Awaitable[R]]
     effect_fn: Callable[[R], CommandEffect] | None = None
     ack: CommandAckStatus = "applied"
     # Set where what `run` answers carries the act on past its ack (a Start's admitted launch holds
@@ -123,7 +150,7 @@ class Applier[R]:
 
     @staticmethod
     def silent(run: Callable[[], Awaitable[object]]) -> Applier[object]:
-        return Applier(run, _no_body)
+        return Applier(run)
 
     @staticmethod
     def for_loop(refusal: str) -> Applier[object]:
@@ -131,20 +158,22 @@ class Applier[R]:
             if refusal:
                 raise RejectedError(refusal)
 
-        return Applier(_guard, _no_body, ack="accepted")
+        return Applier(_guard, ack="accepted")
 
     @staticmethod
     def refusing(reason: str) -> Applier[object]:
         async def _refuse() -> None:
             raise RejectedError(reason)
 
-        return Applier(_refuse, _no_body)
+        return Applier(_refuse)
 
 
 @dataclass(frozen=True, slots=True)
 class Dispatched[P: CommandPayload]:
     dispatcher: CommandDispatcher
     payload: P
+    # What it is filed as: a pass reads its `cancel` by it (`RunControl.acting`).
+    command_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +218,23 @@ def addressed[P: CommandPayload](stores: Stores, payload: P) -> P:
     return payload if resolved == subject else payload.model_copy(update=fields)
 
 
+# `CommandPayload.recorded`: the act as its filing keeps it, and the digest its key names.
+type _Recorded = tuple[dict[str, JsonValue], str]
+
+
+def _inner_refusal(payload: CommandPayload) -> str | None:
+    """A cycle kind's refusal of an inner cycle, sent into one."""
+    if isinstance(payload, CyclePayload) and payload.descend:
+        return payload.inner_refusal
+    return None
+
+
+def _at_leaf[P: CyclePayload](payload: P, leaf: CycleHop) -> P:
+    """A payload sent down a ``descend`` chain as its leaf files it."""
+    update = {"campaign_id": leaf.campaign_id, "cycle_id": leaf.cycle_id, "descend": None}
+    return payload.model_copy(update=update)
+
+
 def _rejected(command_id: str, detail: str, refused: Exception) -> CommandAckRecord:
     """Its end keeps the refusal its door serves, where it is one."""
     kept = KeptRefusal.of(refused) if isinstance(refused, PotterError) else None
@@ -216,6 +262,38 @@ def command_answer(kind: CommandKind) -> object | None:
     raise TypeError(f"{kind} applies {applied!r}, which no wire model carries")
 
 
+def keeps_answer(kind: CommandKind) -> bool:
+    """A task kind's modelled answer is kept on its end: its task's result and its retry answer
+    the act's own, whatever became of its target since."""
+    return kind.answering == "task" and command_answer(kind) is not None
+
+
+def _answer_adapter(kind: CommandKind) -> TypeAdapter[Any]:
+    return TypeAdapter(command_answer(kind))
+
+
+def kept_answer(kind: CommandKind, end: CommandAckRecord) -> object:
+    """What the act answered, as its end kept it (`keeps_answer`)."""
+    return _answer_adapter(kind).validate_python(end.answer)
+
+
+async def _kept(replaying: Replaying[Any]) -> object:
+    return kept_answer(replaying.payload.kind, replaying.end)
+
+
+def replay_of(kind: CommandKind) -> Replay[Any]:
+    """How a retry of *kind* answers its first act: what its end kept, nothing for a kind that
+    answers nothing, else the replay its handler's module registered (`replays`)."""
+    handler = handler_of(kind)
+    if (replay := _REPLAYS.get(kind)) is not None:
+        return replay
+    if keeps_answer(kind):
+        return _kept
+    if get_args(returned(handler))[0] is object:
+        return _no_body
+    raise TypeError(f"{kind} answers a retry with nothing its end keeps; register its replay")
+
+
 class CommandDispatcher:
     def __init__(
         self,
@@ -238,12 +316,7 @@ class CommandDispatcher:
         return self.stores.run_state(hop)
 
     async def _applier(self, dispatched: Dispatched[Any]) -> Applier[Any]:
-        kind = dispatched.payload.kind
-        if kind.capability is not None:
-            require_capability(
-                self.stores.identity, kind.capability, subject=f"command {kind.value!r}"
-            )
-        return await handler_of(kind)(dispatched)
+        return await handler_of(dispatched.payload.kind)(dispatched)
 
     async def answer[R, P: CommandPayload](
         self, handler: Handler[R], call: CommandCall[P]
@@ -260,67 +333,119 @@ class CommandDispatcher:
         acted = await asyncio.to_thread(addressed, self.stores, call.payload)
         if acted is not call.payload:
             call = replace(call, payload=acted)
+        kind = call.kind
+        if kind.capability is not None:
+            require_capability(
+                self.stores.identity, kind.capability, subject=f"command {kind.value!r}"
+            )
+        if (inner_refusal := _inner_refusal(call.payload)) is not None:
+            raise PayloadInvalidError(inner_refusal, code="inner_cycle_unaddressed")
+        filed_as, subject = await asyncio.to_thread(self._filed_on, call.payload)
+        # Off the loop: an upload's act hashes its bytes.
+        recorded = await asyncio.to_thread(filed_as.recorded)
+        if subject is not None and not call.payload.unmatched:
+            # Before any check of its target: the first act may have minted or deleted it.
+            book = await asyncio.to_thread(self.stores.commands.book)
+            found = book.keyed(subject, kind, recorded[1], call.idempotency_key)
+            if found is not None:
+                record, end = found
+                return CommandOutcome(
+                    payload=call.payload,
+                    accepted=CommandAcceptedBody(command_id=record.command_id, subject=subject),
+                    result=await replay_of(kind)(Replaying(self.stores, call.payload, end)),
+                    ack=end.status,
+                )
         match call.payload:
             case CyclePayload():
-                return await self._on_cycle(call)
+                return await self._on_cycle(call, recorded)
             case LinePayload():
-                return await self._on_line(call)
+                return await self._on_line(call, recorded)
             case CampaignPayload():
-                return await self._on_campaign(call)
+                return await self._on_campaign(call, recorded)
             case DraftPayload():
-                return await self._on_draft(call)
+                return await self._on_draft(call, recorded)
             case _:
-                applier = await self._applier(Dispatched(self, call.payload))
-                return await self._record_and_apply(WORKSPACE_SUBJECT, call, applier)
+                applier = await self._applier(Dispatched(self, call.payload, call.command_id))
+                return await self._record_and_apply(WORKSPACE_SUBJECT, call, applier, recorded)
+
+    def _filed_on(self, payload: CommandPayload) -> tuple[CommandPayload, str | None]:
+        """*payload* as it is filed and the subject it is filed on, both read off its address
+        alone; ``None`` for a line command whose campaign holds no line to read it off."""
+        match payload:
+            case CyclePayload(descend=descend) if descend:
+                *_, leaf = decode_cycle_path(descend)
+                below = Subject.below(payload.campaign_id, payload.cycle_id, descend)
+                return _at_leaf(payload, leaf), subject_key(below)
+            case CyclePayload():
+                hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
+                return payload, subject_key(self.stores.subject(hop))
+            case LinePayload():
+                campaign = self.stores.campaigns.load_campaign(payload.campaign_id)
+                if campaign is None:
+                    return payload, None
+                holder = self.stores.campaigns.line_holder(campaign.root_hop)
+                return payload, subject_key(self.stores.subject(holder))
+            case CampaignPayload():
+                return payload, subject_key(Subject(payload.campaign_id))
+            case DraftPayload():
+                return payload, draft_subject(payload.draft_id)
+        return payload, WORKSPACE_SUBJECT
 
     async def _on_campaign(
-        self, call: CommandCall[CampaignPayload]
+        self, call: CommandCall[CampaignPayload], recorded: _Recorded
     ) -> CommandOutcome[object, CampaignPayload]:
         owned_campaign(self.stores, call.payload.campaign_id)
-        applier = await self._applier(Dispatched(self, call.payload))
+        applier = await self._applier(Dispatched(self, call.payload, call.command_id))
         subject = subject_key(Subject(call.payload.campaign_id))
-        return await self._record_and_apply(subject, call, applier)
+        return await self._record_and_apply(subject, call, applier, recorded)
 
-    async def _on_line(self, call: CommandCall[LinePayload]) -> CommandOutcome[object, LinePayload]:
+    async def _on_line(
+        self, call: CommandCall[LinePayload], recorded: _Recorded
+    ) -> CommandOutcome[object, LinePayload]:
         campaign = owned_campaign(self.stores, call.payload.campaign_id)
         hop = self.stores.campaigns.line_holder(campaign.root_hop)
-        applier = await self._applier(DispatchedToCycle(self, call.payload, campaign, hop))
-        return await self._record_and_apply(subject_key(self.stores.subject(hop)), call, applier)
+        applier = await self._applier(
+            DispatchedToCycle(self, call.payload, call.command_id, campaign, hop)
+        )
+        subject = subject_key(self.stores.subject(hop))
+        return await self._record_and_apply(subject, call, applier, recorded)
 
     async def _on_cycle(
-        self, call: CommandCall[CyclePayload]
+        self, call: CommandCall[CyclePayload], recorded: _Recorded
     ) -> CommandOutcome[object, CyclePayload]:
         payload = call.payload
         hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
         tail = decode_cycle_path(payload.descend)
-        if tail and payload.inner_refusal is not None:
-            raise PayloadInvalidError(payload.inner_refusal, code="inner_cycle_unaddressed")
         leaf_stores, leaf = resolve_cycle_path(self.stores, (hop, *tail))
         if tail:
-            inner = payload.model_copy(
-                update={"campaign_id": leaf.campaign_id, "cycle_id": leaf.cycle_id, "descend": None}
-            )
             return await CommandDispatcher(
                 leaf_stores, job_registry=self._attached, inline=self.inline
-            )._on_cycle(replace(call, payload=inner))
+            )._on_cycle(replace(call, payload=_at_leaf(payload, leaf)), recorded)
         campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
         campaign = owned_campaign(self.stores, campaign_id)
         if self.stores.campaigns.load(hop, moment=None) is None:
             raise NotFoundError(
                 f"cycle not found: {campaign_id}/{cycle_id}", code="command_target_not_found"
             )
-        applier = await self._applier(DispatchedToCycle(self, payload, campaign, hop))
-        return await self._record_and_apply(subject_key(self.stores.subject(hop)), call, applier)
+        applier = await self._applier(
+            DispatchedToCycle(self, payload, call.command_id, campaign, hop)
+        )
+        subject = subject_key(self.stores.subject(hop))
+        return await self._record_and_apply(subject, call, applier, recorded)
 
-    async def _on_draft(self, call: CommandCall[DraftPayload]) -> CommandOutcome[Any, DraftPayload]:
+    async def _on_draft(
+        self, call: CommandCall[DraftPayload], recorded: _Recorded
+    ) -> CommandOutcome[Any, DraftPayload]:
         # Under the draft's claim, which a Start holds until its mint closed: no command lands inside
         # a mint or writes a minted draft back. Owned first, so another user's held claim says nothing.
         owned_draft(self.stores, call.payload.draft_id)
         claim = self.stores.drafts.claim(call.payload.draft_id)
         try:
-            applier = await self._applier(DispatchedToDraft(self, call.payload, claim))
+            applier = await self._applier(
+                DispatchedToDraft(self, call.payload, call.command_id, claim)
+            )
             subject = draft_subject(call.payload.draft_id)
-            outcome = await self._record_and_apply(subject, call, applier)
+            outcome = await self._record_and_apply(subject, call, applier, recorded)
         except BaseException:
             claim.release()
             raise
@@ -329,35 +454,18 @@ class CommandDispatcher:
         return outcome
 
     async def _record_and_apply[P: CommandPayload, R](
-        self, subject: str, call: CommandCall[P], applier: Applier[R]
+        self, subject: str, call: CommandCall[P], applier: Applier[R], recorded: _Recorded
     ) -> CommandOutcome[R, P]:
         """*subject* is the log's spelling of what the command is filed on (`command_events.py`)."""
         kind, idempotency_key = call.kind, call.idempotency_key
         log = self.stores.commands
-        # Off the loop: an upload's act hashes its bytes.
-        payload, act_digest = await asyncio.to_thread(call.payload.recorded)
-        if not call.payload.unmatched:
-            existing = log.book().keyed(subject, kind, act_digest, idempotency_key)
-            if existing is not None:
-                record, ack = existing
-                return CommandOutcome(
-                    payload=call.payload,
-                    accepted=CommandAcceptedBody(command_id=record.command_id, subject=subject),
-                    result=await applier.replay(ack.effect),
-                    ack=ack.status,
-                )
-
+        payload, act_digest = recorded
         command_id = call.command_id
-        if command_id in log.book().filed:
-            raise ConflictError(
-                f"command {command_id} is already filed; send a new call under an id of its own",
-                code="command_id_reused",
-            )
         applied: list[R] = []
         # The filing and its end are one scope: a filing no act ended is ended ``cancelled``.
         filed = ended = False
         try:
-            log.append(
+            log.file(
                 CommandRecord(
                     command_id=command_id,
                     kind=kind,
@@ -384,8 +492,17 @@ class CommandDispatcher:
                 log.append(_rejected(command_id, str(exc), exc))
                 raise
             effect = NoEffect() if applier.effect_fn is None else applier.effect_fn(applied[0])
+            kept = (
+                _answer_adapter(kind).dump_python(applied[0], mode="json")
+                if keeps_answer(kind)
+                else None
+            )
             ended = True
-            log.append(CommandAckRecord(command_id=command_id, status=applier.ack, effect=effect))
+            log.append(
+                CommandAckRecord(
+                    command_id=command_id, status=applier.ack, effect=effect, answer=kept
+                )
+            )
         except BaseException as exc:
             # Admitted and never handed on: what the answer holds is given back in this scope.
             if applied and applier.rides is not None:

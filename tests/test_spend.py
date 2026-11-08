@@ -371,7 +371,7 @@ def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Bud
     payload = ChangeRunLimitsPayload(
         campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget
     )
-    dispatched = DispatchedToCycle(dispatcher, payload, minted_campaign(hop), hop)
+    dispatched = DispatchedToCycle(dispatcher, payload, "limits", minted_campaign(hop), hop)
 
     async def apply() -> Applier[object]:
         applier = await change_run_limits(dispatched)
@@ -1167,6 +1167,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         research_datasets_root=None,
         inside=(owner,),
         enclosing=(),
+        acting=(),
         cells=seats,
         purpose=Optimize(),
         ruler=RulerReach(version=0, own=None),
@@ -2683,7 +2684,7 @@ async def _paid_door(door: str, stores: Any) -> None:
             async with paid_call(stores=stores, bucket="turn", provider="openrouter"):
                 keyed_client("openrouter")
         case "bench":
-            await grade_line_bench(stores=stores, hop=_HELD_HOP)
+            await grade_line_bench(stores=stores, hop=_HELD_HOP, acting="bench")
         case "noise-floor":
             await measure_noise_floor(stores=stores, hop=_HELD_HOP, k=RescoreCount(2))
         case "seed-screen":

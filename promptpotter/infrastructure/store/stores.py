@@ -9,7 +9,7 @@ from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject, WorkspaceDir
-from promptpotter.domain.phases import RunState
+from promptpotter.domain.phases import ProducerState, RunState, StopReason
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -106,6 +106,16 @@ class Stores:
     def void_inbox(self, hop: CycleHop) -> None:
         """A run boundary: what the cycle's loop was asked and never took stands no more."""
         self.commands.void(self.subject(hop), f"run boundary of {hop.cycle_id}")
+
+    def mark_producer_vanished(self, hop: CycleHop) -> bool:
+        """A cycle whose producer went with its run owed (`ProducerState.SILENT`) ends
+        PRODUCER_VANISHED, at its run boundary."""
+        if self.run_state(hop).producer.state is not ProducerState.SILENT:
+            return False
+        if not self.campaigns.declare_ended(hop, StopReason.PRODUCER_VANISHED):
+            return False
+        self.void_inbox(hop)
+        return True
 
     def write_own_definition(
         self,

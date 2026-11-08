@@ -474,16 +474,27 @@ def append_line(path: Path, line: bytes) -> range:
     back to the last newline before this line lands. No reader counted those bytes (`complete_lines`,
     `FileMark.end`), and the append that wrote them never returned. A file still ending where this
     process's last append left it is opened append-only: it ends on a line written whole."""
-    data = line + b"\n"
+    with appending(path) as put:
+        return put(line)
+
+
+@contextlib.contextmanager
+def appending(path: Path) -> Iterator[Callable[[bytes], range]]:
+    """`append_line` held: what is read of *path* under it is what the line lands after, so a
+    writer refusing a line the file already holds refuses it inside the write."""
     name = _long_path(path)
     with _write_lock(path):
-        with open_append(name) as f:
-            st = os.fstat(f.fileno())
-            if not st.st_size or _APPENDED.get(name) == (st.st_ino, st.st_size, st.st_mtime_ns):
-                return _landed(name, f, data)
-        _cut_unterminated(name)
-        with open_append(name) as f:
+        yield lambda line: _append_held(name, line + b"\n")
+
+
+def _append_held(name: str, data: bytes) -> range:
+    with open_append(name) as f:
+        st = os.fstat(f.fileno())
+        if not st.st_size or _APPENDED.get(name) == (st.st_ino, st.st_size, st.st_mtime_ns):
             return _landed(name, f, data)
+    _cut_unterminated(name)
+    with open_append(name) as f:
+        return _landed(name, f, data)
 
 
 def open_append(path: Path | str) -> IO[bytes]:

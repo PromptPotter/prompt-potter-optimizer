@@ -189,10 +189,11 @@ class OpenedDiagnostic:
 
 @asynccontextmanager
 async def open_diagnostic(
-    stores: Stores, hop: CycleHop, *, source: RunSource
+    stores: Stores, hop: CycleHop, *, source: RunSource, acting: str | None = None
 ) -> AsyncIterator[OpenedDiagnostic]:
     """The one opener of every verb that scores a cycle's points outside its loop: its scope is
-    the block's, so a pass the loop runs leaves the loop's own standing."""
+    the block's, so a pass the loop runs leaves the loop's own standing. *acting* is the command
+    the pass acts for, whose `cancel` stops it."""
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
@@ -200,7 +201,11 @@ async def open_diagnostic(
     session = configure_and_apply_pipeline(await bind_cycle_session(stores, campaign, hop), cycle)
     config = cycle.config
     # Its cycle's pause stops the pass; the loop's skip and look-ahead are the loop's to spend.
-    session.state.control = RunControl(commands=stores.commands, enclosing=(stores.subject(hop),))
+    session.state.control = RunControl(
+        commands=stores.commands,
+        enclosing=(stores.subject(hop),),
+        acting=() if acting is None else (acting,),
+    )
     # Its scope spawns as `run_optimization`'s: a pp-self point's connector dispatches no inner run without it.
     with arm_diagnostic_scoring(session, config, source=source):
         yield OpenedDiagnostic(

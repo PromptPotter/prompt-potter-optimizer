@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter.application import account, library
-from promptpotter.application.commands.dispatcher import Applier
+from promptpotter.application.commands.dispatcher import Applier, Replaying, replays
 from promptpotter.application.commands.draft_editing import reread_draft_wire
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.datasets.ingest import (
@@ -16,6 +16,7 @@ from promptpotter.application.jobs.coupon import AccountKey, put_account_key, re
 from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.domain.command_kinds import (
     ArchiveCampaignPayload,
+    CommandKind,
     DeleteCampaignPayload,
     UnarchiveCampaignPayload,
 )
@@ -23,11 +24,10 @@ from promptpotter.domain.run_records import DraftOpenedEffect
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import LedgerUnreadableError, NotFoundError
+from promptpotter.shared.errors import LedgerUnreadableError
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import Dispatched
-    from promptpotter.domain.command_events import CommandEffect
     from promptpotter.domain.command_kinds import (
         AcceptTermsPayload,
         BankSnippetPayload,
@@ -40,7 +40,6 @@ if TYPE_CHECKING:
         SetCampaignLabelPayload,
         SetUserSettingsPayload,
     )
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 async def campaign_lifecycle(dispatched: Dispatched[LifecyclePayload]) -> Applier[object]:
@@ -79,25 +78,23 @@ async def set_campaign_label(dispatched: Dispatched[SetCampaignLabelPayload]) ->
     return Applier.silent(_apply)
 
 
-def _opening(
-    stores: Stores, run: Callable[[], Awaitable[DraftCampaignWire]]
-) -> Applier[DraftCampaignWire]:
-    """The three doors a check-in draft opens by: a retry under the first act's key answers the
-    draft it opened, as that draft reads now."""
+def _opening(run: Callable[[], Awaitable[DraftCampaignWire]]) -> Applier[DraftCampaignWire]:
+    """The three doors a check-in draft opens by (`reopened`)."""
+    return Applier(run, effect_fn=lambda wire: DraftOpenedEffect(draft_id=wire.draft_id))
 
-    async def _reopened(effect: CommandEffect) -> DraftCampaignWire:
-        if not isinstance(effect, DraftOpenedEffect):
-            raise LedgerUnreadableError(
-                ledger=str(CycleEventLog.workspace_path(stores.base_dir)),
-                offset=None,
-                reason=f"a draft-open's ack names no draft, its effect is {effect.kind!r}",
-                campaign_id=None,
-            )
-        return await reread_draft_wire(stores, effect.draft_id)
 
-    return Applier(
-        run, replay=_reopened, effect_fn=lambda wire: DraftOpenedEffect(draft_id=wire.draft_id)
-    )
+@replays(CommandKind.INGEST_UPLOAD, CommandKind.OPEN_DATASET_DRAFT, CommandKind.OPEN_ORIGIN_DRAFT)
+async def reopened(replaying: Replaying[Any]) -> DraftCampaignWire:
+    """A retry under the first act's key answers the draft it opened, as that draft reads now."""
+    effect, stores = replaying.end.effect, replaying.stores
+    if not isinstance(effect, DraftOpenedEffect):
+        raise LedgerUnreadableError(
+            ledger=str(CycleEventLog.workspace_path(stores.base_dir)),
+            offset=None,
+            reason=f"a draft-open's ack names no draft, its effect is {effect.kind!r}",
+            campaign_id=None,
+        )
+    return await reread_draft_wire(stores, effect.draft_id)
 
 
 async def ingest_upload(
@@ -110,7 +107,7 @@ async def ingest_upload(
             stores=stores, blob=payload.blob, filename=payload.filename, slug=payload.slug
         )
 
-    return _opening(stores, _apply)
+    return _opening(_apply)
 
 
 async def open_dataset_draft(
@@ -121,7 +118,7 @@ async def open_dataset_draft(
     async def _apply() -> DraftCampaignWire:
         return await draft_from_dataset(stores=stores, dataset_name=name)
 
-    return _opening(stores, _apply)
+    return _opening(_apply)
 
 
 async def open_origin_draft(
@@ -132,7 +129,7 @@ async def open_origin_draft(
     async def _apply() -> DraftCampaignWire:
         return await draft_from_origin(stores=stores, origin_id=origin_id)
 
-    return _opening(stores, _apply)
+    return _opening(_apply)
 
 
 # What an account sets on itself: its preferences, its consent and its own provider keys.
@@ -145,11 +142,13 @@ async def set_user_settings(
     async def _apply() -> account.UserSettings:
         return account.set_user_settings(stores, sent)
 
-    async def _set(_: CommandEffect) -> account.UserSettings:
-        # Its key names this payload, so the first act set exactly these.
-        return sent
+    return Applier(_apply)
 
-    return Applier(_apply, replay=_set)
+
+@replays(CommandKind.SET_USER_SETTINGS)
+async def settings_set(replaying: Replaying[SetUserSettingsPayload]) -> account.UserSettings:
+    # Its key names this payload, so the first act set exactly these.
+    return account.UserSettings(demo_mode_enabled=replaying.payload.demo_mode_enabled)
 
 
 async def accept_terms(
@@ -160,27 +159,24 @@ async def accept_terms(
     async def _apply() -> account.TermsConsent:
         return account.accept_terms(stores, version)
 
-    async def _accepted(_: CommandEffect) -> account.TermsConsent:
-        # One consent line per act: a retry writes none.
-        return account.TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=version)
+    return Applier(_apply)
 
-    return Applier(_apply, replay=_accepted)
+
+@replays(CommandKind.ACCEPT_TERMS)
+async def terms_accepted(replaying: Replaying[AcceptTermsPayload]) -> account.TermsConsent:
+    # One consent line per act: a retry writes none.
+    version = replaying.payload.version
+    return account.TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=version)
 
 
 async def set_api_key(dispatched: Dispatched[SetApiKeyPayload]) -> Applier[AccountKey]:
+    """Its payload is `unmatched`: no retry is answered as it, so it replays nothing."""
     stores, payload = dispatched.dispatcher.stores, dispatched.payload
 
     async def _apply() -> AccountKey:
         return put_account_key(stores, payload.provider, payload.secret)
 
-    async def _held(_: CommandEffect) -> AccountKey:
-        # Never reached by a retry, its payload `unmatched`: the key as the account holds it.
-        held = stores.api_keys.load().get(payload.provider)
-        if held is None:
-            raise NotFoundError(f"no {payload.provider} key is held")
-        return AccountKey(provider=payload.provider, last4=held.last4, added_at=held.added_at)
-
-    return Applier(_apply, replay=_held)
+    return Applier(_apply)
 
 
 async def remove_api_key(dispatched: Dispatched[RemoveApiKeyPayload]) -> Applier[object]:

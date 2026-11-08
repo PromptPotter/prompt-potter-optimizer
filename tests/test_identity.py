@@ -59,6 +59,7 @@ from promptpotter.application.bench.task_context import (
 from promptpotter.application.commands import launching
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
+from promptpotter.application.config_map import campaign_config_map
 from promptpotter.application.datasets import (
     ingest,
     loaders,
@@ -212,6 +213,7 @@ from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
     SCHEMA_TOGGLE_PARAM,
+    KnobLayer,
     ManifestNodeOverlay,
     ModelCapability,
     NodeConfigParam,
@@ -1915,6 +1917,51 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         ["low", "high", "xhigh"],
         ["m", "n"],
     ), "a fork's steer was checked against its root's menu, not its own"
+    # An optimizer knob names the layer its mint recorded behind it, never the tier the account is
+    # on now; a key no layer below the edit recorded is the operator's edit.
+    knob_config = CampaignConfig.model_validate(
+        {
+            "optimization": {
+                "degradation_threshold": 0.05,
+                "nodes": {
+                    "l1_generate": {"config": {"n_variants": 3, "k_max": 4, "pool_window": 6}}
+                },
+            }
+        }
+    )
+    layered = minted_campaign(
+        CycleHop(campaign_id="fk__000002", cycle_id="cycle_root"),
+        config=knob_config,
+        dataset_name="fk",
+        owner_user_id=str(stores.identity.user_id),
+    )
+    stores.campaigns.create_campaign(layered)
+    stores.campaigns.mint_cycle(layered.root_hop)
+    recorded: dict[str, dict[str, KnobLayer]] = {
+        "l1_generate": {"n_variants": "dataset", "k_max": "free_tier"}
+    }
+    stores.campaigns.write_resolved_run(
+        layered.root_hop,
+        PipelineRead(
+            declaration=declaring(["low"]),
+            dataset_overlay={},
+            declared_nodes=frozenset(),
+            knob_layers=recorded,
+        ),
+        experiment=None,
+        model_capabilities={},
+    )
+    sources = {
+        knob.path.rsplit(".", 1)[-1]: knob.source
+        for group in campaign_config_map(stores, layered.campaign_id).groups
+        for knob in group.knobs
+        if ".l1_generate." in knob.path
+    }
+    assert {k: sources[k] for k in ("n_variants", "k_max", "pool_window")} == {
+        "n_variants": "dataset",
+        "k_max": "free_tier",
+        "pool_window": "campaign",
+    }, "a knob named another layer than its mint recorded behind it"
     # A steer the campaign never sanctioned cannot pass as a clean fork.
     sanctioning = {
         "l1_generate": NodeSearchNarrowing(param_allowed_values={"model": ["openai/gpt-oss-120b"]})
@@ -2010,7 +2057,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         return asyncio.run(arm_plans(arming, door, request, rows_30))
 
     # No dollar cap: a backend holding its own sends prices no cell before a run.
-    mint_arms(arm_of("a", Budget(usd=None, rounds=2)), billed=None)
+    mint_arms(arm_of("a", Budget(usd=None, rounds=2)), adopting=None)
     # An arm declared over another budget never joins its head-to-head, and takes no campaign.
     standing = stores.campaigns.list_campaigns(lifecycle="all")
     with pytest.raises(ConflictError):
@@ -2021,11 +2068,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # Two acts on one fresh id each plan off no record: the second to mint is held to the first's
     # record, so one comparison never holds two shared parts.
     early = arm_of("x", Budget(usd=None, rounds=3), h2h="race")
-    mint_arms(arm_of("y", Budget(usd=None, rounds=2), h2h="race"), billed=None)
+    mint_arms(arm_of("y", Budget(usd=None, rounds=2), h2h="race"), adopting=None)
     declared_race = stores.campaigns.load_head_to_head("race")
     assert declared_race is not None, "a fresh id's first mint declared no record"
     with pytest.raises(ConflictError):
-        mint_arms(early, billed=None)
+        mint_arms(early, adopting=None)
     assert stores.campaigns.load_head_to_head("race") == declared_race, (
         "an act that planned off no record rewrote the record another act minted under"
     )
@@ -2038,7 +2085,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # An act on an id another act holds is refused before it pays or mints, never queued behind it.
     standing = stores.campaigns.list_campaigns(lifecycle="all")
     with stores.campaigns.head_to_head_held("race"), pytest.raises(ConflictError):
-        mint_arms(arm_of("z", Budget(usd=None, rounds=2), h2h="race"), billed=None)
+        mint_arms(arm_of("z", Budget(usd=None, rounds=2), h2h="race"), adopting=None)
     assert stores.campaigns.list_campaigns(lifecycle="all") == standing, (
         "an act on a held head-to-head minted a campaign"
     )
@@ -2052,7 +2099,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             arms=[ArmRequest(arm_key=key, optimization=sent) for key, sent in arms],
             budget=Budget(usd=None, rounds=2),
         )
-        minted = mint_arms(asyncio.run(arm_plans(arming, door, request, rows_30)), billed=None)
+        minted = mint_arms(asyncio.run(arm_plans(arming, door, request, rows_30)), adopting=None)
         purposes: dict[str, Compare] = {}
         for cycle in minted:
             campaign = stores.campaigns.load_campaign(cycle.campaign_id)

@@ -446,7 +446,9 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
         stores=store,
         enable_tracing=False,
     )
-    session.state.control = RunControl(commands=store.commands, enclosing=ctx.enclosing)
+    session.state.control = RunControl(
+        commands=store.commands, enclosing=ctx.enclosing, acting=ctx.acting
+    )
     all_samples = session.bank.samples
     if not all_samples:
         raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
@@ -481,7 +483,7 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
             minted = mint(
                 resolve_cycle_plan(session, declaration, train_data),
                 campaign_id=cell.campaign_id,
-                billed=None,
+                adopting=None,
             )
             session, cycle, optimizer = minted.session, minted.cycle, minted.optimizer
         else:

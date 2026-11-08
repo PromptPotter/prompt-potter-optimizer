@@ -42,14 +42,16 @@ class BenchTriggerError(ConflictError):
     """The bench pass cannot be sent for this cycle as it stands on disk."""
 
 
-async def grade_line_bench(*, stores: Stores, hop: CycleHop) -> BenchScore:
-    """Admitted exactly where the served status says so (``BenchStatus.can_grade``)."""
+async def grade_line_bench(*, stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
+    """Admitted exactly where the served status says so (``BenchStatus.can_grade``); *acting* is
+    the command it grades for, whose `cancel` stops it."""
     async with paid_pass(
         stores=stores,
         verb="bench",
         hop=hop,
         declared=Budget(),
         sends=campaign_sends(stores, hop),
+        acting=acting,
     ):
         campaign = stores.campaigns.load_campaign(hop.campaign_id)
         if campaign is None:
@@ -58,13 +60,15 @@ async def grade_line_bench(*, stores: Stores, hop: CycleHop) -> BenchScore:
         if status.refusal is not None:
             held = "" if status.held_by is None else f" Holder: {status.held_by}."
             raise BenchTriggerError(BENCH_REFUSAL_INFO[status.refusal] + held)
-        return await _grade(stores, hop)
+        return await _grade(stores, hop, acting)
 
 
-async def _grade(stores: Stores, hop: CycleHop) -> BenchScore:
+async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
     standing = stores.campaigns.standing_rounds(hop, moment=None).rounds
     rounds = [standing[n].close for n in sorted(standing)]
-    async with open_diagnostic(stores, hop, source=RunSource.OPTIMIZATION_LOOP) as opened:
+    async with open_diagnostic(
+        stores, hop, source=RunSource.OPTIMIZATION_LOOP, acting=acting
+    ) as opened:
         session, config, framing = opened.session, opened.config, opened.framing
         origin_sp = opened.points.measured(rounds[0].origin)
         clock = LaunchClock.now()

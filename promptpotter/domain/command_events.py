@@ -14,7 +14,6 @@ from promptpotter.domain.run_records import (
     DraftOpenedEffect,
     LaunchedEffect,
     NoEffect,
-    VerifySaturated,
 )
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import utcnow_iso
@@ -67,7 +66,7 @@ class CommandRecord(FrozenModel):
 
 
 CommandEffect = Annotated[
-    NoEffect | DraftOpenedEffect | LaunchedEffect | VerifySaturated, Field(discriminator="kind")
+    NoEffect | DraftOpenedEffect | LaunchedEffect, Field(discriminator="kind")
 ]
 
 
@@ -93,13 +92,15 @@ class KeptRefusal(FrozenModel):
 class CommandAckRecord(FrozenModel):
     """``applied`` = it HAPPENED; a loop command is ``accepted`` first, and stays so if untaken
     until the run boundary ``voided`` it. ``cancelled``: its act was interrupted. A ``rejected``
-    act keeps the refusal its door served."""
+    act keeps the refusal its door served, and a task kind's applied act its modelled answer
+    (`dispatcher.py::keeps_answer`): what its task's result and its retry answer."""
 
     record_type: Literal["command_ack"] = "command_ack"
     command_id: str
     status: CommandAckStatus
     detail: str = ""
     effect: CommandEffect = Field(default_factory=NoEffect)
+    answer: dict[str, Any] | None = None
     refusal: KeptRefusal | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 

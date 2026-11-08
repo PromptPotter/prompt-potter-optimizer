@@ -506,14 +506,16 @@ class StopCategory(enum.StrEnum):
 
 
 class NextAct(NamedTuple):
-    """A kind a door presses past a stop, and the one payload field it fills (dotted into a
-    model), described by *value*: each door words its own spelling from it, the terminal its verb
-    and flag (`views/render/phase.py`). Checked against the kind table at its import
-    (`command_kinds.py`)."""
+    """A remedy past a stop: a *kind* a door presses and the one payload field it fills (dotted
+    into a model); with no kind, a declared *field* the operator sets; or a file it *reads*.
+    *value* describes what goes in the field. Each door words its own spelling from it, the
+    terminal its verb and flag (`views/render/phase.py`). A kind is checked against the kind
+    table at its import (`command_kinds.py`)."""
 
     kind: str
     field: str = ""
     value: str = ""
+    reads: str = ""
 
 
 class StopReasonInfo(NamedTuple):
@@ -552,7 +554,11 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; "
             "else read the review.",
             True,
-            (NextAct("set-limits", "budget.rounds", "more"), NextAct("start-run")),
+            (
+                NextAct("set-limits", "budget.rounds", "more"),
+                NextAct("start-run"),
+                NextAct("", reads="review.md"),
+            ),
         ),
         StopReason.TARGET_HIT: StopReasonInfo(
             "Target reached", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ()
@@ -610,7 +616,11 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "the backend deadline their rows name) before resuming, or turn the panel gate off to "
             "elect on the holed panel.",
             False,
-            (NextAct("start-run"),),
+            (
+                NextAct("", "Connector.cell_envelope_s"),
+                NextAct("", "optimization.panel_gate", "off"),
+                NextAct("start-run"),
+            ),
         ),
         StopReason.ADAPTER_OWED: StopReasonInfo(
             "Adapter output owed",

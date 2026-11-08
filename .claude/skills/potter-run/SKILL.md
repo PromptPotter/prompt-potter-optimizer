@@ -55,7 +55,7 @@ act, one budget each; `price-head-to-head <plan>` prices one at $0. `pause` is t
 takes `cancel-queued <job_id>` (`machine-status` names it). A dataset's defaults are
 `{dataset}/dataset.yaml::campaign`, never guessed.
 
-**Every ending states its next verb** (`STOP_REASON_INFO::cli_command`, the readout's `cli:` line). Two
+**Every ending states its next verb** (`STOP_REASON_INFO::next_acts`, the readout's `cli:` line). Two
 ways a `set-limits` raise silently fails: the ceiling is clamped to the account allowance (read the ARMED
 value off `dashboard.json::run_limits.budget`), and the counter is CUMULATIVE across resumes and cycles.
 A hard kill loses nothing: every query lands in `measurements/cells/{config_key}.jsonl` at once.

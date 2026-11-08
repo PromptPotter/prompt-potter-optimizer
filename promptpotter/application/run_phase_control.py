@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.command_kinds import SubmitArmsPayload
     from promptpotter.domain.cycle_paths import Subject
     from promptpotter.infrastructure.llm.spend_book import SpendBook
+    from promptpotter.infrastructure.store.command_log import PauseAsk
 
 
 @dataclass(frozen=True)
@@ -77,11 +78,14 @@ class RunControl:
     # Outermost first. Their pause stops this run; their look-ahead never reaches it — inherited,
     # one arming would multiply concurrency at every nested level.
     enclosing: tuple[Subject, ...] = ()
+    # The commands whose passes this control acts for, outermost first: a `cancel` of one is its
+    # pause while that command acts, and of no other act on its cycle.
+    acting: tuple[str, ...] = ()
     # Held, never spent, where no round spends a press (a screen, a bench pass); ``None`` reads the inbox.
     held_lookahead: int | None = None
 
     def __post_init__(self) -> None:
-        if self.commands is None and (self.cycle is not None or self.enclosing):
+        if self.commands is None and (self.cycle is not None or self.enclosing or self.acting):
             raise ValueError("a control over a cycle reads that cycle's commands off the log")
 
     def _log(self) -> CommandLog:
@@ -92,16 +96,23 @@ class RunControl:
         return Controls() if self.cycle is None else self._log().book().controls(self.cycle)
 
     def _outer_paused(self) -> Subject | None:
-        """The innermost enclosing run a pause, or a pass's cancel, stands on."""
+        """The innermost enclosing run a pause stands on."""
         if not self.enclosing:
             return None
         book = self._log().book()
-        return next((o for o in reversed(self.enclosing) if _asked(book.controls(o))), None)
+        return next((o for o in reversed(self.enclosing) if book.controls(o).pause), None)
+
+    def _cancelled(self) -> PauseAsk | None:
+        """The `cancel` standing on the innermost command this control acts for."""
+        if not self.acting:
+            return None
+        book = self._log().book()
+        return next((s for a in reversed(self.acting) if (s := book.stop(a)) is not None), None)
 
     def pause_requested(self) -> bool:
         """A pause is a CLEAN EXIT: poll it only where work already done is on disk. A pass's
-        ``cancel`` is its pause, read off the subject it is filed on."""
-        if _asked(self._inbox()):
+        ``cancel`` is its pause, read by the command it names."""
+        if self._inbox().pause is not None or self._cancelled() is not None:
             return True
         return self._outer_paused() is not None
 
@@ -120,8 +131,8 @@ class RunControl:
         if (asked := inbox.pause) is not None:
             self._log().ack(asked.command_id, "applied")
             return PauseCause.COMMAND, f"pause by {asked.issued_by.display}"
-        # Its pass's own end drops it from the inbox: nothing to ack.
-        if (stop := inbox.stop) is not None:
+        # Its pass's own end drops it: nothing to ack.
+        if (stop := self._cancelled()) is not None:
             return PauseCause.COMMAND, f"cancel by {stop.issued_by.display}"
         if (outer := self._outer_paused()) is not None:
             return PauseCause.ENCLOSING, f"enclosing run {outer.cycle_id} was paused"
@@ -165,10 +176,6 @@ class RunControl:
         asked = self._inbox().lookahead
         if asked is not None and not asked.taken:
             self._log().ack(asked.command_id, "applied")
-
-
-def _asked(inbox: Controls) -> bool:
-    return inbox.pause is not None or inbox.stop is not None
 
 
 def budget_stop(book: SpendBook) -> StopReason | None:

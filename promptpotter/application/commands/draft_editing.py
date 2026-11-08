@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.commands.dispatcher import Applier
+from promptpotter.application.commands.dispatcher import Applier, Replaying, replays
 from promptpotter.application.datasets.draft_build import (
     DraftCampaignWire,
     draft_wire,
@@ -11,6 +11,7 @@ from promptpotter.application.datasets.draft_build import (
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
+from promptpotter.domain.command_kinds import CommandKind
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import Dispatched, DispatchedToDraft
@@ -36,7 +37,13 @@ async def edit_draft_campaign(
         save_checkin_draft(stores, updated)
         return wire
 
-    return Applier(_apply, replay=lambda _: reread_draft_wire(stores, draft_id))
+    return Applier(_apply)
+
+
+@replays(CommandKind.EDIT_DRAFT_CAMPAIGN)
+async def edited(replaying: Replaying[EditDraftCampaignPayload]) -> DraftCampaignWire:
+    """The draft as it reads now: its key names this patch, so the first act applied it."""
+    return await reread_draft_wire(replaying.stores, replaying.payload.draft_id)
 
 
 async def discard_draft(dispatched: Dispatched[DiscardDraftPayload]) -> Applier[object]:

@@ -597,7 +597,7 @@ class CampaignStore:
     def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> bool:
         # The relation always lands; the ending only where none stands, or it replaces why it ended.
         self._append(hop, CycleSupersededRecord(successor_cycle_id=successor_cycle_id))
-        return self._declare_ended(hop, StopReason.REBASED)
+        return self.declare_ended(hop, StopReason.REBASED)
 
     def line(self, hop: CycleHop, *, moment: Moment | None = None) -> list[CycleHop]:
         """The supersede chain from *hop*; *moment* walks it as it stood then."""
@@ -664,7 +664,8 @@ class CampaignStore:
         if claim is not None and claim.job_id == job_id:
             self._append(hop, LaunchReleasedRecord(job_id=job_id, detail=detail))
 
-    def _declare_ended(self, hop: CycleHop, reason: StopReason) -> bool:
+    def declare_ended(self, hop: CycleHop, reason: StopReason) -> bool:
+        """Ends a minted cycle no producer holds on *reason*, where it has not ended."""
         lock = self.layout(hop).producer_lock
         # A held cycle's producer declares its own stop; asked first, so no caller waits out a live hold.
         if producer_lock.held(lock) or not producer_lock.take(lock):
@@ -677,9 +678,6 @@ class CampaignStore:
             return True
         finally:
             producer_lock.release(lock)
-
-    def mark_producer_vanished(self, hop: CycleHop) -> bool:
-        return self._declare_ended(hop, StopReason.PRODUCER_VANISHED)
 
     def enumerate_cycles(self) -> list[tuple[CycleHop, CycleIndex]]:
         """Every cycle of every campaign in this store whose ledger folds to an index."""

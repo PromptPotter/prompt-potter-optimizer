@@ -59,7 +59,7 @@ from promptpotter.application import account, health, site_records
 from promptpotter.application.app_visits import APP_VISITS
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import job_status, read_command
-from promptpotter.application.commands import draft_editing, measuring
+from promptpotter.application.commands import draft_editing, launching, measuring
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import launch_cancels
 from promptpotter.application.cycle_addressing import cycle_target
@@ -81,6 +81,7 @@ from promptpotter.application.jobs.launcher.admission import (
     request_jobs,
     withdraw_queued,
 )
+from promptpotter.application.jobs.launcher.launch import Launched
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
@@ -110,7 +111,12 @@ from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.checkin_draft import DatasetBasis
-from promptpotter.domain.command_events import WORKSPACE_SUBJECT, CommandAckRecord, CommandRecord
+from promptpotter.domain.command_events import (
+    WORKSPACE_SUBJECT,
+    CommandAckRecord,
+    CommandRecord,
+    subject_key,
+)
 from promptpotter.domain.command_kinds import (
     AcceptTermsPayload,
     BankSnippetPayload,
@@ -128,6 +134,7 @@ from promptpotter.domain.command_kinds import (
     SetApiKeyPayload,
     SetUserSettingsPayload,
     SkipSearchpointPayload,
+    StartCheckinPayload,
     StartRunPayload,
     VerifyCandidatePayload,
 )
@@ -156,7 +163,12 @@ from promptpotter.domain.prompt_block import (
 )
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
-from promptpotter.domain.run_records import RunPhaseRecord, RunWiringRecord
+from promptpotter.domain.run_records import (
+    LaunchedEffect,
+    LaunchedJob,
+    RunPhaseRecord,
+    RunWiringRecord,
+)
 from promptpotter.domain.said import Said, pins
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
@@ -1446,10 +1458,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         async def _score() -> object:
             return score
 
-        async def _kept(_: object) -> object:
-            return score
-
-        return Applier(_score, _kept)
+        return Applier(_score)
 
     with monkeypatch.context() as patched:
         patched.setattr(measuring, "grade_bench", _graded)
@@ -1458,7 +1467,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         "a terminal's bench by an id prefix said the prefix as what it graded"
     )
     assert sweep_dead_cycles(built_stores.projects_root) == 0, "a quiet held producer was reaped"
-    assert campaigns.mark_producer_vanished(hop) is False
+    assert built_stores.mark_producer_vanished(hop) is False
     with pytest.raises(ConflictError):
         hold_cycle(cycle_dir)
     delete_refused()
@@ -1667,7 +1676,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert fresh.returncode == 0, f"a fresh process could not prove a banked state: {fresh.stderr}"
 
 
-# 5. The command state machine
+# 4. The command state machine
 
 
 async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_and_its_owners_end(
@@ -1681,14 +1690,11 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
     acts_hop = CycleHop(campaign_id="acts", cycle_id="cycle_acts")
     stores.campaigns.create_campaign(minted_campaign(acts_hop))
     stores.campaigns.mint_cycle(acts_hop)
-    acts: dict[str, Callable[[], Awaitable[object]]] = {}
+    acts: dict[str, Callable[[], Awaitable[None]]] = {}
 
-    async def _replayed(_: object) -> None:
-        return None
-
-    async def _acting(dispatched: Any) -> Any:
+    async def _acting(dispatched: Any) -> Applier[None]:
         named = getattr(dispatched.payload, "candidate_id", "settings")
-        return Applier(acts[named], replay=_replayed)
+        return Applier(acts[named])
 
     monkeypatch.setattr(measuring, "verify_candidate", _acting)
 
@@ -1703,19 +1709,19 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
 
     def first(key: str) -> str | None:
         book = stores.commands.book()
-        return next((c for c, r in book.filed.items() if r.idempotency_key == key), None)
+        return next((r.command_id for _, r in book.lines() if r.idempotency_key == key), None)
 
     def folded(key: str) -> tuple[str, int]:
         """Its status and its acks, as the log folds them."""
         book, command_id = stores.commands.book(), first(key)
-        if command_id is None:
+        filed = None if command_id is None else book.filing(command_id)
+        if command_id is None or filed is None:
             return "-", 0
         acked = sum(
             isinstance(e, CommandAckRecord) and e.command_id == command_id
-            for events in book.events.values()
-            for e in events
+            for e in book.subject_events(filed.subject)
         )
-        return book.status[command_id], acked
+        return str(book.status(command_id)), acked
 
     async def retried(key: str, call: CommandCall[Any] | None) -> str:
         if call is None:
@@ -1786,17 +1792,23 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
         "a retried set-api-key under one key with another secret was answered as the first"
     )
 
-    # A pass's `cancel` is its pause: it stands while the pass acts, and the pass ends on what it
-    # banked, so a retry answers that.
-    def stopping(call: CommandCall[Any], subject: Subject) -> Callable[[], Awaitable[object]]:
-        async def _stopped() -> None:
-            await sender.dispatch(CommandCall(CancelPayload(command_id=call.command_id)))
-            walk = RunControl(commands=stores.commands, enclosing=(subject,))
-            controls[f"{subject.cycle_id}, its pass cancelled"] = (
-                "stopping" if walk.pause_requested() else "running"
+    # A pass's `cancel` is its pause: it stands while the pass acts, read by that pass alone, and
+    # the pass ends on what it banked, so a retry answers that.
+    def walking(
+        call: CommandCall[Any], subject: Subject, row: str, *, cancel: bool
+    ) -> Callable[[], Awaitable[None]]:
+        async def _walked() -> None:
+            if cancel:
+                await sender.dispatch(CommandCall(CancelPayload(command_id=call.command_id)))
+            walk = RunControl(
+                commands=stores.commands, enclosing=(subject,), acting=(call.command_id,)
             )
+            controls[row] = "stopping" if walk.pause_requested() else "running"
 
-        return _stopped
+        return _walked
+
+    def stopping(call: CommandCall[Any], subject: Subject) -> Callable[[], Awaitable[None]]:
+        return walking(call, subject, f"{subject.cycle_id}, its pass cancelled", cancel=True)
 
     controls: dict[str, str] = {}
     stopped = verify("stopped")
@@ -1817,16 +1829,42 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
     release.set()
     await flight
 
-    real_append = CommandLog.append
+    # Its filer died mid-pass: it stays filed, and its cancel stands for it alone, so neither a
+    # run boundary nor the next pass on its cycle reads it.
+    dead = verify("dead")
+    dead_payload, dead_digest = dead.payload.recorded()
+    stores.commands.file(
+        CommandRecord(
+            command_id=dead.command_id,
+            kind=dead.kind,
+            payload=dead_payload,
+            idempotency_key="dead",
+            act_digest=dead_digest,
+            issued_by=acting_principal(stores.identity),
+            subject=subject_key(stores.subject(acts_hop)),
+        )
+    )
+    await seen(("filed", "its filer gone, cancelled"), "dead", None)
+    stores.void_inbox(acts_hop)
+    after_dead = verify("after-dead")
+    acts["after-dead"] = walking(
+        after_dead, stores.subject(acts_hop), "the next pass on a dead pass's cycle", cancel=False
+    )
+    await sender.dispatch(after_dead)
+    # An id is the log's own: a call under one already filed is refused inside the filing.
+    reused = CommandCall(verify("reused").payload, "reused", command_id=dead.command_id)
+    await seen(("unfiled", "a call under a filed command's id"), "reused", reused)
 
-    def _record_cut(log: CommandLog, *rows: Any) -> None:
-        if any(isinstance(r, CommandRecord) and r.idempotency_key == "cut" for r in rows):
+    real_file = CommandLog.file
+
+    def _record_cut(log: CommandLog, record: CommandRecord) -> None:
+        if record.idempotency_key == "cut":
             raise OSError("disk gone at the filing")
-        real_append(log, *rows)
+        real_file(log, record)
 
     acts["cut"] = _returns
     with monkeypatch.context() as cut:
-        cut.setattr(CommandLog, "append", _record_cut)
+        cut.setattr(CommandLog, "file", _record_cut)
         with pytest.raises(OSError):
             await sender.dispatch(verify("cut"))
     await seen(("unfiled", "its filing raised"), "cut", verify("cut"))
@@ -1863,7 +1901,7 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
     def standing(key: str) -> tuple[object, ...]:
         book, command_id = stores.commands.book(), first(key)
         assert command_id is not None
-        return book.filed[command_id], book.status[command_id], folded(key)
+        return book.filing(command_id), book.status(command_id), folded(key)
 
     for campaign_id, keep in (("kept", True), ("dropped", False)):
         owner = CycleHop(campaign_id=campaign_id, cycle_id=f"cycle_{campaign_id}")
@@ -1934,9 +1972,30 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
     declared = declare(starting, CampaignConfig.model_validate(unframed), purpose=Optimize())
     plan = resolve_cycle_plan(starting, declared, rows)
     moved, edit = await drafted("moved")
+
+    async def _started(_: object) -> Applier[Launched]:
+        async def _admitted() -> Launched:
+            return Launched(LaunchedJob(job_id="started", hop=None, what="the Start"), held=None)
+
+        return Applier(
+            _admitted, effect_fn=lambda ran: LaunchedEffect(launches=[ran.launch]), ack="accepted"
+        )
+
+    monkeypatch.setattr(launching, "start_checkin", _started)
+    start = CommandCall(StartCheckinPayload(draft_id=moved), "start")
+    await sender.dispatch(start)
     before = standing("moved")
-    mint(plan, campaign_id="adopted", billed=stores.drafts.ledger(moved))
+    mint(plan, campaign_id="adopted", adopting=moved)
     stores.drafts.close(moved)
+    # A Start's answer lost after its mint: its retry answers that launch, its draft gone.
+    start_status, acked = folded("start")
+    table[("accepted", "a Start retried, its draft minted and closed")] = (
+        start_status,
+        "-",
+        "-",
+        await retried("start", start),
+        acked,
+    )
     assert standing("moved") == before, "its draft's mint moved its command"
     adopted = stores.subject(CycleHop(campaign_id="adopted", cycle_id=plan.cycle_id))
     assert first("moved") in {
@@ -2026,6 +2085,8 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
         ("applied", "its pass stopped by a cancel"): ("applied", done, done, "replayed", 1),
         ("applied", "an inner pass stopped by a cancel"): ("applied", done, done, "replayed", 1),
         ("filed", "its act runs"): ("filed", "working", "working", "re-filed", 0),
+        ("filed", "its filer gone, cancelled"): ("filed", "working", "working", "-", 0),
+        ("unfiled", "a call under a filed command's id"): ("-", "-", "-", "ConflictError", 0),
         ("unfiled", "its filing raised"): ("-", "-", "-", "re-filed", 0),
         ("cancelled", "its call cancelled mid-act"): (
             "cancelled",
@@ -2049,11 +2110,32 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
             1,
         ),
         ("ended", "RuntimeError left its act"): ("rejected", "failed", "failed", "re-filed", 1),
-        ("applied", "its campaign deleted, keep_results=True"): ("applied", done, done, gone, 1),
-        ("applied", "its campaign deleted, keep_results=False"): ("applied", done, done, gone, 1),
-        ("applied", "its cycle deleted"): ("applied", done, done, gone, 1),
+        # Its retry answers off its end, never its target's checks: a verify keeps its answer.
+        ("applied", "its campaign deleted, keep_results=True"): (
+            "applied",
+            done,
+            done,
+            "replayed",
+            1,
+        ),
+        ("applied", "its campaign deleted, keep_results=False"): (
+            "applied",
+            done,
+            done,
+            "replayed",
+            1,
+        ),
+        ("applied", "its cycle deleted"): ("applied", done, done, "replayed", 1),
+        # An edit's retry answers its draft as it reads now, and there is none.
         ("applied", "its draft discarded"): ("applied", done, done, gone, 1),
         ("applied", "its draft minted and closed"): ("applied", done, done, gone, 1),
+        ("accepted", "a Start retried, its draft minted and closed"): (
+            "accepted",
+            "-",
+            "-",
+            "replayed",
+            1,
+        ),
         ("unfiled", "a pause into an inner cycle its own loop runs"): (
             "-",
             "-",
@@ -2090,7 +2172,7 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
         assert command_id is not None
         stores.commands.append(CommandAckRecord(command_id=command_id, status="accepted"))
         stores.commands.ack(command_id, "applied")
-        if stores.commands.book().status[command_id] != ended[0]:
+        if stores.commands.book().status(command_id) != ended[0]:
             wrong.append(f"{key}: ended {ended[0]}, moved by a stray ack")
     parked = f"{RUN_PHASE_INFO[RunPhase.PAUSED].parked.capitalize()}."
     owed_controls = {
@@ -2098,11 +2180,14 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
         "outer, paused under a pass": parked,
         f"{acts_hop.cycle_id}, its pass cancelled": "stopping",
         f"{leaf.cycle_id}, its pass cancelled": "stopping",
+        "the next pass on a dead pass's cycle": "running",
     }
-    # Its pass's end drops a cancel: none stands for whatever acts on either cycle next.
-    for subject in (stores.subject(acts_hop), inner.subject(leaf)):
-        if stores.commands.book().controls(subject).stop is not None:
-            wrong.append(f"{subject.cycle_id}: a cancel outlived its pass")
+    # Its pass's end drops a cancel.
+    for key in ("stopped", "inner-stopped"):
+        command_id = first(key)
+        assert command_id is not None
+        if stores.commands.book().stop(command_id) is not None:
+            wrong.append(f"{key}: a cancel outlived its pass")
     wrong += [
         f"{row}: its run control reads {controls.get(row)!r}, owed {said!r}"
         for row, said in owed_controls.items()
@@ -2111,7 +2196,7 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
     assert not wrong, "\n".join(wrong)
 
 
-# 4. The host surface
+# 5. The host surface
 
 # The stdio server as a host spawns it, in the `offline` fixture's world.
 _SERVE_MCP_OFFLINE = """

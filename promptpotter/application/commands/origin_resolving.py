@@ -4,16 +4,9 @@ import logging
 from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import Applier
-from promptpotter.application.datasets.draft_build import (
-    DraftCampaignWire,
-    draft_wire,
-    read_draft_wire,
-)
+from promptpotter.application.datasets.draft_build import DraftCampaignWire, draft_wire
 from promptpotter.application.datasets.draft_campaign import owned_draft
-from promptpotter.application.datasets.origin_readiness import (
-    load_resolution,
-    save_checkin_draft,
-)
+from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
 from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
 from promptpotter.domain.checkin_draft import OriginResolution
@@ -60,12 +53,5 @@ async def resolve_origin(
         save_checkin_draft(stores, result.draft, resolution=result.resolution)
         return ResolveOriginResponse(resolution=result.resolution, draft=wire)
 
-    async def _on_replay(_: object) -> ResolveOriginResponse:
-        # The draft's `resolution.json` is the live turn's block: a deduped retry re-spends no LLM call.
-        replayed = owned_draft(stores, draft_id)
-        return ResolveOriginResponse(
-            resolution=load_resolution(stores, replayed),
-            draft=await read_draft_wire(stores, replayed),
-        )
-
-    return Applier(_apply, replay=_on_replay)
+    # Its end keeps the turn's answer: a deduped retry re-spends no LLM call, after a mint too.
+    return Applier(_apply)

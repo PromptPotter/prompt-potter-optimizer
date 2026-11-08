@@ -18390,7 +18390,7 @@
       },
       "VerifySaturated": {
         "additionalProperties": false,
-        "description": "A verify that bought nothing: every sample of the candidate's search split was already\nmeasured for its config. Its answer, and the effect a retry under its key answers.",
+        "description": "A verify that bought nothing: every sample of the candidate's search split was already\nmeasured for its config: its answer, kept on its end as a graded one is.",
         "properties": {
           "already_measured": {
             "title": "Already Measured",

@@ -17,6 +17,8 @@ from promptpotter.application.commands.dispatcher import (
     DispatchedToCycle,
     DispatchedToDraft,
     RejectedError,
+    Replaying,
+    replays,
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.startability import offered_dataset
@@ -53,7 +55,13 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.command_events import CommandEffect
-from promptpotter.domain.command_kinds import CancelQueuedRunPayload, PauseCyclePayload
+from promptpotter.domain.command_kinds import (
+    CancelQueuedRunPayload,
+    CommandKind,
+    MintHeadToHeadPayload,
+    PauseCyclePayload,
+    StartCheckinPayload,
+)
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, InnerRun, Job
 from promptpotter.domain.phases import INNER_PAUSE_REFUSAL
@@ -85,8 +93,6 @@ if TYPE_CHECKING:
         ForkSeed,
         HeadToHeadRequest,
         MintCampaignPayload,
-        MintHeadToHeadPayload,
-        StartCheckinPayload,
         StartRunPayload,
     )
     from promptpotter.infrastructure.store.stores import Stores
@@ -180,21 +186,35 @@ def _launch_applier(
     *,
     refused_on: CycleHop | None = None,
 ) -> Applier[Launched]:
-    """A launch's applier: its ack records the launch, and a retry under its key answers that
-    recorded launch, read before *refused_on*'s start refusal is asked."""
+    """A launch's applier: its ack records the launch, which a retry under its key answers
+    (`relaunched`) before *refused_on*'s start refusal is asked."""
 
     async def _run() -> Launched:
         if refused_on is not None and (refusal := dispatcher.run_state(refused_on).start_refusal):
             raise RejectedError(refusal)
         return await run()
 
-    async def _relaunched(effect: CommandEffect) -> Launched:
-        (launch,) = _recorded_launches(effect)
-        return Launched(launch, held=None)
+    return Applier(_run, effect_fn=lambda ran: LaunchedEffect(launches=[ran.launch]))
 
-    return Applier(
-        _run, replay=_relaunched, effect_fn=lambda ran: LaunchedEffect(launches=[ran.launch])
-    )
+
+@replays(
+    CommandKind.START_RUN,
+    CommandKind.FORK_CYCLE,
+    CommandKind.MINT_CAMPAIGN,
+    CommandKind.HEAD_TO_HEAD,
+    CommandKind.START_CHECKIN,
+)
+async def relaunched(replaying: Replaying[Any]) -> StartAnswer:
+    """Every launch kind's retry: what its first act's ack recorded, arm by arm where it asked a
+    head-to-head, watching no exit (another act owns them)."""
+    launches = _recorded_launches(replaying.end.effect)
+    match replaying.payload:
+        case MintHeadToHeadPayload(head_to_head=request):
+            return head_to_head_answer(request, launches)
+        case StartCheckinPayload(head_to_head=request) if request is not None:
+            return head_to_head_answer(request, launches)
+    (launch,) = launches
+    return Launched(launch, held=None)
 
 
 # What a cancel's pause of a launched run says it was asked for.
@@ -374,13 +394,7 @@ async def mint_head_to_head(
         )
         return await admitted.launched()
 
-    async def _replay(effect: CommandEffect) -> HeadToHeadLaunched:
-        # A retry under an applied act's key answers what it minted; a refused act's is a new act.
-        return head_to_head_answer(request, _recorded_launches(effect))
-
-    return Applier(
-        _act, replay=_replay, effect_fn=lambda ran: LaunchedEffect(launches=ran.launches)
-    )
+    return Applier(_act, effect_fn=lambda ran: LaunchedEffect(launches=ran.launches))
 
 
 # A Start's answer: its admission, launched once its mint closes; or, answering a retry, the
@@ -432,20 +446,13 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
             answer.withdraw(exc)
 
     # The claim and the slot ride the admitted launch to its mint; a second Start refuses while it
-    # holds the claim, and is not found once it minted: a retry answers the first launch only where
-    # its filer died before the mint.
+    # holds the claim, and is not found once it minted. A retry under its key answers the first
+    # launch, minted or not (`relaunched`).
     async def _run() -> StartAnswer:
         request = start.head_to_head
         return await _admit() if request is None else await _admit_arms(request)
 
-    async def _relaunched(effect: CommandEffect) -> StartAnswer:
-        launches, request = _recorded_launches(effect), start.head_to_head
-        if request is not None:
-            return head_to_head_answer(request, launches)
-        (launch,) = launches
-        return Launched(launch, held=None)
-
-    return Applier(_run, _relaunched, effect_fn=_launches, ack="accepted", rides=_withdraw)
+    return Applier(_run, effect_fn=_launches, ack="accepted", rides=_withdraw)
 
 
 async def dispatch_start_checkin(

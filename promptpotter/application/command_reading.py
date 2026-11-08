@@ -100,10 +100,10 @@ class OwnedCommand(FrozenModel):
 def owned_command(stores: Stores, command_id: str) -> OwnedCommand:
     """*command_id* as this principal filed it: refused as absent for anyone else's."""
     book = stores.commands.book()
-    filed = book.filed.get(command_id)
+    filed = book.filing(command_id)
     if filed is None or filed.issued_by.id != acting_principal(stores.identity).id:
         raise NotFoundError(f"no command {command_id!r}")
-    return OwnedCommand(filed=filed, end=book.ends.get(command_id))
+    return OwnedCommand(filed=filed, end=book.end(command_id))
 
 
 def launched_jobs(jobs: JobRegistry, owned: OwnedCommand) -> list[Job] | None:

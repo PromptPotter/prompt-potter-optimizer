@@ -269,6 +269,52 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   Decision: whether `--json` keeps the sentence on stderr for a terminal. **Held:** the operator's.
   **Re-test:** `python -m promptpotter resume --json --campaign nope 2>&1 >/dev/null` prints nothing.
 
+### Batch 12's fix pass (2026-11-08)
+
+- **A command whose filer died stays `filed`**: a verify whose process was killed reads `working` to
+  every door and its task's result polls forever; its `cancel` stands for it alone. Action: the fold
+  reads the filer's OS lock (§0.5), which no command names today (a pass's job is not on its
+  record). **Rides with:** M6. **Re-test:** kill a verify mid-pass; its command reads ended.
+- **`StopReasonInfo.next_acts` reaches TS as `unknown[]`, and no screen renders it**: the webapp reads
+  `next_step` alone. The root is `scripts/build_ts_types.py`: a word-table row renders each column by
+  `json.dumps`, so a model column cannot be one, and a model row no served root reaches is never
+  exported. Action: the emitter types a table's model rows and columns, then `NextAct` is a model
+  and `lib/derivations/run-phase.ts` renders the act. **Rides with:** M4's re-key. **Re-test:**
+  `git grep -n "next_acts: unknown" -- webapp`.
+- **A knob's layer below the edit is read by value, and a draft's names none**: `optimizer_setup`
+  rows carry `unset`, and `pipeline_resolve.py::_knob_layers` names the dataset where the edit set
+  the dataset's own value, since the edit's keys never reach it. Action: the edit layer reaches the
+  knob-layer read, which names the last layer laid; `optimizer_setup` serves it. **Rides with:** M4
+  (its setup screen, beside the knob Reset row). **Re-test:** read a draft's setup knob rows;
+  an edit restating the dataset's value reads `campaign`.
+- **The reaper reads `SILENT` outside the producer lock** (main did too): a producer that takes the
+  cycle between `Stores.mark_producer_vanished`'s read and `declare_ended`'s lock is refused by the
+  lock, but one whose pause lands between them is ended vanished. Under the lock the read sees its
+  own hold. Action: `declare_ended` reads the owed run under the lock it holds. **Rides with:** M6.
+  **Re-test:** a pause filed between the read and the lock leaves the cycle paused.
+- **A stop has two doors**: `declare_run_stop` appends to the bound ledger while
+  `CampaignStore.declare_stop` serves admission and `declare_ended`, so the void is spelled at each stop
+  site. Action: one stop door voids the inbox. **Rides with:** M6. **Re-test:** `void_inbox\(` 6
+  falls to the door's own.
+- **`CommandDispatcher.run_state` delegates to `Stores.run_state`**: 8 callers, one in `new.py`.
+  Action: the callers read the stores'. **Held:** until `new.py` is free. **Re-test:**
+  `git grep -n "def run_state" -- promptpotter/application/commands/dispatcher.py` is empty.
+- **`line_run` reads a paused pass as selecting**: a pass with a pause asked reads `PAUSED`, not
+  `SCORING`, so `campaign_result.py::line_run` takes its hold for the loop's (M2.4 left it).
+  Action: the pass's hold is read as a pass's, by its bracket. **Rides with:** M13. **Re-test:** a
+  bench pass with a pause asked reads `selecting=False`.
+- **The `resume.py` and `closed_rounds.py` refusals spell `resume` flags** in their text, which D7.2
+  cut from every stop's words. Action: each names its `NextAct`. **Rides with:** M6. **Re-test:**
+  `git grep -n "\-\-fork-on-divergence\|\-\-from" -- promptpotter/application/bench/resume_and_fork/resume.py promptpotter/application/scoring/closed_rounds.py`.
+- **An exhausted stale-data ladder prints its rerun line**: `render/sample.py` reads
+  `PERSISTENTLY_DEGRADED` as `RETRIED`, so main's "exhausted" words never print. Decision: a word of
+  its own, or the rerun's. **Held:** the operator's. **Re-test:** a persistently degraded cell's
+  tape line says it exhausted the ladder.
+- **A field cleared in the steer panel cannot drop a candidate's value**: a fork's seed only adds
+  over the candidate it forks, so a cleared field forks at the candidate's value. Action: the steer
+  sends `EditDraftPatch.reset`'s delete, as M4.7's draft edit does. **Rides with:** M4. **Re-test:**
+  clear a field in `SteerForkPanel`; the fork launches without the candidate's value.
+
 ### The connector and entry-point seam audits (two unbiased reads, 2026-11-06)
 
 - **Resuming a campaign takes its connector from today's dataset file** —

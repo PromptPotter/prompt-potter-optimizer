@@ -46,7 +46,12 @@ if TYPE_CHECKING:
 
 def _spelled(act: NextAct) -> str:
     """The terminal's spelling of *act*: its kind's verb, and the field it fills as the flag that
-    sets it (a budget axis as its `--max-` flag), *value* naming what goes there."""
+    sets it (a budget axis as its `--max-` flag), *value* naming what goes there; a kind-less
+    act's field as it is set, or the file it reads."""
+    if act.reads:
+        return f"else read `{act.reads}`"
+    if not act.kind:
+        return f"`{act.field}: {act.value}`" if act.value else f"`{act.field}`"
     verb = PAYLOAD_MODEL_FOR_KIND[act.kind].kind.cli_verb
     if not act.field:
         return f"`{verb}`"

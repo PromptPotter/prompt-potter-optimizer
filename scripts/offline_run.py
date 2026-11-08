@@ -989,7 +989,7 @@ def _commands(stores: Stores, subject: str) -> dict[str, list[dict[str, Any]]]:
     book = stores.commands.book()
     out: dict[str, list[dict[str, Any]]] = {}
     for r in book.subject_events(subject):
-        if isinstance(r, CommandRecord) and book.status[r.command_id] == "applied":
+        if isinstance(r, CommandRecord) and book.status(r.command_id) == "applied":
             out.setdefault(r.kind, []).append(r.payload)
     return out
 

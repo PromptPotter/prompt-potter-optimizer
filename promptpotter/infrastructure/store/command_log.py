@@ -1,16 +1,17 @@
 """The account's command log, ``.workspace/commands.jsonl`` under the account beside its grants and
 charges: every door files on it, and no ledger move or delete reaches it (`domain/command_events.py`).
 
-A read is a fold cached per file and process, as `LedgerIndex.of` is, refreshed by its tail; each
-refresh publishes a fresh snapshot no later append mutates."""
+A read is a fold registered per file as `LedgerIndex.of`'s are, fed from the last byte it read: its
+state only grows, every value versioned by the line that set it, so a book is that state read at
+one line and no later line moves what it reads."""
 
 from __future__ import annotations
 
-import json
 import threading
-from collections.abc import Iterator, Mapping
+from bisect import bisect_right
+from collections import OrderedDict
+from collections.abc import Iterator
 from pathlib import Path
-from types import MappingProxyType
 from typing import NamedTuple
 
 from promptpotter.domain.command_events import (
@@ -35,16 +36,11 @@ from promptpotter.domain.command_kinds import (
     SubmitArmsPayload,
 )
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
-from promptpotter.infrastructure.store.io import ABSENT, FileMark
+from promptpotter.infrastructure.store.io import append_line, appending
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
-from promptpotter.infrastructure.store.read_model import (
-    Signature,
-    append_row,
-    file_sig,
-    read_rows_past,
-)
+from promptpotter.infrastructure.store.read_model import _LedgerTail, _registered, parse_rows
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.errors import IdempotencyKeyReusedError
+from promptpotter.shared.errors import ConflictError, IdempotencyKeyReusedError
 from promptpotter.shared.identity import Principal
 
 COMMAND_LOG_FILE = "commands.jsonl"
@@ -68,11 +64,9 @@ class LookaheadAsk(NamedTuple):
 
 
 class Controls(NamedTuple):
-    """A running loop's inbox: the loop commands on its cycle accepted and not yet taken; and
-    ``stop``, the ``cancel`` of a pass still acting on it, which the pass reads as its pause."""
+    """A running loop's inbox: the loop commands on its cycle accepted and not yet taken."""
 
     pause: PauseAsk | None = None
-    stop: PauseAsk | None = None
     skips: tuple[str, ...] = ()
     lookahead: LookaheadAsk | None = None
     gate_decisions: tuple[tuple[str, str], ...] = ()
@@ -169,30 +163,155 @@ class _Inbox:
         return self._held
 
 
-class CommandBook(NamedTuple):
-    """The log folded, as one snapshot: each command's filing and status, each subject's events in
-    log order (a landed draft's ahead of its cycle's), each subject's inbox and last event, and the
-    ``cancel`` asked of each command still acting, which its end drops."""
+class _Versions[V]:
+    """A value's every version, by the line that set it. Appended only, the line before the value:
+    a read at a line before a version's never reaches it."""
 
-    filed: Mapping[str, CommandRecord]
-    status: Mapping[str, CommandStatus]
-    events: Mapping[str, tuple[_Event, ...]]
-    landed: Mapping[str, str]
-    inboxes: Mapping[str, Controls]
-    stamps: Mapping[str, int]
-    stopping: Mapping[str, str]
-    # The status event that last moved each command: its effect, or the refusal it kept.
-    ends: Mapping[str, CommandAckRecord]
+    __slots__ = ("_at", "_held")
+
+    def __init__(self) -> None:
+        self._at: list[int] = []
+        self._held: list[V] = []
+
+    def set(self, line: int, value: V) -> None:
+        self._at.append(line)
+        self._held.append(value)
+
+    def at(self, line: int) -> V | None:
+        i = bisect_right(self._at, line)
+        return self._held[i - 1] if i else None
+
+    def upto(self, line: int) -> list[V]:
+        return self._held[: bisect_right(self._at, line)]
+
+    def __bool__(self) -> bool:
+        return bool(self._at)
+
+
+class _Moved(NamedTuple):
+    status: CommandStatus
+    # The status event that moved it there: its effect, or the refusal it kept.
+    end: CommandAckRecord | None
+
+
+class _State:
+    """The log folded so far. Only grows: a book reads it at its line."""
+
+    def __init__(self) -> None:
+        self.filed: dict[str, tuple[int, CommandRecord]] = {}
+        self.moved: dict[str, _Versions[_Moved]] = {}
+        # The `cancel` standing on each command it names, while that command is filed.
+        self.stopping: dict[str, _Versions[PauseAsk | None]] = {}
+        self.landed: dict[str, tuple[int, str]] = {}
+        self.drafts_onto: dict[str, list[str]] = {}
+        self.events: dict[str, _Versions[_Event]] = {}
+        self.inboxes: dict[str, tuple[_Inbox, _Versions[Controls]]] = {}
+
+    def feed(self, line: int, row: CommandLogRow) -> None:
+        if isinstance(row, CommandLanded):
+            self._land(line, row.subject, row.onto)
+        elif isinstance(row, CommandRecord):
+            if row.command_id in self.filed:
+                return
+            self.filed[row.command_id] = (line, row)
+            moved = self.moved[row.command_id] = _Versions()
+            moved.set(line, _Moved("filed", None))
+            self._add(line, row.subject, row)
+        else:
+            versions = self.moved.get(row.command_id)
+            held = None if versions is None else versions.at(line)
+            to = None if held is None else COMMAND_TRANSITIONS[held.status, row.status]
+            if versions is None or to is None:
+                return
+            versions.set(line, _Moved(to, row))
+            # Any move ends what a cancel stopped: no command is filed again.
+            if (stop := self.stopping.get(row.command_id)) is not None:
+                stop.set(line, None)
+            asked = self.filed[row.command_id][1]
+            if to == "applied" and asked.kind == CommandKind.CANCEL:
+                target = str(asked.payload["command_id"])
+                standing = self.moved.get(target)
+                if standing is not None and (now := standing.at(line)) and now.status == "filed":
+                    ask = PauseAsk(row.command_id, asked.issued_by, asked.timestamp)
+                    self.stopping.setdefault(target, _Versions()).set(line, ask)
+            self._add(line, asked.subject, row)
+
+    def _add(self, line: int, subject: str, event: _Event) -> None:
+        onto = self.landed.get(subject)
+        spelled = subject if onto is None else onto[1]
+        self.events.setdefault(spelled, _Versions()).set(line, event)
+        inbox, held = self.inboxes.setdefault(spelled, (_Inbox(), _Versions()))
+        was = inbox.value()
+        inbox.feed(event)
+        if (now := inbox.value()) is not was or not held:
+            held.set(line, now)
+
+    def _land(self, line: int, draft: str, onto: str) -> None:
+        """What was filed on *draft* reads as *onto*'s from here, ahead of its own."""
+        self.landed[draft] = (line, onto)
+        self.drafts_onto.setdefault(onto, []).append(draft)
+        inbox = _Inbox()
+        for spelled in (draft, onto):
+            for event in self.events.get(spelled, _Versions()).upto(line):
+                inbox.feed(event)
+        held = self.inboxes[onto][1] if onto in self.inboxes else _Versions[Controls]()
+        self.inboxes[onto] = (inbox, held)
+        held.set(line, inbox.value())
+
+
+class CommandBook:
+    """The log as it stood at one line: each command's filing and where it stands, each subject's
+    events in log order (a landed draft's ahead of its cycle's) and its inbox, and the ``cancel``
+    asked of each command still acting, which its end drops."""
+
+    __slots__ = ("_line", "_state")
+
+    def __init__(self, state: _State, line: int) -> None:
+        self._state, self._line = state, line
+
+    def filing(self, command_id: str) -> CommandRecord | None:
+        held = self._state.filed.get(command_id)
+        return held[1] if held is not None and held[0] <= self._line else None
+
+    def _moved(self, command_id: str) -> _Moved | None:
+        moved = self._state.moved.get(command_id)
+        return None if moved is None else moved.at(self._line)
+
+    def status(self, command_id: str) -> CommandStatus | None:
+        return None if (moved := self._moved(command_id)) is None else moved.status
+
+    def end(self, command_id: str) -> CommandAckRecord | None:
+        """The status event that last moved it: its effect, or the refusal it kept."""
+        return None if (moved := self._moved(command_id)) is None else moved.end
+
+    def stop(self, command_id: str) -> PauseAsk | None:
+        """The ``cancel`` standing on *command_id* while it acts: what its pass reads as its pause."""
+        stopping = self._state.stopping.get(command_id)
+        return None if stopping is None else stopping.at(self._line)
 
     def subject_events(self, subject: Subject | str) -> tuple[_Event, ...]:
-        return self.events.get(self._spelled(subject), ())
+        spelled, state = self._spelled(subject), self._state
+        events: list[_Event] = []
+        for draft in list(state.drafts_onto.get(spelled, ())):
+            if state.landed[draft][0] <= self._line:
+                events += state.events.get(draft, _Versions()).upto(self._line)
+        held = state.events.get(spelled)
+        return tuple(events if held is None else [*events, *held.upto(self._line)])
 
     def controls(self, subject: Subject) -> Controls:
-        return self.inboxes.get(self._spelled(subject), Controls())
+        held = self._state.inboxes.get(self._spelled(subject))
+        return (None if held is None else held[1].at(self._line)) or Controls()
 
     def stamp(self, subject: Subject) -> int | None:
         """The subject's last event, in ns: a filed control re-validates its cycle's reads."""
-        return self.stamps.get(self._spelled(subject))
+        spelled, state = self._spelled(subject), self._state
+        last = None if (held := state.events.get(spelled)) is None else held.at(self._line)
+        for draft in reversed(list(state.drafts_onto.get(spelled, ()))):
+            if last is not None:
+                break
+            if state.landed[draft][0] <= self._line:
+                last = state.events.get(draft, _Versions()).at(self._line)
+        return None if last is None else int((epoch_seconds(last.timestamp) or 0.0) * 1e9)
 
     def untaken(self, subject: Subject) -> list[str]:
         """The loop commands on *subject* accepted and never taken, less an ``auto`` look-ahead,
@@ -205,7 +324,7 @@ class CommandBook(NamedTuple):
             if isinstance(record, CommandRecord)
             and record.kind in LOOP_KINDS
             and record.command_id != keep
-            and self.status[record.command_id] == "accepted"
+            and self.status(record.command_id) == "accepted"
         ]
 
     def keyed(
@@ -233,86 +352,44 @@ class CommandBook(NamedTuple):
 
     def lines(self) -> Iterator[tuple[str, CommandRecord]]:
         """Every filing, under the subject it reads as."""
-        for subject, events in self.events.items():
-            for event in events:
-                if isinstance(event, CommandRecord):
-                    yield subject, event
+        for line, record in list(self._state.filed.values()):
+            if line <= self._line:
+                yield self._spelled(record.subject), record
 
     def _spelled(self, subject: Subject | str) -> str:
         spelled = subject if isinstance(subject, str) else subject_key(subject)
-        return self.landed.get(spelled, spelled)
+        onto = self._state.landed.get(spelled)
+        return spelled if onto is None or onto[0] > self._line else onto[1]
 
 
-_EMPTY = CommandBook(*(MappingProxyType({}) for _ in range(8)))
+class _Fold(_LedgerTail):
+    def _reset(self) -> None:
+        super()._reset()
+        # A rewritten log is read whole into a fresh state: a book read off the old one keeps it.
+        self._state = _State()
+
+    def _feed(self, raw: bytes) -> None:
+        for row in parse_rows(self._path, [raw], COMMAND_LOG_ADAPTER.validate_json):
+            self._state.feed(self._lines + 1, row)
+
+    def book(self) -> CommandBook:
+        with self._lock:
+            try:
+                self._refresh()
+            except BaseException:
+                # A refused line leaves the lines before it fed: the next read starts whole.
+                self._reset()
+                raise
+            return CommandBook(self._state, self._lines)
 
 
-def _folded(base: CommandBook, rows: list[CommandLogRow]) -> CommandBook:
-    """A fresh book over *base* and *rows*: the published one is never written again."""
-    filed, status = dict(base.filed), dict(base.status)
-    events = {subject: list(held) for subject, held in base.events.items()}
-    landed, stopping, ends = dict(base.landed), dict(base.stopping), dict(base.ends)
-    touched: set[str] = set()
-    for row in rows:
-        if isinstance(row, CommandLanded):
-            landed[row.subject] = row.onto
-            events[row.onto] = [*events.pop(row.subject, []), *events.get(row.onto, [])]
-            touched.add(row.onto)
-            continue
-        if isinstance(row, CommandRecord):
-            if row.command_id in filed:
-                continue
-            filed[row.command_id], status[row.command_id] = row, "filed"
-            subject = row.subject
-        else:
-            held = status.get(row.command_id)
-            to = None if held is None else COMMAND_TRANSITIONS[held, row.status]
-            if to is None:
-                continue
-            status[row.command_id], ends[row.command_id] = to, row
-            asked = filed[row.command_id]
-            subject = asked.subject
-            # Any move ends what a cancel stopped: no command is filed again.
-            stopping.pop(row.command_id, None)
-            if to == "applied" and asked.kind == CommandKind.CANCEL:
-                target = str(asked.payload["command_id"])
-                if status.get(target) == "filed":
-                    stopping[target] = row.command_id
-                    touched.add(landed.get(filed[target].subject, filed[target].subject))
-        subject = landed.get(subject, subject)
-        events.setdefault(subject, []).append(row)
-        touched.add(subject)
-    stops: dict[str, PauseAsk] = {}
-    for target, cancel in stopping.items():
-        on, by = filed[target].subject, filed[cancel]
-        stops[landed.get(on, on)] = PauseAsk(cancel, by.issued_by, by.timestamp)
-    inboxes, stamps = dict(base.inboxes), dict(base.stamps)
-    for subject in touched:
-        inbox = _Inbox()
-        for event in events[subject]:
-            inbox.feed(event)
-        inboxes[subject] = inbox.value()._replace(stop=stops.get(subject))
-        stamps[subject] = int((epoch_seconds(events[subject][-1].timestamp) or 0.0) * 1e9)
-    return CommandBook(
-        MappingProxyType(filed),
-        MappingProxyType(status),
-        MappingProxyType({subject: tuple(held) for subject, held in events.items()}),
-        MappingProxyType(landed),
-        MappingProxyType(inboxes),
-        MappingProxyType(stamps),
-        MappingProxyType(stopping),
-        MappingProxyType(ends),
-    )
-
-
-class _Fold:
-    def __init__(self) -> None:
-        self.mark: FileMark = ABSENT
-        self.sig: Signature | None = None
-        self.book = _EMPTY
-
-
-_FOLDS: dict[Path, _Fold] = {}
+_FOLDS: OrderedDict[Path, _Fold] = OrderedDict()
+# The registry's alone: each fold refreshes under its own lock.
 _FOLDS_LOCK = threading.Lock()
+
+
+def _encoded(*rows: CommandLogRow) -> bytes:
+    return b"\n".join(COMMAND_LOG_ADAPTER.dump_json(row) for row in rows)
 
 
 class CommandLog:
@@ -323,17 +400,25 @@ class CommandLog:
 
     def book(self) -> CommandBook:
         with _FOLDS_LOCK:
-            fold = _FOLDS.setdefault(self.path, _Fold())
-            # Stat-only while nothing landed: the 2 s poll's 304 path reads this.
-            if (sig := file_sig(self.path)) != fold.sig:
-                read = read_rows_past(self.path, COMMAND_LOG_ADAPTER.validate_json, fold.mark)
-                fold.book = _folded(_EMPTY if read.whole else fold.book, read.rows)
-                fold.mark, fold.sig = read.mark, sig
-            return fold.book
+            fold = _registered(_FOLDS, self.path, lambda: _Fold(self.path))
+        return fold.book()
+
+    def file(self, record: CommandRecord) -> None:
+        """A filing's id is the log's own: refused inside the write that would land a second one,
+        so two calls under one id never both act."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with appending(self.path) as put:
+            if self.book().filing(record.command_id) is not None:
+                raise ConflictError(
+                    f"command {record.command_id} is already filed; send a new call under an id "
+                    "of its own",
+                    code="command_id_reused",
+                )
+            put(_encoded(record))
 
     def append(self, *rows: CommandLogRow) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        append_row(self.path, *(json.loads(COMMAND_LOG_ADAPTER.dump_json(row)) for row in rows))
+        append_line(self.path, _encoded(*rows))
 
     def ack(self, command_id: str, status: CommandAckStatus, detail: str = "") -> None:
         self.append(CommandAckRecord(command_id=command_id, status=status, detail=detail))
