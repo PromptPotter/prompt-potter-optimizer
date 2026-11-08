@@ -1137,15 +1137,8 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `git grep -n '"ERROR:' -- promptpotter/presentation/cli`.
 
 **C. One address resolved twice.** **Rides with:** M2.
-- `cycle_addressing.py::resolve_campaign_id` is a second resolver over `resolve_subject`'s matcher,
-  read by `cli/commands/ab.py` and `noise_floor.py` off the dispatcher. The CLI's cycle verbs resolve
-  CLI-side. The matcher falls back to a substring, and the dispatcher walks `descend` twice.
-  `run_records.py::BankedSubject` is a second address. Action: one resolution, at the dispatcher, by
-  exact id or prefix. **Re-test:** `git grep -n "resolve_campaign_id(" -- promptpotter`.
-- `evidence/read.py::campaigns_on_dataset` matches the name label, so two banks under one name (a
-  re-upload, a name two tiers hold) pool into one read: a served-answer change, not a cleanup.
-  Action: the name resolved once and matched on `Campaign.declaration.dataset_hash`. **Re-test:**
-  `git grep -n "c.dataset_name == dataset_name" -- promptpotter/application/evidence`.
+- `run_records.py::BankedSubject` is a second address. Action: the spend tombstone addresses by
+  `Subject`. **Re-test:** `git grep -n "BankedSubject" -- promptpotter`.
 
 **D. Spelled by hand beside the rows.** **Rides with:** the next read added.
 - `api/deps.py::read_input`'s pattern, `cli/parsers.py`' read help,

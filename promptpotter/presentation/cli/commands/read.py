@@ -13,7 +13,6 @@ from promptpotter.application.read_params import PARAMS_FOR_READ, ReadParams
 from promptpotter.config.logging import setup_logging
 from promptpotter.presentation.cli.commands.verbs import VERBS
 from promptpotter.presentation.cli.commands.workspace import open_stores
-from promptpotter.presentation.cli.parsers import Arg
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.named_rows import imported
 
@@ -31,14 +30,6 @@ _CYCLE = frozenset({"campaign_id", "cycle_id"})
 _ADDRESSING = frozenset({"campaign", "cycle"})
 
 
-def _dest(arg: Arg) -> str:
-    """Where argparse files the flag's value: its `dest`, else its first long flag's name."""
-    if dest := arg.spec.get("dest"):
-        return str(dest)
-    longs = [flag for flag in arg.flags if flag.startswith("--")]
-    return (longs or list(arg.flags))[0].lstrip("-").replace("-", "_")
-
-
 def _unread_flags() -> list[str]:
     """Every read verb's flag that lands on no field of its row's model, no declared renderer
     arg and no cycle address: a value `cmd_read` would drop unsaid."""
@@ -48,7 +39,7 @@ def _unread_flags() -> list[str]:
             continue
         fields = PARAMS_FOR_READ[verb.read].model_fields.keys()
         taken = {*fields, *verb.render_args, *(_ADDRESSING if fields >= _CYCLE else ())}
-        unread += [f"{verb.name} {_dest(a)}" for a in verb.args if _dest(a) not in taken]
+        unread += [f"{verb.name} {a.dest}" for a in verb.args if a.dest not in taken]
     return unread
 
 

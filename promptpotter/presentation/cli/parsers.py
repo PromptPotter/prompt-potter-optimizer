@@ -20,6 +20,14 @@ class Arg:
         self.flags = flags
         self.spec = spec
 
+    @property
+    def dest(self) -> str:
+        """Where argparse files the flag's value: its `dest`, else its first long flag's name."""
+        if "dest" in self.spec:
+            return str(self.spec["dest"])
+        flag = next((f for f in self.flags if f.startswith("--")), self.flags[0])
+        return flag.lstrip("-").replace("-", "_")
+
 
 @dataclass(frozen=True)
 class Verb:
@@ -35,7 +43,7 @@ class Verb:
     # A read verb's flags its renderer reads, which no field of the row's model takes.
     render_args: tuple[str, ...] = ()
     # Per payload field of a kind naming this verb, no `Arg` of its name: how the terminal carries it
-    # instead (`verbs.py::_spelled`, checked at import).
+    # instead (`verbs.py::_unsaid`, checked at import).
     unspelled: Mapping[str, str] = field(default_factory=dict)
     # A written verb dispatching no kind: why no other door carries it.
     terminal_only: str = ""

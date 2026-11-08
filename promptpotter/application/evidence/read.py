@@ -240,11 +240,13 @@ class _Accum:
 
 
 def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
-    """Read off each manifest: a directory-name match skips an A/B arm, a fork, a rename."""
+    """The campaigns measuring the bank *dataset_name* labels now, matched on the hash each
+    manifest declares: two banks under one name never pool, and a label naming none matches none."""
+    digest = stores.tenant_datasets.hash_of(dataset_name)
     return [
         c.campaign_id
         for c in stores.campaigns.list_campaigns(lifecycle="all")
-        if c.dataset_name == dataset_name
+        if digest is not None and c.declaration.dataset_hash == digest
     ]
 
 

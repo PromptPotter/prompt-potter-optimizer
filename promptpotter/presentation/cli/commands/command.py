@@ -14,6 +14,7 @@ from promptpotter.domain.command_kinds import (
     CommandKind,
     CyclePayload,
 )
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import budget_from_args
@@ -35,7 +36,12 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
     if "budget" in model.model_fields:
         fields["budget"] = budget_from_args(args)
     if issubclass(model, CyclePayload):
-        hop = cycle_target(stores, args.campaign, args.cycle)
+        # Named prefixes are the dispatcher's to resolve; the pointer and a sole cycle are not.
+        hop = (
+            CycleHop(campaign_id=args.campaign, cycle_id=args.cycle)
+            if args.campaign and args.cycle
+            else cycle_target(stores, args.campaign, args.cycle)
+        )
         fields["campaign_id"], fields["cycle_id"] = hop.campaign_id, hop.cycle_id
     payload = PayloadInvalidError.validating(model, fields)
     sent = await CommandDispatcher(stores).dispatch(CommandCall(payload))

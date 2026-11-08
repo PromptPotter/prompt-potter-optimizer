@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pydantic import Field
 
 from promptpotter.application.account import registered_or_default_identity
@@ -11,8 +13,11 @@ from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     read_active_pointer,
 )
-from promptpotter.infrastructure.store.stores import Stores, descend_store
+from promptpotter.infrastructure.store.stores import Stores, descend_store, owned_campaign
 from promptpotter.shared.errors import BadRequestError, NotFoundError
+
+if TYPE_CHECKING:
+    from promptpotter.domain.campaign import Campaign
 
 
 def active_pointer(stores: Stores, *, inside: CyclePath = ()) -> CycleHop | None:
@@ -57,37 +62,58 @@ def _listed(ids: list[str]) -> str:
     return f"{', '.join(ids[:5])}{'…' if len(ids) > 5 else ''}"
 
 
-def _campaign_matches(stores: Stores, needle: str, inside: CyclePath) -> list[str]:
+def _ambiguity_refused(needle: str, matches: list[str], what: str) -> list[str]:
     """Refuses on ambiguity: picking one of several is worse than resolving none."""
-    candidates = descend_store(stores, inside).campaigns.match_campaign_ids(needle)
-    if len(candidates) > 1:
+    if len(matches) > 1:
         raise BadRequestError(
-            f"{needle!r} matches {len(candidates)} campaigns: {_listed(candidates)}. "
-            "Pass the full id.",
+            f"{needle!r} matches {len(matches)} {what}: {_listed(matches)}. Pass the full id.",
             code="ambiguous_id",
         )
-    return candidates
+    return matches
 
 
-def resolve_campaign_id(stores: Stores, needle: str, *, inside: CyclePath = ()) -> str:
-    matches = _campaign_matches(stores, needle, inside)
-    if not matches:
-        raise NotFoundError(f"no campaign matches {needle!r}.")
-    return matches[0]
+def _campaign_matches(stores: Stores, needle: str) -> list[str]:
+    return _ambiguity_refused(needle, stores.campaigns.match_campaign_ids(needle), "campaigns")
+
+
+def _leaf(stores: Stores, subject: Subject) -> tuple[Stores, Subject]:
+    leaf_stores = descend_store(stores, subject.inside)
+    matches = _campaign_matches(leaf_stores, subject.campaign_id)
+    return leaf_stores, subject._replace(campaign_id=next(iter(matches), subject.campaign_id))
 
 
 def resolve_subject(stores: Stores, subject: Subject) -> Subject:
     """Every door's one resolution of an addressed campaign id prefix, in the chain it names; left
     UNCHANGED where nothing matches, so the read or command it rides answers ``not_found``."""
-    matches = _campaign_matches(stores, subject.campaign_id, subject.inside)
-    return subject._replace(campaign_id=next(iter(matches), subject.campaign_id))
+    return _leaf(stores, subject)[1]
+
+
+def named_campaign(stores: Stores, needle: str) -> Campaign:
+    """The caller's campaign an id prefix names, resolved as every door's (`resolve_subject`);
+    another user's or none is ``not_found`` (`owned_campaign`)."""
+    return owned_campaign(stores, resolve_subject(stores, Subject(needle)).campaign_id)
+
+
+def resolve_course(stores: Stores, subject: Subject) -> tuple[Stores, Subject]:
+    """`resolve_subject`, then the course's cycle id prefix in the campaign it resolved, by the
+    same rule; with the stores of the sandbox its chain walked to, so the chain is walked once."""
+    leaf_stores, resolved = _leaf(stores, subject)
+    campaign_id, needle = resolved.campaign_id, resolved.cycle_id
+    if campaign_id not in leaf_stores.campaigns.list_campaign_ids():
+        return leaf_stores, resolved
+    cycles = leaf_stores.campaigns.match_cycle_ids(campaign_id, needle)
+    matches = _ambiguity_refused(needle, cycles, f"cycles in {campaign_id!r}")
+    return leaf_stores, resolved._replace(cycle_id=next(iter(matches), needle))
 
 
 def cycle_target(stores: Stores, campaign: str, cycle: str) -> CycleHop:
     """A terminal's named cycle: a named campaign (an id prefix) never takes the pointer's cycle,
     and a cycle named alone is the active campaign's; each a prefix of its id."""
     if campaign:
-        campaign_id = resolve_campaign_id(stores, campaign)
+        matches = _campaign_matches(stores, campaign)
+        if not matches:
+            raise NotFoundError(f"no campaign matches {campaign!r}.")
+        campaign_id = matches[0]
         return CycleHop(
             campaign_id=campaign_id, cycle_id=resolve_cycle_id(stores, campaign_id, cycle or None)
         )

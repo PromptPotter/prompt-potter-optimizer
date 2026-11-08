@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.cycle_addressing import resolve_campaign_id, resolve_cycle_id
+from promptpotter.application.cycle_addressing import named_campaign, resolve_cycle_id
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import PauseCyclePayload
@@ -15,7 +15,7 @@ from promptpotter.presentation.cli.commands.workspace import open_stores
 async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
-    campaign_id = resolve_campaign_id(stores, args.campaign)
+    campaign_id = named_campaign(stores, args.campaign).root_hop.campaign_id
     cycle_id = resolve_cycle_id(stores, campaign_id, args.cycle)
     pause = PauseCyclePayload(campaign_id=campaign_id, cycle_id=cycle_id, reason="Ctrl+C")
 

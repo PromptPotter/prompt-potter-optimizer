@@ -327,10 +327,7 @@ class CampaignStore:
         # Exact first: a root cycle's id is a prefix of every fork and diag of it.
         if needle in ids:
             return [needle]
-        matches = [i for i in ids if i.endswith(f"__{needle}") or i.startswith(needle)]
-        if needle and not matches:
-            matches = [i for i in ids if needle in i]
-        return matches
+        return [i for i in ids if i.endswith(f"__{needle}") or i.startswith(needle)]
 
     def match_campaign_ids(self, needle: str) -> list[str]:
         return self._ids_matching(self.list_campaign_ids(), needle)

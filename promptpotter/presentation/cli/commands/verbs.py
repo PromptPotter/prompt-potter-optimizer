@@ -873,15 +873,7 @@ def command_verb(kind: CommandKind) -> Verb:
     )
 
 
-def _dest(arg: Arg) -> str:
-    """The namespace attribute argparse gives *arg*."""
-    if "dest" in arg.spec:
-        return str(arg.spec["dest"])
-    flag = next((f for f in arg.flags if f.startswith("--")), arg.flags[0])
-    return flag.lstrip("-").replace("-", "_")
-
-
-def _spelled(verb: Verb) -> list[str]:
+def _unsaid(verb: Verb) -> list[str]:
     """What *verb* leaves unsaid: a payload field of a kind naming it (`CommandKind.cli_verb`) with
     no `Arg` of its name
     and no `unspelled` reason (a `Budget` is `BUDGET_AXES`), a reason for a field it spells or no
@@ -891,7 +883,7 @@ def _spelled(verb: Verb) -> list[str]:
     kinds = [kind for kind in CommandKind if kind.cli_verb == verb.name]
     if not kinds:
         return [] if verb.terminal_only else [f"`{verb.name}` dispatches no kind and says not why"]
-    dests = {_dest(arg) for arg in verb.args}
+    dests = {arg.dest for arg in verb.args}
     fields = {
         name: field
         for kind in kinds
@@ -912,8 +904,8 @@ def _spelled(verb: Verb) -> list[str]:
     return unsaid
 
 
-if _unsaid := [line for verb in _WRITTEN_VERBS for line in _spelled(verb)]:
-    raise TypeError("; ".join(_unsaid))
+if unsaid := [line for verb in _WRITTEN_VERBS for line in _unsaid(verb)]:
+    raise TypeError("; ".join(unsaid))
 
 _WRITTEN = {verb.name for verb in _WRITTEN_VERBS}
 VERBS: tuple[Verb, ...] = (
