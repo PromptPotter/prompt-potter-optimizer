@@ -40,6 +40,7 @@ from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
+from promptpotter.infrastructure.store.read_model import LedgerIndex, Projected
 from promptpotter.infrastructure.tracing.bridge import TracingProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.measurement_context import instrument_depth
@@ -187,11 +188,17 @@ class RunObservers:
     dashboard: DashboardCheckout
     readout: ReadoutProjection
     tracing: TracingProjection
+    projections: list[Projected]
     _book_tokens: list[Token[SpendBook | None]] = field(default_factory=list)
+
+    @property
+    def index(self) -> LedgerIndex:
+        return LedgerIndex.of(self.callbacks.ledger.path, ())
 
     def arm_spend_book(self, book: SpendBook) -> None:
         ledger = self.callbacks.ledger
-        ledger.bind(book)
+        self.index.add_projection(book)
+        self.projections.append(book)
         book.ledger = ledger
         if self._book_tokens:
             reset_spend_book(self._book_tokens.pop())
@@ -211,15 +218,20 @@ class RunObservers:
             )
 
     def drain_all(self) -> None:
+        """Drops this run's projections off its ledger, then raises a refusal one of them held."""
         try:
             self._drain()
         finally:
             release_cycle(self.cycle_dir)
+        self.index.raise_held()
 
     def _drain(self) -> None:
+        index = self.index
+        for projection in self.projections:
+            index.drop_projection(projection)
         self.dashboard.drain()
         self.tracing.drain()
-        # The SSE stream is no subscriber — it tails the on-disk ledger — so nothing drains here.
+        # The SSE stream is no projection — it tails the on-disk ledger — so nothing drains here.
         if self._book_tokens:
             reset_spend_book(self._book_tokens.pop())
 
@@ -279,20 +291,24 @@ def _bind_observers(
         raise RuntimeError(
             f"build_run_observers: the ledger of {session.hop} holds no RunWiringRecord"
         )
-    # Opened after the checkout folded, so its catch-up never feeds the checkout a line twice.
     ledger = open_with_history(cycle_dir)
-
-    ledger.bind(dashboard)
     readout.open_readout(cycle_dir)
-    ledger.bind(readout)
-    ledger.bind(CycleIndexProjection(cycle_dir))
-    ledger.bind(RoundFileProjection(session.store, session.hop, session.state))
     tracing = (
         TracingProjection.for_cycle(session.tenant_root, session.hop, langfuse=session.langfuse)
         if forked_from is None
         else forked_from.tracing
     )
-    ledger.bind(tracing)
+    projections: list[Projected] = [
+        dashboard,
+        readout,
+        CycleIndexProjection(cycle_dir),
+        RoundFileProjection(session.store, session.hop, session.state),
+        tracing,
+    ]
+    # Each joins at the line the index stands at, past what the checkout folded.
+    index = LedgerIndex.of(ledger.path, ())
+    for projection in projections:
+        index.add_projection(projection)
     # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
     declare_running(ledger)
 
@@ -309,4 +325,5 @@ def _bind_observers(
         dashboard=dashboard,
         readout=readout,
         tracing=tracing,
+        projections=projections,
     )

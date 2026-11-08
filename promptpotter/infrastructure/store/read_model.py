@@ -6,7 +6,7 @@ import re
 import threading
 from abc import ABC, abstractmethod
 from bisect import bisect_right
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Callable, Hashable, Iterable, Sequence
 from itertools import islice
 from pathlib import Path
@@ -216,8 +216,12 @@ def _registered[K, I: _LedgerTail](registry: OrderedDict[K, I], key: K, make: Ca
     for gone in [held for held, tail in registry.items() if not tail._path.exists()]:
         del registry[gone]
     index = registry[key] = make()
+    # An index holding a projection is never evicted: its projection would miss every later line.
     while len(registry) > LEDGER_INDEX_MAX:
-        registry.popitem(last=False)
+        oldest = next((held for held, tail in registry.items() if not tail.pinned), None)
+        if oldest is None:
+            break
+        del registry[oldest]
     return index
 
 
@@ -235,6 +239,10 @@ class _LedgerTail(ABC):
         # being read as this one's tail, and served this one's refusal.
         self._mark = ABSENT
         self._lines = 0
+
+    @property
+    def pinned(self) -> bool:
+        return False
 
     @abstractmethod
     def _feed(self, raw: bytes) -> None: ...
@@ -265,13 +273,13 @@ class _LedgerTail(ABC):
                 self._sig = sig
 
 
-def appended_here(path: Path, raw: bytes, at: range) -> None:
-    with LedgerIndex._registry_lock:
-        indexes: list[_LedgerTail] = [i for p, i in LedgerIndex._registry.items() if p == path]
+def appended_here(path: Path, raw: bytes, at: range, record: CycleRecord) -> int:
+    """The line's offset, as its ledger's index counts it; its projections have been fed it."""
     with LineIndex._registry_lock:
-        indexes += [i for (p, _), i in LineIndex._registry.items() if p == path]
-    for index in indexes:
-        index._take(raw, at)
+        lines = [i for (p, _), i in LineIndex._registry.items() if p == path]
+    for line_index in lines:
+        line_index._take(raw, at)
+    return LedgerIndex.of(path, ()).land(raw, at, record)
 
 
 type _Make = Callable[[], LedgerFold[Any, Any]]
@@ -358,9 +366,23 @@ def folded[F: LedgerFold[Any, Any]](
     return made
 
 
+class Projected(Protocol):
+    """A fold that writes (`projections/base.py::Projection`): its index feeds it after its folds."""
+
+    records: ClassVar[RecordClasses]
+
+    def on_record(self, record: CycleRecord, offset: int, *, ledger: Path) -> None: ...
+
+
+type _Routes = tuple[dict[bytes, type[StrictModel]], tuple[Projected, ...]]
+type _Refusal = LedgerUnreadableError | UnregisteredStatePartError
+
+
 class LedgerIndex(_LedgerTail):
     """ONE per ledger, holding every typed fold any roster named: a line is screened and validated once.
-    A fold no roster names holds a slot in its own ledger's index alone, seeded with a fork's parent at its cut."""
+    A fold no roster names holds a slot in its own ledger's index alone, seeded with a fork's parent at its cut.
+    Its projections are fed every line from the one they join at, in append order, outside its lock:
+    a projection may view this index while it is fed."""
 
     _registry: ClassVar[OrderedDict[Path, LedgerIndex]] = OrderedDict()
     _screened: ClassVar[list[_Make]] = []
@@ -369,7 +391,133 @@ class LedgerIndex(_LedgerTail):
     def __init__(self, path: Path) -> None:
         self._seeds: dict[_Make, LedgerFold[Any, Any] | None] = {}
         self._feeder = _Feeder(path, {})
+        self._projections: dict[type[Any], Projected] = {}
+        self._routes: _Routes = ({}, ())
+        self._queue: deque[tuple[int, bytes, _Routes, CycleRecord | None]] = deque()
+        self._projected_to = 0
+        self._projecting = False
+        # A projection's refusal never unwinds the append that landed its line: the next one raises it.
+        self._held: _Refusal | None = None
         super().__init__(path)
+
+    @property
+    def pinned(self) -> bool:
+        return bool(self._projections)
+
+    def add_projection(self, projection: Projected) -> None:
+        """One per type: a second door adding its own is a no-op."""
+        with self._lock:
+            if type(projection) in self._projections:
+                return
+            self._refresh()
+            self._projected_to = max(self._projected_to, self._lines)
+            self._projections[type(projection)] = projection
+            self._route()
+
+    def drop_projection(self, projection: Projected) -> None:
+        with self._lock:
+            if self._projections.get(type(projection)) is projection:
+                del self._projections[type(projection)]
+                self._route()
+
+    def _route(self) -> None:
+        held = tuple(self._projections.values())
+        models = {
+            model.model_fields["record_type"].default.encode(): model
+            for projection in held
+            for model in projection.records
+        }
+        self._routes = (models, held)
+
+    def raise_held(self) -> None:
+        with self._lock:
+            held = self._held
+        if held is not None:
+            raise held.with_traceback(None)
+
+    def line_count(self) -> int:
+        with self._lock:
+            self._refresh()
+            return self._lines
+
+    def land(self, raw: bytes, at: range, record: CycleRecord) -> int:
+        """*raw*, just appended at *at* as *record*: its offset; another writer's gap is read through it now.
+        Its projections are handed *record* itself, so a fold keyed by identity knows its own append."""
+        with self._lock:
+            if self._sig is not None and self._mark.end == at.start:
+                offset = self._lines
+                self._feed(raw)
+                self._lines += 1
+                self._mark = FileMark(at.stop, self._mark.inode, raw + b"\n")
+                sig = file_sig(self._path)
+                # Another process may have appended past ours already: a stale signature has the next view read it.
+                if sig is not None and sig[0] == self._mark.inode and sig[1] == at.stop:
+                    self._sig = sig
+            else:
+                self._refresh()
+                offset = self._lines - 1 - self._lines_past(at.stop)
+            for i, (queued, line, routes, _) in enumerate(self._queue):
+                if queued == offset:
+                    self._queue[i] = (queued, line, routes, record)
+                    break
+        self._project()
+        return offset
+
+    def _lines_past(self, stop: int) -> int:
+        if self._mark.end <= stop:
+            return 0
+        with open(self._path, "rb") as fh:
+            fh.seek(stop)
+            return fh.read(self._mark.end - stop).count(b"\n")
+
+    def _project(self) -> None:
+        """Whoever finds the queue undrained drains it, so a projection appending here is fed in order."""
+        with self._lock:
+            if self._projecting:
+                return
+            self._projecting = True
+        try:
+            while True:
+                with self._lock:
+                    if not self._queue:
+                        self._projecting = False
+                        return
+                    offset, raw, routes, carried = self._queue.popleft()
+                self._project_line(offset, raw, routes, carried)
+        except BaseException:
+            with self._lock:
+                self._projecting = False
+            raise
+
+    def _project_line(
+        self, offset: int, raw: bytes, routes: _Routes, carried: CycleRecord | None
+    ) -> None:
+        models, projections = routes
+        kind = _RECORD_TYPE.search(raw)
+        model = None if kind is None else models.get(kind[1])
+        if model is None:
+            return
+        try:
+            record = (
+                carried
+                if isinstance(carried, model)
+                else ledger_record(model.model_validate_json, raw, ledger=self._path, offset=offset)
+            )
+        except (LedgerUnreadableError, UnregisteredStatePartError) as refusal:
+            self._hold(refusal)
+            return
+        if record is None:
+            return
+        for projection in projections:
+            if model in projection.records:
+                try:
+                    projection.on_record(cast("CycleRecord", record), offset, ledger=self._path)
+                except LedgerUnreadableError as refusal:
+                    self._hold(refusal)
+
+    def _hold(self, refusal: _Refusal) -> None:
+        with self._lock:
+            self._held = self._held or refusal
 
     @classmethod
     def of(cls, path: Path, roster: Sequence[_Make]) -> LedgerIndex:
@@ -445,6 +593,9 @@ class LedgerIndex(_LedgerTail):
 
     def _feed(self, raw: bytes) -> None:
         self._feeder.line(self._lines, raw)
+        if self._projections and self._lines >= self._projected_to:
+            self._queue.append((self._lines, raw, self._routes, None))
+            self._projected_to = self._lines + 1
 
 
 class LineIndex(_LedgerTail):

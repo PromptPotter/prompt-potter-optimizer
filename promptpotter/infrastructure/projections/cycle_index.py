@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 from promptpotter.domain.cycle_index import CycleIndex, IndexRound, Intervention
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.dashboard_rows import RoundHealth
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.infrastructure.ledger import ledger_chain
-from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     moves_index,
     scan_cell_formula,
@@ -16,7 +16,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import Moment
+from promptpotter.infrastructure.store.read_model import EVERY_ARM, Moment, RecordClasses
 
 
 def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | None:
@@ -70,10 +70,14 @@ def write_cycle_index(cycle_dir: Path) -> None:
         write_json(CycleLayout(cycle_dir).manifest, index.model_dump(mode="json"))
 
 
-class CycleIndexProjection(Projection):
+class CycleIndexProjection:
+    """`index.json`: fed every arm, since `ledger_scan.py::moves_index` reads a phase's content."""
+
+    records: ClassVar[RecordClasses] = EVERY_ARM
+
     def __init__(self, cycle_dir: CycleDir) -> None:
         self._cycle_dir = Path(cycle_dir)
 
-    def feed(self, record: CycleRecord) -> None:
+    def on_record(self, record: CycleRecord, offset: int, *, ledger: Path) -> None:  # noqa: ARG002 -- read whole
         if moves_index(record):
             write_cycle_index(self._cycle_dir)

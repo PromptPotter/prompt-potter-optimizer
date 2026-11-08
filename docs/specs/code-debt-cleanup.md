@@ -434,10 +434,7 @@ later arc deletes. **Rides with:** the arc each group names, by its "Was" name i
   Rewritten modules land at Wave C's paths. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
 
 **Batch 4: the ledger (U3, with ET) and spend (S).**
-- **U3: the ledger read stack.** Three push paths (`ledger.py::CycleEventLog` subscribers,
-  `read_model.py::appended_here` and `event_stream.py::CycleLedgerTail` re-reading bytes into its own feed),
-  three fold protocols, every `CycleEventLog.open` re-counting the ledger, store accessors four hops deep,
-  and `live_dashboard/projection.py::DashboardCheckout` writing a `dashboard.json` only
+- **U3: the ledger read stack.** Three fold protocols, store accessors four hops deep, and `live_dashboard/projection.py::DashboardCheckout` writing a `dashboard.json` only
   `scripts/offline_run.py` reads. Action: `RunScope`'s ledger is the one producer door (`RunCallbacks` and
   the telemetry `emit_*` go); `LedgerIndex` the one live fold with the writing projections on it;
   accessors `append` and `last`. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
@@ -1043,10 +1040,6 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 - **`cycle_addressing.py::ActiveSessionResponse` serves two nullable ids for `CycleHop | None`**, so
   the webapp re-tests a pair. Action: one nullable `hop`. **Rides with:** the next webapp pass.
   **Re-test:** `git grep -n "class ActiveSessionResponse" -A4 -- promptpotter`.
-- **A ledger subscriber that raises after `Admission._write` lands a charge leaves it in `_unlanded`**
-  (`llm/spend_book.py`), so the book counts that part twice until the run ends — conservative, never
-  under. Action: the record lands before any subscriber runs. **Re-test:** the outlives journey in
-  `tests/test_spend.py` with a raising projection.
 - **Writers with no reader**: `identity/blocklist_audit.jsonl` and `grants_audit.jsonl`. Action: decide whether each earns a
   reader or goes. **Re-test:** `git grep -n "blocklist_audit" -- promptpotter`.
 - **One act on an arm writes two records**: `runner/arm_gate.py` and `scoring/query_loop.py` append

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -11,11 +10,11 @@ from promptpotter.domain.run_records import (
     CycleMintedRecord,
     CycleRecord,
 )
-from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.infrastructure.store.io import append_line, complete_lines
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR, CycleLayout
 from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
     LedgerSpan,
     Moment,
     appended_here,
@@ -68,17 +67,10 @@ def open_with_history(cycle_dir: CycleDir) -> CycleEventLog:
 
 
 class CycleEventLog:
+    """A ledger's appender: its offsets and its projections are its `LedgerIndex`'s."""
+
     def __init__(self, path: Path) -> None:
         self._path = path
-        self._subscribers: list[Projection] = []
-        # Complete lines alone, as every reader counts them: a torn tail is no offset, and the next
-        # append cuts it away before it lands (`io.py::append_line`).
-        self._next_offset = 0
-        self._end = 0
-        with contextlib.suppress(FileNotFoundError), path.open("rb") as fh:
-            for line in complete_lines(fh):
-                self._next_offset += 1
-                self._end += len(line)
         self._inherit_parent: CycleEventLog | None = None
         self._inherit_offset: int = 0
 
@@ -106,36 +98,11 @@ class CycleEventLog:
     def append(self, record: CycleRecord) -> int:
         # A scored cell's five appends are five moments, never one record: the hold before its send
         # (decisions.md § 0003), a bill per send, the start as the live marker, the priced key, the score.
+        # A projection that refused an earlier line halts the run before another line lands.
+        LedgerIndex.of(self._path, ()).raise_held()
         raw = RECORD_ADAPTER.dump_json(record, fallback=str)
-        written = append_line(self._path, raw)
-        # The offset is the record's LINE, so what another writer appended since is fanned out first.
-        self._catch_up(written.start)
-        offset = self._next_offset
-        self._next_offset, self._end = offset + 1, written.stop
-        # The run's own controls poll this ledger per cell; its own appends must not cost them a read.
-        appended_here(self._path, raw, written)
-        self._fan_out(record, offset)
-        return offset
-
-    def _catch_up(self, upto: int) -> None:
-        if upto <= self._end:
-            return
-        with self._path.open("rb") as fh:
-            fh.seek(self._end)
-            theirs = fh.read(upto - self._end)
-        for raw in theirs.splitlines():
-            offset = self._next_offset
-            self._next_offset += 1
-            record: CycleRecord | None = ledger_record(
-                RECORD_ADAPTER.validate_json, raw, ledger=self._path, offset=offset
-            )
-            if record is not None:
-                self._fan_out(record, offset)
-        self._end = upto
-
-    def _fan_out(self, record: CycleRecord, offset: int) -> None:
-        for sub in self._subscribers:
-            sub.on_record(record, offset, ledger=self._path)
+        # The offset is the record's LINE, as the index counts it, another writer's lines included.
+        return appended_here(self._path, raw, append_line(self._path, raw), record)
 
     def iter(self, own_limit: int | None = None) -> Iterator[tuple[int, CycleRecord]]:
         """`own_limit` counts OWN records, as `forked_at_offset` does, never a position over the chain."""
@@ -163,9 +130,8 @@ class CycleEventLog:
         self._inherit_parent = parent
         self._inherit_offset = offset
 
-    def bind(self, projection: Projection) -> None:
-        self._subscribers.append(projection)
-
     @property
     def next_offset(self) -> int:
-        return self._next_offset
+        """Complete lines alone, as every reader counts them: a torn tail is no offset, and the next
+        append cuts it away before it lands (`io.py::append_line`)."""
+        return LedgerIndex.of(self._path, ()).line_count()

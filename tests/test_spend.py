@@ -255,6 +255,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     unreported_on,
 )
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.account_spend import (
     account_bill,
     bank_spend,
@@ -273,7 +274,7 @@ from promptpotter.infrastructure.store.io import read_lines, write_jsonl, write_
 from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, draft_dirs
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
-from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
@@ -1228,7 +1229,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     # The ceiling already spent: no cell fits, and the control reads it as reached.
     arm = spend_book(0.02, meters="search_incurred", metered=Budget.amount(0.02, 0))
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
-    ledger.bind(arm)
+    LedgerIndex.of(ledger.path, ()).add_projection(arm)
     session = loop_session(
         built_stores,
         _searching(0.01),
@@ -1393,7 +1394,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         filed(account("ada-id").archive, [paid], cell_entry, created_at=shared)
         book = spend_book(1.0, meters="bill")
         ledger = CycleEventLog(homes / f"bob-{shared}.jsonl")
-        ledger.bind(book)
+        LedgerIndex.of(ledger.path, ()).add_projection(book)
         with _billing_on(ledger, book):
             for answer in account("bob-id").archive.population(cell_entry):
                 emit_replayed_step_tokens(answer.cell.pipeline.step_tokens, {})
@@ -2087,7 +2088,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     burst_ledger = CycleEventLog(tmp_path / "burst.jsonl")
     ceiling_usd = 0.05
     book = spend_book(ceiling_usd)
-    burst_ledger.bind(book)
+    LedgerIndex.of(burst_ledger.path, ()).add_projection(book)
 
     async def burst() -> list[Any]:
         async def one(i: int) -> Any:
@@ -2154,11 +2155,11 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     # ledger.
     root = CycleEventLog(tmp_path / "root.jsonl")
     book = spend_book(0.05)
-    root.bind(book)
+    LedgerIndex.of(root.path, ()).add_projection(book)
     book.ledger = root
     nested = CycleEventLog(tmp_path / "nested.jsonl")
     inner = spend_book(5.0)
-    nested.bind(inner)
+    LedgerIndex.of(nested.path, ()).add_projection(inner)
     inner.ledger, inner.enclosing = nested, book
     with _billing_on(nested, inner):
         jumping_clock(_owned_chat("inner", "nested"))
@@ -2228,7 +2229,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     # A send that left and named no price stays held at its bound.
     held_ledger = CycleEventLog(tmp_path / "held.jsonl")
     book = spend_book(0.05)
-    held_ledger.bind(book)
+    LedgerIndex.of(held_ledger.path, ()).add_projection(book)
     wire.broken_once = True
     with _billing_on(held_ledger, book):
         jumping_clock(_owned_chat("tls"))
@@ -2482,7 +2483,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
     replay_arm = spend_book(1.0, meters="search_incurred")
     replays = CycleEventLog(tmp_path / "replays.jsonl")
-    replays.bind(replay_arm)
+    LedgerIndex.of(replays.path, ()).add_projection(replay_arm)
     with _billing_on(replays, replay_arm):
         emit_replayed_step_tokens(rows[-1].step_tokens, {})
     assert replay_arm.usd_metered == pytest.approx(2 * call_usd), (
@@ -2531,7 +2532,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
     turns_ledger = CycleEventLog(tmp_path / "turns.jsonl")
     purse = spend_book(1.0)
-    turns_ledger.bind(purse)
+    LedgerIndex.of(turns_ledger.path, ()).add_projection(purse)
     whole = SendBound(input_tokens=100_000, output_tokens=50_000, usd=0.5)
 
     async def agent_cell(sample_id: int) -> Any:
@@ -3443,7 +3444,7 @@ def account_bound(built_stores: Stores) -> Iterator[None]:
 
 @pytest.mark.usefixtures("account_bound")
 def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     stores = built_stores
     root = "cycle_root0000"
@@ -3693,6 +3694,52 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert activity.total_tokens == 4 * 2_800 + 400 + 700, (
         "the Activity pane lost the sends of what was deleted, reset or never minted"
     )
+
+    # A projection refusing a landed charge never unwinds the append that landed it: the part is
+    # counted once, and the ledger's next append raises the refusal before it lands.
+    class Refusing(Projection):
+        def _handle_token_usage(self, record: TokenUsageRecord) -> None:
+            raise RuntimeError(f"this projection cannot take {record.record_type}")
+
+    refusing_ledger = CycleEventLog.open(CycleDir(tmp_path / "refusing"))
+    refusing_book, refusing = spend_book(1.0), Refusing()
+    refusing_index = LedgerIndex.of(refusing_ledger.path, ())
+    refusing_index.add_projection(refusing_book)
+    refusing_index.add_projection(refusing)
+    billed_once = SendBound(input_tokens=2_000, output_tokens=800, usd=0.5)
+    with (
+        scoped(ledger=refusing_ledger),
+        spending_under(refusing_book),
+        admitted(
+            CallLabel("backend", "backend"),
+            billed_once,
+            model="openai/gpt-4o",
+            provider="openrouter",
+            paid_by="host",
+        ) as refused_send,
+    ):
+        refused_send.settle(Billed(TokenAccount(input=2_000, output=800), 0.04))
+    assert refusing_book.usd_metered == pytest.approx(0.04), (
+        "a projection's refusal unwound a landed charge, so the book counted it twice"
+    )
+    landed = refusing_ledger.next_offset
+    with pytest.raises(LedgerUnreadableError):
+        refusing_ledger.append(
+            billed_call(
+                0.01,
+                kind="backend",
+                node="llm_only",
+                model="openai/gpt-oss-20b",
+                provider="openrouter",
+                input_tokens=10,
+                output_tokens=10,
+                duration_s=1.0,
+                mirrored=False,
+            )
+        )
+    assert refusing_ledger.next_offset == landed, "an append landed past a held refusal"
+    refusing_index.drop_projection(refusing)
+    refusing_index.drop_projection(refusing_book)
 
     # A settle whose remainder's hold cannot be written still closes the book whole: its part
     # billed and the remainder held, never the whole bound held again on top of the bill.

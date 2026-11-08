@@ -110,7 +110,13 @@ from promptpotter.infrastructure.store.layout import (
     inner_sandbox_key,
     root_cycle_id,
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, file_sig, read_file
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    LedgerSpan,
+    Moment,
+    file_sig,
+    read_file,
+)
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_path,
     clear_active_pointer,
@@ -637,14 +643,17 @@ class CampaignStore:
         cycle_dir = CycleDir(self.cycle_dir(hop))
         dashboard = DashboardCheckout.over(cycle_dir)
         ledger = CycleEventLog.open(cycle_dir)
+        index = LedgerIndex.of(ledger.path, ())
         if dashboard is not None:
-            ledger.bind(dashboard)
+            index.add_projection(dashboard)
         # Error first, so no reader finds the ending without it.
         if error is not None:
             ledger.append(error)
         ledger.append(stop)
         if dashboard is not None:
+            index.drop_projection(dashboard)
             dashboard.drain()
+        index.raise_held()
         write_cycle_index(cycle_dir)
 
     def claim_launch(
