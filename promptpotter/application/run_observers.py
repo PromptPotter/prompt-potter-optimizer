@@ -286,11 +286,8 @@ def _bind_observers(
         if forked_from is None
         else forked_from.readout
     )
-    dashboard = DashboardCheckout.over(cycle_dir)
-    if dashboard is None:
-        raise RuntimeError(
-            f"build_run_observers: the ledger of {session.hop} holds no RunWiringRecord"
-        )
+    dashboard = DashboardCheckout(cycle_dir)
+    dashboard.drain()
     ledger = open_with_history(cycle_dir)
     readout.open_readout(cycle_dir)
     tracing = (

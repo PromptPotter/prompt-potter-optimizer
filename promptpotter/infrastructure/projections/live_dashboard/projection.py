@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from pathlib import Path
-from typing import assert_never
+from typing import ClassVar, assert_never
 
 from promptpotter.domain.arms import Concluded, Measuring
 from promptpotter.domain.bench import BenchReading
@@ -79,11 +78,8 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
-    folded,
+    RecordClasses,
 )
-
-logger = logging.getLogger(__name__)
-
 
 _DASHBOARD_DEBOUNCE_S = 0.25
 # The write holds the lock every ledger append takes, so the next one rests this many times its cost.
@@ -565,39 +561,39 @@ class LiveDashboardProjection(Projection):
         )
 
 
-class DashboardCheckout(LiveDashboardProjection):
-    """`dashboard.json`: the fold its run goes on folding, written out at a boundary or settled."""
+class DashboardCheckout:
+    """`dashboard.json`: its ledger index's `LiveDashboardProjection`, written out at a boundary or
+    settled; a write that could not land is held, and `drain` raises it."""
 
-    def __init__(self, folded: LiveDashboardProjection, path: Path) -> None:
-        # Adopts the one-shot fold `folded` hands out; the lock and the timer are its own.
-        vars(self).update(vars(folded))
-        self._path = path
+    records: ClassVar[RecordClasses] = LiveDashboardProjection.records
+
+    def __init__(self, cycle_dir: CycleDir) -> None:
+        *self._prefix, own = ledger_chain(cycle_dir, moment=None)
+        self._index = LedgerIndex.of(own.path, ())
+        self._path = CycleLayout(Path(cycle_dir)).dashboard
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
         self._dirty = False
         self._cost_s = 0.0
+        self._fault: Exception | None = None
 
-    @classmethod
-    def over(cls, cycle_dir: CycleDir) -> DashboardCheckout | None:
-        """``None`` where the cycle has declared no wiring."""
-        *prefix, own = ledger_chain(cycle_dir, moment=None)
-        head = folded(own.path, LiveDashboardProjection, seed=_seed(prefix), until=None)
-        if head._unwired is not None:
-            return None
-        checkout = cls(head, CycleLayout(Path(cycle_dir)).dashboard)
-        checkout.drain()
-        return checkout
+    def _live(self) -> LiveDashboardProjection:
+        return self._index.live(LiveDashboardProjection, seed=_seed(self._prefix))
 
-    def on_record(self, record: CycleRecord, offset: int, *, ledger: Path) -> None:
+    @property
+    def state(self) -> LiveDashboardState:
+        """The run's own fold, fed on as its ledger grows."""
+        return self._live().state
+
+    def spend_metered(self, meters: CeilingMeter) -> MeteredSpend:
+        return self._live().spend_metered(meters)
+
+    def on_record(self, record: CycleRecord, offset: int, *, ledger: Path) -> None:  # noqa: ARG002 -- the index's fold took it
         with self._lock:
-            super().on_record(record, offset, ledger=ledger)
-
-    def feed(self, record: CycleRecord) -> None:
-        super().feed(record)
-        if type(record) in _AT_ONCE:
-            self._write()
-        else:
-            self._settle()
+            if type(record) in _AT_ONCE:
+                self._write()
+            else:
+                self._settle()
 
     def _settle(self) -> None:
         self._dirty = True
@@ -611,37 +607,42 @@ class DashboardCheckout(LiveDashboardProjection):
         timer.start()
 
     def _settled(self) -> None:
-        try:
-            with self._lock:
-                # Before the dirty test: left set on the not-dirty path, it disarms the debounce.
-                self._timer = None
-                if self._dirty:
+        with self._lock:
+            # Before the dirty test: left set on the not-dirty path, it disarms the debounce.
+            self._timer = None
+            if self._dirty:
+                try:
                     self._write()
-        except Exception:
-            logger.exception("debounced dashboard persist failed")
+                except Exception as fault:  # noqa: BLE001 -- held for `drain`, off the run's thread
+                    self._fault = fault
 
     def drain(self) -> None:
+        """Writes it now; raises a write it could not land, or a cycle that declared no wiring."""
         with self._lock:
-            self._write()
+            if self._write() is None:
+                raise RuntimeError(f"{self._path.parent}: its ledger holds no RunWiringRecord")
+            fault, self._fault = self._fault, None
+        if fault is not None:
+            raise fault
 
-    def _write(self) -> None:
+    def _write(self) -> LiveDashboardState | None:
         if self._timer is not None:
             self._timer.cancel()
             self._timer = None
         self._dirty = False
+        state = self._index.view(LiveDashboardProjection, seed=_seed(self._prefix))
+        if state is None:
+            return None
         started = time.perf_counter()
         try:
-            write_json(self._path, self.composed().model_dump(), default=str)
+            write_json(self._path, state.model_dump(), default=str)
+        except OSError as fault:
+            # Never emitted: a round warning appends to the ledger this checkout is fed by.
+            self._fault = fault
+        else:
             self._cost_s = time.perf_counter() - started
-        except OSError as exc:
-            # Logged, never raised or emitted: a round warning appends to the ledger this view subscribes to.
-            logger.warning(
-                "dashboard write refused — %s: %s · %s is stale until the next write lands "
-                "(the run is unaffected; the ledger holds every fact this file shows)",
-                exc.__class__.__name__,
-                exc,
-                self._path,
-            )
+            self._fault = None
+        return state
 
 
 def fold_at(cut: Cut) -> LiveDashboardState | None:

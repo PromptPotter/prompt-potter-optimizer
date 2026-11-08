@@ -71,8 +71,8 @@ async def _grade(stores: Stores, hop: CycleHop) -> BenchScore:
         clock = LaunchClock.now()
         optimizer = select_optimizer(config.optimization)
         cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
-        dashboard = DashboardCheckout.over(cycle_dir)
-        assert dashboard is not None, "a cycle with standing rounds was launched, so it is declared"
+        dashboard = DashboardCheckout(cycle_dir)
+        dashboard.drain()
         readout = ReadoutProjection.for_campaign(session, config, sink=None)
         banked: BenchPasses | None = None
         # The round an `at_end` launch grades under: its last.

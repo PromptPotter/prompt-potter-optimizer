@@ -63,8 +63,8 @@ from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import (
+    CycleIndexProjection,
     read_cycle_index,
-    write_cycle_index,
 )
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.runtime_flags import (
@@ -185,11 +185,18 @@ class CampaignStore:
     def ledger(self, hop: CycleHop) -> Path:
         return self.layout(hop).ledger
 
+    def _log(self, hop: CycleHop) -> CycleEventLog:
+        """From the store's first append on, this process keeps the cycle's `index.json` and
+        `dashboard.json` checked out: one projection of each per ledger, whoever added it."""
+        cycle_dir = CycleDir(self.cycle_dir(hop))
+        ledger = CycleEventLog.open(cycle_dir)
+        index = LedgerIndex.of(ledger.path, ())
+        index.add_projection(CycleIndexProjection(cycle_dir))
+        index.add_projection(DashboardCheckout(cycle_dir))
+        return ledger
+
     def _append(self, hop: CycleHop, record: CycleRecord) -> int:
-        cycle_dir = self.cycle_dir(hop)
-        offset = CycleEventLog.open(CycleDir(cycle_dir)).append(record)
-        write_cycle_index(cycle_dir)
-        return offset
+        return self._log(hop).append(record)
 
     def _read_declared[M: (Campaign, HeadToHeadRecord)](
         self, path: Path, model: type[M]
@@ -640,21 +647,12 @@ class CampaignStore:
     def declare_stop(
         self, hop: CycleHop, stop: RunPhaseRecord, *, error: ErrorRecord | None = None
     ) -> None:
-        cycle_dir = CycleDir(self.cycle_dir(hop))
-        dashboard = DashboardCheckout.over(cycle_dir)
-        ledger = CycleEventLog.open(cycle_dir)
-        index = LedgerIndex.of(ledger.path, ())
-        if dashboard is not None:
-            index.add_projection(dashboard)
+        ledger = self._log(hop)
         # Error first, so no reader finds the ending without it.
         if error is not None:
             ledger.append(error)
         ledger.append(stop)
-        if dashboard is not None:
-            index.drop_projection(dashboard)
-            dashboard.drain()
-        index.raise_held()
-        write_cycle_index(cycle_dir)
+        LedgerIndex.of(ledger.path, ()).raise_held()
 
     def claim_launch(
         self,

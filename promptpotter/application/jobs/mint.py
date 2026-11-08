@@ -583,7 +583,7 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
     campaigns.mint_cycle(hop)
     save_active_pointer(session.store.base_dir, hop)
     # So `dashboard.json` stands from the mint on, through the window before the loop starts.
-    DashboardCheckout.over(CycleDir(campaigns.cycle_dir(hop)))
+    DashboardCheckout(CycleDir(campaigns.cycle_dir(hop))).drain()
     logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
     return session
 

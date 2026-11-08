@@ -548,6 +548,13 @@ class LedgerIndex(_LedgerTail):
                 return cast("LedgerFold[Any, V]", self._feeder.folds[fold]).value()
             return cast("LedgerFold[Any, V]", self._prefix(fold, until)).value()
 
+    def live[F: LedgerFold[Any, Any]](self, fold: Callable[[], F], *, seed: F | None = None) -> F:
+        """The slot itself, fed on past this call: a field held off it reads each line as it lands."""
+        with self._lock:
+            self._open(fold, seed)
+            self._feeder.vouch(fold)
+            return cast("F", self._feeder.folds[fold])
+
     def prefix[F: LedgerFold[Any, Any]](
         self, fold: Callable[[], F], until: int, *, seed: F | None = None
     ) -> F:

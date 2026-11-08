@@ -434,8 +434,7 @@ later arc deletes. **Rides with:** the arc each group names, by its "Was" name i
   Rewritten modules land at Wave C's paths. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
 
 **Batch 4: the ledger (U3, with ET) and spend (S).**
-- **U3: the ledger read stack.** Three fold protocols, store accessors four hops deep, and `live_dashboard/projection.py::DashboardCheckout` writing a `dashboard.json` only
-  `scripts/offline_run.py` reads. Action: `RunScope`'s ledger is the one producer door (`RunCallbacks` and
+- **U3: the ledger read stack.** Three fold protocols and store accessors four hops deep. Action: `RunScope`'s ledger is the one producer door (`RunCallbacks` and
   the telemetry `emit_*` go); `LedgerIndex` the one live fold with the writing projections on it;
   accessors `append` and `last`. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
 - **ET, inside U3: tracing translates the ledger twice.** `tracing/bridge.py::TracingProjection` re-encodes
