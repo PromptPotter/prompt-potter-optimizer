@@ -5,7 +5,8 @@ types. A task kind's call answers the Tasks extension's handle: claimed (`result
 the request itself declares the extension on a 2026-era wire, and as the call's structured content
 everywhere else, since a client MUST reject a claimed result its request did not declare and a
 handshake-era wire carries none. `tasks/get`, `tasks/result` and `tasks/cancel` serve both. A
-refusal keeps its `PotterError.code` on every answer.
+refusal is its `domain/refusal.py::Refusal` on every answer: a call's error result, every other
+request's JSON-RPC error data.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ except ModuleNotFoundError:
 from promptpotter.application import host_surface
 from promptpotter.application.caller import Caller
 from promptpotter.application.host_surface import HostAnswer, HostSession, HostTask
+from promptpotter.domain.refusal import Refusal
 from promptpotter.shared.errors import PotterError
 
 TASKS_EXTENSION = "io.modelcontextprotocol/tasks"
@@ -63,9 +65,22 @@ def _text(value: object) -> list[types.ContentBlock]:
     return [types.TextContent(text=json.dumps(value, ensure_ascii=False))]
 
 
+def _rpc_code(exc: PotterError) -> int:
+    return types.INVALID_PARAMS if exc.http_status < 500 else types.INTERNAL_ERROR
+
+
 def _refused(exc: PotterError) -> MCPError:
-    code = types.INVALID_PARAMS if exc.http_status < 500 else types.INTERNAL_ERROR
-    return MCPError(code=code, message=str(exc), data={"code": exc.code})
+    refused = Refusal.of(exc)
+    return MCPError(
+        code=_rpc_code(exc), message=refused.message, data=refused.model_dump(mode="json")
+    )
+
+
+def refusal_result(exc: PotterError) -> types.CallToolResult:
+    """A refusal is the tool's answer, so the model reading it can correct its call."""
+    return types.CallToolResult(
+        content=_text(Refusal.of(exc).model_dump(mode="json")), is_error=True
+    )
 
 
 def _answered(name: str, answer: HostAnswer) -> types.CallToolResult:
@@ -105,9 +120,7 @@ def host_server(session: HostSession) -> Server[Any]:
                 host_surface.CallTool(params.name, params.arguments or {})
             )
         except PotterError as exc:
-            # A refusal is the tool's answer, so the model reading it can correct its call.
-            refused = {"code": exc.code, "message": str(exc)}
-            return types.CallToolResult(content=_text(refused), is_error=True)
+            return refusal_result(exc)
         if answer.task is None:
             return _answered(params.name, answer)
         task = _task_json(answer.task)

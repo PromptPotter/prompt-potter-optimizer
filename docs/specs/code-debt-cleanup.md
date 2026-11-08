@@ -162,21 +162,14 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   one spine, so a subject on a diverging branch drops out of the drawing. Action: resolve by address,
   one spine per line. **Rides with:** M16b. **Re-test:** compare two branches of one campaign; both
   draw.
-- **A refusal still has three more shapes besides the one Refusal value**:
-  - `jobs/quota.py::LaunchRefusal` is served with `reason` and `sentence`.
-  - A job persists its refusal as `str(exc)` (`jobs/registry.py`, `domain/job.py`), and MCP `tasks/get`
-    reads that back as a code plus text.
-  - REST's envelope calls the code `error`, and the CLI's `--json` spreads `details` beside it.
-
-  Action: every door and every persisted job carries the Refusal value. **Rides with:** REFUSE.
-  **Re-test:** `git grep -n "class LaunchRefusal" -- promptpotter` is empty.
+- **A job persists its refusal as `str(exc)`** (`jobs/registry.py:295`, `domain/job.py:117`), read back
+  by MCP `tasks/get` (`host_surface.py:271`) and `MachineRefusal.reason` (`machine_status.py:252`).
+  Action: a job carries `Refusal`. **Rides with:** M2 (ended jobs are `Fate.RUN`, wiped at M2.3).
+  **Re-test:** `git grep -n "refusal=str(" -- promptpotter` is empty.
 - **A taken name is read two ways** — `slug_exists` (the directory exists) against the definition's
   holders (`dataset.json` exists), across `stores.py`, `draft_patch.py`, `ingest.py` and
   `mint_and_start.py`. Action: one read of a tenant name's hold. **Rides with:** M6. **Re-test:**
   `git grep -n "slug_exists" -- promptpotter` names one definition and its callers.
-- **The unknown-slot refusal is spelled twice** — `bench/task_context.py` and the potter injection
-  registry each validate a template's slots. Action: one template-slot validation. **Rides with:** REFUSE.
-  **Re-test:** one function words an unknown slot.
 - **The scripts' writer and the store's are two**: `store/io.py::_atomic_replace` and
   `scripts/processes.py::replace_changed` each state one bounded retry on Windows' WinError 5; the
   stdlib-only interpreter the scripts run under is what varies, and any `promptpotter` import runs
@@ -333,11 +326,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   request (the gate's `GateDecision`, the arms shape for `submit-arms`), answered as the existing
   command; otherwise never claim `input_required`. Untested against a live client. **Rides with:**
   M22. **Re-test:** a host calling `tasks/result` on a held origin gate receives an input request.
-- **A refusal is answered four ways** — MCP `tools/call` drops `details` and `refusal_words`, MCP
-  `tasks/result` raises a JSON-RPC error, REST serves `ErrorEnvelope`, the CLI a third shape and the
-  only door catching `SendRefusedError` / `UngeneratedRequestError` (`RuntimeError`s, a REST 500).
-  Action: one refusal value in `application/` each door only renders. **Rides with:** REFUSE.
-  **Re-test:** the same refused `start-run` over MCP and REST carries the same `refusal_words`.
 - **A queued launch dies with the asking process** — the queue wait runs in the caller
   (`jobs/launcher/launch.py`), so a CLI-derived kind exits and an MCP stdio session ends, while the
   door reported success. Action: the queued job on disk is promoted by whoever frees the slot.
@@ -1126,15 +1114,14 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `git grep -n "^CACHE_PATH = user_data_root()" -- promptpotter/infrastructure/llm/pricing.py`.
 
 **B. A refusal spelled per door.** **Rides with:** REFUSE.
-- `provider_config.py::OIDCConfigError`, `prompt_block.py::PackRefusal` and
-  `shared/errors.py::LedgerUnreadableError` stand beside the one refusal type. A taken slug is refused
-  twice, as `LaunchError` and as `shared/errors.py::SlugTakenError`.
-  `injections/registry.py::validate_template` raises `KeyError`. Action: one type, its kind a row.
-  **Re-test:** `git grep -nE "class (OIDCConfigError|PackRefusal)\b" -- promptpotter`.
-- The CLI rewrites refusals: `parsers.py::_budget_axis` and `verbs.py::_rescore_count_arg` word their
-  own, and `cli/commands/new.py`, `ab.py` and `resume_command.py` print `ERROR:` beside `Error:`.
-  Action: the CLI prints the refusal's served sentence. **Re-test:**
-  `git grep -n '"ERROR:' -- promptpotter/presentation/cli`.
+- `shared/errors.py::LedgerUnreadableError` stands beside `FileUnreadableError`. **Rides with:** LAND.
+- A taken slug is refused twice, as `LaunchError` and as `shared/errors.py::SlugTakenError`.
+  **Rides with:** M6.
+- `prompt_block.py::PackRefusal` stands beside `Refusal`. Its deletion moves capo, capo-pobb and
+  potter: `pools/members.py::BlockPoolInitializer.refusal` is a reached unit reading its `name` and
+  `reason`. Action: the shelf holds `Refusal` values composed from one `PackRefusalKind` row each, in a
+  re-key. **Rides with:** the next accepted re-key of capo. **Re-test:**
+  `git grep -nE "class PackRefusal\b" -- promptpotter` is empty.
 
 **C. One address resolved twice.** **Rides with:** M2.
 - `run_records.py::BankedSubject` is a second address. Action: the spend tombstone addresses by

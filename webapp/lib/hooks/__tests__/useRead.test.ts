@@ -118,7 +118,7 @@ describe("useRead — a throttled session probe", () => {
     vi.stubGlobal("fetch", async () =>
       throttled
         ? new Response(
-            JSON.stringify({ error: "rate_limited", error_id: "e1", message: "Slow down.", details: null }),
+            JSON.stringify({ code: "rate_limited", error_id: "e1", message: "Slow down.", details: {} }),
             { status: 429 },
           )
         : new Response(JSON.stringify(ME), { status: 200 }),

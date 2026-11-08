@@ -119,6 +119,9 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     RoundDigest,
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub
+from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
+    validate_template,
+)
 from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
     build_l1_response_schema,
 )
@@ -267,6 +270,7 @@ from promptpotter.shared.errors import (
     FileKind,
     FileUnreadableError,
     PayloadInvalidError,
+    PotterError,
     SlugTakenError,
 )
 from promptpotter.shared.hashing import dataset_hash, source_facts, stable_hash
@@ -1215,9 +1219,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         wheel.setattr(paths, "research_datasets_root", lambda: None)
         wheel.setenv("OPENROUTER_API_KEY", "not-a-key")
         wheel.setattr(sys, "argv", ["promptpotter", "new", "promptpotter-self/panel"])
-        with pytest.raises(SystemExit) as refused_new:
+        capsys.readouterr()
+        with pytest.raises(SystemExit):
             campaign_runner.main()
-    assert "no research tier" in str(refused_new.value.code), (
+    assert "no research tier" in capsys.readouterr().err, (
         "`new` on a wheel dropped why the L4 panel is not found"
     )
     # So does an upload `new` refuses: the slug's own reason, never a parse failure in its place.
@@ -1241,11 +1246,12 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         cli.setattr(
             sys, "argv", ["promptpotter", "new", str(upload), "--set", "slug=email-tagging"]
         )
-        with pytest.raises(SystemExit) as renamed:
+        capsys.readouterr()
+        with pytest.raises(SystemExit):
             campaign_runner.main()
-    said = str(renamed.value.code)
+    said = capsys.readouterr().err
     assert said.startswith(
-        "ERROR: A dataset named 'email-tagging' already exists. Suggested slug: email-tagging-2."
+        "Error: A dataset named 'email-tagging' already exists. Suggested slug: email-tagging-2."
     ), f"a check-in took an install name, or `new` reworded the claim: {said!r}"
     assert "discard-draft" in said, "`new` dropped that the refused check-in is kept"
 
@@ -1381,6 +1387,14 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             torn_file.unlink()
         else:
             torn_file.write_bytes(kept)
+    # A potter template filling a slot its node never declares is refused as the check-in's is.
+    l1_runs = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
+    with pytest.raises(PotterError) as typo:
+        validate_template("l1_generate", l1_runs.model_copy(update={"instruction": "{{typo}}"}))
+    assert (typo.value.code, typo.value.http_status) == (
+        FileKind.OPTIMIZER_PROMPT.code,
+        FileKind.OPTIMIZER_PROMPT.http_status,
+    ), "a typo'd slot in a potter template was served as another refusal"
 
     for recipe, imported, why in (
         ("table", {loaders, tabular_ingest}, "a recipe's identity missed code it imports"),

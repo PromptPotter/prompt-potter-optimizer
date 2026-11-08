@@ -98,7 +98,6 @@ from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadStarte
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
-    LaunchRefusal,
     QuotaExceededError,
     account_wallet,
     admit_launch,
@@ -2949,8 +2948,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             keyed_client("openai")
     finally:
         unbind()
-    refused = LaunchRefusal.of(box_paid.value)
-    assert (refused.reason, box_paid.value.details["provider"]) == (
+    assert (box_paid.value.details["reason"], box_paid.value.details["provider"]) == (
         LaunchRefusalReason.USED_UP,
         "openai",
     ), "a send past the coupon was refused for another cause, or named no provider to key"

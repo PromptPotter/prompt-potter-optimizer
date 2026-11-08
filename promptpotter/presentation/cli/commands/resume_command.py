@@ -132,7 +132,7 @@ def _steer_overlay(specs: list[str]) -> dict[str, dict[str, str]]:
         key, sep, raw = spec.partition("=")
         node, dot, param = key.strip().partition(".")
         if not sep or not dot or not node or not param:
-            raise SystemExit(f"ERROR: --steer expects NODE.PARAM=VALUE, got {spec!r}")
+            raise PayloadInvalidError(f"--steer expects NODE.PARAM=VALUE, got {spec!r}")
         overlay.setdefault(node, {})[param] = raw.strip()
     return overlay
 
@@ -229,7 +229,7 @@ async def _pivot_to_fresh(
         f"Start a fresh campaign on `{drift.dataset_name}` instead?", default_no=True
     )
     if answer is None:
-        raise SystemExit(f"ERROR: {drift}")
+        raise drift
     if not answer:
         raise SystemExit("Cancelled. Revert the config edits and retry `resume`.")
     return await mint_and_run(
@@ -254,13 +254,13 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
 
     resume_from_round: int | None = args.resume_from_round
     if resume_from_round is not None and resume_from_round < 0:
-        raise SystemExit(f"ERROR: --from must be >= 0, got {resume_from_round}")
+        raise PayloadInvalidError(f"--from must be >= 0, got {resume_from_round}")
     rewinding = args.rewind_to_round is not None
     steering = bool(args.steer)
     if rewinding and steering:
-        raise SystemExit("ERROR: --rewind and --steer each cut a fork — pass one per `resume`.")
+        raise PayloadInvalidError("--rewind and --steer each cut a fork — pass one per `resume`.")
     if (rewinding or steering) and args.step_rounds is not None:
-        raise SystemExit("ERROR: --step-rounds steps a cycle's own run; a fork's run takes none.")
+        raise PayloadInvalidError("--step-rounds steps a cycle's own run; a fork's run takes none.")
 
     try:
         if rewinding:

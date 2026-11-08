@@ -6,6 +6,7 @@ import {
   LAUNCH_REFUSAL_LABELS,
 } from "@/lib/api/types";
 import { backendHealthRead, datasetIndexRead, originsRead } from "@/lib/api/reads";
+import { wordKeys } from "@/lib/api/words";
 import { ELAPSED_TICK_MS } from "@/lib/cadence";
 import { stepAnswer, type FieldSchema } from "@/lib/derivations";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
@@ -221,6 +222,8 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   // `blocked` mirrors the two served gates alone: the origin's and the allowance's at the declared budget.
   const { complete: ready, gaps } = draft.readiness;
   const refusal = draft.launch_refusal;
+  // Narrowed as `useIngestFlow` narrows a collision's facts: `details` is the refusal's, by name.
+  const refusalReason = wordKeys(LAUNCH_REFUSAL_LABELS).find((r) => r === refusal?.details.reason);
   const backend = health === null || health.status === "live" ? null : BACKEND_REACHABILITY_INFO[health.status];
   const blocked = !ready || refusal !== null;
   const gapped = new Set<Step | null>(gaps.map((g) => g.step));
@@ -323,11 +326,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
           ))}
           {refusal ? (
             <li>
-              <Said
-                tone="warn"
-                label={LAUNCH_REFUSAL_LABELS[refusal.reason]}
-                detail={refusal.sentence}
-              />
+              {refusalReason === undefined ? (
+                <Said tone="warn" label={refusal.message} />
+              ) : (
+                <Said tone="warn" label={LAUNCH_REFUSAL_LABELS[refusalReason]} detail={refusal.message} />
+              )}
             </li>
           ) : null}
         </ul>

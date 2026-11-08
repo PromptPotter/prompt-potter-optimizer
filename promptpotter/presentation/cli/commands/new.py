@@ -28,9 +28,9 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.datasets.origin_readiness import CHECKLIST_FIELDS, origin_readiness
+from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     EditDraftCampaignPayload,
@@ -118,7 +118,7 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
     knobs: dict[str, Any] = {}
     for item in sets:
         if "=" not in item:
-            raise SystemExit(f"ERROR: --set expects FIELD=VALUE, got {item!r}.")
+            raise PayloadInvalidError(f"--set expects FIELD=VALUE, got {item!r}.")
         field, raw = (part.strip() for part in item.split("=", 1))
         if field in _SET_SCORING:
             config.setdefault(_SCORING, {})[field.split(".", 1)[1]] = raw
@@ -132,8 +132,8 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
         elif field in _SET_FIELDS:
             patch_raw[_PATCH_KEY_OF.get(field, field)] = raw
         else:
-            raise SystemExit(
-                f"ERROR: --set field {field!r} is not settable. One of: {_settable()}."
+            raise PayloadInvalidError(
+                f"--set field {field!r} is not settable. One of: {_settable()}."
             )
     if knobs:
         config["optimization"] = knobs
@@ -152,8 +152,8 @@ def _set_knobs(sets: list[str]) -> dict[str, Any]:
     )
     stray = sorted(spelled.get(f, f) for f in patch.model_fields_set - {"config"})
     if stray := [*stray, *sorted(set(config) - {"optimization"})]:
-        raise SystemExit(
-            f"ERROR: --set {', '.join(stray)} confirms a check-in field, which a dataset name "
+        raise PayloadInvalidError(
+            f"--set {', '.join(stray)} confirms a check-in field, which a dataset name "
             f"does not have. On a name: {', '.join(sorted(_SET_KNOBS))}, "
             f"{_NODES}.<node>.<knob>."
         )
@@ -170,8 +170,7 @@ def _draft_kept(draft_id: str) -> str:
 def _raise_incomplete(
     gaps: Sequence[FieldGap], turn: OriginResolution | None, draft_id: str
 ) -> NoReturn:
-    lines = ["ERROR: origin still incomplete — nothing minted.", "", "Open fields:"]
-    lines += [f"  - {g.field}: {g.hint}" for g in gaps]
+    lines = ["Open fields:", *(f"  - {g.field}: {g.hint}" for g in gaps)]
     if turn is not None and turn.degraded_cause:
         lines += ["", f"The resolver turn came back thin: {turn.degraded_cause}."]
     questions = turn.last_resolution.questions if turn and turn.last_resolution else []
@@ -183,10 +182,11 @@ def _raise_incomplete(
         "Confirm a field and re-run, e.g.:",
         "  promptpotter new <file> --set task_description='what the prompt does' "
         "--set column.query=<header> --set column.ground_truth=<header>",
-        "",
-        _draft_kept(draft_id),
     ]
-    raise SystemExit("\n".join(lines))
+    refused = OriginIncompleteError(tuple(gaps))
+    refused.add_note("\n".join(lines))
+    refused.add_note(_draft_kept(draft_id))
+    raise refused
 
 
 async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
@@ -266,10 +266,12 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
         budget = Budget.model_validate(filed).over(budget)
     dataset_name = args.dataset or args.dataset_name
     if not dataset_name:
-        raise SystemExit(
-            "ERROR: `new` requires a dataset name. Pass it as a positional "
-            "(`new justlogic/d234`) or via `--dataset-name <name>`.\n\n" + no_dataset_hint(stores)
+        refused = PayloadInvalidError(
+            "`new` requires a dataset name. Pass it as a positional "
+            "(`new justlogic/d234`) or via `--dataset-name <name>`."
         )
+        refused.add_note(no_dataset_hint(stores))
+        raise refused
     knobs = _set_knobs(args.sets)
     task_text = (
         Path(args.task_file).read_text(encoding="utf-8") if args.task_file else args.task_text
@@ -305,7 +307,8 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     try:
         held = await _hold_checkin(args, stores, draft_id, patch)
     except PotterError as exc:
-        raise SystemExit(f"ERROR: {refusal_words(exc)}\n\n{_draft_kept(draft_id)}") from None
+        exc.add_note(_draft_kept(draft_id))
+        raise
     return await _run_origin(held, diag=args.diag)
 
 
@@ -315,7 +318,8 @@ def _named_dataset(stores: Stores) -> Iterator[None]:
     try:
         yield
     except DatasetAccessError as refused:
-        raise SystemExit(f"ERROR: {refusal_words(refused)}.\n\n{no_dataset_hint(stores)}") from None
+        refused.add_note(no_dataset_hint(stores))
+        raise
 
 
 async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
@@ -330,7 +334,7 @@ async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline
 def _arm_request(raw: str) -> dict[str, Any]:
     arm_key, sep, spec = raw.partition("=")
     if not sep or not spec:
-        raise SystemExit(f"ERROR: --arm takes KEY=OPTIMIZER[,KNOB=VALUE…], got {raw!r}")
+        raise PayloadInvalidError(f"--arm takes KEY=OPTIMIZER[,KNOB=VALUE…], got {raw!r}")
     # A comma opens a knob only where `name=` follows it: a value may hold one.
     optimizer, *knobs = _KNOB_COMMA.split(spec)
     return {"arm_key": arm_key, "optimization": _set_knobs([f"optimizer={optimizer}", *knobs])}
@@ -393,7 +397,7 @@ def head_to_head_command(mint: MintHeadToHeadPayload) -> str:
         return [(a.arm_key, r.declared_optimization(a)) for a in r.arms]
 
     if declared(back) != declared(request):
-        raise SystemExit(f"ERROR: no `head-to-head` command line spells {mint.model_dump()}")
+        raise PotterError(f"no `head-to-head` command line spells {mint.model_dump()}")
     return shlex.join(["python", "-m", "promptpotter", *words])
 
 

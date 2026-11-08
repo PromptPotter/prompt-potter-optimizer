@@ -6,7 +6,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -38,8 +38,8 @@ from promptpotter.config.paths import (
     webapp_static_root,
 )
 from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
-from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import CommandAcceptedBody, CommandKind, ReadKind
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody, StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
@@ -125,13 +125,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Shutting down %s", settings.BRAND_SERVICE_NAME)
 
 
-class ErrorEnvelope(StrictModel):
-    """What every refusal and failure answers, whatever raised it."""
+class ErrorEnvelope(Refusal):
+    """What every refusal and failure answers, whatever raised it: a refusal's `Refusal`, named by
+    its log line."""
 
-    error: str = Field(description="The code a client branches on.")
-    message: str = Field(description="The sentence an operator reads, naming its remedy.")
     error_id: str = Field(description="Names the server log line that holds this failure.")
-    details: dict[str, Any] | None
 
 
 app = FastAPI(
@@ -211,18 +209,19 @@ def _error_response(
             f"{request.method} {request.url.path} -> {status} {code}{reason} [{error_id}]{facts}: {message}",
             status,
         )
-    body = ErrorEnvelope(error=code, message=message, error_id=error_id, details=details or None)
+    body = ErrorEnvelope(code=code, message=message, error_id=error_id, details=details or {})
     return JSONResponse(status_code=status, content=body.model_dump(mode="json"), headers=headers)
 
 
 @app.exception_handler(PotterError)
 async def potter_error_handler(request: Request, exc: PotterError) -> JSONResponse:
+    refused = Refusal.of(exc)
     return _error_response(
         request,
         status=exc.http_status,
-        code=exc.code,
-        message=refusal_words(exc),
-        details=exc.details,
+        code=refused.code,
+        message=refused.message,
+        details=refused.details,
         banked=not isinstance(exc, RateLimitedError),
     )
 

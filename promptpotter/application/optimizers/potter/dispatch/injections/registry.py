@@ -19,6 +19,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYO
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
+from promptpotter.shared.errors import FileKind, PotterError, unknown_slots_said
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 # The one citable name that is NOT a panel: the escape hatch a measured stall licenses.
@@ -81,10 +82,11 @@ def validate_template(name: str, template: OptimizerPromptTemplate) -> None:
     referenced = set(TEMPLATE_TOKEN_RE.findall(text))
     unknown = referenced - injection_table().keys() - extras
     if unknown:
-        raise KeyError(
-            f"Template {name!r} references unknown slot(s): {sorted(unknown)}. "
-            f"Register a renderer (dispatch/injections/) or add it to "
-            f"NODE_LAYOUTS[{name!r}].caller_extras if the slot is a caller-supplied extra."
+        raise PotterError(
+            f"{unknown_slots_said(name, unknown)}. Register a renderer (dispatch/injections/) or "
+            f"add it to NODE_LAYOUTS[{name!r}].caller_extras if the slot is a caller-supplied "
+            "extra.",
+            code=FileKind.OPTIMIZER_PROMPT.code,
         )
 
 

@@ -151,7 +151,7 @@ describe("incident ring", () => {
   });
 
   it("records a write failure's trace handle off its envelope, not a blank row", async () => {
-    const envelope = { error: "internal_error", message: "", error_id: "wid7", details: null };
+    const envelope = { code: "internal_error", message: "", error_id: "wid7", details: {} };
     const e = await toApiError(new Response(JSON.stringify(envelope), { status: 500 }));
     reportIncident(e, { surface: "run-control" });
     const [only] = getIncidents();

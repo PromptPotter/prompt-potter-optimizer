@@ -95,19 +95,6 @@ def is_provider_credit_refusal(detail: str) -> bool:
     return _PROVIDER_CREDIT_REFUSAL.search(detail) is not None
 
 
-class SendRefusedError(RuntimeError):
-    """The run ENDS on the stop ``category`` maps to (``domain/phases.py::REFUSAL_STOPS``).
-
-    ``tab`` is the Account tab its remedy lives in, as a KEY: each surface words it
-    (`domain/account_words.py::refusal_words`), so no navigation wording rides the sentence."""
-
-    tab: AccountTab | None = None
-
-    def __init__(self, message: str, *, category: ErrorCategory) -> None:
-        super().__init__(message)
-        self.category = category
-
-
 class PotterError(Exception):
     http_status: int = 500
     code: str = "internal_error"
@@ -123,6 +110,21 @@ class PotterError(Exception):
     @property
     def message(self) -> str:
         return str(self)
+
+
+class SendRefusedError(PotterError):
+    """The run ENDS on the stop ``category`` maps to (``domain/phases.py::REFUSAL_STOPS``).
+
+    ``tab`` is the Account tab its remedy lives in, as a KEY: each surface words it
+    (`domain/account_words.py::refusal_words`), so no navigation wording rides the sentence."""
+
+    http_status = 503
+    code = "send_refused"
+    tab: AccountTab | None = None
+
+    def __init__(self, message: str, *, category: ErrorCategory) -> None:
+        super().__init__(message, details={"category": category})
+        self.category = category
 
 
 class BadRequestError(PotterError):
@@ -229,7 +231,7 @@ class CycleBusyError(PotterError):
         )
 
 
-class NoApiKeyError(SendRefusedError, PotterError):
+class NoApiKeyError(SendRefusedError):
     """Refused before the wire, so nothing is billed: neither the account nor the box holds a key."""
 
     http_status = 422
@@ -241,9 +243,9 @@ class NoApiKeyError(SendRefusedError, PotterError):
             f"your own {provider} key to this account, or the box's operator sets {key} and "
             "restarts the app."
         )
-        SendRefusedError.__init__(self, message, category=ErrorCategory.CLIENT)
+        super().__init__(message, category=ErrorCategory.CLIENT)
         self.tab = "keys"
-        self.details = {"provider": provider, "key": key}
+        self.details = {"provider": provider, "key": key, "reason": LaunchRefusalReason.NO_KEY}
 
 
 class LaunchRefusalReason(enum.StrEnum):
@@ -256,7 +258,7 @@ class LaunchRefusalReason(enum.StrEnum):
     NO_KEY = "no_key"
 
 
-class HostAllowanceExhaustedError(SendRefusedError, PotterError):
+class HostAllowanceExhaustedError(SendRefusedError):
     """The host's coupon refuses a send that draws it: at admission, or at a send in flight, where
     it ends the run ``host_allowance``."""
 
@@ -276,7 +278,7 @@ class HostAllowanceExhaustedError(SendRefusedError, PotterError):
             if reason is LaunchRefusalReason.OVER_DECLARED
             else f"{remedy[0].upper()}{remedy[1:]}"
         )
-        SendRefusedError.__init__(self, f"{facts} {said}", category=ErrorCategory.HOST_ALLOWANCE)
+        super().__init__(f"{facts} {said}", category=ErrorCategory.HOST_ALLOWANCE)
         self.reason = reason
         self.tab = None if provider is None else "keys"
         self.details = {"reason": reason, "provider": provider}
@@ -385,6 +387,11 @@ class FileKind(enum.Enum):
     )
 
 
+def unknown_slots_said(name: str, unknown: set[str]) -> str:
+    """How a template filling a slot its node does not declare is refused, at every reader."""
+    return f"template {name!r} references unknown slot(s) {sorted(unknown)}"
+
+
 class FileUnreadableError(PotterError):
     """THE refusal of a file that is not a ledger, carrying its path and its `FileKind`: no reader
     yields its bytes as a dict or reads past them. Never a `ValueError`: a survey reads this type
@@ -433,11 +440,13 @@ class LedgerUnreadableError(ConflictError):
         )
 
 
-class UngeneratedRequestError(RuntimeError):
+class UngeneratedRequestError(PotterError):
     """A request refused before any generation: terminal, never resent, never billed."""
 
 
 class RequestTooLargeError(UngeneratedRequestError):
+    code = "request_too_large"
+
     def __init__(
         self,
         *,
@@ -459,16 +468,22 @@ class RequestTooLargeError(UngeneratedRequestError):
             f"`promptpotter/assets/optimizers/potter/pipeline.yaml` at a tier whose per-minute cap "
             f"exceeds {requested} tokens (e.g. OpenRouter, or a paid Groq tier) — "
             f"the free Groq on_demand tier caps at {limit}\n"
-            f"  - or shorten the optimizer prompt (the dataset's task.md)."
+            f"  - or shorten the optimizer prompt (the dataset's task.md).",
+            details={"provider": provider_name},
         )
 
 
 class ContextOverflowError(UngeneratedRequestError):
     """The provider refused the prompt as past the model's window."""
 
+    code = "context_overflow"
+
     def __init__(self, *, provider_name: str, said: str) -> None:
         self.provider_name = provider_name
-        super().__init__(f"{provider_name}: the prompt exceeds the model's context window: {said}")
+        super().__init__(
+            f"{provider_name}: the prompt exceeds the model's context window: {said}",
+            details={"provider": provider_name},
+        )
 
 
 class ResumeDivergenceError(RuntimeError):

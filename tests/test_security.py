@@ -130,6 +130,7 @@ from promptpotter.domain.prompt_block import (
     Snippet,
     snippet_id,
 )
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
 from promptpotter.domain.run_records import CommandRecord, RunPhaseRecord, RunWiringRecord
 from promptpotter.domain.said import Said, pins
@@ -154,7 +155,6 @@ from promptpotter.infrastructure.identity.grants import (
 from promptpotter.infrastructure.identity.jwks import JWKSCache
 from promptpotter.infrastructure.identity.paths import IdentityPaths, default_identity_paths
 from promptpotter.infrastructure.identity.provider_config import (
-    OIDCConfigError,
     OIDCProviderConfig,
     ProviderConfigBundle,
     ProviderIdentity,
@@ -203,10 +203,12 @@ from promptpotter.presentation.api.middleware.oidc import (
 from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers import auth
 from promptpotter.presentation.api.routers.reads import reads_router
+from promptpotter.presentation.cli import campaign_runner
 from promptpotter.presentation.cli.commands.bench import cmd_bench
 from promptpotter.presentation.cli.commands.command import cmd_command
 from promptpotter.presentation.cli.commands.read import cmd_read
 from promptpotter.presentation.cli.commands.result import said_text
+from promptpotter.presentation.mcp.server import _refused
 from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
@@ -708,7 +710,7 @@ async def _oversized_upload(declared: bool) -> tuple[int, str, int]:
     }
     await app(scope, receive, send)
     start, body = sent[0], b"".join(m.get("body", b"") for m in sent[1:])
-    return start["status"], json.loads(body)["error"], read
+    return start["status"], json.loads(body)["code"], read
 
 
 async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -838,7 +840,7 @@ async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) 
         while True:
             quota.refuse_request_rate(writer, read=False)
     throttled = label()
-    assert (throttled.status_code, throttled.json()["error"]) == (429, "rate_limited"), (
+    assert (throttled.status_code, throttled.json()["code"]) == (429, "rate_limited"), (
         "a free verb wrote past its session's write rate"
     )
     assert refusals() == 1, "a throttled write banked a trail line"
@@ -1036,11 +1038,11 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         grant_paths.provider_config,
         {"google": {"client_id": "c", "client_secret": ["the-secret"], "redirect_uri": "r"}},
     )
-    with pytest.raises(OIDCConfigError) as refused:
+    with pytest.raises(FileUnreadableError) as refused:
         load_provider_config(grant_paths.provider_config)
     assert "the-secret" not in str(refused.value), "an oidc.json refusal leaked the secret"
     write_json(grant_paths.provider_config, {"okta": {}})
-    with pytest.raises(OIDCConfigError):
+    with pytest.raises(FileUnreadableError):
         load_provider_config(grant_paths.provider_config)
     grant_paths.provider_config.unlink()
 
@@ -1693,7 +1695,7 @@ async def _stdio_host(tenant: str, who: str) -> AsyncIterator[_HostCall]:
 
 @pytest.mark.usefixtures("offline")
 async def test_a_host_drives_the_catalogue_as_the_terminal_does(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     tenant = f"host-{uuid.uuid4().hex[:8]}"
     caller = Caller.holding(account.local_stores(tenant=tenant))
@@ -1876,3 +1878,52 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
         assert not queuing.list_queued(), "a retried launch launched again"
     for detached in list(launcher_launch._DETACHED):
         detached.cancel()
+
+    # One refused start-run, asked of the dispatcher in-process, is the value every door renders.
+    run = {"campaign_id": "c1", "cycle_id": "k1", "budget": {"usd": "abc"}}
+    with pytest.raises(PotterError) as raised:
+        await session.answer(CallTool("start-run", keyed(run)))
+    value = Refusal.of(raised.value).model_dump(mode="json")
+    assert value["details"]["errors"], "guard: the refused start-run named no field"
+    monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", "off")
+    monkeypatch.setattr(app.state, "job_registry", queuing, raising=False)
+    signed_in = build_identity_bundle(default_identity_paths())
+    monkeypatch.setattr(app.state, "identity_bundle", signed_in, raising=False)
+    posted = TestClient(app).post(
+        f"/api/v1/commands/{CommandKind.START_RUN}",
+        json=run,
+        headers={"Idempotency-Key": uuid.uuid4().hex},
+    )
+    served = posted.json()
+    assert served.pop("error_id"), "the envelope named no log line"
+    assert served == value, "REST served the refusal another way"
+
+    async with _stdio_host(tenant, "terminal") as host:
+        called = await host("start-run", keyed(run))
+    assert called.get("isError"), called
+    assert json.loads(called["content"][0]["text"]) == value, "a tool call served it another way"
+    assert _refused(raised.value).error.data == value, "an MCP request served it another way"
+
+    async def raising(_args: argparse.Namespace) -> Any:
+        raise raised.value
+
+    monkeypatch.setattr(campaign_runner, "_handler", lambda _verb: raising)
+    monkeypatch.setattr(sys, "argv", ["promptpotter", "--json", "reindex"])
+    with pytest.raises(SystemExit):
+        # The terminal runs its own loop, so off this test's.
+        await asyncio.to_thread(campaign_runner.main)
+    said = capsys.readouterr()
+    assert json.loads(said.out) == value, "the terminal's --json served it another way"
+    assert said.err.startswith(f"Error: {value['message']}"), "the terminal reworded it"
+    # A flag accepts the text it always did, and refuses in the sentence the model refuses with.
+    flags = campaign_runner._PARSER.parse_args(["new", "x", "--max-tokens", "1_000"])
+    assert flags.max_tokens.tokens == 1000, "a flag refused a count it always accepted"
+    for argv, sentence in (
+        (["new", "x", "--max-usd", "null"], "usd: "),
+        (["new", "x", "--max-usd", "abc"], value["message"].removeprefix("budget.")),
+        (["noise-floor", "c1", "--k", "abc"], "a rescore count is a whole number"),
+    ):
+        monkeypatch.setattr(sys, "argv", ["promptpotter", *argv])
+        with pytest.raises(SystemExit):
+            campaign_runner.main()
+        assert sentence in capsys.readouterr().err, f"`{' '.join(argv)}` was not refused in it"

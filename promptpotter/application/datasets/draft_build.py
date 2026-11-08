@@ -13,12 +13,7 @@ from promptpotter.application.datasets.origin_readiness import (
     origin_readiness,
 )
 from promptpotter.application.hierarchy import draft_starts
-from promptpotter.application.jobs.quota import (
-    LaunchRefusal,
-    account_wallet,
-    launch_bound,
-    launch_refusal,
-)
+from promptpotter.application.jobs.quota import account_wallet, launch_bound, launch_refusal
 from promptpotter.application.pipeline_resolve import (
     ServedPipeline,
     draft_pipeline,
@@ -39,6 +34,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
     dependencies_from_node_roles,
 )
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import CAP_AXIS_INFO, Budget, CapAxis, money_text
 from promptpotter.domain.strict_model import StrictModel
@@ -106,8 +102,9 @@ class DraftCampaignWire(StrictModel):
     readiness: OriginReadiness = Field(
         description="The server's mint gate, recomputed on every draft response."
     )
-    launch_refusal: LaunchRefusal | None = Field(
-        description="`admit_launch`'s refusal of Start at the declared budget; null where it admits."
+    launch_refusal: Refusal | None = Field(
+        description="`admit_launch`'s refusal of Start at the declared budget, its "
+        "`LaunchRefusalReason` in `details.reason`; null where it admits."
     )
     recap: str = Field(
         description="One plain sentence restating what this draft would run, for a surface to say."
@@ -228,17 +225,15 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
     )
 
 
-def _launch(
-    stores: Stores, draft: DraftFile, declared: Budget
-) -> tuple[LaunchRefusal | None, Budget]:
+def _launch(stores: Stores, draft: DraftFile, declared: Budget) -> tuple[Refusal | None, Budget]:
     """``admit_launch``'s refusal of this Start, then the most it may declare."""
     wallet = account_wallet(stores)
     try:
         sends = draft_sends(stores, draft)
     except NoApiKeyError as unpaid:
-        return LaunchRefusal.of(unpaid), wallet.headroom
+        return Refusal.of(unpaid), wallet.headroom
     refused = launch_refusal(wallet, declared, sends, stores=stores, refusing=None)
-    return (None if refused is None else LaunchRefusal.of(refused)), launch_bound(wallet, sends)
+    return (None if refused is None else Refusal.of(refused)), launch_bound(wallet, sends)
 
 
 def _field(schema: dict[str, Any], name: str, title: str) -> dict[str, Any]:

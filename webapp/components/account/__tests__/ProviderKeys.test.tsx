@@ -86,7 +86,7 @@ describe("ProviderKeys", () => {
     const message = "A openai key is one unbroken string of at most 512 characters.";
     serve(() =>
       Response.json(
-        { error: "api_key_malformed", error_id: "e1", details: null, message },
+        { code: "api_key_malformed", error_id: "e1", details: {}, message },
         { status: 422 },
       ),
     );

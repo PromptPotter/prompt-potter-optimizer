@@ -30,7 +30,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     readable_task_context,
 )
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import FileKind, FileUnreadableError
+from promptpotter.shared.errors import FileKind, FileUnreadableError, unknown_slots_said
 from promptpotter.shared.run_scope import scoped
 
 ORIGIN_FIELD_MAX = 600
@@ -222,7 +222,7 @@ def checkin_template() -> OptimizerPromptTemplate:
         raise FileUnreadableError(
             FileKind.OPTIMIZER_PROMPT,
             path=str(checkin_manifest_path()),
-            reason=f"unknown slot(s) {sorted(unknown)}",
+            reason=unknown_slots_said(CHECKIN_NODE, unknown),
         )
     return template
 

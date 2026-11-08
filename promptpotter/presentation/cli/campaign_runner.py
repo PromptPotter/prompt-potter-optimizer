@@ -16,15 +16,11 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 from promptpotter.config.settings import settings
-from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.phases import StopOutcome
+from promptpotter.domain.refusal import Refusal
 from promptpotter.presentation.cli.commands.verbs import VERBS
 from promptpotter.presentation.cli.parsers import build_parser
-from promptpotter.shared.errors import (
-    PotterError,
-    SendRefusedError,
-    UngeneratedRequestError,
-)
+from promptpotter.shared.errors import PotterError
 from promptpotter.shared.named_rows import imported
 
 if TYPE_CHECKING:
@@ -77,18 +73,19 @@ def main() -> None:
     if args.command in _COMPLETING:
         wiring = importlib.import_module("promptpotter.application.initialization.wiring")
         wiring.complete_registries(every_treatment=False)
-    # A launch verb's handler runs its preamble and THEN answers the coroutine: all of it happens here, outside the runner.
-    run = _handler(args.command)(args)
-
     runner = asyncio.Runner()
     try:
-        result = runner.run(run)
-    except (UngeneratedRequestError, SendRefusedError, PotterError) as exc:
+        # A launch verb's handler runs its preamble and THEN answers the coroutine: a preamble's
+        # refusal is this one catch's to say, as the run's is.
+        result = runner.run(_handler(args.command)(args))
+    except PotterError as exc:
         runner.close()
-        said = refusal_words(exc)
-        if args.json_output and isinstance(exc, PotterError):
-            print(json.dumps({"error": exc.code, "message": said, **exc.details}, default=str))
-        print(f"Error: {said}", file=sys.stderr)
+        refused = Refusal.of(exc)
+        if args.json_output:
+            print(json.dumps(refused.model_dump(mode="json")))
+        # What this terminal alone can do about it rides the refusal as a note, said after it.
+        said = [f"Error: {refused.message}", *getattr(exc, "__notes__", ())]
+        print("\n\n".join(said), file=sys.stderr)
         sys.exit(1)
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
         # The cycle already finalized itself as PAUSED; closing a loop a second SIGINT stopped mid-unwind raises.

@@ -2,15 +2,18 @@
 // Run `python scripts/build_ts_types.py` to regenerate from the Pydantic
 // models in `promptpotter/` and commit the diff alongside any schema change.
 
-/** What every refusal and failure answers, whatever raised it. */
+/** What every refusal and failure answers, whatever raised it: a refusal's
+ * `Refusal`, named by its log line. */
 export interface ErrorEnvelope {
-  /** The code a client branches on. */
-  error: string;
-  /** The sentence an operator reads, naming its remedy. */
+  /** The code a client branches on: the refusal's kind. */
+  code: string;
+  /** The sentence an operator reads, naming its remedy and the Account tab it lives
+   * in, where it names one. */
   message: string;
+  /** The refusal's facts, by name. */
+  details: Record<string, unknown>;
   /** Names the server log line that holds this failure. */
   error_id: string;
-  details: Record<string, unknown> | null;
 }
 
 export interface HealthResponse {
@@ -3350,9 +3353,9 @@ export interface DraftCampaignWire {
   dependencies: DraftDependency[];
   /** The server's mint gate, recomputed on every draft response. */
   readiness: OriginReadiness;
-  /** `admit_launch`'s refusal of Start at the declared budget; null where it
-   * admits. */
-  launch_refusal: LaunchRefusal | null;
+  /** `admit_launch`'s refusal of Start at the declared budget, its
+   * `LaunchRefusalReason` in `details.reason`; null where it admits. */
+  launch_refusal: Refusal | null;
   /** One plain sentence restating what this draft would run, for a surface to say. */
   recap: string;
   /** JSON Schema (2020-12) of the check-in's settings: each top-level property is a
@@ -3962,11 +3965,15 @@ export interface FieldGap {
   step: 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run' | null;
 }
 
-/** A launch refused whole, as ``admit_launch`` raises it. */
-export interface LaunchRefusal {
-  reason: 'used_up' | 'held' | 'over_declared' | 'no_key';
-  /** What binds and the remedy, in the refusal's own words. */
-  sentence: string;
+/** A refusal as served: the rest of the answer it rides in serves on beside it. */
+export interface Refusal {
+  /** The code a client branches on: the refusal's kind. */
+  code: string;
+  /** The sentence an operator reads, naming its remedy and the Account tab it lives
+   * in, where it names one. */
+  message: string;
+  /** The refusal's facts, by name. */
+  details: Record<string, unknown>;
 }
 
 /** `resolution.json`: the last resolver turn; the mint gate is the draft's

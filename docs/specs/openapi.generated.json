@@ -5529,13 +5529,13 @@
           "launch_refusal": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/LaunchRefusal"
+                "$ref": "#/components/schemas/Refusal"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "`admit_launch`'s refusal of Start at the declared budget; null where it admits."
+            "description": "`admit_launch`'s refusal of Start at the declared budget, its `LaunchRefusalReason` in `details.reason`; null where it admits."
           },
           "n_samples": {
             "title": "N Samples",
@@ -6214,24 +6214,18 @@
       },
       "ErrorEnvelope": {
         "additionalProperties": false,
-        "description": "What every refusal and failure answers, whatever raised it.",
+        "description": "What every refusal and failure answers, whatever raised it: a refusal's `Refusal`, named by\nits log line.",
         "properties": {
-          "details": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Details"
-          },
-          "error": {
-            "description": "The code a client branches on.",
-            "title": "Error",
+          "code": {
+            "description": "The code a client branches on: the refusal's kind.",
+            "title": "Code",
             "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "description": "The refusal's facts, by name.",
+            "title": "Details",
+            "type": "object"
           },
           "error_id": {
             "description": "Names the server log line that holds this failure.",
@@ -6239,16 +6233,16 @@
             "type": "string"
           },
           "message": {
-            "description": "The sentence an operator reads, naming its remedy.",
+            "description": "The sentence an operator reads, naming its remedy and the Account tab it lives in, where it names one.",
             "title": "Message",
             "type": "string"
           }
         },
         "required": [
-          "error",
+          "code",
           "message",
-          "error_id",
-          "details"
+          "details",
+          "error_id"
         ],
         "title": "ErrorEnvelope",
         "type": "object"
@@ -8812,37 +8806,6 @@
         ],
         "title": "KnobRef",
         "type": "object"
-      },
-      "LaunchRefusal": {
-        "additionalProperties": false,
-        "description": "A launch refused whole, as ``admit_launch`` raises it.",
-        "properties": {
-          "reason": {
-            "$ref": "#/components/schemas/LaunchRefusalReason"
-          },
-          "sentence": {
-            "description": "What binds and the remedy, in the refusal's own words.",
-            "title": "Sentence",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reason",
-          "sentence"
-        ],
-        "title": "LaunchRefusal",
-        "type": "object"
-      },
-      "LaunchRefusalReason": {
-        "description": "Why a launch is refused whole: `NO_KEY` is `NoApiKeyError`'s, the rest\n`HostAllowanceExhaustedError`'s.",
-        "enum": [
-          "used_up",
-          "held",
-          "over_declared",
-          "no_key"
-        ],
-        "title": "LaunchRefusalReason",
-        "type": "string"
       },
       "Leaf": {
         "description": "Where a campaign file's bytes count in the storage report.",
@@ -14199,6 +14162,35 @@
           "reason"
         ],
         "title": "Reelection",
+        "type": "object"
+      },
+      "Refusal": {
+        "additionalProperties": false,
+        "description": "A refusal as served: the rest of the answer it rides in serves on beside it.",
+        "properties": {
+          "code": {
+            "description": "The code a client branches on: the refusal's kind.",
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "description": "The refusal's facts, by name.",
+            "title": "Details",
+            "type": "object"
+          },
+          "message": {
+            "description": "The sentence an operator reads, naming its remedy and the Account tab it lives in, where it names one.",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details"
+        ],
+        "title": "Refusal",
         "type": "object"
       },
       "RemoveApiKeyPayload": {

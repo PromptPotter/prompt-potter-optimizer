@@ -27,7 +27,6 @@ from promptpotter.application.jobs.coupon import (
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
-from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import (
@@ -71,7 +70,6 @@ from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import (
     HostAllowanceExhaustedError,
     LaunchRefusalReason,
-    NoApiKeyError,
     NotFoundError,
     PayloadInvalidError,
     PotterError,
@@ -348,22 +346,6 @@ LAUNCH_REFUSAL_LABELS: Worded[LaunchRefusalReason, str] = Worded(
     }
 )
 assert LAUNCH_REFUSAL_LABELS.keys() == set(LaunchRefusalReason)
-
-
-class LaunchRefusal(StrictModel):
-    """A launch refused whole, as ``admit_launch`` raises it."""
-
-    reason: LaunchRefusalReason
-    sentence: str = Field(description="What binds and the remedy, in the refusal's own words.")
-
-    @classmethod
-    def of(cls, refused: HostAllowanceExhaustedError | NoApiKeyError) -> LaunchRefusal:
-        reason = (
-            refused.reason
-            if isinstance(refused, HostAllowanceExhaustedError)
-            else LaunchRefusalReason.NO_KEY
-        )
-        return cls(reason=reason, sentence=refusal_words(refused))
 
 
 class ProviderRoute(StrictModel):
