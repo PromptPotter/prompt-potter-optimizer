@@ -1998,6 +1998,12 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             )
 
         opened_task: dict[str, str] = {}
+        # The act runs on past the answer, so it can reach its pass before the host holds the id.
+        answered = asyncio.Event()
+
+        async def _cancel_held() -> HostTask:
+            await answered.wait()
+            return await host.answer(CancelTask(opened_task["held"]))
 
         async def _host_cancel() -> tuple[HostTask, str]:
             sent = {
@@ -2009,17 +2015,14 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             opened = await host.answer(CallTool("verify-candidate", sent))
             assert opened.task is not None
             opened_task["held"] = opened.task.task_id
+            answered.set()
             with pytest.raises(PotterError) as stopped:
                 await host.answer(TaskResultOf(opened.task.task_id))
             return await host.answer(TaskStatusOf(opened.task.task_id)), stopped.value.code
 
         before = len(cancels())
         with monkeypatch.context() as patched:
-            patched.setattr(
-                measuring,
-                "verify_candidate",
-                _passing(lambda: host.answer(CancelTask(opened_task["held"]))),
-            )
+            patched.setattr(measuring, "verify_candidate", _passing(_cancel_held))
             cancelled, result_code = asyncio.run(_host_cancel())
         # A command addresses an L4 leaf by the id prefix a read takes, below its chain: one rule
         # resolves both, so the act reaches the leaf's campaign under its full id.
