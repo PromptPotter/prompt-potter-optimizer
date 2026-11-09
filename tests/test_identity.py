@@ -1913,6 +1913,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             steered,
             fork,
         )
+    # A steer off its engine key's type is refused typed at the door, never minted.
+    with pytest.raises(PayloadInvalidError, match="mistyped"):
+        parse_cycle_seed(
+            ForkSeed.model_validate({"pipeline_overlay": {"a": {"temperature": '"warm"'}}}),
+            stores,
+            steered,
+            fork,
+        )
     # A node permits what its recorded schema serves under the line, so the dataset's optimizer
     # block sanctions a model the campaign's own (empty) layer never names.
     assert fork_preview(stores, steered.campaign_id, {"a": {"model": "n"}}) == ForkPreviewResponse(
@@ -2421,6 +2429,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "grade.invented_field",
     ], "a write off its declared carrier reached the child"
     assert config == {}, "a prompt field rode the config overlay"
+    # An engine key written off its type is refused on the child, as the declared type refuses.
+    _, config, carried = carried_writes(
+        graded, prompt_loci={}, overlay={"grade": {"model": 5, "max_tokens": "2048"}}, demo=()
+    )
+    assert (config, [(f.axis, f.reason) for f in carried]) == (
+        {},
+        [("grade.model", "type_mismatch"), ("grade.max_tokens", "type_mismatch")],
+    ), "a mistyped engine key reached the child's config"
 
     # A SECOND prompt node, on a roster of its own, is written as the first is — by L1's wire and
     # an operator's arm — and a member knowing one prompt is refused pre-spend.

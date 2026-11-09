@@ -693,14 +693,15 @@ Grouped by the arc each would ride; workaround comments and dead top-level names
 
 **A. The pipeline carrier is typed.** **Rides with:** the next change to `pipeline_resolve.py::ParamLayers`.
 - **A node's config is an untyped `dict[str, Any]`** inside the carrier
-  `pipeline_params.py::PipelineParams(steps, nodes)`: engine keys (`model`, `provider`,
-  `route_order`, `max_tokens`, …) are string-read with mixed tolerance (`cfg["model"]`,
-  `cfg.get("model")`, `str(cfg.get("model", ""))`); the prompt is split
-  off its config by `k != "prompt"` beside `search_point.py::strip_rendered_prompt`. Two merges
-  (`campaign_config.py::merge_config_layers`, `pipeline_params.py::apply_node_overlay`) fold one thing.
-  An optimizer's llm nodes already read `search_point.py::NodeConfig`. Action: the carrier's
-  nodes typed by one engine-key base `NodeConfig` extends, the backend's params one dict.
-  **Re-test:** `git grep -n 'k != "prompt"' -- promptpotter`.
+  `pipeline_params.py::PipelineParams(steps, nodes)`. The engine keys are one base model,
+  `search_point.py::NodeCall`, which `NodeConfig` extends; the child door, the fork seed and the
+  spend bound read through it. The rest still string-read them with mixed tolerance
+  (`cfg["model"]`, `cfg.get("model")`, `str(cfg.get("model", ""))`), 47 `.get` lines: `harbor.py`
+  12, `dbllmbench.py` 5, `pipeline_schema.py` 5, `preflight.py` 3, `pipeline_overlay.py` 3, and 19
+  across 13 more files; `harbor.py`'s spend bound re-reads its typed node's dump. Two merges
+  (`campaign_config.py::merge_config_layers`, `pipeline_params.py::apply_node_overlay`) fold one
+  thing. Action: the carrier's nodes typed by `NodeCall`, laid in their key order. **Re-test:**
+  `git grep -c -E '\.get\(.(provider|model|temperature|max_tokens|route_order).\)' -- promptpotter`.
 - **`connectors/protocol.py::InProcessWorkload.experiment` is a `Mapping`** that
   `runner/inner/tasks.py::parse_resolved` re-parses at each reader (`dbllmbench.py` reads it with
   `.get("questions") or []`). Action: each connector declares its experiment model; the workload

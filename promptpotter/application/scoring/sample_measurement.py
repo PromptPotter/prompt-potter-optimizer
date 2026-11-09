@@ -34,6 +34,7 @@ from promptpotter.domain.scoring import (
     extract_item_label,
     turn_scalars,
 )
+from promptpotter.domain.search_point import NodeCall
 from promptpotter.domain.spend import CellPrice, StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
@@ -140,7 +141,9 @@ _UNROUTED: PricedPair = (None, None)
 
 def priced_pairs(session: Session, wire_params: PipelineParams) -> dict[str, PricedPair]:
     priced_as = session.backend_client.priced_as
-    return {name: priced_as(cfg) for name, cfg in wire_params.nodes.items()}
+    return {
+        name: priced_as(NodeCall.model_validate(cfg)) for name, cfg in wire_params.nodes.items()
+    }
 
 
 def _reply_spend(data: Mapping[str, Any], pairs: Mapping[str, PricedPair]) -> PipelineData:
@@ -236,10 +239,8 @@ def cell_billing(
     return billed
 
 
-async def _attempt_bound(
-    spend: LLMSpendBound, cfg: Mapping[str, Any], priced_as: PricedPair
-) -> SendBound:
-    reply = int(cfg.get("max_tokens") or spend.max_tokens)
+async def _attempt_bound(spend: LLMSpendBound, cfg: NodeCall, priced_as: PricedPair) -> SendBound:
+    reply = cfg.max_tokens or spend.max_tokens
     reads = spend.input_tokens + FRAMING_TOKENS
     model, provider = priced_as
     ceiling = await hold_ceiling(model, provider, hosts=spend.hosts) if model and provider else None
@@ -257,11 +258,11 @@ async def _attempt_bound(
 
 def _node_spends(
     session: Session, wire_params: PipelineParams
-) -> list[tuple[PipelineNode, dict[str, Any], NodeSpendBound | None]]:
+) -> list[tuple[PipelineNode, NodeCall, NodeSpendBound | None]]:
     client = session.backend_client
     spends = []
     for node in session.pipeline_schema.nodes:
-        cfg = wire_params.node(node.name)
+        cfg = NodeCall.model_validate(wire_params.node(node.name))
         spends.append((node, cfg, client.node_spend_bound(node, cfg)))
     return spends
 

@@ -19,6 +19,7 @@ from promptpotter.domain.connector import (
 )
 from promptpotter.domain.pipeline_schema import NodeSpendBound
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.search_point import NodeCall
 from promptpotter.domain.spend import KeySource
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
@@ -78,7 +79,7 @@ AuthTokenFn = Callable[[], str | None]
 EndpointFn = Callable[[], str]
 
 # `(node name, node config, the run's experiment) -> what one run of that node can bill`.
-SentSpendBound = Callable[[str, Mapping[str, Any], Mapping[str, Any] | None], NodeSpendBound | None]
+SentSpendBound = Callable[[str, NodeCall, Mapping[str, Any] | None], NodeSpendBound | None]
 
 # `pipeline_params -> Delivery`, resolved from the params a run hashes.
 PromptDelivery = Callable[["PipelineParams"], Delivery]

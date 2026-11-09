@@ -51,6 +51,7 @@ from promptpotter.domain.scoring import (
     ground_truth_text,
     is_verifier_graded,
 )
+from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.store.archive_queries import (
     OpenAt,
@@ -113,13 +114,13 @@ def _span(
     output_keys: list[str],
 ) -> CellSpan:
     usage = pd.step_tokens.get(node)
-    prompt = cfg.get("prompt")
+    prompt, config = split_rendered_prompt(cfg)
     return CellSpan(
         node=node,
         model=(usage.model if usage else None) or cfg.get("model"),
         provider=(usage.provider if usage else None) or cfg.get("provider"),
         input=interpolate_prompt(prompt, variables) if isinstance(prompt, str) else None,
-        config={k: v for k, v in cfg.items() if k != "prompt"},
+        config=config,
         outputs={k: recorded[k] for k in output_keys if k in recorded},
         seconds=pd.step_timings.get(node),
         input_tokens=usage.input if usage else None,

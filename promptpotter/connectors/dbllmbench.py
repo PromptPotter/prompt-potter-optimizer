@@ -19,6 +19,7 @@ import yaml
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
 from promptpotter.domain.pipeline_schema import LLMSpendBound
+from promptpotter.domain.search_point import NodeCall, split_rendered_prompt
 from promptpotter.domain.spend import StepUsage
 from promptpotter.infrastructure.docker_host import (
     PRODUCER_SCRATCH,
@@ -127,27 +128,27 @@ def _upstream_question(workload: InProcessWorkload, sample: Sample) -> dict[str,
 def dbllmbench_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
     if (cfg := pipeline_params.nodes.get(WRITER_NODE)) is not None:
-        if prompt := cfg.get("prompt"):
+        prompt, config = split_rendered_prompt(cfg)
+        if prompt:
             payload["prompt"] = prompt
-        payload["config"] = {k: v for k, v in cfg.items() if k != "prompt"}
+        payload["config"] = config
     return payload
 
 
 def _sent_spend_bound(
-    node: str, cfg: Mapping[str, Any], _experiment: Mapping[str, Any] | None
+    node: str, cfg: NodeCall, _experiment: Mapping[str, Any] | None
 ) -> LLMSpendBound | None:
-    if node != WRITER_NODE:
+    backend = cfg.model_extra or {}
+    if node != WRITER_NODE or cfg.max_tokens is None:
         return None
-    context, reply = cfg.get("max_input_tokens"), cfg.get("max_tokens")
-    if context is None or reply is None:
+    if (context := backend.get("max_input_tokens")) is None:
         return None
-    route = cfg.get("route_order")
     return LLMSpendBound(
         kind="llm",
-        attempts=repetitions(cfg) * (max(retry_levels(cfg)) + 1),
+        attempts=repetitions(backend) * (max(retry_levels(backend)) + 1),
         input_tokens=int(context),
-        max_tokens=int(reply),
-        hosts=tuple(route) if route else None,
+        max_tokens=cfg.max_tokens,
+        hosts=tuple(cfg.route_order) if cfg.route_order else None,
     )
 
 

@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.search_point import NodeCall
 
 logger = logging.getLogger(__name__)
 
@@ -170,18 +171,17 @@ class BackendClient:
     def connector(self) -> Connector:
         return self._connector
 
-    def node_spend_bound(self, node: PipelineNode, cfg: Mapping[str, Any]) -> NodeSpendBound | None:
+    def node_spend_bound(self, node: PipelineNode, cfg: NodeCall) -> NodeSpendBound | None:
         if (sent := self._connector.sent_spend_bound) is not None:
             return sent(node.name, cfg, self.workload.experiment)
         return node.spend_bound
 
-    def priced_as(self, cfg: Mapping[str, Any]) -> tuple[str | None, str | None]:
-        model, provider = cfg.get("model"), cfg.get("provider")
-        if not isinstance(model, str):
+    def priced_as(self, cfg: NodeCall) -> tuple[str | None, str | None]:
+        if cfg.model is None:
             return None, None
-        if self._connector.model_names_provider and provider is None:
-            return inline_route(model)
-        return model, provider if isinstance(provider, str) else None
+        if self._connector.model_names_provider and cfg.provider is None:
+            return inline_route(cfg.model)
+        return cfg.model, cfg.provider
 
     @property
     def http(self) -> httpx.AsyncClient:

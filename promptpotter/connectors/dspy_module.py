@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
+from promptpotter.domain.search_point import NodeCall, split_rendered_prompt
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
 from promptpotter.infrastructure.llm.pricing import inline_route
@@ -65,9 +66,10 @@ class DspyProgram:
 def dspy_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
     if (cfg := pipeline_params.nodes.get(PROGRAM_NODE)) is not None:
-        if prompt := cfg.get("prompt"):
+        prompt, params = split_rendered_prompt(cfg)
+        if prompt:
             payload["prompt"] = prompt
-        if params := {k: v for k, v in cfg.items() if k != "prompt"}:
+        if params:
             payload["params"] = params
     return payload
 
@@ -312,18 +314,19 @@ def _metered(lm: Any, sends: _CellSends, changed: dict[str, Any]) -> Any:
 
 
 def _sent_spend_bound(
-    node: str, cfg: Mapping[str, Any], _experiment: Mapping[str, Any] | None
+    node: str, cfg: NodeCall, _experiment: Mapping[str, Any] | None
 ) -> LLMSpendBound | None:
-    if node != PROGRAM_NODE:
+    backend = cfg.model_extra or {}
+    if node != PROGRAM_NODE or cfg.max_tokens is None:
         return None
-    calls, context, reply = cfg.get("max_calls"), cfg.get("max_input_tokens"), cfg.get("max_tokens")
-    if calls is None or context is None or reply is None:
+    calls, context = backend.get("max_calls"), backend.get("max_input_tokens")
+    if calls is None or context is None:
         return None
     return LLMSpendBound(
         kind="llm",
         attempts=int(calls),
         input_tokens=int(context),
-        max_tokens=int(reply),
+        max_tokens=cfg.max_tokens,
     )
 
 

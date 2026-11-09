@@ -212,7 +212,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import GradedCell, MeasuredCell, PipelineData, Scorer
-from promptpotter.domain.search_point import JobSearchPoint, NodeConfig
+from promptpotter.domain.search_point import JobSearchPoint, NodeCall, NodeConfig
 from promptpotter.domain.spend import (
     CYCLE_AXES,
     MONEY_AXES,
@@ -2447,7 +2447,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             jobs_dir=jobs,
         )
         config = {"prompt": "Answer.", "model": "openai/gpt-x", "max_calls": 2, "max_tokens": 50}
-        pairs = {dspy_module.PROGRAM_NODE: client.priced_as(config)}
+        pairs = {dspy_module.PROGRAM_NODE: client.priced_as(NodeCall.model_validate(config))}
 
         async def one_cell() -> Any:
             async with CellEnvelope(600.0, attempts=client.connector.cell_attempts, label="q"):

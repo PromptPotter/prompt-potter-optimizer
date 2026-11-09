@@ -41,6 +41,7 @@ from promptpotter.connectors.protocol import (
     cell_envelope_of,
 )
 from promptpotter.domain.pipeline_schema import LLMSpendBound
+from promptpotter.domain.search_point import NodeCall
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.docker_host import (
     CONTAINER_PRODUCER,
@@ -479,12 +480,12 @@ def _refuse_send_faults(
 
 
 def _sent_spend_bound(
-    node: str, cfg: Mapping[str, Any], experiment: Mapping[str, Any] | None
+    node: str, cfg: NodeCall, experiment: Mapping[str, Any] | None
 ) -> LLMSpendBound | None:
     if node != AGENT_NODE:
         return None
     # What the adapter SENDS, retries excluded: each of those is admitted at its own bound.
-    fields = _agent_fields(dict(cfg))
+    fields = _agent_fields(cfg.model_dump(exclude_unset=True))
     send, agent = fields.get("send") or {}, fields.get("agent_kwargs") or {}
     _refuse_send_faults(_agent_name(experiment), fields.get("model"), fields.get("provider"), send)
     turns, reply, context = (

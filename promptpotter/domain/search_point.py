@@ -20,7 +20,7 @@ SHOTS_KEY: Annotated[str, shapes_optimizer_prompt] = "shots"
 
 
 class _Roster(Enum):
-    """Which roster an engine call key joins; a key carries its rosters on its `NodeConfig` field."""
+    """Which roster an engine call key joins; a key carries its rosters on its `NodeCall` field."""
 
     # WHO ANSWERS the call: a steer touching only these inherits its done C0.
     WHO_ANSWERS = "who_answers"
@@ -31,27 +31,38 @@ class _Roster(Enum):
 
 
 @shapes_optimizer_prompt
-class NodeConfig(FrozenModel):
-    """An llm node's resolved config: the engine's call keys typed, as laid (strict: a value of
-    the wrong type refuses, never coerces), each field the one spelling of its key, and the
-    prompt fields it sets over its template. Its member's knobs are the member's
-    (`optimizer_manifest.py::_knobs`)."""
+class NodeCall(FrozenModel):
+    """A node's engine call keys typed as laid (strict: a wrong type refuses, a number stays the int
+    or float it was hashed as), each field its key's one spelling; other keys are its backend's."""
 
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, extra="allow")
 
-    provider: Annotated[str, _Roster.WHO_ANSWERS, _Roster.FORBIDDEN]
-    model: Annotated[str, _Roster.WHO_ANSWERS]
+    provider: Annotated[str | None, _Roster.WHO_ANSWERS, _Roster.FORBIDDEN] = None
+    model: Annotated[str | None, _Roster.WHO_ANSWERS] = None
     route_order: Annotated[list[str] | None, _Roster.WHO_ANSWERS, _Roster.FORBIDDEN] = None
-    # A float as every route keys and sends it: an int laid here is the same call.
-    temperature: Annotated[float | None, _Roster.SCOPE] = None
+    temperature: Annotated[int | float | None, _Roster.SCOPE] = None
     max_tokens: Annotated[int | None, _Roster.SCOPE] = None
     reasoning_effort: Annotated[str | None, _Roster.SCOPE] = None
-    top_p: Annotated[float | None, _Roster.SCOPE] = None
+    top_p: Annotated[int | float | None, _Roster.SCOPE] = None
     seed: int | None = None
     prompt_family: str | None = None
     prompt_version: int | None = None
     schema_family: str | None = None
     schema_version: int | None = None
+
+
+@shapes_optimizer_prompt
+class NodeConfig(NodeCall):
+    """An llm node's resolved config: its call keys, naming its provider and model, and the prompt
+    fields it sets over its template; its member's knobs are the member's (`optimizer_manifest.py`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    model: str
+    # A float as every route keys and sends it: an int laid here is the same call.
+    temperature: float | None = None
+    top_p: float | None = None
     # Rendered into the template, never sent: no call key.
     prompt_edits: dict[str, str] = Field(default_factory=dict)
 
@@ -66,7 +77,7 @@ class NodeConfig(FrozenModel):
 
 def _call_keys_in(roster: _Roster) -> frozenset[str]:
     return frozenset(
-        name for name, info in NodeConfig.model_fields.items() if roster in info.metadata
+        name for name, info in NodeCall.model_fields.items() if roster in info.metadata
     )
 
 
@@ -81,8 +92,8 @@ assert PARAM_FORBIDDEN_KEYS <= WHO_ANSWERS_KEYS, PARAM_FORBIDDEN_KEYS - WHO_ANSW
 PARAM_SCOPE_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(_Roster.SCOPE)
 # Every key an llm node's config may set beside its knobs and prompt fields.
 CALL_CONFIG_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
-    NodeConfig.model_fields
-) - {"prompt_edits"}
+    NodeCall.model_fields
+)
 
 
 def missing_template_vars(
@@ -92,13 +103,15 @@ def missing_template_vars(
     return [v for v in declared if v not in fields and "{{" + v + "}}" not in rendered]
 
 
+def split_rendered_prompt(cfg: Mapping[str, object]) -> tuple[object, dict[str, object]]:
+    """A node's ``prompt``, its prompt loci's RENDER (persisted, it goes stale), off its config."""
+    config = dict(cfg)
+    return config.pop("prompt", None), config
+
+
 def strip_rendered_prompt(pipeline_params: PipelineParams) -> PipelineParams:
-    """A node's ``prompt`` is the RENDER of its prompt loci, never configuration: persisted, it goes stale."""
     return pipeline_params.with_nodes(
-        {
-            node: {k: v for k, v in cfg.items() if k != "prompt"}
-            for node, cfg in pipeline_params.nodes.items()
-        }
+        {node: split_rendered_prompt(cfg)[1] for node, cfg in pipeline_params.nodes.items()}
     )
 
 
