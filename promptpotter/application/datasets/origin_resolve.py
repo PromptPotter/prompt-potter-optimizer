@@ -31,7 +31,7 @@ from promptpotter.domain.checkin_draft import (
 )
 from promptpotter.domain.command_kinds import EditDraftCampaignPayload
 from promptpotter.domain.draft_edit import EditDraftPatch
-from promptpotter.domain.opt_search_point import PROMPT_FIELDS
+from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.store.stores import Stores
 

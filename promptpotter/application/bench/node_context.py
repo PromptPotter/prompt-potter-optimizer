@@ -70,8 +70,9 @@ if TYPE_CHECKING:
     )
     from promptpotter.application.runner.inner.tasks import InnerCells
     from promptpotter.domain.connector import MeasuredUnit
-    from promptpotter.domain.opt_search_point import EvidenceGrounding, OptimizerPromptTemplate
+    from promptpotter.domain.opt_search_point import EvidenceGrounding
     from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
+    from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
     from promptpotter.domain.phase_views import PhaseView
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Access

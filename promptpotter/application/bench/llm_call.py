@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from promptpotter.application.jobs.coupon import keyed_client
 from promptpotter.application.optimizer_manifest import bound_determinism
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_overlay import pinned_route
 from promptpotter.domain.run_records import (
     LLMCallRecord,

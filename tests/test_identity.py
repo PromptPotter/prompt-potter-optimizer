@@ -198,14 +198,8 @@ from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
-from promptpotter.domain.opt_search_point import (
-    TEMPLATE_TOKEN_RE,
-    Locus,
-    NodePrompt,
-    OptimizerPromptTemplate,
-    OptSearchPoint,
-    Variation,
-)
+from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
+from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,

@@ -14,7 +14,7 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts
 from promptpotter.domain.campaign_config import OptimizationConfig, OptimizerChoice
 from promptpotter.domain.cell_terms import CellTerm
-from promptpotter.domain.opt_search_point import PROMPT_FIELDS
+from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.pipeline_schema import (
     CapabilityMenu,
@@ -387,7 +387,7 @@ def _node_prompts(selected: SelectedOptimizer) -> dict[str, OptimizerNodePrompt]
         family = config.prompt_family
         out[node] = OptimizerNodePrompt(
             fields=running_prompt(node, config, selected.manifest).model_dump(),
-            edited=list(config.prompt_edits),
+            edited=list(config.prompt_edits.model_dump(exclude_none=True)),
             version=str(config.prompt_version or ""),
             versions_declared=sum(k.partition("/")[0] == family for k in declared),
         )

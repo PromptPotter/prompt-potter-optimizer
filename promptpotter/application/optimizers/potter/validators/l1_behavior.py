@@ -17,7 +17,8 @@ from promptpotter.application.optimizers.potter.validators.behavior_base import 
     ValidatorContext,
     judged,
 )
-from promptpotter.domain.opt_search_point import Locus, OptimizerPromptTemplate
+from promptpotter.domain.opt_search_point import Locus
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.round_audit import NodeBlock, RoundAudit
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 

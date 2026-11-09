@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.optimizers.nodes import LlmNode
 from promptpotter.application.optimizers.potter.records import L1Layout
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.validators import ValidatorOutcome
 

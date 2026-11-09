@@ -121,7 +121,7 @@ its input — is a token count, a SUBSET of the input: `TokenUsageRecord.cache_r
 `domain/spend.py::TokenAccount.cache_share`, whose required `replayed` kwarg stops a replay being shown a discount.
 `cached` is the replay, never the count: `account_spend` drops a record from the roll-up whenever `cached` is
 truthy. The provider cache is per-replica and warms by repetition, and it is why the optimizer prompt renders
-everything volatile last (`opt_search_point.py::OptimizerPromptTemplate.RENDER_ORDER`).
+everything volatile last (`optimizer_template.py::OptimizerPromptTemplate.RENDER_ORDER`).
 
 ## Deprecated samples
 

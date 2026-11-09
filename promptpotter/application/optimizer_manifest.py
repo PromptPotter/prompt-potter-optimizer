@@ -26,8 +26,8 @@ from promptpotter.config.paths import (
 from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.l4 import proxies
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_manifest import (
     AUTHORED_MANIFEST,
     CHECKIN_MANIFEST,
@@ -625,7 +625,8 @@ def running_prompt(
             f"Optimizer prompt for node {node!r} not found in resolved_prompts "
             f"(check nodes.{node}.config.prompt_family/version)."
         )
-    return manifest.resolved_prompts[key].model_copy(update=config.prompt_edits)
+    edits = config.prompt_edits.model_dump(exclude_none=True)
+    return manifest.resolved_prompts[key].model_copy(update=edits)
 
 
 def _refuse_unknown_main(selected: SelectedOptimizer) -> None:

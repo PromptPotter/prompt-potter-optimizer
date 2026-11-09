@@ -706,17 +706,11 @@ Grouped by the arc each would ride; workaround comments and dead top-level names
   `runner/inner/tasks.py::parse_resolved` re-parses at each reader (`dbllmbench.py` reads it with
   `.get("questions") or []`). Action: each connector declares its experiment model; the workload
   carries it parsed. **Re-test:** `git grep -n "parse_resolved(" -- promptpotter`.
-- **`search_point.py::NodeConfig.prompt_edits` is a `dict[str, str]`** beside the
-  `OptimizerPromptTemplate` that `pipeline_manifest.py::typed_config` validates the same edits as and
-  drops; `running_prompt` lays the dict back with `model_copy`. The typed field cannot land in place:
-  `opt_search_point.py` imports `search_point.py`, which holds the call-key rosters. And the template
-  rides beside its config: `llm_call.py::run_optimizer_node` takes a filled `template` and an
-  `LLMCallContext` whose `config` named it (`critique.py::distil_critique`,
-  `firing.py::_run_transition`, `task_context.py::run_checkin`), so the two can disagree. Action:
-  `PROMPT_FIELDS` and `OptimizerPromptTemplate` move to a leaf module both import, `prompt_edits`
-  becomes a partial template, and the call context carries the running template its fill reads.
-  **Re-test:** `git grep -n "prompt_edits: dict" -- promptpotter`; `git grep -n "template=filled" --
-  promptpotter`.
+- **An optimizer node's template rides beside its config** (rides with M8):
+  `llm_call.py::run_optimizer_node` takes a filled `template` and an `LLMCallContext` whose `config`
+  named it (`critique.py::distil_critique`, `firing.py::_run_transition`,
+  `task_context.py::run_checkin`), so the two can disagree. Action: the call context carries the
+  running template its fill reads. **Re-test:** `git grep -n "template=filled" -- promptpotter`.
 
 **B. Run-data payloads are models.** **Rides with:** § Typed state "Run files read as dicts" and the
 next run-data reshape.

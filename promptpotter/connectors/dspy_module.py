@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
-from promptpotter.domain.opt_search_point import PROMPT_FIELDS
+from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
 from promptpotter.domain.search_point import NodeCall, split_rendered_prompt
 from promptpotter.domain.spend import StepUsage, TokenAccount

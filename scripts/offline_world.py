@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from promptpotter.domain.opt_search_point import PROMPT_FIELDS
+from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.infrastructure import backend as backend_wire
 from promptpotter.infrastructure.llm.pricing import UPSTREAM_URL
 from promptpotter.infrastructure.llm.registry import keyed_specs

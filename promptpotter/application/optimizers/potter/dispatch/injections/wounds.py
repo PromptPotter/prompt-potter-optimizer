@@ -12,7 +12,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     signal,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import ParamKind
 from promptpotter.domain.search_point import WHO_ANSWERS_KEYS

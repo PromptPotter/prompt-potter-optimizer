@@ -27,7 +27,7 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
     DEFAULT_PIPELINE,
     ManifestNodeOverlay,

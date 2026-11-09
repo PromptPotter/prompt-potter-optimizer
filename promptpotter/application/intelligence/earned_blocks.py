@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.opt_search_point import PROMPT_FIELDS
+from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.scoring import ANSWER_SPACE_CAP
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.store.archive_queries import (

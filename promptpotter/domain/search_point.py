@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.optimizer_template import OptimizerPromptEdits
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import content_hash, shapes_optimizer_prompt
@@ -64,7 +65,7 @@ class NodeConfig(NodeCall):
     temperature: float | None = None
     top_p: float | None = None
     # Rendered into the template, never sent: no call key.
-    prompt_edits: dict[str, str] = Field(default_factory=dict)
+    prompt_edits: OptimizerPromptEdits = Field(default_factory=OptimizerPromptEdits)
 
     def call_settings(self) -> dict[str, str | int | float | list[str] | None]:
         """Its engine call keys as laid, each to its value: what a call is keyed and sent by."""
@@ -206,11 +207,5 @@ class TaskDecomposition:
             f"model sees. Put the detail in task.md's body, which has no budget."
         )
 
-    def items(self) -> list[tuple[str, str]]:
-        return [(f.name, getattr(self, f.name)) for f in fields(self)]
-
     def __len__(self) -> int:
         return sum(1 for f in fields(self) if getattr(self, f.name))
-
-    def __bool__(self) -> bool:
-        return any(getattr(self, f.name) for f in fields(self))

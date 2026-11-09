@@ -17,7 +17,7 @@ from promptpotter.application.optimizer_manifest import checkin_manifest, runnin
 from promptpotter.config.paths import checkin_manifest_path
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.opt_search_point import (
+from promptpotter.domain.optimizer_template import (
     PROMPT_FIELDS,
     TEMPLATE_TOKEN_RE,
     OptimizerPromptTemplate,

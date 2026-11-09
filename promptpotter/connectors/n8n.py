@@ -17,7 +17,7 @@ import httpx
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, cell_envelope_of
 from promptpotter.domain.connector import AuthScheme
-from promptpotter.domain.opt_search_point import PROMPT_FIELDS
+from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_schema import OUTPUT_CONTRACT_KEYS
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.tls import tls_context

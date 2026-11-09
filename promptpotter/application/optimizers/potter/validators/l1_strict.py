@@ -21,12 +21,8 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     resolve_layout_override,
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import inner_template
-from promptpotter.domain.opt_search_point import (
-    TEMPLATE_TOKEN_RE,
-    EvidenceGrounding,
-    Locus,
-    OptimizerPromptTemplate,
-)
+from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus
+from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.search_point import SHOTS_KEY, WHO_ANSWERS_KEYS, missing_template_vars

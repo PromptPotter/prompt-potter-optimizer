@@ -6,7 +6,7 @@ from typing import Any, Literal, Self
 
 from pydantic import Field, TypeAdapter, model_validator
 
-from promptpotter.domain.opt_search_point import PROMPT_FIELDS, OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import PROMPT_FIELDS, OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.search_point import CALL_CONFIG_KEYS, NodeConfig
 from promptpotter.domain.strict_model import FrozenModel
@@ -32,10 +32,8 @@ def typed_config(cfg: Mapping[str, object]) -> NodeConfig:
     template; any other key is its member's knob, which the member's own model types."""
     calls = {k: v for k, v in cfg.items() if k in CALL_CONFIG_KEYS}
     runs_prompt = resolved_key(calls.get("prompt_family"), calls.get("prompt_version"))
-    if not (edits := {f: cfg[f] for f in PROMPT_FIELDS if f in cfg} if runs_prompt else {}):
-        return NodeConfig.model_validate(calls)
-    OptimizerPromptTemplate.model_validate(edits)
-    return NodeConfig.model_validate({**calls, "prompt_edits": edits})
+    edits = {f: cfg[f] for f in PROMPT_FIELDS if f in cfg} if runs_prompt else {}
+    return NodeConfig.model_validate({**calls, "prompt_edits": edits} if edits else calls)
 
 
 def laid_config(
@@ -44,7 +42,7 @@ def laid_config(
     """`typed_config`, refusing a key that is neither a call key, one of *knobs* nor, on a node
     running a prompt, a prompt field (`optimization.nodes.{node}.config.{field}`)."""
     config = typed_config(cfg)
-    prompt = set(PROMPT_FIELDS) if prompt_key(config) is not None else set()
+    prompt = config.prompt_edits.model_fields_set
     if unknown := sorted(set(cfg) - CALL_CONFIG_KEYS - set(knobs) - prompt):
         raise ValueError(
             f"{owner} node {node!r} names {unknown} in its config, which is neither a call "

@@ -14,7 +14,7 @@ from promptpotter.application.optimizers.potter.dispatch.injections.registry imp
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import resolve_node_layout
 from promptpotter.application.optimizers.potter.records import L1Layout, L2Memory
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
 
 if TYPE_CHECKING:

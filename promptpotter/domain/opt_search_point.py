@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from functools import cached_property
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple, Self
 
 from pydantic import Field, field_validator
 
@@ -26,11 +25,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
 
 
-TEMPLATE_TOKEN_RE: Annotated[re.Pattern[str], shapes_optimizer_prompt] = re.compile(
-    r"\{\{(\w+)\}\}"
-)
-
-
 FEW_SHOT_BLOCK: Annotated[str, shapes_optimizer_prompt] = "few_shot_block"
 """The rendered shots' key — last in a target render, and in the wire's ``prompt_fields``."""
 
@@ -39,57 +33,6 @@ FEW_SHOT_BLOCK: Annotated[str, shapes_optimizer_prompt] = "few_shot_block"
 def render_prompt(fields: Mapping[str, str], order: Sequence[str]) -> str:
     """A field *order* omits renders nowhere, so the caller refuses one first."""
     return "\n\n".join(v for f in order if (v := fields.get(f, "")))
-
-
-PROMPT_FIELDS: Annotated[tuple[str, ...], shapes_optimizer_prompt] = (
-    "persona",
-    "task_intent",
-    "problem_description",
-    "instruction",
-    "thinking_style",
-    "answer_format",
-)
-"""The six fields a check-in decomposes a task into, in the order a prompt node declares them."""
-
-
-class OptimizerPromptTemplate(StrictModel):
-    """A prompt the optimizer RUNS ON (`dispatch/llm_call`), never one it produces."""
-
-    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = (
-        *(f for f in PROMPT_FIELDS if f != "problem_description"),
-        "problem_description",
-    )
-    """Prefix-cache order: a value that CHANGES between rounds goes in ``problem_description``, last."""
-
-    persona: str = ""
-    task_intent: str = ""
-    problem_description: str = ""
-    instruction: str = ""
-    thinking_style: str = ""
-    answer_format: str = ""
-
-    @shapes_optimizer_prompt
-    def render_fields(self) -> list[tuple[str, str]]:
-        return [(f, v) for f in self.RENDER_ORDER if (v := getattr(self, f))]
-
-    @shapes_optimizer_prompt
-    def render(self) -> str:
-        return "\n\n".join(v for _, v in self.render_fields())
-
-    @shapes_optimizer_prompt
-    def compile_prompt(self, **kwargs: str | int) -> str:
-        """Any ``{{…}}`` left after substitution stays LITERAL: it is the backend's placeholder to fill."""
-        text = self.render()
-        for key, value in kwargs.items():
-            text = text.replace("{{" + key + "}}", str(value))
-        return text
-
-    def prompt_fields(self) -> dict[str, str]:
-        return {f: v for f in self.RENDER_ORDER if (v := getattr(self, f))}
-
-
-# A field the order omits renders nowhere — silently, in a prompt.
-assert tuple(OptimizerPromptTemplate.model_fields) == PROMPT_FIELDS
 
 
 class EvidenceGrounding(FrozenModel):

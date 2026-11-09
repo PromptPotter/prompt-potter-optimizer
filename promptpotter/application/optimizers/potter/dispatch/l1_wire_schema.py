@@ -23,7 +23,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1Variant,
     recombinations_schema,
 )
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
     SCHEMA_RENAME_PARAM,
