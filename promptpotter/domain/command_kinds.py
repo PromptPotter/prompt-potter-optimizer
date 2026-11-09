@@ -626,7 +626,7 @@ class ForkSeed(StrictModel):
     own rows and stamps the `origin_source` the wire omits."""
 
     origin_prompts: dict[str, NodePrompt] = Field(default_factory=dict)
-    pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
+    pipeline_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
     config_overrides: ConfigOverrides = Field(default_factory=ConfigOverrides)
     node_narrowing: dict[str, list[ParamIntent]] = Field(
         default_factory=dict,

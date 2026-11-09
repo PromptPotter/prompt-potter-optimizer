@@ -18,7 +18,6 @@ import yaml
 
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.spend import StepUsage
 from promptpotter.infrastructure.docker_host import (
@@ -43,6 +42,7 @@ from promptpotter.shared.errors import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import TurnRecord
 
@@ -124,13 +124,9 @@ def _upstream_question(workload: InProcessWorkload, sample: Sample) -> dict[str,
     return dict(questions[sample.id])
 
 
-def dbllmbench_wire_adapter(
-    sample: Sample, pipeline_params: dict[str, Any] | None
-) -> dict[str, Any]:
+def dbllmbench_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
-    for node, cfg in node_config_items(pipeline_params):
-        if node != WRITER_NODE:
-            continue
+    if (cfg := pipeline_params.nodes.get(WRITER_NODE)) is not None:
         if prompt := cfg.get("prompt"):
             payload["prompt"] = prompt
         payload["config"] = {k: v for k, v in cfg.items() if k != "prompt"}

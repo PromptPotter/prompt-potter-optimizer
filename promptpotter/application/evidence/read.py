@@ -744,7 +744,7 @@ def _winner_chain(
 def _config_of(point: _ChainPoint) -> dict[str, str]:
     individual = point.arm.state.individual
     return build_candidate_flat(
-        flatten_sp_summary(individual.pipeline_params),
+        flatten_sp_summary(individual.pipeline_params.nodes),
         pipeline_overlay=None,
         prompt_flat=flatten_prompts(individual.prompts),
     )

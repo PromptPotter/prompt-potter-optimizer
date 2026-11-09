@@ -23,6 +23,7 @@ from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import ErrorRecord, StopReason
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.ruler import LevelSeries, RulerStamp
@@ -359,7 +360,7 @@ class CycleResult(StrictModel):
     # ``None`` = no cap.
     round_budget: int | None = None
     result_prompt_fields: dict[str, dict[str, str]]
-    result_pipeline_params: dict[str, Any] | None = None
+    result_pipeline_params: PipelineParams | None = None
     stop_reason: StopReason
     # A pause at the round allowance its launch was started with (``start-run {step_rounds}``).
     stepped: bool = False

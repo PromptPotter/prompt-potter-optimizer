@@ -15,6 +15,7 @@ from promptpotter.domain.wounds import ValidationFailure
 
 if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.pipeline_params import PipelineParams
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ def overlay_failures(
     pipeline_overlay: Mapping[str, Mapping[str, Any]],
     pipeline_schema: PipelineSchema,
     *,
-    running: Mapping[str, Any],
+    running: PipelineParams,
 ) -> list[ValidationFailure]:
     """The deterministic twin of a wire schema, judged on the model *running* (the child's config) answers with."""
     failures: list[ValidationFailure] = []
@@ -146,8 +147,7 @@ def overlay_failures(
         assert node is not None, "carried_writes strips an undeclared node first"
         node_types = node.param_types
         node_emittable = emittable.get(node_name, set())
-        own = running.get(node_name)
-        proposed = own.get("model") if isinstance(own, dict) else None
+        proposed = running.node(node_name).get("model")
         for param, value in node_params.items():
             if param in SCHEMA_OWNED_FIELDS or param in PARAM_FORBIDDEN_KEYS:
                 failures.append(

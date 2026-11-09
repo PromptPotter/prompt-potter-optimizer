@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -80,17 +81,17 @@ EndpointFn = Callable[[], str]
 SentSpendBound = Callable[[str, Mapping[str, Any], Mapping[str, Any] | None], NodeSpendBound | None]
 
 # `pipeline_params -> Delivery`, resolved from the params a run hashes.
-PromptDelivery = Callable[[dict[str, Any] | None], Delivery]
+PromptDelivery = Callable[["PipelineParams"], Delivery]
 
 
-def _in_the_request(_pipeline_params: dict[str, Any] | None) -> Delivery:
+def _in_the_request(_pipeline_params: PipelineParams) -> Delivery:
     return "request"
 
 
 def cell_envelope_of(seconds: float) -> CellEnvelopeSeconds:
     """One envelope for every cell of a backend whose cells do not vary in length."""
 
-    def envelope(_sample: Sample, _pipeline_params: dict[str, Any] | None) -> float:
+    def envelope(_sample: Sample, _pipeline_params: PipelineParams) -> float:
         return seconds
 
     return envelope

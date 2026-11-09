@@ -71,13 +71,12 @@ from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.opt_search_point import render_prompt
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
-    apply_node_overlay,
     fold_output_contract,
-    node_config_items,
     normalize_model_id,
     permitted_models_from_narrowing,
     steers_disallowed_model,
 )
+from promptpotter.domain.pipeline_params import PipelineParams, apply_node_overlay
 from promptpotter.domain.pipeline_parsing import (
     merge_node_blocks,
     parse_pipeline_response,
@@ -160,7 +159,7 @@ PARAM_LAYERS: tuple[ParamLayer, ...] = get_args(ParamLayer)
 
 @dataclass(frozen=True)
 class FoldedParams:
-    params: dict[str, Any]
+    params: PipelineParams
     provenance: dict[str, dict[str, ParamSource]]
 
     @property
@@ -191,20 +190,22 @@ class ParamLayers:
     recorded: Mapping[str, Any] = field(default_factory=dict)
 
     def fold(self) -> FoldedParams:
-        params: dict[str, Any] = {"steps": list(self.steps)}
+        params = PipelineParams().with_steps(list(self.steps))
         provenance: dict[str, dict[str, ParamSource]] = {}
         for source in PARAM_LAYERS:
             laid = {
                 node: dict(cfg)
-                for node, cfg in node_config_items(dict(self._layer(source, params)))
+                for node, cfg in self._layer(source, params).items()
                 if node in self.steps
             }
-            params = apply_node_overlay(
-                params, laid, self.schema, source=source, provenance=provenance
+            params = params.with_nodes(
+                apply_node_overlay(
+                    params.nodes, laid, self.schema, source=source, provenance=provenance
+                )
             )
         return FoldedParams(params, provenance)
 
-    def _layer(self, source: ParamLayer, params: dict[str, Any]) -> Mapping[str, Any]:
+    def _layer(self, source: ParamLayer, params: PipelineParams) -> Mapping[str, Any]:
         match source:
             case "dataset":
                 return self.dataset
@@ -231,13 +232,13 @@ class ParamLayers:
             out[node] = {k: ran.get(k, v) for k, v in cfg.items()}
         return out
 
-    def _floors(self, params: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    def _floors(self, params: PipelineParams) -> dict[str, dict[str, Any]]:
         answering = schema_as_run(self.schema, params, self.steps, self.workspace)
         floors: dict[str, dict[str, Any]] = {}
         for name in self.steps:
             node = answering.get_node(name)
-            cfg = params.get(name)
-            if node is None or not isinstance(cfg, dict) or "reasoning_effort" in cfg:
+            cfg = params.nodes.get(name)
+            if node is None or cfg is None or "reasoning_effort" in cfg:
                 continue
             if "reasoning_effort" not in node.param_keys | node.param_keys_held:
                 continue
@@ -248,7 +249,7 @@ class ParamLayers:
 
 
 def _routed_as_run(
-    schema: PipelineSchema, pipeline_params: dict[str, Any], active: list[str]
+    schema: PipelineSchema, pipeline_params: PipelineParams, active: list[str]
 ) -> PipelineSchema:
     running = {
         name: route
@@ -257,7 +258,7 @@ def _routed_as_run(
             route := {
                 key: value
                 for key in ("provider", "model")
-                if isinstance(value := (pipeline_params.get(name) or {}).get(key), str) and value
+                if isinstance(value := pipeline_params.node(name).get(key), str) and value
             }
         )
     }
@@ -277,7 +278,7 @@ def _routed_as_run(
 
 def schema_as_run(
     schema: PipelineSchema,
-    pipeline_params: dict[str, Any],
+    pipeline_params: PipelineParams,
     active: list[str],
     workspace: Path | None,
 ) -> PipelineSchema:
@@ -457,13 +458,13 @@ def _resolve_active_schema(
 
 
 def _apply_starting_prompts(
-    pipeline_params: dict[str, Any],
+    pipeline_params: PipelineParams,
     *,
     filtered: PipelineSchema,
     active: list[str],
     dataset: ResolvedDataset,
     dataset_name: str,
-) -> None:
+) -> PipelineParams:
     """Assumes the caller checked ``has_dataset_prompts``."""
     prompt_nodes = [n for n in filtered.prompt_nodes() if n.name in active]
     authored = declared_origin_prompts(dataset, prompt_nodes)
@@ -484,8 +485,10 @@ def _apply_starting_prompts(
                 f"(node declares: {declared}).",
                 code="pipeline_config_invalid",
             )
-        pipeline_params.setdefault(pnode.name, {})["prompt"] = rendered
+        laid = {**pipeline_params.node(pnode.name), "prompt": rendered}
+        pipeline_params = pipeline_params.with_nodes({**pipeline_params.nodes, pnode.name: laid})
         logger.info("Starting prompt: %s origin.yaml[%s]", dataset_name, pnode.name)
+    return pipeline_params
 
 
 def _validate_prompt_reach(
@@ -517,7 +520,7 @@ def _validate_prompt_reach(
 
 
 def _validate_model_ownership(
-    pipeline_params: dict[str, Any],
+    pipeline_params: PipelineParams,
     *,
     filtered: PipelineSchema,
     active: list[str],
@@ -525,7 +528,7 @@ def _validate_model_ownership(
 ) -> None:
     for name in active:
         node_obj = filtered.get_node(name)
-        if node_obj and node_obj.is_llm and not pipeline_params.get(name, {}).get("model"):
+        if node_obj and node_obj.is_llm and not pipeline_params.node(name).get("model"):
             raise PayloadInvalidError(
                 f"dataset {dataset_name!r}: LLM node {name!r} has no owned model. "
                 f"Declare it in the dataset's dataset.yaml::pipeline.nodes.{name}.config.model "
@@ -558,17 +561,16 @@ def _nests(schema: PipelineSchema) -> list[NestedPipelineRef]:
 
 
 def resolved_output_schemas(
-    schema: PipelineSchema, params: Mapping[str, Any]
+    schema: PipelineSchema, params: PipelineParams
 ) -> dict[str, NodeOutputSchema | None]:
     """Folded as the WIRE folds it, never the declaration; ``None`` is a point that answers as text."""
-    configs = dict(node_config_items(dict(params)))
-    folded = fold_output_contract(configs, schema)
+    folded = fold_output_contract(params, schema)
     out: dict[str, NodeOutputSchema | None] = {}
     for node, declared in schema.node_output_schemas().items():
-        if configs.get(node, {}).get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
+        if params.node(node).get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
             out[node] = None
             continue
-        js = folded.get(node, {}).get("output_schema")
+        js = folded.node(node).get("output_schema")
         out[node] = (
             parse_resolved_schema({"json_schema": js}) if isinstance(js, dict) and js else declared
         )
@@ -765,7 +767,7 @@ def _recorded_read(resolved: ResolvedRun, hop: CycleHop) -> PipelineRead:
     return resolved.read
 
 
-def _served_menu(m: _Merge, params: dict[str, Any], workspace: Path | None) -> CapabilityMenu:
+def _served_menu(m: _Merge, params: PipelineParams, workspace: Path | None) -> CapabilityMenu:
     return resolve_schema_menu(_routed_as_run(m.filtered, params, m.active), workspace=workspace)
 
 
@@ -802,7 +804,7 @@ def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
 
 def _rows(m: _Merge, folded: FoldedParams) -> dict[str, list[NodeConfigParam]]:
     return m.filtered.node_config_schema(
-        values={n: c for n, c in folded.params.items() if isinstance(c, dict)},
+        values=folded.params.nodes,
         sources=folded.provenance,
         model_menu=_admitted_menu(m),
         declared=m.declared,
@@ -844,7 +846,7 @@ def _response(
         cell_terms=list(connectors.CONNECTORS.get(connector).cell_terms),
         optimizer=m.cfg.optimization.optimizer,
         optimizer_setup=optimizer_setup(m.optimizer, mint, m.filtered, workspace),
-        params=folded.params,
+        params=folded.params.dump(),
         node_config_schema=rows,
         view=m.filtered.view,
         node_output_schema=resolved_output_schemas(m.filtered, folded.params),
@@ -879,7 +881,7 @@ class DraftPipeline:
     campaign half), the definition it lays (an upload's Start writes it), and the backend that
     serves it."""
 
-    params: dict[str, Any]
+    params: PipelineParams
     rows: dict[str, list[NodeConfigParam]]
     chain: PipelineSchema
     declared: PipelineSchema
@@ -1116,9 +1118,8 @@ def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
     out: list[RunsWithParam] = []
     by_vendor: dict[str, list[str]] = {}
     for name in m.active:
-        if name not in stripped:
+        if (cfg := stripped.nodes.get(name)) is None:
             continue
-        cfg = stripped[name]
         for key in sorted(set(cfg) - {OUTPUT_SCHEMA_KEY}):
             kind = nodes[name].param_kind(key)
             if kind not in _RUNS_WITH_KINDS:
@@ -1219,7 +1220,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
     )
 
     if dataset is not None and ships_prompts:
-        _apply_starting_prompts(
+        pipeline_params = _apply_starting_prompts(
             pipeline_params,
             filtered=filtered,
             active=active,

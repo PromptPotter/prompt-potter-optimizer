@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from promptpotter.application.preflight import PreflightWarning
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.opt_search_point import NodePrompt
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
 
 
@@ -54,8 +55,7 @@ def init_enter(
     selected = bound_optimizer()
 
     ctx.patience = opt.convergence_patience
-    origin_pp = session.pipeline_params or schema.to_pipeline_params()
-    ctx.original_sp_flat = flatten_sp_summary(origin_pp)
+    ctx.original_sp_flat = flatten_sp_summary(session.pipeline_params.nodes)
     ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}
 
     # Resolved at INIT.enter so the live dashboard stamps the formula before origin scoring fires.
@@ -112,14 +112,16 @@ def propose_enter(
     parent_accuracy: float | None,
     prompt_preview: str,
     model: str | None,
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams,
     parent_prompts: Mapping[str, NodePrompt],
     run_standing: RunStanding | None,
 ) -> RoundStartView:
     # The header renders before candidates exist: it describes the parent.
     preview = prompt_preview.replace("\n", " ").strip()
     preview = "(empty)" if not preview else truncate(preview, 50, "...")
-    ctx.current_sp_flat = flatten_sp_summary(pipeline_params) | flatten_prompts(parent_prompts)
+    ctx.current_sp_flat = flatten_sp_summary(pipeline_params.nodes) | flatten_prompts(
+        parent_prompts
+    )
 
     return RoundStartView(
         node=node,

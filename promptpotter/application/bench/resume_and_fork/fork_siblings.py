@@ -18,7 +18,7 @@ from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.pipeline_overlay import merge_pipeline_params, node_config_items
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
@@ -222,8 +222,7 @@ def declare_steered_values(
     """Without it the fork runs ``model=X`` beside a permitted set that excludes X; X is what the
     fork runs, its candidate's own under the operator's edit."""
     declared = dict(seed.optimizer_narrowing)
-    runs = merge_pipeline_params(seed.origin_params, seed.pipeline_overlay, None) or {}
-    for node, cfg in node_config_items(runs):
+    for node, cfg in seed.runs().items():
         origin = narrowing.get(node)
         listed = origin.param_allowed_values if origin else {}
         own = declared.get(node)
@@ -294,4 +293,4 @@ def _candidate_params(stores: Stores, hop: CycleHop, named: RoundArm) -> dict[st
     arm = stores.campaigns.standing_rounds(hop, moment=None).arms.get((named.round, named.arm))
     if arm is None or isinstance(arm.state, Proposed):
         return None
-    return {node: dict(cfg) for node, cfg in node_config_items(arm.state.resolved_params)}
+    return PipelineParams.model_validate(arm.state.resolved_params).nodes

@@ -34,6 +34,7 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
+from promptpotter.domain.pipeline_params import PipelineParams, apply_node_overlay
 from promptpotter.domain.pipeline_schema import (
     CapabilityMenu,
     KnobLayer,
@@ -850,13 +851,13 @@ class CycleSeed(FrozenModel):
         default_factory=dict,
         description="C0's prompt loci, per prompt node; empty when the seed carries no origin.",
     )
-    origin_params: dict[str, Any] | None = Field(
+    origin_params: dict[str, dict[str, Any]] | None = Field(
         default=None,
         description="The params twin of `origin_prompts`: a fork off a candidate runs that "
         "candidate's record (`resolved_params`), laid under `pipeline_overlay`, the operator's "
         "edit. None on a seed off no candidate.",
     )
-    pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
+    pipeline_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
     optimizer_narrowing: dict[str, NodeSearchNarrowing] = Field(
         default_factory=dict,
         description="Per-fork search-space lock edits, laid on its parent's by part "
@@ -879,6 +880,10 @@ class CycleSeed(FrozenModel):
         if self.origin_prompts and not self.origin_source:
             raise ValueError("origin_prompts set without an origin_source stamp")
         return self
+
+    def runs(self) -> dict[str, dict[str, Any]]:
+        """Each node's config the fork runs: its candidate's record under the operator's edit."""
+        return apply_node_overlay(self.origin_params or {}, self.pipeline_overlay, None)
 
 
 class WallClock(FrozenModel):
@@ -917,7 +922,7 @@ class CycleFinal(FrozenModel):
     # The round the optimizer's DECLARED pick was selected in.
     result_round: int
     result_prompt_fields: dict[str, dict[str, str]]
-    result_pipeline_params: dict[str, Any] | None
+    result_pipeline_params: PipelineParams | None
 
 
 class ElectionRecord(Election):

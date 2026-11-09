@@ -278,6 +278,7 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
@@ -1150,8 +1151,10 @@ def _peer_cycle(
 ) -> Iterator[tuple[Cycle, RunCallbacks]]:
     """Bound as a run seam binds it; the backend answers right where ``solves`` says, errs on None."""
 
-    async def _measure(sample: Sample, _session: Any, pipeline_params: Any) -> MeasuredCell:
-        prompt = pipeline_params["solve"]["prompt"]
+    async def _measure(
+        sample: Sample, _session: Any, pipeline_params: PipelineParams
+    ) -> MeasuredCell:
+        prompt = pipeline_params.node("solve")["prompt"]
         solved = solves(prompt, sample)
         row: dict[str, Any] = {
             "sample_key": sample.key,
@@ -1177,11 +1180,15 @@ def _peer_cycle(
                 fields={"instruction": "Answer.", "answer_format": "Reply with the letter."}
             )
         }
-    ).configured(None, schema)
+    ).configured(PipelineParams(), schema)
 
     def measured_origin(session: Session) -> CellSheet:
         rows = [
-            asyncio.run(_measure(s, session, pipeline_params={"solve": {"prompt": "Answer."}}))
+            asyncio.run(
+                _measure(
+                    s, session, PipelineParams.model_validate({"solve": {"prompt": "Answer."}})
+                )
+            )
             for s in list(session.state.scoring.require_partition().search)[:4]
         ]
         return session.state.scoring.require_scorer().sheet(rows)
@@ -4616,7 +4623,7 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
                 at_round(1),
                 spending_under(spend_book(book_usd, usd_reserve=None)),
             ):
-                return await measure_sample(row, session, params)
+                return await measure_sample(row, session, PipelineParams.model_validate(params))
 
         return asyncio.run(measured())
 

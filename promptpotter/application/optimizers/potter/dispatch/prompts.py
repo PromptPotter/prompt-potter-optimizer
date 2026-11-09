@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.node_context import Calls
 from promptpotter.application.optimizer_manifest import (
@@ -20,6 +20,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.runner.inner.tasks import InnerCells
+    from promptpotter.domain.pipeline_params import PipelineParams
 
 
 logger = logging.getLogger(__name__)
@@ -41,13 +42,12 @@ def inner_template(cells: InnerCells, name: str) -> OptimizerPromptTemplate | No
 
 def effective_optimizer_prompts(
     schema: PipelineSchema,
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams,
     cells: InnerCells | None,
 ) -> dict[str, dict[str, str]]:
     if cells is None:
         return {}
     keys_by_node = schema.node_param_keys()
-    params = pipeline_params or {}
     out: dict[str, dict[str, str]] = {}
     for node_name in schema.active_steps:
         fields = [
@@ -58,8 +58,7 @@ def effective_optimizer_prompts(
         base = inner_template(cells, node_name) if fields else None
         if base is None:
             continue
-        node_params = params.get(node_name)
-        override = node_params if isinstance(node_params, dict) else {}
+        override = pipeline_params.node(node_name)
         out[node_name] = {
             f: str(override[f] if f in override else getattr(base, f)) for f in fields
         }

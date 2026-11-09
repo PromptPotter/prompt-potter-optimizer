@@ -18,7 +18,6 @@ from promptpotter.application.optimizers.potter.validators.behavior_base import 
     judged,
 )
 from promptpotter.domain.opt_search_point import Locus, OptimizerPromptTemplate
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.round_audit import NodeBlock, RoundAudit
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
@@ -58,8 +57,8 @@ def _variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
         for f, v in fields.items()
         if v
     }
-    for n, cfg in node_config_items(variant.get("pipeline_overlay")):
-        for p, v in cfg.items():
+    for n, cfg in (variant.get("pipeline_overlay") or {}).items():
+        for p, v in cfg.items() if isinstance(cfg, dict) else ():
             if p in OptimizerPromptTemplate.model_fields and v:
                 written[Locus(n, p).name] = str(v)
     return written

@@ -166,25 +166,26 @@ def _write_two_step(task_dir: Path, question: str, docs: list[dict[str, Any]]) -
     _write(task_dir / "task.toml", _TASK_TOML_2STEP)
     _write(task_dir / "environment" / "Dockerfile", _DOCKERFILE)
     _write(task_dir / "solution" / "solve.sh", _SOLVE_SH)
-    # `steps/<name>/workdir/` is Harbor's upload convention: it lands in the agent's cwd.
+    retrieve, answer = (task_dir / "steps" / step for step in ("retrieve", "answer"))
+    # `<step>/workdir/` is Harbor's upload convention: it lands in the agent's cwd.
     for i, d in enumerate(docs, start=1):
         head, text = _doc(i, d)
         _write(
-            task_dir / "steps" / "retrieve" / "workdir" / f"doc-{i:02d}.md",
+            retrieve / "workdir" / f"doc-{i:02d}.md",
             f"{head}\n\n{text}\n" if text else f"{head}\n",
         )
     _write(
-        task_dir / "steps" / "retrieve" / "instruction.md",
+        retrieve / "instruction.md",
         _INSTRUCTION_RETRIEVE.format(question=question, retrieved_path=RETRIEVED_PATH),
     )
-    _write(task_dir / "steps" / "retrieve" / "tests" / "test.sh", _TEST_SH_RETRIEVE)
+    _write(retrieve / "tests" / "test.sh", _TEST_SH_RETRIEVE)
     _write(
-        task_dir / "steps" / "answer" / "instruction.md",
+        answer / "instruction.md",
         _INSTRUCTION_ANSWER.format(
             question=question, retrieved_path=RETRIEVED_PATH, answer_path=ANSWER_PATH
         ),
     )
-    _write(task_dir / "steps" / "answer" / "tests" / "test.sh", _TEST_SH)
+    _write(answer / "tests" / "test.sh", _TEST_SH)
 
 
 def _panel_yaml(tasks: list[dict[str, str]], provenance: str) -> str:

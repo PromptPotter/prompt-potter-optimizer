@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import described_field, description_path
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -55,11 +55,11 @@ def _is_edit(value: object, parent_value: object) -> bool:
 def candidate_delta(
     child: Mapping[str, NodePrompt],
     parent: Mapping[str, NodePrompt],
-    pipeline_overlay: dict[str, Any] | None,
-    parent_pp: Mapping[str, Any] | None,
+    pipeline_overlay: Mapping[str, Mapping[str, Any]] | None,
+    parent_pp: PipelineParams | None,
 ) -> CandidateDelta:
     """Both prompt maps are WHOLE (an absent field is empty, an absent node sets nothing)."""
-    parent_cfg = parent_pp or {}
+    parent_cfg = parent_pp.nodes if parent_pp else {}
     nodes = sorted(child.keys() | parent.keys())
     empty = NodePrompt()
 
@@ -75,7 +75,7 @@ def candidate_delta(
         },
         params={
             (n, p): v
-            for n, cfg in node_config_items(pipeline_overlay)
+            for n, cfg in (pipeline_overlay or {}).items()
             for p, v in cfg.items()
             if _is_edit(v, parent_param_value(parent_cfg.get(n) or {}, p))
         },
@@ -194,12 +194,12 @@ def same_idea(a: frozenset[str], b: frozenset[str], *, threshold: float) -> bool
 def candidate_idea(
     child: Mapping[str, NodePrompt],
     parent_prompts: Mapping[str, NodePrompt],
-    pipeline_overlay: dict[str, Any] | None,
-    parent_pp: Mapping[str, Any] | None,
+    pipeline_overlay: Mapping[str, Mapping[str, Any]] | None,
+    parent_pp: PipelineParams | None,
 ) -> frozenset[str]:
     """The parent is subtracted WHOLE: the task's vocabulary in unchanged fields convicts unrelated rewrites."""
     delta = candidate_delta(child, parent_prompts, pipeline_overlay, parent_pp)
-    parent = parent_pp or {}
+    parent = parent_pp.nodes if parent_pp else {}
     written = idea_fingerprint([*delta.prompt.values(), *map(str, delta.params.values())])
     carried = idea_fingerprint(
         [text for prompt in parent_prompts.values() for text in prompt.fields.values()]
@@ -220,10 +220,10 @@ def _fmt_pp_val(v: object) -> str:
 
 
 @shapes_optimizer_prompt
-def flatten_sp_summary(pp: dict[str, Any] | None) -> dict[str, str]:
+def flatten_sp_summary(pp: Mapping[str, Mapping[str, Any]] | None) -> dict[str, str]:
     """A nested param flattens ONE level further (``node.param.key``); ``group_diff_keys`` splits on the first dot."""
     flat: dict[str, str] = {}
-    for k, v in node_config_items(pp):
+    for k, v in (pp or {}).items():
         for sub_k, sub_v in v.items():
             if isinstance(sub_v, dict):
                 for leaf_k, leaf_v in sub_v.items():
@@ -246,7 +246,7 @@ def flatten_prompts(prompts: Mapping[str, NodePrompt]) -> dict[str, str]:
 def build_candidate_flat(
     parent: dict[str, str],
     *,
-    pipeline_overlay: dict[str, Any] | None,
+    pipeline_overlay: dict[str, dict[str, Any]] | None,
     prompt_flat: Mapping[str, str],
 ) -> dict[str, str]:
     """*prompt_flat* is ``flatten_prompts`` of the candidate's prompts."""

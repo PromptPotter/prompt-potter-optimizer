@@ -7255,7 +7255,10 @@
         "additionalProperties": false,
         "properties": {
           "pipeline_overlay": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
             "description": "The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it",
             "title": "Pipeline Overlay",
             "type": "object"
@@ -7368,7 +7371,10 @@
             "type": "object"
           },
           "pipeline_overlay": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
             "title": "Pipeline Overlay",
             "type": "object"
           }
@@ -9479,7 +9485,10 @@
           "pipeline_overlay": {
             "anyOf": [
               {
-                "additionalProperties": true,
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
                 "type": "object"
               },
               {
@@ -11480,10 +11489,8 @@
             "$ref": "#/components/schemas/IndividualLineage"
           },
           "pipeline_params": {
-            "additionalProperties": true,
-            "description": "Its node configuration, resolved: the active steps named, the output contract folded, no rendered prompt. `configured` is the one writer.",
-            "title": "Pipeline Params",
-            "type": "object"
+            "$ref": "#/components/schemas/PipelineParams",
+            "description": "Its node configuration, resolved: the active steps named, the output contract folded, no rendered prompt. `configured` is the one writer."
           },
           "prompts": {
             "additionalProperties": {
@@ -13295,6 +13302,10 @@
           "at"
         ],
         "title": "PauseReading",
+        "type": "object"
+      },
+      "PipelineParams": {
+        "additionalProperties": true,
         "type": "object"
       },
       "PipelineView": {

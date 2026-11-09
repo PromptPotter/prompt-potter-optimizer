@@ -65,7 +65,6 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, InnerRun, Job
 from promptpotter.domain.phases import INNER_PAUSE_REFUSAL
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineSchema, narrowing_of
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
@@ -104,7 +103,7 @@ def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, A
     """Each steered value in its param's declared type at *schema*, as every door sends it: a
     string stays text, and a string sent for any other type is read as JSON."""
     typed = dict(overlay)
-    for node, cfg in node_config_items(overlay):
+    for node, cfg in overlay.items():
         declared = schema.get_node(node)
         if declared is None:
             names = ", ".join(n.name for n in schema.declared_nodes) or "(none)"
@@ -157,7 +156,7 @@ def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop
         if sent.pipeline_overlay
         else {}
     )
-    for node, cfg in node_config_items(overlay):
+    for node, cfg in overlay.items():
         allowed = narrowing[node].param_allowed_values if node in narrowing else {}
         for param, value in cfg.items():
             if param in allowed and str(value) not in allowed[param]:

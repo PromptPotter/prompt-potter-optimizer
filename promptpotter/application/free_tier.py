@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any, NamedTuple
 
 from promptpotter import connectors
@@ -13,7 +13,7 @@ from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER, Bounds, FreeTier
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.spend import draws_coupon
 from promptpotter.infrastructure.llm.registry import providers
@@ -111,7 +111,7 @@ def free_task_models() -> frozenset[str]:
 def outside_free_tier(
     config: CampaignConfig,
     selected: SelectedOptimizer,
-    pipeline_params: Mapping[str, Any],
+    pipeline_params: PipelineParams,
     schema: PipelineSchema,
     fence: FreeFence,
 ) -> list[str]:
@@ -121,10 +121,10 @@ def outside_free_tier(
     task = fence.task
     out = [
         f"the node {s}"
-        for s in (pipeline_params.get("steps", ()) if task else ())
+        for s in (pipeline_params.steps or () if task else ())
         if s not in tier.task_nodes
     ]
-    for node, cfg in node_config_items(dict(pipeline_params)) if task else ():
+    for node, cfg in pipeline_params.nodes.items() if task else ():
         if not (model := cfg.get("model")):
             continue
         declared = space.get_node(node)

@@ -449,6 +449,12 @@
         ".archives/*/measurements/configs/*.json"
       ],
       "shape": {
+        "$defs": {
+          "PipelineParams": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
         "additionalProperties": false,
         "description": "A configuration as its archive file holds it: nothing any dataset or answer says of it.",
         "properties": {
@@ -475,9 +481,7 @@
             "type": "array"
           },
           "pipeline_params": {
-            "additionalProperties": true,
-            "title": "Pipeline Params",
-            "type": "object"
+            "$ref": "#/$defs/PipelineParams"
           },
           "prompt_fields_id": {
             "title": "Prompt Fields Id",

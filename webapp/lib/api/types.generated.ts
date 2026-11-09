@@ -1973,7 +1973,7 @@ export interface LiveCandidate {
    * from. Null until the candidate is announced. */
   prompts: Record<string, NodePrompt> | null;
   resolved_params: Record<string, unknown> | null;
-  pipeline_overlay: Record<string, unknown> | null;
+  pipeline_overlay: Record<string, Record<string, unknown>> | null;
   samples: DashboardSample[];
   validation_failures: ValidationFailure[];
   composite_fitness_formula_short: string | null;
@@ -4801,7 +4801,7 @@ export interface RunMode {
  * forked cycle's own rows and stamps the `origin_source` the wire omits. */
 export interface ForkSeed {
   origin_prompts: Record<string, NodePrompt>;
-  pipeline_overlay: Record<string, unknown>;
+  pipeline_overlay: Record<string, Record<string, unknown>>;
   config_overrides: ConfigOverrides;
   /** Per node, the rows as drawn; overrides the campaign's narrowing for this cycle
    * only, and a node it does not name inherits. */

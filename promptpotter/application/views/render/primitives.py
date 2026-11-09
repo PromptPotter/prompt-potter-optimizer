@@ -8,7 +8,7 @@ from promptpotter.domain.arm_reading import lift_shown, lift_text
 from promptpotter.domain.bench import BenchColumn
 from promptpotter.domain.origin_panel import LineRate, overlap_line, triggered_rates
 from promptpotter.domain.paired_reading import READING_STATE_INFO
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -332,7 +332,7 @@ def _step_tag(step_name: str | None, tags: dict[str, str]) -> str:
 
 
 def render_pipeline_overlay(
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams | None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> str:
     """A node absent from the schema shows every pair, not only its ``param_keys``."""
@@ -340,7 +340,7 @@ def render_pipeline_overlay(
         return ""
 
     node_entries: list[tuple[str, dict[str, Any]]] = []
-    for key, val in node_config_items(pipeline_params):
+    for key, val in pipeline_params.nodes.items():
         tunable: dict[str, Any] = {}
         if pipeline_schema:
             node = pipeline_schema.get_node(key)

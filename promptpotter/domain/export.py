@@ -10,12 +10,12 @@ from promptpotter.domain.bench import BenchScore, OwnLevel
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import PairedReading
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.ruler import SeriesReading
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.search_point import TaskDecomposition, strip_rendered_prompt
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.worded import Worded
@@ -250,8 +250,5 @@ def _delta(individual: OptSearchPoint, parent: OptSearchPoint | None) -> dict[st
     return {name: by_name.get(name) for name in individual.loci_moved_from(parent)}
 
 
-def _tuned_params(pipeline_params: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-    return {
-        node: {k: v for k, v in cfg.items() if k != "prompt"}
-        for node, cfg in node_config_items(pipeline_params)
-    }
+def _tuned_params(pipeline_params: PipelineParams | None) -> dict[str, dict[str, Any]]:
+    return {} if pipeline_params is None else strip_rendered_prompt(pipeline_params).nodes

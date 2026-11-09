@@ -141,7 +141,7 @@ class LiveCandidate(DashboardCandidate):
         "seeds from. Null until the candidate is announced.",
     )
     resolved_params: dict[str, Any] | None = None
-    pipeline_overlay: dict[str, Any] | None = None
+    pipeline_overlay: dict[str, dict[str, Any]] | None = None
     samples: list[DashboardSample] = Field(default_factory=list)
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     composite_fitness_formula_short: str | None = None

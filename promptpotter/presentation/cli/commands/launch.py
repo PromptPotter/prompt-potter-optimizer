@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.launcher.run_job import HeldRun
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.run_mode import RunMode
     from promptpotter.infrastructure.store.stores import Stores
@@ -49,10 +50,10 @@ def prepare_launch() -> None:
     ensure_api_key()
 
 
-def pipeline_summary(session: Session, pipeline_params: dict[str, Any] | None) -> str:
+def pipeline_summary(session: Session, pipeline_params: PipelineParams) -> str:
     ps = session.pipeline_schema
     pipe = f"{ps.name} v{ps.version}"
-    active = list((pipeline_params or {}).get("steps") or [])
+    active = list(pipeline_params.steps or [])
     nodes = f"{len(active)} node{'s' if len(active) != 1 else ''}"
     if active:
         nodes += f" ({', '.join(active)})"
@@ -61,7 +62,7 @@ def pipeline_summary(session: Session, pipeline_params: dict[str, Any] | None) -
 
 def log_startup_summary(
     session: Session,
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams,
     dataset_len: int,
     backend_url: str,
     dataset_name: str | None,

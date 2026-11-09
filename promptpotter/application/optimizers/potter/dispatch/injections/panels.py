@@ -58,6 +58,7 @@ from promptpotter.domain.l4.proxies import held_out_lift_of, inner_facts_of
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, overlap_line, triggered_rates
 from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import evidence_starved_node, ran_to_output_ceiling
 from promptpotter.domain.ruler import ThetaCaveat
@@ -864,7 +865,7 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
 def _candidate_mutation(
     cand: Concluded,
     parent: Mapping[str, NodePrompt],
-    parent_pp: dict[str, Any] | None,
+    parent_pp: PipelineParams,
     slot_of: Mapping[str, int],
 ) -> list[tuple[str, str]]:
     delta = candidate_delta(cand.individual.prompts, parent, cand.overlay, parent_pp)

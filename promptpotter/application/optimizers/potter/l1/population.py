@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_config_not_in_runtime_failures,
@@ -16,12 +16,12 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import (
 from promptpotter.domain.arms import Proposal
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.pipeline_overlay import merge_pipeline_params
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.wounds import RuntimeFailure
 
 if TYPE_CHECKING:
     from promptpotter.application.runner.inner.tasks import InnerCells
+    from promptpotter.domain.pipeline_params import PipelineParams
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 def parse_population(
     proposals: list[Proposal],
     parent: OptSearchPoint,
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams,
     schema: PipelineSchema,
     *,
     runtime_failures: Sequence[RuntimeFailure],
@@ -40,7 +40,7 @@ def parse_population(
     for cp in proposals:
         pipeline_overlay = cp.overlay
         opt_sp = cp.individual
-        merged_pp = merge_pipeline_params(pipeline_params, pipeline_overlay, schema)
+        merged_pp = pipeline_params.overlaid(pipeline_overlay, schema)
         # The DELTA, never the child's whole prompt: an inherited field was not proposed.
         prompt_edit = candidate_delta(opt_sp.prompts, parent.prompts, None, None).prompt
         failures = l1_prompt_fields_open(prompt_edit, pipeline_schema=schema)
@@ -65,7 +65,7 @@ def parse_population(
                 ),
             ]
         # The MERGED params: a child of a broken parent inherits a severed port without proposing it.
-        failures += l1_inner_placeholders_intact(merged_pp or {}, inner_cells=inner_cells)
+        failures += l1_inner_placeholders_intact(merged_pp, inner_cells=inner_cells)
         # A replayed proposal already carries them: the bench banks the walk's arms validated.
         failures = [vf for vf in failures if vf not in cp.validation_failures]
         if failures:

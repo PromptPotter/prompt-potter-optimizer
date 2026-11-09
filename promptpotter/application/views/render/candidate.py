@@ -33,7 +33,7 @@ def fmt_individual_header(
     label: str,
     total: int,
     changes_description: str,
-    pipeline_overlay: dict[str, Any] | None,
+    pipeline_overlay: dict[str, dict[str, Any]] | None,
 ) -> str:
     body = fmt_pipeline_overlay(pipeline_overlay)
     if not body and changes_description:

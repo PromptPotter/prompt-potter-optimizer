@@ -27,7 +27,7 @@ from promptpotter.domain.opt_search_point import (
     Locus,
     OptimizerPromptTemplate,
 )
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.search_point import SHOTS_KEY, WHO_ANSWERS_KEYS, missing_template_vars
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
@@ -134,17 +134,14 @@ def l1_config_not_in_runtime_failures(
     overlay: Mapping[str, Any],
     *,
     runtime_failures: Sequence[RuntimeFailure],
-    pipeline_params: Mapping[str, Any] | None,
+    pipeline_params: PipelineParams,
 ) -> list[ValidationFailure]:
     """A wound convicts a ``(responder, param, value)``: one endpoint's 400 says nothing of the next model's."""
-    merged = pipeline_params or {}
     out_failures: list[ValidationFailure] = []
     for node_name, node_params in overlay.items():
         if not isinstance(node_params, dict):
             continue
-        inherited = merged.get(node_name)
-        effective = dict(inherited) if isinstance(inherited, dict) else {}
-        effective.update(node_params)
+        effective = {**pipeline_params.node(node_name), **node_params}
         for param, value in node_params.items():
             for rf in runtime_failures:
                 obs_cfg = rf.observed_config or {}
@@ -166,13 +163,13 @@ def l1_config_not_in_runtime_failures(
 
 
 def l1_inner_placeholders_intact(
-    pipeline_params: dict[str, Any], *, inner_cells: InnerCells | None
+    pipeline_params: PipelineParams, *, inner_cells: InnerCells | None
 ) -> list[ValidationFailure]:
     """Checks the MERGED params: a child inherits token-less prose without re-proposing it."""
     if inner_cells is None:
         return []
     failures: list[ValidationFailure] = []
-    for node_name, cfg in node_config_items(pipeline_params):
+    for node_name, cfg in pipeline_params.nodes.items():
         prose = {
             k: v
             for k, v in cfg.items()
@@ -276,13 +273,11 @@ _GUT_RATIO = 0.35
 
 
 def _parent_field_text(
-    cells: InnerCells, node: str, field: str, pipeline_params: Mapping[str, Any] | None
+    cells: InnerCells, node: str, field: str, pipeline_params: PipelineParams
 ) -> str:
-    parent = (pipeline_params or {}).get(node)
-    if isinstance(parent, Mapping):
-        inherited = parent.get(field)
-        if isinstance(inherited, str) and inherited:
-            return inherited
+    inherited = pipeline_params.node(node).get(field)
+    if isinstance(inherited, str) and inherited:
+        return inherited
     template = inner_template(cells, node)
     current = getattr(template, field, "") if template is not None else ""
     return current if isinstance(current, str) else ""
@@ -292,7 +287,7 @@ def l1_prompt_field_not_gutted(
     overlay: Mapping[str, Any],
     *,
     inner_cells: InnerCells | None,
-    pipeline_params: Mapping[str, Any] | None,
+    pipeline_params: PipelineParams,
 ) -> list[ValidationFailure]:
     """An override REPLACES its field whole, so a short one deletes the contracts the parent's prose carried."""
     if inner_cells is None:

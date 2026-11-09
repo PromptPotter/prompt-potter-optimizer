@@ -14,6 +14,7 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.wounds import INVARIANT_REASONS, ValidationFailure
 
@@ -53,11 +54,10 @@ def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset
 def detect_invariants(
     proposals: list[Proposal],
     parent_opt_sp: OptSearchPoint,
-    parent_pipeline_params: dict[str, Any] | None,
+    parent_pp: PipelineParams,
     prior_rounds: Sequence[RoundResult] = (),
 ) -> list[Proposal]:
     """Each proposal with its invariant failures re-derived: any it carried in are dropped first."""
-    parent_pp = parent_pipeline_params or {}
     failures = [
         [vf for vf in cp.validation_failures if vf.reason not in INVARIANT_REASONS]
         for cp in proposals

@@ -28,6 +28,7 @@ from promptpotter.application.scoring.sample_measurement import (
 )
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
@@ -111,7 +112,7 @@ async def run_bbeh_campaign(
         # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
         # than default: a results file naming the wrong model is worse than no results file.
         models = {
-            (pipeline_params.get(node.name) or {}).get("model")
+            pipeline_params.node(node.name).get("model")
             for node in configured.pipeline_schema.prompt_nodes()
         }
         if len(models) != 1 or None in models:
@@ -139,7 +140,7 @@ async def run_bbeh_campaign(
             return None
 
         export = session.store.campaigns.read_export(session.hop)
-        result_pipeline_params = cycle_result.result_pipeline_params
+        result_pipeline_params = cycle_result.result_pipeline_params or PipelineParams()
         train_acc = cycle_result.result_accuracy
 
         print(f"\n{'=' * 60}")
@@ -148,11 +149,11 @@ async def run_bbeh_campaign(
 
         per_task_results: dict[str, Record] = {}
         # Outside the run, so under a book of its own: every cell is still admitted and metered.
-        bound = await cell_bound(session, result_pipeline_params or {})
+        bound = await cell_bound(session, result_pipeline_params)
         billed = cell_billing(
             session.pipeline_schema,
-            priced_pairs(session, result_pipeline_params or {}),
-            await attempt_bounds(session, result_pipeline_params or {}),
+            priced_pairs(session, result_pipeline_params),
+            await attempt_bounds(session, result_pipeline_params),
         )
         client = session.backend_client
         with spending_under(unbounded_spend_book()):
@@ -162,7 +163,7 @@ async def run_bbeh_campaign(
                 for ex in test_items:
                     # Each cell is a unit of work of its own: its envelope opens its send budget.
                     async with CellEnvelope(
-                        client.connector.cell_envelope_s(ex, result_pipeline_params or {}),
+                        client.connector.cell_envelope_s(ex, result_pipeline_params),
                         attempts=client.connector.cell_attempts,
                         label=f"{task}:{ex.id}",
                     ):

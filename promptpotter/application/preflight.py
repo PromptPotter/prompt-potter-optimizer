@@ -10,7 +10,6 @@ from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import usd_text
 from promptpotter.infrastructure.llm.pricing import route_priced
@@ -19,6 +18,7 @@ from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.domain.campaign import Arm
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
 
@@ -379,10 +379,10 @@ def refuse_below_reasoning_floor(node_configs: Iterable[tuple[str, Mapping[str, 
 Route = tuple[str, str, tuple[str, ...] | None]
 
 
-def task_routes(pipeline_params: Mapping[str, Any], schema: PipelineSchema) -> list[Route]:
+def task_routes(pipeline_params: PipelineParams, schema: PipelineSchema) -> list[Route]:
     """Each task node's model, and each model its axis offers: ``(model, provider, hosts)``."""
     routes: dict[Route, None] = {}
-    for _node, cfg in node_config_items(dict(pipeline_params)):
+    for cfg in pipeline_params.nodes.values():
         model, provider, hosts = cfg.get("model"), cfg.get("provider"), cfg.get("route_order")
         if model and provider:
             routes[str(model), str(provider), tuple(hosts) if hosts else None] = None
@@ -396,7 +396,7 @@ def task_routes(pipeline_params: Mapping[str, Any], schema: PipelineSchema) -> l
 def unpriced_routes(
     config: CampaignConfig,
     selected: SelectedOptimizer,
-    pipeline_params: Mapping[str, Any],
+    pipeline_params: PipelineParams,
     schema: PipelineSchema,
 ) -> list[str]:
     """Every route a run may send on, the optimizer's too, that no rate prices — under a dollar

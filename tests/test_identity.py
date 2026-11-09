@@ -213,6 +213,7 @@ from promptpotter.domain.pipeline_overlay import (
     permitted_models_from_narrowing,
     steers_disallowed_model,
 )
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
@@ -834,7 +835,9 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             ],
             default_routes=routes,
         )
-        point = prompted("llm_only", instruction="x").configured({"llm_only": cfg}, routed)
+        point = prompted("llm_only", instruction="x").configured(
+            PipelineParams().with_nodes({"llm_only": cfg}), routed
+        )
         job = PointContext(schema=routed, framing=TaskDecomposition(), demo=[]).job(point)
         return archive_entry(job, dataset_hash="d", pipeline_schema=routed).config_key
 
@@ -860,7 +863,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             "extract": NodePrompt(fields={"instruction": "Pull the amount.", "answer_format": "N"}),
             "classify": NodePrompt(fields={"persona": "You book.", "instruction": "Pick a code."}),
         }
-    ).configured({}, chain)
+    ).configured(PipelineParams(), chain)
     second = OptSearchPoint.derive(
         [two],
         schema=chain,
@@ -875,7 +878,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     def scored(point: OptSearchPoint) -> tuple[dict[str, Any], str]:
         job = PointContext(schema=chain, framing=TaskDecomposition(), demo=[]).job(point)
         key = archive_entry(job, dataset_hash="d", pipeline_schema=chain).config_key
-        return job.pipeline_params, key
+        return job.pipeline_params.nodes, key
 
     (before, before_key), (after, after_key) = scored(two), scored(second)
     assert after["classify"]["prompt"] == "You book.\n\nPick the four-digit code.", (
@@ -1680,9 +1683,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     proposed = asyncio.run(plan_draft_patch(built_stores, knobbed, proposal.patch))
     assert (
-        draft_pipeline(built_stores, apply_draft_patch(knobbed, proposed), proposed.served).params[
-            "llm_only"
-        ]["model"]
+        draft_pipeline(
+            built_stores, apply_draft_patch(knobbed, proposed), proposed.served
+        ).params.nodes["llm_only"]["model"]
         == menu[-1]
     ), "a resolver's model proposal was dropped"
     # ...and only as that edit: a node's model moves spend, so the turn raises it and applies none.
@@ -2302,23 +2305,27 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert {"output_schema", "answer_fields"} <= base["llm_only"].keys(), (
         "the instrument declares no contract — the rest proves nothing"
     )
-    assert fold_output_contract(base, text_schema) == base, (
+    assert fold_output_contract(PipelineParams().with_nodes(base), text_schema).nodes == base, (
         "an unmoved point must hash as it always did"
     )
     chose_text = copy.deepcopy(base)
     chose_text["llm_only"][SCHEMA_TOGGLE_PARAM] = ANSWER_AS_TEXT
     chose_text["llm_only"][description_key("answer")] = "IGNORED"
-    folded = fold_output_contract(chose_text, text_schema)["llm_only"]
+    folded = fold_output_contract(PipelineParams().with_nodes(chose_text), text_schema).nodes[
+        "llm_only"
+    ]
     assert not {"output_schema", "answer_fields", description_key("answer")} & folded.keys(), (
         "a point answering in text still carries the contract it left"
     )
-    assert resolved_output_schemas(text_schema, base)["llm_only"] is not None, (
-        "a point answering in the contract was sent none"
-    )
+    assert (
+        resolved_output_schemas(text_schema, PipelineParams().with_nodes(base))["llm_only"]
+        is not None
+    ), "a point answering in the contract was sent none"
     text_point = {**base, "llm_only": {**base["llm_only"], SCHEMA_TOGGLE_PARAM: ANSWER_AS_TEXT}}
-    assert resolved_output_schemas(text_schema, text_point)["llm_only"] is None, (
-        "a point answering in TEXT was sent a contract to answer INTO"
-    )
+    assert (
+        resolved_output_schemas(text_schema, PipelineParams().with_nodes(text_point))["llm_only"]
+        is None
+    ), "a point answering in TEXT was sent a contract to answer INTO"
     joint_pipeline = copy.deepcopy(text_pipeline)
     joint_pipeline["nodes"]["llm_only"]["config"]["answer_fields"] = ["reasoning", "answer"]
     joint_schema = parse_pipeline_response(joint_pipeline)
@@ -2344,7 +2351,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     amount = description_key("lines.amount")
     declared = cast(Any, nested.get_node("llm_only")).current_config
-    pp = fold_output_contract({"llm_only": {**declared, amount: "Net, in CHF."}}, nested)
+    pp = fold_output_contract(
+        PipelineParams().with_nodes({"llm_only": {**declared, amount: "Net, in CHF."}}), nested
+    ).nodes
     line = pp["llm_only"]["output_schema"]["properties"]["lines"]["items"]["properties"]["amount"]
     assert line["description"] == "Net, in CHF." and amount not in pp["llm_only"], (
         "a nested field's description did not fold into the contract it names"
@@ -2372,7 +2381,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         ({"l1_critique": {"layout": "hdr"}}, ["l1_critique.layout"]),
         ({"l1_critique": {"layout": {"instruction": ["plan"]}}}, []),
     ):
-        found = [f.axis for f in overlay_failures(overlay, outer_schema, running={})]
+        found = [f.axis for f in overlay_failures(overlay, outer_schema, running=PipelineParams())]
         assert found == refused_axes, f"{overlay}: admitted a param the schema does not declare"
     grade = PipelineNode(
         name="grade",
@@ -2521,7 +2530,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             ArmKey(ind.id): arm_state(
                 "parent",
                 individual=ind,
-                resolved_params=points.job(ind).config_params or {},
+                resolved_params=points.job(ind).config_params.dump(),
                 sp_hash=points.job(ind).sp_hash(schema),
             )
             for ind in held
@@ -3121,7 +3130,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     proposals = parse_population(
         [proposed(overlay) for overlay in (edit, severed, severed_potter)],
         parent,
-        None,
+        PipelineParams(),
         mixed_schema,
         runtime_failures=[],
         inner_cells=mixed,

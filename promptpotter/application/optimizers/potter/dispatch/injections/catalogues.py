@@ -99,7 +99,7 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
             continue
         lines.append(f"  {node_name}: {', '.join(bits)}".rstrip())
         if described:
-            current = b.cycle_slice.pipeline_params.get(node_name) or {}
+            current = b.cycle_slice.pipeline_params.node(node_name)
             lines.extend(_schema_description_block(node, described, current))
         # Only where the other arm is reachable: the cost of a move nobody can make is prompt mass.
         if ANSWER_AS_JSON in (schema.param_options(node, SCHEMA_TOGGLE_PARAM) or ()):

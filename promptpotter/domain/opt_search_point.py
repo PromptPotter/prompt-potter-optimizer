@@ -8,11 +8,10 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple,
 from pydantic import Field, field_validator
 
 from promptpotter.domain.pipeline_overlay import (
-    apply_node_overlay,
     fold_output_contract,
-    node_config_items,
     pin_default_routes,
 )
+from promptpotter.domain.pipeline_params import PipelineParams, apply_node_overlay
 from promptpotter.domain.search_point import (
     SHOTS_KEY,
     JobSearchPoint,
@@ -200,11 +199,11 @@ class NodePrompt(FrozenModel):
         return bool(self.fields or self.shots)
 
 
-def _resolved_config(pipeline_params: dict[str, Any], schema: PipelineSchema) -> dict[str, Any]:
+def _resolved_config(pipeline_params: PipelineParams, schema: PipelineSchema) -> PipelineParams:
     """Idempotent."""
     pp = strip_rendered_prompt(pipeline_params)
     if schema.active_steps:
-        pp["steps"] = list(schema.active_steps)
+        pp = pp.with_steps(list(schema.active_steps))
     return pin_default_routes(fold_output_contract(pp, schema), schema)
 
 
@@ -215,8 +214,8 @@ class OptSearchPoint(FrozenModel):
         default_factory=dict,
         description="Per prompt node, the loci it sets there; a node it sets nothing on is absent.",
     )
-    pipeline_params: dict[str, Any] = Field(
-        default_factory=dict,
+    pipeline_params: PipelineParams = Field(
+        default_factory=PipelineParams,
         description=(
             "Its node configuration, resolved: the active steps named, the output contract "
             "folded, no rendered prompt. `configured` is the one writer."
@@ -233,13 +232,13 @@ class OptSearchPoint(FrozenModel):
     def id(self) -> str:
         """The individual IS its content, never stored: one configuration reached twice is one id.
         Cached, so a copy changing content is built anew (`configured`), never `model_copy`-updated."""
-        return stable_hash([self.prompts_dump(), self.pipeline_params])
+        return stable_hash([self.prompts_dump(), self.pipeline_params.dump()])
 
     def prompts_dump(self) -> dict[str, Any]:
         return {node: prompt.model_dump(mode="json") for node, prompt in self.prompts.items()}
 
-    def configured(self, pipeline_params: dict[str, Any] | None, schema: PipelineSchema) -> Self:
-        resolved = _resolved_config(pipeline_params or {}, schema)
+    def configured(self, pipeline_params: PipelineParams, schema: PipelineSchema) -> Self:
+        resolved = _resolved_config(pipeline_params, schema)
         return type(self)(prompts=self.prompts, pipeline_params=resolved, lineage=self.lineage)
 
     def prompt(self, node: str) -> NodePrompt:
@@ -333,9 +332,10 @@ class OptSearchPoint(FrozenModel):
     ) -> JobSearchPoint:
         pp = _resolved_config(self.pipeline_params, schema)
         scored = self.scored_prompts(schema, framing, demo=demo)
+        nodes = dict(pp.nodes)
         for node, fields in scored.items():
-            pp.setdefault(node, {})["prompt"] = "\n\n".join(fields.values())
-        return JobSearchPoint(pipeline_params=pp, prompt_fields=scored)
+            nodes[node] = {**pp.node(node), "prompt": "\n\n".join(fields.values())}
+        return JobSearchPoint(pipeline_params=pp.with_nodes(nodes), prompt_fields=scored)
 
     def as_origin(self, *, changes_description: str) -> OptSearchPoint:
         lineage = IndividualLineage(changes_description=changes_description)
@@ -348,7 +348,7 @@ class OptSearchPoint(FrozenModel):
                 loci[Locus(node, field)] = text
             if prompt.shots:
                 loci[Locus(node, SHOTS_KEY)] = tuple(prompt.shots)
-        for node, config in node_config_items(self.pipeline_params):
+        for node, config in self.pipeline_params.nodes.items():
             for param, value in config.items():
                 if (locus := Locus(node, param)) in loci:
                     raise ValueError(f"{locus.name} is a prompt locus, and the config sets it too")
@@ -386,7 +386,8 @@ class OptSearchPoint(FrozenModel):
         )
         if not overlay:
             return written
-        return written.configured(apply_node_overlay(self.pipeline_params, overlay, schema), schema)
+        laid = apply_node_overlay(self.pipeline_params.nodes, overlay, schema)
+        return written.configured(self.pipeline_params.with_nodes(laid), schema)
 
     @classmethod
     def derive(

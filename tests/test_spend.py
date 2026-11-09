@@ -184,6 +184,7 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     PipelineNode,
@@ -594,7 +595,9 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
     )
     with scoped(ledger=cells):
         with spending_under(unbounded):
-            row_ = await measure_sample(Sample(id=0, query="10452", ground_truth=None), session)
+            row_ = await measure_sample(
+                Sample(id=0, query="10452", ground_truth=None), session, PipelineParams()
+            )
         banked = {"agent": StepUsage(input=1200, output=300, rate_priced_usd=0.25)}
         emit_replayed_step_tokens(banked, {})
     *ran, replayed = [r for _, r in cells.iter() if isinstance(r, TokenUsageRecord)]
@@ -743,7 +746,9 @@ async def _walk(
     backend = _OrderedFakeBackend(len(dataset))
     telemetry.bind_priced(set())
     # An individual of its own, so a walk replays only the cells of the one it resumes.
-    sp = resumes or JobSearchPoint(pipeline_params={"search": {"walk": uuid.uuid4().hex}})
+    sp = resumes or JobSearchPoint(
+        pipeline_params=PipelineParams().with_nodes({"search": {"walk": uuid.uuid4().hex}})
+    )
     committed: list[int] = []
     returned: list[int] = []
     book = spend_book(cap_usd)
@@ -1236,7 +1241,10 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         client=backend_client(built_stores.jobs_dir, max_cells_in_flight=1),
     )
     # The arm's individual and the one the bench grades, every cell of each already filed.
-    picked, graded = (JobSearchPoint(pipeline_params={"search": {"sp": n}}) for n in "pg")
+    picked, graded = (
+        JobSearchPoint(pipeline_params=PipelineParams().with_nodes({"search": {"sp": n}}))
+        for n in "pg"
+    )
     for sp in (picked, graded):
         filed(
             built_stores.archive,
@@ -1859,7 +1867,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
             ],
             filed_under([("llm_only", {"model": model})], bank.bank.dataset_hash),
         )
-    cell = measured_cell_price(bank, dict(on))
+    cell = measured_cell_price(bank, PipelineParams().with_nodes(dict(on)))
     assert cell is not None and (cell.usd, cell.seconds, cell.cells) == pytest.approx(
         (0.002, 2.0, 6)
     ), "a cell was priced off another model's rows, or off fewer than the archive holds"
@@ -1965,7 +1973,9 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         loop = asyncio.get_running_loop()
         began = loop.time()
         with spending_under(clock):
-            row = await measure_sample(Sample(id=0, query="q", ground_truth="a"), cut_session)
+            row = await measure_sample(
+                Sample(id=0, query="q", ground_truth="a"), cut_session, PipelineParams()
+            )
         return row, loop.time() - began
 
     row, waited = jumping_clock(cut_cell())
@@ -2330,6 +2340,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         async with CellEnvelope(600.0, attempts=remote.connector.cell_attempts, label="q"):
             return await remote.run_query(
                 Sample(id=0, query="q", ground_truth=None),
+                PipelineParams(),
                 bound=whole_cell,
                 billed=cell_billing(pipeline_schema([]), {}, {"n": attempt}),
             )
@@ -2442,7 +2453,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             async with CellEnvelope(600.0, attempts=client.connector.cell_attempts, label="q"):
                 return await client.run_query(
                     Sample(id=0, query="q", ground_truth="4"),
-                    {dspy_module.PROGRAM_NODE: config},
+                    PipelineParams().with_nodes({dspy_module.PROGRAM_NODE: config}),
                     bound=SendBound(input_tokens=20_000, output_tokens=2_000, usd=0.5),
                     billed=cell_billing(pipeline_schema([]), pairs, {}),
                 )
@@ -2537,6 +2548,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         async with CellEnvelope(600.0, attempts=agent.connector.cell_attempts, label="q"):
             return await agent.run_query(
                 Sample(id=sample_id, query="q", ground_truth=None),
+                PipelineParams(),
                 bound=whole,
                 billed=lambda _data: (None, None),
             )
@@ -3069,7 +3081,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     assert llm_only is not None and offered.model_options(llm_only) == list(
         free_tier.free_tier().task_models
     ), "a free check-in offers a model the tier does not list"
-    launched = {"steps": ["llm_only"], "llm_only": {"model": oss}}
+    launched = PipelineParams.model_validate({"steps": ["llm_only"], "llm_only": {"model": oss}})
     refused_models = [
         what
         for run in (config, tiered)
@@ -3102,7 +3114,9 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     ):
         params = {"steps": steps, "llm_only": {"model": oss, "reasoning_effort": effort}}
         selected = select_optimizer(run.optimization)
-        off = free_tier.outside_free_tier(run, selected, params, schema, fence)
+        off = free_tier.outside_free_tier(
+            run, selected, PipelineParams.model_validate(params), schema, fence
+        )
         assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
     with pytest.raises(PayloadInvalidError):
         free_tier.refuse_outside_free_tier(off)

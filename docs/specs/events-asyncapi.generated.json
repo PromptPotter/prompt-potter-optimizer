@@ -2220,14 +2220,12 @@
           "result_pipeline_params": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/PipelineParams"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Result Pipeline Params"
+            ]
           },
           "result_prompt_fields": {
             "additionalProperties": {
@@ -2642,7 +2640,10 @@
           "origin_params": {
             "anyOf": [
               {
-                "additionalProperties": true,
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
                 "type": "object"
               },
               {
@@ -2667,7 +2668,10 @@
             "description": "Which act seeded C0 — 'fork_seed' | 'campaign_origin', naming its lineage's `changes_description`; empty when the seed carries no origin (an L2/L3 rebase replays its own)."
           },
           "pipeline_overlay": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
             "title": "Pipeline Overlay",
             "type": "object"
           }
@@ -5105,10 +5109,8 @@
             "$ref": "#/components/schemas/IndividualLineage"
           },
           "pipeline_params": {
-            "additionalProperties": true,
-            "description": "Its node configuration, resolved: the active steps named, the output contract folded, no rendered prompt. `configured` is the one writer.",
-            "title": "Pipeline Params",
-            "type": "object"
+            "$ref": "#/components/schemas/PipelineParams",
+            "description": "Its node configuration, resolved: the active steps named, the output contract folded, no rendered prompt. `configured` is the one writer."
           },
           "prompts": {
             "additionalProperties": {
@@ -5837,6 +5839,10 @@
           "event"
         ],
         "title": "PhaseRecord",
+        "type": "object"
+      },
+      "PipelineParams": {
+        "additionalProperties": true,
         "type": "object"
       },
       "PipelineRead": {

@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import ConfigDict, JsonValue
 
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import dataset_hash, stable_hash
@@ -121,7 +122,7 @@ class ArchiveConfig(FrozenModel):
     prompt_fields_id: str
     # Empty with it, and its cells are then never replayed.
     node_configs: list[tuple[str, dict[str, Any]]]
-    pipeline_params: dict[str, Any]
+    pipeline_params: PipelineParams
 
     @property
     def individual(self) -> str:

@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal, NamedTuple, get_args
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.value_tree import Delivery, ValueLeaf, visibility_of
@@ -39,7 +40,7 @@ SCHEMA_OWNED_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozen
     {*OUTPUT_CONTRACT_KEYS, "schema_family", "schema_version"}
 )
 
-# `apply_node_overlay` merges an `object` one level; an `array` replaces wholesale.
+# `pipeline_params.py::apply_node_overlay` merges an `object` one level; an `array` replaces wholesale.
 NESTED_PARAM_TYPES: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {"object", "array"}
 )
@@ -783,10 +784,6 @@ class PipelineSchema(FrozenModel):
             for m in n.observation_mappings
         )
 
-    def to_pipeline_params(self) -> dict[str, Any]:
-        """The WIRE base only: ``origin_content_hash`` hashes the overlay-merged params instead."""
-        return {"steps": list(self.active_steps)}
-
     def model_options(self, node: "PipelineNode") -> list[str]:
         """Empty is a real answer: no value space, so a caller emits nothing, never a free string."""
         declared = node.param_allowed_values.get("model")
@@ -1060,24 +1057,18 @@ class PipelineSchema(FrozenModel):
 
         return self.model_copy(update={"declared_nodes": _narrowed(self.declared_nodes)})
 
-    def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    def node_configs(self, pipeline_params: PipelineParams) -> list[tuple[str, dict[str, Any]]]:
         """Off-chain nodes LEAD, configured ones only: trailing, ``ReplayFeed`` reads a reusable partial."""
         in_chain = {node.name for node in self.nodes}
         result: list[tuple[str, dict[str, Any]]] = [
             (node.name, cfg)
             for node in self.declared_nodes
-            if node.name not in in_chain
-            and isinstance(cfg := pipeline_params.get(node.name, {}), dict)
-            and cfg
+            if node.name not in in_chain and (cfg := pipeline_params.node(node.name))
         ]
-        for node in self.nodes:
-            cfg = pipeline_params.get(node.name, {})
-            if not isinstance(cfg, dict):
-                cfg = {}
-            result.append((node.name, cfg))
+        result.extend((node.name, pipeline_params.node(node.name)) for node in self.nodes)
         return result
 
-    def sp_hash(self, pipeline_params: dict[str, Any]) -> str:
+    def sp_hash(self, pipeline_params: PipelineParams) -> str:
         configs = self.node_configs(pipeline_params)
         return stable_hash(configs) if configs else ""
 

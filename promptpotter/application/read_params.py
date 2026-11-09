@@ -700,7 +700,7 @@ class ForkPreviewParams(
     """
 
     campaign_id: str = Field(min_length=1, max_length=128)
-    pipeline_overlay: dict[str, Any] = Field(
+    pipeline_overlay: dict[str, dict[str, Any]] = Field(
         description="The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it"
     )
 

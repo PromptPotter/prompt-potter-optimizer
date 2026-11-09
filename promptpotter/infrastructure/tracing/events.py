@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from promptpotter.domain.arms import Concluded
     from promptpotter.domain.cell_fold import ScoreSummary
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.run_records import (
         RoundClosedRecord,
         RoundEnteredRecord,
@@ -49,7 +50,7 @@ class QueryScoreStart:
     origin: str
     llm_provider: str
     prompt_fields_id: str
-    pipeline_params: dict[str, Any] | None
+    pipeline_params: PipelineParams | None
     schema_name: str
     session_id: str
     dataset_name: str

@@ -40,7 +40,6 @@ from promptpotter.connectors.protocol import (
     InProcessWorkload,
     cell_envelope_of,
 )
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.docker_host import (
@@ -94,6 +93,7 @@ if TYPE_CHECKING:
     from harbor.models.trial.result import TrialResult
     from harbor.trial.trial import Trial
 
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.value_tree import Delivery
     from promptpotter.infrastructure.store.stores import Stores
@@ -241,8 +241,8 @@ def _skill_delivery(cfg: Mapping[str, Any]) -> SkillDelivery:
     return cast(SkillDelivery, value)
 
 
-def _prompt_delivery(pipeline_params: dict[str, Any] | None) -> Delivery:
-    cfg = dict(node_config_items(pipeline_params)).get(AGENT_NODE, {})
+def _prompt_delivery(pipeline_params: PipelineParams) -> Delivery:
+    cfg = pipeline_params.node(AGENT_NODE)
     return "request" if _skill_delivery(cfg) == "system_prompt" else "artifact_body"
 
 
@@ -438,12 +438,11 @@ def _agent_fields(cfg: dict[str, Any]) -> dict[str, Any]:
 
 def harbor_wire_adapter(
     sample: Sample,
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
-    for node, cfg in node_config_items(pipeline_params):
-        if node == AGENT_NODE:
-            payload.update(_agent_fields(cfg))
+    if (cfg := pipeline_params.nodes.get(AGENT_NODE)) is not None:
+        payload.update(_agent_fields(cfg))
     return payload
 
 

@@ -692,17 +692,15 @@ facts: a lint over EW's one type door, not a mechanism.
 Grouped by the arc each would ride; workaround comments and dead top-level names came back clean.
 
 **A. The pipeline carrier is typed.** **Rides with:** the next change to `pipeline_resolve.py::ParamLayers`.
-- **`pipeline_params` is an untyped `dict[str, Any]`**: engine keys (`model`, `provider`,
+- **A node's config is an untyped `dict[str, Any]`** inside the carrier
+  `pipeline_params.py::PipelineParams(steps, nodes)`: engine keys (`model`, `provider`,
   `route_order`, `max_tokens`, …) are string-read with mixed tolerance (`cfg["model"]`,
-  `cfg.get("model")`, `str(cfg.get("model", ""))`); the reserved `steps` list shares the bag with the
-  node dicts (`pipeline_overlay.py::node_config_items` skips it by `isinstance`, and `"steps"` is
-  spelled again across connectors and domain, past `domain/CLAUDE.md`'s probe); the prompt is split
+  `cfg.get("model")`, `str(cfg.get("model", ""))`); the prompt is split
   off its config by `k != "prompt"` beside `search_point.py::strip_rendered_prompt`. Two merges
-  (`campaign_config.py::merge_config_layers`, `pipeline_overlay.py::apply_node_overlay`) fold one thing.
-  An optimizer's llm nodes already read `search_point.py::NodeConfig`. Action: `PipelineParams(steps, nodes: {name: NodeConfig})`
-  parsed once at the overlay seam, engine keys as fields, the backend's params one dict.
-  **Re-test:** `git grep -c -E 'pipeline_params: (dict|Mapping)\[str, Any\]' -- promptpotter`;
-  `git grep -n '"steps"\|k != "prompt"' -- promptpotter`.
+  (`campaign_config.py::merge_config_layers`, `pipeline_params.py::apply_node_overlay`) fold one thing.
+  An optimizer's llm nodes already read `search_point.py::NodeConfig`. Action: the carrier's
+  nodes typed by one engine-key base `NodeConfig` extends, the backend's params one dict.
+  **Re-test:** `git grep -n 'k != "prompt"' -- promptpotter`.
 - **`connectors/protocol.py::InProcessWorkload.experiment` is a `Mapping`** that
   `runner/inner/tasks.py::parse_resolved` re-parses at each reader (`dbllmbench.py` reads it with
   `.get("questions") or []`). Action: each connector declares its experiment model; the workload

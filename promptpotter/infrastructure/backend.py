@@ -62,6 +62,7 @@ CELL = CallLabel("backend_cell", "backend")
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.sample import Sample
 
@@ -240,7 +241,7 @@ class BackendClient:
     async def run_query[S](
         self,
         sample: Sample,
-        pipeline_params: dict[str, Any] | None = None,
+        pipeline_params: PipelineParams,
         *,
         bound: SendBound | None,
         billed: CellBilling[S],

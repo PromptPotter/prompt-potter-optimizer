@@ -29,7 +29,6 @@ from promptpotter.domain.l4.proxies import (
     INNER_REPORTED_KEYS,
     INNER_RESULT_KEY,
 )
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.hashing import module_source_digest, stable_hash
 
@@ -38,6 +37,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -91,11 +91,11 @@ def _instrument(cells: InnerCells, cell: Seat) -> str:
 
 def promptpotter_wire_adapter(
     sample: Sample,
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
 
-    optimizer_prompt_overrides = {k: dict(v) for k, v in node_config_items(pipeline_params) if v}
+    optimizer_prompt_overrides = {k: dict(v) for k, v in pipeline_params.nodes.items() if v}
     if optimizer_prompt_overrides:
         payload["optimizer_prompt_overrides"] = optimizer_prompt_overrides
 
@@ -126,12 +126,12 @@ async def _in_process_run(
     return await run_inner_cycle(sample, payload)
 
 
-def _cell_envelope_s(sample: Sample, pipeline_params: dict[str, Any] | None) -> float:
+def _cell_envelope_s(sample: Sample, pipeline_params: PipelineParams) -> float:
     """Through this connector's OWN adapter, so the envelope and the run that spends it read one payload."""
     return inner_cell_envelope_s(sample, promptpotter_wire_adapter(sample, pipeline_params))
 
 
-def _cell_hop(sample: Sample, pipeline_params: dict[str, Any] | None) -> CycleHop | None:
+def _cell_hop(sample: Sample, pipeline_params: PipelineParams) -> CycleHop | None:
     return inner_cell_hop(sample, promptpotter_wire_adapter(sample, pipeline_params))
 
 

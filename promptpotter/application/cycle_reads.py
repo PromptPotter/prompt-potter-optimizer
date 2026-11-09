@@ -20,7 +20,6 @@ from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.export import ExportTier
 from promptpotter.domain.hierarchy import HierarchySteps
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import Election
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.strict_model import StrictModel
@@ -148,7 +147,7 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
         if arm is None
         else {
             node: str(config["model"])
-            for node, config in node_config_items(arm.individual.pipeline_params)
+            for node, config in arm.individual.pipeline_params.nodes.items()
             if "model" in config
         }
     )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.domain.arm_reading import DisplayMetric
@@ -12,6 +12,7 @@ from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import instrument_of
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.run_records import PipelineRead
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import Scorer
@@ -107,7 +108,7 @@ class Session:
     dataset_name: str | None = None
     # Where `dataset_name` resolved at init; `None` where a session measures no definition.
     dataset: ResolvedDataset | None = None
-    pipeline_params: dict[str, Any] = field(default_factory=dict)
+    pipeline_params: PipelineParams = field(default_factory=PipelineParams)
     # Per node, the `pipeline_params` keys hashed into identity and never sent to a backend.
     identity_keys: dict[str, frozenset[str]] = field(default_factory=dict)
     langfuse: LangfuseLogger | None = None
