@@ -33,7 +33,7 @@ def typed_config(cfg: Mapping[str, object]) -> NodeConfig:
     calls = {k: v for k, v in cfg.items() if k in CALL_CONFIG_KEYS}
     runs_prompt = resolved_key(calls.get("prompt_family"), calls.get("prompt_version"))
     edits = {f: cfg[f] for f in PROMPT_FIELDS if f in cfg} if runs_prompt else {}
-    return NodeConfig.model_validate({**calls, "prompt_edits": edits} if edits else calls)
+    return NodeConfig.model_validate({**calls, "prompt_edits": edits})
 
 
 def laid_config(

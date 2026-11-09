@@ -139,11 +139,12 @@ PricedPair = tuple[str | None, str | None]
 _UNROUTED: PricedPair = (None, None)
 
 
-def priced_pairs(session: Session, wire_params: PipelineParams) -> dict[str, PricedPair]:
-    priced_as = session.backend_client.priced_as
-    return {
-        name: priced_as(NodeCall.model_validate(cfg)) for name, cfg in wire_params.nodes.items()
-    }
+def node_calls(params: PipelineParams) -> dict[str, NodeCall]:
+    return {name: NodeCall.model_validate(cfg) for name, cfg in params.nodes.items()}
+
+
+def priced_pairs(session: Session, calls: Mapping[str, NodeCall]) -> dict[str, PricedPair]:
+    return {name: session.backend_client.priced_as(cfg) for name, cfg in calls.items()}
 
 
 def _reply_spend(data: Mapping[str, Any], pairs: Mapping[str, PricedPair]) -> PipelineData:
@@ -257,21 +258,21 @@ async def _attempt_bound(spend: LLMSpendBound, cfg: NodeCall, priced_as: PricedP
 
 
 def _node_spends(
-    session: Session, wire_params: PipelineParams
+    session: Session, calls: Mapping[str, NodeCall]
 ) -> list[tuple[PipelineNode, NodeCall, NodeSpendBound | None]]:
     client = session.backend_client
     spends = []
     for node in session.pipeline_schema.nodes:
-        cfg = NodeCall.model_validate(wire_params.node(node.name))
+        cfg = calls.get(node.name) or NodeCall()
         spends.append((node, cfg, client.node_spend_bound(node, cfg)))
     return spends
 
 
-async def attempt_bounds(session: Session, wire_params: PipelineParams) -> dict[str, SendBound]:
+async def attempt_bounds(session: Session, calls: Mapping[str, NodeCall]) -> dict[str, SendBound]:
     priced_as = session.backend_client.priced_as
     return {
         node.name: await _attempt_bound(spend, cfg, priced_as(cfg))
-        for node, cfg, spend in _node_spends(session, wire_params)
+        for node, cfg, spend in _node_spends(session, calls)
         if isinstance(spend, LLMSpendBound)
     }
 
@@ -303,8 +304,12 @@ def measured_cell_price(session: Session, wire_params: PipelineParams) -> CellPr
     )
 
 
-async def cell_bound(session: Session, wire_params: PipelineParams) -> SendBound | None:
+async def cell_bound(session: Session, params: PipelineParams) -> SendBound | None:
     """``None`` where the backend's own sends are each admitted; a node with no served bound leaves it UNBOUNDED."""
+    return await _calls_bound(session, node_calls(params))
+
+
+async def _calls_bound(session: Session, calls: Mapping[str, NodeCall]) -> SendBound | None:
     client = session.backend_client
     if client.connector.holds_own_sends and client.connector.sent_spend_bound is None:
         return None
@@ -313,7 +318,7 @@ async def cell_bound(session: Session, wire_params: PipelineParams) -> SendBound
     bounded = True
     unpriced: tuple[str, ...] = ()
     served = False
-    for node, cfg, spend in _node_spends(session, wire_params):
+    for node, cfg, spend in _node_spends(session, calls):
         if spend is None:
             bounded = bounded and not node.is_llm
             continue
@@ -509,8 +514,9 @@ async def measure_sample(
         wire_params = interpolate_pipeline_params(
             _without_identity(pipeline_params, session.identity_keys), sample.model_dump()
         )
-        pairs = priced_pairs(session, wire_params)
-        data, spent, envelope = await _send_cell(sample, session, wire_params, pairs)
+        calls = node_calls(wire_params)
+        pairs = priced_pairs(session, calls)
+        data, spent, envelope = await _send_cell(sample, session, wire_params, calls, pairs)
 
         ranked = terminal_ranking(data, pipeline_schema)
         predicted = _predicted(data, ranked, session.backend_client.connector.answer_key)
@@ -569,11 +575,12 @@ async def _send_cell(
     sample: Sample,
     session: Session,
     wire_params: PipelineParams,
+    calls: Mapping[str, NodeCall],
     pairs: Mapping[str, PricedPair],
 ) -> tuple[dict[str, Any], PipelineData, CellEnvelope]:
     query = sample.query
     client = session.backend_client
-    bound = await cell_bound(session, wire_params)
+    bound = await _calls_bound(session, calls)
     # The run's wall clock bounds every cell, so one still open at its edge is cut.
     budget_s = client.connector.cell_envelope_s(sample, wire_params)
     if (left := require_spend_book(f"cell {sample.id}").clock_left()) is not None:
@@ -611,7 +618,7 @@ async def _send_cell(
                     billed=cell_billing(
                         session.pipeline_schema,
                         pairs,
-                        await attempt_bounds(session, wire_params),
+                        await attempt_bounds(session, calls),
                     ),
                 )
             except httpx.HTTPStatusError as exc:

@@ -320,6 +320,27 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   Action: a ledger-record base declares it. **Rides with:** M11. **Re-test:**
   `git grep -n "getattr(record, \"forks_inherit\"" -- promptpotter` is empty.
 
+### Batch 14's review (2026-11-08)
+
+- **A node's call keys are typed strict at measurement, past the input boundary**:
+  `sample_measurement.py::node_calls` parses each cell's nodes through `NodeCall`, where main read
+  them loosely, so `max_tokens: 1024.0` or `seed: "42"` on a target node fails `cell_bound` at
+  mint, `loop_start` and `run_prep` with a non-payload error, and errors every cell. Latent: no
+  dataset YAML holds such a value. Action: type every node through `NodeCall` once, at the
+  origin/draft input boundary, refusing with `PayloadInvalidError`; `PipelineParams.nodes` holds
+  `NodeCall`s and `node_calls` goes. **Rides with:** M8. **Re-test:** a definition laying
+  `max_tokens: 1024.0` is refused at `new` with a located 422; `git grep -n "def node_calls" --
+  promptpotter` is empty.
+- **`PipelineParams(steps=..., nodes=...)` builds a node named `nodes`**: `pipeline_params.py::_split`
+  reads keyword arguments as the laid document. No caller does it today. Action: one way to build
+  it, a `laid()` classmethod or a guarded `__init__`. **Rides with:** M8. **Re-test:**
+  `PipelineParams(nodes={"a": {}})` refuses or holds node `a`, never a node `nodes`.
+- **The manifest's prompt-field refusal names `NodeConfig / prompt_edits.persona`**, where main
+  named `OptimizerPromptTemplate / persona`: pydantic's model path, read by an operator. Action:
+  the manifest refuses through `PayloadInvalidError.refusing`, located at
+  `optimization.nodes.{node}.config.{field}`. **Rides with:** M8. **Re-test:** a manifest laying
+  `persona: 5` is refused naming `config.persona`, with no `errors.pydantic.dev` URL.
+
 ### The connector and entry-point seam audits (two unbiased reads, 2026-11-06)
 
 - **Resuming a campaign takes its connector from today's dataset file** —
@@ -694,13 +715,13 @@ Grouped by the arc each would ride; workaround comments and dead top-level names
 **A. The pipeline carrier is typed.** **Rides with:** the next change to `pipeline_resolve.py::ParamLayers`.
 - **A node's config is an untyped `dict[str, Any]`** inside the carrier
   `pipeline_params.py::PipelineParams(steps, nodes)`. The engine keys are one base model,
-  `search_point.py::NodeCall`, which `NodeConfig` extends; the child door, the fork seed and the
-  spend bound read through it. The rest still string-read them with mixed tolerance
-  (`cfg["model"]`, `cfg.get("model")`, `str(cfg.get("model", ""))`), 47 `.get` lines: `harbor.py`
-  12, `dbllmbench.py` 5, `pipeline_schema.py` 5, `preflight.py` 3, `pipeline_overlay.py` 3, and 19
-  across 13 more files; `harbor.py`'s spend bound re-reads its typed node's dump. Two merges
-  (`campaign_config.py::merge_config_layers`, `pipeline_params.py::apply_node_overlay`) fold one
-  thing. Action: the carrier's nodes typed by `NodeCall`, laid in their key order. **Re-test:**
+  `search_point.py::NodeCall`, which `NodeConfig` extends; the fork seed and the spend bound read
+  through it, the bound off one parse per cell (`sample_measurement.py::node_calls`). The rest
+  still string-read them with mixed tolerance (`cfg["model"]`, `cfg.get("model")`,
+  `str(cfg.get("model", ""))`), 44 `.get` lines: `harbor.py` 9, `dbllmbench.py` 5,
+  `pipeline_schema.py` 5, `preflight.py` 3, `pipeline_overlay.py` 3, and 19 across 13 more files.
+  Two merges (`campaign_config.py::merge_config_layers`, `pipeline_params.py::apply_node_overlay`)
+  fold one thing. Action: the carrier's nodes typed by `NodeCall`, laid in their key order. **Re-test:**
   `git grep -c -E '\.get\(.(provider|model|temperature|max_tokens|route_order).\)' -- promptpotter`.
 - **`connectors/protocol.py::InProcessWorkload.experiment` is a `Mapping`** that
   `runner/inner/tasks.py::parse_resolved` re-parses at each reader (`dbllmbench.py` reads it with

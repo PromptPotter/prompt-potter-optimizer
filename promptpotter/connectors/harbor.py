@@ -414,13 +414,17 @@ def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, An
 _AGENT_SENDER = "registry-client.ChatRequest"
 
 
-def _agent_fields(cfg: dict[str, Any]) -> dict[str, Any]:
+def _refuse_discarded(cfg: Mapping[str, Any]) -> None:
     if discarded := sorted(cfg.keys() & _DISCARDED_SENDER_KEYS):
         raise ValueError(
             f"harbor connector: `nodes.{AGENT_NODE}.config` sets {discarded}, which configure "
             "terminus-2's own sender; `_AgentModel` sends in its place, so they would reach no "
             "wire. Delete them."
         )
+
+
+def _agent_fields(cfg: dict[str, Any]) -> dict[str, Any]:
+    _refuse_discarded(cfg)
     fields: dict[str, Any] = {SKILL_DELIVERY_KEY: _skill_delivery(cfg)}
     if prompt := cfg.get("prompt"):
         fields["prompt"] = prompt
@@ -447,12 +451,13 @@ def harbor_wire_adapter(
     return payload
 
 
-def _refuse_send_faults(
-    agent_name: str, model: str | None, provider: str | None, send: Mapping[str, Any]
-) -> None:
+def _refuse_send_faults(agent_name: str, cfg: NodeCall) -> None:
     """What `_AgentModel` would otherwise meet mid-episode, refused before a cell is bought."""
+    backend = cfg.model_extra or {}
+    _refuse_discarded(backend)
+    model, provider = cfg.model, cfg.provider
     where = f"harbor connector: `nodes.{AGENT_NODE}.config`"
-    if model is None and provider is None:
+    if not model and not provider:
         if _AGENTS.get(agent_name, _UNDECLARED).model_seam:
             raise ValueError(
                 f"{where} names no model and no provider, so its {agent_name} agent has "
@@ -466,13 +471,13 @@ def _refuse_send_faults(
         )
     if provider not in providers():
         raise ValueError(f"{where}: no LLM provider {provider!r}; have {sorted(providers())}.")
-    if send.get("max_input_tokens") is None:
+    if backend.get("max_input_tokens") is None:
         raise ValueError(
             f"{where} declares no `max_input_tokens`: terminus-2 summarizes against it, and "
             "nothing else tells it the model's window."
         )
     spec = openai_compat_spec(provider)
-    if send.get("route_order") and (spec is None or not spec.gateway):
+    if cfg.route_order and (spec is None or not spec.gateway):
         raise ValueError(
             f"{where} sets `route_order` on {provider!r}, which is no gateway: it has no host "
             "behind it to route to."
@@ -485,17 +490,16 @@ def _sent_spend_bound(
     if node != AGENT_NODE:
         return None
     # What the adapter SENDS, retries excluded: each of those is admitted at its own bound.
-    fields = _agent_fields(cfg.model_dump(exclude_unset=True))
-    send, agent = fields.get("send") or {}, fields.get("agent_kwargs") or {}
-    _refuse_send_faults(_agent_name(experiment), fields.get("model"), fields.get("provider"), send)
+    backend = cfg.model_extra or {}
+    _refuse_send_faults(_agent_name(experiment), cfg)
     turns, reply, context = (
-        agent.get("max_turns"),
-        send.get("max_tokens"),
-        send.get("max_input_tokens"),
+        backend.get("max_turns"),
+        cfg.max_tokens,
+        backend.get("max_input_tokens"),
     )
     if turns is None or reply is None or context is None:
         return None
-    summarized = _TERMINUS_SUMMARY_CALLS if agent.get("enable_summarize", True) else 0
+    summarized = _TERMINUS_SUMMARY_CALLS if backend.get("enable_summarize", True) else 0
     # Our client holds each send at the dearest host: its gateway route falls back, capped.
     return LLMSpendBound(
         kind="llm",

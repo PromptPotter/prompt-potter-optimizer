@@ -4,14 +4,11 @@ import logging
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
-
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
 from promptpotter.domain.search_point import (
     PARAM_FORBIDDEN_KEYS,
     SHOTS_KEY,
-    NodeCall,
     missing_template_vars,
 )
 from promptpotter.domain.wounds import ValidationFailure
@@ -49,15 +46,6 @@ def _matches_declared_type(value: Any, declared: str) -> bool:
 def _off_carrier(locus: Locus, value: object, allowed: list[str]) -> ValidationFailure:
     return ValidationFailure(
         axis=locus.name, value=str(value)[:300], allowed=allowed, reason="unknown_param"
-    )
-
-
-def _mistyped(axis: str, value: object, declared: object) -> ValidationFailure:
-    return ValidationFailure(
-        axis=axis,
-        value=f"{value!r} ({type(value).__name__})",
-        allowed=[str(declared)],
-        reason="type_mismatch",
     )
 
 
@@ -137,18 +125,11 @@ def carried_writes(
         if not isinstance(params, dict) or not declared(name):
             continue
         for key, value in params.items():
-            if schema.locus_kind(name, key) != "config":
+            if schema.locus_kind(name, key) == "config":
+                config.setdefault(name, {})[key] = value
+            else:
                 emittable = sorted(schema.node_param_keys().get(name, set()))
                 failures.append(_off_carrier(Locus(name, key), value, emittable))
-                continue
-            try:
-                NodeCall.model_validate({key: value})
-            except ValidationError:
-                failures.append(
-                    _mistyped(f"{name}.{key}", value, NodeCall.model_fields[key].annotation)
-                )
-                continue
-            config.setdefault(name, {})[key] = value
     return prompts, config, failures
 
 
@@ -195,7 +176,14 @@ def overlay_failures(
                 and value is not None
                 and not _matches_declared_type(value, declared_type)
             ):
-                failures.append(_mistyped(f"{node_name}.{param}", value, declared_type))
+                failures.append(
+                    ValidationFailure(
+                        axis=f"{node_name}.{param}",
+                        value=f"{value!r} ({type(value).__name__})",
+                        allowed=[declared_type],
+                        reason="type_mismatch",
+                    )
+                )
                 continue
             # `is not None`, never truthiness: `[]` is a declared axis.
             allowed = pipeline_schema.param_options(

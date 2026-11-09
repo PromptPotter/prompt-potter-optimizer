@@ -59,7 +59,7 @@ assert tuple(OptimizerPromptTemplate.model_fields) == PROMPT_FIELDS
 
 @shapes_optimizer_prompt
 class OptimizerPromptEdits(
-    create_model("_Edits", __base__=StrictModel, **dict.fromkeys(PROMPT_FIELDS, (str | None, None)))  # type: ignore[misc]
+    create_model("_Edits", __base__=StrictModel, **dict.fromkeys(PROMPT_FIELDS, (str, None)))  # type: ignore[misc]
 ):
-    """The fields a node sets over its template, by `draft_edit.py::_partial`'s rule: each optional
-    with no default, so an unsent field states no value; its ``exclude_none`` dump is the edit."""
+    """The fields a node sets over its template: an unsent field stays ``None`` and a sent null
+    refuses (a reset is `EditDraftPatch.reset`'s paths), so its ``exclude_none`` dump is the edit."""

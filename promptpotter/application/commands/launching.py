@@ -5,8 +5,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
-
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     mint_diag_sibling,
     mint_operator_fork,
@@ -130,10 +128,7 @@ def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, A
                         "one (spell it as JSON)"
                     ) from None
             params[param] = value
-        try:
-            NodeCall.model_validate(params)
-        except ValidationError as exc:
-            raise PayloadInvalidError(f"payload.seed steers {node} mistyped: {exc}") from None
+        PayloadInvalidError.validating(NodeCall, params, under=("seed", "pipeline_overlay", node))
         typed[node] = params
     return typed
 

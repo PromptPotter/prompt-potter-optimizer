@@ -24,6 +24,7 @@ from promptpotter.application.scoring.sample_measurement import (
     attempt_bounds,
     cell_billing,
     cell_bound,
+    node_calls,
     priced_pairs,
 )
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
@@ -150,10 +151,11 @@ async def run_bbeh_campaign(
         per_task_results: dict[str, Record] = {}
         # Outside the run, so under a book of its own: every cell is still admitted and metered.
         bound = await cell_bound(session, result_pipeline_params)
+        calls = node_calls(result_pipeline_params)
         billed = cell_billing(
             session.pipeline_schema,
-            priced_pairs(session, result_pipeline_params),
-            await attempt_bounds(session, result_pipeline_params),
+            priced_pairs(session, calls),
+            await attempt_bounds(session, calls),
         )
         client = session.backend_client
         with spending_under(unbounded_spend_book()):

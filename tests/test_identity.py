@@ -544,6 +544,14 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert {k: v for k, v in drafted_hashes.items() if k != "capo_mutate"} == {
         k: v for k, v in capo_hashes.items() if k != "capo_mutate"
     }, "a prompt edit on one node moved other nodes' hashes"
+    # A reset is the draft's path list; a null laid over an authored field would reset it unseen.
+    with pytest.raises(PayloadInvalidError, match="instruction"):
+        select_optimizer(
+            OptimizerChoice(
+                optimizer="capo",
+                nodes={"capo_mutate": ManifestNodeOverlay(config={"instruction": None})},
+            )
+        )
     both = select_optimizer(
         spawn._laid_arm(
             CampaignConfig.model_validate(
@@ -1908,7 +1916,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             fork,
         )
     # A steer off its engine key's type is refused typed at the door, never minted.
-    with pytest.raises(PayloadInvalidError, match="mistyped"):
+    with pytest.raises(PayloadInvalidError, match="temperature"):
         parse_cycle_seed(
             ForkSeed.model_validate({"pipeline_overlay": {"a": {"temperature": '"warm"'}}}),
             stores,
@@ -2378,13 +2386,15 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             )
         )
     )
-    for overlay, refused_axes in (
-        ({"l1_generate": {"invented_knob": 1}}, ["l1_generate.invented_knob"]),
-        ({"l1_critique": {"layout": "hdr"}}, ["l1_critique.layout"]),
+    for overlay, reasons in (
+        ({"l1_generate": {"invented_knob": 1}}, [("l1_generate.invented_knob", "unknown_param")]),
+        ({"l1_critique": {"layout": "hdr"}}, [("l1_critique.layout", "type_mismatch")]),
         ({"l1_critique": {"layout": {"instruction": ["plan"]}}}, []),
     ):
-        found = [f.axis for f in overlay_failures(overlay, outer_schema, running=PipelineParams())]
-        assert found == refused_axes, f"{overlay}: admitted a param the schema does not declare"
+        judged = overlay_failures(overlay, outer_schema, running=PipelineParams())
+        assert [(f.axis, f.reason) for f in judged] == reasons, (
+            f"{overlay}: admitted a param the schema does not declare, or off its declared type"
+        )
     grade = PipelineNode(
         name="grade",
         kind=NodeKind.LLM,
@@ -2423,14 +2433,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "grade.invented_field",
     ], "a write off its declared carrier reached the child"
     assert config == {}, "a prompt field rode the config overlay"
-    # An engine key written off its type is refused on the child, as the declared type refuses.
-    _, config, carried = carried_writes(
-        graded, prompt_loci={}, overlay={"grade": {"model": 5, "max_tokens": "2048"}}, demo=()
-    )
-    assert (config, [(f.axis, f.reason) for f in carried]) == (
-        {},
-        [("grade.model", "type_mismatch"), ("grade.max_tokens", "type_mismatch")],
-    ), "a mistyped engine key reached the child's config"
 
     # A SECOND prompt node, on a roster of its own, is written as the first is — by L1's wire and
     # an operator's arm — and a member knowing one prompt is refused pre-spend.
