@@ -7,14 +7,11 @@ import uuid
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-import httpx
-
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SendBudget, parse_retry_after
 from promptpotter.shared.errors import ErrorCategory, graceful
 from promptpotter.shared.extras import Extra, install_hint, installed
-from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
 
@@ -314,36 +311,6 @@ class LangfuseLogger:
     @property
     def rate_limited(self) -> bool:
         return time.time() < self._rate_limit_until
-
-    def link_item_to_run(
-        self,
-        dataset_item_id: str,
-        trace_id: str,
-        observation_id: str | None = None,
-        run_name: str = "",
-        run_metadata: dict[str, Any] | None = None,
-    ) -> None:
-        if not self.enabled or not self.client:
-            return
-        body: dict[str, Any] = {
-            "datasetItemId": dataset_item_id,
-            "traceId": trace_id,
-            "runName": run_name,
-            "metadata": run_metadata or {},
-        }
-        if observation_id:
-            body["observationId"] = observation_id
-        url = f"{settings.LANGFUSE_HOST}/api/public/dataset-run-items"
-        auth = (
-            settings.LANGFUSE_PUBLIC_KEY.get_secret_value(),
-            settings.LANGFUSE_SECRET_KEY.get_secret_value(),
-        )
-
-        def post() -> None:
-            resp = httpx.post(url, auth=auth, json=body, timeout=30, verify=tls_context())
-            resp.raise_for_status()
-
-        self._resent(post)
 
     def flush(self) -> None:
         if not (self.enabled and self.client):

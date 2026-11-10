@@ -3,11 +3,10 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from promptpotter.application import health
+from promptpotter.application import health, notices
 from promptpotter.application.jobs.capacity import SLOT_BOUND_WORDS
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.read_params import QuotaStatusParams
-from promptpotter.presentation.admin_bot import check_health_and_tell
 from promptpotter.presentation.cli.commands.result import CommandResult, said_text
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
@@ -66,7 +65,7 @@ async def cmd_close_admission(args: argparse.Namespace) -> CommandResult:
 
 
 async def cmd_health(_args: argparse.Namespace) -> CommandResult:
-    checked = await asyncio.to_thread(check_health_and_tell)
+    checked = await asyncio.to_thread(notices.check_and_tell)
     return CommandResult(
         data={one.probe.name: one.reading._asdict() for one in checked},
         # The state leads each line: `deploy-linux/update.sh` reads it.

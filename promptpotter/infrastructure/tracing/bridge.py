@@ -13,9 +13,6 @@ from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.tracing.events import (
     CampaignStart,
     DatasetRegistered,
-    MeasurementEvent,
-    QueryNodeSpan,
-    QueryScoreStart,
     TraceSink,
 )
 from promptpotter.infrastructure.tracing.langfuse_sink import LangfuseSink
@@ -121,14 +118,6 @@ class TracingProjection(Projection):
             items.append((sample.query, sample.ground_truth or ""))
         registered = DatasetRegistered(dataset_name=DATASET_NAME, items=tuple(items))
         self._tell("dataset registration", lambda sink: sink.on_dataset_registered(registered))
-
-    def emit(self, event: MeasurementEvent) -> None:
-        if isinstance(event, QueryScoreStart):
-            self._tell("query score start", lambda sink: sink.on_query_score_start(event))
-        elif isinstance(event, QueryNodeSpan):
-            self._tell("query node span", lambda sink: sink.on_query_node_span(event))
-        else:
-            self._tell("query score end", lambda sink: sink.on_query_score_end(event))
 
     def langfuse_trace_id(self) -> str | None:
         if self._langfuse is None:

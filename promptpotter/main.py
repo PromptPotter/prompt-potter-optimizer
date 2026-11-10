@@ -21,7 +21,7 @@ from starlette.exceptions import HTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from promptpotter.application import health
+from promptpotter.application import health, notices
 from promptpotter.application.account import record_refusal
 from promptpotter.application.commands.dispatcher import command_answer
 from promptpotter.application.datasets.startability import offer_faults
@@ -43,7 +43,7 @@ from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody, StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
-from promptpotter.presentation.admin_bot import check_health_and_tell, notify_operator
+from promptpotter.infrastructure.outbound import notify_operator
 from promptpotter.presentation.api.deps import (
     auth_is_open,
     build_stores_from_identity,
@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bundle = build_identity_bundle(default_identity_paths())
     app.state.identity_bundle = bundle
     # Before any user can find out: what is broken is told now, not at its first use.
-    checked = await asyncio.to_thread(check_health_and_tell)
+    checked = await asyncio.to_thread(notices.check_and_tell)
     print(
         render_server_banner(
             brand_name=settings.BRAND_SERVICE_NAME,

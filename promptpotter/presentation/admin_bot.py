@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import sys
 import time
@@ -9,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from promptpotter.application import health
+from promptpotter.application import notices
 from promptpotter.application.account import (
     block_email,
     blocked_emails,
@@ -18,21 +17,17 @@ from promptpotter.application.account import (
     registered_user_id,
     revoke_grant,
     trail_by_email,
-    trails_since,
     unblock_email,
 )
-from promptpotter.application.app_visits import due_digest, mark_told
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
-from promptpotter.application.power import PowerLevel, power_change
-from promptpotter.application.views.trail import trail_fields, trail_notes, trail_rows
+from promptpotter.application.power import PowerLevel
+from promptpotter.application.views.trail import trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.run_records import Device
 from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
 from promptpotter.shared.tls import tls_context
 
@@ -183,68 +178,6 @@ def _handle_grant_command(command: str, argument: str, actor: str) -> str:
     return f"Granted {sub_user_id} [{', '.join(sorted(caps))}] as delegate of {delegator}."
 
 
-def _send_message(client: httpx.Client, chat_id: str, text: str) -> None:
-    try:
-        resp = client.post("/sendMessage", json={"chat_id": chat_id, "text": text})
-    except httpx.HTTPError:
-        logger.warning("sendMessage failed", exc_info=True)
-        return
-    # Telegram refuses in the BODY, not the transport: a 400 is no `httpx.HTTPError`.
-    if resp.status_code != 200:
-        logger.warning("sendMessage refused: HTTP %d %s", resp.status_code, resp.text[:300])
-
-
-def notify_operator(text: str, *, ring: bool) -> bool:
-    """Best-effort: ``False`` and never a raise, so a notice cannot fail the request behind it.
-
-    ``ring`` is the sender's call: an alert sounds, a notice for the record arrives silently.
-    """
-    token = settings.ADMIN_BOT_TELEGRAM_TOKEN.get_secret_value().strip()
-    chat_id = settings.ADMIN_BOT_CHAT_ID.strip()
-    if not token or not chat_id:
-        logger.info("Operator notice skipped (admin bot not configured): %s", text)
-        return False
-    try:
-        with httpx.Client(
-            base_url=f"https://api.telegram.org/bot{token}", timeout=10, verify=tls_context()
-        ) as client:
-            resp = client.post(
-                "/sendMessage",
-                json={"chat_id": chat_id, "text": text, "disable_notification": not ring},
-            )
-    except httpx.HTTPError:
-        logger.warning("Operator notice failed to send", exc_info=True)
-        return False
-    # A refusal is a non-200 body, not an exception; True on one reports an unheard notice as heard.
-    if resp.status_code != 200:
-        logger.warning("Operator notice refused: HTTP %d %s", resp.status_code, resp.text[:300])
-        return False
-    return True
-
-
-def check_health_and_tell() -> list[health.Checked]:
-    """Every entry point's health check, each change of state already told. Blocking."""
-    checked = asyncio.run(health.check(default_projects_root()))
-    for one in checked:
-        if one.change is not None and (said := health.notice(one)) is not None:
-            notify_operator(said, ring=one.change.state == "broken")
-    return checked
-
-
-def _tell_power(was: PowerLevel) -> PowerLevel:
-    """The level now; an unheard notice keeps the old one, so it is told again next time."""
-    now, notice = power_change(was)
-    if notice is not None and not notify_operator(notice.text, ring=notice.ring):
-        return was
-    return now
-
-
-def _tell_visits_digest() -> None:
-    digest = due_digest()
-    if digest is not None and notify_operator(digest.text, ring=digest.ring):
-        mark_told(digest)
-
-
 class _Duties:
     """What the bot does on its own clock; none waits on a command arriving, or on polling at all."""
 
@@ -253,17 +186,17 @@ class _Duties:
         self._roster: tuple[tuple[float, Callable[[], None]], ...] = (
             (_HEALTH_EVERY_S, self._health_and_trail),
             (_POWER_EVERY_S, self._watch_power),
-            (_DIGEST_EVERY_S, _tell_visits_digest),
+            (_DIGEST_EVERY_S, notices.tell_visits_digest),
         )
         self._due = [0.0] * len(self._roster)
 
     def _health_and_trail(self) -> None:
         # Checked first, so the briefing carries what this check just found.
-        check_health_and_tell()
-        forward_trail_to_briefing()
+        notices.check_and_tell()
+        notices.forward_trail_to_briefing()
 
     def _watch_power(self) -> None:
-        self._power = _tell_power(self._power)
+        self._power = notices.tell_power(self._power)
 
     def run_due(self) -> float:
         """Every duty that is due runs; the answer is the seconds until the next one."""
@@ -277,75 +210,7 @@ class _Duties:
         return max(1.0, min(self._due) - time.monotonic())
 
 
-def forward_new_account_to_crm(
-    email: str | None, name: str | None, user_id: str, account_count: int, device: Device | None
-) -> bool:
-    url = settings.N8N_SIGNUP_WEBHOOK_URL.get_secret_value().strip()
-    if not url:
-        logger.info("CRM forward skipped (N8N_SIGNUP_WEBHOOK_URL not set): %s", email or user_id)
-        return False
-    try:
-        with httpx.Client(timeout=10, verify=tls_context()) as client:
-            resp = client.post(
-                url,
-                json={
-                    "email": email or "",
-                    "name": name or "",
-                    "use_case": "",
-                    "signup_source": "promptpotter-app",
-                    "account_count": account_count,
-                    "device": device or "",
-                },
-            )
-    except httpx.HTTPError:
-        logger.warning("CRM forward failed for %s", email or user_id, exc_info=True)
-        return False
-    # A refusal is a non-2xx body, not an exception: read as sent, the contact is lost unnoticed.
-    if not resp.is_success:
-        logger.warning("CRM forward refused for %s: HTTP %d", email or user_id, resp.status_code)
-        return False
-    return True
-
-
-def forward_trail_to_briefing() -> bool:
-    """What every account did in the last day, and the box's health, sent OUT to n8n.
-
-    Sent whole each time: the receiver keeps the newest, so a missed send costs freshness only,
-    and a send that stops arriving is itself the box going quiet.
-    """
-    url = settings.N8N_TRAIL_WEBHOOK_URL.get_secret_value().strip()
-    if not url:
-        return False
-    trails, unreadable = trails_since(default_projects_root(), time.time() - _TRAIL_WINDOW_H * 3600)
-    try:
-        with httpx.Client(timeout=10, verify=tls_context()) as client:
-            resp = client.post(
-                url,
-                headers={
-                    "X-Trail-Secret": settings.N8N_TRAIL_WEBHOOK_SECRET.get_secret_value().strip()
-                },
-                json={
-                    "as_of": utcnow_iso(),
-                    "window_hours": _TRAIL_WINDOW_H,
-                    "accounts": [
-                        {"who": account.who, "lines": trail_fields(account)} for account in trails
-                    ],
-                    "unreadable": unreadable,
-                    "health": health.briefing(default_projects_root()),
-                },
-            )
-    except httpx.HTTPError:
-        logger.warning("Trail forward failed", exc_info=True)
-        return False
-    if resp.status_code != 200:
-        logger.warning("Trail forward refused: HTTP %d", resp.status_code)
-        return False
-    return True
-
-
-def _process_update(
-    update: dict[str, Any], client: httpx.Client, chat_id: str, passphrase: str | None
-) -> None:
+def _process_update(update: dict[str, Any], chat_id: str, passphrase: str | None) -> None:
     message = update.get("message") or update.get("edited_message")
     if not isinstance(message, dict):
         return
@@ -371,7 +236,7 @@ def _process_update(
         # The refusal is the reply: an invalid identity file, a bad argument, a crash alike.
         logger.exception("admin command /%s failed", command)
         reply = f"Error: {exc}"
-    _send_message(client, chat_id, reply)
+    notices.answer_operator(reply)
 
 
 def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
@@ -415,7 +280,7 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
                     continue
                 offset = int(update["update_id"]) + 1
                 try:
-                    _process_update(update, client, chat_id, passphrase)
+                    _process_update(update, chat_id, passphrase)
                 except Exception:
                     # One handler's raise must not end the operator's only admin channel (decisions.md § 0004).
                     logger.exception("admin command failed; channel stays up")

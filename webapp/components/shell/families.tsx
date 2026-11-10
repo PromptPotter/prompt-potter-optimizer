@@ -2,11 +2,8 @@ import type { ReactNode } from "react";
 import { FAMILY_IDS, nodeOfKey, type FamilyId, type View } from "@/lib/address";
 import type { FigureKey } from "@/lib/derivations";
 import { Empty } from "@/components/ui";
-import { AccountView } from "@/components/account/AccountView";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
-import { ComparePane } from "@/components/compare/ComparePane";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
-import { CostStrip } from "@/components/dashboard/scoring/CostStrip";
 import {
   CandidatesPane,
   HeatmapPane,
@@ -14,7 +11,7 @@ import {
   OptimizerPane,
   TimelinePane,
 } from "@/components/dashboard/layout/panes";
-import { ChatPane, FilesPane } from "./lazy-panes";
+import { AccountView, ChatPane, ComparePane, CostStrip, FilesPane } from "./lazy-panes";
 
 // The label is the view's command word (WCAG 2.5.3), so its pane's visible title contains it. A null
 // pane is mounted by chrome: the campaign list is the sidebar, which a phone shows while it is the last view.

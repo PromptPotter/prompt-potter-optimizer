@@ -18,6 +18,10 @@ No use case writes to disk or talks to a network except through one of these sea
 
 Every recursive delete goes through `store/io.py::rmtree_robust` / `unlink_robust`; a bare `shutil.rmtree` is a bug. <!-- probe: git grep -cE "shutil\.rmtree" -- promptpotter/*.py <= 1 -->
 
+## One outbound poster — `outbound.py`
+
+Every notice this box posts (operator, CRM, trail) goes through `outbound.py::post_json`, and a non-2xx body is read as a refusal only by `outbound.py::refused`. <!-- probe: git grep -cE "status_code != 200|is_success" -- promptpotter/presentation/admin_bot.py == 0 -->
+
 ## Backend wire and Docker host
 
 `docker_host.py` is the ONE `docker` CLI call <!-- probe: git grep -cE "^\s+.docker.,$" -- promptpotter/*.py <= 1 -->; taking a machine slot claims the machine (`backend.py::MachineSlots.hold`).

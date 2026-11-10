@@ -11,9 +11,6 @@ from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.tracing.events import (
     CampaignStart,
     DatasetRegistered,
-    QueryNodeSpan,
-    QueryScoreEnd,
-    QueryScoreStart,
     TraceSink,
 )
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
@@ -47,7 +44,6 @@ class LangfuseSink(TraceSink):
         self._node_observation_ids: dict[tuple[int | None, str], str] = {}
         self._dataset_item_ids: dict[tuple[str, str], str] = {}
         self._session_id: str | None = None
-        self._query_trace_ids: dict[tuple[str, str], tuple[str, str, str]] = {}
 
         self._state_cycle_id: str | None = None
         self._state_path: Path | None = None
@@ -256,72 +252,6 @@ class LangfuseSink(TraceSink):
         )
         self._lf.end_trace(trace_id)
         self._persist()
-
-    def on_query_score_start(self, event: QueryScoreStart) -> None:
-        if event.session_id:
-            self._bind_cycle(event.session_id)
-        metadata: dict[str, Any] = {
-            "run_id": event.run_id,
-            "llm_provider": event.llm_provider,
-            "prompt_fields_id": event.prompt_fields_id,
-        }
-        if event.pipeline_params:
-            metadata["pipeline_params"] = event.pipeline_params.dump()
-        trace_name = f"{event.schema_name}_pipeline" if event.schema_name else "pipeline"
-        trace_id = self._lf.create_trace(
-            name=trace_name,
-            input={"query": event.query, "expected_output": event.ground_truth},
-            session_id=event.session_id,
-            tags=["query", event.origin, "pipeline"],
-            metadata=metadata,
-        )
-        if trace_id:
-            self._query_trace_ids[(event.run_id, event.query)] = (
-                trace_id,
-                event.dataset_name,
-                event.origin,
-            )
-
-    def on_query_node_span(self, event: QueryNodeSpan) -> None:
-        entry = self._query_trace_ids.get((event.run_id, event.query))
-        if not entry:
-            return
-        trace_id = entry[0]
-        self._lf.create_span(
-            trace_id,
-            event.node_name,
-            event.input_data,
-            event.output_data,
-            event.metadata,
-            as_type=event.as_type,
-            model=event.model,
-            usage_details=event.usage_details,
-        )
-
-    def on_query_score_end(self, event: QueryScoreEnd) -> None:
-        entry = self._query_trace_ids.pop((event.run_id, event.query), None)
-        if not entry:
-            return
-        trace_id, dataset_name, origin = entry
-        self._lf.create_score(trace_id, "hit", 1.0 if event.hit else 0.0)
-        trace_output: dict[str, Any] = {
-            "predicted": event.predicted,
-            "expected_output": event.ground_truth,
-            "hit": event.hit,
-            "total_time": event.total_time,
-        }
-        trace_output.update(event.node_outputs)
-        self._lf.update_trace(trace_id, output=trace_output)
-        self._lf.end_trace(trace_id)
-        if not self._lf.rate_limited:
-            item_id = self._dataset_item_ids.get((dataset_name, event.query))
-            if item_id:
-                self._lf.link_item_to_run(
-                    dataset_item_id=item_id,
-                    trace_id=trace_id,
-                    run_name=event.run_id,
-                    run_metadata={"origin": origin},
-                )
 
     def flush(self) -> None:
         self._lf.flush()

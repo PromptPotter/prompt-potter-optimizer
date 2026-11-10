@@ -28,7 +28,9 @@ export function ensureChartRegistered(): void {
     BarController,
     LineController,
   );
-  // Before any chart mounts: a theme change re-inks the axes ahead of a chart's re-render.
+  // Before any chart mounts: the defaults ink the axes now, and a theme change re-inks them ahead of
+  // a chart's re-render.
+  applyChartDefaults();
   subscribeTheme(applyChartDefaults);
   registered = true;
 }

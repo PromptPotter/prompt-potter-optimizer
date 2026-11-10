@@ -48,11 +48,11 @@ appends a structure directive the export does not hold.
 
 ## 5. Cells as traces, scores as feedback
 
-`tracing/events.py` declares `QueryScoreStart`, `QueryNodeSpan` and `QueryScoreEnd`, `LangfuseSink` handles
-them, nothing constructs one, and `TracingProjection.emit` has no caller.
-<!-- probe: git grep -cE "QueryScoreStart\(" -- promptpotter == 0 -->
+The per-query trace path (`QueryScoreStart`, `QueryNodeSpan`, `QueryScoreEnd`, `TracingProjection.emit`)
+was dead and is deleted.
+<!-- probe: git grep -cE "QueryScoreStart" -- promptpotter == 0 -->
 
-**Revive it as a fold** ([`../architecture.md`](../architecture.md) § Tracing): the bridge feeds cells from
+**Build it as a fold** ([`../architecture.md`](../architecture.md) § Tracing): the bridge feeds cells from
 the records the bench already writes and `emit` goes. `MlflowClient.start_trace(..., experiment_id=,
 run_id=)` / `end_trace` per cell, the grade as `mlflow.log_feedback`, `link_prompt_versions_to_trace` once
 the winner registers. Step 1 bounds the volume.

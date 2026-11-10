@@ -12,7 +12,7 @@ import { useEntry } from "@/lib/hooks/useRegistry";
 import { useWorkspace } from "@/lib/workspace";
 import { TopStrip } from "./TopStrip";
 import { TimeRay } from "./TimeRay";
-import { CandidatesCard } from "@/components/candidates/CandidatesCard";
+import { CandidatesCard } from "@/components/shell/lazy-panes";
 import { ForestCard } from "@/components/candidates/ForestCard";
 import { BackendRetries } from "@/components/dashboard/pipeline/BackendRetries";
 import { BackendRevisionDrift } from "@/components/dashboard/pipeline/BackendRevisionDrift";

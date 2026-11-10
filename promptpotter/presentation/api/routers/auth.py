@@ -27,9 +27,9 @@ from promptpotter.infrastructure.identity.provider_config import (
 )
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
+from promptpotter.infrastructure.outbound import forward_new_account_to_crm, notify_operator
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import count_accounts
-from promptpotter.presentation.admin_bot import forward_new_account_to_crm, notify_operator
 from promptpotter.presentation.api.deps import (
     build_stores_from_identity,
     require_identity_bundle,

@@ -1,7 +1,6 @@
-import { useEffect, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { SIDEBAR_WIDTH, useSidebarCollapsed, useSidebarWidth } from "@/lib/prefs/sidebar";
-import { applyChartDefaults } from "@/lib/chart";
 import { cx } from "@/lib/cx";
 import { VendorSprite } from "@/components/ui";
 import { Sidebar } from "@/components/shell/sidebar/Sidebar";
@@ -31,10 +30,6 @@ function AppShellInner() {
   const [sidebarCollapsed] = useSidebarCollapsed();
   // Applied inline only while expanded, so the collapsed rail's class rule still wins.
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
-
-  useEffect(() => {
-    applyChartDefaults();
-  }, []);
 
   return (
     // Every surface reading the viewed tree composes `sampleSet` into the masked read.
