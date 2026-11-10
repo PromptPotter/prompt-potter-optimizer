@@ -14,6 +14,7 @@ from promptpotter.application.maintenance.migrations import (
     grant_ceiling,
     job_ending,
     job_refusal,
+    retired_ending,
 )
 from promptpotter.infrastructure.store.data_root import Staged
 
@@ -24,4 +25,5 @@ MIGRATIONS: dict[str, Callable[[Path], list[Staged]]] = {
     "grant ceiling": grant_ceiling.staged,
     "job ending": job_ending.staged,
     "job refusal": job_refusal.staged,
+    "retired ending": retired_ending.staged,
 }

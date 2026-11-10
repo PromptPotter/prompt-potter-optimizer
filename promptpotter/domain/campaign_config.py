@@ -188,8 +188,8 @@ class OptimizationConfig(OptimizerChoice):
         ge=0.0,
         le=1.0,
         description=(
-            "Stop ``target_hit`` once the declared pick's own accuracy reaches this. ``None`` "
-            "→ no such stop. Refused on an arm of a head-to-head, which stops only on its "
+            "Stop ``target_hit`` once the declared pick's level over the origin, on the origin's "
+            "panel, reaches this at its paired interval's lower bound. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its "
             "record's rule."
         ),
     )

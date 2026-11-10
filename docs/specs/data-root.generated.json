@@ -1923,7 +1923,6 @@
           "StopReason": {
             "description": "Why a cycle's run ended or paused.",
             "enum": [
-              "perfect_score",
               "rounds_budget",
               "lives_exhausted",
               "paused",

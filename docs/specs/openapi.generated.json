@@ -11602,7 +11602,7 @@
                 "type": "null"
               }
             ],
-            "description": "Stop ``target_hit`` once the declared pick's own accuracy reaches this. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
+            "description": "Stop ``target_hit`` once the declared pick's level over the origin, on the origin's panel, reaches this at its paired interval's lower bound. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
             "title": "Halt At Accuracy"
           },
           "lift_reference": {
@@ -11701,7 +11701,7 @@
                 "type": "null"
               }
             ],
-            "description": "Stop ``target_hit`` once the declared pick's own accuracy reaches this. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
+            "description": "Stop ``target_hit`` once the declared pick's level over the origin, on the origin's panel, reaches this at its paired interval's lower bound. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
             "title": "Halt At Accuracy"
           },
           "nodes": {
@@ -13096,7 +13096,7 @@
                 "type": "null"
               }
             ],
-            "description": "Stop ``target_hit`` once the declared pick's own accuracy reaches this. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
+            "description": "Stop ``target_hit`` once the declared pick's level over the origin, on the origin's panel, reaches this at its paired interval's lower bound. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
             "title": "Halt At Accuracy"
           },
           "lift_reference": {
@@ -16829,7 +16829,6 @@
       "StopReason": {
         "description": "Why a cycle's run ended or paused.",
         "enum": [
-          "perfect_score",
           "rounds_budget",
           "lives_exhausted",
           "paused",

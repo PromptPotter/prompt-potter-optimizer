@@ -7,7 +7,6 @@ import logging
 import traceback
 from typing import TYPE_CHECKING
 
-from promptpotter.domain.origin_panel import RoundAdvance
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     STOP_REASON_INFO,
@@ -116,26 +115,17 @@ def panel_gate_tripped(
 
 
 def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
-    """The declared pick's own reading, never a high-water across rounds: those sat different rows."""
-    if target is None:
-        return None
-    fold = cycle.selection.fold
-    accuracy = None if fold is None else fold.accuracy
-    return StopReason.TARGET_HIT if accuracy is not None and accuracy >= target else None
+    """The ONE ceiling stop: the selection's headline level on the origin panel, read at its paired
+    interval's lower bound, never a point estimate of a truncated draw. No pair, no stop."""
+    standing = cycle.standing
+    lift = None if target is None or standing is None else standing.vs_origin.headline
+    reached = lift is not None and lift.rate_a + lift.estimate.ci_lo >= target
+    return StopReason.TARGET_HIT if reached else None
 
 
 def standing_tripped(cycle: Cycle) -> StopReason | None:
     standing = cycle.standing
     assert standing is not None, "a boundary stop reads the close it follows"
-    # The OBJECTIVE, not accuracy: where it prices tokens, 100% correct at 3x the tokens is no ceiling.
-    fold = cycle.parent_fold
-    if (
-        cycle.rounds[-1].overlap.advance is RoundAdvance.ADVANCED
-        and fold is not None
-        and fold.composite_fitness is not None
-        and fold.composite_fitness >= 1.0
-    ):
-        return StopReason.PERFECT
     if standing.lives is not None and standing.lives.spent:
         return StopReason.LIVES_EXHAUSTED
     patience = cycle.config.optimization.convergence_patience

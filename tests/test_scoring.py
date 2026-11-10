@@ -1895,7 +1895,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             read.theta[crowned],
             read.theta_se[crowned],
         ), "an arm carries the θ the election takes of its rows, on the scale it stamped"
-        assert target_tripped(cycle, fold.accuracy) is StopReason.TARGET_HIT
+        assert fold.total == 4 and target_tripped(cycle, fold.accuracy) is None, (
+            "a 4-cell point estimate met the target: the ceiling reads the paired lower bound"
+        )
         origin = cycle.origin_round.origin.individual
         origin_pass = asyncio.run(
             score_on_bench(
@@ -3439,9 +3441,11 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         }
         assert all(reading.advance is advance for advance, reading in readings.items())
 
-        def outcome(objective: float, advance: RoundAdvance) -> StopReason | None:
-            closing = round_result(1, improved=True, overlap=readings[advance])
-            folds = {key: score_summary(composite_fitness=objective) for key in closing.folds}
+        # One ceiling stop: the pick's level on the origin panel at its paired interval's lower
+        # bound, `halt_at_accuracy` its target; no pair, no stop.
+        def outcome(reading: OverlapReading, target: float) -> StopReason | None:
+            closing = round_result(1, improved=True, overlap=reading)
+            folds = {key: score_summary(composite_fitness=1.0) for key in closing.folds}
             line = [round_result(0, improved=False), closing.model_copy(update={"folds": folds})]
             set_cycle(
                 cycle,
@@ -3450,18 +3454,25 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
                     line, lives=None, outlay=LineOutlay(search_usd=None, worked_s=None)
                 ),
             )
-            return standing_tripped(cycle)
+            return target_tripped(cycle, target)
 
         for advance in (
             RoundAdvance.NOT_SEPARATED,
             RoundAdvance.ADVANCED_UNPAIRED,
             RoundAdvance.UNREAD,
         ):
-            assert outcome(1.0, advance) is None, f"a perfect objective on {advance} stopped"
-        assert outcome(0.507, RoundAdvance.ADVANCED) is None, (
-            "100% accuracy under a cost-aware objective: accuracy is spent, the objective is not"
+            assert outcome(readings[advance], 0.0) is None, f"{advance} met a ceiling unpaired"
+        clean = readings[RoundAdvance.ADVANCED]
+        assert outcome(clean, 0.7) is StopReason.TARGET_HIT, (
+            "a pick whose lower bound clears the target ran on"
         )
-        assert outcome(1.0, RoundAdvance.ADVANCED) is StopReason.PERFECT
+        assert outcome(clean, 0.9) is None, (
+            "9 of 9 stopped at a 0.9 ceiling: a point estimate of a truncated draw is no ceiling"
+        )
+        swept = _line_read(1, True, ("C1.1", [1.0] * 9), c0=[0.0] * 9)
+        assert outcome(swept, 0.9) is StopReason.TARGET_HIT, (
+            "9 of 9 over a 0 of 9 origin is a 0.9 ceiling met, never a perfect score proven"
+        )
 
     with _peer_cycle(
         workspace(tmp_path / "restated"),

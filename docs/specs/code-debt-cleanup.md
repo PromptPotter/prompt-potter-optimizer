@@ -845,17 +845,6 @@ loop decides, so it lands with an offline run.
   `AbilityReading`; its se is the election's bound, M19). It moves what
   the loop decides and shapes the optimizer prompt, so it lands with an offline run and the re-key.
   **Rides with:** rk-opt. **Re-test:** `git grep -n -E "lift > current.se|sqrt\(2" -- promptpotter/application/optimizers/potter`.
-- **PERFECT can never fire**: `runner/termination.py::_ceiling_reached` stops at
-  `rate_a + ci_lo >= 1.0`, but `shared/statistics.py::_normal_posterior` floors the SE at `1 / (4 n)`, so
-  the lower bound stays below 1.0. Action: drop PERFECT, or read the ceiling on a bound the floor does
-  not bias. **Rides with:** rk-opt (link 5). **Re-test:**
-  `git grep -n "_ceiling_reached(standing, 1.0)" -- promptpotter` names `standing_tripped`, and
-  `git grep -n "se_floor = 1.0" -- promptpotter/shared/statistics.py` names the floor.
-- **`halt_at_accuracy` describes a point-estimate stop**: `domain/campaign_config.py::OptimizationConfig.halt_at_accuracy`
-  says the pick's "own accuracy reaches this", but `termination.py::target_tripped` now stops on the
-  lower bound of `RunStanding.vs_origin`. Action: rewrite the description (a served change: the
-  openapi contract moves). **Rides with:** rk-run (link 4). **Re-test:**
-  `git grep -n "own accuracy reaches" -- promptpotter/domain/campaign_config.py` is empty.
 - **Money text has no sub-cent rule, so two spellings stand beside `domain/spend.py::usd_text`**: a
   cell's price at five places (`preflight.py::_RoundShort.costing`,
   `cli/commands/head_to_head_price.py::_human`), which `usd_text`'s four would print as `$0.0000` for

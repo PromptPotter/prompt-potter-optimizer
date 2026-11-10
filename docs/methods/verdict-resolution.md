@@ -81,10 +81,12 @@ So **a winner with lower accuracy than a rival or the previous round is normally
 `elect_round_winner` ranks `P(θ_cand > θ_parent)`, the reading PoBB cuts on. When an operator calls
 the election wrong off the accuracy column, say which column it used.
 
-**No harness rule ranks rounds by their own readings.** The `halt_at_accuracy` stop
-(`runner/termination.py::target_tripped`) reads the optimizer's declared pick (`Cycle.selection`) on
-the round that picked it, never each round's composite high-water; the overlap line's members are
-those picks too. Only potter's L2/L3 stall comparator keeps the high-water, as its own signal.
+**No harness rule ranks rounds by their own readings.** The run has one ceiling stop
+(`runner/termination.py::target_tripped`): the declared pick's headline level over C0 on the origin
+panel (`RunStanding.vs_origin`), read at its paired interval's lower bound, never a point estimate of
+a truncated draw or each round's composite high-water. `halt_at_accuracy` is its target
+(`target_hit`); no stop sits at 1.0, which the floored SE keeps out of reach of any finite panel;
+the overlap line's members are those picks too. Only potter's L2/L3 stall comparator keeps the high-water, as its own signal.
 
 **States where θ is NOT ability, and the pushback above is wrong** — enumerated by
 `domain/ruler.py::ThetaCaveat`, served so the screen and the optimizer's `confounds` panel read one

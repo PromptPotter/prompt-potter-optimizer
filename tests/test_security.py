@@ -1767,6 +1767,9 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
             stage=RunPhase.RUNNING.value, admitted_at="2026-01-02T00:00:00Z"
         ): "orphaned",
     }
+    # A run that stopped on the retired `perfect_score` hit its target, its refusal unread as one:
+    # its empty words are `job_refusal`'s too, and one migration stages the path.
+    stopped_perfect = released_before(ending="perfect_score", refusal="")
     # A live job, a survivor, wrote its unrefused refusal as the empty words.
     survivor = jobs.create(
         user_id="u",
@@ -1790,6 +1793,11 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert refused_words == ["over budget"] and landed_live and landed_live.refusal is None, (
         "a migrated job's refusal lost its words, or a live one read as refused"
     )
+    landed_perfect = jobs.get(stopped_perfect.stem)
+    assert landed_perfect and landed_perfect.ending is StopReason.TARGET_HIT, (
+        "a job that stopped on the retired ending no longer loads, or lost that it hit its target"
+    )
+    assert landed_perfect.refusal is None and landed_perfect.lapse is None
 
     # A process that loaded no optimizer still proves a ledger banking one's state.
     banked = CycleHop(campaign_id=SANDBOX_CAMPAIGN, cycle_id="cycle_banked")

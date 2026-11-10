@@ -34,7 +34,6 @@ class CampaignPhase(enum.StrEnum):
 class StopReason(enum.StrEnum):
     """Why a cycle's run ended or paused."""
 
-    PERFECT = "perfect_score"
     ROUNDS_BUDGET = "rounds_budget"
     LIVES_EXHAUSTED = "lives_exhausted"
     PAUSED = "paused"
@@ -532,16 +531,6 @@ class StopReasonInfo(NamedTuple):
 # the stop in every surface's words, naming no verb or file; `next_acts` are the acts it names.
 STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
     {
-        StopReason.PERFECT: StopReasonInfo(
-            "Perfect score",
-            StopOutcome.SUCCESS,
-            StopCategory.SEARCH,
-            False,
-            False,
-            "This is one round's panel, not the dataset: verify the winner on more cells.",
-            True,
-            (NextAct("verify-candidate"),),
-        ),
         StopReason.ROUNDS_BUDGET: StopReasonInfo(
             "Rounds budget reached",
             StopOutcome.SUCCESS,
