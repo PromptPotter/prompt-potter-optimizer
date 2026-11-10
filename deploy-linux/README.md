@@ -312,8 +312,8 @@ nothing answered, so a served sign-in code is never written), for 90 days. The d
 app's page called its API, so a link preview or an unnamed bot fetching one page does not. Beside
 them stand people per day for the last week (no number before counting began), then everything
 else: bots that name themselves, fetchers that never opened a page, and attack scans with what they
-were after. It is kept by date in `app_visits/digests.jsonl` and rings only when a scan's request
-was answered.
+were after. It is kept by date in `app_visits/digests.jsonl`, 90 days like the requests, and rings
+only when a scan's request was answered.
 
 **Your own browser is never a visitor.** Signing in as `HOST_ADMIN_EMAIL` leaves a `pp-self` cookie
 on the parent domain (`app.example.com` → `example.com`). This app's record skips that browser

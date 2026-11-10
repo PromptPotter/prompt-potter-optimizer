@@ -55,8 +55,7 @@ from offline_world import Router
 from pydantic import SecretStr
 from starlette.types import Message, Receive, Scope, Send
 
-from promptpotter.application import account, health, notices
-from promptpotter.application.app_visits import OUTSIDE_REQUESTS
+from promptpotter.application import account, app_visits, health, notices
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import job_status, read_command
 from promptpotter.application.commands import draft_editing, launching, measuring
@@ -240,7 +239,10 @@ from promptpotter.infrastructure.store.user_store import (
     UserStore,
     count_accounts,
 )
-from promptpotter.infrastructure.store.visit_records import default_visit_record_store
+from promptpotter.infrastructure.store.visit_records import (
+    VisitRecord,
+    default_visit_record_store,
+)
 from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, _off_catalogue, app
 from promptpotter.presentation import admin_bot
 from promptpotter.presentation.api.deps import build_stores_from_identity
@@ -662,8 +664,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
             "an oversized body was read past the first chunk that overran the bound"
         )
 
-    # A stranger's request is kept beside the website's visits; a signed-in person's is their own
-    # trail's, and so is the admin's marked browser signed out. A query is kept only where nothing
+    # A stranger's request is kept; a signed-in person's is their own trail's, and so is the admin's marked browser signed out. A query is kept only where nothing
     # answered, so a served sign-in code never lands.
     async def answering(scope: Scope, _receive: Receive, send: Send) -> None:
         if scope["path"] == "/signed-in":
@@ -678,11 +679,23 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     outsider.get("/signed-in")
     outsider.get("/login", headers={"cookie": f"{OWNER_DEVICE_COOKIE_NAME}=1"})
     TestClient(OutsideVisitsMiddleware(answering)).get("/from-this-side")
-    kept = [
-        (r.row["path"], r.row["query"]) for r in default_visit_record_store().kept(OUTSIDE_REQUESTS)
-    ]
+    visits = default_visit_record_store()
+    kept = [(r.row["path"], r.row["query"]) for r in visits.kept(app_visits.OUTSIDE_REQUESTS)]
     assert kept == [("/api/v1/auth/callback/google", ""), ("/.env", "probe=1")], (
         "an outside visit kept a served query, a signed-in request, the admin's browser, or this side"
+    )
+    # Every table ages out alike: telling a day drops what is past retention, a digest as surely
+    # as a request.
+    stale = VisitRecord(at="2000-01-01T00:00:00Z", row={"path": "/stale", "day": "2000-01-01"})
+    for table in (app_visits.OUTSIDE_REQUESTS, app_visits._DIGESTS):
+        visits.keep(table, stale)
+    app_visits.mark_told(app_visits.VisitsDigest(day="2001-01-02", text="told", ring=False))
+    told = visits.kept(app_visits.OUTSIDE_REQUESTS)
+    assert [r.row["path"] for r in told] == [path for path, _ in kept], (
+        "a request past retention outlived the day's telling"
+    )
+    assert [r.row["day"] for r in visits.kept(app_visits._DIGESTS)] == ["2001-01-02"], (
+        "a digest past retention outlived the day's telling"
     )
     asyncio.run(_open_sign_up_is_bounded(tmp_path / "perimeter", monkeypatch))
 

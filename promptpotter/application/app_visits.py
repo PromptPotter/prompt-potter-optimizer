@@ -23,7 +23,7 @@ from promptpotter.infrastructure.store.visit_records import (
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
 
 OUTSIDE_REQUESTS = "requests"
-# One row per day told, keyed by its local date: what was said, and that it was.
+# One row per day told, by its local date: what was said, and that it was.
 _DIGESTS = "digests"
 _KEEP_DAYS = 90
 _DIGEST_HOUR = 7
@@ -79,9 +79,7 @@ def keep_visit(
         "ua": ua[:_FIELD_CHARS],
         "referrer": referrer[:_FIELD_CHARS],
     }
-    default_visit_record_store().keep(
-        OUTSIDE_REQUESTS, VisitRecord(at=utcnow_iso(), key="", row=row)
-    )
+    default_visit_record_store().keep(OUTSIDE_REQUESTS, VisitRecord(at=utcnow_iso(), row=row))
 
 
 def _hunted(row: dict[str, Any]) -> list[str]:
@@ -156,7 +154,8 @@ def _top(counts: Counter[str], n: int = 3) -> str:
 
 
 class VisitsDigest(NamedTuple):
-    key: str
+    # The local date it tells, once.
+    day: str
     text: str
     # Rings only where a probe was answered; a refused crawl is routine.
     ring: bool
@@ -198,7 +197,7 @@ def _scans(scanners: list[_Address], answered: list[str]) -> list[str]:
     return lines
 
 
-def visits_digest(records: Iterable[VisitRecord], *, key: str, now: float) -> VisitsDigest:
+def visits_digest(records: Iterable[VisitRecord], *, day: str, now: float) -> VisitsDigest:
     """The last day read for its people first, beside a week of them; *records* may reach further back."""
     days: list[list[VisitRecord]] = [[] for _ in range(_DAYS_SHOWN)]
     began = now
@@ -249,27 +248,26 @@ def visits_digest(records: Iterable[VisitRecord], *, key: str, now: float) -> Vi
     if scanners:
         lines += _scans(scanners, answered)
     lines.append("Signed-in users and your own browser are never counted here.")
-    return VisitsDigest(key=key, text="\n".join(lines), ring=bool(answered))
+    return VisitsDigest(day=day, text="\n".join(lines), ring=bool(answered))
 
 
 def due_digest() -> VisitsDigest | None:
     """The day's digest once its hour has passed on this box's clock, if it was not told yet."""
     at = time.time()
     local = datetime.fromtimestamp(at).astimezone()
-    key = local.date().isoformat()
+    day = local.date().isoformat()
     store = default_visit_record_store()
-    if local.hour < _DIGEST_HOUR or any(r.key == key for r in store.kept(_DIGESTS)):
+    if local.hour < _DIGEST_HOUR or any(r.row["day"] == day for r in store.kept(_DIGESTS)):
         return None
-    return visits_digest(store.kept(OUTSIDE_REQUESTS), key=key, now=at)
+    return visits_digest(store.kept(OUTSIDE_REQUESTS), day=day, now=at)
 
 
 def mark_told(digest: VisitsDigest) -> None:
-    """Kept only once heard, so a refused send is retried; the visits past retention go with it."""
+    """Kept only once heard, so a refused send is retried; whatever is past retention, in either
+    table, goes with it."""
     store = default_visit_record_store()
-    store.keep(
-        _DIGESTS,
-        VisitRecord(
-            at=utcnow_iso(), key=digest.key, row={"text": digest.text, "rang": digest.ring}
-        ),
-    )
-    store.drop_before(OUTSIDE_REQUESTS, time.time() - _KEEP_DAYS * 24 * 3600)
+    row = {"day": digest.day, "text": digest.text, "rang": digest.ring}
+    store.keep(_DIGESTS, VisitRecord(at=utcnow_iso(), row=row))
+    before = time.time() - _KEEP_DAYS * 24 * 3600
+    for table in (OUTSIDE_REQUESTS, _DIGESTS):
+        store.drop_before(table, before)
