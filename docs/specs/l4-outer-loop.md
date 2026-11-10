@@ -109,7 +109,7 @@ evidence promptpotter-self` answers variance and power on demand.
    grow with round count are where to look next.
 6. **Cross-sample terms, unbuilt:** area-under-lift-vs-budget; `mean lift − λ·std` through the post-aggregate
    formula, never the election rank key; PoBB-decisive promotion over inner arms
-   (`application/scoring/selection.py::elimination_p_best`).
+   (`application/scoring/selection.py::prior_read`).
 7. **Self-adopt mode (unbuilt, off by default)** — SIFT's ([`../research/landscape.md`](../research/landscape.md))
    loop with our statistics in its gates: on a **decisive** outer election the winner's overrides become
    the outer campaign's `optimization.nodes` overlay and the outer cycle forks onto it; the instrument is

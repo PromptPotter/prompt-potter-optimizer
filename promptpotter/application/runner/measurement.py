@@ -50,7 +50,7 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.run_standing import LineStep
-from promptpotter.domain.scoring import NO_CELLS
+from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.shared.measurement_context import (
     MeasuredPass,
     MeasurementRole,
@@ -75,7 +75,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.paired_reading import PairedReading
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet, GradedCell
+    from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopRule
 
@@ -370,8 +370,9 @@ async def _walk_population(
     rows: dict[ArmKey, CellSheet] = {}
     concluded: dict[ArmKey, Concluded] = {}
 
+    caught: dict[ArmKey, list[GradedCell]] = {}
     race: Race | None = (
-        eliminator.race(NodeContext(ctx, eliminator), panel, partial(_catch_up, cycle))
+        eliminator.race(NodeContext(ctx, eliminator), panel, partial(_catch_up, cycle, caught))
         if eliminator is not None
         else None
     )
@@ -432,11 +433,23 @@ async def _walk_population(
         on_turn=on_turn,
         on_decided=on_decided,
     )
+    # A prior's caught-up cells are its round reading's rows, so the race and the election read one sheet.
+    for key, cells in caught.items():
+        if key in concluded:
+            taken = CellSheet(rows[key].scorer_id, tuple(cells))
+            rows[key] = rows[key].merged(taken)
+            ctx.walked(ReadArm(key, concluded[key], taken), asked[key])
     ranked = [key for key in proposed if key in concluded]
     return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut
 
 
-def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior: ArmKey) -> CatchUp:
+def _catch_up(
+    cycle: Cycle,
+    caught: dict[ArmKey, list[GradedCell]],
+    sp: JobSearchPoint,
+    sample: Sample,
+    prior: ArmKey,
+) -> CatchUp:
     # No stop rule: it recurses into the eliminator.
     walk = open_walk(
         sp,
@@ -453,7 +466,9 @@ def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior: ArmKey) -
     def commit() -> Sequence[GradedCell]:
         walk.collect()
         walk.end(walk.take(cell) or walk.judge(), cancel=True)
-        return close_walk(walk).sheet.cells
+        cells = close_walk(walk).sheet.cells
+        caught.setdefault(prior, []).extend(cells)
+        return cells
 
     def discard() -> None:
         # Collected first, so a cell already back releases its claim now rather than on a callback.

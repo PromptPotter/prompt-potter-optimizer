@@ -296,35 +296,6 @@ def expected_score_gain(
 FIT_SLACK = 1e-3
 
 
-def theta_bounds_given_delta(
-    measured: Mapping[str, float],
-    open_cells: Collection[str],
-    delta: Ruler | None,
-) -> tuple[float, float, float]:
-    """The MAP rises with every response, so the all-0 and all-1 fills bound θ; the SE is only FLOORED."""
-    params = _cell_parameters({*measured, *open_cells}, delta)
-
-    def fit(fill: float) -> float:
-        filled = {**measured, **dict.fromkeys(open_cells, fill)}
-        fitted = fit_theta(filled, delta)
-        if fitted is None:
-            raise ValueError("theta_bounds_given_delta: no cell on the ruler to bound θ over")
-        return fitted[0]
-
-    low, high = fit(0.0) - FIT_SLACK, fit(1.0) + FIT_SLACK
-
-    d, a = (np.array([params[s][k] for s in params], dtype=np.float64) for k in (0, 1))
-    p = logistic(a * (np.clip(d, low, high) - d))
-    info = 1.0 / (_INIT_SIGMA_THETA * _INIT_SIGMA_THETA) + float(np.sum(a * a * p * (1.0 - p)))
-    on = [s for s in measured if s in params]
-    y = np.fromiter((measured[s] for s in on), dtype=np.float64, count=len(on))
-    dm, am = (np.array([params[s][k] for s in on], dtype=np.float64) for k in (0, 1))
-    ends = logistic(am[:, None] * (np.array([low, high]) - dm[:, None]))
-    pm = np.clip(y, ends.min(axis=1), ends.max(axis=1))
-    phi = _dispersion(y, pm, dof=max(len(params) - 1, 1))
-    return low, high, float(np.sqrt(phi) / np.sqrt(info))
-
-
 # log(aₛ) ~ N(0, σ_a²): collapses 2PL to 1PL absent evidence and identifies a against θ/δ spread.
 _SIGMA_LOG_A = 0.5
 _LOG_A_CLIP = 3.0

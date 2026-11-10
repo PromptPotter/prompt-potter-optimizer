@@ -35,8 +35,7 @@ P(hit_{c,s} = 1) = σ(θ_c − δ_s)
 
 Candidate ability × sample difficulty, fit jointly by MAP (alternating Newton, Laplace SEs,
 `mean(θ) == 0`; `intelligence/rasch.py::fit_rasch`) ONCE, at ruler lock. Every later reading holds δ
-fixed and solves θ alone, one arm at a time (`::fit_theta`; PoBB's bounds `::theta_bounds_given_delta`
-fill the open cells through it), or the scale moves under the round it judges.
+fixed and solves θ alone, one arm at a time (`::fit_theta`), or the scale moves under the round it judges.
 `δ_s` selects samples and ranks hardness; `θ_c` is the **round-winner gate**.
 
 **θ is why per-round resubsetting is safe.** On different subsets raw accuracy drifts — whoever drew

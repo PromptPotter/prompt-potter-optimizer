@@ -18,8 +18,10 @@ from promptpotter.application.optimizers.potter.pobb.checks import (
     EliminationGate,
     PoBBCheck,
     PoBBStop,
+    wire_sheet,
 )
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
+from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.domain.arms import Elimination
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.validators import CaughtUp
@@ -95,8 +97,8 @@ class CatchUpPool:
     def _unstarted(self, sample: Sample) -> list[ArmKey]:
         return [
             key
-            for key, held in self._check.priors_by_sample.items()
-            if sample.key not in held and (key, sample.id) not in self._pending
+            for key in self._check.priors
+            if not self._check.holds(key, sample.key) and (key, sample.id) not in self._pending
         ]
 
     def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
@@ -120,7 +122,7 @@ class CatchUpPool:
     def commit_backfills(self, sample: Sample) -> CaughtUp | None:
         """In prior order, when a serial round would have measured them, so what reaches disk is the serial round's."""
         taken: dict[ArmKey, Sequence[GradedCell]] = {}
-        for cid in self._check.priors_by_sample:
+        for cid in self._check.priors:
             backfill = self._pending.pop((cid, sample.id), None)
             if backfill is not None:
                 taken[cid] = backfill[1]()
@@ -155,7 +157,8 @@ class PoBBRace(CatchUpPool):
         catch_up: CatchUpFn,
     ) -> None:
         # The one prior no arm of this round labels; a cell it never answered is caught up, never borrowed.
-        parent = ArmKey(ctx.read(Lineage).parent.id)
+        lineage = ctx.read(Lineage)
+        parent = ArmKey(lineage.parent.id)
         super().__init__(
             PoBBCheck(
                 ctx.knobs(PoBBKnobs),
@@ -164,6 +167,8 @@ class PoBBRace(CatchUpPool):
                 n_samples=len(panel.cells),
                 ruler=ctx.read(Ruler).difficulty.ruler,
                 parent=parent,
+                # The lock-in asks the election, which reads no cell that crowned the parent.
+                crowned=crowning_cells(lineage.rounds, lineage.parent.id),
             ),
             catch_up,
             ctx.node,
@@ -177,7 +182,7 @@ class PoBBRace(CatchUpPool):
 
     @property
     def n_priors(self) -> int:
-        return len(self._check.priors_by_sample)
+        return len(self._check.priors)
 
     @property
     def blocks(self) -> None:
@@ -195,28 +200,27 @@ class PoBBRace(CatchUpPool):
         """Read off the priors BEFORE the arm joins them: the pool the stop rule tested against."""
         if not isinstance(signal, PoBBStop):
             return None
-        context, fit = signal.check_result, signal.fit
+        context = signal.check_result
         gate = context["gate"]
         round_num = self._ctx.round_num
         inputs: dict[str, Any] = {
             "arm": key,
-            "prior_arms": self._check.prior_keys,
+            "parent": self._check.parent,
+            "prior_arms": list(self._check.priors),
             "queries_scored": context["queries_scored"],
             "round_num": round_num,
             # The fewest shared cells a prior is read on, which the replay's fit needs too.
             "n_min": int(self._check.n_min),
             "recorded_p_best": context["p_best"],
         }
-        # Each cell by its `Sample.key`: a replay re-fits from this JSON record.
+        # Each cell by its `Sample.key`, each prior's grades as read: a replay re-fits from this record.
         data: dict[str, Any] = {
             "p_best": context["p_best"],
             "leader": context["leader"],
             "paired_breakdown": signal.paired_breakdown,
-            "candidate_cells": fit.cells,
-            "prior_histories": {
-                pid: {cell: grade._asdict() for cell, grade in grades.items()}
-                for pid, grades in fit.priors.items()
-            },
+            "candidate_cells": signal.cells,
+            "crowned": sorted(self._check.crowned),
+            "prior_histories": {pid: wire_sheet(prior) for pid, prior in signal.priors.items()},
         }
         if gate is EliminationGate.LOCK_IN:
             kind = PotterCheckpointKind.LEADER_LOCK_IN

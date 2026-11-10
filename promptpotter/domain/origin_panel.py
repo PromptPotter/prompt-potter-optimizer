@@ -240,10 +240,12 @@ def line_by_individual(overlap: OverlapReading | None) -> dict[str, LineRate]:
 
 
 def election_rows(drawn: CellSheet, on_panel: CellSheet, crowned: Collection[str]) -> CellSheet:
-    """What a round elects on: an individual's draw, then the origin-panel cells it lacks, less
-    every cell that crowned the parent."""
+    """What a round elects on: an individual's draw, then the origin-panel cells it lacks, both
+    less every cell that crowned the parent."""
     skip = {cell.key for cell in drawn} | set(crowned)
-    return drawn.merged(on_panel.where(lambda cell: cell.key not in skip))
+    return drawn.where(lambda cell: cell.key not in crowned).merged(
+        on_panel.where(lambda cell: cell.key not in skip)
+    )
 
 
 def origin_panel(

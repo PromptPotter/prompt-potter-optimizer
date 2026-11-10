@@ -203,13 +203,12 @@ from promptpotter.application.scoring.passes import verify_member, verify_readin
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
-    PairedGrade,
     cells_read,
     closest_to_bar,
     crowning_cells,
     elect_round_winner,
-    elimination_p_best,
     level_band,
+    prior_read,
     readable_lifts,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
@@ -265,6 +264,7 @@ from promptpotter.domain.origin_panel import (
     PanelTrigger,
     RoundAdvance,
     TriggeredReading,
+    election_rows,
     line_by_individual,
     origin_panel,
     round_advance,
@@ -322,6 +322,7 @@ from promptpotter.domain.run_standing import (
 )
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import (
+    NO_CELLS,
     NO_RESULT,
     ROW_GRADES,
     CellSheet,
@@ -1401,6 +1402,10 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         crowned_on.cells[1].key,
     }, "a crowned pick's discordant wins stay out of every race it judges, a lone arm's included"
     assert not crowning_cells([won], "c1"), "an ancestor's are its child's own measurements"
+    luck = crowning_cells([won], "c0")
+    assert not luck & {c.key for c in election_rows(crowned_on, NO_CELLS, luck)}, (
+        "the bar read a crowning cell off a draw that held it"
+    )
 
     # A held round leads on the arm nearest the bar admission reads, over the readable arms.
     twenty = sheet(measurements([1.0] * 20 + [0.0] * 8))
@@ -2592,7 +2597,9 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
     # ε ramps in from its floor; the depths come from `fit_theta`'s dispersion rule.
     cfg = pobb_knobs(epsilon=0.30, epsilon_floor=0.15)
     parent, bar = ArmKey("parent"), election_knobs().admission
-    graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent, admission=bar)
+    graded = PoBBCheck(
+        cfg, n_min=6, n_samples=28, ruler=None, parent=parent, admission=bar, crowned=frozenset()
+    )
     for n, epsilon in ((6, 0.15), (9, 0.225), *((n, 0.30) for n in range(12, 29))):
         assert graded.epsilon_at(n) == pytest.approx(epsilon), f"ε at {n} cells"
     flat = PoBBCheck(
@@ -2602,17 +2609,32 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
         ruler=None,
         parent=parent,
         admission=bar,
+        crowned=frozenset(),
     )
     assert flat.epsilon_at(6) == pytest.approx(0.30), "a floor at ε does not ramp"
     shipped = PoBBCheck(
-        pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent, admission=bar
+        pobb_knobs(),
+        n_min=6,
+        n_samples=28,
+        ruler=None,
+        parent=parent,
+        admission=bar,
+        crowned=frozenset(),
     )
     assert shipped.epsilon_at(shipped.n_min) == pytest.approx(shipped.epsilon), (
         "the manifest sits floor and ε on the same value, so an untouched campaign never grades"
     )
 
     def behind_perfect_prior(n: int, misses: int, *, parent_cells: int = 28) -> Any:
-        check = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent, admission=bar)
+        check = PoBBCheck(
+            cfg,
+            n_min=6,
+            n_samples=28,
+            ruler=None,
+            parent=parent,
+            admission=bar,
+            crowned=frozenset(),
+        )
         check.register_completed(sheet(measurements([1.0] * 28)), key=ArmKey("winner"))
         check.register_completed(sheet(measurements([1.0] * parent_cells)), key=parent)
         check.set_current(ArmKey("arm"))
@@ -2645,7 +2667,13 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
     def ahead_of_parent(n: int, wins: int, admission: float | None = bar, **bend: Any) -> Any:
         knobs = pobb_knobs(**bend)
         check = PoBBCheck(
-            knobs, n_min=6, n_samples=28, ruler=None, parent=parent, admission=admission
+            knobs,
+            n_min=6,
+            n_samples=28,
+            ruler=None,
+            parent=parent,
+            admission=admission,
+            crowned=frozenset(),
         )
         check.register_completed(sheet(measurements([0.0] * 28)), key=parent)
         check.set_current(ArmKey("arm"))
@@ -2670,7 +2698,13 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
     # after every cell (optional stopping), so the shipped manifest keeps it off.
     def four_cells(**bend: Any) -> tuple[Any, int | None]:
         check = PoBBCheck(
-            pobb_knobs(**bend), n_min=4, n_samples=20, ruler=None, parent=parent, admission=bar
+            pobb_knobs(**bend),
+            n_min=4,
+            n_samples=20,
+            ruler=None,
+            parent=parent,
+            admission=bar,
+            crowned=frozenset(),
         )
         check.register_completed(sheet(measurements([1.0] + [0.0] * 19)), key=parent)
         check.set_current(ArmKey("arm"))
@@ -2688,6 +2722,31 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
         "switched on, the lock-in is no longer main's rule"
     )
     assert horizon == 5, f"switched on, the walk launched past the lock-in: {horizon}"
+
+    # The lock-in asks the election's own question (ledger 1235): the round order leads with the
+    # parent's misses, and a warm bar reads the parent on every cell it scored, not those four.
+    def front_loaded(parent_hits: int) -> Any:
+        check = PoBBCheck(
+            pobb_knobs(lock_in=True),
+            n_min=4,
+            n_samples=20,
+            ruler=delta_ruler(dict.fromkeys(range(20), 0.0)),
+            parent=parent,
+            admission=bar,
+            crowned=frozenset(),
+        )
+        rest = [1.0] * parent_hits + [0.0] * (16 - parent_hits)
+        check.register_completed(sheet(measurements([0.0] * 4 + rest)), key=parent)
+        check.set_current(ArmKey("arm"))
+        return check.check(sheet(measurements([1.0] * 4)).cells)
+
+    assert front_loaded(16) is None, (
+        "four cells the parent missed locked in an arm the election refuses"
+    )
+    admitted = front_loaded(14)
+    assert admitted is not None and admitted.outcome == "locked_in", (
+        "a lead the election admits kept spending"
+    )
 
     # A locked-in leader is the bar every later arm races: one level with the parent and behind
     # the leader is cut, never walked to its end against the parent alone.
@@ -2711,8 +2770,25 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
     assert ends == {"Ace.": "locked_in", "Same.": "eliminated"}, (
         f"a locked-in leader never joined the priors the arm after it raced: {ends}"
     )
+    by_text = {
+        arm.individual.prompts["solve"].fields["instruction"]: key
+        for key, arm in raced.panel.items()
+    }
+    leader, challenger_cells = by_text["Ace."], {c.key for c in raced.rows(by_text["Same."])}
+    assert challenger_cells <= {c.key for c in raced.rows(leader)}, (
+        "a locked-in leader's round reading left out the cells it was caught up on"
+    )
+    assert raced.folds[leader].total == len(raced.rows(leader)), (
+        "the round's close folded a locked-in leader on fewer cells than the election judged"
+    )
     unpaired = PoBBCheck(
-        pobb_knobs(epsilon=0.05), n_min=4, n_samples=20, ruler=None, parent=parent, admission=bar
+        pobb_knobs(epsilon=0.05),
+        n_min=4,
+        n_samples=20,
+        ruler=None,
+        parent=parent,
+        admission=bar,
+        crowned=frozenset(),
     )
     unpaired.register_completed(
         sheet(measurements([1.0] * 8, sample_ids=list(range(8)))), key=ArmKey("lucky_leader")
@@ -2722,7 +2798,9 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
     challenger = sheet(measurements([0.0] * 5, sample_ids=[9, 12, 13, 14, 8]))
     assert unpaired.check(challenger.cells) is None, "an arm was cut on cells its rival never sat"
     longer, terse_parent = _charged_by_length()
-    charged = PoBBCheck(cfg, n_min=6, n_samples=34, ruler=None, parent=parent, admission=bar)
+    charged = PoBBCheck(
+        cfg, n_min=6, n_samples=34, ruler=None, parent=parent, admission=bar, crowned=frozenset()
+    )
     charged.register_completed(terse_parent, key=parent)
     standings: list[node_contract.RaceSnapshot] = []
     charged.set_current(ArmKey("l"), on_snapshot=standings.append)
@@ -2747,7 +2825,13 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
 
     constant = answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
     unpaired_check = PoBBCheck(
-        pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent, admission=bar
+        pobb_knobs(),
+        n_min=6,
+        n_samples=28,
+        ruler=None,
+        parent=parent,
+        admission=bar,
+        crowned=frozenset(),
     )
     assert unpaired_check.check(constant) is None, (
         "one label on an n_min prefix, read against no parent, cut an arm the panel never judged"
@@ -2792,19 +2876,20 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
     )
 
     # On a graded backend p_best discriminates; concordant cells move θ and must not reach ε.
-    def uncharged(*values: float) -> list[PairedGrade]:
-        return [PairedGrade(v, v) for v in values]
+    def uncharged(*values: float) -> CellSheet:
+        return sheet(measurement(i, v, objective=v) for i, v in enumerate(values))
 
-    sids = [str(s) for s in range(12)]
+    def p_over(rows: CellSheet, bar: CellSheet, ruler: Any = None) -> float:
+        read = prior_read(rows, bar, ruler, min_shared=1)
+        assert read is not None
+        return read.p_better
+
     strong, weak = uncharged(*[0.66] * 12), uncharged(*[0.30] * 12)
-    prior = ArmKey("prior")
-    p_strong, _ = elimination_p_best(strong, {prior: weak}, sids, None)
+    p_strong = p_over(strong, weak)
     assert p_strong > 0.9, f"graded gate failed to discriminate: {p_strong}"
-    assert elimination_p_best(weak, {prior: strong}, sids, None)[0] < 0.1
-    p_tie, _ = elimination_p_best(weak, {prior: list(weak)}, sids, None)
-    assert abs(p_tie - 0.5) < 1e-9, "a tie reads as a coin"
+    assert p_over(weak, strong) < 0.1
+    assert abs(p_over(weak, weak) - 0.5) < 1e-9, "a tie reads as a coin"
     epsilon = pobb_knobs().epsilon
-    prefix = [str(s) for s in range(6)]
     # The probe is also the EASIEST cell in the prefix, which tempts a fit to read it as decisive.
     warm = delta_ruler(
         {0: 2.90, 1: 3.01, 2: 2.66, 3: 1.39, 4: 2.85, 5: 2.95},
@@ -2814,14 +2899,10 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
         sigma_theta=1.0,
     )
     nothing_solved = uncharged(*[0.0] * 6)
-    p_thin, _ = elimination_p_best(
-        nothing_solved, {prior: uncharged(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)}, prefix, warm
-    )
+    p_thin = p_over(nothing_solved, uncharged(0.0, 0.0, 0.0, 1.0, 0.0, 0.0), warm)
     assert p_thin == pytest.approx(0.25), f"one adverse cell may not reach past 0.25: {p_thin}"
     assert p_thin > epsilon, "a one-cell verdict must not be cuttable"
-    p_wide, _ = elimination_p_best(
-        nothing_solved, {prior: uncharged(1.0, 0.0, 1.0, 1.0, 0.0, 0.0)}, prefix, warm
-    )
+    p_wide = p_over(nothing_solved, uncharged(1.0, 0.0, 1.0, 1.0, 0.0, 0.0), warm)
     assert p_wide == pytest.approx(0.0625), f"three adverse cells support a cut: {p_wide}"
     assert p_wide < epsilon, "the width is there — ε decides"
 

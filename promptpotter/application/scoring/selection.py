@@ -6,9 +6,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from promptpotter.application.intelligence.rasch import (
     FIT_SLACK,
     candidate_abilities,
-    fit_theta,
     graded_response,
-    theta_bounds_given_delta,
     theta_cells,
     theta_lift_over_parent,
 )
@@ -158,69 +156,30 @@ def elect_round_winner(
     return winner, abilities
 
 
-def elimination_p_best(
-    candidate_grades: Sequence[PairedGrade],
-    paired_prior_grades: Mapping[ArmKey, Sequence[PairedGrade]],
-    candidate_cells: Sequence[str],
-    ruler: DeltaRuler | None,
-) -> tuple[float, dict[ArmKey, float]]:
-    """A stopping rule, not a verdict: ``P(θ_cand > θ_prior)`` CAPPED by what the discordant pairs support."""
-    if not paired_prior_grades:
-        return 1.0, {}
+class PriorRead(NamedTuple):
+    """The election's posterior of an arm over one prior, and the cells it stands on."""
 
-    # The one sanctioned provisional δ: cells the ruler has not absorbed stand at its centre for BOTH arms.
-    entries = ruler.entries_covering(candidate_cells) if ruler is not None else None
-
-    def read(grades: Sequence[PairedGrade]) -> tuple[float, float]:
-        on_cells = {key: g.response for key, g in zip(candidate_cells, grades, strict=True)}
-        fitted = fit_theta(on_cells, entries)
-        if fitted is None:
-            raise ValueError("elimination_p_best: a reading needs at least one graded cell")
-        return fitted
-
-    theta_c, se_c = read(candidate_grades)
-
-    per_prior: dict[ArmKey, float] = {}
-    for pid, grades in paired_prior_grades.items():
-        theta_p, se_p = read(grades)
-        p = p_exceeds(theta_c, se_c, theta_p, se_p)
-        per_prior[pid] = _capped(p, sign_posterior(*discordance(candidate_grades, grades)))
-    return min(per_prior.values()), per_prior
+    p_better: float
+    paired: int
+    discordant: int
 
 
-class PairedPosterior(NamedTuple):
-    cells: list[str]
-    grades: list[PairedGrade]
-    # Each prior's grades on the cells it shares with the candidate: the pairs its θ was read on.
-    priors: dict[ArmKey, dict[str, PairedGrade]]
-    p_best: float
-    p_better: dict[ArmKey, float]
-
-
-def paired_p_best(
-    rows: Sequence[GradedCell],
-    priors: Mapping[ArmKey, Mapping[str, PairedGrade]],
-    ruler: DeltaRuler | None,
-    *,
-    min_shared: int,
-) -> PairedPosterior | None:
-    """Over rows carrying a verdict only: a backend error is no evidence of inability. A prior is
-    read on the cells it shares with the candidate, so a parent still catching up is a prior."""
-    own = paired_grades(rows)
-    paired = {
-        pid: shared
-        for pid, grades in priors.items()
-        if len(shared := {c: grades[c] for c in own if c in grades}) >= max(min_shared, 1)
-    }
-    if not paired:
+def prior_read(
+    rows: CellSheet, prior: CellSheet, ruler: DeltaRuler | None, *, min_shared: int
+) -> PriorRead | None:
+    """A stopping rule, not a verdict: the election's fit and posterior with *prior* as the bar
+    (``candidate_abilities``), capped by the discordant cells both scored. A prior is read only on
+    *min_shared* such cells, so a parent still catching up is a prior."""
+    own, bar = paired_grades(rows), paired_grades(prior)
+    shared = [c for c in own if c in bar]
+    if len(shared) < max(min_shared, 1):
         return None
-    p_better = {
-        pid: elimination_p_best(
-            [own[c] for c in shared], {pid: list(shared.values())}, list(shared), ruler
-        )[0]
-        for pid, shared in paired.items()
-    }
-    return PairedPosterior(list(own), list(own.values()), paired, min(p_better.values()), p_better)
+    abilities = candidate_abilities({"read": rows}, prior, ruler)
+    if "read" not in abilities.bar:
+        return None
+    wins, losses = discordance([own[c] for c in shared], [bar[c] for c in shared])
+    p = p_exceeds(abilities.theta["read"], abilities.theta_se["read"], *abilities.bar["read"])
+    return PriorRead(_capped(p, sign_posterior(wins, losses)), len(shared), wins + losses)
 
 
 def _capped(p: float, bound: float) -> float:
@@ -230,45 +189,7 @@ def _capped(p: float, bound: float) -> float:
     return 0.5 + reach if p > 0.5 else 0.5 - reach
 
 
-_UNSOLVED = PairedGrade(0.0, 0.0)
-_SOLVED = PairedGrade(1.0, 1.0)
-
-
-def elimination_p_best_bounds(
-    cells: Sequence[str],
-    candidate: Mapping[str, PairedGrade],
-    priors: Mapping[ArmKey, Mapping[str, PairedGrade]],
-    ruler: DeltaRuler | None,
-    *,
-    settled: Collection[ArmKey],
-) -> tuple[float, float]:
-    """``high`` is over ``settled`` priors alone: any other may drop out, which can only RAISE the minimum."""
-    sids = list(cells)
-    entries = ruler.entries_covering(sids) if ruler is not None else None
-    known = {s: candidate[s] for s in sids if s in candidate}
-    c_low, c_high, c_floor = theta_bounds_given_delta(
-        {s: g.response for s, g in known.items()}, [s for s in sids if s not in known], entries
-    )
-    low: dict[ArmKey, float] = {}
-    high: dict[ArmKey, float] = {}
-    for pid, grades in priors.items():
-        both = {s: grades[s] for s in known if s in grades}
-        rest = [s for s in sids if s not in both]
-        p_low, p_high, p_floor = theta_bounds_given_delta(
-            {s: g.response for s, g in both.items()}, rest, entries
-        )
-        wins, losses = discordance([known[s] for s in both], list(both.values()))
-        # An absent grade can go either way, so it is read as the worst case for each bound.
-        _, can_lose = discordance(
-            [candidate.get(s, _UNSOLVED) for s in rest], [grades.get(s, _SOLVED) for s in rest]
-        )
-        can_win, _ = discordance(
-            [candidate.get(s, _SOLVED) for s in rest], [grades.get(s, _UNSOLVED) for s in rest]
-        )
-        worst = p_exceeds(c_low, c_floor, p_high, p_floor) if c_low < p_high else 0.5
-        best = p_exceeds(c_high, c_floor, p_low, p_floor) if c_high > p_low else 0.5
-        low[pid] = _capped(worst, sign_posterior(wins, losses + can_lose))
-        high[pid] = _capped(best, sign_posterior(wins + can_win, losses))
-    if not low:
-        return 1.0, 1.0
-    return min(low.values()), min(high[p] for p in settled) if settled else max(high.values())
+def capped_reach(wins: int, losses: int) -> tuple[float, float]:
+    """The least and most any θ posterior can read once capped by these discordant counts."""
+    bound = sign_posterior(wins, losses)
+    return min(0.5, bound), max(0.5, bound)

@@ -794,6 +794,7 @@ async def _walk(
             ruler=None,
             parent=ArmKey("parent"),
             admission=None,
+            crowned=frozenset(),
         ),
         _backfill,
         "elimination",

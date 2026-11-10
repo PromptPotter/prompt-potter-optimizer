@@ -188,9 +188,7 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   reads raw and deletes a session file that does not validate, `store/layout.py::read_sandbox_owner`
   swallows an unusable owner into a log and answers `None`, and `store/measurement_archive.py` reads
   archive files raw. Action: each
-  refuses once as a `FileKind` through `read_file`, or is named a cache read.
-  `intelligence/hard_sample_sorter.py:120 read_hard_samples` (`read_json_optional` +
-  `model_validate`) is a fourth. **Rides with:** READS.
+  refuses once as a `FileKind` through `read_file`, or is named a cache read. **Rides with:** READS.
   **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
   surveys and caches.
 
@@ -713,7 +711,6 @@ with:** the chains that were the Q rows ([`roadmap.md`](roadmap.md) § The clean
   `origin_listing.py::list_origins` logging and skipping an origin whose dataset no longer resolves
   (so the list is silently short), `campaign_store/store.py::CampaignStore.bank_final` swallowing a
   failed export write under `shared/errors.py::graceful` (the export is the run's handed-on prompt),
-  `runner/output.py` ×4 (`write_log_md`'s `graceful("log.md render failed")` among them),
   `closed_rounds.py:172`, `query_loop.py:926`, `archive_maintenance.py:342`, `admission.py:124`
   (`release_slot`'s `logger.exception`), `jobs/launcher/launch.py::_report_detached` (`logger.error`) and
   `campaign_store/store.py::write_resolved_run`'s "rows not comparable" `logger.warning`. Until this
@@ -1000,9 +997,56 @@ fixtures.
   (keys `PARAM_FORBIDDEN_KEYS`, `model`) and `application/pipeline_responses.py::served_rows`
   (`never_axis == "cost_lever"`, `kind == "model"`). Action: one per-row predicate both read; it cannot
   sit on `NodeConfigParam` without a digest move, since every treatment hash reaches that row.
-  **Rides with:** rk-run (a re-key landing: the digest move is already paid there; it owns
-  `domain/pipeline_schema.py`). **Re-test:**
-  `git grep -n "cost_lever\" or p.kind == \"model\"\|cfg.keys() & PARAM_FORBIDDEN_KEYS" -- promptpotter`.
+  `role` belongs on that row too, so `ServedParam` and `served_rows` go, and three callers pass
+  `babysit=True` (`pipeline_resolve.py:710,1039`, `pipeline_responses.py:466`), the caller steering
+  the callee. Open: what an account-less read (a dataset's pipeline, an optimizer setup) derives
+  `editable` from; the webapp's nine `ServedParam` readers follow the row. **Rides with:** rk-run (a
+  re-key landing: the digest move is already paid there; it owns `domain/pipeline_schema.py`).
+  **Re-test:**
+  `git grep -n "cost_lever\" or p.kind == \"model\"\|cfg.keys() & PARAM_FORBIDDEN_KEYS\|babysit=True" -- promptpotter`.
+- **A locked-in leader's caught-up cells reach the scoreboard only at the round's close, and a
+  re-seated round replays one cell short**: `runner/measurement.py::_walk_population` merges a
+  prior's caught-up cells after `run_walks`; until the close's statement folds the merged sheet
+  (`test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails` asserts it), the arm's fold
+  is its walk's `SampleScoredRecord.running`, since `BACKFILL` is no arm role. Re-seating that test's
+  lock-in round on its own store elects the same pick, yet walks 13 cells where the live round walked
+  14, so θ moves. Re-concluding the arm is no fix: `Concluded` carries no cell. Action: a caught-up
+  cell is a recorded row of its prior's arm, and the replay takes cells as the live walk took them.
+  **Rides with:** rk-dec. **Re-test:** run that test's locked block twice through `_peer_cycle` on
+  one `workspace`, the second refusing a fresh cell, and compare `rows(leader)`.
+- **The pipeline carrier is typed only at its door**: `NodeCall`'s readers go back through
+  `.laid_keys()` (21 sites) and `.laid_nodes` (26) and read its own fields by string, among them
+  `connectors/dbllmbench.py:158-249` and `connectors/harbor.py:431-437`. Action: read `NodeCall`'s
+  fields. **Rides with:** conn. **Re-test:**
+  `git grep -cE "\.get\(\"(model|provider|route_order|temperature|max_tokens|reasoning_effort|top_p|seed)\"" -- promptpotter`
+  (44 at filing).
+- **A relabel over a mixed concept**: `domain/pipeline_manifest.py:43-52` strips `prompt_edits` from
+  each pydantic `loc`, because `NodeConfig` nests the prompt fields the operator lays flat. Action:
+  one layout for a node's prompt fields. **Rides with:** rk-run. **Re-test:**
+  `git grep -n "!= \"prompt_edits\"" -- promptpotter/domain/pipeline_manifest.py`.
+- **A cycle's served hard-sample scale is restamped off its last election**:
+  `scoring/measurement_log.py::cycle_hard_samples` reads each cycle's scale off the last election,
+  where landing 19 served the live ruler at the close; no served answer proves the two equal. Action:
+  one ruler per cycle, then serve one offline cycle's answer on both and diff. **Rides with:** rk-dec.
+  **Re-test:** the diff of that answer between `2d2e3db1e` and the tip.
+- **The call-key rosters are read through a private name**: `domain/search_point.py:10` imports
+  `pipeline_params._Roster` to derive `WHO_ANSWERS_KEYS`, `PARAM_FORBIDDEN_KEYS`, `PARAM_SCOPE_KEYS`
+  and `CALL_CONFIG_KEYS`. Action: the four live beside `NodeCall`, their nine importers re-pointed.
+  **Rides with:** rk-run. **Re-test:** `git grep -n "_Roster" -- promptpotter/domain/search_point.py`.
+- **The domain carrier raises a door's error**: `pipeline_params.py::PipelineParams.with_nodes` raises
+  `PayloadInvalidError` (a 422) from internal calls (`pin_default_routes`, `_without_identity`).
+  Action: the carrier raises its validation error and each door words it. **Rides with:** rk-run.
+  **Re-test:** `git grep -n "PayloadInvalidError" -- promptpotter/domain/pipeline_params.py`.
+- **The election has no one-arm read**: `scoring/selection.py:177` fits a prior through
+  `candidate_abilities({"read": rows}, …)`, a fake arm key. Action: a one-arm read on the election's
+  fit. **Rides with:** rk-dec. **Re-test:** `git grep -n '{"read": ' -- promptpotter/application/scoring/selection.py`.
+- **A steer is typed, then sent untyped**: `commands/launching.py::_typed_steer` (`:133`) validates
+  each node as `NodeCall` and keeps the dict it validated. Action: keep the typed carrier.
+  **Rides with:** startb. **Re-test:** read `_typed_steer`'s return.
+- **The verification records are three modules**: `domain/diagnostic_run.py` (16 lines) and
+  `domain/verify_pass.py` (68) beside `domain/verification.py`, with a cross-import and the
+  `VERIFY_STRATEGY_LABELS` self-check. Action: one module, its 14 importers re-pointed (about −15).
+  **Rides with:** passb. **Re-test:** `ls promptpotter/domain/diagnostic_run.py promptpotter/domain/verify_pass.py`.
 - **`editable` cannot say "frozen" apart from "inside `permitted`"**: any cost-lever move is the babysit
   act, but a non-editable enum cost lever (`provider`) still offers its permitted values, which
   fork-preview then refuses. Action: a served per-row pickable set for the account. **Rides with:**
