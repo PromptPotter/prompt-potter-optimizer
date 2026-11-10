@@ -523,9 +523,10 @@ def _cut_unterminated(name: str) -> None:
                 f.truncate(size - len(_last_line(f, size)))
 
 
-def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
-    append_line(path, json.dumps(item, ensure_ascii=False).encode("utf-8"))
-    return path
+def append_jsonl(path: Path, *rows: dict[str, Any]) -> range:
+    """THE appender of JSON rows: every row lands in one locked write, at the byte range returned."""
+    lines = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    return append_line(path, lines.encode("utf-8"))
 
 
 class FileMark(NamedTuple):

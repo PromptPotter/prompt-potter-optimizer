@@ -17,6 +17,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     MATERIALIZED_PANEL_FILE,
 )
 from promptpotter.infrastructure.store.io import (
+    append_jsonl,
     parse_yaml,
     validate_path_component,
     write_bytes,
@@ -26,7 +27,6 @@ from promptpotter.infrastructure.store.io import (
 )
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.infrastructure.store.read_model import (
-    append_row,
     derived,
     file_sig,
     read_file,
@@ -113,7 +113,7 @@ class TenantDatasetStore:
         validate_dataset_name(label)
         if self.hash_of(label) != digest:
             moved = BankLabel(label=label, dataset_hash=digest, labelled_at=utcnow_iso())
-            append_row(self._labels_path(), moved.model_dump())
+            append_jsonl(self._labels_path(), moved.model_dump())
 
     def labels(self) -> dict[str, str]:
         """The last line naming a label is where it stands."""
@@ -156,7 +156,7 @@ class TenantDatasetStore:
     def record_cut(self, source: str, bank: Bank) -> None:
         self.put_bank(bank)
         cut = BankCut(source=source, dataset_hash=bank.dataset_hash)
-        append_row(self._base_dir / BANKS_DIR / CUTS_FILE, cut.model_dump())
+        append_jsonl(self._base_dir / BANKS_DIR / CUTS_FILE, cut.model_dump())
 
     def cut(self, source: str) -> Bank | None:
         """The last line naming *source* is its cut."""

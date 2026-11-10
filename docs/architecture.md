@@ -173,7 +173,8 @@ Five I/O kinds, each with its own ingress. **The five are fixed: adding one amen
 #### Persistence
 
 Sole writer: the per-cycle `CycleEventLog.append`; a cycle-less command writes the workspace
-ledger beside it, same discipline; a fork is `inherit_from(parent, offset)`. Searchpoints are
+ledger beside it, same discipline; a fork's file holds its own appends alone, and a read takes its
+parent's prefix through `ledger.py::ledger_chain`, never its appender. Searchpoints are
 immutable, so their hash is a trustworthy identity. Owned by
 [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
 § Persistence — one ingress, two projections.

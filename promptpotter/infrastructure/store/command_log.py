@@ -1,18 +1,16 @@
 """The account's command log, ``.workspace/commands.jsonl`` under the account beside its grants and
 charges: every door files on it, and no ledger move or delete reaches it (`domain/command_events.py`).
 
-A read is a fold registered per file as `LedgerIndex.of`'s are, fed from the last byte it read: its
+A read is its `LineIndex` fold, fed from the last byte it read: its
 state only grows, every value versioned by the line that set it, so a book is that state read at
 one line and no later line moves what it reads."""
 
 from __future__ import annotations
 
-import threading
 from bisect import bisect_right
-from collections import OrderedDict
 from collections.abc import Iterator
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from promptpotter.domain.command_events import (
     COMMAND_LOG_ADAPTER,
@@ -38,7 +36,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
 from promptpotter.infrastructure.store.io import append_line, appending
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
-from promptpotter.infrastructure.store.read_model import _LedgerTail, _registered, parse_rows
+from promptpotter.infrastructure.store.read_model import LineIndex
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import ConflictError, IdempotencyKeyReusedError
 from promptpotter.shared.identity import Principal
@@ -363,30 +361,21 @@ class CommandBook:
         return spelled if onto is None or onto[0] > self._line else onto[1]
 
 
-class _Fold(_LedgerTail):
-    def _reset(self) -> None:
-        super()._reset()
-        # A rewritten log is read whole into a fresh state: a book read off the old one keeps it.
-        self._state = _State()
+class _Book:
+    """The log's line fold: a rewritten log is read whole into a fresh one, and a book read off the
+    old state keeps it."""
 
-    def _feed(self, raw: bytes) -> None:
-        for row in parse_rows(self._path, [raw], COMMAND_LOG_ADAPTER.validate_json):
-            self._state.feed(self._lines + 1, row)
+    at_offset = 0
 
-    def book(self) -> CommandBook:
-        with self._lock:
-            try:
-                self._refresh()
-            except BaseException:
-                # A refused line leaves the lines before it fed: the next read starts whole.
-                self._reset()
-                raise
-            return CommandBook(self._state, self._lines)
+    def __init__(self) -> None:
+        self._state, self._line = _State(), 0
 
+    def feed(self, line: dict[str, Any]) -> None:
+        self._line = self.at_offset + 1
+        self._state.feed(self._line, COMMAND_LOG_ADAPTER.validate_python(line))
 
-_FOLDS: OrderedDict[Path, _Fold] = OrderedDict()
-# The registry's alone: each fold refreshes under its own lock.
-_FOLDS_LOCK = threading.Lock()
+    def value(self) -> CommandBook:
+        return CommandBook(self._state, self._line)
 
 
 def _encoded(*rows: CommandLogRow) -> bytes:
@@ -400,9 +389,7 @@ class CommandLog:
         self.path = command_log_path(account)
 
     def book(self) -> CommandBook:
-        with _FOLDS_LOCK:
-            fold = _registered(_FOLDS, self.path, lambda: _Fold(self.path))
-        return fold.book()
+        return LineIndex.of(self.path, (_Book,)).view(_Book)
 
     def file(self, record: CommandRecord) -> None:
         """A filing's id is the log's own: refused inside the write that would land a second one,

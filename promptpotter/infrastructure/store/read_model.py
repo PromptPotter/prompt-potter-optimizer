@@ -104,11 +104,6 @@ def read_file[R](
         raise FileUnreadableError(kind, path=str(path), reason=_reason(exc)) from exc
 
 
-def append_row(path: Path, *rows: dict[str, Any]) -> range:
-    lines = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
-    return append_line(path, lines.encode("utf-8"))
-
-
 Signature = tuple[int, int, int]
 
 

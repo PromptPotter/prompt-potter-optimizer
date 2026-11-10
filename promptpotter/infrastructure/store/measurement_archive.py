@@ -24,6 +24,7 @@ from promptpotter.infrastructure.store.io import (
     FileMark,
     HeldLock,
     PairWrite,
+    append_jsonl,
     read_bytes_optional,
     read_lines,
     replace_lines,
@@ -33,7 +34,6 @@ from promptpotter.infrastructure.store.io import (
     write_json,
 )
 from promptpotter.infrastructure.store.read_model import (
-    append_row,
     file_sig,
     read_file,
     read_rows_past,
@@ -265,7 +265,7 @@ class _CellFile:
         held = self._mark.end
         whole = self._stat is None or self._stat[1] == held
         rows = [answer.wire() for answer in answers]
-        landed = append_row(path, *rows)
+        landed = append_jsonl(path, *rows)
         if not (whole and landed.start == held):
             return
         # Through JSON, as a reader folds them: a tuple is a list on disk.
@@ -425,7 +425,9 @@ class MeasurementArchive:
         fold_key = _fold_key(entry.config_key, entry.dataset_hash)
         if fold_key in self._live_rows():
             return
-        append_row(self._index_path(), {_INDEX_FOLD_KEY: fold_key, **entry.model_dump(mode="json")})
+        append_jsonl(
+            self._index_path(), {_INDEX_FOLD_KEY: fold_key, **entry.model_dump(mode="json")}
+        )
 
     def answer(self, ref: str) -> FiledAnswer | None:
         file_key, _, _ = ref.partition(".")

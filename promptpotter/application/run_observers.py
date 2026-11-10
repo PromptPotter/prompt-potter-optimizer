@@ -36,7 +36,7 @@ from promptpotter.domain.run_records import (
     RunWiringRecord,
 )
 from promptpotter.domain.spend import MONEY_AXES, Budget
-from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     bind_spend_book,
@@ -274,7 +274,7 @@ def build_run_observers(
     ) or time.time()
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
     hold_cycle(cycle_dir)
-    ledger = open_with_history(cycle_dir)
+    ledger = CycleEventLog.open(cycle_dir)
     projecting = LedgerIndex.of(ledger.path, ()).projecting()
     try:
         prior = session.store.campaigns.last(session.hop, RunPhaseRecord)

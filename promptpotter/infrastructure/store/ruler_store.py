@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.ruler import RulerFold, RulerOwn, RulerReach, RulerRow, RulerScope
-from promptpotter.infrastructure.store.read_model import LineIndex, append_row
+from promptpotter.infrastructure.store.io import append_jsonl
+from promptpotter.infrastructure.store.read_model import LineIndex
 
 RULER_FILE = "ruler.jsonl"
 
@@ -60,7 +61,7 @@ class RulerStore:
         )
         if not held:
             return
-        append_row(
+        append_jsonl(
             self.path,
             RulerFold(scope=scope, rows=held, campaign=campaign).model_dump(mode="json"),
         )

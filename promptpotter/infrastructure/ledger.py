@@ -56,22 +56,11 @@ def ledger_chain(cycle_dir: CycleDir, *, moment: Moment | None) -> list[LedgerSp
     return chain if moment is None else moment.spans(chain)
 
 
-def open_with_history(cycle_dir: CycleDir) -> CycleEventLog:
-    log = child = CycleEventLog.open(cycle_dir)
-    for path, cut in reversed(_fork_prefix(cycle_dir)):
-        parent = CycleEventLog(path)
-        child.inherit_from(parent, cut)
-        child = parent
-    return log
-
-
 class CycleEventLog:
     """A ledger's appender: its offsets and its projections are its `LedgerIndex`'s."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
-        self._inherit_parent: CycleEventLog | None = None
-        self._inherit_offset: int = 0
 
     @classmethod
     def open(cls, cycle_dir: CycleDir) -> CycleEventLog:
@@ -101,31 +90,17 @@ class CycleEventLog:
         # The offset is the record's LINE, as the index counts it, another writer's lines included.
         return LedgerIndex.of(self._path, ()).land(raw, append_line(self._path, raw), record)
 
-    def iter(self, own_limit: int | None = None) -> Iterator[tuple[int, CycleRecord]]:
-        """`own_limit` counts OWN records, as `forked_at_offset` does, never a position over the chain."""
-        if self._inherit_parent is not None:
-            yield from self._inherit_parent.iter(self._inherit_offset)
+    def iter(self) -> Iterator[tuple[int, CycleRecord]]:
+        """This file's own records, each at its line: a fork's prefix is `ledger_chain`'s."""
         if not self._path.exists():
             return
         with self._path.open("rb") as fh:
             for offset, line in enumerate(complete_lines(fh)):
-                if own_limit is not None and offset >= own_limit:
-                    return
-                record: CycleRecord | None = ledger_record(
+                record = ledger_record(
                     RECORD_ADAPTER.validate_json, line, ledger=self._path, offset=offset
                 )
                 if record is not None:
                     yield offset, record
-
-    def inherit_from(self, parent: CycleEventLog, offset: int) -> None:
-        if self._inherit_parent is parent and self._inherit_offset == offset:
-            return
-        if self._inherit_parent is not None:
-            raise ValueError("CycleEventLog.inherit_from: already inheriting; cannot rebind")
-        if offset < 0:
-            raise ValueError(f"CycleEventLog.inherit_from: offset must be >= 0, got {offset}")
-        self._inherit_parent = parent
-        self._inherit_offset = offset
 
     @property
     def next_offset(self) -> int:

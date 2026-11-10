@@ -170,7 +170,12 @@ from promptpotter.infrastructure.store.archive_queries import (
     write_sample_fold,
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
-from promptpotter.infrastructure.store.io import probe_lock, rewrite_lines, take_lock
+from promptpotter.infrastructure.store.io import (
+    append_jsonl,
+    probe_lock,
+    rewrite_lines,
+    take_lock,
+)
 from promptpotter.infrastructure.store.layout import CycleLayout, campaigns_root_dir_for
 from promptpotter.infrastructure.store.measurement_archive import (
     MeasurementArchive,
@@ -178,7 +183,6 @@ from promptpotter.infrastructure.store.measurement_archive import (
     config_key,
     standing,
 )
-from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, owned_campaign
 from promptpotter.shared.errors import (
@@ -412,22 +416,22 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     own.advance()
 
     def raced(path: Path, *rows: dict[str, Any]) -> range:
-        monkeypatch.setattr(measurement_archive, "append_row", append_row)
+        monkeypatch.setattr(measurement_archive, "append_jsonl", append_jsonl)
         _bank(6, via=reader)
-        return append_row(path, *rows)
+        return append_jsonl(path, *rows)
 
-    monkeypatch.setattr(measurement_archive, "append_row", raced)
+    monkeypatch.setattr(measurement_archive, "append_jsonl", raced)
     _bank(7)
     assert set(own.advance()) == {"k6", "k7"}, "an answer another process filed was stepped over"
     _bank(8)
     assert set(own.advance()) == {"k8"}
 
     # Four writers on one file at once: Windows runs `O_APPEND` as seek-then-write, so what keeps
-    # every row is the lock under `append_row`, taken on a fresh handle per append.
+    # every row is the lock under `append_jsonl`, taken on a fresh handle per append.
     racing = archive.base_dir / "racing.jsonl"
     writers = [
         threading.Thread(
-            target=lambda w=w: [append_row(racing, {"w": w, "n": n}) for n in range(50)]
+            target=lambda w=w: [append_jsonl(racing, {"w": w, "n": n}) for n in range(50)]
         )
         for w in range(4)
     ]
