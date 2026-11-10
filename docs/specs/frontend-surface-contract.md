@@ -74,7 +74,8 @@ invariants:
                       and `CampaignFacts.runs_with` are TRANSPORTS of it, never sources a row may
                       re-merge or diff. Every param carries a served `source`
                       (domain/pipeline_schema.py::ParamSource); a badge, fold or lock derived from a
-                      client-side diff is the violation. WHY an axis is shut is served (`never_axis`).
+                      client-side diff is the violation. WHY an axis is shut is served (`never_axis`),
+                      and so are whether this account may steer it (`editable`) and its `role`.
                       A component takes IDENTITY props, never a prop re-routing which store it reads.
                       A NEST is dataset-scoped until a cell runs, then an inner campaign addressed
                       ?at=...;in=<hop>; the read is gated on owned_campaign alone. Per enumerable

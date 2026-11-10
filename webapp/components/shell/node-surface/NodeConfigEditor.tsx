@@ -3,7 +3,7 @@ import {
   type CapabilityMenu,
   type DraftPatch,
   type ModelCapability,
-  type NodeConfigParam,
+  type ServedParam,
   type ParamIntent,
   MOVABLE_AGENT_LABELS,
 } from "@/lib/api/types";
@@ -34,11 +34,9 @@ export function NodeConfigEditor(props: {
   overlay: Record<string, unknown>;
   node: string | undefined;
   readOnly: boolean;
-  babysitEditable: boolean | undefined;
   compact: boolean | undefined;
   // Absent = UNKNOWN, never "no model supports it".
   modelCapabilities: CapabilityMenu | undefined;
-  permittedModels: Record<string, readonly string[]> | undefined;
   onApply: ((patch: DraftPatch) => void) | undefined;
   onNarrowing: ((node: string, rows: ParamIntent[]) => void) | undefined;
   onChange: ((overlay: Record<string, Record<string, unknown>>) => void) | undefined;
@@ -50,10 +48,8 @@ export function NodeConfigEditor(props: {
     overlay,
     node,
     readOnly,
-    babysitEditable = true,
     compact = false,
     modelCapabilities,
-    permittedModels,
     onApply,
     onNarrowing,
     onChange,
@@ -146,17 +142,15 @@ export function NodeConfigEditor(props: {
               key={`${r.node}.${r.key}`}
               row={r}
               ignoredBy={caps?.unsupported_params?.includes(r.key) ? pickedModel : undefined}
-              readOnly={readOnly || (!babysitEditable && r.neverAxis === "cost_lever")}
+              readOnly={readOnly || !r.editable}
               onToggleLock={lockable(r) ? () => update(i, { locked: !r.locked }) : undefined}
               onValue={canSetValue ? (v) => update(i, { value: v }) : undefined}
             />
           );
         }
         const { values, inert, userAdded } = axisMenu(r, caps);
-        const barred =
-          r.kind === "model" && !babysitEditable
-            ? values.filter((v) => !(permittedModels?.[r.node] ?? []).includes(v))
-            : [];
+        // Only what the editor may OFFER; the verdict is `POST /campaigns/{id}/fork-preview`'s.
+        const barred = r.editable ? [] : values.filter((v) => !r.permitted.includes(v));
         return (
           <div key={`${r.node}.${r.key}`} className="config-row">
             <span className="config-label" title={r.description || undefined}>
@@ -221,7 +215,7 @@ function EmptyConfig({
   node,
 }: {
   read: ReadResult<unknown>;
-  schema: Record<string, NodeConfigParam[]> | null;
+  schema: Record<string, ServedParam[]> | null;
   node: string | undefined;
 }) {
   const scoped = node !== undefined && schema !== null ? schema[node] : undefined;
@@ -261,7 +255,7 @@ function axisMenu(row: ConfigRow, caps: ModelCapability | undefined) {
   const rest = [...new Set([...ladder, ...row.allowed])].filter((v) => v !== row.value);
   const values = row.value ? [row.value, ...rest] : rest;
   const offered = new Set([...row.options, ...ladder]);
-  const modelAnswered = row.key === "reasoning_effort" && caps?.reasoning_efforts != null;
+  const modelAnswered = row.role === "effort" && caps?.reasoning_efforts != null;
   return {
     values,
     inert: modelAnswered ? values.filter((v) => !ladder.includes(v)) : [],
@@ -278,7 +272,7 @@ function axisNote(
     row.movableBy.length > 0
       ? `Searched by ${row.movableBy.map((a) => MOVABLE_AGENT_LABELS[a]).join(", ")} — ticks are what it may pick.`
       : "Nothing searches this axis today — ticks sanction a human fork.";
-  if (row.key !== "reasoning_effort" || !pickedModel || !caps) return grant;
+  if (row.role !== "effort" || !pickedModel || !caps) return grant;
   return `${grant} ${pickedModel}: ${caps.reasoning_note}`;
 }
 

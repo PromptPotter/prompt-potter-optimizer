@@ -8,20 +8,20 @@ import {
   parseParam,
   nodeOverlayPatch,
   overlayEdits,
-  permittedModels,
   seedOverlayFromRows,
   type ConfigRow,
 } from "../node-config";
 import {
   type ModelCapability,
-  type NodeConfigParam,
   SCHEMA_DESCRIPTION_PREFIX as DESCRIPTION_PREFIX,
+  type ServedParam,
 } from "@/lib/api/types";
 import { configParam as param } from "@/lib/test-fixtures";
 
 function row(over: Partial<ConfigRow> & { key: string; kind: ConfigRow["kind"] }): ConfigRow {
   return {
     node: "n",
+    role: "",
     integer: false,
     nullable: false,
     minimum: null,
@@ -38,6 +38,8 @@ function row(over: Partial<ConfigRow> & { key: string; kind: ConfigRow["kind"] }
     neverAxis: "",
     movableBy: [],
     held: false,
+    editable: true,
+    permitted: [],
     description: "",
     ...over,
   };
@@ -82,7 +84,7 @@ describe("nodeOverlayPatch (search-space emit)", () => {
   });
 });
 
-const schema: Record<string, NodeConfigParam[]> = {
+const schema: Record<string, ServedParam[]> = {
   llm_only: [
     param({
       key: "model",
@@ -95,6 +97,7 @@ const schema: Record<string, NodeConfigParam[]> = {
     }),
     param({
       key: "reasoning_effort",
+      role: "effort",
       value: "low",
       kind: "enum",
       options: ["low", "medium", "high"],
@@ -167,7 +170,7 @@ describe("configRows (values mode)", () => {
 
   it("seeds the value from the candidate overlay over the config floor", () => {
     const rows = configRows(schema, { llm_only: { reasoning_effort: "high" } }, "values");
-    const re = rows.find((r) => r.key === "reasoning_effort")!;
+    const re = rows.find((r) => r.role === "effort")!;
     expect(re.value).toBe("high");
     expect(re.inSeed).toBe(true);
     expect(rows.find((r) => r.key === "temperature")!.inSeed).toBe(false);
@@ -228,7 +231,7 @@ describe("configRows (values mode)", () => {
 
   // A row left out of the emission reads as the operator holding it.
   it("carries a prompt field's lock in every emit, and keeps its text out of a fork seed", () => {
-    const prompt = (key: string, open: boolean): NodeConfigParam =>
+    const prompt = (key: string, open: boolean): ServedParam =>
       param({
         key,
         value: "text",
@@ -316,30 +319,6 @@ describe("overlayEdits + applyFlatEdits", () => {
   });
 });
 
-describe("permittedModels", () => {
-  const modelRow = (over: Partial<NodeConfigParam>): NodeConfigParam[] => [
-    param({ key: "model", kind: "model", options: ["a", "b"], ...over }),
-  ];
-
-  it("takes the served permitted set where the gate is narrower than the menu", () => {
-    expect(permittedModels({ l1_generate: modelRow({ permitted: ["a"] }) })).toEqual({
-      l1_generate: ["a"],
-    });
-  });
-
-  it("keeps an EMPTY permitted set empty — nothing may be picked, never the menu", () => {
-    expect(permittedModels({ l1_generate: modelRow({ permitted: [] }) })).toEqual({
-      l1_generate: [],
-    });
-  });
-
-  it("names only nodes that carry a model row at all", () => {
-    expect(permittedModels({ scorer: [] })).toEqual({});
-    expect(permittedModels(null)).toEqual({});
-    expect(permittedModels(undefined)).toEqual({});
-  });
-});
-
 describe("effortLadder", () => {
   const caps = (over: Partial<ModelCapability>): ModelCapability => ({
     model: "m",
@@ -361,6 +340,7 @@ describe("effortLadder", () => {
   });
   const effort = row({
     key: "reasoning_effort",
+    role: "effort",
     kind: "enum",
     options: ["low", "medium"],
   });
@@ -395,7 +375,7 @@ describe("descriptionSubtree (one click on a schema-tree row)", () => {
 });
 
 describe("parseParam (a value typed in, read by its served row)", () => {
-  const knob = (over: Partial<NodeConfigParam>): NodeConfigParam =>
+  const knob = (over: Partial<ServedParam>): ServedParam =>
     param({ key: "k", integer: true, declared: 10, value: 10, ...over });
 
   it("commits only what the served type reads as the typed value", () => {

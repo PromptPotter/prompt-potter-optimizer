@@ -10,10 +10,9 @@ import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { type NodePrompt, type ParamIntent, STEER_OUTSIDE_INFO } from "@/lib/api/types";
 import { useRound } from "@/lib/hooks/useRound";
-import { useAuth } from "@/lib/state/auth";
 import { encodeCyclePath, pathRoot, type CyclePath } from "@/lib/ids";
 import { useEntry } from "@/lib/hooks/useRegistry";
-import { phaseWalks, permittedModels as permittedModelsOf, searchPoint } from "@/lib/derivations";
+import { phaseWalks, searchPoint } from "@/lib/derivations";
 import type { NodeSchemaReading, SelectedCandidate } from "@/lib/types";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { Empty, FailureLine, ReadState, Said } from "@/components/ui";
@@ -50,13 +49,9 @@ export function SteerForkPanel({
   const rootCourse = useEntry(encodeCyclePath([root]));
   const isLive = phaseWalks(rootCourse?.level === "course" ? rootCourse.state.status.run_phase : undefined);
   const round = useRound(path, candidate.round);
-  const { me } = useAuth();
   const seed = round.seed(candidate.arm);
   const seedPrompts = seed?.origin_prompts ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
-  // For the EDITOR only: the verdict reads the campaign's frozen narrowing, not these rows.
-  const permittedModels = permittedModelsOf(schema.config);
-  const canBabysit = !!me?.capabilities.includes("campaign.babysit");
   const [pickedOverlay, setPickedOverlay] = useState<Record<
     string,
     Record<string, unknown>
@@ -140,8 +135,6 @@ export function SteerForkPanel({
         overlay={overlay}
         schema={schema}
         mode="values"
-        babysitEditable={canBabysit}
-        permittedModels={permittedModels}
         onApply={(p) => {
           // The editor writes fields; each node's shots ride the seed unchanged.
           const fields = p.origin_prompts ?? {};

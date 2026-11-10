@@ -48,6 +48,7 @@ from promptpotter.application.pipeline_responses import (
     ForkPreviewResponse,
     SteerVerdict,
     optimizer_setup,
+    served_rows,
 )
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.scoring.formula.compiler import (
@@ -656,6 +657,8 @@ class _Merge:
     layers: ParamLayers
     # The free tier fences the target's nodes: it is offered only the tier's task models.
     free: bool
+    # The account may steer past what a node permits; a draft sets what its nodes permit.
+    babysit: bool
 
     @functools.cached_property
     def optimizer(self) -> SelectedOptimizer:
@@ -704,6 +707,7 @@ def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> _D
             identity=identity_layer(None, None, None, cfg.judges, active),
         ),
         free=_task_fenced(fence),
+        babysit=True,
         local=local,
     )
 
@@ -742,6 +746,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
             seed=cycle.seed_overlay,
         ),
         free=_task_fenced(free_fence(stores, campaign.connector)),
+        babysit=has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP),
         hop=hop,
         experiment=resolved.experiment,
     )
@@ -847,7 +852,7 @@ def _response(
         optimizer=m.cfg.optimization.optimizer,
         optimizer_setup=optimizer_setup(m.optimizer, mint, m.filtered, workspace),
         params=folded.params.dump(),
-        node_config_schema=rows,
+        node_config_schema=served_rows(rows, babysit=m.babysit),
         view=m.filtered.view,
         node_output_schema=resolved_output_schemas(m.filtered, folded.params),
         model_capabilities=_served_menu(m, folded.params, workspace),
@@ -1030,7 +1035,8 @@ async def resolve_pipeline_for_dataset(
     return DatasetPipelineResponse(
         connector=definition.backend_type,
         view=filtered.view,
-        node_config_schema=rows,
+        # Declared, valueless: nothing steers it.
+        node_config_schema=served_rows(rows, babysit=True),
         reach=reach_map(rows),
         nests=_nests(schema),
     )

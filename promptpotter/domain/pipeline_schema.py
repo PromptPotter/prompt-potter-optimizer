@@ -690,7 +690,9 @@ class ParamIntent(FrozenModel):
     allowed: list[str]
 
 
-def narrowing_of(params: list[NodeConfigParam], intents: list[ParamIntent]) -> NodeSearchNarrowing:
+def narrowing_of(
+    params: Iterable[NodeConfigParam], intents: list[ParamIntent]
+) -> NodeSearchNarrowing:
     """A value space is written where it DIFFERS from the menu, never "is a subset": axes may widen."""
     served = {p.key: p for p in params}
     keys: list[str] = []

@@ -28,10 +28,8 @@ export function NodeSurface({
   schema,
   label,
   mode,
-  babysitEditable,
   compact,
   modelCapabilities,
-  permittedModels,
   promptScope = "target",
   edited,
   onApply,
@@ -49,10 +47,8 @@ export function NodeSurface({
   schema: NodeSchemaReading;
   label?: string;
   mode: ConfigMode;
-  babysitEditable?: boolean | undefined;
   compact?: boolean | undefined;
   modelCapabilities?: CapabilityMenu | undefined;
-  permittedModels?: Record<string, readonly string[]> | undefined;
   onApply?: ((patch: DraftPatch) => void) | undefined;
   onConfigChange?: ((overlay: Record<string, Record<string, unknown>>) => void) | undefined;
   onNarrowing?: ((node: string, rows: ParamIntent[]) => void) | undefined;
@@ -79,13 +75,13 @@ export function NodeSurface({
   const author = mode === "search-space" ? onApply : undefined;
   const authored = nodeId ? authoredOutputSchema(overlay, nodeId) : undefined;
   const rows = nodeId ? schema.config?.[nodeId] : undefined;
-  const toggle = rows?.find((p) => p.key === "response_format");
+  const toggle = rows?.find((p) => p.role === "answer_format");
   const asksForSchema = toggle?.permitted.includes("json") === true;
   const onAuthor =
     author &&
     nodeId &&
     kind === "llm" &&
-    rows?.some((p) => p.key === "schema_family") !== true &&
+    rows?.some((p) => p.role === "schema_family") !== true &&
     (authored !== undefined || (!ownOutput && asksForSchema))
       ? (next: Record<string, unknown>, answers?: string[]) =>
           author({
@@ -122,11 +118,9 @@ export function NodeSurface({
         schema={schema}
         node={node?.id}
         overlay={overlay}
-        babysitEditable={babysitEditable}
         readOnly={configReadOnly}
         compact={compact}
         modelCapabilities={modelCapabilities}
-        permittedModels={permittedModels}
         onApply={onApply}
         onChange={onConfigChange}
         onNarrowing={onNarrowing}

@@ -2514,7 +2514,7 @@
           "node_config_schema": {
             "additionalProperties": {
               "items": {
-                "$ref": "#/components/schemas/NodeConfigParam"
+                "$ref": "#/components/schemas/ServedParam"
               },
               "type": "array"
             },
@@ -5263,7 +5263,7 @@
           "node_config_schema": {
             "additionalProperties": {
               "items": {
-                "$ref": "#/components/schemas/NodeConfigParam"
+                "$ref": "#/components/schemas/ServedParam"
               },
               "type": "array"
             },
@@ -11192,170 +11192,6 @@
         "title": "NodeCall",
         "type": "object"
       },
-      "NodeConfigParam": {
-        "additionalProperties": false,
-        "description": "One param a node carries, in the COMPLETE per-node list a reader sums `movable_by` over.\n\n`kind` names the surface that owns it: `model`/`enum` a select, `number`/`bool`/`string` a typed\ninput, `prompt` the prompt editor's, `description` one output-schema field's prose, `nested`\nstructured text that is still renderable.\n`movable_by` names the agents that may move it now; the empty list is the only true lock, and\nchanging it costs a fork.\n`never_axis` says it could never be an axis (`cost_lever`: a billing key; `schema_owned`: the\nstructured-output contract); `held` says this campaign closed an axis the dataset offered,\nreversibly. `model` is in neither: an ordinary axis.",
-        "properties": {
-          "declared": {
-            "description": "The value the manifest declares — a campaign's floor",
-            "title": "Declared"
-          },
-          "description": {
-            "default": "",
-            "title": "Description",
-            "type": "string"
-          },
-          "exclusive_maximum": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "A bound every legal value lies strictly below; null when none",
-            "title": "Exclusive Maximum"
-          },
-          "exclusive_minimum": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "A bound every legal value lies strictly above; null when none",
-            "title": "Exclusive Minimum"
-          },
-          "held": {
-            "default": false,
-            "title": "Held",
-            "type": "boolean"
-          },
-          "integer": {
-            "default": false,
-            "description": "A `number` row takes whole numbers only",
-            "title": "Integer",
-            "type": "boolean"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "model",
-              "enum",
-              "number",
-              "bool",
-              "string",
-              "prompt",
-              "description",
-              "nested"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "maximum": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The greatest legal value, itself legal; null when none",
-            "title": "Maximum"
-          },
-          "minimum": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The least legal value, itself legal; null when none",
-            "title": "Minimum"
-          },
-          "movable_by": {
-            "items": {
-              "$ref": "#/components/schemas/MovableAgent"
-            },
-            "title": "Movable By",
-            "type": "array"
-          },
-          "never_axis": {
-            "default": "",
-            "enum": [
-              "",
-              "cost_lever",
-              "schema_owned"
-            ],
-            "title": "Never Axis",
-            "type": "string"
-          },
-          "nullable": {
-            "default": false,
-            "description": "Whether null is a legal value (an opt-in knob, off)",
-            "title": "Nullable",
-            "type": "boolean"
-          },
-          "options": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Options",
-            "type": "array"
-          },
-          "permitted": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Permitted",
-            "type": "array"
-          },
-          "permitted_stated": {
-            "default": false,
-            "title": "Permitted Stated",
-            "type": "boolean"
-          },
-          "source": {
-            "default": "unset",
-            "enum": [
-              "dataset",
-              "campaign",
-              "free_tier",
-              "seed",
-              "model_floor",
-              "identity",
-              "evolved",
-              "unset"
-            ],
-            "title": "Source",
-            "type": "string"
-          },
-          "summary": {
-            "default": "",
-            "description": "The description's first sentence, cut at its first clause where that runs long: the one line a setup surface shows before the whole text",
-            "title": "Summary",
-            "type": "string"
-          },
-          "value": {
-            "title": "Value"
-          }
-        },
-        "required": [
-          "key",
-          "kind"
-        ],
-        "title": "NodeConfigParam",
-        "type": "object"
-      },
       "NodeInput": {
         "additionalProperties": false,
         "description": "What a node's call was asked: the template it rendered, or its bare messages where it rendered none.",
@@ -12193,7 +12029,7 @@
           "node_config_schema": {
             "additionalProperties": {
               "items": {
-                "$ref": "#/components/schemas/NodeConfigParam"
+                "$ref": "#/components/schemas/ServedParam"
               },
               "type": "array"
             },
@@ -16072,6 +15908,189 @@
           "said"
         ],
         "title": "ServedDashboard",
+        "type": "object"
+      },
+      "ServedParam": {
+        "additionalProperties": false,
+        "description": "A param row as the account that asked reads it.",
+        "properties": {
+          "declared": {
+            "description": "The value the manifest declares — a campaign's floor",
+            "title": "Declared"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "editable": {
+            "description": "Whether this account may steer it past `permitted`: false where that is the babysit act (`campaign.babysit`) it does not hold, on a cost lever or a model",
+            "title": "Editable",
+            "type": "boolean"
+          },
+          "exclusive_maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A bound every legal value lies strictly below; null when none",
+            "title": "Exclusive Maximum"
+          },
+          "exclusive_minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A bound every legal value lies strictly above; null when none",
+            "title": "Exclusive Minimum"
+          },
+          "held": {
+            "default": false,
+            "title": "Held",
+            "type": "boolean"
+          },
+          "integer": {
+            "default": false,
+            "description": "A `number` row takes whole numbers only",
+            "title": "Integer",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "model",
+              "enum",
+              "number",
+              "bool",
+              "string",
+              "prompt",
+              "description",
+              "nested"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The greatest legal value, itself legal; null when none",
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The least legal value, itself legal; null when none",
+            "title": "Minimum"
+          },
+          "movable_by": {
+            "items": {
+              "$ref": "#/components/schemas/MovableAgent"
+            },
+            "title": "Movable By",
+            "type": "array"
+          },
+          "never_axis": {
+            "default": "",
+            "enum": [
+              "",
+              "cost_lever",
+              "schema_owned"
+            ],
+            "title": "Never Axis",
+            "type": "string"
+          },
+          "nullable": {
+            "default": false,
+            "description": "Whether null is a legal value (an opt-in knob, off)",
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "permitted": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permitted",
+            "type": "array"
+          },
+          "permitted_stated": {
+            "default": false,
+            "title": "Permitted Stated",
+            "type": "boolean"
+          },
+          "role": {
+            "description": "`provider` the route's host, `effort` the reasoning ladder a model answers, `answer_format` the text/json toggle, `schema_family` a registry schema the backend owns",
+            "enum": [
+              "",
+              "provider",
+              "effort",
+              "answer_format",
+              "schema_family"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "source": {
+            "default": "unset",
+            "enum": [
+              "dataset",
+              "campaign",
+              "free_tier",
+              "seed",
+              "model_floor",
+              "identity",
+              "evolved",
+              "unset"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "description": "The description's first sentence, cut at its first clause where that runs long: the one line a setup surface shows before the whole text",
+            "title": "Summary",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "role",
+          "editable"
+        ],
+        "title": "ServedParam",
         "type": "object"
       },
       "ServedRound": {

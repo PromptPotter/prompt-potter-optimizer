@@ -2,21 +2,21 @@ import {
   type CapabilityMenu,
   type DraftPatch,
   type ModelCapability,
-  type NodeConfigParam,
   type OptimizerSetup,
   type ParamIntent,
   SCHEMA_DESCRIPTION_PREFIX,
+  type ServedParam,
 } from "@/lib/api/types";
 
 export type ConfigMode = "search-space" | "values";
 
 // What a typed-in value is read as: the served row's kind and bounds; `nested` round-trips as JSON.
 export type ValueType = Pick<
-  NodeConfigParam,
+  ServedParam,
   "kind" | "integer" | "nullable" | "minimum" | "exclusive_minimum" | "maximum" | "exclusive_maximum"
 >;
 
-function valueType(p: NodeConfigParam): ValueType {
+function valueType(p: ServedParam): ValueType {
   return {
     kind: p.kind,
     integer: p.integer,
@@ -31,6 +31,7 @@ function valueType(p: NodeConfigParam): ValueType {
 export interface ConfigRow extends ValueType {
   node: string;
   key: string;
+  role: ServedParam["role"];
   options: string[];
   value: string;
   baseValue: string;
@@ -39,10 +40,13 @@ export interface ConfigRow extends ValueType {
   allowed: string[];
   // A transport fact (kept in the emitted seed even untouched), never provenance: that is `source`.
   inSeed: boolean;
-  source: NodeConfigParam["source"];
-  neverAxis: NodeConfigParam["never_axis"];
-  movableBy: NodeConfigParam["movable_by"];
+  source: ServedParam["source"];
+  neverAxis: ServedParam["never_axis"];
+  movableBy: ServedParam["movable_by"];
   held: boolean;
+  // False: this account sets only what `permitted` names, nothing on a free-valued row.
+  editable: boolean;
+  permitted: string[];
   description: string;
 }
 
@@ -52,26 +56,14 @@ export function pickedRoute(
 ): { model: string; caps: ModelCapability | undefined } {
   const picked = rows.find((r) => r.kind === "model");
   const model = picked?.value ?? "";
-  const provider = rows.find((r) => r.key === "provider" && r.node === picked?.node)?.value ?? "";
+  const provider = rows.find((r) => r.role === "provider" && r.node === picked?.node)?.value ?? "";
   return { model, caps: menu?.[provider]?.[model] };
 }
 
 // Display only: emitted as ticks, it would save the model's refusals as the campaign's choice.
 export function effortLadder(row: ConfigRow, caps: ModelCapability | undefined): string[] {
-  if (row.key !== "reasoning_effort") return row.options;
+  if (row.role !== "effort") return row.options;
   return caps?.reasoning_efforts ?? row.options;
-}
-
-// Only what the editor may OFFER; the verdict is `POST /campaigns/{id}/fork-preview`'s.
-export function permittedModels(
-  schema: Record<string, NodeConfigParam[]> | null | undefined,
-): Record<string, readonly string[]> {
-  const out: Record<string, readonly string[]> = {};
-  for (const [node, params] of Object.entries(schema ?? {})) {
-    const row = params.find((p) => p.key === "model");
-    if (row) out[node] = row.permitted;
-  }
-  return out;
 }
 
 function asObj(v: unknown): Record<string, unknown> {
@@ -117,14 +109,14 @@ export function descriptionSubtree(keys: readonly string[], path: string): strin
 
 // `valuesSeed` is read in `values` mode only: search-space rows are served (`frontend-surface-contract.md::I9`).
 export function configRows(
-  schema: Record<string, NodeConfigParam[]> | null,
+  schema: Record<string, ServedParam[]> | null,
   valuesSeed: Record<string, unknown>,
   mode: ConfigMode,
   node?: string,
 ): ConfigRow[] {
   if (!schema) return [];
   const scoped = node != null ? schema[node] : undefined;
-  const entries: [string, NodeConfigParam[]][] =
+  const entries: [string, ServedParam[]][] =
     node != null ? (scoped ? [[node, scoped]] : []) : Object.entries(schema);
   const rows: ConfigRow[] = [];
   for (const [n, params] of entries) {
@@ -136,6 +128,7 @@ export function configRows(
           ...valueType(p),
           node: n,
           key: p.key,
+          role: p.role,
           options: p.options,
           value: baseValue,
           baseValue,
@@ -146,6 +139,8 @@ export function configRows(
           neverAxis: p.never_axis,
           movableBy: p.movable_by,
           held: p.held,
+          editable: p.editable,
+          permitted: p.permitted,
           description: p.description,
         });
       } else {
@@ -155,6 +150,7 @@ export function configRows(
           ...valueType(p),
           node: n,
           key: p.key,
+          role: p.role,
           options: p.options,
           value: asRowValue(p.kind, seedVal),
           baseValue,
@@ -166,6 +162,8 @@ export function configRows(
           neverAxis: p.never_axis,
           movableBy: p.movable_by,
           held: p.held,
+          editable: p.editable,
+          permitted: p.permitted,
           description: p.description,
         });
       }
@@ -193,7 +191,7 @@ export function nodeOverlayPatch(node: string, rows: ConfigRow[]): DraftPatch {
 }
 
 export function nodeLockPatch(
-  schema: Record<string, NodeConfigParam[]> | null,
+  schema: Record<string, ServedParam[]> | null,
   node: string,
   keys: readonly string[],
   locked: boolean,
@@ -271,7 +269,7 @@ export function seedOverlayFromRows(
 export interface KnobGroup {
   node: string;
   kind: string;
-  knobs: NodeConfigParam[];
+  knobs: ServedParam[];
 }
 
 // Each member's knobs as its `node_config_schema` rows, in the member's declared order.
@@ -300,7 +298,7 @@ function withinBounds(knob: ValueType, n: number): boolean {
   );
 }
 
-export function knobRange(knob: NodeConfigParam): string | null {
+export function knobRange(knob: ValueType): string | null {
   const low = knob.exclusive_minimum ?? knob.minimum;
   const high = knob.exclusive_maximum ?? knob.maximum;
   if (low === null && high === null) return null;

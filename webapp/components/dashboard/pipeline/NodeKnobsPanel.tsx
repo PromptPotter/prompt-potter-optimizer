@@ -5,7 +5,7 @@ import {
   type ConfigKnob,
   type ConfigMapResponse,
   type ManifestNodeOverlay,
-  type NodeConfigParam,
+  type ServedParam,
   type OptimizerRoster,
   type OptimizerSetup,
   type PoolFill,
@@ -220,7 +220,7 @@ export function KnobItem({
   onChange,
 }: {
   node: string;
-  knob: NodeConfigParam;
+  knob: ServedParam;
   declaredLabel: string;
   // The config map's layer behind a campaign's value; a draft's setup has none.
   setBy?: KnobLayer | undefined;

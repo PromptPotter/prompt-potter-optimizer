@@ -18,6 +18,7 @@ from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.pipeline_schema import (
+    SCHEMA_TOGGLE_PARAM,
     CapabilityMenu,
     NestedPipelineRef,
     NodeConfigParam,
@@ -112,6 +113,48 @@ class PoolRow(StrictModel):
     )
 
 
+# The call fact a surface keys a control on; a model row is `kind`'s.
+ParamRole = Literal["", "provider", "effort", "answer_format", "schema_family"]
+_PARAM_ROLES: dict[str, ParamRole] = {
+    "provider": "provider",
+    "reasoning_effort": "effort",
+    SCHEMA_TOGGLE_PARAM: "answer_format",
+    "schema_family": "schema_family",
+}
+
+
+# Beside the domain row, never on it: every treatment digest hashes that row's source, which
+# `PipelineSchema.node_config_schema` reaches.
+class ServedParam(NodeConfigParam):
+    """A param row as the account that asked reads it."""
+
+    role: ParamRole = Field(
+        description="`provider` the route's host, `effort` the reasoning ladder a model answers, "
+        "`answer_format` the text/json toggle, `schema_family` a registry schema the backend owns"
+    )
+    editable: bool = Field(
+        description="Whether this account may steer it past `permitted`: false where that is the "
+        "babysit act (`campaign.babysit`) it does not hold, on a cost lever or a model"
+    )
+
+
+def served_rows(
+    rows: dict[str, list[NodeConfigParam]], *, babysit: bool
+) -> dict[str, list[ServedParam]]:
+    """*babysit*: the account may take the act `overlay_sets_model_outside_allowed` decides."""
+    return {
+        node: [
+            ServedParam(
+                **dict(p),
+                role=_PARAM_ROLES.get(p.key, ""),
+                editable=babysit or not (p.never_axis == "cost_lever" or p.kind == "model"),
+            )
+            for p in params
+        ]
+        for node, params in rows.items()
+    }
+
+
 class OptimizerNodePrompt(StrictModel):
     """The prompt an optimizer node runs under a config, before any L4 override."""
 
@@ -163,7 +206,7 @@ class OptimizerSetup(StrictModel):
         "that opens or adds arms and adds none here is off, and absent"
     )
     pools: list[PoolRow] = Field(description="What the members draw from")
-    node_config_schema: dict[str, list[NodeConfigParam]] = Field(
+    node_config_schema: dict[str, list[ServedParam]] = Field(
         description="Per optimizer node, its typed config rows at this config — an llm node's "
         "call config and prompt fields, a member's knobs: what its pipeline graph and node detail "
         "draw"
@@ -203,7 +246,7 @@ class CampaignPipelineResponse(StrictModel):
         description="Resolved config as the engine holds it — the bytes each arm of a round file "
         "carries as `resolved_params`, which makes that field this endpoint's check"
     )
-    node_config_schema: dict[str, list[NodeConfigParam]]
+    node_config_schema: dict[str, list[ServedParam]]
     view: PipelineView | None
     node_output_schema: dict[str, NodeOutputSchema | None]
     model_capabilities: CapabilityMenu = Field(
@@ -274,7 +317,7 @@ class DatasetPipelineResponse(StrictModel):
         description="The connector the definition declares, as `CampaignPipelineResponse.connector` names it"
     )
     view: PipelineView | None
-    node_config_schema: dict[str, list[NodeConfigParam]] = Field(
+    node_config_schema: dict[str, list[ServedParam]] = Field(
         description="Every param each node carries, valueless — what `reach` is summed over"
     )
     reach: dict[str, NodeReach]
@@ -419,7 +462,8 @@ def optimizer_setup(
         arms_per_round=selected.arms_per_round,
         proposers=[ProposerRow(node=p.name, makes=selected.makes(p)) for p in selected.proposing],
         pools=[_pool_row(selected, i, mint, opened) for i in selected.plan.initializers],
-        node_config_schema=rows,
+        # An optimizer node's config is no steer `overlay_sets_model_outside_allowed` reads.
+        node_config_schema=served_rows(rows, babysit=True),
         reach=reach_map(rows),
     )
 
