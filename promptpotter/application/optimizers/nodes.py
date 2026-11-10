@@ -37,8 +37,7 @@ from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import CatchUps
-from promptpotter.infrastructure.store.source_scan import optimizer_prompt_shapers
-from promptpotter.shared.hashing import module_source_digest
+from promptpotter.infrastructure.store.source_scan import prompt_source_digest
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
@@ -416,8 +415,7 @@ def _source_digest(
     # Both are hashed whole and scanned for the shapers they read: a member module names its wire
     # schemas and helpers by name, so a reached unit needs no mark.
     foreign = frozenset(f"{_PACKAGE}.{package}" for package in BUILTIN_PACKAGES - roster)
-    shapers = optimizer_prompt_shapers((*spoken, *own), covered=covered, foreign=foreign)
-    return module_source_digest(*spoken, *own, *shapers)
+    return prompt_source_digest((*spoken, *own), covered=covered, foreign=foreign)
 
 
 def rows_read(rounds: Sequence[RoundResult], round_num: int) -> str:

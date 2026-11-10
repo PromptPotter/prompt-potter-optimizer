@@ -3138,6 +3138,18 @@
         "reader": "promptpotter.infrastructure.store.tenant_dataset_store::read_task_context"
       }
     },
+    "treatment digests": {
+      "fate": "CACHE",
+      "patterns": [
+        ".cache/treatment_digests.json"
+      ],
+      "shape": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      }
+    },
     "upload": {
       "fate": "SURVIVOR",
       "patterns": [

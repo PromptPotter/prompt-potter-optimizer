@@ -17,9 +17,11 @@ import random
 import re
 import sys
 import zipfile
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from types import ModuleType
 from typing import Any, cast
 from unittest.mock import Mock
 
@@ -287,7 +289,7 @@ from promptpotter.shared.errors import (
     PotterError,
     SlugTakenError,
 )
-from promptpotter.shared.hashing import dataset_hash, source_facts, stable_hash
+from promptpotter.shared.hashing import SourceFacts, dataset_hash, source_facts, stable_hash
 from promptpotter.shared.identity import default_identity
 from promptpotter.shared.run_scope import scoped
 
@@ -404,7 +406,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert "BOUND" in pick["reads"]["names"], "an annotation's metadata went unwalked"
     assert "Arm" not in pick["reads"]["names"], "an annotation was walked"
     # The walk stops at plumbing: editing what it reads re-keys nothing.
-    package = tmp_path / "pkg" / "promptpotter"
+    package = (tmp_path / "pkg" / "promptpotter").resolve()
     for module, text in {
         "__init__": "",
         "config/__init__": "",
@@ -417,19 +419,55 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         (package / f"{module}.py").parent.mkdir(parents=True, exist_ok=True)
         (package / f"{module}.py").write_text(text, encoding="utf-8")
 
-    def walked(edit: str | None = None) -> tuple[str, ...]:
-        with monkeypatch.context() as patch:
-            patch.setattr(source_scan, "_PACKAGE_ROOT", package)
-            if edit is None:
-                return source_scan.optimizer_prompt_shapers(())
-            (package / "config" / f"{edit}.py").write_text("WIDTH = 3\n", encoding="utf-8")
-            try:
-                return source_scan.optimizer_prompt_shapers(())
-            finally:
-                (package / "config" / f"{edit}.py").write_text("WIDTH = 2\n", encoding="utf-8")
+    unit = ModuleType("promptpotter.unit")
+    unit.__file__ = str(package / "unit.py")
 
-    assert walked("settings") == walked(), "a plumbing module's edit re-keyed a treatment"
-    assert walked("shaped") != walked(), "the walk stopped short of a shaping module"
+    def process() -> Callable[[], str]:
+        """A new process on the scratch package: nothing held in memory, one cache file."""
+        stores = {
+            "_FACTS": source_scan._ContentCache[SourceFacts](source_scan.SOURCE_FACTS_FILE),
+            "_DIGESTS": source_scan._ContentCache[str](source_scan.TREATMENT_DIGESTS_FILE),
+        }
+
+        def treatment() -> str:
+            with monkeypatch.context() as patch:
+                patch.setattr(source_scan, "_PACKAGE_ROOT", package)
+                patch.setattr(source_scan, "install_cache_root", lambda: tmp_path / "cache")
+                for name, store in stores.items():
+                    patch.setattr(source_scan, name, store)
+                return source_scan.prompt_source_digest((unit,), covered=(), foreign=())
+
+        return treatment
+
+    def with_edit(module: str, text: str) -> str:
+        path = package / f"{module}.py"
+        kept = path.read_text(encoding="utf-8")
+        path.write_text(text, encoding="utf-8")
+        try:
+            return process()()
+        finally:
+            path.write_text(kept, encoding="utf-8")
+
+    assert with_edit("config/settings", "WIDTH = 3\n") == process()(), (
+        "a plumbing module's edit re-keyed a treatment"
+    )
+    assert with_edit("config/shaped", "WIDTH = 3\n") != process()(), (
+        "the walk stopped short of a shaping module"
+    )
+    # A digest is derived from the tree its key hashes: a module edited after a process's first
+    # digest is answered by the edited text, whether the cache file holds it or not.
+    running = process()
+    first_digest = running()
+    (package / "unit.py").write_text(
+        (package / "unit.py").read_text(encoding="utf-8") + "EXTRA = 1\n", encoding="utf-8"
+    )
+    edited_digest = running()
+    assert edited_digest != first_digest, "an edit after a first digest kept the old text's digest"
+    digests_file = tmp_path / "cache" / source_scan.TREATMENT_DIGESTS_FILE
+    assert digests_file.is_file(), "the process kept no digest"
+    assert process()() == edited_digest, "a new process read a cached digest of another text"
+    digests_file.unlink()
+    assert process()() == edited_digest, "the cached digest differs from a fresh derivation"
 
     # The judge a cell is graded by moves its searchpoint hash.
     schema = pipeline_schema(

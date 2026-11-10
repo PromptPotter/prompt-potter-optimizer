@@ -91,7 +91,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.ruler_store import RULER_FILE
 from promptpotter.infrastructure.store.site_records import SITE_RECORDS_DIR, site_record
-from promptpotter.infrastructure.store.source_scan import SOURCE_FACTS_FILE
+from promptpotter.infrastructure.store.source_scan import SOURCE_FACTS_FILE, TREATMENT_DIGESTS_FILE
 from promptpotter.infrastructure.store.tenant_dataset_store import (
     BANKS_DIR,
     CUTS_FILE,
@@ -242,6 +242,13 @@ INSTALL_KINDS: tuple[Kind, ...] = (
         f"{INSTALL_CACHE_DIR}/{SOURCE_FACTS_FILE}",
         Fate.CACHE,
         TypeAdapter(dict[str, SourceFacts]),
+    ),
+    Kind(
+        "treatment digests",
+        _INSTALL,
+        f"{INSTALL_CACHE_DIR}/{TREATMENT_DIGESTS_FILE}",
+        Fate.CACHE,
+        TypeAdapter(dict[str, str]),
     ),
     # `HF_HOME`, set by `deploy-linux/install-service.sh`: the only path its unit may write.
     Kind("dataset fetch cache", _INSTALL, f"{INSTALL_CACHE_DIR}/huggingface/**", Fate.CACHE),

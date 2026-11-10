@@ -60,7 +60,8 @@ Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only 
   jobs/{job_id}.json                    # machine-global admission records (`domain/job.py::JobStage`)
   jobs/ended/{job_id}.json              # a job released before today, deleted after `jobs/registry.py::_ENDED_KEPT`
   logs/latest-readout-path.txt          # names the newest terminal launch's `readout.log`
-  .cache/source_facts.json              # the install cache, where an install has no checkout
+  .cache/source_facts.json              # source facts, keyed by content; where an install has no checkout
+  .cache/treatment_digests.json         # treatment digests, keyed by the package tree's text
   .cache/huggingface/                   # the box unit's HF_HOME (`deploy-linux/install-service.sh`)
   projects/{tenant_id}/
     user.json  grant.json  api_keys.json

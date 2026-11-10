@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 import json
 from pathlib import Path
@@ -278,13 +279,18 @@ def source_facts(text: str) -> SourceFacts:
 
 
 def module_source_digest(*sources: ModuleType | NormalizedSource) -> str:
-    parts = [
-        s
-        if isinstance(s, str)
-        else _normalized_source(ast.parse(Path(str(s.__file__)).read_text("utf-8")))
-        for s in sources
-    ]
-    return stable_hash(parts)
+    return stable_hash(
+        [
+            s if isinstance(s, str) else normalized_module(Path(str(s.__file__)).read_text("utf-8"))
+            for s in sources
+        ]
+    )
+
+
+@functools.cache
+def normalized_module(text: str) -> NormalizedSource:
+    """Memoized on the text, never the module: an edit on disk is never answered by an older read."""
+    return NormalizedSource(_normalized_source(ast.parse(text)))
 
 
 def stable_hash(value: Any, *, length: int = ID_HEX) -> str:
