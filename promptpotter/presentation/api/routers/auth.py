@@ -13,19 +13,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from promptpotter.application import account, health
 from promptpotter.config.paths import default_projects_root
-from promptpotter.config.settings import settings
 from promptpotter.domain.run_records import Device, device_of
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
-from promptpotter.infrastructure.identity.default_claim import (
-    maybe_claim_default,
-    registered_user_id,
-)
 from promptpotter.infrastructure.identity.provider_config import (
     SUPPORTED_PROVIDERS,
     CodeExchangeError,
     SignInClient,
 )
-from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
 from promptpotter.infrastructure.outbound import forward_new_account_to_crm, notify_operator
 from promptpotter.infrastructure.store.stores import Stores
@@ -37,8 +31,6 @@ from promptpotter.presentation.api.deps import (
 from promptpotter.presentation.api.middleware.oidc import (
     OWNER_DEVICE_COOKIE_NAME,
     SESSION_COOKIE_NAME,
-    identity_of_session,
-    resolve_access_state,
 )
 from promptpotter.shared.errors import (
     NotFoundError,
@@ -58,15 +50,6 @@ OAUTH_FLOW_COOKIE_NAME = "promptpotter_oauth_flow"
 _OAUTH_FLOW_TTL_S = 600
 # The longest a browser keeps a cookie; each of the admin's sign-ins renews it.
 _OWNER_DEVICE_TTL_S = 400 * 24 * 60 * 60
-
-
-def _is_declared_host_admin(email: str | None, issuer: str | None) -> bool:
-    """Unset `HOST_ADMIN_EMAIL` means nobody may: signing up is the grant, so "first one in wins" is unsafe."""
-    declared = settings.HOST_ADMIN_EMAIL.strip().lower()
-    if not declared or (email or "").strip().lower() != declared:
-        return False
-    declared_issuer = settings.HOST_ADMIN_ISSUER.strip()
-    return not declared_issuer or (issuer or "").strip() == declared_issuer
 
 
 def _require_provider_client(bundle: IdentityBundle, provider: str) -> tuple[str, SignInClient]:
@@ -200,66 +183,25 @@ async def callback(
         broken = health.is_broken(default_projects_root(), health.signin_probe(provider))
         return _redirect_with_error("signin_unavailable" if broken else "code_exchange_failed")
 
-    # A blocked account still gets a session: the session seam empties its capabilities per request.
-    user_id = derive_user_id(identity.issuer, identity.subject)
-    access_state = resolve_access_state(identity.email, bundle)
-    host_admin = _is_declared_host_admin(identity.email, identity.issuer)
-    if access_state == "blocked":
-        logger.info("Blocked account signed in: %s (%s)", identity.email, provider)
-    elif host_admin:
-        # The marker names the box's own tenant, so who writes it is declared, never inferred from arrival order.
-        maybe_claim_default(
-            projects_root=default_projects_root(),
-            user_id=str(user_id),
-            marker_path=bundle.paths.default_claim_marker,
-        )
-    elif registered_user_id(bundle.paths.default_claim_marker) is None:
-        why = (
-            "HOST_ADMIN_EMAIL's account has not signed in yet"
-            if settings.HOST_ADMIN_EMAIL.strip()
-            else "HOST_ADMIN_EMAIL is unset, so no browser identity may write the claim marker"
-        )
-        logger.warning(
-            "Sign-in by %s did not claim this box: %s. Terminal and browser will resolve DIFFERENT "
-            "tenants until it is claimed.",
-            identity.email,
-            why,
-        )
-
-    session_id, session = bundle.session_store.create(
-        user_id=str(user_id),
-        tenant_id=str(user_id),
-        issuer=identity.issuer,
-        subject=identity.subject,
-        email=identity.email,
-        provider=identity.provider,
-    )
-    try:
-        # Resolved as every later request resolves it, so a delegate's sign-in lands where its commands do.
-        signed_in = identity_of_session(session, bundle)
-        device = _device(request)
-        arrival = account.sign_in(build_stores_from_identity(signed_in), device=device)
-    except account.AccountCeilingError as full:
-        bundle.session_store.delete(session_id)
-        background.add_task(
-            notify_operator,
-            f"Sign-up refused for {identity.email or 'no email'}: {full.message}",
-            ring=True,
-        )
-        return _redirect_with_error("accounts_full")
-    except Exception:
-        # Refused rather than let through unrecorded: the trail's promise is that no sign-in is missing.
-        logger.exception("A %s sign-in could not be recorded", provider)
-        bundle.session_store.delete(session_id)
-        return _redirect_with_error("signin_unavailable")
-    _announce_if_opened(background, arrival, signed_in, device)
+    device = _device(request)
+    signed = account.sign_in_oidc(bundle, identity, device=device)
+    for ring in signed.rings:
+        background.add_task(notify_operator, ring, ring=True)
+    if isinstance(signed, account.SignInRefused):
+        return _redirect_with_error(signed.refusal)
+    if signed.opened:
+        _announce(background, signed.identity, device)
 
     response = RedirectResponse(url="/", status_code=303)
     _set_auth_cookie(
-        response, request, key=SESSION_COOKIE_NAME, value=session_id, max_age=60 * 60 * 24 * 7
+        response,
+        request,
+        key=SESSION_COOKIE_NAME,
+        value=signed.session_id,
+        max_age=60 * 60 * 24 * 7,
     )
     response.delete_cookie(OAUTH_FLOW_COOKIE_NAME, path="/")
-    if host_admin:
+    if signed.host_admin:
         _mark_owner_device(response, request)
     return response
 
@@ -304,26 +246,23 @@ def _announce_new_account(
     )
 
 
-def _announce_if_opened(
-    background: BackgroundTasks,
-    arrival: account.Arrival,
-    identity: IdentityContext,
-    device: Device | None,
+def _announce(
+    background: BackgroundTasks, identity: IdentityContext, device: Device | None
 ) -> None:
     """After the response, never on it."""
-    if arrival.opened:
-        background.add_task(
-            _announce_new_account,
-            email=identity.email,
-            name=display_name(identity.email),
-            user_id=str(identity.user_id),
-            access_state=identity.access_state,
-            device=device,
-        )
+    background.add_task(
+        _announce_new_account,
+        email=identity.email,
+        name=display_name(identity.email),
+        user_id=str(identity.user_id),
+        access_state=identity.access_state,
+        device=device,
+    )
 
 
 def arrive(request: Request, background: BackgroundTasks, stores: Stores) -> None:
     """`me`'s arrival: opened at sign-in as a rule; here for an open box, which has none, and for a
     session that outlived its files."""
     device = _device(request)
-    _announce_if_opened(background, account.arrive(stores, device=device), stores.identity, device)
+    if account.arrive(stores, device=device).opened:
+        _announce(background, stores.identity, device)

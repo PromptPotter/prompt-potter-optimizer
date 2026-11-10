@@ -590,11 +590,7 @@ def list_hierarchy(
             ),
         )
         for campaign in (
-            []
-            if stored is None
-            else leaf.campaigns.list_campaigns(
-                dataset, lifecycle=stored, owner_user_id=str(leaf.identity.user_id)
-            )
+            [] if stored is None else leaf.campaigns.list_campaigns(dataset, lifecycle=stored)
         )
         if campaign_id in (None, campaign.campaign_id)
     ]

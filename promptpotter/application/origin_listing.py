@@ -88,9 +88,8 @@ class OriginEntry(StrictModel):
 
 
 def _campaigns_by_origin(stores: Stores) -> dict[str, list[Campaign]]:
-    """NOT owner-filtered: a CLI mint's owner id differs from a browser session's in ONE tenant."""
     by_origin: dict[str, list[Campaign]] = {}
-    for campaign in stores.campaigns.list_campaigns(None, lifecycle="active", owner_user_id=None):
+    for campaign in stores.campaigns.list_campaigns(None, lifecycle="active"):
         by_origin.setdefault(campaign.origin_id, []).append(campaign)
     return by_origin
 

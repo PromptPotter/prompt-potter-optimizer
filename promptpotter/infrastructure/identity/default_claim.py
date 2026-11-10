@@ -4,10 +4,13 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from promptpotter.config.paths import ACCOUNTS_LOCK
+from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.identity.paths import DefaultClaim, default_identity_paths
+from promptpotter.infrastructure.runtime_flags import producer_attached
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import write_json
+from promptpotter.infrastructure.store.io import held_lock, write_json
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import FileKind
@@ -19,24 +22,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def maybe_claim_default(
-    *,
-    projects_root: Path,
-    user_id: str,
-    marker_path: Path,
-) -> None:
-    if marker_path.is_file():
-        return
-    user_dir = projects_root / user_id
-    default_dir = projects_root / "default"
-    renamed = default_dir.is_dir() and not user_dir.exists()
-    if renamed:
-        default_dir.rename(user_dir)
-        logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
-    claim = DefaultClaim(user_id=user_id, claimed_at=utcnow_iso(), renamed=renamed)
-    write_json(marker_path, claim.model_dump())
-    if user_dir.is_dir():
-        _rebind_campaigns(CampaignStore(WorkspaceDir(user_dir)), user_id)
+def claim_default(*, projects_root: Path, user_id: str, marker_path: Path) -> str | None:
+    """The host's account takes the terminal's: ONE act under the accounts lock, so no sign-in
+    opens either directory meanwhile. ``None`` once claimed; else why it refused, the marker
+    unwritten so the host's next sign-in asks again."""
+    with held_lock(projects_root / ACCOUNTS_LOCK, wait_s=LOCK_TIMEOUT):
+        if marker_path.is_file():
+            return None
+        user_dir = projects_root / user_id
+        default_dir = projects_root / TERMINAL_IDENTITY_ID
+        if default_dir.is_dir():
+            if user_dir.exists():
+                return f"both {default_dir} and {user_dir} exist: merge or remove one, then sign in"
+            terminal = CampaignStore(WorkspaceDir(default_dir))
+            if any(
+                producer_attached(cycle_dir)
+                for campaign_id in terminal.list_campaign_ids()
+                for cycle_dir in terminal.campaign_cycle_dirs(campaign_id)
+            ):
+                return (
+                    f"a run holds a cycle under {default_dir}: pause it or let it end, then sign in"
+                )
+            default_dir.rename(user_dir)
+            logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
+        write_json(marker_path, DefaultClaim(user_id=user_id, claimed_at=utcnow_iso()).model_dump())
+    return None
 
 
 def registered_user_id(marker_path: Path) -> str | None:
@@ -57,12 +67,3 @@ def is_host_tenant_dir(user_id: str) -> bool:
     A signed-in principal's seam stamps it; a directory walk reads it."""
     claimed = registered_user_id(default_identity_paths().default_claim_marker)
     return user_id == TERMINAL_IDENTITY_ID or (claimed is not None and user_id == claimed)
-
-
-def _rebind_campaigns(campaigns: CampaignStore, user_id: str) -> None:
-    """Any OTHER owner is left alone: a multi-user install holds campaigns that are someone else's."""
-    for campaign_id in campaigns.list_campaign_ids():
-        campaign = campaigns.load_campaign(campaign_id)
-        if campaign is not None and campaign.owner_user_id == "default":
-            campaigns.update_campaign(campaign_id, owner_user_id=user_id)
-            logger.info("Rebound campaign %s to user %s", campaign_id, user_id)

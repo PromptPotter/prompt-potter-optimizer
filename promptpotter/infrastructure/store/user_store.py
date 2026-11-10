@@ -42,9 +42,11 @@ class User(FrozenModel):
     user_id: str
     tenant_id: str
     email: str | None = None
-    terms_accepted: ConsentRecord | None = Field(
-        default=None,
-        description="Provable Terms-acceptance record (version + server-stamped timestamp). None until the consent gate is cleared.",
+    terms_accepted: dict[str, ConsentRecord] = Field(
+        default_factory=dict,
+        description="Provable Terms-acceptance record (version + server-stamped timestamp) per "
+        "acting principal: the account's own and each delegate's. Absent until it clears the "
+        "consent gate.",
     )
     max_concurrent_cycles: int = Field(default=2, ge=1)
     max_campaigns_per_day: int = Field(default=1000, ge=1)

@@ -30,18 +30,10 @@ def free_tier() -> FreeTier:
 
 
 def on_free_tier(stores: Stores) -> bool:
-    """The box's DEFAULT coupon: the host, a delegate and a hand-granted account are outside it.
-    What the tier binds of a run is `free_fence`'s."""
-    return (
-        not is_host(stores.identity)
-        and stores.grant.load() is None
-        and delegated_spend_ceiling(stores) is None
-    )
-
-
-def delegated_spend_ceiling(stores: Stores) -> float | None:
-    ceiling = stores.identity.claims.get("spend_ceiling_usd")
-    return float(ceiling) if isinstance(ceiling, int | float) else None
+    """The box's DEFAULT coupon: the host and a hand-granted account are outside it, and a
+    delegate stands where its delegator's account does. What the tier binds of a run is
+    `free_fence`'s."""
+    return not is_host(stores.identity) and stores.grant.load() is None
 
 
 def tier_ceiling(stores: Stores) -> float | None:

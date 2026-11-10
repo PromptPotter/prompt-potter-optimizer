@@ -46,11 +46,10 @@ IDENTITY_DIR = "identity"
 
 
 class DefaultClaim(FrozenModel):
-    """``default_claim_marker``: the host's account, written at its first sign-in; `renamed` is whether `default` became it."""
+    """``default_claim_marker``: the host's account, written once its first sign-in claimed it."""
 
     user_id: str = Field(min_length=1)
     claimed_at: str
-    renamed: bool
 
 
 def default_identity_paths() -> IdentityPaths:

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.store.io import append_jsonl, write_json
+from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_lock
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import FileKind, FileUnreadableError
@@ -88,11 +88,13 @@ def list_blocked(path: Path) -> list[str]:
 
 def block_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
     normalized = _normalize(email)
-    current = list_blocked(path)
-    before = len(current)
-    if normalized not in current:
-        current = sorted({*current, normalized})
-        _write_emails(path, current)
+    # Read and rewritten under the file's write lock: two edits never both read it.
+    with write_lock(path):
+        current = list_blocked(path)
+        before = len(current)
+        if normalized not in current:
+            current = sorted({*current, normalized})
+            _write_emails(path, current)
     _append_audit(
         audit_path, action="block", email=normalized, actor=actor, before=before, after=len(current)
     )
@@ -101,11 +103,12 @@ def block_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list
 
 def unblock_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
     normalized = _normalize(email)
-    current = list_blocked(path)
-    before = len(current)
-    if normalized in current:
-        current = [e for e in current if e != normalized]
-        _write_emails(path, current)
+    with write_lock(path):
+        current = list_blocked(path)
+        before = len(current)
+        if normalized in current:
+            current = [e for e in current if e != normalized]
+            _write_emails(path, current)
     _append_audit(
         audit_path,
         action="unblock",

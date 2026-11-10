@@ -349,7 +349,6 @@ class CampaignStore:
         dataset_name: str | None = None,
         *,
         lifecycle: LifecycleFilter = "active",
-        owner_user_id: str | None = None,
     ) -> list[Campaign]:
         out: list[Campaign] = []
         for cid in self.list_campaign_ids():
@@ -364,8 +363,6 @@ class CampaignStore:
             if dataset_name and campaign.dataset_name != dataset_name:
                 continue
             if lifecycle != "all" and campaign.lifecycle_status != lifecycle:
-                continue
-            if owner_user_id is not None and campaign.owner_user_id != owner_user_id:
                 continue
             out.append(campaign)
         return out

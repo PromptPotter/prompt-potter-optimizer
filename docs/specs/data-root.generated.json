@@ -1286,24 +1286,11 @@
               "note": {
                 "title": "Note",
                 "type": "string"
-              },
-              "spend_ceiling_usd": {
-                "anyOf": [
-                  {
-                    "minimum": 0.0,
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Spend Ceiling Usd"
               }
             },
             "required": [
               "delegated_by",
               "capabilities",
-              "spend_ceiling_usd",
               "note"
             ],
             "title": "PrincipalGrant",
@@ -1341,15 +1328,11 @@
       ],
       "shape": {
         "additionalProperties": false,
-        "description": "``default_claim_marker``: the host's account, written at its first sign-in; `renamed` is whether `default` became it.",
+        "description": "``default_claim_marker``: the host's account, written once its first sign-in claimed it.",
         "properties": {
           "claimed_at": {
             "title": "Claimed At",
             "type": "string"
-          },
-          "renamed": {
-            "title": "Renamed",
-            "type": "boolean"
           },
           "user_id": {
             "minLength": 1,
@@ -1359,8 +1342,7 @@
         },
         "required": [
           "user_id",
-          "claimed_at",
-          "renamed"
+          "claimed_at"
         ],
         "title": "DefaultClaim",
         "type": "object"
@@ -3226,16 +3208,12 @@
             "type": "string"
           },
           "terms_accepted": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ConsentRecord"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "Provable Terms-acceptance record (version + server-stamped timestamp). None until the consent gate is cleared."
+            "additionalProperties": {
+              "$ref": "#/$defs/ConsentRecord"
+            },
+            "description": "Provable Terms-acceptance record (version + server-stamped timestamp) per acting principal: the account's own and each delegate's. Absent until it clears the consent gate.",
+            "title": "Terms Accepted",
+            "type": "object"
           },
           "user_id": {
             "title": "User Id",

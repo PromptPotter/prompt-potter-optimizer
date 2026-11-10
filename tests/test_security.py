@@ -64,7 +64,7 @@ from promptpotter.application.commands.dispatcher import Applier, CommandCall, C
 from promptpotter.application.commands.launching import launch_cancels
 from promptpotter.application.cycle_addressing import cycle_target
 from promptpotter.application.cycle_files import FileScope, read_cycle_file
-from promptpotter.application.datasets.draft_campaign import new_draft
+from promptpotter.application.datasets.draft_campaign import new_draft, owned_draft
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.host_surface import (
     CallTool,
@@ -179,8 +179,16 @@ from promptpotter.infrastructure.identity.blocklist import (
     check_blocklist,
     unblock_email,
 )
-from promptpotter.infrastructure.identity.bundle import IdentityBundle, build_identity_bundle
-from promptpotter.infrastructure.identity.default_claim import is_host, maybe_claim_default
+from promptpotter.infrastructure.identity.bundle import (
+    IdentityBundle,
+    build_identity_bundle,
+    identity_of_session,
+)
+from promptpotter.infrastructure.identity.default_claim import (
+    claim_default,
+    is_host,
+    registered_user_id,
+)
 from promptpotter.infrastructure.identity.google import GoogleProviderClient
 from promptpotter.infrastructure.identity.grants import (
     grant_principal,
@@ -190,7 +198,11 @@ from promptpotter.infrastructure.identity.grants import (
     revoke_principal,
 )
 from promptpotter.infrastructure.identity.jwks import JWKSCache
-from promptpotter.infrastructure.identity.paths import IdentityPaths, default_identity_paths
+from promptpotter.infrastructure.identity.paths import (
+    IDENTITY_DIR,
+    IdentityPaths,
+    default_identity_paths,
+)
 from promptpotter.infrastructure.identity.provider_config import (
     OIDCProviderConfig,
     ProviderConfigBundle,
@@ -213,6 +225,7 @@ from promptpotter.infrastructure.store.layout import (
     draft_dirs,
     inner_sandbox_dir,
     inner_sandboxes_dir,
+    tenant_workspace,
 )
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
 from promptpotter.infrastructure.store.private_root import DataRootExposedError, hold_private
@@ -222,9 +235,12 @@ from promptpotter.infrastructure.store.site_records import (
     SiteRecordStore,
     default_site_record_store,
 )
-from promptpotter.infrastructure.store.stores import Stores, descend_store
+from promptpotter.infrastructure.store.stores import Stores, descend_store, tenant_stores
 from promptpotter.infrastructure.store.user_store import (
     CONSENT_FILE,
+    USER_FILE,
+    ConsentLine,
+    ConsentRecord,
     User,
     UserStore,
     count_accounts,
@@ -237,7 +253,6 @@ from promptpotter.presentation.api.deps import (
 from promptpotter.presentation.api.middleware.oidc import (
     OWNER_DEVICE_COOKIE_NAME,
     SESSION_COOKIE_NAME,
-    identity_of_session,
 )
 from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers import auth
@@ -262,6 +277,8 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.hashing import ADDRESS_HEX
 from promptpotter.shared.identity import (
+    ACCOUNT_KEYS_CAP,
+    CAMPAIGN_BUDGET_CAP,
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
     OWNER_COMMAND_CAPABILITIES,
@@ -289,6 +306,7 @@ sys.exit(0 if landing.proven and not landing.refused and not landing.caches else
 # 1. Leaks and the perimeter
 
 
+@pytest.mark.usefixtures("offline")
 def test_no_path_secret_or_dataset_text_leaves_its_fence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
 ) -> None:
@@ -600,7 +618,16 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         workspace(tmp_path, dataclasses.replace(who(u), capabilities=OWNER_COMMAND_CAPABILITIES))
         for u in ("ada-id", "eve-id")
     )
-    ada.campaigns.create_campaign(minted_campaign(ada_hop, owner_user_id="ada-id"))
+    ada.campaigns.create_campaign(minted_campaign(ada_hop))
+    # The tenant directory is the owner: the terminal's `--tenant ada-id` acts as ada in ada's
+    # account, so what ada's browser drafted is its own, and another account's is not (bl4.B3).
+    drafted = asyncio.run(ingest_draft(stores=ada, blob=b"q,a\nx,y\n", filename="t.csv"))
+    terminal = tenant_stores(ada.projects_root, ada.campaigns.workspace)
+    assert owned_draft(terminal, drafted.draft_id).slug == drafted.slug, (
+        "the terminal in an account lost a draft that account's browser made"
+    )
+    with pytest.raises(NotFoundError):
+        owned_draft(eve, drafted.draft_id)
     edit = "Think it through, one step at a time."
     banked = BankSnippetPayload(
         supersedes=snippet_id(seed.text), text=edit, experiment=ada_hop.campaign_id
@@ -982,13 +1009,12 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
             expires_at=9_999_999_999,
         )
 
-    def grant(sub: str, by: str, caps: frozenset[str], ceiling: float | None = None) -> None:
+    def grant(sub: str, by: str, caps: frozenset[str]) -> None:
         grant_principal(
             grants,
             sub_principal_user_id=sub,
             delegated_by_user_id=by,
             capabilities=caps,
-            spend_ceiling_usd=ceiling,
             note="claude",
             actor="owner-9",
             audit_path=audit,
@@ -999,7 +1025,6 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         "sub-1",
         "owner-9",
         frozenset({CAMPAIGN_STEP_CAP, "admin.super", "datasets.benchmarks.read"}),
-        5.0,
     )
     granted = read_grant(grants, "sub-1")
     assert granted is not None and not granted.is_denied
@@ -1015,12 +1040,49 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     with pytest.raises(NotFoundError):
         require_capability(ident, starting.capability, subject=starting.value)  # lacks campaign.run
     assert acting_principal(ident).id == "sub-1", "audit must name the delegate, not the delegator"
-    # The host's delegate acts in the host's tenant and is not the host (bl4.B1).
-    maybe_claim_default(
-        projects_root=tmp_path / "projects",
-        user_id="owner-9",
-        marker_path=default_identity_paths().default_claim_marker,
+    # A delegate never holds the account's keys, whatever its grant names (bl4.B6), stands on its
+    # delegator's access (bl4.B7), and no account is its own delegate (bl4.B8).
+    grant("sub-keys", "owner-9", frozenset({CAMPAIGN_BUDGET_CAP, ACCOUNT_KEYS_CAP}))
+    keyed = identity_of_session(session_of("sub-keys"), signed_in)
+    for keys in (CommandKind.SET_API_KEY, CommandKind.REMOVE_API_KEY):
+        assert keys.capability is not None
+        with pytest.raises(NotFoundError):
+            require_capability(keyed, keys.capability, subject=keys.value)
+    delegator = User(
+        user_id="owner-9", tenant_id="owner-9", email="owner-9@x.com", created_at="2026-01-01"
     )
+    UserStore(tenant_workspace(default_projects_root(), "owner-9")).save(delegator)
+    block_email(
+        grant_paths.blocklist, "owner-9@x.com", actor="host", audit_path=grant_paths.blocklist_audit
+    )
+    cut_off = identity_of_session(session_of("sub-1"), signed_in)
+    assert (cut_off.access_state, cut_off.capabilities) == ("blocked", frozenset()), (
+        "a blocked delegator's delegate still acted"
+    )
+    grant_paths.blocklist.unlink()
+    with pytest.raises(ValueError):
+        grant("owner-9", "owner-9", frozenset({CAMPAIGN_STEP_CAP}))
+    # The host's first sign-in takes the terminal's account in one act, and refuses while both
+    # directories stand or a run holds a cycle there: the marker waits for the next (bl4.B4).
+    marker, projects = default_identity_paths().default_claim_marker, tmp_path / "projects"
+    terminal = workspace(tmp_path)
+    live = CycleHop(campaign_id="terminal-camp", cycle_id="cycle_terminal")
+    terminal.campaigns.create_campaign(minted_campaign(live))
+    terminal.campaigns.mint_cycle(live)
+    hold_cycle(terminal.campaigns.cycle_dir(live))
+    (projects / "owner-9").mkdir(parents=True)
+
+    def claim() -> str | None:
+        return claim_default(projects_root=projects, user_id="owner-9", marker_path=marker)
+
+    assert claim() is not None and (projects / "default").is_dir(), "a claim merged two accounts"
+    (projects / "owner-9").rmdir()
+    assert claim() is not None and (projects / "default").is_dir(), "a claim moved a live run"
+    release_cycle(terminal.campaigns.cycle_dir(live))
+    assert not marker.exists(), "a refused claim wrote its marker"
+    assert claim() is None and (projects / "owner-9" / "campaigns" / "terminal-camp").is_dir()
+    assert registered_user_id(marker) == "owner-9", "the claim left no marker"
+    # The host's delegate acts in the host's tenant and is not the host (bl4.B1).
     assert is_host(identity_of_session(session_of("owner-9"), signed_in)), (
         "the host read as a guest"
     )
@@ -1035,7 +1097,6 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
                 "sub-2": {
                     "delegated_by": "",
                     "capabilities": ["campaign.run"],
-                    "spend_ceiling_usd": None,
                     "note": "",
                 }
             }
@@ -1129,6 +1190,23 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     await withdraw(delegate, delegates.job_id)
     gone = registry.get(delegates.job_id)
     assert gone is not None and gone.released, "a delegate could not leave its place"
+
+    # Consent is the acting principal's: a delegate accepts for itself, and its accept leaves its
+    # delegator's standing (bl4.B5).
+    def accepted(stores: Stores) -> str | None:
+        read = account.me(stores, account.account_read(stores), configured=())
+        return read.terms_accepted_version
+
+    account.accept_terms(owner, TERMS_VERSION)
+    owners_consent = account.account_of(owner).terms_accepted
+    assert accepted(owner) == TERMS_VERSION and accepted(delegate) is None, (
+        "a delegate stood on its delegator's acceptance"
+    )
+    account.accept_terms(delegate, TERMS_VERSION)
+    assert accepted(delegate) == TERMS_VERSION
+    assert account.account_of(owner).terms_accepted.items() >= owners_consent.items(), (
+        "a delegate's accept overwrote its delegator's"
+    )
 
     # A check-in is refused before anything of it is kept or fetched.
     def tree() -> list[Path]:
@@ -1266,10 +1344,10 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         ("mint-campaign", ""),
     ], "an account event left no line or left two, or the merge lost the order"
     ada = stores.users.load()
-    assert ada is not None and ada.terms_accepted is not None
+    assert ada is not None
     assert (trail.lines[2].at, trail.lines[4].at) == (
         ada.created_at,
-        ada.terms_accepted.accepted_at,
+        ada.terms_accepted[str(identity.user_id)].accepted_at,
     ), "one fact carries two times: the account file says one and its record another"
     assert {line.actor for line in trail.lines[2:5]} == trail.own == {str(identity.user_id)}
     for keep_results in (True, False):
@@ -1550,7 +1628,6 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     # A reset's plan carries its refusal, so a dry run shows it: a draft a Start holds, or a cycle
     # its producer holds, refuses it whole.
     held_draft = new_draft(
-        owner_user_id="u",
         slug="held",
         basis=DatasetBasis(dataset="held"),
         n_samples=1,
@@ -1605,7 +1682,37 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     append_jsonl(events, old | {"event": "signed_in", "subject": "google", "device": "phone"})
     append_jsonl(events, old | {"event": "request_refused", "subject": "x", "device": None})
     users = UserStore(campaigns.workspace)
+    # The identity survivors the base wrote are migrated, never wiped.
+    identity = IdentityPaths(data_root / IDENTITY_DIR)
+    write_json(
+        identity.default_claim_marker,
+        {"user_id": "u", "claimed_at": "2026-01-01T00:00:00Z", "renamed": True},
+    )
+    write_json(
+        identity.grants,
+        {
+            "grants": {
+                "sub": {
+                    "delegated_by": "u",
+                    "capabilities": [CAMPAIGN_STEP_CAP],
+                    "spend_ceiling_usd": None,
+                    "note": "",
+                }
+            }
+        },
+    )
+    # The owner accepted v0, then v1; its delegate accepted v1 after it, over the one record.
+    accepts = (("u", "v0", "2025-12-30"), ("u", "v1", "2025-12-31"), ("sub", "v1", "2026-01-01"))
+    for by, version, day in accepts:
+        users.record(
+            ConsentLine(event="terms_accepted", user_id=by, subject=version, at=f"{day}T00:00:00Z")
+        )
     before = users.consent_trail()
+    consent = {"version": "v1", "accepted_at": "2026-01-01T00:00:00Z"}
+    write_json(
+        Path(campaigns.workspace) / USER_FILE,
+        user.model_dump(mode="json") | {"terms_accepted": consent},
+    )
     refused = plan_landing(built_stores.projects_root, reset=False)
     assert refused.refused and [u.path for u in refused.unloadable] == [events]
     with pytest.raises(ConflictError):
@@ -1614,6 +1721,14 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     landed = plan_landing(built_stores.projects_root, reset=True)
     assert not landed.refused, f"a reset landing refused: {landed}"
     apply_landing(landed)
+    assert registered_user_id(identity.default_claim_marker) == "u", "a landing lost the claim"
+    regranted = read_grant(identity.grants, "sub")
+    assert regranted is not None and regranted.delegated_by == "u", "a landing lost a grant"
+    migrated = users.load()
+    assert migrated is not None and migrated.terms_accepted == {
+        "u": ConsentRecord(version="v1", accepted_at="2025-12-31T00:00:00Z"),
+        "sub": ConsentRecord(version="v1", accepted_at="2026-01-01T00:00:00Z"),
+    }, "a landing lost an owner's own acceptance its delegate's had written over"
     trail = users.consent_trail()
     assert [line.device for line in trail if line.at == old["timestamp"]] == ["phone"], (
         "a sign-in was lost from the account's consent trail"
@@ -1958,7 +2073,6 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
 
     async def drafted(key: str) -> tuple[str, CommandCall[Any]]:
         draft = new_draft(
-            owner_user_id=str(stores.identity.user_id),
             slug=key,
             basis=DatasetBasis(dataset=key),
             n_samples=1,
@@ -2030,9 +2144,7 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
     sandbox = inner_sandbox(stores, acts_hop.campaign_id, acts_hop.cycle_id)
     (sandbox / stores.tenant_id).mkdir(exist_ok=True)
     inner = descend_store(stores, (acts_hop,))
-    inner.campaigns.create_campaign(
-        minted_campaign(leaf, owner_user_id=str(stores.identity.user_id))
-    )
+    inner.campaigns.create_campaign(minted_campaign(leaf))
     inner.campaigns.mint_cycle(leaf)
     leaf_dir = inner.campaigns.cycle_dir(leaf)
     into_leaf = Subject.of((acts_hop, leaf)).command_fields

@@ -942,7 +942,6 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         tenant_id=TenantId("sub-9"),
         issuer=Issuer("https://accounts.google.com"),
         email="a@example.com",
-        claims={"spend_ceiling_usd": 2.0},
         capabilities=frozenset({"campaign.run"}),
     )
     stores = workspace(tmp_path, signup)
@@ -1848,15 +1847,14 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     assert after.started_at is not None
     shared.release(stamped.job_id, StopReason.CONVERGED)
 
-    # Sharing divides the CAMPAIGN's ceiling, never what the account admits: a $2 delegate on a
-    # $10 campaign that has spent $3 shares the $7 left, and its account binds through the reserve.
+    # Sharing divides the CAMPAIGN's ceiling, never what the account admits: a $10 campaign that
+    # has spent $3 shares the $7 left, and its account binds through the reserve.
     delegate = workspace(
         tmp_path,
         IdentityContext(
             user_id=UserId("sub-d"),
             tenant_id=TenantId("sub-d"),
             issuer=Issuer("https://accounts.google.com"),
-            claims={"spend_ceiling_usd": 2.0},
             capabilities=frozenset({"campaign.run"}),
         ),
     )
@@ -1887,9 +1885,8 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     )
     claim_held = shared.get(claim.job_id)
     assert claim_held is not None and cycle_share(delegate, claim_held).usd == pytest.approx(7.0), (
-        "a $2 delegate's share was cut from its account's claim, not the campaign's $7 left"
+        "a share was cut from its account's claim, not the campaign's $7 left"
     )
-    assert claim_held.reserve.usd == pytest.approx(2.0), "the delegate's claim did not bind it"
     shared.release(claim.job_id, StopReason.CONVERGED)
 
     # A planned head-to-head is priced before it is minted, at what the archive measured a cell of
@@ -2686,7 +2683,6 @@ def _account_stores(
     spent: dict[str, Any] | None,
     face: Budget | None = None,
     own_key: str | None = None,
-    delegated: float | None = None,
 ) -> Stores:
     """`issuer` set makes this a WEB identity; the box operator has none and is unmetered. Its one
     campaign's cycle is `_HELD_HOP`; its charges hold what the box's keys *spent* for it."""
@@ -2697,7 +2693,6 @@ def _account_stores(
             tenant_id=TenantId(user.tenant_id),
             issuer=None if issuer is None else Issuer(issuer),
             email="",
-            claims={} if delegated is None else {"spend_ceiling_usd": delegated},
             host=issuer is None,
         ),
     )
@@ -2810,23 +2805,22 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     full = Budget(usd=_FACE.usd, tokens=_FACE.tokens)
     hand_set = Budget(usd=50.0, tokens=50_000)
     rows: tuple[tuple[Any, ...], ...] = (
-        # door, issuer, face, sends (None: a backend's cells), declared, delegated, running,
-        # spent, admitted, reserve
+        # door, issuer, face, sends (None: a backend's cells), declared, running, spent,
+        # admitted, reserve
         # A hand-set grant of the default face: off the free tier, whose ceiling binds below.
-        ("launch", _WEB, full, None, None, None, None, None, _UNBOUNDED, (0.30, _FACE.tokens)),
+        ("launch", _WEB, full, None, None, None, None, _UNBOUNDED, (0.30, _FACE.tokens)),
         # A USD ceiling holds no tokens: every send under it is priced, so the dollars bound it.
-        ("launch", _WEB, full, None, 0.15, None, None, None, (0.15, None), (0.30, None)),
-        ("launch", _WEB, full, None, 10.0, None, None, None, HostAllowanceExhaustedError, None),
+        ("launch", _WEB, full, None, 0.15, None, None, (0.15, None), (0.30, None)),
+        ("launch", _WEB, full, None, 10.0, None, None, HostAllowanceExhaustedError, None),
         # The free tier's ceiling bounds what a launch holds, a lift's included (bl2.B5).
-        ("launch", _WEB, None, None, None, None, None, None, (0.03, None), (0.06, None)),
+        ("launch", _WEB, None, None, None, None, None, (0.03, None), (0.06, None)),
         # A run none of whose sends the box's keys pay is refused nothing and reserves nothing.
-        ("launch", _WEB, None, _OWN_ONLY, 10.0, None, None, None, (10.0, None), (0.0, 0)),
+        ("launch", _WEB, None, _OWN_ONLY, 10.0, None, None, (10.0, None), (0.0, 0)),
         (
             "launch",
             _WEB,
             None,
             _OWN_ONLY,
-            None,
             None,
             {"admitted": False, "reserve": Budget()},
             None,
@@ -2839,7 +2833,6 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             None,
             None,
             None,
-            None,
             {"admitted": True, "reserve": full},
             None,
             HostAllowanceExhaustedError,
@@ -2848,7 +2841,6 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         (
             "launch",
             _WEB,
-            None,
             None,
             None,
             None,
@@ -2864,30 +2856,15 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             None,
             None,
             None,
-            None,
             _UNPRICEABLE,
             _UNBOUNDED,
             (settings.UNPRICED_GRACE_USD, _FACE.token_amount - 500_000),
         ),
-        ("launch", None, None, None, None, None, None, None, _UNBOUNDED, _UNBOUNDED),
-        ("launch", _WEB, hand_set, None, 10.0, 2.0, None, None, (2.0, None), (2.0, None)),
-        ("launch", _WEB, hand_set, None, 10.0, None, None, None, (10.0, None), (20.0, None)),
+        ("launch", None, None, None, None, None, None, _UNBOUNDED, _UNBOUNDED),
+        ("launch", _WEB, hand_set, None, 10.0, None, None, (10.0, None), (20.0, None)),
         (
             "launch",
             _WEB,
-            Budget(usd=1.0, tokens=50_000),
-            None,
-            None,
-            2.0,
-            None,
-            None,
-            (2.0, None),
-            (1.0, None),
-        ),
-        (
-            "launch",
-            _WEB,
-            None,
             None,
             None,
             None,
@@ -2896,14 +2873,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             HostAllowanceExhaustedError,
             None,
         ),
-        ("launch", _WEB, None, _OWN_ONLY, None, None, None, _SPENT_THE_COUPON, _UNBOUNDED, (0, 0)),
+        ("launch", _WEB, None, _OWN_ONLY, None, None, _SPENT_THE_COUPON, _UNBOUNDED, (0, 0)),
         # An own key frees its provider's sends, never a backend's cells.
         (
             "launch",
             _WEB,
             None,
             (*_CELLS, *_OWN_ONLY),
-            None,
             None,
             None,
             _SPENT_THE_COUPON,
@@ -2914,7 +2890,6 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             (
                 door,
                 _WEB,
-                None,
                 None,
                 None,
                 None,
@@ -2932,7 +2907,6 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         face,
         sends,
         declared,
-        delegated,
         running,
         spent,
         admits,
@@ -2941,9 +2915,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         at = tmp_path / f"door-{n}"
         at.mkdir()
         user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
-        stores = _account_stores(
-            at, issuer=issuer, user=user, spent=spent, face=face, delegated=delegated
-        )
+        stores = _account_stores(at, issuer=issuer, user=user, spent=spent, face=face)
         registry = JobRegistry(stores.jobs_dir, capacity=lambda _live: 1)
         if running is not None:
             _running(registry, **cast("dict[str, Any]", running))
@@ -3339,20 +3311,6 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "an uncap became a bounded share"
     )
     assert held.reserve.usd is not None, "an uncap left the account nothing held back for the run"
-    granted = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
-    delegated = _account_stores(
-        tmp_path / "delegated", issuer=_WEB, user=granted, spent=None, delegated=2.0
-    )
-    change_budget(
-        Budget(tokens=1_000),
-        stores=delegated,
-        job_registry=JobRegistry(tmp_path / "jobs-d", capacity=lambda _live: 1),
-        hop=_HELD_HOP,
-        sends=_CELLS,
-    )
-    assert delegated.campaigns.read_campaign_ceiling(_HELD_HOP) == Budget(tokens=1_000), (
-        "a grant became a ceiling on an axis the caller left alone"
-    )
 
     # A moved ceiling is the CAMPAIGN's: every cycle's spend counts against it once, a fork's
     # walked prefix not twice, and what the parent billed past the cut counts too.
@@ -3823,7 +3781,6 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         return draft_dir
 
     draft = new_draft(
-        owner_user_id=str(stores.identity.user_id),
         slug="drafted",
         basis=DatasetBasis(dataset="drafted"),
         n_samples=1,
@@ -3859,11 +3816,6 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert draft_dir.is_dir(), "a discard refused under a Start's claim still took the draft"
     assert held_ledger.read_bytes() == ledger_before, "an edit under a Start's claim was recorded"
     assert held_draft.read_bytes() == draft_before, "an edit landed on a draft a Start holds"
-    intruder = dataclasses.replace(
-        stores, identity=dataclasses.replace(stores.identity, user_id=UserId("intruder"))
-    )
-    with pytest.raises(NotFoundError):
-        asyncio.run(CommandDispatcher(intruder).dispatch(CommandCall(edit)))
     claim.release()
     command(DiscardDraftPayload(draft_id=draft.draft_id))
     assert not draft_dir.exists(), "a discard left the draft's dir, or wrote it back"

@@ -123,7 +123,6 @@ class WorkspaceStorageResponse(StrictModel):
 
 
 def workspace_storage(stores: Stores) -> WorkspaceStorageResponse:
-    owner = str(stores.identity.user_id)
     entries = [
         WorkspaceStorageEntry(
             campaign_id=campaign.campaign_id,
@@ -131,7 +130,7 @@ def workspace_storage(stores: Stores) -> WorkspaceStorageResponse:
             lifecycle_status=campaign.lifecycle_status,
             on_disk=_campaign_split(stores.campaigns.campaign_root_dir(campaign.campaign_id)),
         )
-        for campaign in stores.campaigns.list_campaigns(lifecycle="all", owner_user_id=owner)
+        for campaign in stores.campaigns.list_campaigns(lifecycle="all")
     ]
     entries.sort(key=lambda e: e.on_disk.total, reverse=True)
     campaigns_total = sum(e.on_disk.total for e in entries)

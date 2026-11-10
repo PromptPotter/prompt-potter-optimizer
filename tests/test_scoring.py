@@ -2034,9 +2034,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         sandbox = inner_sandbox(stores, _PEER_HOP.campaign_id, _PEER_HOP.cycle_id)
         (sandbox / stores.tenant_id).mkdir(exist_ok=True)
         inner = descend_store(stores, (_PEER_HOP,))
-        inner.campaigns.create_campaign(
-            minted_campaign(leaf, owner_user_id=str(stores.identity.user_id))
-        )
+        inner.campaigns.create_campaign(minted_campaign(leaf))
         inner.campaigns.mint_cycle(leaf)
         reached: list[CycleHop] = []
 

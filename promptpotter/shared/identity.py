@@ -47,7 +47,11 @@ CAMPAIGN_CAP_BY_NAME: dict[str, str] = {
     "lookahead": CAMPAIGN_LOOKAHEAD_CAP,
 }
 
-OWNER_COMMAND_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_NAME.values())
+# What a grant may carry: every rung `/grant` names.
+DELEGABLE_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_NAME.values())
+# The account's own provider keys: its owner's alone, never delegated (bl4.B6).
+ACCOUNT_KEYS_CAP = "account.keys"
+OWNER_COMMAND_CAPABILITIES = DELEGABLE_CAPABILITIES | {ACCOUNT_KEYS_CAP}
 
 
 def capabilities_from_names(names: Iterable[str]) -> frozenset[str]:
@@ -86,11 +90,10 @@ class IdentityContext:
     host: bool = False
 
 
-def default_identity(
-    tenant_id: str = TERMINAL_IDENTITY_ID, user_id: str = TERMINAL_IDENTITY_ID
-) -> IdentityContext:
+def default_identity(tenant_id: str = TERMINAL_IDENTITY_ID) -> IdentityContext:
+    """The tenant directory is the owner, so the terminal acts as the account it names."""
     return IdentityContext(
-        user_id=UserId(safe_name(user_id)),
+        user_id=UserId(safe_name(tenant_id)),
         tenant_id=TenantId(safe_name(tenant_id)),
         issuer=None,
         claims={},

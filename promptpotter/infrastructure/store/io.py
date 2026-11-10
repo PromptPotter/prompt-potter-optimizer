@@ -455,8 +455,10 @@ def write_lock_name(name: str) -> str:
     return f".{name}.lock"
 
 
-def _write_lock(path: Path) -> AbstractContextManager[None]:
-    """Windows runs `O_APPEND` as seek-then-write, so two unlocked appends overwrite one record."""
+def write_lock(path: Path) -> AbstractContextManager[None]:
+    """The file's one write lock. Windows runs `O_APPEND` as seek-then-write, so two unlocked
+    appends overwrite one record; a read-and-rewrite holds it too, so two edits never both read
+    the file the other is about to replace."""
     return held_lock(path.with_name(write_lock_name(path.name)), wait_s=LOCK_TIMEOUT)
 
 
@@ -483,7 +485,7 @@ def appending(path: Path) -> Iterator[Callable[[bytes], range]]:
     """`append_line` held: what is read of *path* under it is what the line lands after, so a
     writer refusing a line the file already holds refuses it inside the write."""
     name = _long_path(path)
-    with _write_lock(path):
+    with write_lock(path):
         yield lambda line: _append_held(name, line + b"\n")
 
 
@@ -611,7 +613,7 @@ def _last_line(f: IO[bytes], end: int) -> bytes:
 def _end_mark(path: Path) -> FileMark:
     # Locked, so no append is in flight. A torn fragment a crashed append left is counted in the
     # mark, so `replace_lines` drops it: only what lands past the mark is carried.
-    with _write_lock(path):
+    with write_lock(path):
         try:
             with open(_long_path(path), "rb") as f:
                 st = os.fstat(f.fileno())
@@ -647,7 +649,7 @@ def _put(path: Path, data: bytes | None, *, held: bytes | None) -> None:
 def _swap(path: Path, mark: FileMark, lines: Iterable[str], companion: _Companion | None) -> bool:
     data = "".join(lines).encode("utf-8")
     # Only the swap is locked: a big rewrite outlasts `LOCK_TIMEOUT`, where an appender gives up.
-    with _write_lock(path):
+    with write_lock(path):
         try:
             with open(_long_path(path), "rb") as f:
                 if not holds_mark(f, mark):

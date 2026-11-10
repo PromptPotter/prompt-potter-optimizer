@@ -45,6 +45,7 @@ from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import RequestBody, StrictModel, UploadBytes, WireInt
 from promptpotter.domain.verify_pass import VerifyStrategy
 from promptpotter.shared.identity import (
+    ACCOUNT_KEYS_CAP,
     CAMPAIGN_BUDGET_CAP,
     CAMPAIGN_CREATE_CAP,
     CAMPAIGN_LIFECYCLE_CAP,
@@ -370,11 +371,11 @@ class CommandKind(StrEnum):
     ACCEPT_TERMS = "accept-terms", "workspace_edits:accept_terms", None, person("accept-terms")
     # Browser-only ON PURPOSE: a key on a terminal's argv lands in its shell history, and the
     # terminal sends on the box's own keys.
-    SET_API_KEY = "set-api-key", "workspace_edits:set_api_key", CAMPAIGN_BUDGET_CAP, BROWSER, True
+    SET_API_KEY = "set-api-key", "workspace_edits:set_api_key", ACCOUNT_KEYS_CAP, BROWSER, True
     REMOVE_API_KEY = (
         "remove-api-key",
         "workspace_edits:remove_api_key",
-        CAMPAIGN_BUDGET_CAP,
+        ACCOUNT_KEYS_CAP,
         BROWSER,
         True,
     )

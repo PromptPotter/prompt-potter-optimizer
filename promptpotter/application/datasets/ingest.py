@@ -96,7 +96,6 @@ async def ingest_draft(
 
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
     draft = new_draft(
-        owner_user_id=str(stores.identity.user_id),
         slug=base_slug,
         basis=UploadBasis(connector=DEFAULT_CONNECTOR, kept=kept.name),
         n_samples=len(table.rows),
@@ -148,7 +147,6 @@ async def draft_from_dataset(
     ]
 
     draft = new_draft(
-        owner_user_id=str(stores.identity.user_id),
         slug=slug,
         basis=DatasetBasis(dataset=dataset_name),
         n_samples=len(rows),

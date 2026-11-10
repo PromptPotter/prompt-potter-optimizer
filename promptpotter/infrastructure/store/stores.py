@@ -142,15 +142,12 @@ class Stores:
 
 
 def owned_campaign(stores: Stores, campaign_id: str) -> Campaign:
-    """Another user's campaign is NOT FOUND, never forbidden: existence leakage is a violation."""
+    """The tenant directory is the owner: another account's campaign is in another directory, so
+    it is NOT FOUND, never forbidden."""
     campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None or not caller_owns(stores, campaign):
+    if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return campaign
-
-
-def caller_owns(stores: Stores, campaign: Campaign) -> bool:
-    return campaign.owner_user_id == str(stores.identity.user_id)
 
 
 def build_stores(

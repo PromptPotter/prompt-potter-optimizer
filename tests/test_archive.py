@@ -826,7 +826,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # Rounds stand; a rewind retracts every election, close and crown past it, for every reader.
     closing = seat(stores).cycle
     hop = CycleHop(campaign_id="rewound__20260101-000000", cycle_id="cycle_rewound")
-    stored_campaign(stores, minted_campaign(hop, owner_user_id=str(stores.identity.user_id)))
+    stored_campaign(stores, minted_campaign(hop))
     stores.campaigns.mint_cycle(hop)
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
     closed: list[RoundResult] = []
@@ -865,7 +865,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert served() == [(ids[0], True, True)]
     # A resume `--from 3` that halts on a divergence below it displaces no round past it.
     halted = CycleHop(campaign_id="halted__20260101-000000", cycle_id="cycle_halted")
-    stored_campaign(stores, minted_campaign(halted, owner_user_id=str(stores.identity.user_id)))
+    stored_campaign(stores, minted_campaign(halted))
     stores.campaigns.mint_cycle(halted)
     halted_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(halted)))
     run: list[RoundResult] = []
@@ -957,7 +957,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # the remedy it names deletes the campaign, paused as it is, and keeps the paid measurement.
     # `rewrite_lines` writes a fresh file: a ledger index takes a same-inode growth for an append.
     stranded = CycleHop(campaign_id="stranded__20260101-000000", cycle_id="cycle_stranded")
-    stored_campaign(stores, minted_campaign(stranded, owner_user_id=str(stores.identity.user_id)))
+    stored_campaign(stores, minted_campaign(stranded))
     stores.campaigns.mint_cycle(stranded)
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(stranded)))
     _emit_round(closing, ledger, [], "c0")
@@ -1083,7 +1083,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     stored_campaign(
         stores,
-        minted_campaign(scenario, config=permits_m, owner_user_id=str(stores.identity.user_id)),
+        minted_campaign(scenario, config=permits_m),
     )
     scenario_rounds: list[RoundResult] = []
     scenario_pick = ArmKey(
@@ -1262,7 +1262,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     # A fork's own ledger displaces its parent's prefix once.
     displaced = CycleHop(campaign_id="displaced__20260101-000000", cycle_id="cycle_displaced")
-    stored_campaign(stores, minted_campaign(displaced, owner_user_id=str(stores.identity.user_id)))
+    stored_campaign(stores, minted_campaign(displaced))
     stores.campaigns.mint_cycle(displaced)
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(displaced)))
     closed = []
@@ -1433,7 +1433,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 optimization=OptimizationConfig(degradation_threshold=0.4),
                 scoring="label_match(predicted, ground_truth)",
             ),
-            owner_user_id=str(stores.identity.user_id),
         ),
     )
     stores.campaigns.mint_cycle(family)
@@ -1806,7 +1805,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     def repaired(cycle_id: str, *, consumed: bool) -> tuple[CycleHop, CycleHop]:
         hop = CycleHop(campaign_id=f"{cycle_id}__20260101-000000", cycle_id=cycle_id)
-        stored_campaign(stores, minted_campaign(hop, owner_user_id=str(stores.identity.user_id)))
+        stored_campaign(stores, minted_campaign(hop))
         stores.campaigns.mint_cycle(hop)
         drawn = partition_bank(repair_bank, DatasetSplit(bench=0), seed=0)
         stores.campaigns.append(hop, drawn.record(dataset_hash="bank"))
@@ -1919,7 +1918,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
     dead = sheet(measurement(i, None, error="boom", error_category="SERVER") for i in range(8))
     origin = prompted(instruction="origin")
     hop = CycleHop(campaign_id="cycle_gated__20260101-000000", cycle_id="cycle_gated")
-    stored_campaign(stores, minted_campaign(hop, owner_user_id=str(stores.identity.user_id)))
+    stored_campaign(stores, minted_campaign(hop))
     stores.campaigns.mint_cycle(hop)
 
     def launch(*, replayed: bool, crashes: bool = False) -> StopReason:

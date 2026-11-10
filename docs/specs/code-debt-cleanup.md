@@ -857,13 +857,6 @@ loop decides, so it lands with an offline run.
   under a dollar is one candidate. Then both sites join `usd_text`; the panel rides M8.
   **Held:** the rule. **Re-test:** `git grep -c -E '\$\{[^}]*:[,]?\.[0-9]f\}' -- promptpotter`.
 
-**Singles.**
-- **`infrastructure/identity/paths.py::DefaultClaim.renamed` is written and never read**: the marker
-  `default_claim.py::maybe_claim_default` writes is read only for its `user_id`
-  (`registered_user_id`). It is survivor data (its `store/data_root.py` row), so the delete is a landing migration that rewrites each marker without the
-  field, run once and then deleted ([`../decisions.md`](../decisions.md) § 0011). **Rides with:** F5
-  (the claim is one act; `renamed` goes with it). **Re-test:** `git grep -n "\.renamed" -- promptpotter` finds no reader.
-
 ### The file layout (import-graph pass 2026-10-31)
 
 **Rides with:** after the config/scope arc above; merges mostly cut duplicated import blocks (whole

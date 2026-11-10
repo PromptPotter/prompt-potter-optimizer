@@ -298,7 +298,6 @@ type LifecycleFilter = Literal["active", "archived", "deleted", "all"]
 
 
 class CampaignEdit(TypedDict, total=False):
-    owner_user_id: str
     label: str
     dataset_name: str
     lifecycle_status: LifecycleStatus
@@ -309,7 +308,6 @@ class CampaignEdit(TypedDict, total=False):
 class Campaign(FrozenModel):
     """Identity, declaration and visibility INTENT only, never run state."""
 
-    owner_user_id: str = "default"
     campaign_id: str
     dataset_name: str
     label: str = ""

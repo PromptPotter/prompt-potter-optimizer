@@ -7,11 +7,12 @@ from pathlib import Path
 
 from pydantic import field_serializer
 
-from promptpotter.domain.strict_model import FrozenModel, NonNegativeWireFloat
-from promptpotter.infrastructure.store.io import append_jsonl, write_json
+from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_lock
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import FileKind, FileUnreadableError
+from promptpotter.shared.identity import DELEGABLE_CAPABILITIES
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,6 @@ class PrincipalGrant(FrozenModel):
 
     delegated_by: str
     capabilities: frozenset[str]
-    spend_ceiling_usd: NonNegativeWireFloat | None
     note: str
 
     @property
@@ -56,8 +56,9 @@ def read_grant(path: Path, sub_principal_user_id: str) -> PrincipalGrant | None:
 def resolve_effective_capabilities(
     grant: PrincipalGrant, delegator_capabilities: frozenset[str]
 ) -> frozenset[str]:
-    """INTERSECTED with the delegator's own set: a hand-edited over-grant is clamped, not trusted."""
-    return grant.capabilities & delegator_capabilities
+    """INTERSECTED with the delegator's own resolved set and with what a grant may carry: a
+    hand-edited over-grant is clamped, not trusted, and a delegate never holds the account's keys."""
+    return grant.capabilities & delegator_capabilities & DELEGABLE_CAPABILITIES
 
 
 def list_grants(path: Path) -> dict[str, PrincipalGrant]:
@@ -89,30 +90,33 @@ def grant_principal(
     sub_principal_user_id: str,
     delegated_by_user_id: str,
     capabilities: frozenset[str],
-    spend_ceiling_usd: float | None,
     note: str,
     actor: str,
     audit_path: Path,
 ) -> None:
-    """Refuses a sub-principal AS delegator: the read-time ceiling walks one level only."""
-    grants = _grants(path)
-    if delegated_by_user_id in grants:
-        raise ValueError(
-            f"cannot delegate from {delegated_by_user_id!r}: it is itself a sub-principal "
-            "(one-level delegation only)"
+    """Refuses a sub-principal AS delegator, the read-time ceiling walking one level only, and an
+    account as its own delegate, which would hand it its delegator's tenant as a grant (bl4.B8)."""
+    if sub_principal_user_id == delegated_by_user_id:
+        raise ValueError(f"cannot delegate {delegated_by_user_id!r} to itself")
+    # Read and rewritten under the file's write lock: two edits never both read it (bl2.B10).
+    with write_lock(path):
+        grants = _grants(path)
+        if delegated_by_user_id in grants:
+            raise ValueError(
+                f"cannot delegate from {delegated_by_user_id!r}: it is itself a sub-principal "
+                "(one-level delegation only)"
+            )
+        _write(
+            path,
+            {
+                **grants,
+                sub_principal_user_id: PrincipalGrant(
+                    delegated_by=delegated_by_user_id,
+                    capabilities=capabilities,
+                    note=note,
+                ),
+            },
         )
-    _write(
-        path,
-        {
-            **grants,
-            sub_principal_user_id: PrincipalGrant(
-                delegated_by=delegated_by_user_id,
-                capabilities=capabilities,
-                spend_ceiling_usd=spend_ceiling_usd,
-                note=note,
-            ),
-        },
-    )
     _append_audit(
         audit_path,
         action="grant",
@@ -125,10 +129,11 @@ def grant_principal(
 def revoke_principal(
     path: Path, *, sub_principal_user_id: str, actor: str, audit_path: Path
 ) -> bool:
-    grants = _grants(path)
-    removed = sub_principal_user_id in grants
-    if removed:
-        _write(path, {k: v for k, v in grants.items() if k != sub_principal_user_id})
+    with write_lock(path):
+        grants = _grants(path)
+        removed = sub_principal_user_id in grants
+        if removed:
+            _write(path, {k: v for k, v in grants.items() if k != sub_principal_user_id})
     _append_audit(
         audit_path,
         action="revoke",

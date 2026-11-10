@@ -19,7 +19,6 @@ from promptpotter.domain.prompt_block import (
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_packs import bank_into_account_pack
-from promptpotter.infrastructure.store.stores import caller_owns
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.identity import acting_principal
 
@@ -139,8 +138,6 @@ def _written_in(stores: Stores, experiment: str) -> None:
     campaign = stores.campaigns.load_campaign(experiment)
     if campaign is None:
         owned_draft(stores, experiment)
-    elif not caller_owns(stores, campaign):
-        raise NotFoundError(f"Campaign not found: {experiment}")
 
 
 def bank_snippet(stores: Stores, *, supersedes: str, text: str, experiment: str) -> None:

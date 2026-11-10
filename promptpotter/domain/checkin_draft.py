@@ -46,8 +46,6 @@ class DraftFile(FrozenModel):
 
     # Its address, beside the file: the directory `DraftStore` keeps it in, stamped by `at`.
     _draft_id: str = PrivateAttr()
-    # Another user's draft is not found, as their campaign is.
-    owner_user_id: str
     slug: str
     n_samples: int
     sample_preview: tuple[dict[str, str], ...]

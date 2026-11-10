@@ -104,25 +104,23 @@ def draft_criterion(
 
 
 def owned_draft(stores: Stores, draft_id: str) -> DraftFile:
-    """Asked before a draft's claim is taken: a claim another user holds answers as their draft does."""
+    """Asked before a draft's claim is taken; the tenant directory is the owner."""
     data = stores.drafts.read_draft(draft_id)
-    if data is None or data.owner_user_id != str(stores.identity.user_id):
+    if data is None:
         raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
     return data
 
 
 def owned_drafts(stores: Stores) -> list[DraftFile]:
-    user = str(stores.identity.user_id)
     return [
         data
         for draft_id in stores.drafts.draft_ids()
-        if (data := stores.drafts.read_draft(draft_id)) is not None and data.owner_user_id == user
+        if (data := stores.drafts.read_draft(draft_id)) is not None
     ]
 
 
 def new_draft(
     *,
-    owner_user_id: str,
     slug: str,
     basis: DraftBasis,
     n_samples: int,
@@ -135,7 +133,6 @@ def new_draft(
     now = utcnow_iso()
     column_query, column_ground_truth, provenance = _seed_provenance(headers)
     return DraftFile(
-        owner_user_id=owner_user_id,
         slug=slug,
         n_samples=n_samples,
         sample_preview=tuple(dict(row) for row in sample_preview[:PREVIEW_ROWS]),

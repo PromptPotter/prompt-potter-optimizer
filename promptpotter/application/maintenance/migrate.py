@@ -7,11 +7,21 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from promptpotter.application.maintenance.migrations import consent_trail, job_ending, job_refusal
+from promptpotter.application.maintenance.migrations import (
+    claim_marker,
+    consent_by_principal,
+    consent_trail,
+    grant_ceiling,
+    job_ending,
+    job_refusal,
+)
 from promptpotter.infrastructure.store.data_root import Staged
 
 MIGRATIONS: dict[str, Callable[[Path], list[Staged]]] = {
+    "claim marker": claim_marker.staged,
+    "consent by principal": consent_by_principal.staged,
     "consent trail": consent_trail.staged,
+    "grant ceiling": grant_ceiling.staged,
     "job ending": job_ending.staged,
     "job refusal": job_refusal.staged,
 }

@@ -13,7 +13,7 @@ from pydantic import Field
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of, account_or_opening
-from promptpotter.application.free_tier import delegated_spend_ceiling, model_calls, tier_ceiling
+from promptpotter.application.free_tier import model_calls, tier_ceiling
 from promptpotter.application.jobs.capacity import SlotBound
 from promptpotter.application.jobs.coupon import (
     ALLOWANCE_STATE_INFO,
@@ -498,7 +498,6 @@ def admit_launch(
         excluding_job_id=job_id,
         excluding_campaign=None if hop is None else hop.campaign_id,
     )
-    delegated = delegated_spend_ceiling(stores)
     admitted = _admitted(stores, declared, sends)
     if not any(draws_coupon(send.payer) for send in sends):
         return admitted, _nothing_on(wallet.coupon.face)
@@ -518,16 +517,15 @@ def admit_launch(
             spent.unpriced_tokens,
             settings.UNPRICED_GRACE_USD,
         )
-    return admitted, _reserve(admitted, wallet.headroom, delegated)
+    return admitted, _reserve(admitted, wallet.headroom)
 
 
 def _admitted(stores: Stores, declared: Budget, sends: tuple[Send, ...]) -> Budget:
-    """*declared*, capped at the USD one launch of this account may hold: a delegate's claim, and
-    the free tier's ceiling on a run any of whose *sends* draws the coupon, so neither a
-    `start-run` budget nor a `set-limits` lifts it. An axis the run leaves undeclared stays
-    unnamed, so the reserve takes it for no ceiling; declaring nothing reads the cap alone."""
-    drawn = any(draws_coupon(send.payer) for send in sends)
-    bound = _lowest(delegated_spend_ceiling(stores), tier_ceiling(stores) if drawn else None)
+    """*declared*, capped at the USD one launch of this account may hold: the free tier's ceiling
+    on a run any of whose *sends* draws the coupon, so neither a `start-run` budget nor a
+    `set-limits` lifts it. An axis the run leaves undeclared stays unnamed, so the reserve takes
+    it for no ceiling; declaring nothing reads the cap alone."""
+    bound = tier_ceiling(stores) if any(draws_coupon(send.payer) for send in sends) else None
     if bound is None:
         return declared
     return declared.over(Budget(usd=_lowest(declared.usd, bound)))
@@ -892,7 +890,7 @@ def _clamped(
     # Refuse rather than clamp: a contended wallet's zero would write a $0 ceiling on a funded run.
     if wallet.contended:
         raise _contended("this campaign's ceiling")
-    delegated, bound = delegated_spend_ceiling(stores), _admitted(stores, Budget(), sends).usd
+    bound = _admitted(stores, Budget(), sends).usd
     room = wallet.headroom
     # A campaign ceiling is the operator's: past the coupon only where none of its sends draws it.
     clamp = (
@@ -911,19 +909,18 @@ def _clamped(
         )
     )
     moved = requested.named & MONEY_AXES
-    return change, _reserve(change.only(moved), room, delegated).only(moved)
+    return change, _reserve(change.only(moved), room).only(moved)
 
 
-def _reserve(budget: Budget, headroom: Budget, delegated: float | None) -> Budget:
+def _reserve(budget: Budget, headroom: Budget) -> Budget:
     """What the coupon holds for a run, per money axis: twice the run's ceiling where it caps the
     axis, at most the headroom; else the whole headroom. A USD ceiling the coupon bounds holds no
     tokens: every send under it is priced (`SpendBook.refuse_unpriced`), so the dollars bound it.
     ``None`` where no coupon bounds the axis."""
-    under = headroom.over(Budget(usd=_lowest(headroom.usd, delegated)))
-    priced = budget.usd is not None and under.usd is not None
+    priced = budget.usd is not None and headroom.usd is not None
     held: dict[str, float | int | None] = {}
     for axis in sorted(MONEY_AXES):
-        room, ceiling = getattr(under, axis), getattr(budget, axis)
+        room, ceiling = getattr(headroom, axis), getattr(budget, axis)
         if ceiling is not None:
             held[axis] = None if room is None else min(room, 2 * ceiling)
         elif axis != "tokens" or not priced:

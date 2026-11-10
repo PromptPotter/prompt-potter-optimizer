@@ -1532,7 +1532,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         },
     )
     draft = new_draft(
-        owner_user_id=str(built_stores.identity.user_id),
         slug="ds",
         basis=DatasetBasis(dataset="ds"),
         n_samples=1,
@@ -1579,7 +1578,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         },
     )
     on_capo = new_draft(
-        owner_user_id=str(built_stores.identity.user_id),
         slug="cap",
         basis=DatasetBasis(dataset="cap"),
         n_samples=1,
@@ -1615,7 +1613,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         },
     )
     edited = new_draft(
-        owner_user_id=str(built_stores.identity.user_id),
         slug="d",
         basis=DatasetBasis(dataset="d"),
         n_samples=1,
@@ -1672,7 +1669,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         },
     )
     reused_contract = new_draft(
-        owner_user_id=str(built_stores.identity.user_id),
         slug="dj",
         basis=DatasetBasis(dataset="dj"),
         n_samples=1,
@@ -1836,7 +1832,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             scoring=dials,
         ),
         dataset_name="fz",
-        owner_user_id=str(stores.identity.user_id),
     )
     stores.campaigns.create_campaign(campaign)
     stores.campaigns.mint_cycle(campaign.root_hop)
@@ -1931,7 +1926,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         CycleHop(campaign_id="fk__000001", cycle_id="cycle_root"),
         config=_connector_config(),
         dataset_name="fk",
-        owner_user_id=str(stores.identity.user_id),
     )
     stores.campaigns.create_campaign(steered)
     fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
@@ -2004,7 +1998,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         CycleHop(campaign_id="fk__000002", cycle_id="cycle_root"),
         config=knob_config,
         dataset_name="fk",
-        owner_user_id=str(stores.identity.user_id),
     )
     stores.campaigns.create_campaign(layered)
     stores.campaigns.mint_cycle(layered.root_hop)
@@ -2239,7 +2232,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         purpose=l4_arm.purpose,
         dataset_name="decl",
         dataset_hash=opened.bank.dataset_hash,
-        owner_user_id=str(stores.identity.user_id),
     )
     stores.campaigns.create_campaign(as_campaign)
     stores.campaigns.mint_cycle(as_campaign.root_hop)
@@ -2253,7 +2245,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         dataset_name="decl",
         root_content_hash=plan.origin_hash,
         dataset_hash=opened.bank.dataset_hash,
-        owner_user_id=str(stores.identity.user_id),
     )
     assert held_campaign.declaration == declared, (
         "the manifest holds another declaration than the door made"

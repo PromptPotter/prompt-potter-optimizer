@@ -586,7 +586,6 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
             root_content_hash=plan.origin_hash,
             treatment=plan.treatment,
             declaration=declaration,
-            owner_user_id=str(session.identity.user_id),
             lifecycle_status="active",
             lifecycle_changed_at=now,
         )

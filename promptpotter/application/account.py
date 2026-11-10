@@ -7,6 +7,7 @@ record on the retry, which reads as the same fact twice and never as one missing
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Literal, NamedTuple
@@ -17,6 +18,11 @@ from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, De
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity import blocklist, default_claim
+from promptpotter.infrastructure.identity.bundle import (
+    IdentityBundle,
+    identity_of_session,
+    resolve_access_state,
+)
 from promptpotter.infrastructure.identity.grants import (
     PrincipalGrant,
     grant_principal,
@@ -24,6 +30,8 @@ from promptpotter.infrastructure.identity.grants import (
     revoke_principal,
 )
 from promptpotter.infrastructure.identity.paths import default_identity_paths
+from promptpotter.infrastructure.identity.provider_config import ProviderIdentity
+from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.account_trail import (
     TrailLine,
@@ -58,6 +66,8 @@ from promptpotter.shared.identity import (
     display_name,
 )
 from promptpotter.shared.worded import Worded
+
+logger = logging.getLogger(__name__)
 
 
 def _consent(
@@ -202,6 +212,93 @@ def sign_in(stores: Stores, *, device: Device | None) -> Arrival:
     return arrival
 
 
+def _is_declared_host_admin(email: str | None, issuer: str | None) -> bool:
+    """Unset `HOST_ADMIN_EMAIL` means nobody may: signing up is the grant, so "first one in wins" is unsafe."""
+    declared = settings.HOST_ADMIN_EMAIL.strip().lower()
+    if not declared or (email or "").strip().lower() != declared:
+        return False
+    declared_issuer = settings.HOST_ADMIN_ISSUER.strip()
+    return not declared_issuer or (issuer or "").strip() == declared_issuer
+
+
+class SignedIn(NamedTuple):
+    session_id: str
+    identity: IdentityContext
+    # This sign-in opened the account: the one moment there is somebody new to announce.
+    opened: bool
+    # The declared host admin: its browser is marked the owner's.
+    host_admin: bool
+    # What the operator is rung with: a claim the host's sign-in did not take.
+    rings: tuple[str, ...]
+
+
+class SignInRefused(NamedTuple):
+    refusal: SignInRefusal
+    # What the operator is rung with: a refused sign-up, a claim the host's sign-in did not take.
+    rings: tuple[str, ...]
+
+
+def sign_in_oidc(
+    bundle: IdentityBundle, verified: ProviderIdentity, *, device: Device | None
+) -> SignedIn | SignInRefused:
+    """THE browser sign-in: blocked, the box's claim, the account ceiling and the opening are
+    decided here, and a session stands only for an account that does."""
+    user_id = str(derive_user_id(verified.issuer, verified.subject))
+    host_admin = _is_declared_host_admin(verified.email, verified.issuer)
+    marker, rings = bundle.paths.default_claim_marker, list[str]()
+    # A blocked account still gets a session: the session seam empties its capabilities per request.
+    if resolve_access_state(verified.email, bundle) == "blocked":
+        logger.info("Blocked account signed in: %s (%s)", verified.email, verified.provider)
+    elif host_admin:
+        # The marker names the box's own tenant, so who writes it is declared, never inferred
+        # from arrival order.
+        root = default_projects_root()
+        refused = default_claim.claim_default(
+            projects_root=root, user_id=user_id, marker_path=marker
+        )
+        if refused is not None:
+            logger.warning("The host's sign-in did not claim this box: %s", refused)
+            rings.append(f"Your sign-in did not claim this box: {refused}")
+    elif default_claim.registered_user_id(marker) is None:
+        why = (
+            "HOST_ADMIN_EMAIL's account has not signed in yet"
+            if settings.HOST_ADMIN_EMAIL.strip()
+            else "HOST_ADMIN_EMAIL is unset, so no browser identity may write the claim marker"
+        )
+        logger.warning(
+            "Sign-in by %s did not claim this box: %s. Terminal and browser will resolve DIFFERENT "
+            "tenants until it is claimed.",
+            verified.email,
+            why,
+        )
+    session_id, session = bundle.session_store.create(
+        user_id=user_id,
+        tenant_id=user_id,
+        issuer=verified.issuer,
+        subject=verified.subject,
+        email=verified.email,
+        provider=verified.provider,
+    )
+    refusal: SignInRefusal
+    try:
+        # Resolved as every later request resolves it, so a delegate's sign-in lands where its
+        # commands do.
+        identity = identity_of_session(session, bundle)
+        stores = build_stores(identity, projects_root=default_projects_root())
+        opened = sign_in(stores, device=device).opened
+        return SignedIn(session_id, identity, opened, host_admin, tuple(rings))
+    except AccountCeilingError as full:
+        rings.append(f"Sign-up refused for {verified.email or 'no email'}: {full.message}")
+        refusal = "accounts_full"
+    except Exception:
+        # Refused rather than let through unrecorded: the trail's promise is that no sign-in is
+        # missing.
+        logger.exception("A %s sign-in could not be recorded", verified.provider)
+        refusal = "signin_unavailable"
+    bundle.session_store.delete(session_id)
+    return SignInRefused(refusal, tuple(rings))
+
+
 class ConnectedAccount(StrictModel):
     """One OIDC provider bound to the active session."""
 
@@ -228,8 +325,10 @@ class MeResponse(StrictModel):
 
 def me(stores: Stores, user: User | None, *, configured: Iterable[str]) -> MeResponse:
     """``available_providers`` is the *configured* ones minus the connected one; *user* is
-    ``None`` for an account not opened yet, which has accepted no terms."""
+    ``None`` for an account not opened yet, which has accepted no terms. Consent is the acting
+    principal's: a delegate accepts for itself, never by its delegator's acceptance."""
     identity = stores.identity
+    accepted = None if user is None else user.terms_accepted.get(acting_principal(identity).id)
     email, provider = identity.email, identity.provider
     return MeResponse(
         user_id=str(identity.user_id),
@@ -243,9 +342,7 @@ def me(stores: Stores, user: User | None, *, configured: Iterable[str]) -> MeRes
         capabilities=sorted(identity.capabilities),
         access_state=identity.access_state,
         terms_version=TERMS_VERSION,
-        terms_accepted_version=user.terms_accepted.version
-        if user is not None and user.terms_accepted
-        else None,
+        terms_accepted_version=None if accepted is None else accepted.version,
     )
 
 
@@ -282,7 +379,9 @@ def accept_terms(stores: Stores, version: str) -> TermsConsent:
             details={"expected": TERMS_VERSION, "received": version},
         )
     consent = ConsentRecord(version=version, accepted_at=utcnow_iso())
-    user = account_of(stores).model_copy(update={"terms_accepted": consent})
+    user = account_of(stores)
+    accepted = {**user.terms_accepted, acting_principal(stores.identity).id: consent}
+    user = user.model_copy(update={"terms_accepted": accepted})
     _consent(stores, "terms_accepted", at=consent.accepted_at, subject=version)
     stores.users.save(user)
     return TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=version)
@@ -418,7 +517,7 @@ def registered_or_default_identity(explicit_tenant: str | None = None) -> Identi
     if explicit_tenant:
         return default_identity(tenant_id=explicit_tenant)
     uid = registered_user_id()
-    return default_identity(tenant_id=uid, user_id=uid) if uid else default_identity()
+    return default_identity(tenant_id=uid) if uid else default_identity()
 
 
 def local_stores(*, tenant: str | None) -> Stores:
@@ -463,7 +562,6 @@ def grant(sub_user_id: str, *, delegator: str, capabilities: frozenset[str], act
         sub_principal_user_id=sub_user_id,
         delegated_by_user_id=delegator,
         capabilities=capabilities,
-        spend_ceiling_usd=None,
         note=f"via {actor}",
         actor=actor,
         audit_path=paths.grants_audit,
