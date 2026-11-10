@@ -20,7 +20,8 @@ interface RoundNodes {
 
 export function useRoundNodes(): RoundNodes {
   const { dash } = useViewedDashboard();
-  const { viewedPath } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const { round } = useObserveSubject();
   const showsCurrent = round != null && round === (dash?.current_round.round ?? null);
   const audit = useRead(

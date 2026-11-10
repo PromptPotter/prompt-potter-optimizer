@@ -8,7 +8,8 @@ import { useWorkspace } from "@/lib/workspace";
 
 export function useOrigin(): ObservePoint | null {
   const { dash } = useViewedDashboard();
-  const { viewedPath } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const { index } = useViewedLineage();
   return useMemo(() => originPoint(dash, originAt(index, viewedPath)), [dash, index, viewedPath]);
 }

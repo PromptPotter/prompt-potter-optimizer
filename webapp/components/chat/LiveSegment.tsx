@@ -21,7 +21,8 @@ export function LiveSegment({
   decision: ActivityDecision | null;
 }) {
   const cmd = useCommand<string>("decision");
-  const { viewedPath } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
 
   const now = listening ? (status ?? { icon: "·", label: "Listening for activity…", detail: null }) : null;
   if (notices.length === 0 && !now && !decision) return null;

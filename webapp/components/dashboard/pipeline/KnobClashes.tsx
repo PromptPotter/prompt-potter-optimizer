@@ -16,7 +16,8 @@ export function useKnobClashes(): {
   read: ReadResult<ConfigMapResponse>;
   active: ConfigCoupling[] | null;
 } {
-  const { campaignId } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const campaignId = viewed?.root.campaignId ?? null;
   const read = useRead(campaignId ? configMapRead(campaignId) : null);
   return { read, active: readyData(read)?.couplings.filter((c) => c.active) ?? null };
 }

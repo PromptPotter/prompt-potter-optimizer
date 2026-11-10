@@ -1,5 +1,4 @@
 import { useState, type ReactNode } from "react";
-import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
 import { useRound } from "@/lib/hooks/useRound";
 import { nodeSchemaReading } from "@/lib/derivations";
@@ -7,7 +6,7 @@ import { useConnector } from "@/lib/hooks/useConnector";
 import { ARM_END_INFO } from "@/lib/api/types";
 import type { CellsPreset } from "@/lib/hooks/useCells";
 import { useViewedDashboard } from "@/lib/poll";
-import { isSelectedCandidate, selectedCandidateOf, type ArmRow } from "@/lib/types";
+import type { ArmRow } from "@/lib/types";
 import type { CandidateVerdict } from "@/lib/derivations";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { fmtUnit, unitPlural } from "@/lib/format";
@@ -31,15 +30,11 @@ export function MeasurementRun({
   const { dash, isLive } = useViewedDashboard();
   const read = useConnector();
   const schema = nodeSchemaReading(read);
-  const { viewedPath, leafCycleId } = useWorkspace();
-  const { setSelectionForCandidate, candidate: selected } = useSelection();
+  const { viewed, pick, pickCandidate } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const onSelectCandidate = (c: ArmRow | null): void => {
     const arm = c?.reading.arm;
-    setSelectionForCandidate(
-      arm && leafCycleId
-        ? selectedCandidateOf(leafCycleId, arm.round, arm.key, arm.label)
-        : null,
-    );
+    pickCandidate(arm ? { round: arm.round, arm: arm.key } : null);
   };
   const {
     unfiled: isLiveView,
@@ -113,7 +108,7 @@ export function MeasurementRun({
           // An invalid arm never started a walk: it renders as rejected below, never as a stop.
           const early = reading.walked_short ? end : null;
           const accuracy = reading.own?.accuracy?.value ?? null;
-          const isCandSelected = isSelectedCandidate(selected, leafCycleId, arm.round, arm.key);
+          const isCandSelected = pick?.round === arm.round && pick.arm === arm.key;
           const { cached, cached_share: cachedShare } = reading.panel;
           const verdict = verdicts.get(arm.key);
           return (

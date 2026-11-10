@@ -41,7 +41,8 @@ interface Cells {
 // Every list of measured cells reads here: `useCells({})` is the viewed unit's roster, and a pane
 // naming the same preset shares its read.
 export function useCells(preset: CellsPreset | null, status?: CellStatus): Cells {
-  const { viewedPath } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const { scope, rankedBy } = useCellsView();
   const leafDatasetName = useLeafDatasetName();
   const path = preset?.path ?? viewedPath;

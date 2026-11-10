@@ -23,8 +23,8 @@ function passLabel(s: MachineSlot): string {
 
 export function JobsDock() {
   const { running, byAddress } = useRegistry();
-  const { campaignId, cycleId, navigate, open } = useWorkspace();
-  const viewed = campaignId && cycleId ? encodeCyclePath([{ campaignId, cycleId }]) : null;
+  const { viewed, navigate, open } = useWorkspace();
+  const viewedRoot = viewed ? encodeCyclePath([viewed.root]) : null;
   const machine = readyData(useMachineStatus());
   // A slot holding a cycle is that cycle, already listed above; only a cycleless pass is the
   // machine read's alone.
@@ -113,7 +113,7 @@ export function JobsDock() {
             {running.map((r) => (
               <MenuCheck
                 key={r.address}
-                on={r.address === viewed}
+                on={r.address === viewedRoot}
                 onClick={() => {
                   pick(r);
                   close();

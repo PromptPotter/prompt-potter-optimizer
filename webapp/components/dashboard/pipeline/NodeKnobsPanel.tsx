@@ -46,7 +46,8 @@ export function NodeKnobsPanel({
   const editable = onChange != null;
   const read = useConnector();
   const served = shownData(read);
-  const { campaignId } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const campaignId = viewed?.root.campaignId ?? null;
   const rosterRead = useRead(optimizerRosterRead());
   // A campaign's knobs name the layer that set them; a draft's setup serves no such map.
   const mapRead = useRead(!editable && campaignId ? configMapRead(campaignId) : null);

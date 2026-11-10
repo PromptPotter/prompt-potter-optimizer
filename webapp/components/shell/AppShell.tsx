@@ -6,8 +6,8 @@ import { VendorSprite } from "@/components/ui";
 import { Sidebar } from "@/components/shell/sidebar/Sidebar";
 import { SidebarResizer } from "@/components/shell/sidebar/SidebarResizer";
 import { JobsDock } from "@/components/shell/JobsDock";
-import { SelectionProvider } from "@/lib/SelectionContext";
-import { IngestFlowProvider } from "@/lib/ingest-flow";
+import { SelectionProvider } from "@/lib/state/selection";
+import { IngestFlowProvider } from "@/lib/state/ingest-flow";
 import { ThreadProvider } from "@/lib/chat/thread";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { RemoteControl } from "@/components/shell/remote/RemoteControl";
@@ -26,14 +26,14 @@ export function AppShell() {
 }
 
 function AppShellInner() {
-  const { viewedPath, leafCycleId, views } = useWorkspace();
+  const { viewed, views } = useWorkspace();
   const [sidebarCollapsed] = useSidebarCollapsed();
   // Applied inline only while expanded, so the collapsed rail's class rule still wins.
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
 
   return (
     // Every surface reading the viewed tree composes `sampleSet` into the masked read.
-    <SelectionProvider cycleId={leafCycleId}>
+    <SelectionProvider cycleId={viewed?.leaf.cycleId ?? null}>
     <div
       className={cx(
         "shell",
@@ -64,7 +64,7 @@ function AppShellInner() {
         <RunMasthead />
         <CriticalAlertBanner />
         {/* Only a run has presets: a check-in opens on its chat. */}
-        {viewedPath !== null && <ViewTabs />}
+        {viewed !== null && <ViewTabs />}
         <Views />
       </main>
       <RemoteControl />

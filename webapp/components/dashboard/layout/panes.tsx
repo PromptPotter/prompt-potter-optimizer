@@ -6,7 +6,7 @@ import { useViewedDashboard } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData } from "@/lib/hooks/useRead";
 import { useCandidatesState } from "@/lib/state/candidates";
-import { useSelection } from "@/lib/SelectionContext";
+import { usePickedCandidate } from "@/lib/hooks/usePickedCandidate";
 import { hasTag } from "@/lib/derivations";
 import { useEntry } from "@/lib/hooks/useRegistry";
 import { useWorkspace } from "@/lib/workspace";
@@ -55,7 +55,9 @@ const DegradedRounds = memo(function DegradedRounds() {
 });
 
 export function LeaderPane() {
-  const { viewedPath, campaignId } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
+  const campaignId = viewed?.root.campaignId ?? null;
   const rootSelfOpt = hasTag(useEntry(campaignId), "self_optimization");
   return (
     <>
@@ -68,15 +70,16 @@ export function LeaderPane() {
 }
 
 export function CandidatesPane() {
-  const { candidate, setSelectionForCandidate } = useSelection();
+  const picked = usePickedCandidate();
+  const { pickCandidate } = useWorkspace();
   const { showForest } = useCandidatesState();
   return (
     <>
       <CandidatesCard />
       {showForest && <ForestCard />}
-      {candidate && (
+      {picked && (
         <div className="card card-full inspector-card">
-          <ScoringInspector selected={candidate} onClose={() => setSelectionForCandidate(null)} />
+          <ScoringInspector selected={picked} onClose={() => pickCandidate(null)} />
         </div>
       )}
     </>

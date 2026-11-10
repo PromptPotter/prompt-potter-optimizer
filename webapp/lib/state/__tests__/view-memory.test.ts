@@ -65,7 +65,7 @@ describe("viewMemoryCodec", () => {
         "showForest",
         "toggled",
         "v",
-        "viewedCandidateId",
+        "viewedPick",
         "viewedPath",
       ].sort(),
     );

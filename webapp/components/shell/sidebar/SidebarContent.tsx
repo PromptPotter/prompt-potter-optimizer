@@ -17,7 +17,8 @@ import { SidebarFilterPopover } from "./SidebarFilterPopover";
 
 export function SidebarContent() {
   const { status } = useAuth();
-  const { viewedPath, viewedCandidateId } = useWorkspace();
+  const { viewed, pick } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const { read, entries } = useRegistry();
   const listedLifecycle = useListedLifecycle();
   const loaded = shownData(read) !== null;
@@ -60,10 +61,10 @@ export function SidebarContent() {
       isNodeOpen: nodes.isOpen,
       toggleNode: nodes.toggle,
       viewedPath,
-      viewedCandidateId,
+      picked: pick !== null,
       showCandidates,
     }),
-    [nodes, viewedPath, viewedCandidateId, showCandidates],
+    [nodes, viewedPath, pick, showCandidates],
   );
 
   const filtered = listedLifecycle === "archived" || datasetFilter != null;

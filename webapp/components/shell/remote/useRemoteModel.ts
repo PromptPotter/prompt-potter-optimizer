@@ -8,7 +8,8 @@ import { useWorkspace } from "@/lib/workspace";
 export type RemoteModel = NonNullable<ReturnType<typeof useRemoteModel>>;
 
 export function useRemoteModel() {
-  const { viewedPath, navigate } = useWorkspace();
+  const { viewed, navigate } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const leafEntry = useEntry(viewedPath ? encodeCyclePath(viewedPath) : null);
   const { dash, isLive } = useViewedDashboard();
   const cmd = useCommand<"skip" | "sample-lookahead">("remote-control");

@@ -8,6 +8,7 @@ export * from "./headline-stats";
 export * from "./hierarchy";
 export * from "./lineage-candidates";
 export * from "./lineage-descendants";
+export * from "./live-candidates";
 export * from "./node-config";
 export * from "./output-contract";
 export * from "./paired-reading";

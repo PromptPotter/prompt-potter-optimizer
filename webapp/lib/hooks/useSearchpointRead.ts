@@ -17,7 +17,8 @@ export function useSearchpointRead(
   nodeId?: string | null,
 ): SearchpointRead {
   // From the workspace, NOT the viewed dashboard, which nulls on a unit switch and would starve the round read.
-  const { viewedPath } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const { cfg: cfgOf, read, unfiled } = useRound(viewedPath, point?.round ?? null);
   const key = point?.key ?? null;
   const title = point?.title ?? "";

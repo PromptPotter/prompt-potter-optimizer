@@ -16,19 +16,3 @@ export function selectedCandidateOf(
 ): SelectedCandidate {
   return { cycle_id: cycleId, round, arm, label };
 }
-
-// `cycleId` is the leaf hop the caller READ its rows from; they carry no cycle of their own.
-export function isSelectedCandidate(
-  sel: SelectedCandidate | null,
-  cycleId: string | null,
-  round: number,
-  arm: string,
-): boolean {
-  return (
-    sel != null &&
-    cycleId != null &&
-    sel.cycle_id === cycleId &&
-    sel.round === round &&
-    sel.arm === arm
-  );
-}

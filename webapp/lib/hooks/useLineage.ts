@@ -11,7 +11,7 @@ import { pathOfAddress, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useViewedLineage } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/state/view-memory";
-import { setCandidatesState, useCandidatesState } from "@/lib/state/candidates";
+import { setCandidatesState, useCandidatesState, useMetrics } from "@/lib/state/candidates";
 
 interface LineageCleanup {
   open: boolean;
@@ -61,8 +61,8 @@ export function useLineage({
 }): Lineage {
   const { tree, index } = useViewedLineage();
   const { viewFor, recordView } = useViewMemory();
-  const { metrics, expanded, expandedForCampaign, expandedForLane } = useCandidatesState();
-  const metric = primaryMetric(metrics, electedMetric);
+  const { expanded, expandedForCampaign, expandedForLane } = useCandidatesState();
+  const metric = primaryMetric(useMetrics(cycleId, electedMetric), electedMetric);
 
   const viewedLaneKey = useMemo(() => courseAt(index, path)?.address ?? null, [index, path]);
 

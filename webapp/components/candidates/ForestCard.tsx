@@ -14,10 +14,8 @@ import {
 } from "@/components/ui";
 import { DASHBOARD_PENDING, useViewedDashboard } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
-import { useSelection } from "@/lib/SelectionContext";
-import { isSelectedCandidate } from "@/lib/types";
-import { selectedNodeOf } from "@/lib/derivations";
-import { encodeCyclePath, pathLeaf, shortFamilyTail } from "@/lib/ids";
+import { pickOf } from "@/lib/derivations";
+import { shortFamilyTail } from "@/lib/ids";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { Forest, type CladogramCtx } from "./Forest";
 import { useLineage } from "@/lib/hooks/useLineage";
@@ -36,13 +34,10 @@ export function ForestCard() {
 }
 
 function ReadForestCard({ dash }: { dash: ServedDashboard }) {
-  const {
-    campaignId,
-    cycleId,
-    viewedPath,
-    navigate,
-  } = useWorkspace();
-  const { candidate, setSelectionForCandidate } = useSelection();
+  const { viewed, pick, pickCandidate, navigate } = useWorkspace();
+  const campaignId = viewed?.root.campaignId ?? null;
+  const cycleId = viewed?.root.cycleId ?? null;
+  const viewedPath = viewed?.path ?? null;
   const selection = useViewedCourse()?.facts.standing?.selection ?? null;
   const {
     tree,
@@ -69,24 +64,16 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
 
   const ctx = useMemo<CladogramCtx>(
     () => ({
-      viewedKey: viewedPath ? encodeCyclePath(viewedPath) : null,
+      viewedKey: viewed?.address ?? null,
       channels: [],
       clip: null,
-      isPicked: (n) => {
-        const own = selectedNodeOf(n.node, pathLeaf(n.coursePath).cycleId);
-        return isSelectedCandidate(candidate, own.cycle_id, own.round, own.arm);
-      },
-      onPickCandidate: (n) => {
-        const own = selectedNodeOf(n.node, pathLeaf(n.coursePath).cycleId);
-        if (n.coursePathKey !== (viewedPath ? encodeCyclePath(viewedPath) : null)) {
-          navigate({ path: n.coursePath });
-        }
-        setSelectionForCandidate(
-          isSelectedCandidate(candidate, own.cycle_id, own.round, own.arm) ? null : own,
-        );
-      },
+      isPicked: (n) => n.node.address === pick?.address,
+      onPickCandidate: (n) =>
+        n.node.address === pick?.address
+          ? pickCandidate(null)
+          : pickCandidate(pickOf(n.node), n.coursePath),
     }),
-    [viewedPath, candidate, navigate, setSelectionForCandidate],
+    [viewed, pick, pickCandidate],
   );
 
   return (

@@ -1,12 +1,18 @@
 import { useCallback, useMemo, useState } from "react";
 import { activeSeries, type SeriesCtx } from "./series";
 import { type PlotGeometry, geomEqual } from "./FitnessChart";
-import { setCandidatesState, useCandidatesState } from "@/lib/state/candidates";
+import {
+  setCandidatesState,
+  showOverlapOf,
+  toggleMetric,
+  useCandidatesState,
+  useMetrics,
+} from "@/lib/state/candidates";
 import { useCandidateBars } from "./useCandidateBars";
 import { useViewedDashboard } from "@/lib/poll";
-import { subjectKey, withMask } from "@/lib/api/reads";
+import { candidateSubject, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/state/compare-selection";
-import { useSelection } from "@/lib/SelectionContext";
+import { useSelection } from "@/lib/state/selection";
 import { lensOf, useMaskState } from "@/lib/scoring-mask";
 import { useCellTerms } from "@/lib/hooks/useConnector";
 import type { HierarchyCourse, ServedDashboard, DisplayMetric } from "@/lib/api/types";
@@ -16,7 +22,6 @@ import {
   type LineageIndex,
 } from "@/lib/derivations";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
-import { isSelectedCandidate, selectedCandidateOf } from "@/lib/types";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "@/lib/hooks/useLineage";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
@@ -29,32 +34,20 @@ export type CandidatesModel = ReturnType<typeof useCandidatesModel>;
 export function useCandidatesModel(dash: ServedDashboard) {
   const { isLive } = useViewedDashboard();
   const unit = dash.measured_unit;
-  const {
-    campaignId,
-    cycleId,
-    leafCampaignId,
-    leafCycleId,
-    viewedPath,
-    viewedCandidateId,
-    navigate,
-  } = useWorkspace();
-  const {
-    candidate: selectedCandidate,
-    setSelectionForCandidate,
-    sampleSet,
-    setSelectionForSampleSet,
-  } = useSelection();
+  const { viewed, pick, pickCandidate, navigate } = useWorkspace();
+  const campaignId = viewed?.root.campaignId ?? null;
+  const cycleId = viewed?.root.cycleId ?? null;
+  const viewedPath = viewed?.path ?? null;
+  const { sampleSet, setSelectionForSampleSet } = useSelection();
   const comparing = useCompareSelection();
 
   const {
     showForest,
-    metrics,
-    metricsSeededForCycle,
-    showOverlap,
-    overlapSeededForCycle,
+    showOverlap: overlapPicked,
     showCache,
   } = useCandidatesState();
   const electedMetric = dash.display_metric;
+  const metrics = useMetrics(cycleId, electedMetric);
   const overlay = useViewedLineage();
   const wonOnTheta = useViewedCourse()?.facts.elects_on === "ability";
   const { lens, setLens, maskActive, readUnder, scoringMaskActive } = overlay;
@@ -67,23 +60,11 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const activeLens = maskOpen ? lensOf(mask, cellTerms) : null;
 
   const compareKey =
-    selectedCandidate && leafCampaignId && viewedPath
-      ? withMask(
-          subjectKey(
-            "candidate",
-            [leafCampaignId, selectedCandidate.cycle_id, selectedCandidate.arm],
-            viewedPath.slice(0, -1),
-          ),
-          { lens: activeLens, samples: sampleSet?.length ? sampleSet.join(",") : null },
-        )
+    pick && viewed
+      ? withMask(candidateSubject(viewed.path, pick.arm), {
+          lens: activeLens, samples: sampleSet?.length ? sampleSet.join(",") : null,
+        })
       : null;
-
-  if (cycleId && metricsSeededForCycle !== cycleId) {
-    setCandidatesState({
-      metrics: new Set<DisplayMetric>(["accuracy", electedMetric]),
-      metricsSeededForCycle: cycleId,
-    });
-  }
 
   const { metric, forkedFrom, revealLane, setShowForest, totalDescendants } = useLineage({
     campaignId,
@@ -101,15 +82,9 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const onSelect = useCallback(
     (v: CandidateBar | null) => {
       // A course bar is no arm: there is nothing to inspect.
-      if (!v?.reading || !leafCycleId) {
-        setSelectionForCandidate(null);
-        return;
-      }
-      setSelectionForCandidate(
-        selectedCandidateOf(leafCycleId, barRound(v), v.reading.arm.key, v.label),
-      );
+      pickCandidate(v?.reading ? { round: barRound(v), arm: v.reading.arm.key } : null);
     },
-    [setSelectionForCandidate, leafCycleId],
+    [pickCandidate],
   );
 
   const onFreeHierarchy = useCallback(
@@ -120,24 +95,21 @@ export function useCandidatesModel(dash: ServedDashboard) {
     [revealLane, navigate],
   );
 
+  const pickedAddress = pick?.address ?? null;
   const selectedKey = useMemo(
-    () =>
-      views.find(
-        (v) =>
-          v.reading !== null &&
-          isSelectedCandidate(selectedCandidate, leafCycleId, barRound(v), v.reading.arm.key),
-      )?.key ?? null,
-    [views, selectedCandidate, leafCycleId],
+    () => (views.some((v) => v.key === pickedAddress) ? pickedAddress : null),
+    [views, pickedAddress],
   );
+  const drilled = viewedNode?.level === "candidate";
 
   const divergentRound = useMemo(() => {
-    if (!overlay.maskActive || viewedCandidateId) return null;
+    if (!overlay.maskActive || drilled) return null;
     const { points, subtree } = divergenceRoundsFor(overlay.index, viewedPath);
     let first = Infinity;
     for (const r of points) first = Math.min(first, r);
     for (const r of subtree) first = Math.min(first, r);
     return Number.isFinite(first) ? first : null;
-  }, [overlay.maskActive, overlay.index, viewedPath, viewedCandidateId]);
+  }, [overlay.maskActive, overlay.index, viewedPath, drilled]);
 
   const lensCriterion =
     courseAt(overlay.index, viewedPath)?.facts.lens_criterion ?? null;
@@ -163,9 +135,9 @@ export function useCandidatesModel(dash: ServedDashboard) {
   // Off the served reading, not the views, which null `overlap` for everyone off the set.
   const hasOverlap = overlap != null && !areCourses;
 
-  if (cycleId && overlap != null && overlapSeededForCycle !== cycleId) {
-    setCandidatesState({ showOverlap: true, overlapSeededForCycle: cycleId });
-  }
+  const showOverlap = showOverlapOf(overlapPicked, cycleId, overlap != null);
+  const setShowOverlap = (on: boolean) =>
+    cycleId !== null && setCandidatesState({ showOverlap: { cycleId, value: on } });
 
   const pickedSet = sampleSet != null && !areCourses;
   const rung = pickedSet ? 2 : showOverlap && hasOverlap ? 1 : 0;
@@ -174,12 +146,12 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const stepOverlap = () => {
     if (rung === 2) {
       setSelectionForSampleSet(null);
-      setCandidatesState({ showOverlap: false });
+      setShowOverlap(false);
     } else if (rung === 1 || !hasOverlap) {
       setSelectionForSampleSet(overlap?.positions ?? sampleUniverse);
-      setCandidatesState({ showOverlap: true });
+      setShowOverlap(true);
     } else {
-      setCandidatesState({ showOverlap: true });
+      setShowOverlap(true);
     }
   };
 
@@ -217,9 +189,10 @@ export function useCandidatesModel(dash: ServedDashboard) {
     isLive,
     unit,
     viewedPath,
-    viewedCandidateId,
+    drilled,
     viewedLabel: viewedNode?.label ?? "runs",
     navigate,
+    pickCandidate,
     history,
     ability: history.at(-1)?.series_reading ?? null,
     electedMetric,
@@ -228,6 +201,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
     areCourses,
     floorPinned,
     metrics,
+    toggleMetric: (m: DisplayMetric) => toggleMetric(m, cycleId, metrics),
     showCache,
     cacheHitCount,
     showForest,

@@ -24,7 +24,8 @@ import { useViewedListing, useWorkspace } from "@/lib/workspace";
 // course's served figures, each the door to the view that reads it; any other open view gets a door
 // of its own. A phone's title row leads with the way back to the list.
 export function RunMasthead() {
-  const { viewedPath, leafCycleId, pinned, checkin, navigate, open } = useWorkspace();
+  const { viewed, pinned, checkin, navigate, open } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const { running } = useRegistry();
   const listing = useViewedListing();
   const dataset = tagValue(listing, "dataset");
@@ -53,10 +54,10 @@ export function RunMasthead() {
           <span className="run-name">{listing?.label ?? (checkin ? "New campaign" : BRAND.shortName)}</span>
           {/* The dataset as a chip only beside a name of the operator's own. */}
           {dataset !== null && dataset !== listing?.label && <Badge>{dataset}</Badge>}
-          {leafCycleId && (
+          {viewed && (
             <span className="run-id">
-              ID: {leafCycleId}
-              <CopyButton data={leafCycleId} title="Copy this cycle's id" />
+              ID: {viewed.leaf.cycleId}
+              <CopyButton data={viewed.leaf.cycleId} title="Copy this cycle's id" />
             </span>
           )}
           {pinned && (

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { useSelection } from "@/lib/SelectionContext";
+import { useSelection } from "@/lib/state/selection";
 import {
   MOVEMENT_CLASS,
   orderAtStep,

@@ -54,7 +54,8 @@ interface Props {
 }
 
 export function RunLimitsControl({ budget, share, metered }: Props) {
-  const { viewedPath, leafCycleId } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const [drafts, setDrafts] = useState<Drafts>(() => draftsOf(budget));
   // Never remounted on a unit switch: unseeded, `apply()` writes the prior cycle's caps on the new.
   const key = budgetKey(budget);
@@ -63,7 +64,7 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
     setPrevKey(key);
     setDrafts(draftsOf(budget));
   }
-  const cmd = useCommand<"set-limits">("run-limits", { scope: leafCycleId });
+  const cmd = useCommand<"set-limits">("run-limits", { scope: viewed?.leaf.cycleId ?? null });
   const [confirmingHalt, setConfirmingHalt] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const pending = cmd.pending !== null;
@@ -191,7 +192,7 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
           </>
         }
       >
-        <p>{`Setting a cap to 0 stops ${leafCycleId ?? "this unit"} after the current round completes. Measurements so far are preserved; you can resume later by raising the cap and re-running.`}</p>
+        <p>{`Setting a cap to 0 stops ${viewed?.leaf.cycleId ?? "this unit"} after the current round completes. Measurements so far are preserved; you can resume later by raising the cap and re-running.`}</p>
       </Dialog>
     </div>
   );

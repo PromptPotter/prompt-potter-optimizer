@@ -59,36 +59,37 @@ export function lensOf(mask: ScoringMask | null, own: readonly CellTerm[]): stri
 export interface MaskState {
   open: boolean;
   mask: ScoringMask;
-  seededForCycle: string | null;
+  // The viewed address (`ViewedCycle.address`, the leaf's whole path) the mask was seeded for.
+  seededFor: string | null;
 }
 
-const store = createModuleStore<MaskState>({ open: false, mask: NO_DIALS, seededForCycle: null });
+const store = createModuleStore<MaskState>({ open: false, mask: NO_DIALS, seededFor: null });
 
 export const setScoringMask = store.set;
 
 // Every mask reader reads the store alone, never the dashboard: a reader keyed on it (the time ray,
 // a sidebar row's tree) re-renders only when the mask moves, never on a dashboard landing. Until
-// `seededForCycle` names the viewed cycle, its mask is not known and a tree under it is held.
+// `seededFor` names the viewed address, its mask is not known and a tree under it is held.
 export const useMaskState = store.useStore;
 
 // The viewed cycle's mask is its served criterion until the operator edits it: seeded once per
-// viewed cycle, where its dashboard lands (`poll.tsx::useViewedDashboard`). A dashboard serving no
-// formula (a run that died in INIT) seeds no dials.
+// viewed address, where its dashboard lands (`poll.tsx::useViewedDashboard`). A dashboard serving
+// no formula (a run that died in INIT) seeds no dials.
 export function seededMask(
   state: MaskState,
-  cycleId: string,
+  address: string,
   dash: Pick<ServedDashboard, "composite_fitness_formula" | "composite_fitness_weights">,
 ): MaskState {
-  if (state.seededForCycle === cycleId) return state;
+  if (state.seededFor === address) return state;
   return {
     open: state.open,
     mask: servedMask(dash.composite_fitness_formula, dash.composite_fitness_weights),
-    seededForCycle: cycleId,
+    seededFor: address,
   };
 }
 
-export function seedScoringMask(cycleId: string, dash: ServedDashboard): void {
+export function seedScoringMask(address: string, dash: ServedDashboard): void {
   const state = store.get();
-  const next = seededMask(state, cycleId, dash);
+  const next = seededMask(state, address, dash);
   if (next !== state) store.set(next);
 }

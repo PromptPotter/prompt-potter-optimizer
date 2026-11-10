@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useSelection } from "@/lib/SelectionContext";
+import { useSelection } from "@/lib/state/selection";
 import { useViewedDashboard } from "@/lib/poll";
 import { cx } from "@/lib/cx";
 

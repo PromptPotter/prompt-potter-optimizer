@@ -25,7 +25,8 @@ interface RunControl {
 
 export function useRunControl(): RunControl | null {
   const { dash } = useViewedDashboard();
-  const { viewedPath } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const cmd = useCommand<"pause" | "start-run">("run-control");
   const [pausing, setPausing] = useState(false);
 

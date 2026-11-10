@@ -34,7 +34,8 @@ export interface TreeCtx {
   isNodeOpen: (key: string, openByDefault: boolean) => boolean;
   toggleNode: (key: string) => void;
   viewedPath: CyclePath | null;
-  viewedCandidateId: string | null;
+  // A candidate is picked on the viewed path, so no course row is the one selected.
+  picked: boolean;
   showCandidates: boolean;
 }
 
@@ -161,7 +162,7 @@ function RunRow({ campaign, ctx: shared }: { campaign: HierarchyCampaign; ctx: T
   const selected =
     ctx.viewedPath != null &&
     encodeCyclePath(ctx.viewedPath) === campaign.facts.root &&
-    ctx.viewedCandidateId == null;
+    !ctx.picked;
 
   return (
     <>
@@ -223,7 +224,7 @@ function CourseRow({
   const viewed = ctx.viewedPath != null && encodeCyclePath(ctx.viewedPath) === course.address;
   // Every course open stacks each fork's whole roster on a phone: the line and the viewed one open.
   const open = ctx.isNodeOpen(course.address, holdsLine || viewed);
-  const selected = viewed && ctx.viewedCandidateId == null;
+  const selected = viewed && !ctx.picked;
   return (
     <>
       <RowHoverCard card={course}>

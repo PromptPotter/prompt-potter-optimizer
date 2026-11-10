@@ -10,7 +10,7 @@ import { useCellTerms } from "@/lib/hooks/useConnector";
 import { shownData, useRead } from "@/lib/hooks/useRead";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import type { ReadResult } from "@/lib/read-cache";
-import { useSelection } from "@/lib/SelectionContext";
+import { useSelection } from "@/lib/state/selection";
 import { createModuleStore } from "@/lib/state/module-store";
 import { useWorkspace } from "@/lib/workspace";
 
@@ -43,8 +43,8 @@ function useLens(campaignId: string | null): string {
 }
 
 // An operator's mask edit goes out once it rests; a cycle's seed goes out at once. The settle
-// restarts on the SEED (`seededForCycle`), never the cycle id: a cycle switch first shows the last
-// cycle's mask unseeded, and resetting there would debounce the new seed like an edit.
+// restarts on the SEED (`seededFor`), never the address: an address switch first shows the last
+// address's mask unseeded, and resetting there would debounce the new seed like an edit.
 const settling = createModuleStore<{ seed: string | null; live: string | null; settled: string | null }>(
   { seed: null, live: null, settled: null },
 );
@@ -72,37 +72,37 @@ interface TreeKey {
   moment: SubtreeMoment | null;
 }
 
-// The tree's mask: `seeding` while the open mask panel's seed for the viewed cycle is not known, so
-// a cycle's first tree goes out under its own seed and the campaign's last tree stands meanwhile.
+// The tree's mask: `seeding` while the open mask panel's seed for the viewed address is not known,
+// so an address's first tree goes out under its own seed and the campaign's last tree stands meanwhile.
 export function treeMaskOf(
-  { open, seededForCycle }: MaskState,
-  cycleId: string | null,
+  { open, seededFor }: MaskState,
+  address: string | null,
   lens: string | null,
   samples: readonly number[] | null,
 ): SubtreeMask | "seeding" | null {
-  if (open && seededForCycle !== cycleId) return "seeding";
+  if (open && seededFor !== address) return "seeding";
   return lens || samples ? { lens, samples } : null;
 }
 
 // The viewed tree's key off the mask store, which no dashboard landing moves. Keyed on the
 // campaign, not the cycle: a same-campaign cycle switch keeps one read.
 function useViewedTreeKey(maskState: MaskState): TreeKey {
-  const { open: maskOpen, mask, seededForCycle } = maskState;
-  const { campaignId, cycleId, at, viewedPath: leafPath } = useWorkspace();
+  const { open: maskOpen, mask, seededFor } = maskState;
+  const { viewed, at } = useWorkspace();
+  const viewedAddress = viewed?.address ?? null;
   const { sampleSet } = useSelection();
-  const lens = useLens(campaignId);
-  // Every reader names the same seed, seeding or not: the viewed cycle once seeded, else null.
-  const seed = seededForCycle === cycleId ? cycleId : null;
+  const lens = useLens(viewed?.root.campaignId ?? null);
+  // Every reader names the same seed, seeding or not: the viewed address once seeded, else null.
+  const seed = seededFor === viewedAddress ? viewedAddress : null;
   const cellTerms = useCellTerms();
   const maskLens = useSettledLens(seed, maskOpen ? lensOf(mask, cellTerms) : null);
   const lensParam = maskOpen ? maskLens : lens || null;
   const samples = sampleSet && sampleSet.length > 0 ? sampleSet : null;
-  const address = campaignId && cycleId ? campaignId : null;
   return {
-    address,
-    mask: treeMaskOf(maskState, cycleId, lensParam, samples),
+    address: viewed?.root.campaignId ?? null,
+    mask: treeMaskOf(maskState, viewedAddress, lensParam, samples),
     // The offset is the viewed LEAF's, which the campaign-keyed subtree is not addressed by.
-    moment: at !== null && leafPath !== null ? { at, cycle: leafPath } : null,
+    moment: at !== null && viewed !== null ? { at, cycle: viewed.path } : null,
   };
 }
 
@@ -148,7 +148,9 @@ function maskActiveOf(index: LineageIndex): boolean {
 }
 
 export function useViewedLineage(): ViewedLineage {
-  const { campaignId, viewedPath: leafPath } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const campaignId = viewed?.root.campaignId ?? null;
+  const leafPath = viewed?.path ?? null;
   const mask = useMaskState();
   const maskOpen = mask.open;
   const treeRead = useTree(useViewedTreeKey(mask));
@@ -173,18 +175,18 @@ export function useViewedLineage(): ViewedLineage {
 // The viewed leaf's course entry: its `state` is the one word and next step every surface reads.
 export function useViewedCourse(): SubtreeCourse | null {
   const { index } = useViewedLineage();
-  const { viewedPath } = useWorkspace();
-  return useMemo(() => courseAt(index, viewedPath), [index, viewedPath]);
+  const path = useWorkspace().viewed?.path ?? null;
+  return useMemo(() => courseAt(index, path), [index, path]);
 }
 
 // A campaign's tree by its address: the viewed campaign's under the viewed mask and moment.
 export function useLineageTree(address: string, enabled: boolean): CampaignTree {
-  const { campaignId, cycleId } = useWorkspace();
-  const viewed = useViewedTreeKey(useMaskState());
+  const { viewed } = useWorkspace();
+  const viewedKey = useViewedTreeKey(useMaskState());
   const key = !enabled
     ? null
-    : campaignId === address && cycleId !== null
-      ? viewed
+    : viewed?.root.campaignId === address
+      ? viewedKey
       : { address, mask: null, moment: null };
   return useTree(key);
 }

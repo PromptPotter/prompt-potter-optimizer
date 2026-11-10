@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { armReading, currentRound, dash, liveRow } from "@/lib/test-fixtures";
-import { liveCandidate, liveCandidates } from "../poll";
+import { liveCandidate, liveCandidates } from "../live-candidates";
 
 describe("liveCandidates", () => {
   it("returns the same reference on the no-candidate path", () => {

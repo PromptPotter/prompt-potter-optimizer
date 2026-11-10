@@ -11,7 +11,8 @@ import { useWorkspace } from "@/lib/workspace";
 // The viewed check-in: a draft id, `NEW_CHECKIN` before one is minted, null while a run is viewed.
 // Nothing viewed at all (no run yet, or none followed) is a fresh check-in too.
 export function useCheckinSubject(): CheckinSubject {
-  const { checkin, viewedPath } = useWorkspace();
+  const { viewed, checkin } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   return checkin !== null
     ? (checkin.draftId ?? NEW_CHECKIN)
     : viewedPath === null

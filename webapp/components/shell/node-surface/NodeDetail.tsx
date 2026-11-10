@@ -8,8 +8,8 @@ import {
   type PipelineViewNode,
 } from "@/lib/api/types";
 import type { SelectedNode } from "@/lib/address";
-import { useSelection } from "@/lib/SelectionContext";
-import { useCheckinDraft, useIngest } from "@/lib/ingest-flow";
+import { useSelection } from "@/lib/state/selection";
+import { useCheckinDraft, useIngest } from "@/lib/state/ingest-flow";
 import { draftPrompts } from "@/lib/prompt-fields";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";

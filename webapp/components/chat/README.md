@@ -45,7 +45,7 @@ The core imports nothing from an optimizer module; each file's import list is th
 To strip this down to a generic chat + tool-activity app, remove:
 
 - **The optimizer panes:** `components/dashboard/`, `components/files/`, and the ingest setup
-  flow — `components/ingest/` whole, `lib/hooks/useIngestFlow.ts` and `lib/ingest-flow.tsx`.
+  flow — `components/ingest/` whole, `lib/hooks/useIngestFlow.ts` and `lib/state/ingest-flow.tsx`.
   Ingest is a contributor: it appends messages and mounts two blocks
   (`IngestConversation.tsx::useIngestItems`), so removing it leaves the thread intact:
   `ThreadProvider` is mounted by the shell (`shell/AppShell.tsx`), above `IngestFlowProvider`.

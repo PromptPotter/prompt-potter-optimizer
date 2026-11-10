@@ -7,7 +7,6 @@ import { encodeCyclePath, type CyclePath } from "./ids";
 import type {
   HierarchyStep,
   HierarchySteps,
-  LiveCandidate,
   Said,
   ServedDashboard,
 } from "@/lib/api/types";
@@ -16,21 +15,6 @@ import { invalidateReads, type ReadFailure, type ReadResult } from "./read-cache
 import { seedScoringMask } from "./scoring-mask";
 import { createModuleStore } from "./state/module-store";
 import { useMomentAt, useWorkspace } from "./workspace";
-
-// Stable reference: a fresh `[]` per poll drives the candidates card into a setState loop.
-const NO_ROWS: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
-
-export function liveCandidates(dash: ServedDashboard | null): LiveCandidate[] {
-  return dash?.current_round.candidates ?? NO_ROWS;
-}
-
-export function liveCandidate(
-  dash: ServedDashboard | null,
-  key: string | null,
-): LiveCandidate | null {
-  if (!key) return null;
-  return liveCandidates(dash).find((c) => c.reading.arm.key === key) ?? null;
-}
 
 export const DASHBOARD_PENDING = "Waiting for this run’s dashboard…";
 
@@ -71,10 +55,6 @@ export function connectionSaid(failure: ReadFailure | null, of: FailureOf): Said
   };
 }
 
-export function roundOf(dash: ServedDashboard | null): number | null {
-  return dash?.current_round.round ?? null;
-}
-
 interface DashboardPoll {
   read: ReadResult<ServedDashboard>;
   // The read's body, or the unit's last one while a moved moment loads; null once the unit is gone.
@@ -87,15 +67,15 @@ interface DashboardPoll {
 // phase re-ask, so the read's change effect is that whoever subscribed last
 // (`read-cache.ts::descriptorOf`).
 export function useDashboard(path: CyclePath | null, intervalMs: number | null): DashboardPoll {
-  const { reportAddressGone, viewedPath } = useWorkspace();
+  const { reportAddressGone, viewed } = useWorkspace();
   const at = useMomentAt(path);
   const unit = path ? encodeCyclePath(path) : null;
-  const viewed = unit !== null && viewedPath !== null && unit === encodeCyclePath(viewedPath);
+  const isViewed = unit !== null && unit === viewed?.address;
   const read = useRead(
     path
       ? {
           ...dashboardRead(path, at, intervalMs),
-          ...(viewed ? { onChange: onViewedPhaseChange } : {}),
+          ...(isViewed ? { onChange: onViewedPhaseChange } : {}),
           onGone: () => reportAddressGone(encodeCyclePath(path)),
         }
       : null,
@@ -112,12 +92,13 @@ export function viewedIntervalMs(at: number | null, lost: boolean): number {
   return at !== null || lost ? RECONNECT_POLL_MS : DASHBOARD_LIVE_POLL_MS;
 }
 
-// The viewed cycle's dashboard, and the one place its scoring mask is seeded from. A lost read
-// slows on the cache's own floor (`read-cache.ts::intervalOf`).
+// The viewed cycle's dashboard, and the one place its scoring mask is seeded from: keyed on the
+// address whose dashboard it read, so an inner run drilled into seeds its own criterion. A lost
+// read slows on the cache's own floor (`read-cache.ts::intervalOf`).
 export function useViewedDashboard(): DashboardPoll {
-  const { viewedPath, cycleId, at } = useWorkspace();
-  const poll = useDashboard(viewedPath, viewedIntervalMs(at, false));
-  if (cycleId !== null && poll.dash !== null) seedScoringMask(cycleId, poll.dash);
+  const { viewed, at } = useWorkspace();
+  const poll = useDashboard(viewed?.path ?? null, viewedIntervalMs(at, false));
+  if (viewed !== null && poll.dash !== null) seedScoringMask(viewed.address, poll.dash);
   return poll;
 }
 
@@ -143,11 +124,12 @@ interface TimeRay {
 // settled run's steps move only on a resume, whose phase change re-asks them
 // (`reads.ts::onViewedPhaseChange`).
 export function useTimeRay(): TimeRay {
-  const { viewedPath: path, at } = useWorkspace();
+  const { viewed, at } = useWorkspace();
+  const path = viewed?.path ?? null;
   const { read: board, dash } = useViewedDashboard();
   const lost = board.status === "failed" && board.failure.kind !== "gone";
   const intervalMs = phaseIs(dash?.run_phase, "settled") ? null : viewedIntervalMs(at, lost);
-  const unit = path ? encodeCyclePath(path) : null;
+  const unit = viewed?.address ?? null;
   const head = useRead(path ? stepsRead(path, RAY_WINDOW, null, intervalMs) : null);
   const headWindow = shownData(head);
   const paged = paging.useStore();

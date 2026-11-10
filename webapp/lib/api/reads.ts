@@ -215,7 +215,8 @@ export function roundAuditRead(path: CyclePath, round: number): ReadDescriptor<R
 }
 
 export function filesRead(campaignId: string, cycleId: string): ReadDescriptor<FilesResponse> {
-  return once("files", `${API}/campaigns/${enc(campaignId)}/cycles/${enc(cycleId)}/files`);
+  // The ROOT hop's files: a drilled-in leaf's live under its `.inner/`.
+  return once("files", cyclePathUrl([{ campaignId, cycleId }], "/files"));
 }
 
 export interface CellsFilter {

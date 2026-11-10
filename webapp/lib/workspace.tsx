@@ -20,10 +20,14 @@ import {
   DEFAULT_VIEWS,
   EMPTY_ADDRESS,
   formatAddress,
+  formatPick,
   nodeOfKey,
   parseAddress,
+  parsePick,
+  pickedAddressOf,
   withViews,
   type Address,
+  type CandidatePick,
   type FamilyId,
   type SelectedNode,
   type View,
@@ -35,15 +39,26 @@ import { tagValue } from "./derivations/hierarchy";
 import { useActivePointer, useCampaign, useEntry, useRegistry } from "./hooks/useRegistry";
 import { useViewMemory } from "./state/view-memory";
 
+type Hop = CyclePath[number];
+
+// The viewed cycle, once: its whole path, that path's encoded `address` (every read's and the
+// hierarchy's course key), and the ROOT hop (ingest, Files, view memory) beside the LEAF hop (display).
+export interface ViewedCycle {
+  path: CyclePath;
+  address: string;
+  root: Hop;
+  leaf: Hop;
+}
+
 interface WorkspaceState {
   // Null while a check-in is viewed: an unstarted campaign has no cycle, so nothing of a run shows.
-  viewedPath: CyclePath | null;
+  viewed: ViewedCycle | null;
   checkin: { draftId: string | null } | null;
-  cycleId: string | null;
-  campaignId: string | null;
-  leafCampaignId: string | null;
-  leafCycleId: string | null;
-  viewedCandidateId: string | null;
+  // The one candidate pick, on the viewed path (the hash's `k/`); `address` is its hierarchy entry's.
+  pick: (CandidatePick & { address: string }) | null;
+  // The pick's one writer: on `path` (the viewed one when omitted), keeping the moment while the
+  // path stays the viewed one; null unpicks.
+  pickCandidate: (pick: CandidatePick | null, path?: CyclePath) => void;
   // An offset in the viewed LEAF's ledger (`StepFacts.offset`); null is the head.
   at: number | null;
   views: readonly View[];
@@ -71,9 +86,9 @@ export function useWorkspace(): WorkspaceState {
 }
 
 export function useMomentAt(path: CyclePath | null): number | null {
-  const { at, viewedPath } = useWorkspace();
-  if (at === null || path === null || viewedPath === null) return null;
-  return encodeCyclePath(path) === encodeCyclePath(viewedPath) ? at : null;
+  const { at, viewed } = useWorkspace();
+  if (at === null || path === null || viewed === null) return null;
+  return encodeCyclePath(path) === viewed.address ? at : null;
 }
 
 // What every pipeline graph lights and the one `NodeDetail` shows: the open `node` view's.
@@ -84,17 +99,16 @@ export function useViewedNode(): SelectedNode | null {
 
 // The ROOT hop's dataset; a drilled-in leaf's is `useLeafDatasetName`.
 export function useViewedDatasetName(): string | null {
-  const { campaignId, cycleId } = useWorkspace();
-  const root = campaignId && cycleId ? encodeCyclePath([{ campaignId, cycleId }]) : null;
-  return tagValue(useEntry(root), "dataset");
+  const { viewed } = useWorkspace();
+  return tagValue(useEntry(viewed ? encodeCyclePath([viewed.root]) : null), "dataset");
 }
 
 // The viewed subject's listing: a check-in's unstarted campaign by its draft id, else the run's
 // campaign. Null is no subject listed: `#/new`, or a listing not landed yet.
 export function useViewedListing(): ListedCampaign | null {
-  const { checkin, campaignId } = useWorkspace();
+  const { checkin, viewed } = useWorkspace();
   const { unstarted } = useRegistry();
-  const campaign = useCampaign(checkin === null ? campaignId : null);
+  const campaign = useCampaign(checkin === null ? (viewed?.root.campaignId ?? null) : null);
   if (checkin === null) return campaign;
   return unstarted.find((c) => c.address === checkin.draftId) ?? null;
 }
@@ -150,27 +164,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   // Memoized: consumers key reads and chart `options` on its identity.
   const pinnedPath = pinned?.path ?? null;
-  const viewedPath: CyclePath | null = useMemo(
-    () =>
+  const viewed: ViewedCycle | null = useMemo(() => {
+    const path: CyclePath | null =
       subject === null
         ? active
           ? [{ campaignId: active.campaign_id, cycleId: active.cycle_id }]
           : null
-        : pinnedPath,
-    [subject, active, pinnedPath],
+        : pinnedPath;
+    return path
+      ? { path, address: encodeCyclePath(path), root: pathRoot(path), leaf: pathLeaf(path) }
+      : null;
+  }, [subject, active, pinnedPath]);
+  const campaignId = viewed?.root.campaignId ?? null;
+  const viewedAddress = viewed?.address ?? null;
+
+  const pinnedPick = pinned?.pick ?? null;
+  const pick = useMemo(
+    () => (viewed && pinnedPick ? { ...pinnedPick, address: pickedAddressOf(viewed.address, pinnedPick) } : null),
+    [viewed, pinnedPick],
   );
-
-  const rootHop = viewedPath ? pathRoot(viewedPath) : null;
-  const campaignId = rootHop?.campaignId ?? null;
-  const cycleId = rootHop?.cycleId ?? null;
-
-  const leafHop = viewedPath ? pathLeaf(viewedPath) : null;
-  const leafCampaignId = leafHop?.campaignId ?? null;
-  const leafCycleId = leafHop?.cycleId ?? null;
-
-  const viewedCandidateId = pinned?.candidateId ?? null;
+  const viewedPick = pinnedPick ? formatPick(pinnedPick) : null;
   const at = pinned?.at ?? null;
-  const viewedAddress = viewedPath ? encodeCyclePath(viewedPath) : null;
 
   // `replaceState`, not `push`: Back leaves the app.
   useEffect(() => {
@@ -189,8 +203,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!campaignId || !viewedAddress) return;
-    recordView(campaignId, { viewedPath: viewedAddress, viewedCandidateId });
-  }, [campaignId, viewedAddress, viewedCandidateId, recordView]);
+    recordView(campaignId, { viewedPath: viewedAddress, viewedPick });
+  }, [campaignId, viewedAddress, viewedPick, recordView]);
 
   const resumed = (path: CyclePath): ViewedSubject => {
     const hop = path[0];
@@ -202,7 +216,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (!remembered || !root || root.campaignId !== hop.campaignId) return { path };
     // Inner hops never appear in `/hierarchy`, so the ROOT hop's existence is the check.
     const known = byAddress.has(encodeCyclePath([root]));
-    return known ? { path: remembered, candidateId: mem.viewedCandidateId } : { path };
+    return known ? { path: remembered, pick: parsePick(mem.viewedPick ?? "") } : { path };
   };
   // Read by `navigate`, whose identity every consumer holds: a poll's 200 moves `byAddress`.
   const resumedRef = useRef(resumed);
@@ -213,7 +227,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // The list screen closes on a subject switch; a check-in opens on its chat.
   const navigate = useCallback((to: ViewedSubject, opts: { resume?: boolean } = {}) => {
     const target =
-      to !== null && "path" in to && opts.resume && !to.candidateId
+      to !== null && "path" in to && opts.resume && !to.pick
         ? resumedRef.current(to.path)
         : to;
     setScreen((s) => ({
@@ -244,6 +258,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Read by `pickCandidate`, whose identity every picker holds.
+  const hereRef = useRef({ viewed, at });
+  useEffect(() => {
+    hereRef.current = { viewed, at };
+  });
+
+  const pickCandidate = useCallback(
+    (next: CandidatePick | null, path?: CyclePath) => {
+      const here = hereRef.current;
+      const to = path ?? here.viewed?.path;
+      if (!to) return;
+      const stays = here.viewed !== null && encodeCyclePath(to) === here.viewed.address;
+      navigate({ path: to, pick: next, at: stays ? here.at : null });
+    },
+    [navigate],
+  );
+
   // Read by `reportAddressGone`, whose identity a polled read holds across renders.
   const pinnedRef = useRef<CyclePath | null>(pinnedPath);
   useEffect(() => {
@@ -256,7 +287,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const gone = pinnedRef.current;
       if (!gone || encodeCyclePath(gone) !== address) return;
       // Memory would restore the dead address on reload; a reaped `.inner/` leaf's root campaign is still alive.
-      recordView(pathRoot(gone).campaignId, { viewedPath: null, viewedCandidateId: null });
+      recordView(pathRoot(gone).campaignId, { viewedPath: null, viewedPick: null });
       setScreen((s) => ({ ...s, subject: null }));
       setGoneAddress(address);
     },
@@ -271,13 +302,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<WorkspaceState>(
     () => ({
-      viewedPath,
+      viewed,
       checkin,
-      cycleId,
-      campaignId,
-      leafCampaignId,
-      leafCycleId,
-      viewedCandidateId,
+      pick,
+      pickCandidate,
       at,
       views,
       pinned: pinned !== null,
@@ -289,13 +317,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       goneAddress,
     }),
     [
-      viewedPath,
+      viewed,
       checkin,
-      cycleId,
-      campaignId,
-      leafCampaignId,
-      leafCycleId,
-      viewedCandidateId,
+      pick,
+      pickCandidate,
       at,
       views,
       pinned,

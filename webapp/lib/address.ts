@@ -47,9 +47,32 @@ export function nodeOfKey(key: string): SelectedNode | null {
   return (scope === "optimizer" || scope === "target") && id ? { scope, id } : null;
 }
 
+// A candidate picked on a course: its place below the course, the served address's
+// `/r{round}/{arm_key}` tail (`ids.ts::courseAddressOf`). The hash spells it `k/<round>.<arm key>`.
+export interface CandidatePick {
+  round: number;
+  arm: string;
+}
+
+export function formatPick({ round, arm }: CandidatePick): string {
+  return `${round}.${arm}`;
+}
+
+export function parsePick(s: string): CandidatePick | null {
+  const dot = s.indexOf(".");
+  const round = s.slice(0, dot);
+  const arm = s.slice(dot + 1);
+  return dot > 0 && /^\d+$/.test(round) && validIdComponent(arm) ? { round: Number(round), arm } : null;
+}
+
+// The picked candidate's hierarchy address under its course's.
+export function pickedAddressOf(course: string, { round, arm }: CandidatePick): string {
+  return `${course}/r${round}/${arm}`;
+}
+
 // null follows the active run; a check-in's null draft is a fresh one no file or pick has minted.
 export type ViewedSubject =
-  | { path: CyclePath; candidateId?: string | null; at?: number | null }
+  | { path: CyclePath; pick?: CandidatePick | null; at?: number | null }
   | { draftId: string | null }
   | null;
 
@@ -87,7 +110,7 @@ export function formatAddress({ subject, views }: Address): string {
   } else if (subject !== null) {
     segs.push(CYCLE_SEG);
     for (const hop of subject.path) segs.push(hop.campaignId, shortCycle(hop.cycleId));
-    if (subject.candidateId) segs.push(CAND_SEG, subject.candidateId);
+    if (subject.pick) segs.push(CAND_SEG, formatPick(subject.pick));
     if (subject.at != null) segs.push(AT_SEG, String(subject.at));
   }
   // The default view is omitted, so the common address stays short.
@@ -136,15 +159,15 @@ export function parseAddress(hash: string): Address | null {
       i += 2;
     }
     if (path.length === 0) return null;
-    const run: { path: CyclePath; candidateId: string | null; at: number | null } = {
+    const run: { path: CyclePath; pick: CandidatePick | null; at: number | null } = {
       path,
-      candidateId: null,
+      pick: null,
       at: null,
     };
     if (segs[i] === CAND_SEG) {
-      const id = segs[i + 1];
-      if (id === undefined || !validIdComponent(id)) return null;
-      run.candidateId = id;
+      const pick = parsePick(segs[i + 1] ?? "");
+      if (pick === null) return null;
+      run.pick = pick;
       i += 2;
     }
     if (segs[i] === AT_SEG) {

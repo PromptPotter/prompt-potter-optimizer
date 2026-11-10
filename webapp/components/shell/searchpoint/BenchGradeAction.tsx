@@ -3,21 +3,20 @@ import { Button, FailureLine, Term } from "@/components/ui";
 import { commands, mintCommandId } from "@/lib/api/commands";
 import { BENCH_REFUSAL_INFO } from "@/lib/api/types";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { encodeCyclePath, pathRoot } from "@/lib/ids";
 import { useViewedCourse } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 
 // The bench's one control, on the Leader it grades: a refusal is the served reason, read on its Term.
 export function BenchGradeAction() {
-  const { viewedPath } = useWorkspace();
+  const { viewed } = useWorkspace();
   const status = useViewedCourse()?.facts.bench?.status ?? null;
-  const scope = viewedPath ? encodeCyclePath(viewedPath) : null;
+  const scope = viewed?.address ?? null;
   const cmd = useCommand<"grade-bench">("grade-bench", { scope });
   const stop = useCommand<"cancel">("cancel", { revalidate: false, scope });
   const [acting, setActing] = useState<string | null>(null);
-  if (!viewedPath || !status?.offered) return null;
+  if (!viewed || !status?.offered) return null;
   const grading = cmd.pending !== null || status.refusal === "in_flight";
-  const campaignId = pathRoot(viewedPath).campaignId;
+  const campaignId = viewed.root.campaignId;
   function grade() {
     const commandId = mintCommandId();
     setActing(commandId);

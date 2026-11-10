@@ -1,4 +1,4 @@
-import { liveCandidates } from "@/lib/poll";
+import { liveCandidates } from "./live-candidates";
 import type { ServedDashboard, ValidationFailure, RoundView } from "@/lib/api/types";
 
 export interface CandidateVerdict {

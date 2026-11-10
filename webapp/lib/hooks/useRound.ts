@@ -6,17 +6,19 @@ import {
   candidateSearchPoint,
   candidateVerdicts,
   groupByRound,
+  liveCandidate,
   liveCandidateObserveConfig,
   liveCandidateSearchPoint,
   liveCandidateVerdicts,
   roundCandidates,
+  roundOf,
   scoreboardReading,
   type CandidateSearchPoint,
   type CandidateVerdict,
   type ObserveConfig,
 } from "../derivations";
 import type { CyclePath } from "../ids";
-import { liveCandidate, roundOf, useDashboard } from "../poll";
+import { useDashboard } from "../poll";
 import type { ReadResult } from "../read-cache";
 import type { ArmRow } from "../types";
 import { useMomentAt } from "../workspace";

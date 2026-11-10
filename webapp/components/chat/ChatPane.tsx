@@ -4,9 +4,8 @@ import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
 import { useViewedCourse } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { entryAlone } from "@/lib/derivations";
-import { encodeCyclePath } from "@/lib/ids";
 import { NEW_CHECKIN } from "@/lib/hooks/useIngestFlow";
-import { useCheckinSubject } from "@/lib/ingest-flow";
+import { useCheckinSubject } from "@/lib/state/ingest-flow";
 import { IngestComposer, useIngestItems } from "@/components/ingest/IngestConversation";
 import type { HierarchyCourse } from "@/lib/api/types";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
@@ -24,10 +23,11 @@ import { RunCard, RunSummaryItem } from "@/components/chat/RunCard";
 // The pane renders ONE subject's conversation: the viewed check-in's, or the viewed run's.
 export function ChatPane() {
   const datasetName = useLeafDatasetName();
-  const { viewedPath, cycleId, leafCycleId } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const subject = useCheckinSubject();
   const threads = useThreads<HierarchyCourse>();
-  const runKey = viewedPath ? runThreadKey(encodeCyclePath(viewedPath)) : null;
+  const runKey = viewed ? runThreadKey(viewed.address) : null;
   const threadKey =
     subject === null && runKey !== null
       ? runKey
@@ -51,7 +51,7 @@ export function ChatPane() {
 
   const live = useCycleEvents(viewedPath);
   const mounted: ThreadItem<HierarchyCourse>[] = [];
-  if (subject === null && leafCycleId) {
+  if (subject === null && viewed) {
     mounted.push({
       id: "live",
       kind: "block",
@@ -65,7 +65,7 @@ export function ChatPane() {
       ),
     });
   }
-  if (subject === null && cycleId) {
+  if (subject === null && viewed) {
     mounted.push({
       id: "run-card",
       kind: "block",

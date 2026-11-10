@@ -3,7 +3,7 @@ import { STORAGE_KEYS, useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { ownerOfAddress } from "@/lib/ids";
 
 // Bumping this DROPS every stored record rather than migrating it.
-const RECORD_VERSION = 2;
+const RECORD_VERSION = 3;
 
 const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -18,7 +18,8 @@ export interface CampaignView {
   // Latches the one-shot reveal, or a sidebar remount re-opens a row the operator collapsed.
   autoExpandedFor: string | null;
   viewedPath: string | null;
-  viewedCandidateId: string | null;
+  // `address.ts::formatPick`'s spelling.
+  viewedPick: string | null;
   showForest: boolean;
   // Lane keys (course addresses), the same space `forest-layout::layout` matches.
   expandedLanes: string[];
@@ -35,7 +36,7 @@ export function emptyView(): CampaignView {
     toggled: [],
     autoExpandedFor: null,
     viewedPath: null,
-    viewedCandidateId: null,
+    viewedPick: null,
     showForest: false,
     expandedLanes: [],
   };

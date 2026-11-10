@@ -4,13 +4,13 @@ import { treeMaskOf } from "@/lib/lineage";
 import { lensOf, NO_DIALS, seededMask, type MaskState } from "@/lib/scoring-mask";
 import { dash } from "@/lib/test-fixtures";
 
-const OPEN: MaskState = { open: true, mask: NO_DIALS, seededForCycle: null };
+const OPEN: MaskState = { open: true, mask: NO_DIALS, seededFor: null };
 
 const lensOfRead = (id: string) => new URL(id.split("\x1f")[1]!, "http://x").searchParams.get("lens");
 
-// The campaign tree the viewed cycle asks for under `state`, keyed off the mask alone.
-function treeFor(state: MaskState, cycleId: string) {
-  return subtreeRead("a", treeMaskOf(state, cycleId, lensOf(state.mask, []), null), null, null);
+// The campaign tree the viewed address asks for under `state`, keyed off the mask alone.
+function treeFor(state: MaskState, address: string) {
+  return subtreeRead("a", treeMaskOf(state, address, lensOf(state.mask, []), null), null, null);
 }
 
 describe("the viewed tree under an open mask panel", () => {
@@ -38,6 +38,14 @@ describe("the viewed tree under an open mask panel", () => {
     const read = treeFor(seeded, "c4");
     expect(read.held).toBeUndefined();
     expect(lensOfRead(read.id)).toBeNull();
+  });
+
+  it("seeds an inner run drilled into under its own criterion, though it shares the outer root", () => {
+    const outer = seededMask(OPEN, "a::c1", dash({ composite_fitness_formula: "fitness", composite_fitness_weights: null }));
+    const inner = "a::c1/a__in::cycle_x";
+    expect(treeFor(outer, inner).held).toBe(true);
+    const seeded = seededMask(outer, inner, dash({ composite_fitness_formula: "fitness - cost", composite_fitness_weights: null }));
+    expect(lensOfRead(treeFor(seeded, inner).id)).toBe("score:fitness - cost");
   });
 
   it("never holds a tree while the mask panel is closed", () => {

@@ -44,7 +44,8 @@ function changesOf(
 }
 
 export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
-  const { viewedPath } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const { index } = useViewedLineage();
   const { dash } = useViewedDashboard();
   const attached = dash?.producer.attached === true;

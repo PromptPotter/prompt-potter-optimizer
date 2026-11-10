@@ -9,8 +9,7 @@ import type {
   CellTerm,
 } from "@/lib/api/types";
 import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
-import { pathLeaf } from "@/lib/ids";
-import { useCheckinDraft } from "@/lib/ingest-flow";
+import { useCheckinDraft } from "@/lib/state/ingest-flow";
 import type { ReadResult } from "@/lib/read-cache";
 import { useWorkspace } from "@/lib/workspace";
 
@@ -35,19 +34,20 @@ export function useCampaignPipeline(
 // The viewed leaf as a course subject: the hops ABOVE it are its chain, so an L4 inner run
 // resolves its OWN pipeline.
 export function useLeafSubject(): string | null {
-  const { viewedPath } = useWorkspace();
-  return useMemo(() => {
-    const leaf = viewedPath ? pathLeaf(viewedPath) : null;
-    return leaf && viewedPath
-      ? subjectKey("course", [leaf.campaignId, leaf.cycleId], viewedPath.slice(0, -1))
-      : null;
-  }, [viewedPath]);
+  const { viewed } = useWorkspace();
+  return useMemo(
+    () =>
+      viewed
+        ? subjectKey("course", [viewed.leaf.campaignId, viewed.leaf.cycleId], viewed.path.slice(0, -1))
+        : null,
+    [viewed],
+  );
 }
 
 export function useConnector(): ReadResult<CampaignPipelineResponse> {
-  const { leafCampaignId } = useWorkspace();
+  const { viewed } = useWorkspace();
   const draft = useCheckinDraft();
-  const served = useCampaignPipeline(draft ? null : leafCampaignId, useLeafSubject());
+  const served = useCampaignPipeline(draft ? null : (viewed?.leaf.campaignId ?? null), useLeafSubject());
   // A viewed check-in's draft (`resolve_pipeline_for_draft`) is a second transport of the same answer, never a second source.
   return useMemo(
     () => (draft ? { status: "ready", data: draft.pipeline } : served),

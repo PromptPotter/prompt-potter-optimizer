@@ -49,12 +49,12 @@ describe("formatAddress", () => {
             { campaignId: "pp-self__aa11bb", cycleId: "cycle_outer0000" },
             { campaignId: "justlogic__cc22dd", cycleId: "cycle_inner0000" },
           ],
-          candidateId: "sp_9f2",
+          pick: { round: 3, arm: "sp_9f2" },
           at: 512,
         },
         views: [view("chat"), view("samples", "ab12")],
       }),
-    ).toBe("#/c/pp-self__aa11bb/outer0000/justlogic__cc22dd/inner0000/k/sp_9f2/t/512/chat/samples=ab12");
+    ).toBe("#/c/pp-self__aa11bb/outer0000/justlogic__cc22dd/inner0000/k/3.sp_9f2/t/512/chat/samples=ab12");
   });
 });
 
@@ -67,7 +67,7 @@ describe("parseAddress round trip", () => {
     [
       "pinned, a candidate, a moment at offset zero and a cell",
       {
-        subject: { path: PATH, candidateId: "sp_9f2a1c", at: 0 },
+        subject: { path: PATH, pick: { round: 3, arm: "sp_9f2a1c" }, at: 0 },
         views: [view("samples", "9f2a1c0b7d3e4f5a.ab12cd34ef56"), view("files")],
       },
     ],
@@ -79,7 +79,7 @@ describe("parseAddress round trip", () => {
             { campaignId: "pp-self__aa11bb", cycleId: "cycle_outer0000" },
             { campaignId: "justlogic__cc22dd", cycleId: "cycle_inner0000" },
           ],
-          candidateId: null,
+          pick: null,
           at: null,
         },
         views: [view("compare"), view("chat")],
@@ -90,7 +90,7 @@ describe("parseAddress round trip", () => {
       {
         subject: {
           path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41_fork_9a2f" }],
-          candidateId: null,
+          pick: null,
           at: null,
         },
         views: [view("timeline"), view("leader")],
@@ -104,6 +104,12 @@ describe("parseAddress round trip", () => {
   }
 });
 
+describe("the candidate pick", () => {
+  it("refuses a pick that names no round", () => {
+    expect(parseAddress("#/c/a__b/deadbeef/k/sp_9f2")).toBeNull();
+  });
+});
+
 describe("parseAddress tolerates what a person types", () => {
   it("reads a bare hash as following the default view", () => {
     for (const hash of ["#", "", "#/"]) {
@@ -113,7 +119,7 @@ describe("parseAddress tolerates what a person types", () => {
 
   it("restores the cycle_ prefix", () => {
     expect(parseAddress("#/c/a__b/deadbeef")).toEqual({
-      subject: { path: [{ campaignId: "a__b", cycleId: "cycle_deadbeef" }], candidateId: null, at: null },
+      subject: { path: [{ campaignId: "a__b", cycleId: "cycle_deadbeef" }], pick: null, at: null },
       views: DEFAULT_VIEWS,
     });
   });

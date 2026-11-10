@@ -1,12 +1,13 @@
 import { useMemo } from "react";
-import { liveCandidates, useViewedDashboard } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import type { ServedRound } from "@/lib/api/types";
-import { useSelection } from "@/lib/SelectionContext";
+import { useSelection } from "@/lib/state/selection";
 import {
   barsAreCourses,
   candidateBars,
   candidatesAtPath,
   courseAt,
+  liveCandidates,
   measuredUniverse,
   type LineageIndex,
 } from "@/lib/derivations";
@@ -15,7 +16,9 @@ import type { CandidateBar } from "@/lib/types";
 
 export function useCandidateBars(index: LineageIndex) {
   const { dash } = useViewedDashboard();
-  const { viewedPath, viewedCandidateId } = useWorkspace();
+  const { viewed, pick } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
+  const pickedAddress = pick?.address ?? null;
   const { sampleSet } = useSelection();
 
   const history: ServedRound[] = useMemo(() => dash?.rounds ?? [], [dash?.rounds]);
@@ -28,13 +31,12 @@ export function useCandidateBars(index: LineageIndex) {
 
   const sampleUniverse = useMemo(() => measuredUniverse(history), [history]);
 
+  // A pick holding inner courses is drilled into: its bars are those courses.
   const viewedNode = useMemo(() => {
     if (!viewedPath) return undefined;
-    if (!viewedCandidateId) return courseAt(index, viewedPath) ?? undefined;
-    return candidatesAtPath(index, viewedPath).find(
-      (c) => c.facts.individual === viewedCandidateId,
-    );
-  }, [index, viewedPath, viewedCandidateId]);
+    const picked = candidatesAtPath(index, viewedPath).find((c) => c.address === pickedAddress);
+    return picked && barsAreCourses(picked) ? picked : (courseAt(index, viewedPath) ?? undefined);
+  }, [index, viewedPath, pickedAddress]);
 
   const inflightByKey = useMemo(
     () => new Map(liveCandidates(dash).map((c) => [c.reading.arm.key, c.reading])),

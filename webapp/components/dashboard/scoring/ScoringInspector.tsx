@@ -26,7 +26,8 @@ export function ScoringInspector({ selected, onClose }: Props) {
 function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose: () => void }) {
   const { dash } = useViewedDashboard();
   const schema = nodeSchemaReading(useConnector());
-  const { viewedPath } = useWorkspace();
+  const { viewed } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const round = useRound(viewedPath, selected.round);
   const reading = round.reading(selected.arm);
   const cfg = round.cfg(selected.arm, selected.label);

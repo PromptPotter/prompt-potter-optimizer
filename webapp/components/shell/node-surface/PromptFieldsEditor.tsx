@@ -85,7 +85,8 @@ export function PromptFieldsEditor({
     [library],
   );
   // An edit is banked as a version of its snippet in the campaign or check-in it is written in.
-  const { campaignId, checkin } = useWorkspace();
+  const { viewed, checkin } = useWorkspace();
+  const campaignId = viewed?.root.campaignId ?? null;
   const experiment = campaignId ?? checkin?.draftId ?? null;
   const bank = useCommand<"bank-snippet">("prompt-snippets", { revalidate: ["library"], scope: experiment });
   const sent = useRef(new Set<string>());

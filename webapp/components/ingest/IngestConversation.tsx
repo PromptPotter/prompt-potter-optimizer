@@ -15,7 +15,7 @@ import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import type { BlockItem } from "@/lib/chat/thread";
-import { useCheckinSubject, useIngest } from "@/lib/ingest-flow";
+import { useCheckinSubject, useIngest } from "@/lib/state/ingest-flow";
 import { useAuth } from "@/lib/state/auth";
 import { useWorkspace } from "@/lib/workspace";
 import { familiesNamed } from "@/components/shell/families";

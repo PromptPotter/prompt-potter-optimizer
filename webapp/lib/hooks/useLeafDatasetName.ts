@@ -5,10 +5,10 @@ import { useCampaignPipeline, useLeafSubject } from "./useConnector";
 import { readyData } from "./useRead";
 
 export function useLeafDatasetName(): string | null {
-  const { viewedPath, leafCampaignId } = useWorkspace();
+  const { viewed } = useWorkspace();
   const rootDatasetName = useViewedDatasetName();
-  const deep = viewedPath !== null && viewedPath.length > 1;
-  const served = readyData(useCampaignPipeline(deep ? leafCampaignId : null, useLeafSubject()));
+  const deep = viewed !== null && viewed.path.length > 1;
+  const served = readyData(useCampaignPipeline(deep ? viewed.leaf.campaignId : null, useLeafSubject()));
   if (!deep) return rootDatasetName;
   return served === null ? null : served.dataset_name;
 }

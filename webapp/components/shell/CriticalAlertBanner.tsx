@@ -13,7 +13,9 @@ import { useWorkspace } from "@/lib/workspace";
 // backend probe's. A connection row is the one said row the client makes.
 export function CriticalAlertBanner() {
   const { read, dash } = useViewedDashboard();
-  const { viewedPath, cycleId, pinned, goneAddress } = useWorkspace();
+  const { viewed, pinned, goneAddress } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
+  const cycleId = viewed?.root.cycleId ?? null;
   const registryFailure = failureOf(useRegistry().read);
   const pointerFailure = failureOf(useActivePointer().read);
   const pause = useCommand<"pause">("critical-alert", { scope: cycleId });

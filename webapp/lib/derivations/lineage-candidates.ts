@@ -9,6 +9,7 @@ import type {
   DisplayMetric,
 } from "@/lib/api/types";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
+import type { CandidatePick } from "@/lib/address";
 import { tagValue } from "./hierarchy";
 import { courseAddressOf, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { metricLevel } from "./headline-stats";
@@ -39,6 +40,12 @@ export function splitRetired<N extends LineageNode>(
 export function childNodes(node: LineageNode): LineageNode[] {
   if (node.level === "course") return node.children.flatMap<LineageNode>((c) => c.children);
   return node.children.flatMap((c) => c.children);
+}
+
+// A candidate entry as the workspace's pick (`workspace.tsx::pickCandidate`).
+export function pickOf(node: HierarchyCandidate): CandidatePick {
+  const { round, key } = node.facts.reading.arm;
+  return { round, arm: key };
 }
 
 export function selectedNodeOf(node: HierarchyCandidate, cycleId: string): SelectedCandidate {

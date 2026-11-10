@@ -1,9 +1,7 @@
 import { useCallback } from "react";
-import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
-import { isSelectedCandidate } from "@/lib/types";
-import { selectedNodeOf } from "@/lib/derivations";
-import { pathLeaf, pathOfAddress } from "@/lib/ids";
+import { pickOf } from "@/lib/derivations";
+import { pathOfAddress } from "@/lib/ids";
 import type { HierarchyCandidate } from "@/lib/api/types";
 
 interface SelectNode {
@@ -15,27 +13,21 @@ interface SelectNode {
 // `resume` is the campaign LIST's: a deselect landing on another campaign's root resumes it.
 export function useSelectNode(opts: { resume?: boolean } = {}): SelectNode {
   const { resume = false } = opts;
-  const { navigate } = useWorkspace();
-  const { candidate, setSelectionForCandidate } = useSelection();
+  const { navigate, pick: picked, pickCandidate } = useWorkspace();
+  const pickedAddress = picked?.address ?? null;
 
   const isPicked = useCallback(
-    (node: HierarchyCandidate) => {
-      const own = selectedNodeOf(node, pathLeaf(pathOfAddress(node.address)).cycleId);
-      return isSelectedCandidate(candidate, own.cycle_id, own.round, own.arm);
-    },
-    [candidate],
+    (node: HierarchyCandidate) => node.address === pickedAddress,
+    [pickedAddress],
   );
 
   const pick = useCallback(
     (node: HierarchyCandidate) => {
       const nodePath = pathOfAddress(node.address);
-      const own = selectedNodeOf(node, pathLeaf(nodePath).cycleId);
-      const selected = isSelectedCandidate(candidate, own.cycle_id, own.round, own.arm);
-      if (selected) navigate({ path: nodePath }, { resume });
-      else navigate({ path: nodePath, candidateId: node.facts.individual });
-      setSelectionForCandidate(selected ? null : own);
+      if (node.address === pickedAddress) navigate({ path: nodePath }, { resume });
+      else pickCandidate(pickOf(node), nodePath);
     },
-    [candidate, navigate, resume, setSelectionForCandidate],
+    [pickedAddress, navigate, resume, pickCandidate],
   );
 
   return { isPicked, pick };

@@ -4,7 +4,7 @@ import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
 import { useOrigin } from "@/lib/hooks/useOrigin";
 import { useOriginEvidence } from "@/lib/hooks/useOriginEvidence";
 import { useSearchpointRead } from "@/lib/hooks/useSearchpointRead";
-import { useSelection } from "@/lib/SelectionContext";
+import { useSelection } from "@/lib/state/selection";
 import { searchpointCopyChoices, searchpointText, type ObserveState } from "@/lib/derivations";
 import { CopyButton, Empty, FailureLine, Loading, SegmentedControl } from "@/components/ui";
 import { RoundFacts, RoundVerdict } from "./RoundFacts";

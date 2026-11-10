@@ -87,7 +87,7 @@ const CANDIDATES = "this run’s candidates";
 
 function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
   const m = useCandidatesModel(dash);
-  const { views, maskOpen, viewedCandidateId } = m;
+  const { views, maskOpen, drilled } = m;
 
   return (
     <CardFrame
@@ -111,7 +111,7 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
             onGeometry={m.onGeometry}
           />
           <div className="cand-tree-row">
-            {!viewedCandidateId && (
+            {!drilled && (
               <DendrogramStrip
                 views={views}
                 plot={m.plot}
@@ -130,7 +130,7 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
             </div>
           )}
         </div>
-        {maskOpen && !viewedCandidateId && (
+        {maskOpen && !drilled && (
           <Criterion
             className="fitness-mask"
             startRung={1}
@@ -148,7 +148,7 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
             }
           />
         )}
-        {maskOpen && !viewedCandidateId && (
+        {maskOpen && !drilled && (
           <ApplyScenarioPanel
             path={m.viewedPath}
             isLive={m.isLive}

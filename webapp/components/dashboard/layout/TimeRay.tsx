@@ -4,7 +4,7 @@ import { cx } from "@/lib/cx";
 import { HEARTBEAT_INTERVAL_S } from "@/lib/api/types";
 import { fmtGap } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { useSelection } from "@/lib/SelectionContext";
+import { useSelection } from "@/lib/state/selection";
 import { useTimeRay } from "@/lib/poll";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { useViewedLineage } from "@/lib/lineage";
@@ -13,10 +13,11 @@ import { encodeCyclePath } from "@/lib/ids";
 
 // The chronology alone: the run's state now is the masthead's STATE.
 export const TimeRay = memo(function TimeRay() {
-  const { viewedPath, viewedCandidateId, navigate, at } = useWorkspace();
+  const { viewed, pick, navigate, at } = useWorkspace();
+  const viewedPath = viewed?.path ?? null;
   const { setSelectionForRound } = useSelection();
   const { index } = useViewedLineage();
-  const { pick } = useSelectNode();
+  const { pick: pickNode } = useSelectNode();
   const { steps: served, head, earlier, hasMore, loadOlder } = useTimeRay();
 
   const rootKey = viewedPath ? encodeCyclePath(viewedPath) : "";
@@ -31,7 +32,7 @@ export const TimeRay = memo(function TimeRay() {
 
   if (!viewedPath || (head.status === "loading" && steps.length === 0)) return null;
   const setAt = (offset: number | null) =>
-    navigate({ path: viewedPath, candidateId: viewedCandidateId, at: offset });
+    navigate({ path: viewedPath, pick, at: offset });
 
   const onStep = (step: RayStep): void => {
     const elsewhere = step.pathKey !== rootKey;
@@ -40,7 +41,7 @@ export const TimeRay = memo(function TimeRay() {
     if (step.arm) {
       const node = armAt(index, step.path, step.arm);
       if (node) {
-        pick(node);
+        pickNode(node);
         return;
       }
     }

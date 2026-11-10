@@ -1,7 +1,7 @@
 import { metricInkToken } from "./series";
 import { AbilityHelp } from "./AbilityInfo";
 import type { CandidatesModel } from "./useCandidatesModel";
-import { setCandidatesState, toggleMetric } from "@/lib/state/candidates";
+import { setCandidatesState } from "@/lib/state/candidates";
 import {
   Badge,
   Chip,
@@ -55,11 +55,11 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
 
   return (
     <Toolbar className="cand-toolbar">
-      {m.viewedCandidateId && viewedPath ? (
+      {m.drilled && viewedPath ? (
         <button
           type="button"
           className="cand-title cand-crumb"
-          onClick={() => m.navigate({ path: viewedPath })}
+          onClick={() => m.pickCandidate(null)}
           title="Back to this course's candidates"
         >
           ‹ {m.viewedLabel} · runs
@@ -82,7 +82,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
             ink={`var(${metricInkToken(id, m.electedMetric)})`}
             ariaLabel={d.label}
             title={d.title}
-            onClick={() => toggleMetric(id)}
+            onClick={() => m.toggleMetric(id)}
           >
             {d.glyph}
           </Chip>
