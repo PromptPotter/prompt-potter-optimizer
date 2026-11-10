@@ -34,9 +34,11 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.command_kinds import (
+    CancelPayload,
     CompactArchivePayload,
     GradeBenchPayload,
     OriginGateDecisionPayload,
+    PauseCyclePayload,
     SubmitArmsPayload,
     SubmittedArm,
 )
@@ -65,9 +67,11 @@ if TYPE_CHECKING:
 
 # This module IS the embedded surface: a capability it does not name is one a host cannot find.
 __all__ = [
+    "cancel",
     "compact_archive",
     "grade_bench",
     "open_session",
+    "pause",
     "reindex_measurement_archive",
     "run_campaign",
     "run_head_to_head",
@@ -136,11 +140,36 @@ async def submit_arms(
     )
 
 
-async def grade_bench(stores: Stores, campaign_id: str) -> BenchScore:
-    """Raises ``ConflictError`` where the served ``BenchStatus.refusal`` stands."""
-    sent = await CommandDispatcher(stores).answer(
-        measuring.grade_bench, CommandCall(GradeBenchPayload(campaign_id=campaign_id))
+async def pause(stores: Stores, hop: CycleHop, *, reason: str = "") -> None:
+    """Pause a running cycle at its next round boundary, as every other door's `pause`.
+
+    Raises ``ConflictError`` where no run holds it.
+    """
+    await CommandDispatcher(stores).dispatch(
+        CommandCall(
+            PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason=reason)
+        )
     )
+
+
+async def cancel(stores: Stores, command_id: str) -> None:
+    """Stop a command still acting, by the id it was filed under (``grade_bench``'s
+    *command_id*); one that ended is left as it ended."""
+    await CommandDispatcher(stores).dispatch(
+        CommandCall(CancelPayload(command_id=command_id), f"cancel:{command_id}")
+    )
+
+
+async def grade_bench(
+    stores: Stores, campaign_id: str, *, command_id: str | None = None
+) -> BenchScore:
+    """Raises ``ConflictError`` where the served ``BenchStatus.refusal`` stands. *command_id* names
+    the pass for a ``cancel`` sent from another task."""
+    payload = GradeBenchPayload(campaign_id=campaign_id)
+    call = (
+        CommandCall(payload) if command_id is None else CommandCall(payload, command_id=command_id)
+    )
+    sent = await CommandDispatcher(stores).answer(measuring.grade_bench, call)
     return sent.result
 
 

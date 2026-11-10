@@ -313,9 +313,9 @@ class CommandBook:
                 last = state.events.get(draft, _Versions()).at(self._line)
         return None if last is None else int((epoch_seconds(last.timestamp) or 0.0) * 1e9)
 
-    def untaken(self, subject: Subject) -> list[str]:
+    def untaken(self, subject: Subject, *, before: float | None = None) -> list[str]:
         """The loop commands on *subject* accepted and never taken, less an ``auto`` look-ahead,
-        which is a mode: what a run boundary voids."""
+        which is a mode, filed before epoch *before* where given: what a run boundary voids."""
         kept = self.controls(subject).lookahead
         keep = kept.command_id if kept is not None and kept.auto else None
         return [
@@ -325,6 +325,7 @@ class CommandBook:
             and record.kind in LOOP_KINDS
             and record.command_id != keep
             and self.status(record.command_id) == "accepted"
+            and (before is None or (epoch_seconds(record.timestamp) or 0.0) < before)
         ]
 
     def keyed(
@@ -423,9 +424,10 @@ class CommandLog:
     def ack(self, command_id: str, status: CommandAckStatus, detail: str = "") -> None:
         self.append(CommandAckRecord(command_id=command_id, status=status, detail=detail))
 
-    def void(self, subject: Subject, detail: str) -> None:
-        """A run boundary: every loop command *subject* accepted and the run never took."""
-        untaken = self.book().untaken(subject)
+    def void(self, subject: Subject, detail: str, *, before: float | None = None) -> None:
+        """A run boundary: every loop command *subject* accepted, filed before epoch *before* where
+        given, and the run never took."""
+        untaken = self.book().untaken(subject, before=before)
         if untaken:
             self.append(
                 *(CommandAckRecord(command_id=c, status="voided", detail=detail) for c in untaken)

@@ -19,7 +19,7 @@ import sys
 import zipfile
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
@@ -44,7 +44,7 @@ from factories import (
 )
 from offline_world import Router
 
-from promptpotter.application import optimizer_manifest, optimizers
+from promptpotter.application import optimizer_manifest, optimizers, run_observers
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.children import (
     admission_failures,
@@ -60,7 +60,7 @@ from promptpotter.application.bench.task_context import (
     checkin_template,
 )
 from promptpotter.application.commands import launching
-from promptpotter.application.commands.dispatcher import CommandCall
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.config_map import campaign_config_map
 from promptpotter.application.datasets import (
@@ -195,6 +195,7 @@ from promptpotter.domain.command_kinds import (
     ArmRequest,
     ForkSeed,
     HeadToHeadRequest,
+    PauseCyclePayload,
     StartCheckinPayload,
     SubmittedArm,
 )
@@ -206,6 +207,7 @@ from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,
     normalize_model_id,
@@ -242,6 +244,7 @@ from promptpotter.domain.run_records import (
     ConfigOverrides,
     CycleSeed,
     CycleSeedRecord,
+    LaunchClaimRecord,
     PipelineRead,
     RoundWarningRecord,
     ScoringLockedRecord,
@@ -254,7 +257,7 @@ from promptpotter.infrastructure.identity import blocklist, grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
-from promptpotter.infrastructure.producer_lock import cycle_held
+from promptpotter.infrastructure.producer_lock import cycle_held, release, take
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
     DashboardCheckout,
@@ -280,6 +283,7 @@ from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli import campaign_runner
+from promptpotter.shared.clock import iso_z
 from promptpotter.shared.errors import (
     ConflictError,
     DatasetAccessError,
@@ -2359,7 +2363,40 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # `run_optimization`'s `finally`, leaves neither its ledger's index nor its cycle held.
     root_dir = CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop))
     launched = effective_config(declared)
-    observers = build_run_observers(session=opened, campaign_config=launched)
+    address = {"campaign_id": opened.hop.campaign_id, "cycle_id": opened.hop.cycle_id}
+
+    def pause(key: str) -> str:
+        call = CommandCall(PauseCyclePayload(**address), key)
+        return asyncio.run(CommandDispatcher(stores).dispatch(call)).accepted.command_id
+
+    def acked(command_id: str) -> str | None:
+        return stores.commands.book().status(command_id)
+
+    # A pause filed while a live launch claims the cycle (bl1.B11), QUEUED before its STARTING
+    # re-claim, or while the launch folds its ledger (bl1.B10), is that launch's to take.
+    claimant = tmp_path / "claimant.lock"
+    assert take(claimant)
+    stores.campaigns.claim_launch(
+        opened.hop, stage=RunPhase.QUEUED, job_id="claimed", claimant_lock=claimant
+    )
+    claimed = pause("claimed")
+    stores.campaigns.append(
+        opened.hop,
+        LaunchClaimRecord(
+            stage=RunPhase.STARTING,
+            job_id="claimed",
+            claimant_lock=str(claimant),
+            timestamp=iso_z(datetime.now(UTC) + timedelta(minutes=1)),
+        ),
+    )
+    folding: list[str] = []
+    with monkeypatch.context() as filing:
+        filing.setattr(run_observers, "bind_account", lambda _: folding.append(pause("fold")))
+        observers = build_run_observers(session=opened, campaign_config=launched)
+    release(claimant)
+    assert [acked(claimed), acked(folding[0])] == ["accepted"] * 2, (
+        "the launch voided a pause filed under its own claim or hold"
+    )
     with LedgerIndex.of(wired_ledger.path, ()).projecting() as joiner:
         assert joiner.add(DashboardCheckout(root_dir)) is observers.dashboard, (
             "a second holder folded a dashboard beside the run's, each writing its own file"
@@ -2370,10 +2407,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert LedgerIndex.of(wired_ledger.path, ()).pinned and "steered" in manifest.read_text(), (
         "a store-door append let go of the run's projections, or left its index.json stale"
     )
-    observers.drain_all()
+    # A pause filed past the stop's declaration, while the run still holds, dies at its release
+    # (B16), on an exit that skips the drain too (a raise in the close, `entry.py`'s `finally`).
+    late = pause("late")
+    observers.release()
     assert not LedgerIndex.of(wired_ledger.path, ()).pinned and not cycle_held(root_dir), (
-        "a drained run kept its ledger's projections or its cycle"
+        "a released run kept its ledger's projections or its cycle"
     )
+    assert acked(late) == "voided", "a pause filed before the release outlived its run"
     # Outside a run, the store door holds its one-shot only while its line lands.
     stores.campaigns.record_intervention(held_campaign.root_hop, kind="steered")
     assert not LedgerIndex.of(wired_ledger.path, ()).pinned, (

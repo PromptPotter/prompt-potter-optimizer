@@ -1388,7 +1388,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     attached_alike()
     assert (claimed.run_phase, claimed.producer.state) == (RunPhase.QUEUED, ProducerState.CLAIMED)
     assert claimed.producer.attached and not claimed.resumable
-    assert claimed.pause_refusal, "a queued launch was offered a pause no loop can take"
+    assert not claimed.pause_refusal, "a claimed launch refused the pause its run will take"
     delete_refused()
     with pytest.raises(CycleBusyError):
         request_jobs(

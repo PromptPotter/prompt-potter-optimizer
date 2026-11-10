@@ -13,6 +13,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A free-tier launch holds at most the tier's $0.03**, whatever its `start-run` budget or a `set-limits` asks.
 - **A judge on a model off the free tier is refused**, as an optimizer node on one is.
 - **A run traced to Langfuse no longer creates a `ground_truth` dataset there**: its items were linked to no run.
+- **The embedded surface stops what it starts.** `embedded_run.py` exports `pause` (a running cycle, at its next round boundary) and `cancel` (a command by its id; `grade_bench` takes the `command_id` a host cancels it by), each dispatched as every other door's.
+- **`resume --from N` that halts on a divergence leaves its rounds standing.** The divergence is decided before the rewind is written; a halting divergence refuses before a repair branch is cut. The CLI's unreachable "Fork here?" prompt is gone: a halt is the run's `diverged` stop, whose next act names the fork.
 
 ## [0.8.19] — 2026-11-06
 

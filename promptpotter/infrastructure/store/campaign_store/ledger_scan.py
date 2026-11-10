@@ -272,8 +272,14 @@ class _LaunchClaim:
         match record:
             case RunPhaseRecord():
                 self._found = None
-            case LaunchClaimRecord():
-                self._found = record
+            case LaunchClaimRecord(job_id=job_id):
+                first = self._found
+                # A job's re-claim moves its stage only: the job holds the cycle since its first claim.
+                self._found = (
+                    record
+                    if first is None or first.job_id != job_id
+                    else record.model_copy(update={"timestamp": first.timestamp})
+                )
             case LaunchReleasedRecord(job_id=job_id):
                 if self._found is not None and job_id == self._found.job_id:
                     self._found = None

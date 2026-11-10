@@ -74,7 +74,7 @@ The loop-mint verbs. The flag set is `presentation/cli/commands/verbs.py` and wh
 
 ## 5b. Embedded launch entry (Python)
 
-`application/embedded_run.py::open_session`, `::run_campaign`, `::submit_gate_decision`, `::submit_arms`, `::compact_archive` and `::reindex_measurement_archive` — signatures there. What a host cannot read off a signature:
+`application/embedded_run.py::open_session`, `::run_campaign`, `::submit_gate_decision`, `::submit_arms`, `::pause`, `::cancel`, `::grade_bench`, `::compact_archive` and `::reindex_measurement_archive` — signatures there. What a host cannot read off a signature:
 
 - **Two steps because every caller works between them**: the mint is the same `mint_framed_cycle` prologue `new` and the web mint run, so the cycle is resumable, forkable and diagnosable by the §5 verbs; the session `run_campaign` answers is bound to the cycle the run ended on, a fork included.
 - **`campaign_config` is what a MINT declares** — required on a fresh session, refused on one bound to a cycle.

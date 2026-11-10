@@ -63,6 +63,12 @@ def cycle_held(cycle_dir: Path) -> bool:
     return held(CycleLayout(cycle_dir).producer_lock)
 
 
+def cycle_held_here(cycle_dir: Path) -> bool:
+    """This process holds the cycle, where `cycle_held` answers for any process."""
+    with _guard:
+        return CycleLayout(cycle_dir).producer_lock.resolve() in _mine
+
+
 def hold_pass(cycle_dir: Path) -> None:
     """A scoring pass is a producer too: it holds the cycle against a launch, a delete and a rewind."""
     hold_cycle(cycle_dir)

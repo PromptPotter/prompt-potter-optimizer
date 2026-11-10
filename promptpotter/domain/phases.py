@@ -287,9 +287,6 @@ class RunState(NamedTuple):
         """Why `pause` is refused; empty where it is admitted."""
         if self.inner:
             return INNER_PAUSE_REFUSAL
-        if self.producer.state is ProducerState.CLAIMED:
-            # No loop exists yet to take a pause: one accepted here would be dropped.
-            return "This launch has not started its run yet — cancel it from the queue instead."
         return "" if self.producer.attached else "No run of this cycle is in flight to pause."
 
     @property

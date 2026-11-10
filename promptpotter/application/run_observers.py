@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextvars import Token
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
 from promptpotter.application.initialization.session import Session
@@ -17,7 +19,7 @@ from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
 from promptpotter.domain.activity import ActivityFeed
 from promptpotter.domain.campaign import ceiling_meter
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
     GateKind,
@@ -41,13 +43,20 @@ from promptpotter.infrastructure.llm.spend_book import (
     bound_spend_book,
     reset_spend_book,
 )
-from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
+from promptpotter.infrastructure.producer_lock import (
+    cycle_held_here,
+    held,
+    hold_cycle,
+    release_cycle,
+)
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.tracing.bridge import TracingProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
+from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import instrument_depth
 
 if TYPE_CHECKING:
@@ -146,7 +155,6 @@ def declare_run_stop(
         cause, detail = session.state.control.take_pause() or (interrupted_by, "")
         stop = RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend)
     ledger.append(stop)
-    session.store.void_inbox(session.hop)
 
 
 def declare_run_wiring(
@@ -189,7 +197,8 @@ def declare_run_wiring(
 
 @dataclass(frozen=True)
 class RunObservers:
-    cycle_dir: CycleDir
+    store: Stores
+    hop: CycleHop
     callbacks: RunCallbacks
     dashboard: DashboardCheckout
     readout: ReadoutProjection
@@ -227,8 +236,18 @@ class RunObservers:
         finally:
             self.release()
 
+    @property
+    def cycle_dir(self) -> CycleDir:
+        return CycleDir(self.store.campaigns.cycle_dir(self.hop))
+
     def release(self) -> None:
-        _let_go(self.projecting, self.cycle_dir)
+        """The run boundary, on every exit: while this process still holds the cycle, what its run
+        never took is voided, a pause filed after the stop declared included; then the cycle goes."""
+        try:
+            if cycle_held_here(self.cycle_dir):
+                self.store.void_inbox(self.hop)
+        finally:
+            _let_go(self.projecting, self.cycle_dir)
 
 
 def _let_go(projecting: Projecting, cycle_dir: CycleDir) -> None:
@@ -245,6 +264,14 @@ def build_run_observers(
     forked_from: RunObservers | None = None,
 ) -> RunObservers:
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
+    # A launch holds its cycle from its job's first live claim, else from here: a pause filed since
+    # is its to take, a QUEUED one included.
+    claim = session.store.campaigns.launch_claim(session.hop)
+    held_since = (
+        epoch_seconds(claim.timestamp)
+        if claim is not None and held(Path(claim.claimant_lock))
+        else None
+    ) or time.time()
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
     hold_cycle(cycle_dir)
     ledger = open_with_history(cycle_dir)
@@ -265,7 +292,11 @@ def build_run_observers(
         bind_account(session.store)
         # A launch is a run boundary; the run a gate held resumes, what it was asked standing.
         if prior is None or prior.run_phase is not RunPhase.GATE:
-            session.store.void_inbox(session.hop)
+            session.store.commands.void(
+                session.store.subject(session.hop),
+                f"the launch of {session.hop.cycle_id}",
+                before=held_since,
+            )
     except BaseException:
         _let_go(projecting, cycle_dir)
         raise
@@ -319,7 +350,8 @@ def _bind_observers(
     projecting.add(RoundFileProjection(session.store, session.hop, session.state))
     tracing = projecting.add(tracing)
     return RunObservers(
-        cycle_dir=cycle_dir,
+        store=session.store,
+        hop=session.hop,
         callbacks=(
             RunCallbacks(ledger=ledger)
             if forked_from is None

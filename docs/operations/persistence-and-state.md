@@ -129,7 +129,7 @@ A command is taken at the next **per-sample** checkpoint, so a pause asked mid-c
 
 ### Commands ride the ledger
 
-`.runtime/` holds no control file: a command is acked `accepted` into the cycle's inbox on the account's command log (`command_log.py::Controls`) and `applied` at the checkpoint that takes it; a launch not resuming a gate, and any stop, ack `voided` what stood (`stores.py::Stores.void_inbox`). The standing budget is the last `standing_budget` record on the cycle's ledger (`runtime_flags.py::standing_budget`); its money axes are the campaign's, the last `campaign_ceiling` record on the ROOT's ledger (`ledger_scan.py::scan_campaign_ceiling`).
+`.runtime/` holds no control file: a command is acked `accepted` into the cycle's inbox on the account's command log (`command_log.py::Controls`) and `applied` at the checkpoint that takes it; a launch not resuming a gate acks `voided` what stood before its hold, and a run's release what stood at it, still held (`command_log.py::CommandLog.void`). The standing budget is the last `standing_budget` record on the cycle's ledger (`runtime_flags.py::standing_budget`); its money axes are the campaign's, the last `campaign_ceiling` record on the ROOT's ledger (`ledger_scan.py::scan_campaign_ceiling`).
 
 ### Where the error text is
 
