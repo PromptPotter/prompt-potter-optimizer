@@ -31,7 +31,7 @@ import {
 } from "./address";
 import type { ListedCampaign } from "@/lib/api/types";
 import { GONE_NOTICE_MS } from "./cadence";
-import { hasTag, tagValue } from "./derivations/hierarchy";
+import { tagValue } from "./derivations/hierarchy";
 import { useActivePointer, useCampaign, useEntry, useRegistry } from "./hooks/useRegistry";
 import { useViewMemory } from "./state/view-memory";
 
@@ -80,11 +80,6 @@ export function useMomentAt(path: CyclePath | null): number | null {
 export function useViewedNode(): SelectedNode | null {
   const view = useWorkspace().views.find((v) => v.family === "node");
   return view?.key ? nodeOfKey(view.key) : null;
-}
-
-// An inner run is absent from the listing and correctly reads false.
-export function useLeafIsL4(): boolean {
-  return hasTag(useEntry(useWorkspace().leafCampaignId), "self_optimization");
 }
 
 // The ROOT hop's dataset; a drilled-in leaf's is `useLeafDatasetName`.

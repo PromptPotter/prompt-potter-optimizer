@@ -1,5 +1,5 @@
-"""Notices this box sends out. A refusal is a non-2xx body, not an exception: ``refused`` is the one
-place that reads it, so an unheard notice is never reported as heard."""
+"""Notices this box sends out. A refusal is a non-2xx body, not an exception: ``post_json`` is the
+one place that reads it, so an unheard notice is never reported as heard."""
 
 from __future__ import annotations
 
@@ -15,13 +15,6 @@ from promptpotter.shared.tls import tls_context
 logger = logging.getLogger(__name__)
 
 
-def refused(resp: httpx.Response, what: str) -> bool:
-    if resp.is_success:
-        return False
-    logger.warning("%s refused: HTTP %d %s", what, resp.status_code, resp.text[:300])
-    return True
-
-
 def post_json(
     url: str, body: dict[str, Any], *, what: str, headers: dict[str, str] | None = None
 ) -> bool:
@@ -32,7 +25,9 @@ def post_json(
     except httpx.HTTPError:
         logger.warning("%s failed to send", what, exc_info=True)
         return False
-    return not refused(resp, what)
+    if not resp.is_success:
+        logger.warning("%s refused: HTTP %d %s", what, resp.status_code, resp.text[:300])
+    return resp.is_success
 
 
 def notify_operator(text: str, *, ring: bool) -> bool:

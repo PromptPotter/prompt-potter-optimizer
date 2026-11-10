@@ -34,7 +34,7 @@ BASELINE = {
     # `Settings` fields — what the environment can set.
     "settings_env": 45,
     # Parameters annotated `Any`.
-    "any_params": 41,
+    "any_params": 39,
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 45,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.

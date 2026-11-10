@@ -64,7 +64,6 @@ async def prepare_run(
     # Declared before origin scoring; the record is the readout, the arming below the enforcement.
     for failure in observers.tracing.start(
         config_snapshot=campaign_config.model_dump(mode="json"),
-        dataset=dataset,
         langfuse_session_id=langfuse_session_id,
     ):
         emit_round_warning(kind="trace_sink_failed", message=failure)

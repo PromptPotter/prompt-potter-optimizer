@@ -22,7 +22,7 @@ export function withReadRank<R extends PairedCells>(rows: readonly R[]): (R & { 
   return rows.map((r) => ({ ...r, rank: r.lift === null ? null : (read += 1) }));
 }
 
-type LiftRow =PairedCells & { row: { reading: PairedReading } };
+type LiftRow = PairedCells &{ row: { reading: PairedReading } };
 
 // The paired lift with its 95% CI, then the cells it was read on: one column pair for every table.
 export function liftColumns<R extends LiftRow>(label: string): Column<R>[] {

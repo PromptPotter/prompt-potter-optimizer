@@ -14,13 +14,6 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class DatasetRegistered:
-    dataset_name: str
-    items: tuple[tuple[str, str], ...]
-    """Queries non-empty and distinct: ``TracingProjection._register_dataset`` settles it once."""
-
-
-@dataclass(frozen=True, slots=True)
 class CampaignStart:
     campaign_id: str
     config: dict[str, Any]
@@ -29,7 +22,6 @@ class CampaignStart:
 
 
 class TraceSink:
-    def on_dataset_registered(self, event: DatasetRegistered) -> None: ...
     def on_campaign_start(self, event: CampaignStart) -> None: ...
     def on_round_entered(self, record: RoundEnteredRecord) -> None: ...
 

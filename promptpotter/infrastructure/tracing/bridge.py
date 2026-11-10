@@ -10,11 +10,7 @@ from promptpotter.domain.arms import Concluded
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import AnnouncedArms
 from promptpotter.infrastructure.projections.base import Projection
-from promptpotter.infrastructure.tracing.events import (
-    CampaignStart,
-    DatasetRegistered,
-    TraceSink,
-)
+from promptpotter.infrastructure.tracing.events import CampaignStart, TraceSink
 from promptpotter.infrastructure.tracing.langfuse_sink import LangfuseSink
 from promptpotter.infrastructure.tracing.mlflow_server import MLflowSink
 from promptpotter.shared.errors import SendRefusedError, graceful
@@ -31,13 +27,10 @@ if TYPE_CHECKING:
         RunPhaseRecord,
         SampleScoredRecord,
     )
-    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 
 logger = logging.getLogger(__name__)
-
-DATASET_NAME: str = "ground_truth"
 
 
 def configured_sinks(
@@ -78,7 +71,6 @@ class TracingProjection(Projection):
         self,
         *,
         config_snapshot: dict[str, Any],
-        dataset: Sequence[Sample],
         langfuse_session_id: str | None,
     ) -> list[str]:
         """Each sink that will trace nothing this run, as a sentence: its caller serves them."""
@@ -100,24 +92,12 @@ class TracingProjection(Projection):
                     f"{type(sink).__name__} failed on campaign start "
                     f"({type(exc).__name__}: {exc}), so this run traces nothing to it"
                 )
-        self._register_dataset(dataset)
         return failed
 
     def _tell(self, what: str, call: Callable[[TraceSink], None]) -> None:
         for sink in self._sinks:
             with graceful(f"{type(sink).__name__} failed on {what}"):
                 call(sink)
-
-    def _register_dataset(self, dataset: Sequence[Sample]) -> None:
-        seen: set[str] = set()
-        items: list[tuple[str, str]] = []
-        for sample in dataset:
-            if not sample.query or sample.query in seen:
-                continue
-            seen.add(sample.query)
-            items.append((sample.query, sample.ground_truth or ""))
-        registered = DatasetRegistered(dataset_name=DATASET_NAME, items=tuple(items))
-        self._tell("dataset registration", lambda sink: sink.on_dataset_registered(registered))
 
     def langfuse_trace_id(self) -> str | None:
         if self._langfuse is None:

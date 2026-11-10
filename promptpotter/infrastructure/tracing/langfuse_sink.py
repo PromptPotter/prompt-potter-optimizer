@@ -1,20 +1,13 @@
 from __future__ import annotations
 
-import logging
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import cycle_dir_for
-from promptpotter.infrastructure.tracing.events import (
-    CampaignStart,
-    DatasetRegistered,
-    TraceSink,
-)
+from promptpotter.infrastructure.tracing.events import CampaignStart, TraceSink
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
-from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.domain.arms import Concluded
@@ -24,8 +17,6 @@ if TYPE_CHECKING:
         RoundEnteredRecord,
         RunPhaseRecord,
     )
-
-logger = logging.getLogger(__name__)
 
 
 class LangfuseSink(TraceSink):
@@ -42,7 +33,6 @@ class LangfuseSink(TraceSink):
         self.trace_id: str | None = None
         self._round_observation_ids: dict[int, str] = {}
         self._node_observation_ids: dict[tuple[int | None, str], str] = {}
-        self._dataset_item_ids: dict[tuple[str, str], str] = {}
         self._session_id: str | None = None
 
         self._state_cycle_id: str | None = None
@@ -63,9 +53,6 @@ class LangfuseSink(TraceSink):
             for key, value in (existing.get("node_observation_ids") or {}).items():
                 rn, nid = key.split("|", 1)
                 self._node_observation_ids[(int(rn) if rn else None, nid)] = value
-            for key, value in (existing.get("dataset_item_ids") or {}).items():
-                dsname, query = key.split("|", 1)
-                self._dataset_item_ids[(dsname, query)] = value
 
     def _persist(self) -> None:
         if self._state_path is None:
@@ -77,9 +64,6 @@ class LangfuseSink(TraceSink):
             "node_observation_ids": {
                 f"{'' if rn is None else rn}|{nid}": v
                 for (rn, nid), v in self._node_observation_ids.items()
-            },
-            "dataset_item_ids": {
-                f"{dsname}|{query}": v for (dsname, query), v in self._dataset_item_ids.items()
             },
         }
         write_json(self._state_path, state)
@@ -97,38 +81,6 @@ class LangfuseSink(TraceSink):
             if event.session_id:
                 self._session_id = event.session_id
             self._persist()
-
-    def on_dataset_registered(self, event: DatasetRegistered) -> None:
-        if len(event.items) > 100:
-            logger.warning(
-                "Skipping Langfuse cloud dataset registration for %d items "
-                "(rate-limit risk). Use the dedicated Langfuse sync cell instead.",
-                len(event.items),
-            )
-            return
-
-        # One `update`, never key-by-key: a concurrent `_persist` must not see the dict mid-growth.
-        def _register() -> None:
-            with graceful("Langfuse dataset registration failed"):
-                self._lf.create_dataset(
-                    name=event.dataset_name,
-                    description="Ground truth queries for prompt evaluation",
-                    metadata={"n_items": len(event.items)},
-                )
-                minted: dict[tuple[str, str], str] = {}
-                for query, ground_truth in event.items:
-                    cloud_id = self._lf.create_dataset_item(
-                        dataset_name=event.dataset_name,
-                        input={"query": query},
-                        expected_output=ground_truth,
-                        metadata={"source": "dataset"},
-                    )
-                    if cloud_id:
-                        minted[(event.dataset_name, query)] = cloud_id
-                self._dataset_item_ids.update(minted)
-                self._persist()
-
-        threading.Thread(target=_register, name="langfuse-dataset", daemon=True).start()
 
     def on_arm_concluded(self, round_num: int, arm: Concluded, fold: ScoreSummary | None) -> None:
         trace_id = self.trace_id

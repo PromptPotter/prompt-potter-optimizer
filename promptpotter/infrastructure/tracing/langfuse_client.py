@@ -2,25 +2,16 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 import uuid
-from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any
 
 from promptpotter.config.settings import settings
-from promptpotter.infrastructure.llm.send_failure import failed_send
-from promptpotter.infrastructure.llm.send_pacing import SendBudget, parse_retry_after
-from promptpotter.shared.errors import ErrorCategory, graceful
+from promptpotter.shared.errors import graceful
 from promptpotter.shared.extras import Extra, install_hint, installed
 
 logger = logging.getLogger(__name__)
 
-_T = TypeVar("_T")
-
 _MAX_OPEN_OBSERVATIONS = 256
-
-_WRITE_ATTEMPTS = 3
-_LONGEST_HELD_S = 5.0
 
 FLUSH_TIMEOUT_SEC: float = 5.0
 
@@ -45,7 +36,6 @@ class LangfuseLogger:
         self.failure: str | None = None
         self._trace_metadata: dict[str, Any] = {}
         self._open_observations: dict[str, Any] = {}
-        self._rate_limit_until: float = 0.0
 
         if self.enabled and not installed(Extra.OBSERVABILITY):
             self.failure = (
@@ -248,69 +238,6 @@ class LangfuseLogger:
         # Never shut the SDK client down here: it is a process-wide singleton.
         self._trace_metadata.clear()
         self._open_observations.clear()
-
-    def create_dataset(
-        self,
-        name: str,
-        description: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        if not self.enabled or not self.client:
-            return
-        self.client.create_dataset(
-            name=name,
-            description=description or "",
-            metadata=metadata or {},
-        )
-
-    def create_dataset_item(
-        self,
-        dataset_name: str,
-        input: Any,
-        expected_output: Any = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> str | None:
-        client = self.client
-        if not self.enabled or client is None:
-            return None
-        item = self._resent(
-            lambda: client.create_dataset_item(
-                dataset_name=dataset_name,
-                input=input,
-                expected_output=expected_output,
-                metadata=metadata or {},
-            ),
-        )
-        return getattr(item, "id", None)
-
-    def _resent(self, send: Callable[[], _T]) -> _T | None:
-        if self.rate_limited:
-            return None
-        budget = SendBudget(None, attempts=_WRITE_ATTEMPTS)
-        while True:
-            try:
-                return send()
-            except Exception as exc:
-                outcome = failed_send(exc)
-                throttled = outcome.failure is ErrorCategory.PROVIDER_THROTTLED
-                asked = parse_retry_after(outcome.headers) if throttled else None
-                # A long throttle pauses every later write (`rate_limited`) instead of holding the run.
-                if asked is not None and asked > _LONGEST_HELD_S:
-                    self._rate_limit_until = time.time() + asked
-                    logger.warning(
-                        "Langfuse is throttling (resets in %.0fs); its writes are skipped until "
-                        "then.",
-                        asked,
-                    )
-                    return None
-                wait = budget.resend_wait() if throttled or outcome.resendable else None
-                if wait is None:
-                    raise
-                time.sleep(asked or wait)
-
-    @property
-    def rate_limited(self) -> bool:
-        return time.time() < self._rate_limit_until
 
     def flush(self) -> None:
         if not (self.enabled and self.client):
