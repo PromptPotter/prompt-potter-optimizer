@@ -308,9 +308,12 @@ minutes, power every minute on a machine with a battery, the digest once a day a
 **Outside visits.** Every request reaching the app from a public address without a session is kept
 in `site_records/app_visits.jsonl` (`presentation/api/middleware/visits.py`; the query only where
 nothing answered, so a served sign-in code is never written), for 90 days. The digest
-(`application/app_visits.py`) reads them as scanners and what they hunted, crawlers by name, and
-visitors by country, and is kept by date in `site_records/app_visit_digests.jsonl`. It rings only
-when a scanner's probe was answered.
+(`application/app_visits.py`) puts people first: an address counts as a person only when the
+app's page called its API, so a link preview or an unnamed bot fetching one page does not. Beside
+them stand people per day for the last week (no number before counting began), then everything
+else: bots that name themselves, fetchers that never opened a page, and attack scans with what they
+were after. It is kept by date in `site_records/app_visit_digests.jsonl` and rings only when a
+scan's request was answered.
 
 **Your own browser is never a visitor.** Signing in as `HOST_ADMIN_EMAIL` leaves a `pp-self` cookie
 on the parent domain (`app.example.com` → `example.com`). This app's record skips that browser
