@@ -83,20 +83,31 @@ class Admitted:
         logger.warning("admitted launch %s withdrawn unrun: %s", self.job.job_id, exc)
         release_slot(self.job_registry, self.job.job_id, exc, stores=self.stores, hop=None)
 
+    async def held(self) -> HeldRun:
+        """Its run held: past the queue, the money admission and the cycle's session."""
+        return await _hold(
+            self.request, stores=self.stores, job_registry=self.job_registry, job=self.job
+        )
+
     async def launched(self) -> Launched:
-        request, job, stores, job_registry = self.request, self.job, self.stores, self.job_registry
+        return await self.hand_over(self.held())
+
+    async def hand_over(self, holding: Coroutine[Any, Any, HeldRun]) -> Launched:
+        """*holding* — `held`, or a held step that acts once the run is held (a fork's cut on its
+        parent) — awaited where the run goes: inline, detached, or in the queue's own task."""
+        job = self.job
         if self.inline is not None:
-            held = await _hold(request, stores=stores, job_registry=job_registry, job=job)
+            held = await holding
             return Launched(LaunchedJob.of(job, held.session.hop), held)
 
         async def hold_and_detach() -> CycleHop:
-            held = await _hold(request, stores=stores, job_registry=job_registry, job=job)
-            hop = held.session.hop
+            held = await holding
             await held.detach(mode=self.mode)
-            return hop
+            return held.session.hop
 
         if job.queued:
-            _detach(hold_and_detach(), what=f"queued launch {job.job_id} ({request.dataset_name})")
+            what = f"queued launch {job.job_id} ({self.request.dataset_name})"
+            _detach(hold_and_detach(), what=what)
             return Launched(LaunchedJob.of(job), None)
         return Launched(LaunchedJob.of(job, await hold_and_detach()), None)
 

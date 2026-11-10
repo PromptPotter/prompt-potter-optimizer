@@ -24,8 +24,9 @@ from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.run_records import StandingBudgetRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
+from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.send_pacing import set_abort_check
-from promptpotter.infrastructure.llm.spend_book import bound_spend_book
+from promptpotter.infrastructure.llm.spend_book import bound_spend_book, filed
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -91,7 +92,7 @@ async def prepare_run(
         cell := await cell_bound(session, session.pipeline_params)
     ) is not None:
         # After the scorer, which the stop this raises is finalized with.
-        book.refuse_unpriced(cell, NEXT_CELL, "host")
+        book.refuse_unpriced(cell, filed(CELL).kind, NEXT_CELL, "host")
     origin = await establish_campaign_origin(
         session,
         dataset,

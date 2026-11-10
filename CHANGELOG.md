@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Quota and ceiling refusals answer 409; only the request-rate throttle answers 429.** A client retrying on 429 retries what passes, never a spent ceiling; the webapp reads a 429 as throttled, and over MCP a throttle answers `-32029`, never `INVALID_PARAMS`.
+- **A Compare arm's bench and diagnostic sends on the box's key meet the run's coupon reserve**, and one no rate prices is refused unsent, as every other send is.
+- **A free-tier launch holds at most the tier's $0.03**, whatever its `start-run` budget or a `set-limits` asks.
+- **A judge on a model off the free tier is refused**, as an optimizer node on one is.
+
 ## [0.8.19] — 2026-11-06
 
 > An n8n workflow is a backend, every command and read is a host tool over MCP, and a node can grade several fields in one call. An account's bill is its own charges, a landing migrates what must survive and proves every file before it writes, and the webapp builds with Vite. Breaking on disk: run data is wiped. 61 commits since `v0.8.18`.

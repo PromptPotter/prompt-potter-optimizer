@@ -16,13 +16,13 @@ from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
-    claim_cycle,
     release_slot,
 )
 from promptpotter.application.jobs.launcher.mint_and_start import (
     LaunchError,
     assert_origin_ready,
     commit_upload_definition,
+    land_and_claim,
     persist_origin_candidate_library,
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun
@@ -34,7 +34,6 @@ from promptpotter.application.jobs.mint import (
     refuse_unrunnable,
     resolve_cycle_plan,
 )
-from promptpotter.application.jobs.quota import land_job
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
@@ -211,13 +210,13 @@ async def hold_checkin_start(
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
         minted = await _commit_checkin(stores, request)
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
-        land_job(stores, job_registry, job.job_id, hop, held.share)
-        claim_cycle(stores, job_registry, job, hop)
+        land_and_claim(stores, job_registry, job.job_id, hop, held)
+        logger.info(
+            "start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id
+        )
+        return HeldRun.of(job_registry, job.job_id, minted, held)
     except BaseException as exc:
         release_slot(job_registry, job.job_id, exc, stores=stores, hop=hop)
         raise
     finally:
         request.claim.release()
-
-    logger.info("start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id)
-    return HeldRun.of(job_registry, job.job_id, minted, held)

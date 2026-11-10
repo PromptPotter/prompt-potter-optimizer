@@ -573,21 +573,10 @@ class DashboardCheckout:
         self._dirty = False
         self._cost_s = 0.0
 
-    def _live(self) -> LiveDashboardProjection:
-        return self._index.live(LiveDashboardProjection, seed=_seed(self._prefix))
-
     @property
-    def wired(self) -> bool:
-        """``False`` where the cycle has declared no wiring: it has no dashboard."""
-        return self._live()._unwired is None
-
-    @property
-    def state(self) -> LiveDashboardState:
+    def live(self) -> LiveDashboardProjection:
         """The run's own fold, fed on as its ledger grows."""
-        return self._live().state
-
-    def spend_metered(self, meters: CeilingMeter) -> MeteredSpend:
-        return self._live().spend_metered(meters)
+        return self._index.live(LiveDashboardProjection, seed=_seed(self._prefix))
 
     def on_record(self, record: CycleRecord, offset: int, *, ledger: Path) -> None:  # noqa: ARG002 -- the index's fold took it
         with self._lock:

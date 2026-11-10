@@ -250,7 +250,7 @@ class CommandKind(StrEnum):
         anyone("set-concurrent-cycles"),
         True,
     )
-    # A queued MINT has no cycle to address yet, and WHOSE launch it is `JobRegistry.cancel_queued` checks.
+    # A queued MINT has no cycle to address yet, and WHOSE launch it is `cancel_queued_run` checks.
     CANCEL_QUEUED = (
         "cancel-queued",
         "limits_and_queue:cancel_queued_run",

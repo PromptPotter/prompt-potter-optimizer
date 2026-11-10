@@ -8,8 +8,10 @@ import time
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -199,40 +201,32 @@ class JobRegistry:
             first = next(iter(self.queue_order()), None)
             if first is None or first.job_id != job_id:
                 return False
-            first.stage = RunPhase.STARTING
-            self._persist(first)
-            return True
+            return self._stamp(job_id, lambda _: {"stage": RunPhase.STARTING}) is not None
 
-    def cancel_queued(self, job_id: str, *, principal_id: str) -> bool:
+    def cancel_queued(self, job_id: str) -> Job | None:
+        """The job withdrawn; ``None`` where it is no longer queued. Whose act it is, the caller asks."""
         with self.admission_gate():
             job = self.get(job_id)
-            if job is None or not job.queued or job.principal_id != principal_id:
-                return False
-            self._end(job, lapse="withdrawn")
-            return True
+            return None if job is None or not job.queued else self._end(job_id, lapse="withdrawn")
 
     def mark_admitted(self, job_id: str, reserve: Budget) -> None:
-        job = self.get(job_id)
-        if job is None:
-            return
-        job.admitted_at = utcnow_iso()
-        job.reserve = reserve
-        self._persist(job)
+        self._stamp(job_id, lambda _: {"admitted_at": utcnow_iso(), "reserve": reserve})
 
     def set_reserve(self, job_id: str, reserve: Budget) -> None:
-        job = self.get(job_id)
-        if job is None:
-            return
-        job.reserve = reserve
-        self._persist(job)
+        self._stamp(job_id, lambda _: {"reserve": reserve})
 
     def update_target(self, job_id: str, *, hop: CycleHop) -> None:
-        job = self.get(job_id)
-        if job is None:
-            return
-        job.campaign_id = hop.campaign_id
-        job.cycle_id = hop.cycle_id
-        self._persist(job)
+        self._stamp(job_id, lambda _: {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id})
+
+    def _stamp(self, job_id: str, change: Callable[[Job], Mapping[str, Any] | None]) -> Job | None:
+        """The one read-modify-write of a job file, read and persisted under the gate: a stamp
+        outside it overwrote one inside (a lowered reserve, a release). *change* answers the fields
+        it stamps on the job it is shown, or ``None`` to leave it; ``None`` where nothing stamped."""
+        with self.admission_gate():
+            if (job := self.get(job_id)) is None or (fields := change(job)) is None:
+                return None
+            self._persist(stamped := replace(job, **fields))
+            return stamped
 
     @property
     def jobs_dir(self) -> Path:
@@ -246,14 +240,8 @@ class JobRegistry:
         return this_producer_lock(self._dir)
 
     def adopt(self, job_id: str) -> bool:
-        with self.admission_gate():
-            job = self.get(job_id)
-            if job is None or job.released:
-                return False
-            job.producer_id = this_producer(self._dir)
-            job.code_revision = CODE_REVISION
-            self._persist(job)
-            return True
+        adopted = {"producer_id": this_producer(self._dir), "code_revision": CODE_REVISION}
+        return self._stamp(job_id, lambda job: None if job.released else adopted) is not None
 
     def landing(self) -> str | None:
         return self._gate.landing()
@@ -272,12 +260,7 @@ class JobRegistry:
             self._tasks[job_id] = task
 
     def mark_started(self, job_id: str) -> None:
-        job = self.get(job_id)
-        if job is None:
-            return
-        job.stage = RunPhase.RUNNING
-        job.started_at = utcnow_iso()
-        self._persist(job)
+        self._stamp(job_id, lambda _: {"stage": RunPhase.RUNNING, "started_at": utcnow_iso()})
 
     def release(
         self, job_id: str, ended: StopReason | BaseException | None = None, *, stepped: bool = False
@@ -287,39 +270,39 @@ class JobRegistry:
         paused at its round allowance); a raise before its admission refused it, and an interrupt
         or a raise after it is the stop it reads as (`run_stop_reason`); nothing at all is a
         scoring pass that returned."""
-        job = self.get(job_id)
-        if job is None:
-            return None
-        match ended:
-            case StopReason():
-                self._end(job, ending=ended, stepped=stepped)
-            case BaseException() if not job.admitted and not launch_interrupted(ended):
-                refused = ended if isinstance(ended, PotterError) else PotterError(str(ended))
-                self._end(job, lapse="refused", refusal=Refusal.of(refused))
-            case BaseException():
-                self._end(job, ending=run_stop_reason(ended))
-            case None:
-                self._end(job)
-        return job
+        with self.admission_gate():
+            job = self.get(job_id)
+            if job is None:
+                return None
+            match ended:
+                case StopReason():
+                    stamped = self._end(job_id, ending=ended, stepped=stepped)
+                case BaseException() if not job.admitted and not launch_interrupted(ended):
+                    refused = ended if isinstance(ended, PotterError) else PotterError(str(ended))
+                    stamped = self._end(job_id, lapse="refused", refusal=Refusal.of(refused))
+                case BaseException():
+                    stamped = self._end(job_id, ending=run_stop_reason(ended))
+                case None:
+                    stamped = self._end(job_id)
+            return stamped or job
 
     def _end(
         self,
-        job: Job,
+        job_id: str,
         *,
         ending: StopReason | None = None,
         stepped: bool = False,
         lapse: JobLapse | None = None,
         refusal: Refusal | None = None,
-    ) -> None:
+    ) -> Job | None:
+        stamp = {"ending": ending, "stepped": stepped, "lapse": lapse, "refusal": refusal}
         # Stamped once: a queue waiter waking on a job already ended raises into a second release.
-        if job.released:
-            return
-        job.released_at = utcnow_iso()
-        job.ending, job.stepped, job.lapse, job.refusal = ending, stepped, lapse, refusal
-        job.__post_init__()
-        self._persist(job)
+        ended = self._stamp(
+            job_id, lambda job: None if job.released else {"released_at": utcnow_iso(), **stamp}
+        )
         with self._lock:
-            self._tasks.pop(job.job_id, None)
+            self._tasks.pop(job_id, None)
+        return ended
 
     def launched_by(self, job_ids: Sequence[str], *, principal_id: str) -> list[Job] | None:
         """Each of *job_ids* as *principal_id* launched it, a reaped one as its release stamped it;
@@ -469,7 +452,7 @@ class JobRegistry:
                         job.job_id,
                         job.stage.value,
                     )
-                    self._end(job, lapse="orphaned")
+                    self._end(job.job_id, lapse="orphaned")
                     reclaim_producer(self._dir, job.producer_id)
 
     def _persist(self, job: Job, *, at: Path | None = None) -> None:

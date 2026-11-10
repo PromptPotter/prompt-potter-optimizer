@@ -47,19 +47,16 @@ def registered_user_id(marker_path: Path) -> str | None:
     return claim.user_id if claim.user_id != "default" else None
 
 
-def _is_host(*, terminal: bool, user_id: str) -> bool:
-    """Terminal detection is passed IN: merged, an identity omitting an issuer reads as the host."""
-    claimed = registered_user_id(default_identity_paths().default_claim_marker)
-    return terminal or (claimed is not None and user_id == claimed)
-
-
 def is_host(identity: IdentityContext) -> bool:
-    return _is_host(terminal=identity.issuer is None, user_id=str(identity.user_id))
+    """The fact its seam stamped (`IdentityContext.host`)."""
+    return identity.host
 
 
 def is_host_tenant_dir(user_id: str) -> bool:
-    """The DIRECTORY-walk reading: no issuer survives on disk."""
-    return _is_host(terminal=user_id == TERMINAL_IDENTITY_ID, user_id=user_id)
+    """Whether *user_id*'s own account is the host's: the terminal's, or the one that claimed it.
+    A signed-in principal's seam stamps it; a directory walk reads it."""
+    claimed = registered_user_id(default_identity_paths().default_claim_marker)
+    return user_id == TERMINAL_IDENTITY_ID or (claimed is not None and user_id == claimed)
 
 
 def _rebind_campaigns(campaigns: CampaignStore, user_id: str) -> None:

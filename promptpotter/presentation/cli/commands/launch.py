@@ -7,7 +7,7 @@ import logging
 import signal
 import sys
 import threading
-from collections.abc import Awaitable, Callable, Coroutine, Iterator, Sequence
+from collections.abc import Callable, Coroutine, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter import connectors
@@ -95,7 +95,7 @@ def held_run(launched: object) -> HeldRun:
 def ctrl_c_pauses(
     stores: Stores, pauses: Sequence[PauseCyclePayload]
 ) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
-    """The first Ctrl+C sends *pauses* as the browser's press does, then cancels this task; the second force-quits."""
+    """The first Ctrl+C sends *pauses* as the browser's press does, and nothing more; the second force-quits."""
 
     async def _pause_each() -> None:
         for pause in pauses:
@@ -108,8 +108,8 @@ def ctrl_c_pauses(
 def ctrl_c_stops_pass(
     stores: Stores, call: CommandCall[Any]
 ) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
-    """A paid pass's Ctrl+C: the `cancel` of *call*'s command, then of this task; before it is
-    filed, or once it ended, the task's cancel alone ends it."""
+    """A paid pass's Ctrl+C: the `cancel` of *call*'s command, as every other door's; the second
+    press force-quits."""
 
     async def _stop() -> None:
         with contextlib.suppress(PotterError):
@@ -121,10 +121,9 @@ def ctrl_c_stops_pass(
 
 @contextlib.contextmanager
 def _ctrl_c(
-    stores: Stores, stop: Callable[[], Awaitable[None]]
+    stores: Stores, stop: Callable[[], Coroutine[Any, Any, None]]
 ) -> Iterator[Callable[[CyclePayload], None]]:
-    loop, run = asyncio.get_running_loop(), asyncio.current_task()
-    assert run is not None
+    loop = asyncio.get_running_loop()
     asked: set[asyncio.Task[None]] = set()
 
     async def send(payload: CyclePayload) -> None:
@@ -132,12 +131,6 @@ def _ctrl_c(
             await CommandDispatcher(stores).dispatch(CommandCall(payload))
         except PotterError as exc:
             print(f"  {refusal_words(exc)}", flush=True)
-
-    async def stop_then_cancel() -> None:
-        try:
-            await stop()
-        finally:
-            run.cancel()
 
     def _spawn(coro: Coroutine[Any, Any, None]) -> None:
         task = loop.create_task(coro)
@@ -154,7 +147,7 @@ def _ctrl_c(
         if interrupted:
             raise KeyboardInterrupt
         interrupted = True
-        loop.call_soon_threadsafe(lambda: _spawn(stop_then_cancel()))
+        loop.call_soon_threadsafe(lambda: _spawn(stop()))
 
     previous = signal.signal(signal.SIGINT, on_sigint)
     try:

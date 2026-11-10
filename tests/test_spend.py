@@ -76,7 +76,7 @@ from promptpotter.application.head_to_head_price import (
     optimizer_round_price,
     priced_head_to_head,
 )
-from promptpotter.application.jobs import mint
+from promptpotter.application.jobs import interlock, mint, quota
 from promptpotter.application.jobs.account_activity import account_activity
 from promptpotter.application.jobs.coupon import (
     AllowanceState,
@@ -101,12 +101,10 @@ from promptpotter.application.jobs.quota import (
     QuotaExceededError,
     account_wallet,
     admit_launch,
-    clamp_budget_change,
+    change_budget,
     coupon_status,
     cycle_share,
-    hold_budget_change,
     hold_moved,
-    on_free_tier,
     paid_call,
 )
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
@@ -261,8 +259,10 @@ from promptpotter.infrastructure.store.account_spend import (
     account_bill,
     bank_spend,
     billed_spend,
+    campaign_spend,
     ledger_cost,
 )
+from promptpotter.infrastructure.store.campaign_store import store as campaign_store_module
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_last,
     scan_ledger_priced_keys,
@@ -271,7 +271,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
-from promptpotter.infrastructure.store.io import read_lines, write_jsonl, write_yaml
+from promptpotter.infrastructure.store.io import read_lines, rmtree_robust, write_jsonl, write_yaml
 from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, draft_dirs
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
@@ -297,6 +297,7 @@ from promptpotter.shared.errors import (
     NotFoundError,
     PayloadInvalidError,
     SendRefusedError,
+    ServiceUnavailableError,
 )
 from promptpotter.shared.identity import (
     SYSTEM_PRINCIPAL,
@@ -1775,12 +1776,8 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         return gate()
 
     def raise_to_three() -> None:
-        hold_budget_change(
-            job_registry=shared,
-            stores=built_stores,
-            hop=race[0],
-            change=Budget(usd=3.0),
-            reserve=Budget(),
+        change_budget(
+            Budget(usd=3.0), stores=built_stores, job_registry=shared, hop=race[0], sends=()
         )
 
     def launch_b() -> None:
@@ -1816,6 +1813,40 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     bill(race[0], 3.0)
     with pytest.raises(QuotaExceededError):
         launch(race[1], 3.0)
+
+    # A job file has one writer at a time: a ceiling lowered by another process while the run
+    # stamps its start is never overwritten by the run's stale copy (bl5.B2).
+    stamped = shared.create(
+        user_id="u-stamp",
+        principal_id="u-stamp",
+        workspace=built_stores.campaigns.workspace,
+        hop=race[1],
+        holder=CampaignLaunch("ds1"),
+    )
+    shared.mark_admitted(stamped.job_id, Budget(usd=3.0))
+    api = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 4)
+    lowered, interleaved = Budget(usd=1.0), [False]
+    read_job = shared.get
+
+    def read_then_lowered(job_id: str) -> Any:
+        job = read_job(job_id)
+        with contextlib.suppress(ServiceUnavailableError):
+            api.set_reserve(job_id, lowered)
+            interleaved[0] = True
+        return job
+
+    with monkeypatch.context() as patched:
+        patched.setattr(interlock, "LOCK_TIMEOUT", 0.0)
+        patched.setattr(shared, "get", read_then_lowered)
+        shared.mark_started(stamped.job_id)
+        if not interleaved[0]:
+            api.set_reserve(stamped.job_id, lowered)
+    after = shared.get(stamped.job_id)
+    assert after is not None and after.reserve == lowered, (
+        "a reserve lowered mid-stamp was overwritten by the run's stale job file"
+    )
+    assert after.started_at is not None
+    shared.release(stamped.job_id, StopReason.CONVERGED)
 
     # Sharing divides the CAMPAIGN's ceiling, never what the account admits: a $2 delegate on a
     # $10 campaign that has spent $3 shares the $7 left, and its account binds through the reserve.
@@ -2089,15 +2120,16 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     fresh = spend_book(0.10, meters="search_incurred")
     fresh.count(replay(0.09))
     pass_bound = SendBound(input_tokens=100, output_tokens=100, usd=5.0)
-    fresh.hold(pass_bound, pass_bound, "bench", what="bench pass", reservation=None, paid_by="host")
-    fresh.release(pass_bound, pass_bound, "bench", "host")
-    fresh.count(billed_call(5.0, kind="bench", node="b", output_tokens=1))
+    # On the account's own key: one on the box's would meet the reserve (B2).
+    fresh.hold(pass_bound, pass_bound, "bench", what="bench pass", reservation=None, paid_by="user")
+    fresh.release(pass_bound, pass_bound, "bench", "user")
+    fresh.count(billed_call(5.0, kind="bench", node="b", output_tokens=1, key_source="user"))
     assert fresh.exhausted() is None, "the bench pass ate into the arm's search budget"
     # The pass's cells are backend cells filed as bench: admitted in the bucket they bill to.
     with (
         spending_under(fresh),
         telemetry.filed_as("bench"),
-        reserved(CallLabel("cell", "backend"), pass_bound, paid_by="host"),
+        reserved(CallLabel("cell", "backend"), pass_bound, paid_by="user"),
     ):
         pass
     small = SendBound(input_tokens=1, output_tokens=1, usd=0.02)
@@ -2666,6 +2698,7 @@ def _account_stores(
             issuer=None if issuer is None else Issuer(issuer),
             email="",
             claims={} if delegated is None else {"spend_ceiling_usd": delegated},
+            host=issuer is None,
         ),
     )
     stores.users.save(user)
@@ -2779,10 +2812,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     rows: tuple[tuple[Any, ...], ...] = (
         # door, issuer, face, sends (None: a backend's cells), declared, delegated, running,
         # spent, admitted, reserve
-        ("launch", _WEB, None, None, None, None, None, None, _UNBOUNDED, (0.30, _FACE.tokens)),
+        # A hand-set grant of the default face: off the free tier, whose ceiling binds below.
+        ("launch", _WEB, full, None, None, None, None, None, _UNBOUNDED, (0.30, _FACE.tokens)),
         # A USD ceiling holds no tokens: every send under it is priced, so the dollars bound it.
-        ("launch", _WEB, None, None, 0.15, None, None, None, (0.15, None), (0.30, None)),
-        ("launch", _WEB, None, None, 10.0, None, None, None, HostAllowanceExhaustedError, None),
+        ("launch", _WEB, full, None, 0.15, None, None, None, (0.15, None), (0.30, None)),
+        ("launch", _WEB, full, None, 10.0, None, None, None, HostAllowanceExhaustedError, None),
+        # The free tier's ceiling bounds what a launch holds, a lift's included (bl2.B5).
+        ("launch", _WEB, None, None, None, None, None, None, (0.03, None), (0.06, None)),
         # A run none of whose sends the box's keys pay is refused nothing and reserves nothing.
         ("launch", _WEB, None, _OWN_ONLY, 10.0, None, None, None, (10.0, None), (0.0, 0)),
         (
@@ -2824,7 +2860,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         (
             "launch",
             _WEB,
-            None,
+            full,
             None,
             None,
             None,
@@ -3019,6 +3055,21 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "a run stopped past the coupon read as another stop"
     )
     book.hold(send, send, "optimizer", what="o", reservation=None, paid_by="user")
+    # A Compare arm's bench sends, which its meter does not count, still draw the coupon's reserve.
+    graded = spend_book(None, usd_reserve=0.05, meters="search_incurred")
+    graded.count(billed_call(0.03, kind="bench"))
+    with pytest.raises(HostAllowanceExhaustedError):
+        graded.hold(send, send, "bench", what="b", reservation=None, paid_by="host")
+    with pytest.raises(SendRefusedError) as unpriced:
+        graded.hold(
+            send,
+            SendBound(input_tokens=1, output_tokens=1, usd=None),
+            "diagnostic",
+            what="d",
+            reservation=None,
+            paid_by="host",
+        )
+    assert unpriced.value.category is ErrorCategory.NO_RATE, "an unpriced bench send went out"
 
     # The free tier bounds what a run may ask for, off one table; granted and host accounts are not on it.
     for n, (issuer, face, on_tier) in enumerate(
@@ -3027,7 +3078,9 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         at = tmp_path / f"tier-{n}"
         at.mkdir()
         stores = _account_stores(at, issuer=issuer, user=user, spent=None, face=face)
-        assert on_free_tier(stores) is on_tier, f"account {n} sits on the wrong side of the tier"
+        assert free_tier.on_free_tier(stores) is on_tier, (
+            f"account {n} sits on the wrong side of the tier"
+        )
     # The tier fences only what draws the coupon: an own-keyed provider's optimizer nodes go free.
     boxed = free_tier.free_fence(
         _account_stores(tmp_path / "boxed", issuer=_WEB, user=user, spent=None), "termnorm"
@@ -3135,6 +3188,19 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
     with pytest.raises(PayloadInvalidError):
         free_tier.refuse_outside_free_tier(off)
+    # The fence walks every call the run sends (bl2.B4): a judge's model is fenced like a node's.
+    judge = {"name": "j", "stages": [{"model": "openai/dear", "provider": "openrouter"}]}
+    judged = CampaignConfig.model_validate(
+        merge_config_layers(
+            layered.model_dump(mode="json", exclude_unset=True), {"judges": {"j": judge}}
+        )
+    )
+    tiered_params = PipelineParams.model_validate(
+        {"steps": ["llm_only"], "llm_only": {"model": oss, "reasoning_effort": "low"}}
+    )
+    assert free_tier.outside_free_tier(
+        judged, select_optimizer(judged.optimization), tiered_params, schema, boxed
+    ) == ["the judge model openai/dear"], "a judge on a model the tier does not list ran free"
 
     # A paid verb never bills a cycle its producer still holds.
     operator = User(user_id="op", tenant_id="op", created_at="")
@@ -3274,17 +3340,19 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     )
     assert held.reserve.usd is not None, "an uncap left the account nothing held back for the run"
     granted = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
-    caps, _ = clamp_budget_change(
-        requested=Budget(tokens=1_000),
-        user=granted,
-        stores=_account_stores(
-            tmp_path / "delegated", issuer=_WEB, user=granted, spent=None, delegated=2.0
-        ),
+    delegated = _account_stores(
+        tmp_path / "delegated", issuer=_WEB, user=granted, spent=None, delegated=2.0
+    )
+    change_budget(
+        Budget(tokens=1_000),
+        stores=delegated,
         job_registry=JobRegistry(tmp_path / "jobs-d", capacity=lambda _live: 1),
         hop=_HELD_HOP,
         sends=_CELLS,
     )
-    assert caps == Budget(tokens=1_000), "a grant became a ceiling on an axis the caller left alone"
+    assert delegated.campaigns.read_campaign_ceiling(_HELD_HOP) == Budget(tokens=1_000), (
+        "a grant became a ceiling on an axis the caller left alone"
+    )
 
     # A moved ceiling is the CAMPAIGN's: every cycle's spend counts against it once, a fork's
     # walked prefix not twice, and what the parent billed past the cut counts too.
@@ -3330,14 +3398,8 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     hold_moved(forker, fork, Budget(usd=0.8))
     forker.grant.save(CouponGrant(face=Budget(usd=1.0)))
     allowance = account_of(forker)
-    caps, reserve = clamp_budget_change(
-        requested=Budget(usd=5.0),
-        user=allowance,
-        stores=forker,
-        job_registry=registry,
-        hop=fork,
-        sends=_CELLS,
-    )
+    change_budget(Budget(usd=5.0), stores=forker, job_registry=registry, hop=fork, sends=_CELLS)
+    caps, raised = forker.campaigns.read_campaign_ceiling(fork), registry.get(job.job_id)
     _, relaunched = admit_launch(
         declared=Budget(),
         user=allowance,
@@ -3351,7 +3413,93 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "$1.00 allowance, $0.50 of it the campaign's own: its ceiling is the whole $1.00, which "
         "already counts that $0.50 — not $1.10 off a fork prefix counted twice"
     )
-    assert reserve.usd == pytest.approx(1.0), "the reservation moved off the ceiling it backs"
+    assert raised is not None and raised.reserve.usd == pytest.approx(1.0), (
+        "the reservation moved off the ceiling it backs"
+    )
+
+    # Set-limits is an admission (bl2.B1): of two raises on one account's campaigns, the second
+    # reads the wallet after the first's reserve landed, so the reserves stand within the face.
+    racer = web_account("sub-8")
+    racer.grant.save(CouponGrant(face=Budget(usd=0.30)))
+    racing = JobRegistry(tmp_path / "jobs-8", capacity=lambda _live: 2)
+    raced = [CycleHop(campaign_id=f"camp-8{n}", cycle_id=f"cycle_race80{n}") for n in (1, 2)]
+    for racing_hop in raced:
+        racer.campaigns.create_campaign(minted_campaign(racing_hop))
+        racer.campaigns.mint_cycle(racing_hop)
+        held_job = racing.request_slot(
+            user_id="sub-8",
+            principal_id="sub-8",
+            workspace=racer.campaigns.workspace,
+            holder=CampaignLaunch("ds1"),
+            hop=racing_hop,
+        )
+        racing.mark_admitted(held_job.job_id, Budget(usd=0.0))
+        hold_moved(racer, racing_hop, Budget(usd=0.0))
+    first_read, second_at_gate, go = threading.Event(), threading.Event(), threading.Event()
+    wallet_of, gate_of = quota.read_account_wallet, racing.admission_gate
+    raises: list[BaseException] = []
+
+    def paused_wallet(**kwargs: Any) -> Any:
+        read = wallet_of(**kwargs)
+        if threading.current_thread() is first and not first_read.is_set():
+            first_read.set()
+            go.wait(timeout=60)
+        return read
+
+    def watched_racing_gate() -> Any:
+        if threading.current_thread() is second:
+            second_at_gate.set()
+        return gate_of()
+
+    def raise_on(at: CycleHop) -> None:
+        try:
+            change_budget(Budget(usd=0.20), stores=racer, job_registry=racing, hop=at, sends=_CELLS)
+        except QuotaExceededError as exc:
+            raises.append(exc)
+
+    first = threading.Thread(target=raise_on, args=(raced[0],))
+    second = threading.Thread(target=raise_on, args=(raced[1],))
+    with monkeypatch.context() as patched:
+        patched.setattr(quota, "read_account_wallet", paused_wallet)
+        patched.setattr(racing, "admission_gate", watched_racing_gate)
+        first.start()
+        assert first_read.wait(timeout=60), "the first raise never read the wallet"
+        second.start()
+        assert second_at_gate.wait(timeout=60), "the second raise never reached the gate"
+        go.set()
+        first.join(timeout=60)
+        second.join(timeout=60)
+    reserved = sum(job.reserve.usd or 0.0 for job in racing.list_holding_spend(user_id="sub-8"))
+    assert reserved <= 0.30 + 1e-9, (
+        f"two set-limits reserved ${reserved:.2f} on a $0.30 coupon: the second read the wallet "
+        "before the first's reserve landed"
+    )
+
+    # A live run holds its reserve less what it billed (bl2.B3): its spend counts once, so a
+    # launch beside it is quoted what the coupon can still pay.
+    biller = web_account("sub-6")
+    biller.grant.save(CouponGrant(face=Budget(usd=0.30)))
+    billed_hop = CycleHop(campaign_id="camp-6b", cycle_id="cycle_billed01")
+    biller.campaigns.create_campaign(minted_campaign(billed_hop))
+    biller.campaigns.mint_cycle(billed_hop)
+    billing = JobRegistry(biller.jobs_dir, capacity=lambda _live: 2)
+    live = billing.request_slot(
+        user_id="sub-6",
+        principal_id="sub-6",
+        workspace=biller.campaigns.workspace,
+        holder=CampaignLaunch("ds1"),
+        hop=billed_hop,
+    )
+    billing.mark_admitted(live.job_id, Budget(usd=0.20))
+    unbind = bind_account(biller)
+    try:
+        billed_ledger = CycleEventLog.open(CycleDir(biller.campaigns.cycle_dir(billed_hop)))
+        _pay(billed_ledger, 0.10, input_tokens=1_000, output_tokens=0)
+    finally:
+        unbind()
+    assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.10), (
+        "a live run's billed $0.10 was held twice: once billed, once inside its $0.20 reserve"
+    )
 
     # A head-to-head is one door: every arm planned, priced and admitted before any takes a key,
     # so a refused act leaves no arm behind; each arm runs the budget it declared, and a retry
@@ -3376,12 +3524,11 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     stores.tenant_datasets.relabel("duel", bank.dataset_hash)
     detached: list[JobSpec] = []
 
-    async def ran_elsewhere(
-        registry: JobRegistry, spec: JobSpec, **_: Stores
-    ) -> asyncio.Task[None]:
+    async def ran_elsewhere(held: HeldRun, mode: RunMode) -> asyncio.Task[None]:
         """The arm's own process, run and exited: its slot handed back, nothing spent."""
+        spec = held.job_spec(mode)
         detached.append(spec)
-        registry.release(spec.job_id, StopReason.CONVERGED)
+        held.job_registry.release(spec.job_id, StopReason.CONVERGED)
         return asyncio.create_task(asyncio.sleep(0))
 
     monkeypatch.setattr(run_job_mod, "spawn_job", ran_elsewhere)
@@ -3600,8 +3747,35 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert ceiling_counts_now() == pytest.approx(ceiling_counts), (
         "a crash retried between bank and delete counted the cycle's metered spend twice, or none"
     )
-    # A campaign whose manifest is gone still deletes, and banks: nothing reads its rows as one.
+    # A delete that dies after its bank and before the tree goes: the tombstone is its commit.
     camp_dir = stores.campaigns.campaign_root_dir("camp-2")
+    spent_before = campaign_spend(stores.campaigns, "camp-2")
+    owned_sandbox = inner_sandbox(stores, "camp-2", root)
+    with monkeypatch.context() as patched:
+
+        def torn(path: Path) -> None:
+            if path == camp_dir:
+                raise OSError(f"killed while removing {path}")
+            rmtree_robust(path)
+
+        patched.setattr(campaign_store_module, "rmtree_robust", torn)
+        with pytest.raises(OSError):
+            stores.campaigns.delete_campaign(
+                "camp-2",
+                keep_results=False,
+                changed_at="2026-01-02T00:00:00Z",
+                inner_sandbox_root=owned_sandbox.parent,
+            )
+    assert camp_dir.is_dir() and not owned_sandbox.exists(), (
+        "a delete torn at its tree stranded the campaign's inner sandbox, which no retry reaches"
+    )
+    assert campaign_spend(stores.campaigns, "camp-2") == spent_before, (
+        "a torn delete's rows counted beside its tombstone: the campaign's spend read twice"
+    )
+    assert ceiling_counts_now() == pytest.approx(ceiling_counts), (
+        "a torn delete's rows metered beside its tombstone: the ceiling refuses at half its room"
+    )
+    # A campaign whose manifest is gone still deletes, and banks: nothing reads its rows as one.
     CampaignLayout(camp_dir).manifest.unlink()
     assert stores.campaigns.delete_campaign(
         "camp-2", keep_results=True, changed_at="2026-01-02T00:00:00Z"
@@ -3824,10 +3998,14 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     ):
         held.add(short)
 
-        def uncountable(_: TokenUsageRecord) -> None:
-            raise ValueError("no rate for it")
+        unpriced = ["backend"]
 
-        monkeypatch.setattr(short, "count", uncountable)
+        def uncountable(record: TokenUsageRecord, _meter: CeilingMeter) -> tuple[float | None, int]:
+            if record.kind in unpriced:
+                raise ValueError("no rate for it")
+            return 0.1, 1
+
+        monkeypatch.setattr("promptpotter.infrastructure.llm.spend_book.metered", uncountable)
         bound = SendBound(input_tokens=2_000, output_tokens=800, usd=0.5)
         label = CallLabel("backend", "backend")
         with admitted(label, bound, model="m", provider="openrouter", paid_by="host") as send:
@@ -3837,3 +4015,16 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
             admitted(label, bound, model="m", provider="openrouter", paid_by="host"),
         ):
             pytest.fail("a send was admitted past a bill its book could not count")
+    # Nor by any book of its chain: a nested bill its root's meter could not count stops the root's
+    # next send, and a bill the root's own fold could not count stops its nested book's.
+    for folding, unpriced[0] in (("nested", "backend"), ("root", "optimizer")):
+        outer, nested = spend_book(1.0), spend_book(1.0)
+        nested.enclosing = outer
+        chain = CycleEventLog(Path(stores.base_dir) / folding / "ledger.jsonl")
+        with LedgerIndex.of(chain.path, ()).projecting() as held:
+            held.add(nested if folding == "nested" else outer)
+            chain.append(billed_call(0.1))
+        for asking, book in (("root", outer), ("nested", nested)):
+            with pytest.raises(ValueError, match="no rate for it"):
+                book.hold(bound, bound, "optimizer", what="next", reservation=None, paid_by="host")
+                pytest.fail(f"the {asking} book sent past a bill the {folding} fold left uncounted")

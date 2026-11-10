@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
 from promptpotter.application.bench.resume_and_fork.repair import apply_correction, round_packages
 from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
@@ -169,14 +169,14 @@ async def _replay_line(
                         ),
                     },
                 )
-            new_cycle_id = mint_fork(
+            new_cycle_id = cut_fork(
                 session.store,
                 hop,
                 div.round_num,
                 trigger=ForkTrigger.SCORING_DIVERGENCE,
                 reason=f"resume_divergence:{div.kind}",
                 issued_by=SYSTEM_PRINCIPAL,
-            )
+            ).take(session.store)
             if not self_inflicted:
                 # The operator's flag ran the line past a divergence it halts on.
                 campaign_store.leave_comparison(

@@ -201,9 +201,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   `model_validate`) is a fourth. **Rides with:** READS.
   **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
   surveys and caches.
-- **A failed round checkout is swallowed into a log** — `application/scoring/closed_rounds.py` wraps the
-  checkout in `graceful(...)`. Action: the read refuses or serves the row typed. **Rides with:** M9.
-  **Re-test:** `git grep -n "graceful(" -- promptpotter/application/scoring/closed_rounds.py` is empty.
 
 ### Batch 10's fix pass (2026-11-07)
 
@@ -238,15 +235,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   so the refusal names the node, not the edit. Action: refuse an edit's unknown slot where the overlay
   is laid, named by its config address. **Rides with:** NODE. **Re-test:** an overlay holding
   `{{typo}}` is refused naming `optimization.nodes.l1_generate.config.instruction`.
-- **The 429 status serves four meanings**: `jobs/quota.py::QuotaExceededError` sets `http_status = 429`
-  class-wide (`:97`), so `quota_exceeded`, `campaign_ceiling_held`, `campaign_ceiling_unshared` and the
-  throttle `rate_limited` (`RateLimitedError`, `:206`) share it. `client.ts::failureKind` must key
-  `throttled` on the code, and `mcp/server.py::_rpc_code` answers a throttle `INVALID_PARAMS`. A host
-  that retries on 429, as HTTP intends, retries a spend ceiling forever. Action: only `RateLimitedError`
-  serves 429. The quota and ceiling refusals serve 409, the repo's state-conflict status
-  (`SlugTakenError` already serves 409). Both clients then read a throttle by its status.
-  **Rides with:** F3. **Re-test:** `git grep -n "http_status = 429" -- promptpotter` names
-  `RateLimitedError` alone.
 - **Two per-category tables in two modules**: `domain/phases.py::REFUSAL_STOPS` and
   `shared/errors.py::ERROR_IS_CHARGED` each key `ErrorCategory`. Action: one row per category holds
   every column. **Held:** a digest re-key (`ERROR_IS_CHARGED` is reached). **Re-test:**
@@ -337,26 +325,98 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   `optimization.nodes.{node}.config.{field}`. **Rides with:** NODE. **Re-test:** a manifest laying
   `persona: 5` is refused naming `config.persona`, with no `errors.pydantic.dev` URL.
 
-### Batch 15's review (2026-11-10)
+### Batch 17's fold (2026-11-10)
 
-- **An appender's `land` drains every queued line, so a spend book counts a part twice under two
-  appending threads**: `read_model.py::LedgerIndex.land` feeds a second thread's later
-  `TokenUsageRecord` before the first appender returns, so `spend_book.py`'s `saw()` (the last
-  record fed) is False for the first and `settle` counts its record again. Latent: no two threads
-  append usage to one ledger today. Action: `land` returns once its own offset was fed, or `saw`
-  keys on the record's offset. **Rides with:** M9 (M9.5b, which owns `spend_book.py`). **Re-test:**
-  two threads appending one `TokenUsageRecord` each to one ledger settle two parts, never three.
-- **A line queued before a `Projecting` closed still feeds the projection it dropped**: each queued
-  line snapshots the held projections (`read_model.py::LedgerIndex._feed`), so a foreign line a
-  reader's refresh queued feeds an already drained `DashboardCheckout` at the next `land`, which
-  re-arms its debounce and writes `dashboard.json` after its run released. Action: the drain reads
-  who is held when it feeds, never when the line was queued. **Rides with:** M9 (M9.5b).
-  **Re-test:** a line appended by another writer, refreshed and left queued across `close()`, feeds
-  no projection at the next append.
-- **`tests/test_spend.py`'s eight binders never close their `Projecting`**:
-  `LedgerIndex.of(path, ()).projecting().add(book)` pins each ledger's index for the session, and
-  no fixture resets the registry. Action: `with ... projecting() as held: held.add(book)`.
-  **Rides with:** M9 (M9.5b). **Re-test:** `git grep -n "projecting().add(" -- tests/test_spend.py`
+- **The store door says by a flag whether a record rides with `dashboard.json`**:
+  `campaign_store/store.py::CampaignStore.append` takes `dashboard=True` from `mint_cycle` and
+  `declare_stop`. Whether a line moves the dashboard file is a fact of the record (a mint, a stop),
+  which the door could read off it. Action: `append` derives it from the records it lands.
+  **Rides with:** DOOR-a. **Re-test:** `git grep -n "dashboard=True" -- promptpotter` is empty.
+- **A `derived_file_stale` warning names the projection's class, never the file it could not write**:
+  `read_model.py::LedgerIndex.shielded` has only the `Projected` protocol, which carries no path, and
+  `TracingProjection` and `SpendBook` write no file at all. Action: `Projected` declares what it
+  derives, and the warning names that. **Rides with:** DOOR-a. **Re-test:** a `dashboard.json` write
+  fault's warning detail names `dashboard.json`.
+- **A fork's cut lands before its admission**: `jobs/launcher/admission.py::request_jobs` claims and
+  `admit_and_hold` admits money on the request's own hop, so `commands/launching.py::_launch_fork`
+  must cut the child before asking; a refusal deletes the child and leaves the parent's inert
+  `FORK_CUT` line. Action: admission over a planned hop (the cut rides the held step). **Rides
+  with:** START-b. **Re-test:** `git grep -n "cut_operator_fork(\|admit(" -- promptpotter/application/commands/launching.py`
+  lists the cut before the admission.
+- **`pause_superseded` is a second pause filer**: `commands/dispatcher.py::CommandDispatcher.pause_superseded`
+  appends a PAUSE command and its ack beside `dispatch`. Action: the fork dispatches
+  `PauseCyclePayload`. **Rides with:** STOP-b. **Re-test:** `git grep -c "def pause_superseded" -- promptpotter`
+  is 0.
+- **The CLI repeats `--from`'s bound**: `presentation/cli/commands/resume_command.py` checks `>= 0`
+  beside `RunMode.from_round`'s `ge=0`; start-run now refuses past the last close. Action: the CLI
+  checks neither. **Rides with:** F6. **Re-test:** `git grep -n ">= 0" -- promptpotter/presentation/cli/commands/resume_command.py`
+  is empty.
+- **A head-to-head arm holds outside its release**: `jobs/launcher/head_to_head.py` builds
+  `HeldRun.of` and claims after its try. Action: `land_and_claim` inside the arm's release.
+  **Rides with:** START-b. **Re-test:** `git grep -c "claim_cycle(" -- promptpotter/application/jobs/launcher/head_to_head.py`
+  is 0.
+- **`record_decision` discards its offset**: `bench/resume_and_fork/decisions.py::record_decision`
+  returns the outcome, so the fork's cut appends its own record. Action: it returns the offset the
+  cut takes. **Rides with:** OPACT. **Re-test:** `git grep -c "ResumeCheckpointRecord(" -- promptpotter/application/bench/resume_and_fork/fork_siblings.py`
+  is 0.
+- **A diag sibling never leaves the comparison**: `commands/launching.py::start_run` launches it
+  with `leaving=None` (decisions § 0009: a fork leaves). Action: `--diag` as a mode, whose launch
+  leaves. **Rides with:** INIT. **Re-test:** `git grep -n "leaving=None" -- promptpotter` is empty.
+- **A queued launch withdrawn by an interrupt reads as a paused run**:
+  `application/jobs/registry.py::JobRegistry.release` stamps `ending=run_stop_reason(exc)` for a
+  never-admitted job on a `KeyboardInterrupt` or `CancelledError`, so `command_reading.py::job_status`
+  reports a run that never held a slot as paused. The registry alone cannot make it a lapse:
+  `jobs/launcher/admission.py::release_slot` reads `job.ending is None` as `NOT_ADMITTED` and would
+  declare the cycle HALTED with a `launch_failed` record for a Ctrl+C in the queue. Action: one
+  change across both: a never-admitted release is the lapse `withdrawn`, and `release_slot` declares
+  no stop (or the cycle's prior one) for a withdrawn job. **Rides with:** START-b. **Re-test:**
+  release an unadmitted job with `asyncio.CancelledError()`; `job.lapse` is `None` and `job.ending`
+  is a pause.
+- **The daily-campaigns quota counts refused and withdrawn launches**:
+  `application/jobs/quota.py::check_launch_quotas` counts `JobRegistry.list_launched_today`, which
+  holds every `CampaignLaunch` created today, so an account under a lowered daily limit exhausts it
+  without minting a campaign. `machine_status.py` reads the same listing for today's refusals, so the
+  filter is the quota's, not the listing's. Action: the quota counts `j.admitted or not j.released`;
+  the listing stays whole. **Rides with:** F5. **Re-test:** `git grep -n "list_launched_today(user_id" -- promptpotter/application/jobs/quota.py`
+  reads its length unfiltered.
+- **A stopped paid pass exits 1 at the CLI, a noise-floor stop exits 130**:
+  `presentation/cli/campaign_runner.py::main` maps every `PotterError`, `PassStoppedError` included,
+  to `Error: …` and exit 1, while `cli/commands/noise_floor.py::cmd_noise_floor` catches
+  `PassStoppedError` itself for `StopOutcome.PAUSED.exit_code`. Action: `campaign_runner.py` answers
+  `PassStoppedError` with the paused exit code and its words, and noise-floor's own catch goes.
+  **Rides with:** PASS. **Re-test:** `git grep -cE "except PassStoppedError" -- promptpotter/presentation`
+  is 1 (noise_floor).
+- **`default_claim.py::is_host_tenant_dir` is named for a directory but is the user-id check**: the
+  oidc seam stamps through it too. Action: rename it to what it decides. **Rides with:** F5.
+  **Re-test:** `git grep -n "is_host_tenant_dir(" -- promptpotter`.
+- **The free tier's budget is both a config default and an admission bound**: `free_tier.yaml`
+  `campaign.optimization.budget.usd` is laid by `application/free_tier.py::with_free_tier_layer` and read by
+  `application/free_tier.py::tier_ceiling`. Action: one owner. **Rides with:** MONEY. **Re-test:**
+  `git grep -n "tier_ceiling\|with_free_tier_layer" -- promptpotter`.
+- **A live run's billed spend has no carrier**: `quota.py::_billed_by` re-folds the cycle ledger on
+  every wallet read. Action: the job carries it. **Rides with:** MONEY. **Re-test:**
+  `git grep -n "_billed_by" -- promptpotter`.
+- **`launch_contended` is retryable but answers 409**: `quota.py::_contended`. Action: a retryable
+  status or code. **Held:** a decision. **Re-test:** `git grep -n "launch_contended" -- promptpotter`.
+- **A resumed cycle loses its unmetered coupon spend**: `spend_book.py::SpendBook.take_up` restores
+  `off_coupon_*` but not `beside_*`. Action: `unreported_on` folds it. **Rides with:** MONEY.
+  **Re-test:** `git grep -n "beside_usd" -- promptpotter/infrastructure/llm/spend_book.py`.
+- **A bench cell's plan reads the campaign ceiling it is not metered by**:
+  `application/scoring/query_loop.py:639` calls `fits(..., beside=label.kind)`, which counts every
+  side of `_room`. Action: `fits` skips the share's sides where the book does not bind the kind, as
+  `refuse_unless_room` does. **Held:** a digest. **Re-test:**
+  `git grep -n "\.fits(" -- promptpotter/application/scoring/query_loop.py`.
+- **A tombstoned campaign lists as deleted whatever its manifest says**:
+  `campaign_store/store.py::CampaignStore.list_campaigns` reads the manifest's lifecycle, so a torn
+  delete's campaign lists `active` until the delete is retried, though its spend reads once. Action:
+  the lifecycle reads `WorkspaceBank.deleted`; the keepsake's `_set_lifecycle("deleted")` becomes its
+  projection, not a second write. **Held:** a served change. **Re-test:** a campaign whose delete
+  died after its tombstone lists `deleted`.
+- **A campaign id the bank holds as deleted can be minted again**: `store/account_spend.py::WorkspaceBank.deleted`
+  is permanent and keyed on the id, and `runner/campaign_ids.py::mint_campaign_id` draws
+  `prefix__token_hex(3)` without asking it, so a new campaign on a tombstoned id meters none of its
+  own ledgers (`campaign_spend`, `CampaignStore.metered_spend`). Action: the mint re-draws an id the
+  bank holds as deleted. **Rides with:** F5. **Re-test:** `git grep -n "deleted" -- promptpotter/application/runner/campaign_ids.py`
   is empty.
 
 ### The connector and entry-point seam audits (two unbiased reads, 2026-11-06)
@@ -503,7 +563,7 @@ later arc deletes. **Rides with:** the chain each group names, by its "Was" name
   `git grep -n "class StartCheckinResponse" -- promptpotter`.
 - **`--diag` mints a sibling cycle** (`commands/launching.py::_diag_target`) and `potter/generation_only.py`
   drives its rounds a second way. Action: an unmeasured mode on `RunStart` that the round loop reads;
-  both go. Shares `generation_only.py` with the potter arc. **Re-test:** `git grep -n "def mint_diag_sibling" -- promptpotter`.
+  both go. Shares `generation_only.py` with the potter arc. **Re-test:** `git grep -n "def cut_diag_sibling" -- promptpotter`.
 - **The test builders replay production by hand**: `tests/factories.py::seat` builds a cycle as run init
   does, `tests/factories.py::close_round` replays the runner's append order, and two more mint "as the mint
   does". Action: they call `open_cycle` and the mint. **Re-test:** `git grep -c "def seat(" -- tests/factories.py`.
@@ -870,6 +930,15 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
 - Two `cell_means` renderers: `SubjectSignals` and `channel-parts::CellMeans`. **Rides with:** webcell.
 - `TrajectorySeriesView::SeriesHoverPopup` is a hand-built popover beside `ui/Popover`.
 - `EvidenceCharts` and `CostStrip` lost their hover readouts with the tooltip; a per-cell or per-round value they need opens in the DOM.
+- **Two lineage layouts are derived side by side**: `webapp/components/candidates/dendrogram.ts::dendrogram`
+  lays `DendrogramStrip` (x-aligned under `FitnessChart` in `CandidatesCard.tsx`), and
+  `webapp/components/candidates/forest-layout.ts::layout` lays `Forest` (the tree button,
+  `ForestToggle`). The strip stays (operator, 2026-11-10): it is the bar chart's natural ordering, and
+  the bars are far less readable without it. Action: one tree, two layouts, PAIRED (aligned to the
+  bars) and FREED (the forest), with one button detaching and re-pairing it, as OBS docks and undocks a
+  source; the long-term UI direction is panes that pair and unpair this way. **Rides with:**
+  WEBSTATE-a. **Re-test:** `git grep -hE "^export function (dendrogram|layout)\(" -- webapp/components/candidates`
+  prints one line.
 
 ### The webapp swept by shape (debt hunt 2026-11-02)
 
@@ -963,11 +1032,11 @@ fixtures.
 
 ### On the box (2026-11-01)
 
-- **The host is a claim marker, not the declared account**: `infrastructure/identity/default_claim.py::_is_host`
+- **The host is a claim marker, not the declared account**: `infrastructure/identity/default_claim.py::is_host_tenant_dir`
   compares a user id to the claim marker, while `HOST_ADMIN_EMAIL` is read only in `routers/auth.py`.
   So one email holds two accounts on the box: the claimed host (the coupon exemption, the CLI's
   identity) and the Google sign-in that owns every webapp campaign. Action: the host is the account
-  `HOST_ADMIN_EMAIL` names, and `_is_host` reads that. The marker's identity role goes, and what the
+  `HOST_ADMIN_EMAIL` names, and `is_host_tenant_dir` reads that. The marker's identity role goes, and what the
   marker owns is migrated to that account at the landing (a SURVIVOR, decisions § 0011).
   **Rides with:** MONEY. **Re-test:** `git grep -n "default_claim_marker" -- promptpotter/infrastructure/identity/default_claim.py` is empty.
 - No verb sets an account's coupon or starts it afresh: `grant.json` is hand-written, and a reset is
@@ -991,7 +1060,7 @@ fixtures.
   **Re-test:** a shadow `checkin/pipeline.yaml` with `optimizer.param_keys: 5` under `land-data --dry-run`.
 - **Left by the payer rule (2026-11-02)**:
   - `quota.py::sends_on` raises `NoApiKeyError` for a provider no key pays, so `set-limits`
-    (`clamp_budget_change`) refuses a limit over a missing key. Action: `sends_on` is total (a no-key
+    (`quota.py::change_budget`) refuses a limit over a missing key. Action: `sends_on` is total (a no-key
     send's payer is `None`); `launch_refusal` refuses `NO_KEY`, and `coupon.py::keyed_client` is the one
     raise at send (today `provider_send` spells it again, and `connectors/harbor.py:1184-1193 _AgentModel`
     picks `host_key(provider)` and raises its own `NoApiKeyError`, a third raiser). **Rides with:** CONN-a.
@@ -1044,10 +1113,6 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 - **`cycle_addressing.py::ActiveSessionResponse` serves two nullable ids for `CycleHop | None`**, so
   the webapp re-tests a pair. Action: one nullable `hop`. **Rides with:** WEBSTATE-b.
   **Re-test:** `git grep -n "class ActiveSessionResponse" -A4 -- promptpotter`.
-- **A ledger subscriber that raises after `Admission._write` lands a charge leaves it in `_unlanded`**
-  (`llm/spend_book.py`), so the book counts that part twice until the run ends — conservative, never
-  under. Action: the record lands before any subscriber runs. **Re-test:** the outlives journey in
-  `tests/test_spend.py` with a raising projection.
 - **One act on an arm writes two records**: `runner/arm_gate.py` and `scoring/query_loop.py` append
   an `InterventionRecord` and a `LeftComparisonRecord` for one act. Action: one act record both
   reads derive from. **Rides with:** OPACT. **Re-test:** `git grep -n "LeftComparisonRecord(" -- promptpotter`.
@@ -1231,44 +1296,43 @@ A fix chain's row lists the bug ids it closes (`bl<part>.B<n>` is the audit's id
   **Rides with:** the next `/potter-release`. **Re-test:** `git grep -c 'RUNNER_TEMP/elsewhere' -- .github` is 0.
 
 **Bugs, by fix chain** (each chain is one session of one-decision links).
-- **F1, admit then cut**: bl1.B1 **HIGH** (a refused fork leaves its parent rebased, its inbox voided and
-  its line held by a deleted stub), B4, B5, B6, B7, B9, B15 (= bl5.B4, a torn mint), B17, B20, B21, B22.
-  Root: every cycle a launch creates is written in the held step, after admission
-  (`application/commands/launching.py::fork_cycle`, `jobs/launcher/*`, `jobs/mint.py`). **Rides with:** F1.
-  **Re-test:** a refused fork leaves its parent untouched.
-- **F2, one stop, one void**: bl1.B2 **HIGH** (the CLI's first Ctrl+C cancels the run task, so paid
-  in-flight cells are re-paid on resume), B3, B10, B11, B12, B16. Root: Ctrl+C is the pause press, and a
-  pause is read only while held (`presentation/cli/commands/launch.py::_ctrl_c`, `domain/phases.py`,
-  `infrastructure/runtime_flags.py`, `run_observers.py`). **Rides with:** F2 (B10 and B16 open DOOR-a).
-  **Re-test:** the first Ctrl+C on a CLI run files the pause and cancels nothing.
-- **F3, the coupon under one gate**: bl2.B1 **HIGH** (set-limits reads the wallet off the gate and writes
-  the reserve under it), bl2.B2 **HIGH** (a Compare arm's `bench` / `diagnostic` sends skip the coupon
-  reserve and the NO_RATE refusal), B3 (a running run's spend counts twice against the coupon), B4 (the
-  free tier never vets judge models), B5 (its $0.03 ceiling is liftable) and the 409 row above. Root:
-  clamp, reserve and hold are one function inside `admission_gate()`; the reserve is checked per send on
-  the root book. **Rides with:** F3 (B3 finished by MONEY). **Re-test:** two `set-limits` never
-  over-reserve the coupon.
-- **F4, one door into a job file**: bl5.B2 **HIGH** (`mark_admitted`, `mark_started` and `_end` write a
-  job file outside the gate and overwrite a lowered reserve), bl1.B18, B19. Root:
-  `application/jobs/registry.py::JobRegistry` has ten read-modify-writers and no one `_stamp`.
-  **Rides with:** F4. **Re-test:** `git grep -c "def _stamp" -- promptpotter/application/jobs/registry.py` is 1.
-- **F5, identity: the host fact, the owner, the claim**: bl4.B1 **HIGH** (every host delegate reads as the
-  host: `is_host` compares `user_id`), B3 (= bl5.B3, `--tenant X` acts as user `default`), B4 (the first
-  sign-in can orphan `projects/default/`), B5 (a delegate's accept overwrites its delegator's), B6 (= bl2.B6,
-  the delegate spend ceiling has no writer), B7, B8, bl2.B10. Root: host-ness on `IdentityContext`; the
-  tenant directory owns; one claim act. **Rides with:** F5a (the host fact), then F5. **Re-test:**
-  `git grep -n "is_host(" -- promptpotter` reads the field.
+- **F1, a torn mint**: bl1.B15 (= bl5.B4). A mint that dies between `adopt_ledger`, `create_campaign`
+  and `mint_cycle` leaves an invisible directory or a campaign with no cycle. Root: `campaign.json` is
+  written last, as the mint's commit (`application/jobs/mint.py`). **Rides with:** `f6` (its link 4).
+  **Re-test:** `git grep -n "adopt_ledger(\|create_campaign(\|mint_cycle(" -- promptpotter/application/jobs/mint.py`
+  lists the adoption and the cycle's mint after the campaign's creation.
+- **F2, one stop, one void**: bl1.B10, B11, B16. Root: a pause is read only while held, and the launch
+  voids only what stood before its hold (`domain/phases.py`, `infrastructure/runtime_flags.py`,
+  `run_observers.py`). B10 first: the void cutoff, which opens DOOR-a. B11 follows it: a pause is
+  refused while CLAIMED, because the launch voids what was asked before its hold.
+  `domain/phases.py::RunState.pause_refusal` refuses pause on `ProducerState.CLAIMED`, and
+  `cancel-queued` 404s and a start's `cancel` raises `TaskUncancellableError` once a job is promoted, so
+  no door stops a CLAIMED cycle. Dropping the refusal alone would accept a pause that
+  `run_observers.py::build_run_observers` then voids at the boundary (`void_inbox` after `hold_cycle`).
+  Action: void only what stood before the hold (the command log's book line read before `hold_cycle`),
+  then delete the CLAIMED branch of `pause_refusal`. B16 stays with B10. **Rides with:** `door-a`.
+  **Re-test:** `git grep -n "ProducerState.CLAIMED" -- promptpotter/domain/phases.py` still shows the
+  `pause_refusal` branch.
+- **F5, identity: the owner, the claim**: bl4.B3 (= bl5.B3, `--tenant X` acts as user `default`), B4
+  (the first sign-in can orphan `projects/default/`), B5 (a delegate's accept overwrites its
+  delegator's), B6 (= bl2.B6, the delegate spend ceiling has no writer), B7, B8, bl2.B10. Root: the
+  tenant directory owns; one claim act. **Rides with:** F5. **Re-test:** B3 first:
+  `git grep -n "default_identity(tenant_id=explicit_tenant)" -- promptpotter/application/account.py`
+  lays no `user_id`, so `--tenant X` acts as user `default`.
 - **F6, resume and the embedded door**: bl1.B8 (`resume --from N` rewinds before the divergence check),
   B13 (the embedded door launches its own way and exports no pause or cancel), B14 (the CLI's divergence
   prompt is unreachable). Root: decide before writing; the fifth door dispatches. **Rides with:** F6.
   **Re-test:** `git grep -n "divergence_hint" -- promptpotter` is empty.
-- **F7, destroyers**: bl5.B1 (a delete that dies after `bank_spend` doubles the campaign's spend), bl5.B6
-  (a delete that dies midway strands inner sandboxes), bl2.B7 (the delete guard races a launch). Root: the
-  tombstone is the delete's commit, and a destroyer holds the cycle claim. **Rides with:** F7.
-- **F7b, the replay**: bl3.B1 (a `force_fresh` diagnostic rescore displaces the answer every later reader
-  replays). Root: `measurement_archive.py::ReplayFeed.advance` serves the first deliberate row per cell.
-  **Rides with:** F7b (a replay re-key). **Re-test:** a cell with a later diagnostic rescore replays its
-  first deliberate row.
+- **A destroyer takes the cycle claim (bl2.B7)**: `campaign_store/store.py::CampaignStore.delete_campaign`
+  checks for no attached producer (`_guard_and_release`), banks, then removes, with no admission gate or
+  claim held. A `start-run` admitted between the guard and the bank attaches to a cycle whose ledger is
+  then deleted after the bank was written without it: the run dies writing into a missing tree, the
+  deleted campaign's banked total under-reads, and nothing reports the killed run. Root: the destroyer
+  takes `claim_launch` on each cycle under `JobRegistry.admission_gate`, so "a producer holds it" and "it
+  is being deleted" are one door. The gate is `application/jobs/interlock.py::AdmissionGate`, so the claim
+  belongs in `application/commands/workspace_edits.py::campaign_lifecycle` (or a `jobs/` destroyer it
+  calls), never `infrastructure/`. **Rides with:** STOP-b. **Re-test:**
+  `git grep -n "claim_launch" -- promptpotter/application/commands/workspace_edits.py` is empty.
 - **A reserved or failed send writes a bill nobody counts** (bl2.B8, B9, B11): `paid_call` admits off the
   gate and registers no hold; a failed part write leaves later parts uncharged; a never-sent attempt
   writes a zero bill on two homes. Action: the call's hold is an open charge, one charge record per send,

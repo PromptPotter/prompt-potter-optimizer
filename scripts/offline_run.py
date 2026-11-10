@@ -47,7 +47,7 @@ from processes import REPO, RamBudget, end_children_with_this_process, queue_beh
 
 import promptpotter
 from promptpotter.application import optimizers
-from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_operator_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.loaders import definition_source
@@ -624,13 +624,13 @@ async def forked_twice(stores: Stores, fork: CycleHop, rounds: int) -> None:
     """An operator fork off the divergence fork, then one off that: one campaign, four courses."""
     # Each cut leaves the fork a round of its own to close under the campaign's rounds cap.
     for from_round in (rounds - 2, rounds - 1):
-        cycle_id = mint_operator_fork(
+        cycle_id = cut_operator_fork(
             stores=stores,
             hop=fork,
             from_round=from_round,
             seed=CycleSeed(),
             keep_rounds=True,
-        )
+        ).take(stores)
         fork = CycleHop(campaign_id=fork.campaign_id, cycle_id=cycle_id)
         session, result = await run_campaign(
             await rebound_session(stores, fork),

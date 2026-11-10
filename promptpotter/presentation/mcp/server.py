@@ -65,7 +65,13 @@ def _text(value: object) -> list[types.ContentBlock]:
     return [types.TextContent(text=json.dumps(value, ensure_ascii=False))]
 
 
+# JSON-RPC's implementation-defined server range: a throttle passes, so it is no caller's mistake.
+_RATE_LIMITED = -32029
+
+
 def _rpc_code(exc: PotterError) -> int:
+    if exc.http_status == 429:
+        return _RATE_LIMITED
     return types.INVALID_PARAMS if exc.http_status < 500 else types.INTERNAL_ERROR
 
 

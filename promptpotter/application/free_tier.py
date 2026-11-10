@@ -7,15 +7,17 @@ from typing import Any, NamedTuple
 
 from promptpotter import connectors
 from promptpotter.application.jobs.coupon import paying_key
-from promptpotter.application.jobs.quota import on_free_tier
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER, Bounds, FreeTier
+from promptpotter.domain.judges import JudgeStage
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.spend import draws_coupon
+from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
@@ -25,6 +27,42 @@ from promptpotter.shared.errors import PayloadInvalidError
 def free_tier() -> FreeTier:
     """Read each time, so an operator's edit holds from the next check."""
     return FREE_TIER_ADAPTER.validate_python(read_yaml(free_tier_path()))
+
+
+def on_free_tier(stores: Stores) -> bool:
+    """The box's DEFAULT coupon: the host, a delegate and a hand-granted account are outside it.
+    What the tier binds of a run is `free_fence`'s."""
+    return (
+        not is_host(stores.identity)
+        and stores.grant.load() is None
+        and delegated_spend_ceiling(stores) is None
+    )
+
+
+def delegated_spend_ceiling(stores: Stores) -> float | None:
+    ceiling = stores.identity.claims.get("spend_ceiling_usd")
+    return float(ceiling) if isinstance(ceiling, int | float) else None
+
+
+def tier_ceiling(stores: Stores) -> float | None:
+    """The USD one launch may hold on the free tier, its `campaign:` layer's own ceiling: an
+    admission bound (`quota.py::_admitted`), so no operator axis lifts it. ``None`` off it."""
+    if not on_free_tier(stores):
+        return None
+    usd = free_tier().campaign.get("optimization", {}).get("budget", {}).get("usd")
+    return None if usd is None else float(usd)
+
+
+def model_calls(
+    selected: SelectedOptimizer, config: CampaignConfig
+) -> list[NodeConfig | JudgeStage]:
+    """THE roster of what a run declaring *config* calls beside its connector's cells: its
+    optimizer's nodes, then its judges' stages. Admission prices it and the free tier fences it,
+    so a new kind of call is both by construction."""
+    return [
+        *(selected.node_config(node) for node in selected.llm_nodes),
+        *(stage for spec in config.judges.values() for stage in spec.stages),
+    ]
 
 
 class FreeFence(NamedTuple):
@@ -37,7 +75,7 @@ class FreeFence(NamedTuple):
 
 
 def free_fence(stores: Stores, connector: str) -> FreeFence | None:
-    """``None`` off the free tier (`quota.py::on_free_tier`)."""
+    """``None`` off the free tier (`on_free_tier`)."""
     if not on_free_tier(stores):
         return None
     keys = stores.api_keys.load()
@@ -141,16 +179,17 @@ def outside_free_tier(
                 if declared is not None and param in searched:
                     values += space.param_options(declared, param, model=m) or ["any"]
                 out += [f"{param} {v} on {m}" for v in values if v not in admitted]
-    for name in selected.llm_nodes:
-        called = selected.node_config(name)
+    # A judge runs on the box's models under the optimizer's bar: one table, one rule.
+    for called in model_calls(selected, config):
         if called.provider not in fence.providers:
             continue
+        role = "judge" if isinstance(called, JudgeStage) else "optimizer"
         if (bounds := tier.optimizer_models.get(model := called.model)) is None:
-            out.append(f"the optimizer model {model}")
+            out.append(f"the {role} model {model}")
             continue
         laid = called.model_dump(include=set(bounds), exclude_unset=True)
         out += [
-            f"{param} {value} on the optimizer model {model}"
+            f"{param} {value} on the {role} model {model}"
             for param, admitted in bounds.items()
             if (value := laid.get(param, "default")) not in admitted
         ]

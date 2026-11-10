@@ -76,7 +76,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
         optimizer = select_optimizer(config.optimization)
         cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
         dashboard = DashboardCheckout(cycle_dir)
-        assert dashboard.wired, "a cycle with standing rounds was launched, so it is declared"
+        assert dashboard.live.value() is not None, "a launched cycle with rounds is declared"
         dashboard.drain()
         readout = ReadoutProjection.for_campaign(session, config, sink=None)
         banked: BenchPasses | None = None
@@ -96,7 +96,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                         session,
                         origin_sp,
                         origin_id=rounds[0].origin.individual.id,
-                        spend=dashboard.state.spend,
+                        spend=dashboard.live.state.spend,
                         cb=cb,
                     )
                     assert banked is not None, "the line holder holds its origin's pass"

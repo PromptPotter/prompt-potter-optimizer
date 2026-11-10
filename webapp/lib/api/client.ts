@@ -59,8 +59,9 @@ export function failureKind(e: unknown): FailureKind {
   if (e.status === 403) return "denied";
   if (e.status === 404) return "gone";
   if (e.status === 400 || e.status === 422) return "invalid";
-  // The request rate's throttle (`quota.py::RateLimitedError`): it passes, and the act never ran.
-  if (e.code === "rate_limited") return "throttled";
+  // The request rate's throttle (`quota.py::RateLimitedError`), the one 429: it passes, and the
+  // act never ran.
+  if (e.status === 429) return "throttled";
   // The server answered and said no (a conflict, a spend cap): its sentence is the remedy.
   if (e.status >= 400 && e.status < 500) return "refused";
   return "transient";

@@ -5,12 +5,10 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.resume_and_fork.decisions import (
-    record_decision,
-)
 from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.arms import Proposed
@@ -27,11 +25,15 @@ from promptpotter.domain.run_records import (
     ForkDirection,
     ForkSpec,
     ForkTrigger,
+    ResumeCheckpointRecord,
 )
 from promptpotter.domain.run_standing import line_reference
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
-from promptpotter.infrastructure.store.session_pointer import save_active_pointer
+from promptpotter.infrastructure.store.session_pointer import (
+    cleanup_stub_fork_if_empty,
+    save_active_pointer,
+)
 from promptpotter.infrastructure.store.stores import owned_campaign
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError
@@ -71,33 +73,26 @@ def _fork_sibling_setup(
     new_dir = campaign_store.cycle_dir(child)
     if new_dir.exists():
         raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
-    new_dir.mkdir(parents=True, exist_ok=True)
+    new_dir.mkdir(parents=True)
 
-    record_decision(
-        CycleEventLog.open(CycleDir(parent_dir)),
-        BenchCheckpointKind.FORK_CUT,
-        {"from_round": from_round},
-        child.cycle_id,
-        node=None,
-        data={"forked_at": utcnow_iso(), "fork": payload.model_dump(mode="json")},
+    # The FORK_CUT's own offset: a parent still running appends past it, never into the fork.
+    cut = CycleEventLog.open(CycleDir(parent_dir)).append(
+        ResumeCheckpointRecord(
+            kind=BenchCheckpointKind.FORK_CUT,
+            node=None,
+            inputs_ref={"from_round": from_round},
+            outcome=child.cycle_id,
+            data={"forked_at": utcnow_iso(), "fork": payload.model_dump(mode="json")},
+        )
     )
-
-    save_active_pointer(campaign_store.workspace, child)
     logger.info(
-        "Forked %s → %s at round %d [trigger=%s] (active pointer retargeted)",
+        "Forked %s → %s at round %d [trigger=%s]",
         parent.cycle_id,
         child.cycle_id,
         from_round,
         payload.trigger.value,
     )
-    # Read after the FORK_CUT, the only moment the offset is true of a parent still running.
-    campaign_store.mint_fork_cycle(
-        child,
-        parent_dir,
-        payload,
-        cut=CycleEventLog.open(CycleDir(parent_dir)).next_offset,
-        cut_round=from_round,
-    )
+    campaign_store.mint_fork_cycle(child, parent_dir, payload, cut=cut + 1, cut_round=from_round)
     if seed is not None:
         # Without its own record a rebase's config unlock silently re-locks on the fork's first `resume`.
         campaign_store.append(child, CycleSeedRecord(seed=seed))
@@ -172,7 +167,38 @@ def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) 
     return line_reference(below, origin=origin)
 
 
-def mint_fork(
+@dataclass(frozen=True, slots=True)
+class ForkCut:
+    """A fork cut and minted, its parent's line not yet moved: ``take`` is the fork's act on its
+    parent, ``withdraw`` deletes a cut whose launch was refused."""
+
+    parent: CycleHop
+    child: CycleHop
+    direction: ForkDirection
+
+    def take(self, stores: Stores) -> str:
+        save_active_pointer(stores.campaigns.workspace, self.child)
+        # An offshoot's parent keeps running, hence the DIRECTION.
+        if self.direction is ForkDirection.SUPERSEDE and stores.campaigns.mark_superseded(
+            self.parent, self.child.cycle_id
+        ):
+            stores.void_inbox(self.parent)
+        return self.child.cycle_id
+
+    def withdraw(self, stores: Stores) -> None:
+        # Best-effort: it must never mask the refusal its caller re-raises.
+        try:
+            deleted, reason = cleanup_stub_fork_if_empty(
+                campaign_store=stores.campaigns, hop=self.child
+            )
+        except Exception:
+            logger.exception("fork %s: refused, and its cut could not be deleted", self.child)
+            return
+        if not deleted:
+            logger.warning("fork %s: refused, and its cut was kept (%s)", self.child, reason)
+
+
+def cut_fork(
     stores: Stores,
     parent: CycleHop,
     fork_from_round: int,
@@ -182,14 +208,14 @@ def mint_fork(
     issued_by: Principal,
     named: RoundArm | None = None,
     seed: CycleSeed | None = None,
-) -> str:
+) -> ForkCut:
     """``fork_from_round`` is how many parent rounds the cut lifts, recorded as its ``cut_round``."""
     campaign_store = stores.campaigns
     direction = FORK_DIRECTION[trigger]
     # Only a superseding cut continues the parent's line, so only it lifts the parent's rounds.
     if direction is not ForkDirection.SUPERSEDE and fork_from_round != 0:
         raise ValueError(
-            f"mint_fork({trigger.value}) branches from the origin and lifts no parent "
+            f"cut_fork({trigger.value}) branches from the origin and lifts no parent "
             f"round, so fork_from_round must be 0; got {fork_from_round}"
         )
     if campaign_store.last(parent, PartitionRecord) is None:
@@ -197,7 +223,17 @@ def mint_fork(
             f"cycle {parent.cycle_id} holds no drawn partition over its chain, "
             "so no fork can stand on it"
         )
-    edge = fork_edge(campaign_store.standing_rounds(parent, moment=None), fork_from_round, named)
+    standing = campaign_store.standing_rounds(parent, moment=None)
+    # A rewind in place refuses past its last close (`rewind_enters`); so does the cut.
+    if (
+        direction is ForkDirection.SUPERSEDE
+        and fork_from_round > (-1 if standing.last_closed is None else standing.last_closed) + 1
+    ):
+        raise PayloadInvalidError(
+            f"round {fork_from_round}: the parent's completed rounds are "
+            f"{'none' if standing.last_closed is None else f'0..{standing.last_closed}'}"
+        )
+    edge = fork_edge(standing, fork_from_round, named)
     payload = ForkSpec(trigger=trigger, reason=reason, issued_by=issued_by, from_candidate=edge)
     child = parent.model_copy(update={"cycle_id": _sibling_id(campaign_store, parent, payload)})
     _fork_sibling_setup(
@@ -208,12 +244,7 @@ def mint_fork(
         payload=payload,
         seed=seed,
     )
-    # An offshoot's parent keeps running, hence the DIRECTION.
-    if direction is ForkDirection.SUPERSEDE and campaign_store.mark_superseded(
-        parent, child.cycle_id
-    ):
-        stores.void_inbox(parent)
-    return child.cycle_id
+    return ForkCut(parent=parent, child=child, direction=direction)
 
 
 def declare_steered_values(
@@ -239,8 +270,8 @@ def declare_steered_values(
     return seed.model_copy(update={"optimizer_narrowing": declared})
 
 
-def mint_diag_sibling(*, stores: Stores, hop: CycleHop) -> str:
-    return mint_fork(
+def cut_diag_sibling(*, stores: Stores, hop: CycleHop) -> ForkCut:
+    return cut_fork(
         stores,
         hop,
         0,
@@ -250,7 +281,7 @@ def mint_diag_sibling(*, stores: Stores, hop: CycleHop) -> str:
     )
 
 
-def mint_operator_fork(
+def cut_operator_fork(
     *,
     stores: Stores,
     hop: CycleHop,
@@ -259,7 +290,7 @@ def mint_operator_fork(
     from_candidate_id: str = "",
     keep_rounds: bool = False,
     reason: str = "",
-) -> str:
+) -> ForkCut:
     campaign = owned_campaign(stores, hop.campaign_id)
     named = RoundArm(round=from_round, arm=ArmKey(from_candidate_id)) if from_candidate_id else None
     if named is not None:
@@ -270,7 +301,7 @@ def mint_operator_fork(
         # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
         caps = fork_remainder(stores, hop).under(seed.config_overrides)
         seed = seed.model_copy(update={"config_overrides": caps})
-    return mint_fork(
+    return cut_fork(
         stores,
         hop,
         from_round if keep_rounds else 0,

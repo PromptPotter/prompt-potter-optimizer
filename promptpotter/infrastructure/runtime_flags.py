@@ -98,7 +98,7 @@ def read_run_state(
     if not held and claimed is not None:
         return RunState(claimed, ProducerReading.of(ProducerState.CLAIMED))
     if not held:
-        owed = declared == RunPhase.RUNNING and not pause_requested and not terminal
+        owed = declared == RunPhase.RUNNING and not terminal
         producer = ProducerReading.of(ProducerState.SILENT) if owed else absent
     elif declared == RunPhase.GATE:
         producer = ProducerReading.of(ProducerState.HELD)
@@ -132,7 +132,8 @@ def derive_run_state(cycle_dir: Path, inbox: Controls) -> RunState:
     producer_held = cycle_held(cycle_dir)
     scoring = producer_held and pass_held(cycle_dir)
     progress = scan_ledger_progress(ledger) if producer_held else Progress()
-    asked = inbox.pause if scoring or not terminal else None
+    # A pause is asked of a producer: with none holding the cycle, a RUNNING one is owed (SILENT).
+    asked = inbox.pause if producer_held and (scoring or not terminal) else None
     claim = None if producer_held else scan_launch_claim(ledger)
     now = time.time()
     run = read_run_state(

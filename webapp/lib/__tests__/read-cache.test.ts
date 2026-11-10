@@ -268,14 +268,14 @@ describe("read cache — subscribers", () => {
 
   it("re-asks a read lost to the network or throttled on the slow beat, and rests one the server refused", async () => {
     const asked = { lost: 0, denied: 0, empty: 0, slow: 0, fast: 0, throttled: 0, capped: 0 };
-    // The request-rate throttle passes; a spend cap, a 429 too, would answer the same again.
+    // The request-rate throttle passes; a spend cap, a 409, would answer the same again.
     const throttled = at("t\x1fu", async () => {
       asked.throttled += 1;
       throw new ApiError(429, "/t", "rate_limited");
     });
     const capped = at("c\x1fu", async () => {
       asked.capped += 1;
-      throw new ApiError(429, "/c", "spend_cap");
+      throw new ApiError(409, "/c", "spend_cap");
     });
     // A read polled faster than the reconnect beat backs off to it while it fails.
     const fast = at(

@@ -631,27 +631,27 @@ class ReplayFeed:
         self._node_configs = node_configs
         self._file_keys = [config_key(node_configs[:n]) for n in range(1, len(node_configs) + 1)]
         self._seen: dict[str, int] = {}
-        self._deprecated: dict[str, bool] = {}
+        self._served: dict[str, tuple[bool, str, str]] = {}
 
     def advance(self) -> dict[str, FiledAnswer]:
+        """Each cell's answer where it changed: a live row before a deprecated one, then A before
+        B, then the oldest, so a later diagnostic rescore never displaces what a run measured."""
         banked: list[FiledAnswer] = []
         with self._archive._lock:
             for file_key in self._file_keys:
                 rows = self._archive._file(file_key).rows
                 banked.extend(rows[self._seen.get(file_key, 0) :])
                 self._seen[file_key] = len(rows)
-        banked.sort(key=lambda answer: answer.created_at)
         fresh: dict[str, FiledAnswer] = {}
         for answer in banked:
             cell = answer.cell
             key = cell.sample_key
             if not key or cell.errored or not meets_grade(answer.provenance, REUSABLE_MIN_GRADE):
                 continue
-            deprecated = is_deprecated(cell)
-            if deprecated and self._deprecated.get(key) is False:
-                continue
-            self._deprecated[key] = deprecated
-            fresh[key] = answer
+            rank = (is_deprecated(cell), answer.provenance, answer.created_at)
+            if (served := self._served.get(key)) is None or rank < served:
+                self._served[key] = rank
+                fresh[key] = answer
         return fresh
 
     def claim(self, sample_key: str) -> CellClaim | None:

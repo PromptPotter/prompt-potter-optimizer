@@ -82,18 +82,19 @@ class JobSpec(StrictModel):
         return self
 
 
-async def spawn_job(
-    job_registry: JobRegistry, spec: JobSpec, *, stores: Stores
-) -> asyncio.Task[None]:
+async def spawn_job(held: HeldRun, mode: RunMode) -> asyncio.Task[None]:
     """Returns only once the run's process holds the job and its claim (`run_job`): a spawner
     gone before that, its producer lock with it, would leave a job a reconciling read releases
     under its child. Answers the task that ends when the run's process exits."""
-    log_path = CycleLayout(stores.campaigns.cycle_dir(spec.hop)).job_log
+    job_registry, stores = held.job_registry, held.session.store
+    log_path = CycleLayout(stores.campaigns.cycle_dir(held.session.hop)).job_log
     try:
+        spec = held.job_spec(mode)
         child = _start(spec, log_path)
     except BaseException as exc:
-        # No process took the job, so nothing else will ever hand its slot back or stamp its cycle.
-        release_slot(job_registry, spec.job_id, exc, stores=stores, hop=spec.hop)
+        # No process took the job (its spec unbuilt among them), so nothing else will ever hand its
+        # slot back or stamp its cycle.
+        release_slot(job_registry, held.job_id, exc, stores=stores, hop=held.session.hop)
         raise
 
     loop = asyncio.get_running_loop()
@@ -276,7 +277,7 @@ class HeldRun:
         )
 
     async def detach(self, *, mode: RunMode) -> asyncio.Task[None]:
-        return await spawn_job(self.job_registry, self.job_spec(mode), stores=self.session.store)
+        return await spawn_job(self, mode)
 
     async def run_inline(
         self, *, mode: RunMode, readout_sink: Callable[[str], None] | None

@@ -762,7 +762,7 @@ def stale_file_warning(projection: str, offset: int, reason: str) -> RoundWarnin
 
 
 class ForkTrigger(enum.StrEnum):
-    """One value per caller of :func:`mint_fork`."""
+    """One value per caller of :func:`cut_fork`."""
 
     OPERATOR_DIAG = "operator_diag"
     OPERATOR_REWIND = "operator_rewind"

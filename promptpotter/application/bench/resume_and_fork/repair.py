@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.node_context import NodeContext, rewalk_origin
-from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import mended_round
 from promptpotter.application.optimizers.nodes import RoundContext
@@ -345,7 +345,7 @@ async def apply_correction(
     rederived = await _rederived(
         cycle, corrected, [rn for rn in drifted if rn < cut.resume_at], callbacks
     )
-    repair_target = mint_fork(
+    repair_target = cut_fork(
         session.store,
         hop,
         cut.resume_at,
@@ -353,7 +353,7 @@ async def apply_correction(
         reason=f"repair:round_{cut.rounds[0]}",
         issued_by=SYSTEM_PRINCIPAL,
         named=cut.edge,
-    )
+    ).take(session.store)
     logger.warning(
         "Round(s) %s do not re-derive from their own rows; branched → %s from %s, and this cycle "
         "keeps them exactly as they ran. Everything after that candidate retires with it; its "

@@ -6,12 +6,14 @@ import threading
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
 from typing import NamedTuple, assert_never, get_args
 
 from pydantic import Field
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of, account_or_opening
+from promptpotter.application.free_tier import delegated_spend_ceiling, model_calls, tier_ceiling
 from promptpotter.application.jobs.capacity import SlotBound
 from promptpotter.application.jobs.coupon import (
     ALLOWANCE_STATE_INFO,
@@ -28,7 +30,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
     CampaignLaunch,
@@ -69,7 +71,12 @@ from promptpotter.infrastructure.llm.spend_book import (
     spending_under,
     unbounded_spend_book,
 )
-from promptpotter.infrastructure.store.account_spend import account_bill, campaign_spend
+from promptpotter.infrastructure.store.account_spend import (
+    account_bill,
+    campaign_spend,
+    ledger_cost,
+)
+from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import (
@@ -91,10 +98,11 @@ logger = logging.getLogger(__name__)
 
 
 class QuotaExceededError(PotterError):
-    """A user-scoped abuse limit refused a request — 429, as against ``LaunchError``'s 422 for a malformed
-    or unowned one. Both map to one HTTP response through the ``PotterError`` seam."""
+    """A user-scoped limit refused a request — 409, a state a retry does not change, as against
+    ``LaunchError``'s 422 for a malformed or unowned one. Only the throttle passes, so only it serves
+    429 (`RateLimitedError`). Both map to one HTTP response through the ``PotterError`` seam."""
 
-    http_status = 429
+    http_status = 409
 
     def __init__(self, *, code: str, message: str) -> None:
         super().__init__(message)
@@ -204,7 +212,10 @@ def slot_rate(stores: Stores, holder: JobHolder, hop: CycleHop, *, asked: int) -
 
 
 class RateLimitedError(QuotaExceededError):
-    """A throttle: it repeats as fast as it is asked, so the trail banks none of it (`main.py::_bank_refusal`)."""
+    """A throttle: it repeats as fast as it is asked, so the trail banks none of it (`main.py::_bank_refusal`).
+    It alone serves 429: a retry after it passes."""
+
+    http_status = 429
 
     def __init__(self, message: str) -> None:
         super().__init__(code="rate_limited", message=message)
@@ -285,7 +296,7 @@ def read_account_wallet(
     excluding_job_id: str | None = None,
     excluding_campaign: str | None = None,
 ) -> AccountWallet:
-    """A running cycle's spend-so-far is counted twice (ledger + reserve): it errs toward refusing."""
+    """What the coupon has left past every bill, less what each live run may still draw."""
     coupon = read_coupon(stores)
     if coupon.unmetered:
         return AccountWallet(coupon, coupon.face)
@@ -323,15 +334,13 @@ def account_wallet(stores: Stores) -> AccountWallet:
 
 def sends_on(stores: Stores, config: CampaignConfig, connector: str) -> tuple[Send, ...]:
     """What a run declaring *config* on *connector* sends, and who pays each: the connector's
-    cells, then each provider its optimizer's nodes and its judges name, per `paying_key`.
+    cells, then each provider its `model_calls` name, per `paying_key`.
     Raises ``NoApiKeyError`` for a provider no key pays."""
     keys = stores.api_keys.load()
-    selected = select_optimizer(config.optimization)
-    named = [selected.node_config(node).provider for node in selected.llm_nodes]
-    named += [stage.provider for spec in config.judges.values() for stage in spec.stages]
+    calls = model_calls(select_optimizer(config.optimization), config)
     return (
         BackendCells(connector, connectors.CONNECTORS.get(connector).cell_payer),
-        *(provider_send(keys, provider) for provider in dict.fromkeys(named)),
+        *(provider_send(keys, provider) for provider in dict.fromkeys(c.provider for c in calls)),
     )
 
 
@@ -489,8 +498,8 @@ def admit_launch(
         excluding_job_id=job_id,
         excluding_campaign=None if hop is None else hop.campaign_id,
     )
-    delegated = _delegated_spend_ceiling(stores)
-    admitted = _admitted(declared, delegated)
+    delegated = delegated_spend_ceiling(stores)
+    admitted = _admitted(stores, declared, sends)
     if not any(draws_coupon(send.payer) for send in sends):
         return admitted, _nothing_on(wallet.coupon.face)
     if wallet.contended:
@@ -512,12 +521,16 @@ def admit_launch(
     return admitted, _reserve(admitted, wallet.headroom, delegated)
 
 
-def _admitted(declared: Budget, delegated: float | None) -> Budget:
-    """A delegate's claim bounds what its launch holds, whatever its campaign declares. An axis
-    the run leaves undeclared stays unnamed, so the reserve takes it for no ceiling."""
-    if delegated is None:
+def _admitted(stores: Stores, declared: Budget, sends: tuple[Send, ...]) -> Budget:
+    """*declared*, capped at the USD one launch of this account may hold: a delegate's claim, and
+    the free tier's ceiling on a run any of whose *sends* draws the coupon, so neither a
+    `start-run` budget nor a `set-limits` lifts it. An axis the run leaves undeclared stays
+    unnamed, so the reserve takes it for no ceiling; declaring nothing reads the cap alone."""
+    drawn = any(draws_coupon(send.payer) for send in sends)
+    bound = _lowest(delegated_spend_ceiling(stores), tier_ceiling(stores) if drawn else None)
+    if bound is None:
         return declared
-    return declared.over(Budget(usd=_lowest(declared.usd, delegated)))
+    return declared.over(Budget(usd=_lowest(declared.usd, bound)))
 
 
 def launch_refusal(
@@ -537,7 +550,7 @@ def launch_refusal(
     what = "this launch" if refusing is None else refusing.what
     if wallet.launch_room_gone:
         return wallet.refused(drawing, what=what)
-    room, admitted = wallet.headroom, _admitted(declared, _delegated_spend_ceiling(stores))
+    room, admitted = wallet.headroom, _admitted(stores, declared, sends)
     # What the run itself declares: a delegate's cap past the coupon is held by the reserve.
     asked = None if declared.usd is None else admitted.usd
     if room.usd is not None and asked is not None and asked > room.usd:
@@ -816,34 +829,76 @@ def next_launch_budget(config: CampaignConfig, *, stores: Stores, hop: CycleHop)
     )[0]
 
 
-def clamp_budget_change(
-    *,
+def change_budget(
     requested: Budget,
-    user: User,
+    *,
     stores: Stores,
     job_registry: JobRegistry,
     hop: CycleHop,
     sends: tuple[Send, ...],
+) -> bool:
+    """Set-limits is an admission of the changed ceiling: the wallet read, the clamp, the reserve
+    and the hold run under the one gate a launch admits under, so no admission between them goes
+    unseen. Money moves the CAMPAIGN's ceiling and re-shares it over every live cycle; holds land
+    first. Whether the ceiling *hop* runs under moved: a change restating it moves nothing."""
+    campaigns = stores.campaigns
+    armed = campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)
+    change = requested
+    with job_registry.admission_gate():
+        job = job_registry.running_job_for(campaigns.workspace, hop)
+        # Rounds and a clock are no money: a change naming neither money axis reads no wallet.
+        if requested.named & MONEY_AXES:
+            change, reserve = _clamped(
+                requested, stores=stores, job_registry=job_registry, job=job, hop=hop, sends=sends
+            )
+            if job is not None:
+                job_registry.set_reserve(job.job_id, job.reserve.over(reserve))
+        move_campaign_money(
+            change, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
+        )
+    cycle = change.only(CYCLE_AXES)
+    if cycle.named:
+        prior = campaigns.read_standing_budget(hop)
+        campaigns.append(
+            hop,
+            StandingBudgetRecord(
+                budget=prior.budget.over(cycle), pause_at_round=prior.pause_at_round
+            ),
+        )
+    return (
+        campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)
+        != armed
+    )
+
+
+def _clamped(
+    requested: Budget,
+    *,
+    stores: Stores,
+    job_registry: JobRegistry,
+    job: Job | None,
+    hop: CycleHop,
+    sends: tuple[Send, ...],
 ) -> tuple[Budget, Budget]:
-    """Clamps only a NAMED, bounded money axis: a lift stays a lift, which the reservation binds."""
-    held = job_registry.running_job_for(stores.campaigns.workspace, hop)
+    """Clamps only a NAMED, bounded money axis: a lift stays a lift, which the reservation binds.
+    The change, then what the coupon reserves for it."""
     wallet = read_account_wallet(
-        user=user,
+        user=account_of(stores),
         stores=stores,
         job_registry=job_registry,
-        excluding_job_id=None if held is None else held.job_id,
+        excluding_job_id=None if job is None else job.job_id,
         excluding_campaign=hop.campaign_id,
     )
     # Refuse rather than clamp: a contended wallet's zero would write a $0 ceiling on a funded run.
     if wallet.contended:
         raise _contended("this campaign's ceiling")
-    delegated = _delegated_spend_ceiling(stores)
+    delegated, bound = delegated_spend_ceiling(stores), _admitted(stores, Budget(), sends).usd
     room = wallet.headroom
     # A campaign ceiling is the operator's: past the coupon only where none of its sends draws it.
     clamp = (
-        room.over(Budget(usd=_lowest(room.usd, delegated)))
+        room.over(Budget(usd=_lowest(room.usd, bound)))
         if any(draws_coupon(send.payer) for send in sends)
-        else Budget(usd=delegated)
+        else Budget(usd=bound)
     )
     change = requested.over(
         Budget.model_validate(
@@ -876,41 +931,6 @@ def _reserve(budget: Budget, headroom: Budget, delegated: float | None) -> Budge
     return Budget.model_validate(held)
 
 
-def hold_budget_change(
-    *,
-    job_registry: JobRegistry,
-    stores: Stores,
-    hop: CycleHop,
-    change: Budget,
-    reserve: Budget,
-) -> bool:
-    """Money moves the CAMPAIGN's ceiling and re-shares it over every live cycle; holds land first.
-    Whether the ceiling *hop* runs under moved: a change restating it moves nothing."""
-    campaigns = stores.campaigns
-    armed = campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)
-    # Under the gate a launch admits under, so no share is taken from a split mid-move.
-    with job_registry.admission_gate():
-        job = job_registry.running_job_for(stores.campaigns.workspace, hop)
-        if job is not None:
-            job_registry.set_reserve(job.job_id, job.reserve.over(reserve))
-        move_campaign_money(
-            change, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
-        )
-    cycle = change.only(CYCLE_AXES)
-    if cycle.named:
-        prior = campaigns.read_standing_budget(hop)
-        campaigns.append(
-            hop,
-            StandingBudgetRecord(
-                budget=prior.budget.over(cycle), pause_at_round=prior.pause_at_round
-            ),
-        )
-    return (
-        campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)
-        != armed
-    )
-
-
 def _contended(subject: str) -> QuotaExceededError:
     """The ``request_slot``→``mark_admitted`` window: retryable, as an exhausted ceiling is not."""
     return QuotaExceededError(
@@ -925,7 +945,9 @@ def _contended(subject: str) -> QuotaExceededError:
 def _outstanding_reservations(
     job_registry: JobRegistry, *, user_id: str, excluding_job_id: str | None
 ) -> Budget | None:
-    """``None`` fails closed on an unstamped sibling. Exclusion is by job, never by hop."""
+    """What the live runs may still draw: each its reserve less what it already billed, which the
+    coupon's bill counts. ``None`` fails closed on an unstamped sibling. Exclusion is by job,
+    never by hop."""
     running = job_registry.list_holding_spend(user_id=user_id)
     own = next((j for j in running if j.job_id == excluding_job_id), None)
     mine = None if own is None else (own.created_at, own.job_id)
@@ -940,8 +962,24 @@ def _outstanding_reservations(
             continue
         # An axis no account bounds reserves nothing on it.
         usd, tokens = job.reserve.usd, job.reserve.tokens
-        held = held.plus(Budget.amount(usd or 0.0, tokens or 0))
+        billed = _billed_by(job)
+        held = held.plus(
+            Budget.amount(
+                max(0.0, (usd or 0.0) - billed.at_most_usd),
+                max(0, (tokens or 0) - billed.at_most_tokens),
+            )
+        )
     return held
+
+
+def _billed_by(job: Job) -> UserSpend:
+    """What a launch's cycle cost on the box's keys, every send its book counts against the
+    reserve (`SpendBook._coupon_usd_used`), a resumed cycle's prior spend and a nested run's
+    included. A holder whose sends land on no cycle of its own has billed nothing it can name."""
+    if not isinstance(job.holder, CampaignLaunch) or job.hop == UNRESOLVED_HOP:
+        return ZERO_SPEND
+    ledger = CycleLayout(cycle_dir_for(WorkspaceDir(Path(job.workspace)), job.hop)).ledger
+    return ledger_cost([ledger] if ledger.is_file() else []).host
 
 
 def _grace_bounded(remaining: float, spent: UserSpend) -> float:
@@ -979,18 +1017,3 @@ def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
     updated = account_of(stores).model_copy(update={"max_concurrent_cycles": limit})
     stores.users.save(updated)
     return updated
-
-
-def on_free_tier(stores: Stores) -> bool:
-    """The box's DEFAULT coupon: the host, a delegate and a hand-granted account are outside it.
-    What the tier binds of a run is `free_tier.py::free_fence`'s."""
-    return (
-        not is_host(stores.identity)
-        and stores.grant.load() is None
-        and _delegated_spend_ceiling(stores) is None
-    )
-
-
-def _delegated_spend_ceiling(stores: Stores) -> float | None:
-    ceiling = stores.identity.claims.get("spend_ceiling_usd")
-    return float(ceiling) if isinstance(ceiling, int | float) else None

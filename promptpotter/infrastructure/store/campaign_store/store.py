@@ -67,7 +67,7 @@ from promptpotter.infrastructure.runtime_flags import (
     run_state_stamps,
     standing_budget,
 )
-from promptpotter.infrastructure.store.account_spend import banked_metered, sandbox_cycle_dirs
+from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs, workspace_bank
 from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ResolvedRun,
@@ -101,7 +101,7 @@ from promptpotter.infrastructure.store.layout import (
     campaigns_root_dir_for,
     cycle_dir_for,
     head_to_head_path,
-    inner_sandbox_key,
+    read_sandbox_owner,
     root_cycle_id,
 )
 from promptpotter.infrastructure.store.read_model import (
@@ -179,10 +179,7 @@ class CampaignStore:
     def ledger(self, hop: CycleHop) -> Path:
         return self.layout(hop).ledger
 
-    def append(self, hop: CycleHop, record: CycleRecord) -> int:
-        return self._land(hop, record)
-
-    def _land(self, hop: CycleHop, *records: CycleRecord, dashboard: bool = False) -> int:
+    def append(self, hop: CycleHop, *records: CycleRecord, dashboard: bool = False) -> int:
         """The one append door: each record lands under a one-shot hold of the cycle's `index.json`
         (and, at a mint or a stop, its `dashboard.json`), joining a run's in this process."""
         cycle_dir = CycleDir(self.cycle_dir(hop))
@@ -249,8 +246,11 @@ class CampaignStore:
 
     def metered_spend(self, campaign_id: str, meter: CeilingMeter) -> Budget:
         """Each cycle's OWN appends once (a fork's prefix is its parent's), and what a deleted cycle metered."""
-        own = _ledger_meters(self.campaign_cycle_ledgers(campaign_id))[meter]
-        return own.plus(banked_metered(self._base_dir, campaign_id, meter))
+        bank = workspace_bank(self._base_dir)
+        counted = bank.metered.get((campaign_id, meter), NOTHING_METERED)
+        if bank.deleted(campaign_id):
+            return counted
+        return _ledger_meters(self.campaign_cycle_ledgers(campaign_id))[meter].plus(counted)
 
     def cycle_metered(self, hop: CycleHop, meter: CeilingMeter) -> Budget:
         return _ledger_meters([self.ledger(hop)])[meter]
@@ -456,24 +456,20 @@ class CampaignStore:
         self._guard_and_release(campaign_id, "delete")
         # After the guard: a tombstone beside a refused delete's rows counts the money twice.
         self._campaign_metered_bank(campaign_id)
-        # Before the tree goes: the off-tree inner sandboxes are keyed by these ids.
-        inner_cycle_ids: list[str] = []
-        if inner_sandbox_root is not None:
-            cycles_dir = campaign_cycles_dir(campaign_dir)
-            if cycles_dir.is_dir():
-                inner_cycle_ids = [p.name for p in cycles_dir.iterdir() if p.is_dir()]
+        # Before the tree goes, keyed by owner: a retry of a delete torn anywhere finds them all.
+        if inner_sandbox_root is not None and inner_sandbox_root.is_dir():
+            for sandbox in sorted(inner_sandbox_root.iterdir()):
+                owner = read_sandbox_owner(sandbox)
+                if owner is not None and (owner.tenant_id, owner.campaign_id) == (
+                    self._base_dir.name,
+                    campaign_id,
+                ):
+                    self.delete_inner_sandbox(sandbox, campaign_id=campaign_id)
         if keepsake:
             self._set_lifecycle(campaign_id, "deleted", changed_at, reason)
             _strip_to_keepsake(campaign_dir)
         else:
             rmtree_robust(campaign_dir)
-        if inner_sandbox_root is not None:
-            tenant_id = self._base_dir.name
-            for cycle_id in inner_cycle_ids:
-                inner_dir = inner_sandbox_root / inner_sandbox_key(
-                    tenant_id, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
-                )
-                self.delete_inner_sandbox(inner_dir, campaign_id=campaign_id)
         return True
 
     def delete_inner_sandbox(self, sandbox: Path, *, campaign_id: str) -> None:
@@ -506,7 +502,7 @@ class CampaignStore:
 
     def mint_cycle(self, hop: CycleHop) -> None:
         if scan_cycle_facts(self.ledger(hop)).minted is None:
-            self._land(hop, CycleMintedRecord(), dashboard=True)
+            self.append(hop, CycleMintedRecord(), dashboard=True)
 
     def mint_fork_cycle(
         self, child: CycleHop, parent_dir: Path, spec: ForkSpec, *, cut: int, cut_round: int
@@ -640,7 +636,7 @@ class CampaignStore:
         self, hop: CycleHop, stop: RunPhaseRecord, *, error: ErrorRecord | None = None
     ) -> None:
         # Error first, so no reader finds the ending without it.
-        self._land(hop, *([] if error is None else [error]), stop, dashboard=True)
+        self.append(hop, *([] if error is None else [error]), stop, dashboard=True)
 
     def claim_launch(
         self,

@@ -93,7 +93,7 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
     if (r.ok) setNote(applied);
   };
 
-  // Quotes NO number: `quota.py::clamp_budget_change` mins the request against the allowance.
+  // Quotes NO number: `quota.py::change_budget` mins the request against the allowance.
   const apply = () =>
     void send(
       next,

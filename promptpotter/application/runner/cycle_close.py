@@ -159,7 +159,7 @@ def close_cycle(
         cycle_error=cycle_error,
         finished_at=finished_at,
         # In-memory, never the debounced ``dashboard.json``.
-        spend=observers.dashboard.state.spend,
+        spend=observers.dashboard.live.state.spend,
         bench=bench,
         langfuse_trace_id=observers.tracing.langfuse_trace_id(),
     )

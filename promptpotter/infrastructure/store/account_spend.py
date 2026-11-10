@@ -138,14 +138,20 @@ class _Tombstones:
         held = self._by_campaign.get(banked.campaign_id, NOTHING_PAID)
         self._by_campaign[banked.campaign_id] = held.plus(spent)
 
-    def value(self) -> _Banked:
-        return _Banked(dict(self._by_campaign), dict(self._metered), frozenset(self._subjects))
+    def value(self) -> WorkspaceBank:
+        return WorkspaceBank(
+            dict(self._by_campaign), dict(self._metered), frozenset(self._subjects)
+        )
 
 
-class _Banked(NamedTuple):
+class WorkspaceBank(NamedTuple):
     spent: dict[str, PaidSpend]
     metered: dict[tuple[str, CeilingMeter], Budget]
     subjects: frozenset[Subject]
+
+    def deleted(self, campaign_id: str) -> bool:
+        """Its own tombstone IS the delete's commit: rows a torn delete left count for nothing."""
+        return Subject(campaign_id, "") in self.subjects
 
 
 _SPEND_FOLDS = (_Spend, _Tombstones)
@@ -177,17 +183,14 @@ def ledger_cost(ledgers: Iterable[Path]) -> PaidSpend:
 
 def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> PaidSpend:
     """What the campaign cost, an L4 inner one too; the account's bill is :func:`billed_spend`'s."""
-    own = ledger_cost(campaigns.campaign_cycle_ledgers(campaign_id))
-    banked = _banked(campaigns.workspace).spent
-    return own.plus(banked.get(campaign_id, NOTHING_PAID))
+    bank = workspace_bank(campaigns.workspace)
+    spent = bank.spent.get(campaign_id, NOTHING_PAID)
+    if bank.deleted(campaign_id):
+        return spent
+    return ledger_cost(campaigns.campaign_cycle_ledgers(campaign_id)).plus(spent)
 
 
-def banked_metered(workspace: WorkspaceDir, campaign_id: str, meter: CeilingMeter) -> Budget:
-    """What the campaign's deleted cycles had metered against its ceiling."""
-    return _banked(workspace).metered.get((campaign_id, meter), NOTHING_METERED)
-
-
-def _banked(workspace: WorkspaceDir) -> _Banked:
+def workspace_bank(workspace: WorkspaceDir) -> WorkspaceBank:
     workspace_ledger = CycleEventLog.workspace_path(workspace)
     return LedgerIndex.of(workspace_ledger, _SPEND_FOLDS).view(_Tombstones)
 

@@ -6,8 +6,9 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
-    mint_diag_sibling,
-    mint_operator_fork,
+    ForkCut,
+    cut_diag_sibling,
+    cut_operator_fork,
 )
 from promptpotter.application.commands.dispatcher import (
     Applier,
@@ -22,6 +23,7 @@ from promptpotter.application.commands.dispatcher import (
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.startability import offered_dataset
+from promptpotter.application.jobs.launcher.admission import release_slot, withdraw_queued
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.head_to_head import (
     AdmittedHeadToHead,
@@ -43,6 +45,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     FreshMint,
     assert_origin_ready,
 )
+from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
     cycle_config,
@@ -75,7 +78,6 @@ from promptpotter.domain.run_records import (
     OriginSource,
 )
 from promptpotter.domain.search_point import NodeCall
-from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.shared.errors import (
     LedgerUnreadableError,
     NotFoundError,
@@ -264,37 +266,43 @@ def _recorded_launches(effect: CommandEffect) -> list[LaunchedJob]:
     return effect.launches
 
 
-def _diag_target(stores: Stores, hop: CycleHop, mode: RunMode) -> CycleHop:
+def _diag_target(stores: Stores, hop: CycleHop, mode: RunMode) -> ForkCut | None:
+    """A diag start's target: on a cycle that ended in diag, a sibling cut off it; ``None``, the
+    cycle itself."""
     if not mode.diag or mode.from_round is not None:
-        return hop
+        return None
     index = stores.campaigns.load(hop, moment=None)
     final = None if index is None else index.final
     if final is None or final.mode != "diag":
-        return hop
-    return CycleHop(
-        campaign_id=hop.campaign_id,
-        cycle_id=mint_diag_sibling(stores=stores, hop=hop),
-    )
+        return None
+    return cut_diag_sibling(stores=stores, hop=hop)
 
 
 async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[Launched]:
     dispatcher, payload, hop = dispatched.dispatcher, dispatched.payload, dispatched.hop
-    return _launch_applier(
-        dispatcher,
-        lambda: launch(
-            ExistingCycle(
-                _diag_target(dispatcher.stores, hop, payload.mode),
-                dispatched.campaign,
-                payload.budget,
-                step_rounds=payload.step_rounds,
-            ),
+
+    def request(on: CycleHop) -> ExistingCycle:
+        return ExistingCycle(
+            on, dispatched.campaign, payload.budget, step_rounds=payload.step_rounds
+        )
+
+    async def _apply_start() -> Launched:
+        # Refused before a slot is taken: a rewind past the last close is the operator's to fix.
+        if (after := payload.mode.from_round) is not None:
+            dispatcher.stores.campaigns.rewind_enters(hop, after)
+        if (sibling := _diag_target(dispatcher.stores, hop, payload.mode)) is not None:
+            return await _launch_fork(
+                dispatcher, sibling, request(sibling.child), payload.mode, leaving=None
+            )
+        return await launch(
+            request(hop),
             payload.mode,
             stores=dispatcher.stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
-        ),
-        refused_on=hop,
-    )
+        )
+
+    return _launch_applier(dispatcher, _apply_start, refused_on=hop)
 
 
 async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier[Launched]:
@@ -308,7 +316,7 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
     seed = parse_cycle_seed(payload.seed, stores, campaign, hop)
 
     async def _apply_fork() -> Launched:
-        new_cycle_id = mint_operator_fork(
+        cut = cut_operator_fork(
             stores=stores,
             hop=hop,
             from_round=payload.round,
@@ -317,42 +325,68 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
             keep_rounds=payload.keep_rounds,
             reason=payload.reason,
         )
-        fork = CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id)
-        # Before it runs: it spends the arm's ceiling and pauses its parent, so the campaign leaves.
-        stores.campaigns.leave_comparison(fork, ComparisonExit.FORK)
-        try:
-            # Bounded as a start-run is: the payload's own budget, admitted from what the parent leaves.
-            launched = await launch(
-                ExistingCycle(fork, campaign, payload.budget),
-                payload.mode,
-                stores=stores,
-                job_registry=dispatcher.job_registry,
-                inline=dispatcher.inline,
-            )
-        except BaseException:
-            # A start raises only BEFORE the run exists, so the stub is idle.
-            _cleanup_failed_fork(stores, hop, new_cycle_id)
-            raise
-        # Only once the fork's run is admitted: a refused fork pauses nothing.
-        if not dispatcher.run_state(hop).pause_refusal:
-            dispatcher.pause_superseded(hop, fork)
-        return launched
+        # Bounded as a start-run is: the payload's own budget, admitted from what the parent leaves.
+        return await _launch_fork(
+            dispatcher,
+            cut,
+            ExistingCycle(cut.child, campaign, payload.budget),
+            payload.mode,
+            leaving=ComparisonExit.FORK,
+        )
 
     return _launch_applier(dispatcher, _apply_fork)
 
 
-def _cleanup_failed_fork(stores: Stores, parent_hop: CycleHop, new_cycle_id: str) -> None:
-    # Best-effort: it must never mask the launch failure its caller re-raises.
+async def _launch_fork(
+    dispatcher: CommandDispatcher,
+    cut: ForkCut,
+    request: ExistingCycle,
+    mode: RunMode,
+    *,
+    leaving: ComparisonExit | None,
+) -> Launched:
+    """Its parent untouched until the fork's run is held: a refused fork deletes its cut and
+    leaves its parent's line, inbox, pointer and comparison as they stood. An operator's fork
+    then leaves its parent and the comparison by *leaving*; a diag sibling (``None``) neither."""
+    stores, job_registry = dispatcher.stores, dispatcher.job_registry
     try:
-        deleted, reason = cleanup_stub_fork_if_empty(
-            campaign_store=stores.campaigns,
-            hop=CycleHop(campaign_id=parent_hop.campaign_id, cycle_id=new_cycle_id),
+        admitted = admit(
+            request, mode, stores=stores, job_registry=job_registry, inline=dispatcher.inline
         )
-    except Exception:
-        logger.exception("fork %s: launch failed and its stub could not be cleaned", new_cycle_id)
+    except BaseException:
+        cut.withdraw(stores)
+        raise
+
+    async def _held_fork() -> HeldRun:
+        held: HeldRun | None = None
+        try:
+            held = await admitted.held()
+            if leaving is not None:
+                # It spends the arm's ceiling and moves its parent, so the campaign leaves.
+                stores.campaigns.leave_comparison(cut.child, leaving)
+            cut.take(stores)
+            if leaving is not None:
+                # Last: no withdraw of the cut undoes it.
+                _leave_parent(dispatcher, cut)
+        except BaseException as exc:
+            if held is not None:
+                release_slot(job_registry, held.job_id, exc, stores=stores, hop=None)
+            cut.withdraw(stores)
+            raise
+        return held
+
+    return await admitted.hand_over(_held_fork())
+
+
+def _leave_parent(dispatcher: CommandDispatcher, cut: ForkCut) -> None:
+    """On the fork's own authority over its parent: the parent's launch still queued is withdrawn,
+    otherwise its run paused; a parent no pause reaches is left as it stands."""
+    stores, parent = dispatcher.stores, cut.parent
+    claim = stores.campaigns.launch_claim(parent)
+    if claim is not None and withdraw_queued(stores, dispatcher.job_registry, claim.job_id):
         return
-    if not deleted:
-        logger.warning("fork %s: launch failed and its stub was kept (%s)", new_cycle_id, reason)
+    if not dispatcher.run_state(parent).pause_refusal:
+        dispatcher.pause_superseded(parent, cut.child)
 
 
 async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[Launched]:

@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass, replace
 
 from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
 from promptpotter.application.initialization.loop_start import (
     cycle_partition,
     finalize_loop_state,
@@ -135,7 +135,7 @@ async def _run_single_cycle(
                 session,
                 cycle.points.job(origin.origin.individual),
                 origin_id=origin.origin.individual.id,
-                spend=observers.dashboard.state.spend,
+                spend=observers.dashboard.live.state.spend,
                 cb=cb,
             )
             if cycle.bench_passes is not None and book.binds("bench"):
@@ -256,7 +256,7 @@ def _mint_and_rebase_fork(
     prep = replace(prep, campaign_config=apply_config_overrides(prep.campaign_config, overrides))
     held = store.standing_rounds(parent, moment=None).rounds
     learned = held[max(held)].close.optimizer_state
-    new_cycle_id = mint_fork(
+    new_cycle_id = cut_fork(
         session.store,
         parent=parent,
         fork_from_round=cut,
@@ -265,7 +265,7 @@ def _mint_and_rebase_fork(
         issued_by=rebase_req.issued_by,
         # No `origin_prompts`: a rebase replays its origin from the parent's round.
         seed=CycleSeed(config_overrides=overrides),
-    )
+    ).take(session.store)
     child = CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id)
     branch = (
         rebase_req.hangs_from or store.standing_rounds(child, moment=None).rounds[cut - 1].close

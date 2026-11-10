@@ -40,7 +40,7 @@ A field on the ROUND file is one edit: `domain/results.py::RoundOutcome` — the
 
 ## 4. A resume / decision checkpoint kind
 
-Name the kind on the deciding party's `CheckpointKind` enum — `BenchCheckpointKind` (`domain/run_records.py`), potter's `PotterCheckpointKind` (`optimizers/potter/records.py`), or a plugin's own string. A member records it with `ctx.read(Replay).decide(kind, inputs, outcome)` (`bench/node_context.py`); the bench's own go through `record_decision`. If a resume must re-derive it, register a replayer on the deciding member's `replayers` — **registering one IS the gating**: a kind with none is archived and never compared. `replayers.py::replayers` refuses two members claiming one kind (at `wiring.py::complete_registries`); `cli/commands/launch.py::divergence_hint` lists the checked kinds off that table.
+Name the kind on the deciding party's `CheckpointKind` enum — `BenchCheckpointKind` (`domain/run_records.py`), potter's `PotterCheckpointKind` (`optimizers/potter/records.py`), or a plugin's own string. A member records it with `ctx.read(Replay).decide(kind, inputs, outcome)` (`bench/node_context.py`); the bench's own go through `record_decision`, but a fork's `FORK_CUT`, which `fork_siblings.py::_fork_sibling_setup` appends itself for the offset it lands at. If a resume must re-derive it, register a replayer on the deciding member's `replayers` — **registering one IS the gating**: a kind with none is archived and never compared. `replayers.py::replayers` refuses two members claiming one kind (at `wiring.py::complete_registries`); `cli/commands/launch.py::divergence_hint` lists the checked kinds off that table.
 
 ---
 

@@ -34,7 +34,7 @@ from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     resolve_dataset,
@@ -139,6 +139,18 @@ class ExistingCycle:
         return campaign_sends(stores, self.hop)
 
 
+def land_and_claim(
+    stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, held: HeldBudget
+) -> None:
+    """A job onto the cycle its hold just minted, the claim taken off the job as it stands now:
+    promoted out of the queue, its stage the one the cycle reads."""
+    land_job(stores, job_registry, job_id, hop, held.share)
+    promoted = job_registry.get(job_id)
+    if promoted is None:
+        raise RuntimeError(f"job {job_id} was cleared while its cycle was minted")
+    claim_cycle(stores, job_registry, promoted, hop)
+
+
 async def hold_fresh_mint(
     request: FreshMint, *, stores: Stores, job_registry: JobRegistry, job: Job
 ) -> HeldRun:
@@ -165,21 +177,18 @@ async def hold_fresh_mint(
             task_text=request.task_text,
         )
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
-        land_job(stores, job_registry, job.job_id, hop, held.share)
-        claim_cycle(stores, job_registry, job, hop)
-
+        land_and_claim(stores, job_registry, job.job_id, hop, held)
+        logger.info(
+            "mint: minted %s/%s for user %s (job %s)",
+            minted.campaign_id,
+            minted.cycle_id,
+            stores.identity.user_id,
+            job.job_id,
+        )
+        return HeldRun.of(job_registry, job.job_id, minted, held)
     except BaseException as exc:
         release_slot(job_registry, job.job_id, exc, stores=stores, hop=hop)
         raise
-
-    logger.info(
-        "mint: minted %s/%s for user %s (job %s)",
-        minted.campaign_id,
-        minted.cycle_id,
-        stores.identity.user_id,
-        job.job_id,
-    )
-    return HeldRun.of(job_registry, job.job_id, minted, held)
 
 
 def commit_upload_definition(

@@ -28,8 +28,8 @@ landed, reviewed and stopped is [`../developer/refactor-arcs.md`](../developer/r
 
 | Chain | Was | Closes | Waits on |
 |---|---|---|---|
-| **m9r** | M9 | M9.5b, M9.2, M9.6: a derived file's fault is a `derived_file_stale` warning; one writer per derived file | — |
-| **F1, F2, F3, F4, F5a, F7, F7b** | — | admit, then cut; Ctrl+C is the pause press; the coupon under one gate; one door into a job file; the host fact on `IdentityContext`; the tombstone is the delete; the replay serves the first deliberate row | m9r names its hunks |
+| **m9r** | M9 | landed in batch 17: M9.5b, M9.2, M9.6, a derived file's fault is a `derived_file_stale` warning and one writer per derived file; M9's rest is DOOR-a and DOOR-a's rest | — |
+| **F1, F2, F3, F4, F5a, F7, F7b** | — | landed in batch 17: admit, then cut; Ctrl+C is the pause press; the coupon under one gate; one door into a job file; the host fact on `IdentityContext`; the tombstone is the delete; the replay serves the first deliberate row | m9r names its hunks |
 | **trace, digest, edge, gate, webcell, weblazy** | M10, —, LA, —, M16, — | the dead trace path; the digest cached by content; one outbound poster; one pytest door; one measured-cell renderer and one knob editor; the entry chunk | — |
 | **PASS** | M13 | one held-out pass at all five doors; noise floor and seed screen on the ledger; the skipped verify | m9r |
 | **F5** | — | the tenant directory is the owner; one claim act; consent per principal; the delegate ceiling deleted | F1, F3, F5a |

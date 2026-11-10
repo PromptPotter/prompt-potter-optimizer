@@ -81,6 +81,9 @@ class IdentityContext:
     access_state: AccessState = "active"
     claims: Mapping[str, object] = field(default_factory=dict)
     capabilities: frozenset[str] = field(default_factory=frozenset)
+    # Stamped where the identity is built, never re-derived from `user_id`: a delegate acting
+    # for the host carries the host's `user_id` and is not the host.
+    host: bool = False
 
 
 def default_identity(
@@ -92,6 +95,8 @@ def default_identity(
         issuer=None,
         claims={},
         capabilities=OWNER_COMMAND_CAPABILITIES,
+        # The terminal is the box's own.
+        host=True,
     )
 
 

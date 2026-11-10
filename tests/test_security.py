@@ -180,6 +180,7 @@ from promptpotter.infrastructure.identity.blocklist import (
     unblock_email,
 )
 from promptpotter.infrastructure.identity.bundle import IdentityBundle, build_identity_bundle
+from promptpotter.infrastructure.identity.default_claim import is_host, maybe_claim_default
 from promptpotter.infrastructure.identity.google import GoogleProviderClient
 from promptpotter.infrastructure.identity.grants import (
     grant_principal,
@@ -539,7 +540,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     served = seen_by_eve.model_dump_json()
     for named in ("ada-id", ada_hop.campaign_id, ada_hop.cycle_id, held.job_id):
         assert named not in served, "another account's slot was named to a stranger"
-    host = IdentityContext(user_id=UserId("host"), tenant_id=TenantId("host"))
+    host = IdentityContext(user_id=UserId("host"), tenant_id=TenantId("host"), host=True)
     for reader, why in (
         (who("ada-id"), "an account lost its own slot"),
         (host, "the host lost it"),
@@ -1014,6 +1015,18 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     with pytest.raises(NotFoundError):
         require_capability(ident, starting.capability, subject=starting.value)  # lacks campaign.run
     assert acting_principal(ident).id == "sub-1", "audit must name the delegate, not the delegator"
+    # The host's delegate acts in the host's tenant and is not the host (bl4.B1).
+    maybe_claim_default(
+        projects_root=tmp_path / "projects",
+        user_id="owner-9",
+        marker_path=default_identity_paths().default_claim_marker,
+    )
+    assert is_host(identity_of_session(session_of("owner-9"), signed_in)), (
+        "the host read as a guest"
+    )
+    assert not is_host(identity_of_session(session_of("sub-1"), signed_in)), (
+        "the host's delegate read as the host: it would skip the coupon, the rate limit and the tier"
+    )
     # A grant with no delegator is fail-secure: own tenant, ZERO caps — never owner.
     write_json(
         grants,
@@ -1386,9 +1399,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
             stores=built_stores, verb="bench", hop=hop, declared=Budget(), sends=()
         ):
             pass
-    assert withdraw_queued(built_stores, registry, job.job_id, principal_id=job.principal_id), (
-        "the launch's own principal could not withdraw it"
-    )
+    assert withdraw_queued(built_stores, registry, job.job_id), "a queued launch stayed queued"
     assert not built_stores.run_state(hop).producer.attached, "a withdrawn launch held its cycle"
     attached_alike()
     assert campaigns.attached_cycle_ids(hop.campaign_id) == [], (
@@ -1473,14 +1484,23 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     delete_refused()
     standing = campaigns.load(hop, moment=None)
     assert standing is not None and standing.finished_at is None
-    # A fresh heartbeat with no lock held is still dead.
+    # A fresh heartbeat with no lock held is still dead, and a pause it accepted before it died
+    # stands for no producer: the crash reads vanished, never a clean pause (bl1.B12).
+    pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
+    await CommandDispatcher(built_stores).dispatch(CommandCall(pause))
+    assert built_stores.inbox(hop).pause is not None
     release_cycle(cycle_dir)
     os.utime(ledger)
-    gone = built_stores.run_state(hop).producer
-    assert (gone.state, gone.attached) == (ProducerState.SILENT, False)
+    gone = built_stores.run_state(hop)
+    assert (gone.run_phase, gone.producer.state, gone.producer.attached) == (
+        RunPhase.DETACHED,
+        ProducerState.SILENT,
+        False,
+    ), "a dead producer's accepted pause read as a clean pause"
     assert sweep_dead_cycles(built_stores.projects_root) == 1
     swept = campaigns.load(hop, moment=None)
     assert swept is not None and swept.stop_reason is StopReason.PRODUCER_VANISHED
+    assert built_stores.inbox(hop).pause is None, "a reaped cycle's pause still stood"
     assert sweep_dead_cycles(built_stores.projects_root) == 0, "one dead producer was swept twice"
     # A finished run still writing its last files holds the cycle against a delete.
     hold_cycle(cycle_dir)
@@ -2437,7 +2457,7 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
     with pytest.raises(TaskUncancellableError):
         launch_cancels([queued, elsewhere], caller.stores)
     release_cycle(run_dir)
-    assert registry.cancel_queued(queued.job_id, principal_id=principal)
+    assert registry.cancel_queued(queued.job_id) is not None
     assert read(queued) == "cancelled", "a withdrawn launch reads as run"
     # Its run's task ended without a release: the producer is gone, so the launch never will end.
     died = asyncio.ensure_future(asyncio.sleep(0))
@@ -2470,7 +2490,7 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
         launched = ran.result.launch
         assert launched.hop == step_hop, "a queued step recorded no cycle its job knew"
         if ending is None:
-            assert withdraw_queued(caller.stores, queuing, launched.job_id, principal_id=principal)
+            assert withdraw_queued(caller.stores, queuing, launched.job_id)
         else:
             queuing.release(launched.job_id, ending)
             caller.stores.campaigns.release_claim(step_hop, job_id=launched.job_id, detail="ran")

@@ -2096,13 +2096,18 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             "a host task filed the prefix it was sent by, which a later mint can make ambiguous"
         )
 
+        landed: list[str] = []
+
         async def _ctrl_c() -> str:
             pressed_call = _verify_call("pressed")
 
             async def _press() -> None:
                 signal.raise_signal(signal.SIGINT)
-                # Its cancel lands, then cancels this task.
-                await asyncio.Event().wait()
+                # A send already out bills either way: the press stops the pass at its next
+                # checkpoint, never by cancelling the wait on what it paid for.
+                while stores.commands.book().stop(pressed_call.command_id) is None:
+                    await asyncio.to_thread(lambda: None)
+                landed.append(pressed_call.command_id)
 
             with monkeypatch.context() as patched:
                 patched.setattr(measuring, "verify_candidate", _passing(_press))
@@ -2119,6 +2124,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         )
         assert result_code == PassStoppedError.code, "a stopped pass's result is not its refusal"
         assert "cancel by" in pressed, "a Ctrl+C left the pass running"
+        assert len(landed) == 1, "a Ctrl+C cancelled the pass's in-flight sends (bl1.B2)"
         assert len(cancels()) == before + 2 and opened_task["held"] in cancels(), (
             "a host cancel or a Ctrl+C ended the pass without its cancel"
         )

@@ -35,12 +35,12 @@ describe("failureKind", () => {
   });
 
   it("reads any other answered 4xx as a refusal, worded by the server, read or write", () => {
-    for (const status of [409, 429, 418]) {
+    for (const status of [409, 418]) {
       expect(failureKind(new ApiError(status, "/api/v1/x"))).toBe("refused");
     }
-    const capped = new ApiError(429, "/api/v1/x", "spend_cap", null, null, "Raise the cap to go on.");
+    const capped = new ApiError(409, "/api/v1/x", "spend_cap", null, null, "Raise the cap to go on.");
     expect(operatorMessage(capped, failureKind(capped))).toBe("Raise the cap to go on.");
-    const bare = new ApiError(429, "/api/v1/x");
+    const bare = new ApiError(409, "/api/v1/x");
     expect(operatorMessage(bare, failureKind(bare))).not.toMatch(/reach/i);
   });
 

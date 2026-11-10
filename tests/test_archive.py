@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import dataclasses
 import json
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -55,8 +57,8 @@ from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    cut_operator_fork,
     fork_edge,
-    mint_operator_fork,
 )
 from promptpotter.application.bench.resume_and_fork.repair import apply_correction, round_packages
 from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
@@ -70,6 +72,9 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_version,
 )
 from promptpotter.application.initialization.session import LaunchClock
+from promptpotter.application.jobs.launcher.admission import request_jobs
+from promptpotter.application.jobs.launcher.launch import Admitted, Inline
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
@@ -105,7 +110,7 @@ from promptpotter.domain.campaign_config import (
     OptimizationConfig,
     apply_config_overrides,
 )
-from promptpotter.domain.command_kinds import DeleteCampaignPayload, ForkSeed
+from promptpotter.domain.command_kinds import DeleteCampaignPayload, ForkCyclePayload, ForkSeed
 from promptpotter.domain.cycle_paths import (
     CycleDir,
     CycleHop,
@@ -119,6 +124,7 @@ from promptpotter.domain.hierarchy import (
     SubtreeCourse,
     entries_under,
 )
+from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
@@ -133,6 +139,7 @@ from promptpotter.domain.run_records import (
     ConfigOverrides,
     CycleSeed,
     CycleShareRecord,
+    CycleSupersededRecord,
     ForkDirection,
     ForkSpec,
     ForkTrigger,
@@ -172,12 +179,14 @@ from promptpotter.infrastructure.store.measurement_archive import (
     standing,
 )
 from promptpotter.infrastructure.store.read_model import append_row
+from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, owned_campaign
 from promptpotter.shared.errors import (
     ConflictError,
     FileKind,
     FileUnreadableError,
     LedgerUnreadableError,
+    PotterError,
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
@@ -272,6 +281,15 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
         "q_aime_14",
         "q_justlogic_14",
     }, "a grade-C answer was replayed"
+    # A later diagnostic rescore (B) or remeasure never displaces the answer a run measured first.
+    feed = ReplayFeed(archive, LLM_ONLY)
+    for at, said, grade in ((1, "measured", "A"), (2, "rescored", "B"), (3, "again", "A")):
+        row = archive_row("q_rescored", predicted=said, pipeline_data={"terminal_node": "llm_only"})
+        filed(archive, [row], filed_under(), grade=grade, created_at=f"2026-05-19T00:0{at}")
+        moved = [b.cell.predicted for b in feed.advance().values() if b.cell.query == "q_rescored"]
+        assert moved == (["measured"] if at == 1 else []), (
+            f"the replay served {moved} once {said!r} was filed: a later row displaced the first"
+        )
     # A cell replays on its sample's content in whichever bank holds it, at that bank's slot.
     wider = [
         Sample(id=0, query="q_aime_14", ground_truth="g"),
@@ -612,7 +630,7 @@ def _minted(stores: Stores, cycle_id: str) -> tuple[CycleHop, CycleEventLog]:
 def _mint_sibling(
     store: Any, parent: CycleHop, cycle_id: str, spec: ForkSpec, *, cut_round: int
 ) -> CycleHop:
-    """The mint record alone, cut at the parent's head: what `mint_fork` writes for a sibling."""
+    """The mint record alone, cut at the parent's head: what `cut_fork` writes for a sibling."""
     child = parent.model_copy(update={"cycle_id": cycle_id})
     parent_dir = store.cycle_dir(parent)
     store.mint_fork_cycle(
@@ -651,7 +669,7 @@ def _emit_round(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_inherits_them(
-    built_stores: Stores, offline: Router
+    built_stores: Stores, offline: Router, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stores = built_stores
     # A replayer that cannot re-derive its decision is a named divergence, never a clean match.
@@ -1034,15 +1052,46 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     for record in unheld:
         store.append(scenario, record)
+
+    # A rewind its launch refuses (no backend answers this dataset) has written nothing on its
+    # parent: no supersede, no inbox void, no moved pointer, no stub; nor does a cut past the
+    # parent's last close.
+    def parent_standing() -> tuple[object, ...]:
+        index = store.load(scenario, moment=None)
+        assert index is not None
+        cycles = sorted(d.name for d in store.campaign_cycle_dirs(scenario.campaign_id))
+        return cycles, read_active_pointer(store.workspace), index.final
+
+    standing = parent_standing()
+    for refused_round in (2, 99):
+        with pytest.raises(PotterError):
+            asyncio.run(
+                CommandDispatcher(stores, inline=Inline()).dispatch(
+                    CommandCall(
+                        ForkCyclePayload(
+                            campaign_id=scenario.campaign_id,
+                            cycle_id=scenario.cycle_id,
+                            round=refused_round,
+                            keep_rounds=True,
+                        )
+                    )
+                )
+            )
+        assert store.last(scenario, CycleSupersededRecord) is None, (
+            f"a refused rewind at round {refused_round} superseded its parent"
+        )
+        assert parent_standing() == standing, (
+            f"a refused rewind at round {refused_round} left a stub or moved its parent"
+        )
     criterion = "0.9 * accuracy + 0.1 * (1 - mean_latency_s)"
-    fork_id = mint_operator_fork(
+    fork_id = cut_operator_fork(
         stores=stores,
         hop=scenario,
         from_round=2,
         from_candidate_id="",
         seed=CycleSeed(config_overrides=ConfigOverrides(scoring=criterion)),
         keep_rounds=True,
-    )
+    ).take(stores)
     applied = scenario.model_copy(update={"cycle_id": fork_id})
     index = store.load(applied, moment=None)
     assert index is not None and index.fork is not None
@@ -1074,9 +1123,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         seed = parse_cycle_seed(
             ForkSeed(pipeline_overlay={"a": {"model": model}}), stores, campaign, hop
         )
-        cycle_id = mint_operator_fork(
+        cycle_id = cut_operator_fork(
             stores=stores, hop=hop, from_round=2, seed=seed, keep_rounds=True
-        )
+        ).take(stores)
         return hop.model_copy(update={"cycle_id": cycle_id})
 
     permitted = permitted_narrowing(stores, campaign)
@@ -1108,13 +1157,13 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert steer_verdict(stores, permitted, no_edit.pipeline_overlay) == "clean"
     panel_fork = scenario.model_copy(
         update={
-            "cycle_id": mint_operator_fork(
+            "cycle_id": cut_operator_fork(
                 stores=stores,
                 hop=scenario,
                 from_round=2,
                 from_candidate_id=candidate_key,
                 seed=parse_cycle_seed(no_edit, stores, campaign, scenario),
-            )
+            ).take(stores)
         }
     )
     panel_laid = cycle_config(stores, campaign, panel_fork)
@@ -1128,6 +1177,42 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert panel_index is not None and not panel_index.human_intervened, (
         "a panel fork with no edit was stamped babysat"
     )
+    # A fork by another issuer than the one whose launch queued on its parent goes ahead and, on
+    # its own authority over the parent, withdraws that launch (bl1.B5).
+    room = [0]
+    queue = JobRegistry(tmp_path / "fork_jobs", capacity=lambda _live: room[0])
+    (parents_launch,) = request_jobs(
+        stores=stores, job_registry=queue, holder=CampaignLaunch("ds1"), hop=scenario
+    )
+    assert parents_launch.queued, "guard: the parent's launch holds a place in line"
+    room[0] = 1
+    other = dataclasses.replace(
+        stores, identity=dataclasses.replace(stores.identity, claims={"principal": "sub-1"})
+    )
+
+    async def past_its_refusals(admitted: Admitted) -> Any:
+        # The journey asks what the held fork does to its parent, not what holds it.
+        return SimpleNamespace(job_id=admitted.job.job_id, session=admitted.request)
+
+    monkeypatch.setattr(Admitted, "held", past_its_refusals)
+    asyncio.run(
+        CommandDispatcher(other, job_registry=queue, inline=Inline()).dispatch(
+            CommandCall(
+                ForkCyclePayload(
+                    campaign_id=scenario.campaign_id,
+                    cycle_id=scenario.cycle_id,
+                    round=2,
+                    keep_rounds=True,
+                )
+            )
+        )
+    )
+    withdrawn = queue.get(parents_launch.job_id)
+    assert withdrawn is not None and withdrawn.lapse == "withdrawn", (
+        "a fork left its parent's queued launch to run beside it"
+    )
+    assert store.launch_claim(scenario) is None, "a withdrawn launch still claims the parent"
+    assert store.last(scenario, CycleSupersededRecord) is not None, "the fork never took"
 
     # A fork's own ledger displaces its parent's prefix once.
     displaced = CycleHop(campaign_id="displaced__20260101-000000", cycle_id="cycle_displaced")
@@ -1360,7 +1445,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 trigger=ForkTrigger.OPERATOR_STEERED if row_named else ForkTrigger.OPERATOR_REWIND,
                 reason="",
                 issued_by=SYSTEM_PRINCIPAL,
-                # The one resolution `mint_fork` writes: the named arm, else the line's pick.
+                # The one resolution `cut_fork` writes: the named arm, else the line's pick.
                 from_candidate=fork_edge(
                     store.standing_rounds(hops[row_parent], moment=None),
                     row_cut,

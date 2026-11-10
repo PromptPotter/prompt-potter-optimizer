@@ -3561,7 +3561,7 @@
         "type": "object"
       },
       "ForkTrigger": {
-        "description": "One value per caller of :func:`mint_fork`.",
+        "description": "One value per caller of :func:`cut_fork`.",
         "enum": [
           "operator_diag",
           "operator_rewind",

@@ -5,6 +5,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from promptpotter.infrastructure.identity.blocklist import check_blocklist
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
+from promptpotter.infrastructure.identity.default_claim import is_host_tenant_dir
 from promptpotter.infrastructure.identity.grants import (
     PrincipalGrant,
     read_grant,
@@ -79,6 +80,8 @@ def identity_of_session(data: SessionData, bundle: IdentityBundle) -> IdentityCo
         access_state=access_state,
         claims={"subject": data.subject},
         capabilities=_session_capabilities(access_state),
+        # A delegate (above) is never the host, whoever delegated it.
+        host=is_host_tenant_dir(data.user_id),
     )
 
 

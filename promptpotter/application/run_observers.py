@@ -127,13 +127,13 @@ def declare_run_stop(
 ) -> None:
     """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second record."""
     budget = session.store.campaigns.armed_run_limits(
-        session.hop, observers.dashboard.state.run_limits
+        session.hop, observers.dashboard.live.state.run_limits
     ).budget
     meter = ceiling_meter(session.purpose)
     # The cycle's share record, which its book reads live; none lands before admission's.
     held = session.store.campaigns.last(session.hop, CycleShareRecord)
     spend = run_spend_view(
-        observers.dashboard.spend_metered(meter),
+        observers.dashboard.live.spend_metered(meter),
         campaign_metered=session.store.campaigns.metered_spend(session.campaign_id, meter),
         usd_cap=budget.usd,
         token_cap=budget.tokens,
@@ -301,7 +301,7 @@ def _bind_observers(
         else forked_from.readout
     )
     dashboard = DashboardCheckout(cycle_dir)
-    if not dashboard.wired:
+    if dashboard.live.value() is None:
         raise RuntimeError(
             f"build_run_observers: the ledger of {session.hop} holds no RunWiringRecord"
         )

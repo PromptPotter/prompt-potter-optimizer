@@ -237,6 +237,10 @@ class SpendBook(Projection):
         # coupon's reserve never counts it. A resumed cycle's prior metering counts as the host's.
         self.off_coupon_usd = 0.0
         self.off_coupon_tokens = 0
+        # What the box's key paid for kinds the meter does not count (a Compare arm's bench): the
+        # reserve binds every send on that key, so the root book counts it beside the meter.
+        self.beside_usd = 0.0
+        self.beside_tokens = 0
         self._held_usd: dict[TokenUsageKind, float] = {}
         self._held_tokens: dict[TokenUsageKind, int] = {}
         self._out_usd: dict[TokenUsageKind, float] = {}
@@ -283,21 +287,16 @@ class SpendBook(Projection):
         return self.tokens_spent + self.tokens_unreported + self.set_aside_tokens
 
     def _coupon_usd_used(self) -> float:
-        return self._usd_used() - self.off_coupon_usd
+        return self._usd_used() - self.off_coupon_usd + self.beside_usd
 
     def _coupon_tokens_used(self) -> int:
-        return self._tokens_used() - self.off_coupon_tokens
+        return self._tokens_used() - self.off_coupon_tokens + self.beside_tokens
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
         self._seen = record
         # A nested run's copy is the ledger's: its book already counted it into this one.
         if not record.node.startswith(NESTED_NODE_PREFIX):
-            try:
-                self.count(record)
-            except Exception as fault:
-                # Its guard reports it; the next send refuses before it spends against a short meter.
-                self.unmetered = fault
-                raise
+            self.count(record)
 
     def binds(self, kind: TokenUsageKind) -> bool:
         return kind in METER_KINDS[self.meters]
@@ -311,10 +310,17 @@ class SpendBook(Projection):
         return not self.prices_replays or campaign_priced(cell_key)
 
     def count(self, record: TokenUsageRecord) -> None:
-        usd, tokens = metered(record, self.meters)
-        self._meter(usd, tokens, record.key_source)
-        if self.enclosing is not None:
-            self.enclosing.count(record.model_copy(update={"kind": _ENCLOSED}))
+        for book, filed_as in self._levels(record.kind):
+            filed = record.model_copy(update={"kind": filed_as})
+            try:
+                if book.binds(filed_as):
+                    book._meter(*metered(filed, book.meters), record.key_source)
+                else:
+                    book._beside(*metered(filed, "bill"), record.key_source)
+            except Exception as fault:
+                # Its guard reports it; no send in its chain is admitted against the short meter.
+                book.unmetered = fault
+                raise
 
     def _meter(self, usd: float | None, tokens: int, paid_by: KeySource | None) -> None:
         if usd is not None:
@@ -324,12 +330,17 @@ class SpendBook(Projection):
             self.off_coupon_usd += usd or 0.0
             self.off_coupon_tokens += tokens
 
+    def _beside(self, usd: float | None, tokens: int, paid_by: KeySource | None) -> None:
+        if draws_coupon(paid_by):
+            self.beside_usd += usd or 0.0
+            self.beside_tokens += tokens
+
     def _spend(
         self, kind: TokenUsageKind, usd: float | None, tokens: int, paid_by: KeySource
     ) -> None:
         """``usd`` is ``None`` where neither a bill nor a rate prices the call."""
-        for book, _ in self._levels(kind):
-            book._meter(usd, tokens, paid_by)
+        for book, filed_as in self._levels(kind):
+            (book._meter if book.binds(filed_as) else book._beside)(usd, tokens, paid_by)
 
     def set_aside(self, usd: float, tokens: int) -> None:
         self.set_aside_usd = usd
@@ -370,9 +381,13 @@ class SpendBook(Projection):
         return None
 
     def _room(
-        self, held: SendBound, bound: SendBound, beside: TokenUsageKind | None, paid_by: KeySource
+        self,
+        held: SendBound,
+        bound: SendBound,
+        beside: TokenUsageKind | None,
+        paid_by: KeySource,
     ) -> Iterator[tuple[ErrorCategory, bool, int]]:
-        """The campaign's share binds every send; the coupon's reserve only one on the box's key."""
+        """The campaign's share binds every send it meters; the coupon's reserve every one on the box's key."""
         budget = self.allotment
         reserved = self.reserve if draws_coupon(paid_by) else Budget()
         for reserve, limit, used, out, each in (
@@ -449,9 +464,9 @@ class SpendBook(Projection):
         paid_by: KeySource,
     ) -> bool:
         """True where an open cell reservation in this book's chain paid part of it."""
-        if self.unmetered is not None:
-            raise self.unmetered
         levels = list(self._levels(kind))
+        if (fault := next((b.unmetered for b, _ in levels if b.unmetered), None)) is not None:
+            raise fault
         at = next(
             (
                 i
@@ -462,8 +477,8 @@ class SpendBook(Projection):
             ),
             None,
         )
-        for book, _ in levels if at is None else levels[:at]:
-            book.refuse_unless_room(held, bound, what, paid_by)
+        for book, filed_as in levels if at is None else levels[:at]:
+            book.refuse_unless_room(held, bound, filed_as, what, paid_by)
         if at is not None and reservation is not None:
             reservation.draw(held, bound, what, paid_by)
         for book, filed_as in levels:
@@ -471,10 +486,11 @@ class SpendBook(Projection):
         return at is not None
 
     def _levels(self, kind: TokenUsageKind) -> Iterator[tuple[SpendBook, TokenUsageKind]]:
-        """This book and every book enclosing it, each with the kind it files *kind* as, where it binds."""
+        """This book and every book enclosing it, each with the kind it files *kind* as, where it
+        binds; the root always, whose reserve binds every send on the box's key."""
         book: SpendBook | None = self
         while book is not None:
-            if book.binds(kind):
+            if book.binds(kind) or book.enclosing is None:
                 yield book, kind
             book, kind = book.enclosing, _ENCLOSED
 
@@ -486,8 +502,9 @@ class SpendBook(Projection):
         sign: int,
         paid_by: KeySource,
     ) -> None:
-        self._held_usd[kind] = self._held_usd.get(kind, 0.0) + sign * (held.usd or 0.0)
-        self._held_tokens[kind] = self._held_tokens.get(kind, 0) + sign * (held.tokens or 0)
+        if self.binds(kind):
+            self._held_usd[kind] = self._held_usd.get(kind, 0.0) + sign * (held.usd or 0.0)
+            self._held_tokens[kind] = self._held_tokens.get(kind, 0) + sign * (held.tokens or 0)
         # What is out against the reserve: a send on the account's own key holds none of it.
         if draws_coupon(paid_by):
             self._out_usd[kind] = self._out_usd.get(kind, 0.0) + sign * (bound.usd or 0.0)
@@ -501,15 +518,16 @@ class SpendBook(Projection):
         what: str,
         paid_by: KeySource,
     ) -> None:
-        for book, _ in self._levels(kind):
-            book.refuse_unless_room(held, bound, what, paid_by)
+        for book, filed_as in self._levels(kind):
+            book.refuse_unless_room(held, bound, filed_as, what, paid_by)
 
     def refuse_unless_room(
-        self, held: SendBound, bound: SendBound, what: str, paid_by: KeySource
+        self, held: SendBound, bound: SendBound, kind: TokenUsageKind, what: str, paid_by: KeySource
     ) -> None:
-        self.refuse_unpriced(bound, what, paid_by)
+        """*kind* as this book files it: the share refuses only a send it meters."""
+        self.refuse_unpriced(bound, kind, what, paid_by)
         for category, reserve, n in self._room(held, bound, None, paid_by):
-            if n < 1:
+            if n < 1 and (reserve or self.binds(kind)):
                 refusal = self._refusal(category, reserve, bound if reserve else held, what)
                 if reserve:
                     # Whether a key of the account's own would pay this send is not the book's to know.
@@ -518,8 +536,10 @@ class SpendBook(Projection):
                     )
                 raise SendRefusedError(refusal, category=category)
 
-    def refuse_unpriced(self, bound: SendBound, what: str, paid_by: KeySource) -> None:
-        priced = self.allotment.usd is not None or (
+    def refuse_unpriced(
+        self, bound: SendBound, kind: TokenUsageKind, what: str, paid_by: KeySource
+    ) -> None:
+        priced = (self.binds(kind) and self.allotment.usd is not None) or (
             draws_coupon(paid_by) and self.reserve.usd is not None
         )
         if bound.usd is not None or not priced:
@@ -549,6 +569,7 @@ class SpendBook(Projection):
                     self.usd_metered - (self.off_coupon_usd if reserve else 0.0),
                     CEILING_METER_LABELS[self.meters],
                 ),
+                (self.beside_usd if reserve else 0.0, "on sends the meter does not count"),
                 (self.usd_unreported, "unreported"),
                 (out, "in calls still out"),
                 (self.set_aside_usd, "set aside for the bench"),
@@ -581,10 +602,7 @@ class SpendBook(Projection):
         self, held: SendBound, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource
     ) -> None:
         self.release(held, bound, kind, paid_by)
-        for book, _ in self._levels(kind):
-            book.usd_unreported += bound.usd or 0.0
-            if not draws_coupon(paid_by):
-                book.off_coupon_usd += bound.usd or 0.0
+        self.keep_held(_amount(bound.usd or 0.0, 0), kind, paid_by)
 
     def unreported(
         self, held: SendBound, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource
@@ -593,7 +611,10 @@ class SpendBook(Projection):
         self.keep_held(bound, kind, paid_by)
 
     def keep_held(self, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource) -> None:
-        for book, _ in self._levels(kind):
+        for book, filed_as in self._levels(kind):
+            if not book.binds(filed_as):
+                book._beside(bound.usd, bound.tokens or 0, paid_by)
+                continue
             book.usd_unreported += bound.usd or 0.0
             book.tokens_unreported += bound.tokens or 0
             if not draws_coupon(paid_by):

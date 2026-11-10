@@ -216,7 +216,7 @@ def claim_cycle(stores: Stores, job_registry: JobRegistry, job: Job, hop: CycleH
 
 def refuse_as_busy(stores: Stores, job_registry: JobRegistry, job: Job) -> NoReturn:
     # A REFUSAL takes its queue entry with it: one left behind starts the run later.
-    withdraw_queued(stores, job_registry, job.job_id, principal_id=job.principal_id)
+    withdraw_queued(stores, job_registry, job.job_id)
     raise _machine_busy(job_registry)
 
 
@@ -229,14 +229,13 @@ def _machine_busy(job_registry: JobRegistry) -> MachineBusyError:
     )
 
 
-def withdraw_queued(
-    stores: Stores, job_registry: JobRegistry, job_id: str, *, principal_id: str
-) -> bool:
-    job = job_registry.get(job_id)
-    if not job_registry.cancel_queued(job_id, principal_id=principal_id):
+def withdraw_queued(stores: Stores, job_registry: JobRegistry, job_id: str) -> bool:
+    if (withdrawn := job_registry.cancel_queued(job_id)) is None:
         return False
-    if job is not None and job.hop != UNRESOLVED_HOP:
-        stores.campaigns.release_claim(job.hop, job_id=job_id, detail="withdrawn from the queue")
+    if withdrawn.hop != UNRESOLVED_HOP:
+        stores.campaigns.release_claim(
+            withdrawn.hop, job_id=job_id, detail="withdrawn from the queue"
+        )
     return True
 
 

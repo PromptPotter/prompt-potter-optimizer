@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from promptpotter.application.account import account_of
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import campaign_sends, withdraw_queued
@@ -33,17 +32,15 @@ async def change_run_limits(
     return Applier.silent(lambda: _apply_change_run_limits(dispatcher, hop, change))
 
 
-def _clamp_to_account_ceilings(
-    dispatcher: CommandDispatcher, hop: CycleHop, change: Budget
-) -> tuple[Budget, Budget]:
+def _change_budget(dispatcher: CommandDispatcher, hop: CycleHop, change: Budget) -> bool:
     stores = dispatcher.stores
-    return quota.clamp_budget_change(
-        requested=change,
-        user=account_of(stores),
+    return quota.change_budget(
+        change,
         stores=stores,
         job_registry=dispatcher.job_registry,
         hop=hop,
-        sends=campaign_sends(stores, hop),
+        # A change naming no money axis reads no config: it sends nothing a clamp asks of.
+        sends=campaign_sends(stores, hop) if change.named & MONEY_AXES else (),
     )
 
 
@@ -54,20 +51,7 @@ async def _apply_change_run_limits(
     Settable on every arm of a head-to-head: a change that moves a ceiling the arm runs under moves
     it alone, off its head-to-head's budget, so the act is its exit (decisions.md § 0009); a change
     restating the ceilings it stands under leaves the arm in its comparison."""
-    reserve = Budget()
-    # Rounds and a clock are no money: a change naming neither money axis skips the wallet read.
-    if change.named & MONEY_AXES:
-        change, reserve = await asyncio.to_thread(
-            _clamp_to_account_ceilings, dispatcher, hop, change
-        )
-    moved = await asyncio.to_thread(
-        quota.hold_budget_change,
-        job_registry=dispatcher.job_registry,
-        stores=dispatcher.stores,
-        hop=hop,
-        change=change,
-        reserve=reserve,
-    )
+    moved = await asyncio.to_thread(_change_budget, dispatcher, hop, change)
     if moved:
         await asyncio.to_thread(
             dispatcher.stores.campaigns.leave_comparison, hop, ComparisonExit.SET_LIMITS
@@ -90,9 +74,14 @@ async def cancel_queued_run(dispatched: Dispatched[CancelQueuedRunPayload]) -> A
     dispatcher, job_id = dispatched.dispatcher, dispatched.payload.job_id
 
     async def _apply() -> None:
-        stores = dispatcher.stores
-        principal = acting_principal(stores.identity).id
-        if not withdraw_queued(stores, dispatcher.job_registry, job_id, principal_id=principal):
+        stores, registry = dispatcher.stores, dispatcher.job_registry
+        # Its own launch only: a job's principal never changes, so it is asked outside the gate.
+        job = registry.get(job_id)
+        if (
+            job is None
+            or job.principal_id != acting_principal(stores.identity).id
+            or not withdraw_queued(stores, registry, job_id)
+        ):
             raise NotFoundError("Not found", code="not_found")
 
     return Applier.silent(_apply)
