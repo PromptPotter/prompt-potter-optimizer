@@ -59,7 +59,7 @@ def candidate_delta(
     parent_pp: PipelineParams | None,
 ) -> CandidateDelta:
     """Both prompt maps are WHOLE (an absent field is empty, an absent node sets nothing)."""
-    parent_cfg = parent_pp.nodes if parent_pp else {}
+    parent_cfg = parent_pp.laid_nodes if parent_pp else {}
     nodes = sorted(child.keys() | parent.keys())
     empty = NodePrompt()
 
@@ -199,7 +199,7 @@ def candidate_idea(
 ) -> frozenset[str]:
     """The parent is subtracted WHOLE: the task's vocabulary in unchanged fields convicts unrelated rewrites."""
     delta = candidate_delta(child, parent_prompts, pipeline_overlay, parent_pp)
-    parent = parent_pp.nodes if parent_pp else {}
+    parent = parent_pp.laid_nodes if parent_pp else {}
     written = idea_fingerprint([*delta.prompt.values(), *map(str, delta.params.values())])
     carried = idea_fingerprint(
         [text for prompt in parent_prompts.values() for text in prompt.fields.values()]

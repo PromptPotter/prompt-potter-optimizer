@@ -55,7 +55,7 @@ def init_enter(
     selected = bound_optimizer()
 
     ctx.patience = opt.convergence_patience
-    ctx.original_sp_flat = flatten_sp_summary(session.pipeline_params.nodes)
+    ctx.original_sp_flat = flatten_sp_summary(session.pipeline_params.laid_nodes)
     ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}
 
     # Resolved at INIT.enter so the live dashboard stamps the formula before origin scoring fires.
@@ -119,7 +119,7 @@ def propose_enter(
     # The header renders before candidates exist: it describes the parent.
     preview = prompt_preview.replace("\n", " ").strip()
     preview = "(empty)" if not preview else truncate(preview, 50, "...")
-    ctx.current_sp_flat = flatten_sp_summary(pipeline_params.nodes) | flatten_prompts(
+    ctx.current_sp_flat = flatten_sp_summary(pipeline_params.laid_nodes) | flatten_prompts(
         parent_prompts
     )
 

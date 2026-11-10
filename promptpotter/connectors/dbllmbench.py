@@ -18,8 +18,9 @@ import yaml
 
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import LLMSpendBound
-from promptpotter.domain.search_point import NodeCall, split_rendered_prompt
+from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.domain.spend import StepUsage
 from promptpotter.infrastructure.docker_host import (
     PRODUCER_SCRATCH,
@@ -128,7 +129,7 @@ def _upstream_question(workload: InProcessWorkload, sample: Sample) -> dict[str,
 def dbllmbench_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
     if (cfg := pipeline_params.nodes.get(WRITER_NODE)) is not None:
-        prompt, config = split_rendered_prompt(cfg)
+        prompt, config = split_rendered_prompt(cfg.laid_keys())
         if prompt:
             payload["prompt"] = prompt
         payload["config"] = config

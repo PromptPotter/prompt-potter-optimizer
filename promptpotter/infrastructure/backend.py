@@ -62,10 +62,9 @@ CELL = CallLabel("backend_cell", "backend")
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
-    from promptpotter.domain.pipeline_params import PipelineParams
+    from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import NodeCall
 
 logger = logging.getLogger(__name__)
 

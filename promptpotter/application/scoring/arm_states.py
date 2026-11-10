@@ -58,7 +58,7 @@ def read_breakage(
     aborted = signal.check_name == SCORING_ERROR_ABORT
     # An abort names an error, not a node, so it shows the whole config.
     node = None if aborted else cr["dominant_warning"].split(":", 1)[0]
-    node_cfg = params.dump() if node is None else params.node(node)
+    node_cfg = params.dump() if node is None else params.node(node).laid_keys()
     operator_terminal = cr["fatal"] or (aborted and _abort_is_config_break(cr))
     return Broken(
         failure=RuntimeFailure(

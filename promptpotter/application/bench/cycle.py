@@ -129,7 +129,7 @@ def _origin_fit(difficulty: DifficultyView, origin: ReadArm) -> dict[ArmKey, Arm
 def _assert_overlay_preserved(sp: JobSearchPoint, session_pipeline_params: PipelineParams) -> None:
     """``content_hash`` flips on an overlay edit only if those keys survive into ``sp.pipeline_params``."""
     for node, cfg in session_pipeline_params.nodes.items():
-        missing = set(cfg) - set(sp.pipeline_params.node(node))
+        missing = set(cfg.laid_keys()) - set(sp.pipeline_params.node(node).laid_keys())
         assert not missing, (
             f"overlay keys stripped from {node}: {sorted(missing)} — "
             "the origin must carry session.pipeline_params, not a sparse schema view"

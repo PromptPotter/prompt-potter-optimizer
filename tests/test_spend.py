@@ -181,7 +181,7 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     PipelineNode,
@@ -210,7 +210,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import GradedCell, MeasuredCell, PipelineData, Scorer
-from promptpotter.domain.search_point import JobSearchPoint, NodeCall, NodeConfig
+from promptpotter.domain.search_point import JobSearchPoint, NodeConfig
 from promptpotter.domain.spend import (
     CYCLE_AXES,
     MONEY_AXES,

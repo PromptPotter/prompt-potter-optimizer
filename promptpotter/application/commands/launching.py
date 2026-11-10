@@ -68,6 +68,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, InnerRun, Job
 from promptpotter.domain.phases import INNER_PAUSE_REFUSAL
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineSchema, narrowing_of
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
@@ -77,7 +78,6 @@ from promptpotter.domain.run_records import (
     LaunchedJob,
     OriginSource,
 )
-from promptpotter.domain.search_point import NodeCall
 from promptpotter.shared.errors import (
     LedgerUnreadableError,
     NotFoundError,

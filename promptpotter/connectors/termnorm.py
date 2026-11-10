@@ -29,7 +29,7 @@ def termnorm_wire_adapter(
     if pipeline_params.steps is not None:
         payload[STEPS_KEY] = list(pipeline_params.steps)
 
-    wire_overrides = dict(pipeline_params.nodes)
+    wire_overrides = pipeline_params.laid_nodes
     if wire_overrides:
         payload["node_config"] = wire_overrides
 

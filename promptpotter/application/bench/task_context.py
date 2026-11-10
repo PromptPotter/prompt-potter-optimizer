@@ -19,7 +19,6 @@ from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.optimizer_template import (
     PROMPT_FIELDS,
-    TEMPLATE_TOKEN_RE,
     OptimizerPromptTemplate,
 )
 from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
@@ -218,7 +217,7 @@ def checkin_template() -> OptimizerPromptTemplate:
     """No panel is filled into the check-in, so any other ``{{slot}}`` reaches the model literally."""
     checkin = checkin_manifest()
     template = running_prompt(CHECKIN_NODE, checkin.config, checkin.manifest)
-    if unknown := set(TEMPLATE_TOKEN_RE.findall(template.render())) - {"consultation_instruction"}:
+    if unknown := template.unknown_slots({"consultation_instruction"}):
         raise FileUnreadableError(
             FileKind.OPTIMIZER_PROMPT,
             path=str(checkin_manifest_path()),

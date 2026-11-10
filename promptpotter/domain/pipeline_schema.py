@@ -5,7 +5,7 @@ from typing import Annotated, Any, Literal, NamedTuple, get_args
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import RESERVED_NODE_NAMES, PipelineParams
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.value_tree import Delivery, ValueLeaf, visibility_of
@@ -747,6 +747,8 @@ class PipelineSchema(FrozenModel):
             raise ValueError(
                 f"pipelines declares {sorted(self.pipelines)} and no `default`, the chain a round runs"
             )
+        if reserved := sorted(RESERVED_NODE_NAMES & {n.name for n in self.declared_nodes}):
+            raise ValueError(f"a node may not be named {reserved}: the pipeline params read it")
         return self
 
     # Derived on read, never cached: `model_copy` (`narrow`, `filter_to_steps`) skips init hooks.
@@ -1060,12 +1062,13 @@ class PipelineSchema(FrozenModel):
     def node_configs(self, pipeline_params: PipelineParams) -> list[tuple[str, dict[str, Any]]]:
         """Off-chain nodes LEAD, configured ones only: trailing, ``ReplayFeed`` reads a reusable partial."""
         in_chain = {node.name for node in self.nodes}
+        laid = pipeline_params.laid_nodes
         result: list[tuple[str, dict[str, Any]]] = [
             (node.name, cfg)
             for node in self.declared_nodes
-            if node.name not in in_chain and (cfg := pipeline_params.node(node.name))
+            if node.name not in in_chain and (cfg := laid.get(node.name))
         ]
-        result.extend((node.name, pipeline_params.node(node.name)) for node in self.nodes)
+        result.extend((node.name, laid.get(node.name, {})) for node in self.nodes)
         return result
 
     def sp_hash(self, pipeline_params: PipelineParams) -> str:

@@ -7,14 +7,16 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic.fields import FieldInfo
 from pydantic_core import to_jsonable_python
 
 from promptpotter.application import optimizers
-from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
+from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, knob_label
 from promptpotter.domain.pipeline_schema import KnobLayer, KnobLayers
 from promptpotter.domain.said import Tone
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
@@ -296,12 +298,66 @@ def check_couplings(config: CampaignConfig, selected: SelectedOptimizer) -> list
 KnobSource = Literal["default", KnobLayer, "required", "manifest"]
 
 
-@dataclass(frozen=True)
-class KnobState:
-    path: str
-    value: Any
-    source: KnobSource
-    estimands: tuple[Estimand, ...]
+class ConfigKnob(StrictModel):
+    path: str = Field(
+        description="Dotted CampaignConfig path (or const.<NAME> for a hardcoded floor)"
+    )
+    label: str = Field(description="Short display name (prefix-stripped)")
+    value: Any = Field(description="Effective value in this campaign's frozen config")
+    source: KnobSource = Field(
+        description="Where the value came from: default | required | manifest (an optimizer "
+        "node's knob, as its manifest declares it) | the layer that set it: campaign (the "
+        "operator's edit; any set bench knob), and on an optimizer node's knob dataset, "
+        "free_tier or seed"
+    )
+
+
+class ConfigEstimandGroup(StrictModel):
+    key: str = Field(description="Estimand key (selection, difficulty, ability, …)")
+    label: str = Field(description="Human-readable estimand name")
+    knobs: list[ConfigKnob] = Field(description="Knobs that move this estimand, in declared order")
+
+
+class ConfigCoupling(StrictModel):
+    name: str = Field(description="Coupling id")
+    labels: list[str] = Field(description="Short display names for those knobs")
+    relation: str = Field(description="The relationship rule, plain language")
+    consequence: str = Field(description="What goes wrong when the combination is violated")
+    severity: CouplingSeverity = Field(
+        description="collision (soundness) | inert (wasted knob) | info (relationship)"
+    )
+    active: bool = Field(
+        description="True when this campaign's config is in the violating combination"
+    )
+
+
+class ConfigMapResponse(StrictModel):
+    """Built off the couplings the pre-run preflight warning reads, so no surface disagrees with
+    the engine on which knobs collide."""
+
+    groups: list[ConfigEstimandGroup] = Field(description="Estimand groups, in declared order")
+    couplings: list[ConfigCoupling] = Field(
+        description="Declared couplings in reading order: the ones this config violates first, "
+        "then gravest severity first, declaration order within a severity"
+    )
+
+
+class ConfigNodeKnobs(StrictModel):
+    node: str = Field(description="The manifest node that owns these knobs")
+    kind: str = Field(description="The node's type: sampler | eliminator | selector | …")
+    keys: list[str] = Field(
+        description="Its knobs' keys, in declared order, each a row of `node_config_schema[node]`"
+    )
+
+
+def node_knobs(selected: SelectedOptimizer) -> list[ConfigNodeKnobs]:
+    initializers = {initializer.name for initializer in selected.plan.initializers}
+    return [
+        ConfigNodeKnobs(node=node, kind=str(selected.node(node).kind), keys=list(keys))
+        for node in selected.member_nodes
+        if node not in initializers
+        and (keys := optimizers.NODE_MEMBERS.get(node).knobs.model_fields)
+    ]
 
 
 _MISSING = object()
@@ -316,16 +372,16 @@ def _at(data: Any, path: tuple[str, ...]) -> Any:
     return cur
 
 
-def resolve_knob_states(
+def _knob_rows(
     config: CampaignConfig, selected: SelectedOptimizer, laid_by: KnobLayers
-) -> list[KnobState]:
+) -> list[tuple[ConfigKnob, frozenset[Estimand]]]:
     """``value`` is ``None`` where an opt-in submodel is off, not merely unset; *laid_by* names
     the layer behind each ``optimization.nodes`` key *config* sets (`CycleConfig.knob_layers`)."""
     dumped = config.model_dump(mode="json")
     authored = config.model_dump(mode="json", exclude_defaults=True)
     nodes = {n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes}
     dumped["optimization"]["nodes"] = {n: {"config": v} for n, v in nodes.items()}
-    states: list[KnobState] = []
+    rows: list[tuple[ConfigKnob, frozenset[Estimand]]] = []
     bench = {p: d for p, d in KNOBS.items() if p != _NODES_PATH}
     for path, decl in {**bench, **_node_decls(selected)}.items():
         value = _at(dumped, path)
@@ -336,15 +392,44 @@ def resolve_knob_states(
             source = laid_by[node][key] if set_by_operator else "manifest"
         else:
             source = "required" if decl.required else ("campaign" if set_by_operator else "default")
-        states.append(
-            KnobState(
-                path=decl.dotted,
-                value=None if value is _MISSING else value,
-                source=source,
-                estimands=tuple(sorted(decl.knob.estimands)),
-            )
+        knob = ConfigKnob(
+            path=decl.dotted,
+            label=knob_label(decl.dotted),
+            value=None if value is _MISSING else value,
+            source=source,
         )
-    return states
+        rows.append((knob, frozenset(decl.knob.estimands)))
+    return rows
+
+
+def config_map(config: CampaignConfig, laid_by: KnobLayers) -> ConfigMapResponse:
+    selected = select_optimizer(config.optimization)
+    rows = _knob_rows(config, selected, laid_by)
+    groups = [
+        ConfigEstimandGroup(
+            key=estimand.value,
+            label=estimand.value.replace("_", " ").title(),
+            knobs=[knob for knob, estimands in rows if estimand in estimands],
+        )
+        for estimand in Estimand
+    ]
+    active = {c.name for c in check_couplings(config, selected)}
+    couplings = [
+        ConfigCoupling(
+            name=c.name,
+            labels=[knob_label(k) for k in c.knobs],
+            relation=c.relation,
+            consequence=c.consequence,
+            severity=c.severity,
+            active=c.name in active,
+        )
+        for c in declared_couplings(selected)
+    ]
+    severities = typing.get_args(CouplingSeverity)
+    return ConfigMapResponse(
+        groups=[g for g in groups if g.knobs],
+        couplings=sorted(couplings, key=lambda c: (not c.active, severities.index(c.severity))),
+    )
 
 
 # A coupling naming a knob that does not exist points the operator at one they cannot set.

@@ -17,9 +17,9 @@ from promptpotter.domain.connector import (
     bearer,
     data_envelope,
 )
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import NodeSpendBound
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.search_point import NodeCall
 from promptpotter.domain.spend import KeySource
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS

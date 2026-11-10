@@ -4,12 +4,13 @@ from collections.abc import Collection, Mapping
 from functools import cached_property
 from typing import Any, Literal, Self
 
-from pydantic import Field, TypeAdapter, model_validator
+from pydantic import Field, TypeAdapter, ValidationError, model_validator
 
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS, OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.search_point import CALL_CONFIG_KEYS, NodeConfig
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
@@ -40,8 +41,18 @@ def laid_config(
     owner: str, node: str, cfg: Mapping[str, object], *, knobs: Collection[str]
 ) -> NodeConfig:
     """`typed_config`, refusing a key that is neither a call key, one of *knobs* nor, on a node
-    running a prompt, a prompt field (`optimization.nodes.{node}.config.{field}`)."""
-    config = typed_config(cfg)
+    running a prompt, a prompt field; a mistyped one is refused at the key it was laid as
+    (`optimization.nodes.{node}.config.{field}`), a prompt field's never under ``prompt_edits``."""
+    try:
+        config = typed_config(cfg)
+    except ValidationError as exc:
+        laid = [
+            {**e, "loc": [p for p in e["loc"] if p != "prompt_edits"]}
+            for e in exc.errors(include_input=False, include_url=False)
+        ]
+        raise PayloadInvalidError.refusing(
+            laid, under=("optimization", "nodes", node, "config")
+        ) from exc
     prompt = config.prompt_edits.model_fields_set
     if unknown := sorted(set(cfg) - CALL_CONFIG_KEYS - set(knobs) - prompt):
         raise ValueError(

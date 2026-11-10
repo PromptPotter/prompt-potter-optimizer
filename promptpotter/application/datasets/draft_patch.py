@@ -278,7 +278,7 @@ def _authored_contract(
     a reused dataset's own counts."""
     overlay = _block(config.get("pipeline_overlay"))
     node = _block(overlay.get(edit.node))
-    running = params.node(edit.node)
+    running = params.node(edit.node).laid_keys()
     fields = list(_block(edit.output_schema.get("properties")))
     first = not _block(running.get(OUTPUT_SCHEMA_KEY))
     authored = [f for f in edit.answer_fields or () if f in fields]

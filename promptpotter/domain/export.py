@@ -251,4 +251,4 @@ def _delta(individual: OptSearchPoint, parent: OptSearchPoint | None) -> dict[st
 
 
 def _tuned_params(pipeline_params: PipelineParams | None) -> dict[str, dict[str, Any]]:
-    return {} if pipeline_params is None else strip_rendered_prompt(pipeline_params).nodes
+    return {} if pipeline_params is None else strip_rendered_prompt(pipeline_params).laid_nodes

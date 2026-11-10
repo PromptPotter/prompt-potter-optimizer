@@ -39,7 +39,7 @@ from promptpotter.application.free_tier import (
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.quota import sends_on
-from promptpotter.application.knobs import bench_defaults_pin
+from promptpotter.application.knobs import ConfigMapResponse, bench_defaults_pin, config_map
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.optimizers.nodes import MintFacts, admits
 from promptpotter.application.pipeline_responses import (
@@ -200,7 +200,7 @@ class ParamLayers:
             }
             params = params.with_nodes(
                 apply_node_overlay(
-                    params.nodes, laid, self.schema, source=source, provenance=provenance
+                    params.laid_nodes, laid, self.schema, source=source, provenance=provenance
                 )
             )
         return FoldedParams(params, provenance)
@@ -238,7 +238,7 @@ class ParamLayers:
         for name in self.steps:
             node = answering.get_node(name)
             cfg = params.nodes.get(name)
-            if node is None or cfg is None or "reasoning_effort" in cfg:
+            if node is None or cfg is None or "reasoning_effort" in cfg.model_fields_set:
                 continue
             if "reasoning_effort" not in node.param_keys | node.param_keys_held:
                 continue
@@ -258,7 +258,7 @@ def _routed_as_run(
             route := {
                 key: value
                 for key in ("provider", "model")
-                if isinstance(value := pipeline_params.node(name).get(key), str) and value
+                if (value := getattr(pipeline_params.node(name), key))
             }
         )
     }
@@ -485,7 +485,7 @@ def _apply_starting_prompts(
                 f"(node declares: {declared}).",
                 code="pipeline_config_invalid",
             )
-        laid = {**pipeline_params.node(pnode.name), "prompt": rendered}
+        laid = {**pipeline_params.node(pnode.name).laid_keys(), "prompt": rendered}
         pipeline_params = pipeline_params.with_nodes({**pipeline_params.nodes, pnode.name: laid})
         logger.info("Starting prompt: %s origin.yaml[%s]", dataset_name, pnode.name)
     return pipeline_params
@@ -528,7 +528,7 @@ def _validate_model_ownership(
 ) -> None:
     for name in active:
         node_obj = filtered.get_node(name)
-        if node_obj and node_obj.is_llm and not pipeline_params.node(name).get("model"):
+        if node_obj and node_obj.is_llm and not pipeline_params.node(name).model:
             raise PayloadInvalidError(
                 f"dataset {dataset_name!r}: LLM node {name!r} has no owned model. "
                 f"Declare it in the dataset's dataset.yaml::pipeline.nodes.{name}.config.model "
@@ -567,10 +567,10 @@ def resolved_output_schemas(
     folded = fold_output_contract(params, schema)
     out: dict[str, NodeOutputSchema | None] = {}
     for node, declared in schema.node_output_schemas().items():
-        if params.node(node).get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
+        if params.node(node).laid_keys().get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
             out[node] = None
             continue
-        js = folded.node(node).get("output_schema")
+        js = folded.node(node).laid_keys().get(OUTPUT_SCHEMA_KEY)
         out[node] = (
             parse_resolved_schema({"json_schema": js}) if isinstance(js, dict) and js else declared
         )
@@ -804,7 +804,7 @@ def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
 
 def _rows(m: _Merge, folded: FoldedParams) -> dict[str, list[NodeConfigParam]]:
     return m.filtered.node_config_schema(
-        values=folded.params.nodes,
+        values=folded.params.laid_nodes,
         sources=folded.provenance,
         model_menu=_admitted_menu(m),
         declared=m.declared,
@@ -1004,6 +1004,13 @@ def fork_preview(stores: Stores, campaign_id: str, overlay: dict[str, Any]) -> F
     )
 
 
+def campaign_config_map(stores: Stores, campaign_id: str) -> ConfigMapResponse:
+    campaign = owned_campaign(stores, campaign_id)
+    cycle = cycle_config(stores, campaign, campaign.root_hop)
+    laid_by = cycle.knob_layers(recorded_read(stores, campaign.root_hop).knob_layers)
+    return config_map(cycle.config, laid_by)
+
+
 async def resolve_pipeline_for_dataset(
     stores: Stores, dataset_name: str
 ) -> DatasetPipelineResponse:
@@ -1118,7 +1125,7 @@ def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
     out: list[RunsWithParam] = []
     by_vendor: dict[str, list[str]] = {}
     for name in m.active:
-        if (cfg := stripped.nodes.get(name)) is None:
+        if (cfg := stripped.laid_nodes.get(name)) is None:
             continue
         for key in sorted(set(cfg) - {OUTPUT_SCHEMA_KEY}):
             kind = nodes[name].param_kind(key)

@@ -19,7 +19,7 @@ from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import LLMSpendBound, WebSpendBound
 from promptpotter.domain.results_health import classify_result, is_deprecated, terminal_node
 from promptpotter.domain.sample import Sample
@@ -34,7 +34,6 @@ from promptpotter.domain.scoring import (
     extract_item_label,
     turn_scalars,
 )
-from promptpotter.domain.search_point import NodeCall
 from promptpotter.domain.spend import CellPrice, StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
@@ -110,7 +109,7 @@ def interpolate_pipeline_params(
             node: {**cfg, "prompt": interpolate_prompt(prompt, query_data)}
             if isinstance(prompt := cfg.get("prompt"), str)
             else cfg
-            for node, cfg in pipeline_params.nodes.items()
+            for node, cfg in pipeline_params.laid_nodes.items()
         }
     )
 
@@ -137,10 +136,6 @@ PricedPair = tuple[str | None, str | None]
 """The ``(model, provider)`` one node's sends are priced as (``BackendClient.priced_as``)."""
 
 _UNROUTED: PricedPair = (None, None)
-
-
-def node_calls(params: PipelineParams) -> dict[str, NodeCall]:
-    return {name: NodeCall.model_validate(cfg) for name, cfg in params.nodes.items()}
 
 
 def priced_pairs(session: Session, calls: Mapping[str, NodeCall]) -> dict[str, PricedPair]:
@@ -282,9 +277,7 @@ _PRICED_RUNS = 32
 
 def measured_cell_price(session: Session, wire_params: PipelineParams) -> CellPrice | None:
     """What a cell BILLED on these models over the archive's newest rows; ``None`` before any."""
-    on_models = {
-        name: {"model": cfg["model"]} for name, cfg in wire_params.nodes.items() if cfg.get("model")
-    }
+    on_models = {name: {"model": cfg.model} for name, cfg in wire_params.nodes.items() if cfg.model}
     costs: list[float] = []
     seconds: list[float] = []
     for m in session.store.archive.measurements_for_config(
@@ -306,7 +299,7 @@ def measured_cell_price(session: Session, wire_params: PipelineParams) -> CellPr
 
 async def cell_bound(session: Session, params: PipelineParams) -> SendBound | None:
     """``None`` where the backend's own sends are each admitted; a node with no served bound leaves it UNBOUNDED."""
-    return await _calls_bound(session, node_calls(params))
+    return await _calls_bound(session, params.nodes)
 
 
 async def _calls_bound(session: Session, calls: Mapping[str, NodeCall]) -> SendBound | None:
@@ -395,7 +388,7 @@ def _estimated_usage(
     wire_params: PipelineParams,
     priced_as: PricedPair,
 ) -> StepUsage:
-    in_text = wire_params.node(node.name).get("prompt") or ""
+    in_text = wire_params.node(node.name).laid_keys().get("prompt") or ""
     out_text = " ".join(_observed_texts(node, resp_data))
     model, provider = priced_as
     return StepUsage(
@@ -495,7 +488,7 @@ def _without_identity(
     return pipeline_params.with_nodes(
         {
             node: {k: v for k, v in cfg.items() if k not in identity_keys.get(node, ())}
-            for node, cfg in pipeline_params.nodes.items()
+            for node, cfg in pipeline_params.laid_nodes.items()
         }
     )
 
@@ -514,7 +507,7 @@ async def measure_sample(
         wire_params = interpolate_pipeline_params(
             _without_identity(pipeline_params, session.identity_keys), sample.model_dump()
         )
-        calls = node_calls(wire_params)
+        calls = wire_params.nodes
         pairs = priced_pairs(session, calls)
         data, spent, envelope = await _send_cell(sample, session, wire_params, calls, pairs)
 
@@ -672,9 +665,9 @@ def _candidate_and_sample_facts(
     # Off `pipeline_params`, never `wire_params`: no sample's own length may reach a prompt-length term.
     # Summed over every prompt node: the term prices the whole prompt the configuration ships.
     rendered = [
-        cfg["prompt"]
+        prompt
         for node in pipeline_schema.prompt_nodes()
-        if isinstance((cfg := pipeline_params.node(node.name)).get("prompt"), str)
+        if isinstance(prompt := pipeline_params.node(node.name).laid_keys().get("prompt"), str)
     ]
     if rendered:
         facts["target_prompt_chars"] = sum(map(len, rendered))
@@ -749,11 +742,11 @@ def _rerun_would_repeat_token_budget_failure(
     if cached_completion <= 0:
         return False
 
-    rerun_max_tokens = rerun_pipeline_params.node(node).get("max_tokens")
+    rerun_max_tokens = rerun_pipeline_params.node(node).max_tokens
     if rerun_max_tokens is None:
         return False
 
-    return int(rerun_max_tokens) <= cached_completion
+    return rerun_max_tokens <= cached_completion
 
 
 async def execute_stale_data_protocol(

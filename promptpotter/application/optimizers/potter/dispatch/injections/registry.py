@@ -18,7 +18,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.application.optimizers.potter.records import L1Layout
-from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.shared.errors import FileKind, PotterError, unknown_slots_said
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -78,10 +78,7 @@ def validate_template(name: str, template: OptimizerPromptTemplate) -> None:
     """A typo'd ``{{slot}}`` is otherwise a silent empty render."""
     spec = NODE_LAYOUTS.get(name)
     extras = spec.caller_extras if spec is not None else frozenset()
-    text = template.render()
-    referenced = set(TEMPLATE_TOKEN_RE.findall(text))
-    unknown = referenced - injection_table().keys() - extras
-    if unknown:
+    if unknown := template.unknown_slots(injection_table().keys() | extras):
         raise PotterError(
             f"{unknown_slots_said(name, unknown)}. Register a renderer (dispatch/injections/) or "
             f"add it to NODE_LAYOUTS[{name!r}].caller_extras if the slot is a caller-supplied "

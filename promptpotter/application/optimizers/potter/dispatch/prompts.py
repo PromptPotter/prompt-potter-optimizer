@@ -58,7 +58,7 @@ def effective_optimizer_prompts(
         base = inner_template(cells, node_name) if fields else None
         if base is None:
             continue
-        override = pipeline_params.node(node_name)
+        override = pipeline_params.node(node_name).laid_keys()
         out[node_name] = {
             f: str(override[f] if f in override else getattr(base, f)) for f in fields
         }

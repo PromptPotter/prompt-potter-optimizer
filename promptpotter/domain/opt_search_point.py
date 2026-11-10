@@ -275,9 +275,9 @@ class OptSearchPoint(FrozenModel):
     ) -> JobSearchPoint:
         pp = _resolved_config(self.pipeline_params, schema)
         scored = self.scored_prompts(schema, framing, demo=demo)
-        nodes = dict(pp.nodes)
+        nodes = pp.laid_nodes
         for node, fields in scored.items():
-            nodes[node] = {**pp.node(node), "prompt": "\n\n".join(fields.values())}
+            nodes[node] = {**pp.node(node).laid_keys(), "prompt": "\n\n".join(fields.values())}
         return JobSearchPoint(pipeline_params=pp.with_nodes(nodes), prompt_fields=scored)
 
     def as_origin(self, *, changes_description: str) -> OptSearchPoint:
@@ -291,7 +291,7 @@ class OptSearchPoint(FrozenModel):
                 loci[Locus(node, field)] = text
             if prompt.shots:
                 loci[Locus(node, SHOTS_KEY)] = tuple(prompt.shots)
-        for node, config in self.pipeline_params.nodes.items():
+        for node, config in self.pipeline_params.laid_nodes.items():
             for param, value in config.items():
                 if (locus := Locus(node, param)) in loci:
                     raise ValueError(f"{locus.name} is a prompt locus, and the config sets it too")
@@ -329,7 +329,7 @@ class OptSearchPoint(FrozenModel):
         )
         if not overlay:
             return written
-        laid = apply_node_overlay(self.pipeline_params.nodes, overlay, schema)
+        laid = apply_node_overlay(self.pipeline_params.laid_nodes, overlay, schema)
         return written.configured(self.pipeline_params.with_nodes(laid), schema)
 
     @classmethod

@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass, fields
-from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.optimizer_template import OptimizerPromptEdits
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams, _Roster
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import content_hash, shapes_optimizer_prompt
 
@@ -18,38 +17,6 @@ if TYPE_CHECKING:
 
 # A prompt node's shots locus; no field may take its name, nor the render's (`prompt`).
 SHOTS_KEY: Annotated[str, shapes_optimizer_prompt] = "shots"
-
-
-class _Roster(Enum):
-    """Which roster an engine call key joins; a key carries its rosters on its `NodeCall` field."""
-
-    # WHO ANSWERS the call: a steer touching only these inherits its done C0.
-    WHO_ANSWERS = "who_answers"
-    # Never a search axis: hosts of one model disagree, so an arm moving one measures the plumbing.
-    FORBIDDEN = "forbidden"
-    # A sampling scope the provider request carries.
-    SCOPE = "scope"
-
-
-@shapes_optimizer_prompt
-class NodeCall(FrozenModel):
-    """A node's engine call keys typed as laid (strict: a wrong type refuses, a number stays the int
-    or float it was hashed as), each field its key's one spelling; other keys are its backend's."""
-
-    model_config = ConfigDict(strict=True, extra="allow")
-
-    provider: Annotated[str | None, _Roster.WHO_ANSWERS, _Roster.FORBIDDEN] = None
-    model: Annotated[str | None, _Roster.WHO_ANSWERS] = None
-    route_order: Annotated[list[str] | None, _Roster.WHO_ANSWERS, _Roster.FORBIDDEN] = None
-    temperature: Annotated[int | float | None, _Roster.SCOPE] = None
-    max_tokens: Annotated[int | None, _Roster.SCOPE] = None
-    reasoning_effort: Annotated[str | None, _Roster.SCOPE] = None
-    top_p: Annotated[int | float | None, _Roster.SCOPE] = None
-    seed: int | None = None
-    prompt_family: str | None = None
-    prompt_version: int | None = None
-    schema_family: str | None = None
-    schema_version: int | None = None
 
 
 @shapes_optimizer_prompt
@@ -112,7 +79,7 @@ def split_rendered_prompt(cfg: Mapping[str, object]) -> tuple[object, dict[str, 
 
 def strip_rendered_prompt(pipeline_params: PipelineParams) -> PipelineParams:
     return pipeline_params.with_nodes(
-        {node: split_rendered_prompt(cfg)[1] for node, cfg in pipeline_params.nodes.items()}
+        {node: split_rendered_prompt(cfg)[1] for node, cfg in pipeline_params.laid_nodes.items()}
     )
 
 

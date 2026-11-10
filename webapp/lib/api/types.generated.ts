@@ -3696,7 +3696,7 @@ export interface OptimizerSetup {
   main: KnobRef[];
   /** Every member taking a knob, in declared order, but a pool initializer: its
    * knobs are its `pools` row */
-  knobs: NodeKnobs[];
+  knobs: ConfigNodeKnobs[];
   /** By node, each node running a prompt; a node naming no `prompt_family` has no
    * entry */
   prompts: Record<string, OptimizerNodePrompt>;
@@ -3776,7 +3776,7 @@ export interface KnobRef {
   knob: string;
 }
 
-export interface NodeKnobs {
+export interface ConfigNodeKnobs {
   /** The manifest node that owns these knobs */
   node: string;
   /** The node's type: sampler | eliminator | selector | … */

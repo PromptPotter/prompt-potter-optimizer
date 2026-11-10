@@ -35,7 +35,7 @@ def _rf_matches_current_config(rf: RuntimeFailure, pipeline_params: PipelinePara
     if current is None:
         return False
     observed = rf.observed_config
-    return all(observed.get(k) == current.get(k) for k in WHO_ANSWERS_KEYS if k in observed)
+    return all(observed.get(k) == getattr(current, k) for k in WHO_ANSWERS_KEYS if k in observed)
 
 
 def _validation_block(b: InjectionBundle) -> str:

@@ -43,6 +43,7 @@ from factories import (
     stored_campaign,
 )
 from offline_world import Router
+from pydantic import ValidationError
 
 from promptpotter.application import optimizer_manifest, optimizers, run_observers
 from promptpotter.application.bench import llm_call as call_mod
@@ -62,7 +63,6 @@ from promptpotter.application.bench.task_context import (
 from promptpotter.application.commands import launching
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
-from promptpotter.application.config_map import campaign_config_map
 from promptpotter.application.datasets import (
     ingest,
     loaders,
@@ -140,6 +140,7 @@ from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
     ParamLayers,
     campaign_admits,
+    campaign_config_map,
     cycle_config,
     dataset_pipeline,
     defaults_drift,
@@ -214,7 +215,7 @@ from promptpotter.domain.pipeline_overlay import (
     permitted_models_from_narrowing,
     steers_disallowed_model,
 )
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
@@ -932,7 +933,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     def scored(point: OptSearchPoint) -> tuple[dict[str, Any], str]:
         job = PointContext(schema=chain, framing=TaskDecomposition(), demo=[]).job(point)
         key = archive_entry(job, dataset_hash="d", pipeline_schema=chain).config_key
-        return job.pipeline_params.nodes, key
+        return job.pipeline_params.laid_nodes, key
 
     (before, before_key), (after, after_key) = scored(two), scored(second)
     assert after["classify"]["prompt"] == "You book.\n\nPick the four-digit code.", (
@@ -1733,9 +1734,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     proposed = asyncio.run(plan_draft_patch(built_stores, knobbed, proposal.patch))
     assert (
-        draft_pipeline(
-            built_stores, apply_draft_patch(knobbed, proposed), proposed.served
-        ).params.nodes["llm_only"]["model"]
+        draft_pipeline(built_stores, apply_draft_patch(knobbed, proposed), proposed.served)
+        .params.nodes["llm_only"]
+        .model
         == menu[-1]
     ), "a resolver's model proposal was dropped"
     # ...and only as that edit: a node's model moves spend, so the turn raises it and applies none.
@@ -2474,13 +2475,34 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert {"output_schema", "answer_fields"} <= base["llm_only"].keys(), (
         "the instrument declares no contract — the rest proves nothing"
     )
-    assert fold_output_contract(PipelineParams().with_nodes(base), text_schema).nodes == base, (
-        "an unmoved point must hash as it always did"
-    )
+    assert (
+        fold_output_contract(PipelineParams().with_nodes(base), text_schema).laid_nodes == base
+    ), "an unmoved point must hash as it always did"
+    # One door: whatever the carrier builds reads back off its dump, each node's keys in laid order.
+    laid = {"prompt": "p", "temperature": 0.2, "model": "m"}
+    for built in (
+        PipelineParams().with_nodes({"nodes": laid}).with_steps(["nodes"]),
+        PipelineParams.model_validate({"steps": ["solve"], "solve": laid}),
+    ):
+        assert PipelineParams.model_validate(built.dump()).dump() == built.dump()
+        assert [list(cfg) for cfg in built.laid_nodes.values()] == [list(laid)], (
+            "the wire sent a node's keys out of their laid order"
+        )
+    # The laid order is the wire's, never the call's identity: one call laid in two orders is one.
+    relaid = dict(reversed(laid.items()))
+    assert (NodeCall.model_validate(relaid), PipelineParams.model_validate({"solve": relaid})) == (
+        NodeCall.model_validate(laid),
+        PipelineParams.model_validate({"solve": laid}),
+    ), "two calls with the same keys compared unequal for their laid order"
+    for door in (PipelineParams.model_validate, PipelineParams().with_nodes):
+        with pytest.raises((ValidationError, PayloadInvalidError)):
+            door({"solve": {"max_tokens": 1024.0}})
+    with pytest.raises(ValidationError, match="may not be named"):
+        pipeline_schema(nodes=[PipelineNode(name="steps", tunes_llm=False)])
     chose_text = copy.deepcopy(base)
     chose_text["llm_only"][SCHEMA_TOGGLE_PARAM] = ANSWER_AS_TEXT
     chose_text["llm_only"][description_key("answer")] = "IGNORED"
-    folded = fold_output_contract(PipelineParams().with_nodes(chose_text), text_schema).nodes[
+    folded = fold_output_contract(PipelineParams().with_nodes(chose_text), text_schema).laid_nodes[
         "llm_only"
     ]
     assert not {"output_schema", "answer_fields", description_key("answer")} & folded.keys(), (
@@ -2522,7 +2544,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     declared = cast(Any, nested.get_node("llm_only")).current_config
     pp = fold_output_contract(
         PipelineParams().with_nodes({"llm_only": {**declared, amount: "Net, in CHF."}}), nested
-    ).nodes
+    ).laid_nodes
     line = pp["llm_only"]["output_schema"]["properties"]["lines"]["items"]["properties"]["amount"]
     assert line["description"] == "Net, in CHF." and amount not in pp["llm_only"], (
         "a nested field's description did not fold into the contract it names"

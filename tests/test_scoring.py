@@ -1183,7 +1183,7 @@ def _peer_cycle(
     async def _measure(
         sample: Sample, _session: Any, pipeline_params: PipelineParams
     ) -> MeasuredCell:
-        prompt = pipeline_params.node("solve")["prompt"]
+        prompt = pipeline_params.node("solve").laid_keys()["prompt"]
         solved = solves(prompt, sample)
         row: dict[str, Any] = {
             "sample_key": sample.key,

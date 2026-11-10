@@ -26,7 +26,6 @@ from promptpotter.application.backend_listing import (
 )
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import CommandReading, read_command
-from promptpotter.application.config_map import ConfigMapResponse, campaign_config_map
 from promptpotter.application.cycle_addressing import (
     ActiveSessionResponse,
     active_session,
@@ -63,6 +62,7 @@ from promptpotter.application.jobs.quota import (
     coupon_status,
     quota_status,
 )
+from promptpotter.application.knobs import ConfigMapResponse
 from promptpotter.application.library import LibraryResponse, library
 from promptpotter.application.maintenance.storage_report import (
     LeafBytes,
@@ -77,6 +77,7 @@ from promptpotter.application.origin_listing import (
     origin_index,
 )
 from promptpotter.application.pipeline_resolve import (
+    campaign_config_map,
     fork_preview,
     resolve_pipeline_at,
     resolve_pipeline_for_dataset,

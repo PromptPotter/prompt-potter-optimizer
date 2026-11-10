@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 from pydantic import Field
 
 from promptpotter.application import optimizers
+from promptpotter.application.knobs import ConfigNodeKnobs, node_knobs
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     running_prompt,
@@ -40,14 +41,6 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import Initializer
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Pool, PoolEntry
-
-
-class NodeKnobs(StrictModel):
-    node: str = Field(description="The manifest node that owns these knobs")
-    kind: str = Field(description="The node's type: sampler | eliminator | selector | …")
-    keys: list[str] = Field(
-        description="Its knobs' keys, in declared order, each a row of `node_config_schema[node]`"
-    )
 
 
 class KnobRef(StrictModel):
@@ -156,7 +149,7 @@ class OptimizerSetup(StrictModel):
         "it accepts and what a round costs are the facts every other node's rows need too"
     )
     main: list[KnobRef] = Field(description="The knobs a setup surface leads with, in order")
-    knobs: list[NodeKnobs] = Field(
+    knobs: list[ConfigNodeKnobs] = Field(
         description="Every member taking a knob, in declared order, but a pool initializer: its "
         "knobs are its `pools` row"
     )
@@ -366,17 +359,6 @@ def _opened_parts(target: PipelineSchema) -> set[str]:
     )
 
 
-def _node_knobs(selected: SelectedOptimizer) -> list[NodeKnobs]:
-    nodes: list[NodeKnobs] = []
-    initializers = {initializer.name for initializer in selected.plan.initializers}
-    for node in selected.member_nodes:
-        keys = optimizers.NODE_MEMBERS.get(node).knobs.model_fields
-        if node in initializers or not keys:
-            continue
-        nodes.append(NodeKnobs(node=node, kind=str(selected.node(node).kind), keys=list(keys)))
-    return nodes
-
-
 def _node_prompts(selected: SelectedOptimizer) -> dict[str, OptimizerNodePrompt]:
     out: dict[str, OptimizerNodePrompt] = {}
     declared = list(selected.manifest.resolved_prompts)
@@ -432,7 +414,7 @@ def optimizer_setup(
             KnobRef(node=node, knob=knob)
             for node, _, knob in (ref.partition(".") for ref in selected.manifest.main)
         ],
-        knobs=_node_knobs(selected),
+        knobs=node_knobs(selected),
         prompts=_node_prompts(selected),
         arms_per_round=selected.arms_per_round,
         proposers=[ProposerRow(node=p.name, makes=selected.makes(p)) for p in selected.proposing],

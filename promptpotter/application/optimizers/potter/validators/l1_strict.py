@@ -22,7 +22,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import inner_template
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus
-from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.search_point import SHOTS_KEY, WHO_ANSWERS_KEYS, missing_template_vars
@@ -137,7 +137,7 @@ def l1_config_not_in_runtime_failures(
     for node_name, node_params in overlay.items():
         if not isinstance(node_params, dict):
             continue
-        effective = {**pipeline_params.node(node_name), **node_params}
+        effective = {**pipeline_params.node(node_name).laid_keys(), **node_params}
         for param, value in node_params.items():
             for rf in runtime_failures:
                 obs_cfg = rf.observed_config or {}
@@ -165,7 +165,7 @@ def l1_inner_placeholders_intact(
     if inner_cells is None:
         return []
     failures: list[ValidationFailure] = []
-    for node_name, cfg in pipeline_params.nodes.items():
+    for node_name, cfg in pipeline_params.laid_nodes.items():
         prose = {
             k: v
             for k, v in cfg.items()
@@ -174,7 +174,7 @@ def l1_inner_placeholders_intact(
         base = inner_template(inner_cells, node_name) if prose else None
         if base is None:
             continue
-        declared = sorted(set(TEMPLATE_TOKEN_RE.findall(base.render())))
+        declared = sorted(base.slots())
         if not declared:
             continue
         merged = base.model_copy(update=prose)
@@ -271,7 +271,7 @@ _GUT_RATIO = 0.35
 def _parent_field_text(
     cells: InnerCells, node: str, field: str, pipeline_params: PipelineParams
 ) -> str:
-    inherited = pipeline_params.node(node).get(field)
+    inherited = pipeline_params.node(node).laid_keys().get(field)
     if isinstance(inherited, str) and inherited:
         return inherited
     template = inner_template(cells, node)

@@ -50,9 +50,9 @@ def bench_set_of(
         bench_rows=bench_rows,
         scorer_id=scorer_id,
         models={
-            node: str(cfg["model"])
+            node: cfg.model
             for node, cfg in (origin_params.nodes if origin_params else {}).items()
-            if "model" in cfg
+            if cfg.model is not None
         },
         origin=origin,
     )

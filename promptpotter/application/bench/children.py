@@ -147,7 +147,7 @@ def overlay_failures(
         assert node is not None, "carried_writes strips an undeclared node first"
         node_types = node.param_types
         node_emittable = emittable.get(node_name, set())
-        proposed = running.node(node_name).get("model")
+        proposed = running.node(node_name).model
         for param, value in node_params.items():
             if param in SCHEMA_OWNED_FIELDS or param in PARAM_FORBIDDEN_KEYS:
                 failures.append(

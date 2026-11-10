@@ -48,7 +48,7 @@ from promptpotter.application.optimizers.potter.records import (
 from promptpotter.application.optimizers.variation.members import Cross, crossable
 from promptpotter.domain import ruler
 from promptpotter.domain.optimizer_state import Critique
-from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pool import BlockPool, DemoPool
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
@@ -201,7 +201,7 @@ class DispatchHub:
                 update[slot] = static
         filled = template.model_copy(update=update)
 
-        remaining = set(TEMPLATE_TOKEN_RE.findall(filled.render()))
+        remaining = filled.slots()
         injection_vars = {
             name: DispatchHub.render(name, bundle) for name in remaining if name in table
         }

@@ -82,18 +82,16 @@ def pin_default_routes(pp: PipelineParams, schema: PipelineSchema) -> PipelinePa
     out = dict(pp.nodes)
     for node, cfg in pp.nodes.items():
         declared = schema.get_node(node)
-        provider = cfg.get("provider") or (declared.provider if declared else None)
-        if route := pinned_route(
-            cfg.get("model"), cfg.get("route_order"), provider, schema.default_routes
-        ):
-            out[node] = {**cfg, "route_order": route}
+        provider = cfg.provider or (declared.provider if declared else None)
+        if route := pinned_route(cfg.model, cfg.route_order, provider, schema.default_routes):
+            out[node] = cfg.model_copy(update={"route_order": route})
     return pp.with_nodes(out)
 
 
 def fold_output_contract(pp: PipelineParams, schema: PipelineSchema) -> PipelineParams:
     """The toggle is read, never WRITTEN: an unmoved node keeps a byte-identical payload, and so its banked hash."""
-    out = dict(pp.nodes)
-    for node, cfg in pp.nodes.items():
+    out = pp.laid_nodes
+    for node, cfg in pp.laid_nodes.items():
         descriptions = {
             path: text for key, text in cfg.items() if (path := description_path(key)) is not None
         }

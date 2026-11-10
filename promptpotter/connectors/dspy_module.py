@@ -10,8 +10,9 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
-from promptpotter.domain.search_point import NodeCall, split_rendered_prompt
+from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
 from promptpotter.infrastructure.llm.pricing import inline_route
@@ -66,7 +67,7 @@ class DspyProgram:
 def dspy_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
     if (cfg := pipeline_params.nodes.get(PROGRAM_NODE)) is not None:
-        prompt, params = split_rendered_prompt(cfg)
+        prompt, params = split_rendered_prompt(cfg.laid_keys())
         if prompt:
             payload["prompt"] = prompt
         if params:

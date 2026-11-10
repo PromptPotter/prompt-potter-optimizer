@@ -95,7 +95,7 @@ def promptpotter_wire_adapter(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
 
-    optimizer_prompt_overrides = {k: dict(v) for k, v in pipeline_params.nodes.items() if v}
+    optimizer_prompt_overrides = {k: v for k, v in pipeline_params.laid_nodes.items() if v}
     if optimizer_prompt_overrides:
         payload["optimizer_prompt_overrides"] = optimizer_prompt_overrides
 

@@ -56,8 +56,9 @@ def n8n_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> dict[st
         "params": {},
     }
     if (cfg := pipeline_params.nodes.get(HARNESS_NODE)) is not None:
-        payload["prompt"] = cfg.get("prompt") or ""
-        payload["params"] = {k: cfg[k] for k in OUTPUT_CONTRACT_KEYS if k in cfg}
+        laid = cfg.laid_keys()
+        payload["prompt"] = laid.get("prompt") or ""
+        payload["params"] = {k: laid[k] for k in OUTPUT_CONTRACT_KEYS if k in laid}
     return payload
 
 

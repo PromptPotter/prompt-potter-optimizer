@@ -235,9 +235,8 @@ def _check_confirmed(
 
 
 def _check_node_models(pipeline: DraftPipeline, *, gaps: list[FieldGap]) -> None:
-    configs = pipeline.params.nodes
     for node in pipeline.chain.nodes:
-        if node.is_llm and not configs.get(node.name, {}).get("model"):
+        if node.is_llm and not pipeline.params.node(node.name).model:
             gaps.append(
                 FieldGap.of(
                     f"node.{node.name}.model",

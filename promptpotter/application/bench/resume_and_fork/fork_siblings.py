@@ -324,4 +324,4 @@ def _candidate_params(stores: Stores, hop: CycleHop, named: RoundArm) -> dict[st
     arm = stores.campaigns.standing_rounds(hop, moment=None).arms.get((named.round, named.arm))
     if arm is None or isinstance(arm.state, Proposed):
         return None
-    return PipelineParams.model_validate(arm.state.resolved_params).nodes
+    return PipelineParams.model_validate(arm.state.resolved_params).laid_nodes

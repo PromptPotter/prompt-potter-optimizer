@@ -155,7 +155,7 @@ def outside_free_tier(
         if s not in tier.task_nodes
     ]
     for node, cfg in pipeline_params.nodes.items() if task else ():
-        if not (model := cfg.get("model")):
+        if not (model := cfg.model):
             continue
         declared = space.get_node(node)
         searched = set() if declared is None else declared.param_keys
@@ -167,7 +167,7 @@ def outside_free_tier(
                 out.append(f"the task model {m}")
                 continue
             for param, admitted in bounds.items():
-                values = [cfg.get(param, "default")] if m == model else []
+                values = [cfg.laid_keys().get(param, "default")] if m == model else []
                 if declared is not None and param in searched:
                     values += space.param_options(declared, param, model=m) or ["any"]
                 out += [f"{param} {v} on {m}" for v in values if v not in admitted]

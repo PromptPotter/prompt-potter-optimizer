@@ -1,4 +1,5 @@
 import re
+from collections.abc import Collection
 from typing import Annotated, ClassVar
 
 from pydantic import create_model
@@ -39,6 +40,15 @@ class OptimizerPromptTemplate(StrictModel):
     @shapes_optimizer_prompt
     def render(self) -> str:
         return "\n\n".join(self.prompt_fields().values())
+
+    @shapes_optimizer_prompt
+    def slots(self) -> frozenset[str]:
+        """Each ``{{slot}}`` its render names: the one parse of a template's tokens."""
+        return frozenset(TEMPLATE_TOKEN_RE.findall(self.render()))
+
+    def unknown_slots(self, known: Collection[str]) -> set[str]:
+        """Its slots *known* does not fill; each reader refuses them in its own type."""
+        return set(self.slots()) - set(known)
 
     @shapes_optimizer_prompt
     def compile_prompt(self, **kwargs: str | int) -> str:

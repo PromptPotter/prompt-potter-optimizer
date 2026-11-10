@@ -298,7 +298,7 @@ async def _emit_preflight_and_init_session(
 ) -> None:
 
     target_node_configs = list(session.pipeline_params.nodes.items())
-    target_models = tuple(str(v["model"]) for _, v in target_node_configs if v.get("model"))
+    target_models = tuple(v.model for _, v in target_node_configs if v.model)
 
     bound = await cell_bound(session, session.pipeline_params)
     measured = measured_cell_price(session, session.pipeline_params)

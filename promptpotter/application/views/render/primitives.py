@@ -340,7 +340,7 @@ def render_pipeline_overlay(
         return ""
 
     node_entries: list[tuple[str, dict[str, Any]]] = []
-    for key, val in pipeline_params.nodes.items():
+    for key, val in pipeline_params.laid_nodes.items():
         tunable: dict[str, Any] = {}
         if pipeline_schema:
             node = pipeline_schema.get_node(key)

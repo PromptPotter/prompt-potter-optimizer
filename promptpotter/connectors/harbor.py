@@ -40,8 +40,8 @@ from promptpotter.connectors.protocol import (
     InProcessWorkload,
     cell_envelope_of,
 )
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import LLMSpendBound
-from promptpotter.domain.search_point import NodeCall
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.docker_host import (
     CONTAINER_PRODUCER,
@@ -243,7 +243,7 @@ def _skill_delivery(cfg: Mapping[str, Any]) -> SkillDelivery:
 
 
 def _prompt_delivery(pipeline_params: PipelineParams) -> Delivery:
-    cfg = pipeline_params.node(AGENT_NODE)
+    cfg = pipeline_params.node(AGENT_NODE).laid_keys()
     return "request" if _skill_delivery(cfg) == "system_prompt" else "artifact_body"
 
 
@@ -447,7 +447,7 @@ def harbor_wire_adapter(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
     if (cfg := pipeline_params.nodes.get(AGENT_NODE)) is not None:
-        payload.update(_agent_fields(cfg))
+        payload.update(_agent_fields(cfg.laid_keys()))
     return payload
 
 

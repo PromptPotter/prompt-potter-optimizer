@@ -146,9 +146,9 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
         {}
         if arm is None
         else {
-            node: str(config["model"])
+            node: config.model
             for node, config in arm.individual.pipeline_params.nodes.items()
-            if "model" in config
+            if config.model is not None
         }
     )
     no_export = "this cycle has none: it is written when the cycle ends with a round closed"
