@@ -273,7 +273,7 @@ from promptpotter.infrastructure.store.io import read_lines, write_jsonl, write_
 from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, draft_dirs
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
-from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
@@ -1232,7 +1232,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     # The ceiling already spent: no cell fits, and the control reads it as reached.
     arm = spend_book(0.02, meters="search_incurred", metered=Budget.amount(0.02, 0))
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
-    ledger.bind(arm)
+    LedgerIndex.of(ledger.path, ()).projecting().add(arm)
     session = loop_session(
         built_stores,
         _searching(0.01),
@@ -1400,7 +1400,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         filed(account("ada-id").archive, [paid], cell_entry, created_at=shared)
         book = spend_book(1.0, meters="bill")
         ledger = CycleEventLog(homes / f"bob-{shared}.jsonl")
-        ledger.bind(book)
+        LedgerIndex.of(ledger.path, ()).projecting().add(book)
         with _billing_on(ledger, book):
             for answer in account("bob-id").archive.population(cell_entry):
                 emit_replayed_step_tokens(answer.cell.pipeline.step_tokens, {})
@@ -2096,7 +2096,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     burst_ledger = CycleEventLog(tmp_path / "burst.jsonl")
     ceiling_usd = 0.05
     book = spend_book(ceiling_usd)
-    burst_ledger.bind(book)
+    LedgerIndex.of(burst_ledger.path, ()).projecting().add(book)
 
     async def burst() -> list[Any]:
         async def one(i: int) -> Any:
@@ -2163,11 +2163,11 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     # ledger.
     root = CycleEventLog(tmp_path / "root.jsonl")
     book = spend_book(0.05)
-    root.bind(book)
+    LedgerIndex.of(root.path, ()).projecting().add(book)
     book.ledger = root
     nested = CycleEventLog(tmp_path / "nested.jsonl")
     inner = spend_book(5.0)
-    nested.bind(inner)
+    LedgerIndex.of(nested.path, ()).projecting().add(inner)
     inner.ledger, inner.enclosing = nested, book
     with _billing_on(nested, inner):
         jumping_clock(_owned_chat("inner", "nested"))
@@ -2237,7 +2237,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     # A send that left and named no price stays held at its bound.
     held_ledger = CycleEventLog(tmp_path / "held.jsonl")
     book = spend_book(0.05)
-    held_ledger.bind(book)
+    LedgerIndex.of(held_ledger.path, ()).projecting().add(book)
     wire.broken_once = True
     with _billing_on(held_ledger, book):
         jumping_clock(_owned_chat("tls"))
@@ -2492,7 +2492,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
     replay_arm = spend_book(1.0, meters="search_incurred")
     replays = CycleEventLog(tmp_path / "replays.jsonl")
-    replays.bind(replay_arm)
+    LedgerIndex.of(replays.path, ()).projecting().add(replay_arm)
     with _billing_on(replays, replay_arm):
         emit_replayed_step_tokens(rows[-1].step_tokens, {})
     assert replay_arm.usd_metered == pytest.approx(2 * call_usd), (
@@ -2541,7 +2541,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
     turns_ledger = CycleEventLog(tmp_path / "turns.jsonl")
     purse = spend_book(1.0)
-    turns_ledger.bind(purse)
+    LedgerIndex.of(turns_ledger.path, ()).projecting().add(purse)
     whole = SendBound(input_tokens=100_000, output_tokens=50_000, usd=0.5)
 
     async def agent_cell(sample_id: int) -> Any:

@@ -180,8 +180,9 @@ immutable, so their hash is a trustworthy identity. Owned by
 
 #### Display
 
-Ledger subscribers, read-only, each writing only the artifact it declares; every entry point binds
-the same set. **Run state is derived (`derive_run_state`), never a freshness guess.** **Pause is
+Projections fed by their ledger's `LedgerIndex`, read-only, each writing only the artifact it
+declares and held by its drainer's `Projecting` (the run, a bench pass, one store append), never the
+process; every entry point holds the same set. **Run state is derived (`derive_run_state`), never a freshness guess.** **Pause is
 the single operator interrupt** and leaves a cycle resumable; "done" is a human mark.
 
 #### Control-local

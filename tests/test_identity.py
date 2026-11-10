@@ -21,6 +21,7 @@ from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import Mock
 
 import openpyxl
 import pytest
@@ -150,8 +151,10 @@ from promptpotter.application.pipeline_resolve import (
     resolved_output_schemas,
 )
 from promptpotter.application.pipeline_responses import ForkPreviewResponse
-from promptpotter.application.run_observers import declare_run_wiring
+from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.run_observers import build_run_observers, declare_run_wiring
 from promptpotter.application.runner.arm_gate import author_arm
+from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.connector import CONNECTOR, promptpotter_wire_adapter
 from promptpotter.application.runner.inner.spawn import inner_campaign_id
@@ -232,6 +235,7 @@ from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptPart, Snippet
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     CycleSeed,
@@ -242,12 +246,16 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.identity import blocklist, grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
-from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
+from promptpotter.infrastructure.producer_lock import cycle_held
+from promptpotter.infrastructure.projections.live_dashboard.projection import (
+    DashboardCheckout,
+    fold_at,
+)
 from promptpotter.infrastructure.store import source_scan
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
@@ -265,7 +273,7 @@ from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import rmtree_robust, write_json, write_yaml
 from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
-from promptpotter.infrastructure.store.read_model import derived, file_sig
+from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.errors import (
@@ -2306,6 +2314,58 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert refused.value.details["capabilities_moved"] == ["/m"], (
         "a resume past a moved capability snapshot blamed only the dataset"
     )
+    # A launch's observers hold its ledger's projections, and another holder joins the very ones
+    # they hold; only while the run lives: one that drained, or whose exit unwound through
+    # `run_optimization`'s `finally`, leaves neither its ledger's index nor its cycle held.
+    root_dir = CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop))
+    launched = effective_config(declared)
+    observers = build_run_observers(session=opened, campaign_config=launched)
+    beside = DashboardCheckout.over(root_dir)
+    assert beside is not None
+    with LedgerIndex.of(wired_ledger.path, ()).projecting() as joiner:
+        assert joiner.add(beside) is observers.dashboard, (
+            "a second holder folded a dashboard beside the run's, each writing its own file"
+        )
+    observers.drain_all()
+    assert not LedgerIndex.of(wired_ledger.path, ()).pinned and not cycle_held(root_dir), (
+        "a drained run kept its ledger's projections or its cycle"
+    )
+    # A build that raises past its projections' checkout lets go of them too.
+    with monkeypatch.context() as broken, pytest.raises(OSError, match="no callbacks"):
+        broken.setattr(RunCallbacks, "__init__", Mock(side_effect=OSError("no callbacks")))
+        build_run_observers(session=opened, campaign_config=launched)
+    assert not LedgerIndex.of(wired_ledger.path, ()).pinned and not cycle_held(root_dir), (
+        "a build that raised kept its ledger's projections or its cycle"
+    )
+    observers = build_run_observers(session=opened, campaign_config=launched)
+    # An exit on an error drains nothing: a drain's own fault would replace the error in flight.
+    drained = Mock()
+    monkeypatch.setattr(DashboardCheckout, "drain", drained)
+    with pytest.raises(PayloadInvalidError):
+        asyncio.run(
+            run_optimization(
+                [],
+                CycleConfig.laid(launched, []),
+                session=opened,
+                observers=observers,
+                mode=RunMode(diag=True),
+                budget=HeldBudget(
+                    admitted=Budget(),
+                    standing=Budget(),
+                    job_id="",
+                    step_rounds=None,
+                    share=Budget(),
+                ),
+                # No controller, so `--diag` refuses inside the run, past its observers' build.
+                optimizer=select_optimizer(
+                    OptimizationConfig(degradation_threshold=0.0, optimizer="gepa")
+                ),
+            )
+        )
+    assert not LedgerIndex.of(wired_ledger.path, ()).pinned and not cycle_held(root_dir), (
+        "a run whose exit unwound kept its ledger's projections or its cycle"
+    )
+    assert not drained.called, "a run that raised drained its dashboard on the way out"
 
     # Answering in TEXT sends no contract to answer INTO.
     text_pipeline = read_dataset_pipeline(_install("justlogic/d234"))

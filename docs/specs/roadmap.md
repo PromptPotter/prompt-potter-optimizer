@@ -35,7 +35,7 @@ names the earlier arc a ledger row may still cite.
 | **M7** run init and round 0 | U2 | batch 3's init and round-0 rows, config item 5, `--diag` as a mode, the test builders, the origin-gate rows, `_peer_cycle`, a resume that takes 72 s to apply | halt a degraded origin (yes) | M6 |
 | **ADDR** an address off its record | — | the fork-summary kind, the webapp's id parses (`rootCycleId`, the short labels), parent counting | the mint record serves the kind and the short label | M7 |
 | **M8** potter call door, served roster | U1b, EP | `InjectionBundle`, `Calls.ask`, the seed rule, `PROMPT_FIELD`, swept F, the `[#N]` slots, the panel's money text, a refused L4 arm's identity | a failed critique is a typed fault (yes) | M4 |
-| **M9** ledger read stack | U3 | the projection checkouts re-cut on M2's account log (M9.5a, M9.5b, M9.2, M9.6), `_unlanded`, the cold-fold snapshot (held: re-measured on the box first), the `dashboard.json` checkout, the swallowed round checkout; a derived file's fault never unwinds or stops a landed line | keep `dashboard.json` / `index.json` as projections (yes, §0) | - |
+| **M9** ledger read stack | U3 | the projection checkouts re-cut on M2's account log (M9.5b, M9.2, M9.6; M9.5a landed in batch 15), `_unlanded`, the cold-fold snapshot (held: re-measured on the box first), the `dashboard.json` checkout, the swallowed round checkout; a derived file's fault never unwinds or stops a landed line | keep `dashboard.json` / `index.json` as projections (yes, §0) | - |
 | **M10** narration and tracing | U3, ET | one narration table, the typed phase act, ET, `ActivityItem` as `Said`, a pause's cause served | — | M9 |
 | **M11** typed run records | U3 | engine B and C, `StatusMark`, `rewound`, the act record, the cell beat, `cached` / `key_source`, the export's spend, the on-disk renames (`ArmSlot`, `CycleSeed`, `LinePayload`) | — | M9 |
 | **M12** spend | S | the book counted once, one charge value, the lost mirror, the reserved hold, stale `run_limits`, a grant verb, the host-coupon rows | a re-grant counts from `granted_at` (yes); migrates `charges.jsonl` | M9 |
@@ -57,8 +57,8 @@ first wipe (M2's, on main since batch 12; M9's round-audit cache, CONN, M10 and 
 **Critical path:** M4's re-key → M9 → M13 → M19, then the next paid run. M9 → FEED → M16 runs
 beside it.
 
-**Next:** batch 15: M9's re-cut (`w7m9b`, census 7c) on M4's re-keyed tip; then CONN, and LAND before
-the release.
+**Next:** the rest of M9's re-cut (`w7m9b`: M9.5b, M9.2, M9.6, census 7c); then CONN, and LAND
+before the release.
 
 **Re-keys.** M4, CONN, M8, M5 (the L4 cache) and M19 (decisions) land in any order before the next
 paid run. M4's and M8's re-keys share one cold cache only if no paid run lands

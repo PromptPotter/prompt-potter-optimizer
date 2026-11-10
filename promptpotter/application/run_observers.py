@@ -1,4 +1,4 @@
-"""``build_run_observers`` binds every projection to one ledger; a fork re-anchors onto its own."""
+"""``build_run_observers`` holds every projection on one ledger's index; a fork re-anchors onto its own."""
 
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
+from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
 from promptpotter.infrastructure.tracing.bridge import TracingProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.measurement_context import instrument_depth
@@ -193,11 +194,12 @@ class RunObservers:
     dashboard: DashboardCheckout
     readout: ReadoutProjection
     tracing: TracingProjection
+    projecting: Projecting
     _book_tokens: list[Token[SpendBook | None]] = field(default_factory=list)
 
     def arm_spend_book(self, book: SpendBook) -> None:
         ledger = self.callbacks.ledger
-        ledger.bind(book)
+        self.projecting.add(book)
         book.ledger = ledger
         if self._book_tokens:
             reset_spend_book(self._book_tokens.pop())
@@ -218,16 +220,21 @@ class RunObservers:
 
     def drain_all(self) -> None:
         try:
-            self._drain()
+            self.projecting.close()
+            # The SSE stream is no projection — it tails the on-disk ledger — so nothing drains it.
+            if self._book_tokens:
+                reset_spend_book(self._book_tokens.pop())
         finally:
-            release_cycle(self.cycle_dir)
+            self.release()
 
-    def _drain(self) -> None:
-        self.dashboard.drain()
-        self.tracing.drain()
-        # The SSE stream is no subscriber — it tails the on-disk ledger — so nothing drains here.
-        if self._book_tokens:
-            reset_spend_book(self._book_tokens.pop())
+    def release(self) -> None:
+        _let_go(self.projecting, self.cycle_dir)
+
+
+def _let_go(projecting: Projecting, cycle_dir: CycleDir) -> None:
+    """Drops a run's projections undrained, since `drain_all` alone drains, then lets its cycle go."""
+    projecting.close(drain=False)
+    release_cycle(cycle_dir)
 
 
 def build_run_observers(
@@ -240,26 +247,33 @@ def build_run_observers(
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
     hold_cycle(cycle_dir)
+    ledger = open_with_history(cycle_dir)
+    projecting = LedgerIndex.of(ledger.path, ()).projecting()
     try:
         prior = session.store.campaigns.last(session.hop, RunPhaseRecord)
         observers = _bind_observers(
             cycle_dir,
+            ledger,
+            projecting,
             session=session,
             campaign_config=campaign_config,
-            readout_sink=readout_sink,
             forked_from=forked_from,
+            readout_sink=readout_sink,
         )
+        # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
+        declare_running(observers.callbacks.ledger)
+        bind_account(session.store)
         # A launch is a run boundary; the run a gate held resumes, what it was asked standing.
         if prior is None or prior.run_phase is not RunPhase.GATE:
             session.store.void_inbox(session.hop)
     except BaseException:
-        release_cycle(cycle_dir)
+        _let_go(projecting, cycle_dir)
         raise
-    session.state.locked_cycle = cycle_dir
+    session.state.observers = observers
     observers.callbacks.close_dead_bench()
     if forked_from is not None:
         # The line moved onto this cycle; the one it left is no longer this process's.
-        release_cycle(forked_from.cycle_dir)
+        forked_from.release()
         # A fork's config is already admitted; a first build waits for `prepare_run` to settle it.
         declare_run_wiring(
             session,
@@ -273,6 +287,8 @@ def build_run_observers(
 
 def _bind_observers(
     cycle_dir: CycleDir,
+    ledger: CycleEventLog,
+    projecting: Projecting,
     *,
     session: Session,
     campaign_config: CampaignConfig,
@@ -289,34 +305,27 @@ def _bind_observers(
         raise RuntimeError(
             f"build_run_observers: the ledger of {session.hop} holds no RunWiringRecord"
         )
-    # Opened after the checkout folded, so its catch-up never feeds the checkout a line twice.
-    ledger = open_with_history(cycle_dir)
-
-    ledger.bind(dashboard)
     readout.open_readout(cycle_dir)
-    ledger.bind(readout)
-    ledger.bind(CycleIndexProjection(cycle_dir))
-    ledger.bind(RoundFileProjection(session.store, session.hop, session.state))
     tracing = (
         TracingProjection.for_cycle(session.tenant_root, session.hop, langfuse=session.langfuse)
         if forked_from is None
         else forked_from.tracing
     )
-    ledger.bind(tracing)
-    # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
-    declare_running(ledger)
-
-    callbacks = (
-        RunCallbacks(ledger=ledger)
-        if forked_from is None
-        else RunCallbacks(ledger=ledger, view_context=forked_from.callbacks.view_context)
-    )
-    bind_account(session.store)
-
+    # Each joins at the line the index stands at, past what the checkout folded.
+    dashboard = projecting.add(dashboard)
+    readout = projecting.add(readout)
+    projecting.add(CycleIndexProjection(cycle_dir))
+    projecting.add(RoundFileProjection(session.store, session.hop, session.state))
+    tracing = projecting.add(tracing)
     return RunObservers(
         cycle_dir=cycle_dir,
-        callbacks=callbacks,
+        callbacks=(
+            RunCallbacks(ledger=ledger)
+            if forked_from is None
+            else RunCallbacks(ledger=ledger, view_context=forked_from.callbacks.view_context)
+        ),
         dashboard=dashboard,
         readout=readout,
         tracing=tracing,
+        projecting=projecting,
     )

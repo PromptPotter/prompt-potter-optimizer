@@ -634,7 +634,7 @@ class DashboardCheckout(LiveDashboardProjection):
             write_json(self._path, self.composed().model_dump(), default=str)
             self._cost_s = time.perf_counter() - started
         except OSError as exc:
-            # Logged, never raised or emitted: a round warning appends to the ledger this view subscribes to.
+            # Logged, never raised or emitted: a round warning appends to the ledger that feeds this view.
             logger.warning(
                 "dashboard write refused — %s: %s · %s is stale until the next write lands "
                 "(the run is unaffected; the ledger holds every fact this file shows)",

@@ -29,6 +29,7 @@ from promptpotter.domain.phases import STOP_REASON_INFO
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError
 
@@ -79,10 +80,14 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
         readout = ReadoutProjection.for_campaign(session, config, sink=None)
         banked: BenchPasses | None = None
         # The round an `at_end` launch grades under: its last.
-        with verb_ledger(stores, hop) as ledger, at_round(rounds[-1].round):
-            ledger.bind(dashboard)
+        with (
+            verb_ledger(stores, hop) as ledger,
+            at_round(rounds[-1].round),
+            LedgerIndex.of(ledger.path, ()).projecting() as projecting,
+        ):
+            dashboard = projecting.add(dashboard)
             readout.open_readout(cycle_dir)
-            ledger.bind(readout)
+            projecting.add(readout)
             cb = RunCallbacks(ledger)
             try:
                 try:
@@ -124,7 +129,6 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                         finished_at=utcnow_iso(),
                         optimizer_phases=optimizer.phases,
                     )
-                dashboard.drain()
         stores.campaigns.restate_export_bench(hop, score)
         publish_export(session)
         write_review_md(

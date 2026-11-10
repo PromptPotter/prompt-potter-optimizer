@@ -341,6 +341,28 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   `optimization.nodes.{node}.config.{field}`. **Rides with:** M8. **Re-test:** a manifest laying
   `persona: 5` is refused naming `config.persona`, with no `errors.pydantic.dev` URL.
 
+### Batch 15's review (2026-11-10)
+
+- **An appender's `land` drains every queued line, so a spend book counts a part twice under two
+  appending threads**: `read_model.py::LedgerIndex.land` feeds a second thread's later
+  `TokenUsageRecord` before the first appender returns, so `spend_book.py`'s `saw()` (the last
+  record fed) is False for the first and `settle` counts its record again. Latent: no two threads
+  append usage to one ledger today. Action: `land` returns once its own offset was fed, or `saw`
+  keys on the record's offset. **Rides with:** M9 (M9.5b, which owns `spend_book.py`). **Re-test:**
+  two threads appending one `TokenUsageRecord` each to one ledger settle two parts, never three.
+- **A line queued before a `Projecting` closed still feeds the projection it dropped**: each queued
+  line snapshots the held projections (`read_model.py::LedgerIndex._feed`), so a foreign line a
+  reader's refresh queued feeds an already drained `DashboardCheckout` at the next `land`, which
+  re-arms its debounce and writes `dashboard.json` after its run released. Action: the drain reads
+  who is held when it feeds, never when the line was queued. **Rides with:** M9 (M9.5b).
+  **Re-test:** a line appended by another writer, refreshed and left queued across `close()`, feeds
+  no projection at the next append.
+- **`tests/test_spend.py`'s eight binders never close their `Projecting`**:
+  `LedgerIndex.of(path, ()).projecting().add(book)` pins each ledger's index for the session, and
+  no fixture resets the registry. Action: `with ... projecting() as held: held.add(book)`.
+  **Rides with:** M9 (M9.5b). **Re-test:** `git grep -n "projecting().add(" -- tests/test_spend.py`
+  is empty.
+
 ### The connector and entry-point seam audits (two unbiased reads, 2026-11-06)
 
 - **Resuming a campaign takes its connector from today's dataset file** —
@@ -511,9 +533,7 @@ later arc deletes. **Rides with:** the arc each group names, by its "Was" name i
   Rewritten modules land at Wave C's paths. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
 
 **Batch 4: the ledger (U3, with ET) and spend (S).**
-- **U3: the ledger read stack.** Two push paths (`ledger.py::CycleEventLog` subscribers and
-  `read_model.py::appended_here`),
-  three fold protocols, every `CycleEventLog.open` re-counting the ledger,
+- **U3: the ledger read stack.** Three fold protocols,
   and `live_dashboard/projection.py::DashboardCheckout` writing a `dashboard.json` only
   `scripts/offline_run.py` reads. Action: `RunScope`'s ledger is the one producer door (`RunCallbacks`
   goes, in M10; `emit_*` land on `RunScope`'s ledger); `LedgerIndex` the one live fold with the writing projections on it. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
@@ -753,8 +773,8 @@ next run-data reshape.
   `runner/output.py::write_log_md`, `runner/output.py::write_review_md`, `runner/output.py::publish_export`
   and `runner/output.py::write_hard_samples_artifacts` are called only from `runner/round.py`,
   `runner/cycle_close.py` and `runner/grade_bench.py`. So `log.md`, `review.md` and the export lag
-  any other act that moves the ledger, and nothing says so (architecture §0 Display: a ledger
-  subscriber writes only the artifact it declares). Action: each a writing projection on the
+  any other act that moves the ledger, and nothing says so (architecture §0 Display: a
+  projection writes only the artifact it declares). Action: each a writing projection on the
   ledger, or the file goes where `readout.log` and `index.json` already carry it.
   **Re-test:** `git grep -n "write_log_md(\|write_review_md(\|publish_export(" -- promptpotter/application/runner`.
 - **A running verification is orphaned at two seams** (`live_dashboard/projection.py::_handle_run_wiring`,

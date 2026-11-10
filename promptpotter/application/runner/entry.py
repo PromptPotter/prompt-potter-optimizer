@@ -62,7 +62,6 @@ from promptpotter.domain.spend import HeldBudget
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.spend_book import SpendBook, require_spend_book
 from promptpotter.infrastructure.llm.telemetry import at_round, bind_priced
-from promptpotter.infrastructure.producer_lock import release_cycle
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.run_scope import rescope, scoped
@@ -436,7 +435,7 @@ async def run_optimization(
                 raise outcome.cancelled
             return outcome.session, outcome.cycle_result
     finally:
-        # Whatever path exits, a fork included: the lock left the opened cycle when the line moved.
-        locked = session.state.locked_cycle
-        assert locked is not None, "a run opens on observers that hold its cycle"
-        release_cycle(locked)
+        # Whatever path exits, a fork included: the observers left the opened cycle when the line moved.
+        held = session.state.observers
+        assert held is not None, "a run opens on observers that hold its cycle"
+        held.release()

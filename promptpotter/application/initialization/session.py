@@ -9,7 +9,7 @@ from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, PartitionRecord, restored_partition
 from promptpotter.domain.campaign import Optimize, Purpose
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams
@@ -25,6 +25,7 @@ from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
+    from promptpotter.application.run_observers import RunObservers
     from promptpotter.application.scoring.evaluators import Evaluator
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.run_records import BackendRevision
@@ -82,8 +83,8 @@ class LaunchState:
     flight: FlightGauge | None = None
     # What admission held for this launch, set at the runner seam BEFORE the book is armed.
     held: HeldBudget | None = None
-    # The cycle whose producer lock the launch holds: `build_run_observers` moves it onto a fork.
-    locked_cycle: CycleDir | None = None
+    # The cycle lock and projections the launch holds: `build_run_observers` moves them onto a fork.
+    observers: RunObservers | None = None
 
     def launch_clock(self) -> LaunchClock:
         if self.clock is None:

@@ -6,7 +6,7 @@ import re
 import threading
 from abc import ABC, abstractmethod
 from bisect import bisect_right
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Callable, Hashable, Iterable, Sequence
 from itertools import islice
 from pathlib import Path
@@ -15,12 +15,7 @@ from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_
 from pydantic import ValidationError
 
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
-from promptpotter.domain.run_records import (
-    RECORD_KINDS,
-    CycleRecord,
-    SpendHoldRecord,
-    TokenUsageRecord,
-)
+from promptpotter.domain.run_records import CycleRecord, SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import (
     ABSENT,
@@ -42,7 +37,7 @@ from promptpotter.shared.errors import (
 # Every `CycleRecord` arm: a fold of all of them reads every line, so a line no arm names refuses it.
 EVERY_ARM: tuple[type[StrictModel], ...] = get_args(get_args(CycleRecord)[0])
 _EVERY_ARM = frozenset(EVERY_ARM)
-_ARM_KINDS = frozenset(kind.encode() for kind in RECORD_KINDS)
+_ARM_MODELS = {arm.model_fields["record_type"].default.encode(): arm for arm in EVERY_ARM}
 
 
 # What a line reader raises on a line it cannot take, a model's or a hand-built one's.
@@ -212,12 +207,15 @@ def _registered[K, I: _LedgerTail](registry: OrderedDict[K, I], key: K, make: Ca
     if index is not None:
         registry.move_to_end(key)
         return index
-    # No fold outlives its ledger: a deleted tree's indexes leave before another joins.
-    for gone in [held for held, tail in registry.items() if not tail._path.exists()]:
+    # No fold outlives its ledger: a deleted tree's indexes leave before another joins; a pinned one stays.
+    for gone in [
+        held for held, tail in registry.items() if not (tail.pinned or tail._path.exists())
+    ]:
         del registry[gone]
     index = registry[key] = make()
-    while len(registry) > LEDGER_INDEX_MAX:
-        registry.popitem(last=False)
+    unpinned = [held for held, tail in registry.items() if not tail.pinned]
+    for gone in unpinned[: max(0, len(registry) - LEDGER_INDEX_MAX)]:
+        del registry[gone]
     return index
 
 
@@ -236,6 +234,10 @@ class _LedgerTail(ABC):
         self._mark = ABSENT
         self._lines = 0
 
+    @property
+    def pinned(self) -> bool:
+        return False
+
     @abstractmethod
     def _feed(self, raw: bytes) -> None: ...
 
@@ -252,26 +254,18 @@ class _LedgerTail(ABC):
         self._mark = tail.mark
         self._sig = None if tail.mark.inode is None else sig
 
-    def _take(self, raw: bytes, at: range) -> None:
-        with self._lock:
-            if self._sig is None or self._mark.end != at.start:
-                return
-            self._feed(raw)
-            self._lines += 1
-            self._mark = FileMark(at.stop, self._mark.inode, raw + b"\n")
-            sig = file_sig(self._path)
-            # Another process may have appended past ours already: a stale signature has the next view read it.
-            if sig is not None and sig[0] == self._mark.inode and sig[1] == at.stop:
-                self._sig = sig
-
-
-def appended_here(path: Path, raw: bytes, at: range) -> None:
-    with LedgerIndex._registry_lock:
-        indexes: list[_LedgerTail] = [i for p, i in LedgerIndex._registry.items() if p == path]
-    with LineIndex._registry_lock:
-        indexes += [i for (p, _), i in LineIndex._registry.items() if p == path]
-    for index in indexes:
-        index._take(raw, at)
+    def _take(self, raw: bytes, at: range) -> bool:
+        """Under the lock: whether *raw*, appended at *at*, was this tail's next line, now fed."""
+        if self._sig is None or self._mark.end != at.start:
+            return False
+        self._feed(raw)
+        self._lines += 1
+        self._mark = FileMark(at.stop, self._mark.inode, raw + b"\n")
+        sig = file_sig(self._path)
+        # Another process may have appended past ours already: a stale signature has the next view read it.
+        if sig is not None and sig[0] == self._mark.inode and sig[1] == at.stop:
+            self._sig = sig
+        return True
 
 
 type _Make = Callable[[], LedgerFold[Any, Any]]
@@ -302,7 +296,7 @@ class _Feeder:
         kind = _RECORD_TYPE.search(raw)
         model = None if kind is None else self._models.get(kind[1])
         if model is None:
-            if raw.strip() and (kind is None or kind[1] not in _ARM_KINDS):
+            if raw.strip() and (kind is None or kind[1] not in _ARM_MODELS):
                 reason = "no record_type" if kind is None else f"no arm is {kind[1].decode()!r}"
                 self.refused.setdefault(None, _refusal(self._ledger, offset, reason))
             return
@@ -358,9 +352,45 @@ def folded[F: LedgerFold[Any, Any]](
     return made
 
 
+class Projected(Protocol):
+    """A fold that writes (`projections/base.py::Projection`), fed after its index's folds."""
+
+    def on_record(self, record: CycleRecord, offset: int, *, ledger: Path) -> None: ...
+
+    def drain(self) -> None: ...
+
+
+class Projecting:
+    """A drainer's hold on projections of one ledger: the last holder of a projection to close drains it."""
+
+    def __init__(self, index: LedgerIndex) -> None:
+        self._index = index
+        self._kinds: list[type[Any]] | None = []
+
+    def add[P: Projected](self, projection: P) -> P:
+        assert self._kinds is not None, "a closed Projecting holds nothing more"
+        held = self._index._join(projection)
+        self._kinds.append(type(projection))
+        return held
+
+    def close(self, *, drain: bool = True) -> None:
+        kinds, self._kinds = self._kinds or [], None
+        for projection in [self._index._leave(kind) for kind in kinds]:
+            if projection is not None and drain:
+                projection.drain()
+
+    def __enter__(self) -> Projecting:
+        return self
+
+    def __exit__(self, raised: object, *_: object) -> None:
+        # An error in flight leaves them undrained: a drain's own fault never replaces it.
+        self.close(drain=raised is None)
+
+
 class LedgerIndex(_LedgerTail):
     """ONE per ledger, holding every typed fold any roster named: a line is screened and validated once.
-    A fold no roster names holds a slot in its own ledger's index alone, seeded with a fork's parent at its cut."""
+    A fold no roster names holds a slot in its own ledger's index alone, seeded with a fork's parent at its cut.
+    Its projections are fed outside its lock, so one may view this index while it is fed."""
 
     _registry: ClassVar[OrderedDict[Path, LedgerIndex]] = OrderedDict()
     _screened: ClassVar[list[_Make]] = []
@@ -369,7 +399,86 @@ class LedgerIndex(_LedgerTail):
     def __init__(self, path: Path) -> None:
         self._seeds: dict[_Make, LedgerFold[Any, Any] | None] = {}
         self._feeder = _Feeder(path, {})
+        # A projection by its type, with how many hold it; the lines it waits on, in append order.
+        self._held: dict[type[Any], tuple[Projected, int]] = {}
+        self._queue: deque[tuple[int, bytes, list[Projected], CycleRecord | None]] = deque()
+        self._draining = threading.Lock()
+        self._drainer: int | None = None
         super().__init__(path)
+
+    @property
+    def pinned(self) -> bool:
+        return bool(self._held)
+
+    def projecting(self) -> Projecting:
+        return Projecting(self)
+
+    def _join[P: Projected](self, projection: P) -> P:
+        """A type held already is the held instance; a new one is fed from the line the index stands at."""
+        with self._lock:
+            held, holders = self._held.get(type(projection), (projection, 0))
+            if not holders:
+                self._refresh()
+            self._held[type(projection)] = (held, holders + 1)
+            return cast("P", held)
+
+    def _leave(self, kind: type[Any]) -> Projected | None:
+        """The projection its last holder left, to drain: no line feeds it again."""
+        with self._lock:
+            held, holders = self._held[kind]
+            if holders > 1:
+                self._held[kind] = (held, holders - 1)
+                return None
+            del self._held[kind]
+            return held
+
+    def line_count(self) -> int:
+        with self._lock:
+            self._refresh()
+            return self._lines
+
+    def land(self, raw: bytes, at: range, record: CycleRecord) -> int:
+        """*raw*, just appended at *at* as *record*: its offset, once its projections were handed it in
+        append order, *record* itself, so a fold keyed by identity knows its own append."""
+        # The run's own controls poll this ledger per cell; its own appends must not cost them a read.
+        with LineIndex._registry_lock:
+            lines = [i for (p, _), i in LineIndex._registry.items() if p == self._path]
+        for line_index in lines:
+            with line_index._lock:
+                line_index._take(raw, at)
+        with self._lock:
+            if not self._take(raw, at):
+                self._refresh()
+            offset = self._lines - 1
+            if self._mark.end > at.stop:
+                with open(self._path, "rb") as fh:
+                    fh.seek(at.stop)
+                    offset -= fh.read(self._mark.end - at.stop).count(b"\n")
+            for i, (queued, line, held, _) in enumerate(self._queue):
+                if queued == offset:
+                    self._queue[i] = (queued, line, held, record)
+        # The drainer's own re-entrant append is fed after the line it is feeding; any other waits.
+        if self._drainer == threading.get_ident():
+            return offset
+        with self._draining:
+            self._drainer = threading.get_ident()
+            try:
+                while True:
+                    with self._lock:
+                        if not self._queue:
+                            return offset
+                        at_line, line, held, carried = self._queue.popleft()
+                    kind = _RECORD_TYPE.search(line)
+                    model = None if kind is None else _ARM_MODELS.get(kind[1])
+                    if model is None:
+                        continue
+                    read = carried or ledger_record(
+                        model.model_validate_json, line, ledger=self._path, offset=at_line
+                    )
+                    for projection in held:
+                        projection.on_record(cast("CycleRecord", read), at_line, ledger=self._path)
+            finally:
+                self._drainer = None
 
     @classmethod
     def of(cls, path: Path, roster: Sequence[_Make]) -> LedgerIndex:
@@ -445,6 +554,8 @@ class LedgerIndex(_LedgerTail):
 
     def _feed(self, raw: bytes) -> None:
         self._feeder.line(self._lines, raw)
+        if self._held:
+            self._queue.append((self._lines, raw, [held for held, _ in self._held.values()], None))
 
 
 class LineIndex(_LedgerTail):
