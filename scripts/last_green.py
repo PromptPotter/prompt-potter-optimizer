@@ -152,9 +152,13 @@ class LastGreen:
 
     @classmethod
     def open(cls) -> LastGreen | None:
-        """``None`` under ``CI``, and where git cannot list the tree: a key over no files matches every tree."""
-        if os.environ.get("CI"):
-            return None
+        """``None`` under ``CI``, which keeps no green, and where git cannot list the tree."""
+        return None if os.environ.get("CI") else cls.of_tree()
+
+    @classmethod
+    def of_tree(cls) -> LastGreen | None:
+        """The tree's keys, whether or not a green is kept: ``None`` where git cannot list the
+        tree, as a key over no files matches every tree."""
         code, listed = git("ls-files", "-co", "--exclude-standard", "-z")
         return None if code else cls(listed, clone_cache() / "greens.json")
 

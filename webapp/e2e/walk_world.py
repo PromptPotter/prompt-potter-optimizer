@@ -33,6 +33,13 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
+    # A world is read only here, and a gate's `walk-world` build prunes every other world under the
+    # clone's lock (`scripts/gate.py::_walk_world`): the copy holds that lock too, or inherits its
+    # gate's hold.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    from processes import queue_behind_siblings
+
+    queue_behind_siblings("a walk world's copy")
     if not source.is_dir():
         print(
             f"[e2e] no workspace at {source} — run `python scripts/gate.py --only walk-world`",

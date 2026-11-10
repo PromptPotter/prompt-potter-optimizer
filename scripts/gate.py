@@ -77,6 +77,16 @@ class Selection:
     probes: tuple[_Probe, ...] = ()
     # Every check is `light`, so this gate runs beside a sibling's rather than queuing.
     unqueued: bool = False
+    # The run `walk-world` builds and `walk` serves a copy of, under that check's key: `None` only
+    # where git lists no tree to key it on.
+    walk_world: Path | None = None
+
+    @property
+    def world(self) -> Path:
+        """The walk world, which nothing builds, prunes or walks under no key."""
+        if self.walk_world is None:
+            raise RuntimeError("git lists no tree, so the walk world has no key to stand under")
+        return self.walk_world
 
     @classmethod
     def build(cls, staged: bool, changed: bool) -> Selection:
@@ -851,10 +861,11 @@ def _eslint(sel: Selection) -> Outcome:
     return run(_node("npm", "run", *lint), _WEBAPP)
 
 
-def _playwright(_sel: Selection) -> Outcome:
-    # `walk` serves a copy of the walk world; `spend` costs real money.
+def _playwright(sel: Selection) -> Outcome:
+    # `walk` serves a copy of the walk world, in this gate's own home; `spend` costs real money.
     tiers = _node("npx", "playwright", "test", "--project=cold", "--project=walk")
-    return run(tiers, _WEBAPP, PP_E2E_WALK_WORLD=str(_WALK_WORLD))
+    walk_home = str(Path(os.environ["PROMPTPOTTER_HOME"]) / "e2e-walk")
+    return run(tiers, _WEBAPP, PP_E2E_WALK_WORLD=str(sel.world), PP_E2E_WALK_HOME=walk_home)
 
 
 def _lock_satisfies(requirer: str, dep: str, entries: frozenset[str]) -> bool:
@@ -1025,7 +1036,7 @@ class Check:
         return digest(store.key(prefixes, self.product).encode()).hex()
 
     def kept(self, store: LastGreen, key: str | None) -> bool:
-        standing = not self.builds or (REPO / self.builds).exists()
+        standing = not self.builds or (REPO / self.builds.format(key=key)).exists()
         return key is not None and standing and store.holds(self.name, key)
 
 
@@ -1136,13 +1147,24 @@ def _optimizer_plugin(_: Selection) -> Outcome:
     return 0, out
 
 
-# What the `walk` tier serves a copy of: potter's straight run, in a home of its own.
-_WALK_WORLD = clone_cache() / "walk-world" / "potter"
+# What the `walk` tier serves a copy of: potter's straight run, in a home of its own under the
+# `walk-world` check's key, so a world is read only by a tree whose engine built it. One world
+# stands: building one removes every other entry of `walk-world/`, under the clone's lock, which
+# a walk's copy of its world takes too (`webapp/e2e/walk_world.py`), so no world goes while a tree
+# copies it; a tree whose world went builds its own again (`Check.kept` reads `builds`).
+_WALK_WORLDS = clone_cache() / "walk-world"
+_WALK_WORLD = str(_WALK_WORLDS / "{key}" / "potter")
 
 
-def _walk_world(_: Selection) -> Outcome:
+def _walk_world(sel: Selection) -> Outcome:
+    home = sel.world.parent
+    for other in _WALK_WORLDS.iterdir() if _WALK_WORLDS.is_dir() else ():
+        if other.is_dir() and other != home:
+            shutil.rmtree(other)
+        elif other.is_file():
+            other.unlink()
     argv = [sys.executable, "scripts/offline_run.py", "--optimizer=potter", "--straight"]
-    return run(argv, REPO, PROMPTPOTTER_HOME=str(_WALK_WORLD.parent))
+    return run(argv, REPO, PROMPTPOTTER_HOME=str(home))
 
 
 def _offline_run(_: Selection) -> Outcome:
@@ -1307,7 +1329,7 @@ CHECKS: tuple[Check, ...] = (
         _walk_world,
         landing=True,
         reads=(*OFFLINE_RUN_READS, *_GATE),
-        builds=str(_WALK_WORLD),
+        builds=_WALK_WORLD,
     ),
     Check(
         "optimizer-plugin",
@@ -1710,10 +1732,15 @@ def main() -> int:
     queue_behind_siblings(f"gate[{label}]", exempt=light or bool(os.environ.get("CI")))
     budget = RamBudget.read()
 
-    # `--staged` checks less than any key names, so it neither reads nor records a green.
+    # `--staged` checks less than any key names, so it neither reads nor records a green, and CI
+    # keeps none; the walk world is keyed all the same, on the tree that builds it.
     store = None if args.staged else LastGreen.open()
+    tree = store or LastGreen.of_tree()
+    [walk_world] = (c for c in CHECKS if c.name == "walk-world")
+    world_key = None if tree is None else walk_world.key(tree)
     sel = dataclasses.replace(
         sel,
+        walk_world=None if world_key is None else Path(_WALK_WORLD.format(key=world_key)),
         probes=tuple(
             c.run
             for c in checks
