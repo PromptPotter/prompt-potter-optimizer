@@ -64,16 +64,13 @@ def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | 
     )
 
 
-def write_cycle_index(cycle_dir: Path) -> None:
-    index = read_cycle_index(cycle_dir, moment=None)
-    if index is not None:
-        write_json(CycleLayout(cycle_dir).manifest, index.model_dump(mode="json"))
-
-
 class CycleIndexProjection(Projection):
+    """`index.json`'s one writer: the cycle's index, rewritten at each record that moves it."""
+
     def __init__(self, cycle_dir: CycleDir) -> None:
         self._cycle_dir = Path(cycle_dir)
 
     def feed(self, record: CycleRecord) -> None:
-        if moves_index(record):
-            write_cycle_index(self._cycle_dir)
+        index = read_cycle_index(self._cycle_dir, moment=None) if moves_index(record) else None
+        if index is not None:
+            write_json(CycleLayout(self._cycle_dir).manifest, index.model_dump(mode="json"))

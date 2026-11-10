@@ -1116,7 +1116,7 @@ export interface ActivityItem {
   /** The arm the record is about, by its key; `label` renders it. */
   arm: string | null;
   /** The self-heal a round warning reports; null on every other item. */
-  healed: 'layer_parse_failure' | 'injection_budget_overrun' | 'trace_sink_failed' | null;
+  healed: 'layer_parse_failure' | 'injection_budget_overrun' | 'trace_sink_failed' | 'derived_file_stale' | null;
 }
 
 /** A campaign as the subtree read serves it: every level under it. */
@@ -2496,7 +2496,7 @@ export interface RoundAudit {
 /** One optimizer-loop degradation the self-healing rails recovered from. */
 export interface LoopWarning {
   ts: string;
-  kind: 'layer_parse_failure' | 'injection_budget_overrun' | 'trace_sink_failed';
+  kind: 'layer_parse_failure' | 'injection_budget_overrun' | 'trace_sink_failed' | 'derived_file_stale';
   severity: 'warning' | 'error';
   message: string;
   round: number | null;

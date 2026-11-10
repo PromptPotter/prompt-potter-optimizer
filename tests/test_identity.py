@@ -241,6 +241,7 @@ from promptpotter.domain.run_records import (
     CycleSeed,
     CycleSeedRecord,
     PipelineRead,
+    RoundWarningRecord,
     ScoringLockedRecord,
 )
 from promptpotter.domain.sample import Bank, Sample
@@ -252,6 +253,7 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.infrastructure.producer_lock import cycle_held
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
     DashboardCheckout,
     fold_at,
@@ -271,7 +273,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import rmtree_robust, write_json, write_yaml
-from promptpotter.infrastructure.store.layout import CampaignLayout
+from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
 from promptpotter.infrastructure.store.stores import Stores, build_stores
@@ -2320,15 +2322,24 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     root_dir = CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop))
     launched = effective_config(declared)
     observers = build_run_observers(session=opened, campaign_config=launched)
-    beside = DashboardCheckout.over(root_dir)
-    assert beside is not None
     with LedgerIndex.of(wired_ledger.path, ()).projecting() as joiner:
-        assert joiner.add(beside) is observers.dashboard, (
+        assert joiner.add(DashboardCheckout(root_dir)) is observers.dashboard, (
             "a second holder folded a dashboard beside the run's, each writing its own file"
         )
+    # A store-door append during the run lands through the run's own `index.json` writer, at once.
+    stores.campaigns.record_intervention(held_campaign.root_hop, kind="steered")
+    manifest = CycleLayout(root_dir).manifest
+    assert LedgerIndex.of(wired_ledger.path, ()).pinned and "steered" in manifest.read_text(), (
+        "a store-door append let go of the run's projections, or left its index.json stale"
+    )
     observers.drain_all()
     assert not LedgerIndex.of(wired_ledger.path, ()).pinned and not cycle_held(root_dir), (
         "a drained run kept its ledger's projections or its cycle"
+    )
+    # Outside a run, the store door holds its one-shot only while its line lands.
+    stores.campaigns.record_intervention(held_campaign.root_hop, kind="steered")
+    assert not LedgerIndex.of(wired_ledger.path, ()).pinned, (
+        "a store-door append pinned its ledger's index past its own line"
     )
     # A build that raises past its projections' checkout lets go of them too.
     with monkeypatch.context() as broken, pytest.raises(OSError, match="no callbacks"):
@@ -2366,6 +2377,24 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "a run whose exit unwound kept its ledger's projections or its cycle"
     )
     assert not drained.called, "a run that raised drained its dashboard on the way out"
+    # A projection that cannot write is one stale-file warning on its ledger, never a raise into
+    # the appends whose lines landed, and nothing it raised is held for a later append.
+
+    class _Unwritable(Projection):
+        def _handle_round_warning(self, record: RoundWarningRecord) -> None:  # noqa: ARG002 -- routed by its annotation
+            raise OSError("disk full")
+
+    faulty = CycleEventLog.open(CycleDir(tmp_path / "campaigns" / "c" / "cycles" / "faulty"))
+    with LedgerIndex.of(faulty.path, ()).projecting() as held:
+        held.add(_Unwritable())
+        offsets = [
+            faulty.append(RoundWarningRecord(kind="layer_parse_failure", message=str(n)))
+            for n in range(2)
+        ]
+    kinds = [record.kind for _, record in faulty.iter() if isinstance(record, RoundWarningRecord)]
+    assert offsets == [0, 2] and kinds.count("derived_file_stale") == 1 and len(kinds) == 3, (
+        "a projection's write fault unwound a landed append, or went unreported, or stormed"
+    )
 
     # Answering in TEXT sends no contract to answer INTO.
     text_pipeline = read_dataset_pipeline(_install("justlogic/d234"))

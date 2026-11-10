@@ -23,7 +23,7 @@ from promptpotter.infrastructure.store.io import unlink_robust, write_json
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, round_number
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, derived
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import NotFoundError, graceful
+from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import (
@@ -147,7 +147,8 @@ def _with_rows(stores: Stores, hop: CycleHop, held: StandingRound, scorer: Score
 
 
 class RoundFileProjection(Projection):
-    """The ONE writer of ``rounds/round_NNNN.json``; a failed checkout is logged, the ledger holding the round."""
+    """The ONE writer of ``rounds/round_NNNN.json``: it writes what the round read answers, so a round
+    the read refuses has no file, and a disk fault is its ledger's warning as any projection's is."""
 
     def __init__(self, stores: Stores, hop: CycleHop, state: LaunchState) -> None:
         self._stores, self._hop, self._state = stores, hop, state
@@ -169,14 +170,19 @@ class RoundFileProjection(Projection):
         self._check_out(record.round)
 
     def _check_out(self, round_num: int) -> None:
-        with graceful(f"Round {round_num} checkout failed"):
-            wanted = {round_num}
-            if not self._synced:
-                own = scan_standing_rounds([LedgerSpan(self._ledger)]).rounds
-                wanted |= {n for n in own if not self._layout.round_file(n).exists()}
-                self._synced = True
-            scorer = self._state.scoring.require_scorer()
-            for n in sorted(wanted):
+        wanted = {round_num}
+        if not self._synced:
+            own = scan_standing_rounds([LedgerSpan(self._ledger)]).rounds
+            wanted |= {n for n in own if not self._layout.round_file(n).exists()}
+            self._synced = True
+        scorer = self._state.scoring.require_scorer()
+        for n in sorted(wanted):
+            path = self._layout.round_file(n)
+            try:
                 closed = closed_round(self._stores, self._hop, n, scorer, moment=None)
-                if closed is not None:
-                    write_json(self._layout.round_file(n), closed.model_dump(mode="json"))
+            except NotFoundError:
+                # The round read refuses it, so its file says nothing either.
+                unlink_robust(path)
+                continue
+            if closed is not None:
+                write_json(path, closed.model_dump(mode="json"))

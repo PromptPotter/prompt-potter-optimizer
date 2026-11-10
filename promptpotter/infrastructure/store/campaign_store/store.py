@@ -180,10 +180,18 @@ class CampaignStore:
         return self.layout(hop).ledger
 
     def append(self, hop: CycleHop, record: CycleRecord) -> int:
+        return self._land(hop, record)
+
+    def _land(self, hop: CycleHop, *records: CycleRecord, dashboard: bool = False) -> int:
+        """The one append door: each record lands under a one-shot hold of the cycle's `index.json`
+        (and, at a mint or a stop, its `dashboard.json`), joining a run's in this process."""
         cycle_dir = CycleDir(self.cycle_dir(hop))
-        offset = CycleEventLog.open(cycle_dir).append(record)
-        CycleIndexProjection(cycle_dir).feed(record)
-        return offset
+        ledger = CycleEventLog.open(cycle_dir)
+        with LedgerIndex.of(ledger.path, ()).projecting() as projecting:
+            projecting.add(CycleIndexProjection(cycle_dir))
+            if dashboard:
+                projecting.add(DashboardCheckout(cycle_dir))
+            return [ledger.append(record) for record in records][-1]
 
     def _read_declared[M: (Campaign, HeadToHeadRecord)](
         self, path: Path, model: type[M]
@@ -498,7 +506,7 @@ class CampaignStore:
 
     def mint_cycle(self, hop: CycleHop) -> None:
         if scan_cycle_facts(self.ledger(hop)).minted is None:
-            self.append(hop, CycleMintedRecord())
+            self._land(hop, CycleMintedRecord(), dashboard=True)
 
     def mint_fork_cycle(
         self, child: CycleHop, parent_dir: Path, spec: ForkSpec, *, cut: int, cut_round: int
@@ -631,17 +639,8 @@ class CampaignStore:
     def declare_stop(
         self, hop: CycleHop, stop: RunPhaseRecord, *, error: ErrorRecord | None = None
     ) -> None:
-        cycle_dir = CycleDir(self.cycle_dir(hop))
-        dashboard = DashboardCheckout.over(cycle_dir)
-        ledger = CycleEventLog.open(cycle_dir)
-        with LedgerIndex.of(ledger.path, ()).projecting() as projecting:
-            if dashboard is not None:
-                projecting.add(dashboard)
-            # Error first, so no reader finds the ending without it.
-            if error is not None:
-                ledger.append(error)
-            ledger.append(stop)
-        CycleIndexProjection(cycle_dir).feed(stop)
+        # Error first, so no reader finds the ending without it.
+        self._land(hop, *([] if error is None else [error]), stop, dashboard=True)
 
     def claim_launch(
         self,

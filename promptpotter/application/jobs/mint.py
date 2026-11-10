@@ -81,7 +81,6 @@ from promptpotter.domain.run_records import (
     RunWiringRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_framing,
     runnable_definition,
@@ -595,8 +594,6 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     declare_run_wiring(session, plan.cycle.config, ledger, selected=plan.optimizer, tracing=None)
     campaigns.mint_cycle(hop)
     save_active_pointer(session.store.base_dir, hop)
-    # So `dashboard.json` stands from the mint on, through the window before the loop starts.
-    DashboardCheckout.over(CycleDir(campaigns.cycle_dir(hop)))
     logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
     return session
 

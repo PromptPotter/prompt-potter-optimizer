@@ -244,6 +244,8 @@ class SpendBook(Projection):
         self.set_aside_usd = 0.0
         self.set_aside_tokens = 0
         self._seen: TokenUsageRecord | None = None
+        # A bill its fold could not count: the meter is short of it, so no send is admitted after.
+        self.unmetered: Exception | None = None
         self.ledger: CycleEventLog | None = None
         # A nested run's book: each send is admitted against it AND every book enclosing it.
         self.enclosing: SpendBook | None = None
@@ -290,7 +292,12 @@ class SpendBook(Projection):
         self._seen = record
         # A nested run's copy is the ledger's: its book already counted it into this one.
         if not record.node.startswith(NESTED_NODE_PREFIX):
-            self.count(record)
+            try:
+                self.count(record)
+            except Exception as fault:
+                # Its guard reports it; the next send refuses before it spends against a short meter.
+                self.unmetered = fault
+                raise
 
     def binds(self, kind: TokenUsageKind) -> bool:
         return kind in METER_KINDS[self.meters]
@@ -442,6 +449,8 @@ class SpendBook(Projection):
         paid_by: KeySource,
     ) -> bool:
         """True where an open cell reservation in this book's chain paid part of it."""
+        if self.unmetered is not None:
+            raise self.unmetered
         levels = list(self._levels(kind))
         at = next(
             (

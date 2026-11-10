@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from bisect import bisect_right
 from collections import OrderedDict, deque
 from collections.abc import Callable, Hashable, Iterable, Sequence
+from functools import partial
 from itertools import islice
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_checkable
@@ -15,7 +16,13 @@ from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_
 from pydantic import ValidationError
 
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
-from promptpotter.domain.run_records import CycleRecord, SpendHoldRecord, TokenUsageRecord
+from promptpotter.domain.run_records import (
+    RECORD_ADAPTER,
+    CycleRecord,
+    SpendHoldRecord,
+    TokenUsageRecord,
+    stale_file_warning,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import (
     ABSENT,
@@ -377,7 +384,7 @@ class Projecting:
         kinds, self._kinds = self._kinds or [], None
         for projection in [self._index._leave(kind) for kind in kinds]:
             if projection is not None and drain:
-                projection.drain()
+                self._index.shielded(projection, projection.drain)
 
     def __enter__(self) -> Projecting:
         return self
@@ -401,9 +408,12 @@ class LedgerIndex(_LedgerTail):
         self._feeder = _Feeder(path, {})
         # A projection by its type, with how many hold it; the lines it waits on, in append order.
         self._held: dict[type[Any], tuple[Projected, int]] = {}
+        # The held types whose fault is reported: one warning per projection while it is held.
+        self._stale: set[type[Any]] = set()
         self._queue: deque[tuple[int, bytes, list[Projected], CycleRecord | None]] = deque()
         self._draining = threading.Lock()
         self._drainer: int | None = None
+        self._until = -1
         super().__init__(path)
 
     @property
@@ -419,6 +429,7 @@ class LedgerIndex(_LedgerTail):
             held, holders = self._held.get(type(projection), (projection, 0))
             if not holders:
                 self._refresh()
+                self._stale.discard(type(projection))
             self._held[type(projection)] = (held, holders + 1)
             return cast("P", held)
 
@@ -432,14 +443,32 @@ class LedgerIndex(_LedgerTail):
             del self._held[kind]
             return held
 
+    def shielded(
+        self, projection: Projected, call: Callable[[], None], at: int | None = None
+    ) -> None:
+        """Every call into a projection: a fault of any type lands as one `derived_file_stale` warning on
+        this ledger, never a raise into the append whose line landed, and nothing is held for a later one."""
+        try:
+            call()
+        except Exception as fault:  # noqa: BLE001 -- a derived file's fault of any kind is its warning
+            with self._lock:
+                if type(projection) in self._stale:
+                    return
+                self._stale.add(type(projection))
+                at = self._lines - 1 if at is None else at
+            warning = stale_file_warning(type(projection).__name__, at, _reason(fault))
+            raw = RECORD_ADAPTER.dump_json(warning, fallback=str)
+            # A ledger that takes the line, then refuses the warning, raises: that fault is the ledger's.
+            self.land(raw, append_line(self._path, raw), warning)
+
     def line_count(self) -> int:
         with self._lock:
             self._refresh()
             return self._lines
 
     def land(self, raw: bytes, at: range, record: CycleRecord) -> int:
-        """*raw*, just appended at *at* as *record*: its offset, once its projections were handed it in
-        append order, *record* itself, so a fold keyed by identity knows its own append."""
+        """*raw*, just appended at *at* as *record*: its offset, once its projections were handed every line
+        up to it in append order, *record* itself, so a fold keyed by identity knows its own append."""
         # The run's own controls poll this ledger per cell; its own appends must not cost them a read.
         with LineIndex._registry_lock:
             lines = [i for (p, _), i in LineIndex._registry.items() if p == self._path]
@@ -459,15 +488,19 @@ class LedgerIndex(_LedgerTail):
                     self._queue[i] = (queued, line, held, record)
         # The drainer's own re-entrant append is fed after the line it is feeding; any other waits.
         if self._drainer == threading.get_ident():
+            self._until = max(self._until, offset)
             return offset
         with self._draining:
-            self._drainer = threading.get_ident()
+            self._drainer, self._until = threading.get_ident(), offset
             try:
                 while True:
                     with self._lock:
-                        if not self._queue:
+                        # A later line is its own appender's to feed, or the next append's.
+                        if not self._queue or self._queue[0][0] > self._until:
                             return offset
-                        at_line, line, held, carried = self._queue.popleft()
+                        at_line, line, fed_then, carried = self._queue.popleft()
+                        # Who is held now, never when the line was queued: a dropped one is fed no more.
+                        held = [p for p in fed_then if self._held.get(type(p), (None,))[0] is p]
                     kind = _RECORD_TYPE.search(line)
                     model = None if kind is None else _ARM_MODELS.get(kind[1])
                     if model is None:
@@ -475,8 +508,10 @@ class LedgerIndex(_LedgerTail):
                     read = carried or ledger_record(
                         model.model_validate_json, line, ledger=self._path, offset=at_line
                     )
+                    fed = cast("CycleRecord", read)
                     for projection in held:
-                        projection.on_record(cast("CycleRecord", read), at_line, ledger=self._path)
+                        on_record = partial(projection.on_record, fed, at_line, ledger=self._path)
+                        self.shielded(projection, on_record, at_line)
             finally:
                 self._drainer = None
 
@@ -508,6 +543,13 @@ class LedgerIndex(_LedgerTail):
                 self._feeder.vouch(fold)
                 return cast("LedgerFold[Any, V]", self._feeder.folds[fold]).value()
             return cast("LedgerFold[Any, V]", self._prefix(fold, until)).value()
+
+    def live[F: LedgerFold[Any, Any]](self, fold: Callable[[], F], *, seed: F | None = None) -> F:
+        """The slot itself, fed on past this call: a field held off it reads each line as it lands."""
+        with self._lock:
+            self._open(fold, seed)
+            self._feeder.vouch(fold)
+            return cast("F", self._feeder.folds[fold])
 
     def prefix[F: LedgerFold[Any, Any]](
         self, fold: Callable[[], F], until: int, *, seed: F | None = None

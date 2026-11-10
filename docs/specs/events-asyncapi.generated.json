@@ -254,7 +254,8 @@
                 "enum": [
                   "layer_parse_failure",
                   "injection_budget_overrun",
-                  "trace_sink_failed"
+                  "trace_sink_failed",
+                  "derived_file_stale"
                 ],
                 "type": "string"
               },
@@ -7246,7 +7247,8 @@
             "enum": [
               "layer_parse_failure",
               "injection_budget_overrun",
-              "trace_sink_failed"
+              "trace_sink_failed",
+              "derived_file_stale"
             ],
             "title": "Kind",
             "type": "string"

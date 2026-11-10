@@ -734,6 +734,8 @@ RoundWarningKind = Literal[
     "injection_budget_overrun",
     # A configured trace sink that failed to open at the run's start: the run traces nothing to it.
     "trace_sink_failed",
+    # A projection that could not write its derived file: the line landed, the file is stale until its next write.
+    "derived_file_stale",
 ]
 # `error` = the step produced nothing usable; `warning` = degraded but progressed.
 RoundWarningSeverity = Literal["warning", "error"]
@@ -749,6 +751,14 @@ class RoundWarningRecord(FrozenModel):
     round: int | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
+
+
+def stale_file_warning(projection: str, offset: int, reason: str) -> RoundWarningRecord:
+    return RoundWarningRecord(
+        kind="derived_file_stale",
+        message=f"{projection} could not project line {offset}; its file is stale until its next write",
+        detail={"projection": projection, "offset": offset, "reason": reason},
+    )
 
 
 class ForkTrigger(enum.StrEnum):

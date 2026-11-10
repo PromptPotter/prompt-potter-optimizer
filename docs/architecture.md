@@ -182,7 +182,8 @@ immutable, so their hash is a trustworthy identity. Owned by
 
 Projections fed by their ledger's `LedgerIndex`, read-only, each writing only the artifact it
 declares and held by its drainer's `Projecting` (the run, a bench pass, one store append), never the
-process; every entry point holds the same set. **Run state is derived (`derive_run_state`), never a freshness guess.** **Pause is
+process; every entry point holds the same set. A projection's fault is one `derived_file_stale`
+warning on its ledger, never a raise into the append whose line landed. **Run state is derived (`derive_run_state`), never a freshness guess.** **Pause is
 the single operator interrupt** and leaves a cycle resumable; "done" is a human mark.
 
 #### Control-local

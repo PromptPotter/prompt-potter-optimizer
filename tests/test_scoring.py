@@ -21,6 +21,7 @@ from math import sqrt
 from pathlib import Path
 from statistics import fmean, mean, stdev
 from typing import Any, NoReturn, cast
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -168,8 +169,9 @@ from promptpotter.application.runner.inner.spawn_context import inner_spawn_of
 from promptpotter.application.runner.measurement import ReferencePairs
 from promptpotter.application.runner.round import announce_opening, execute_round, run_init
 from promptpotter.application.runner.termination import standing_tripped, target_tripped
-from promptpotter.application.scoring import evaluators, query_loop
+from promptpotter.application.scoring import closed_rounds, evaluators, query_loop
 from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
+from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.scoring.evaluators import (
     DEFAULT_CELL_FORMULA,
     Evaluator,
@@ -296,6 +298,7 @@ from promptpotter.domain.run_records import (
     ForkSpec,
     ForkTrigger,
     PhaseRecord,
+    RoundWarningRecord,
     RunPhaseRecord,
 )
 from promptpotter.domain.run_standing import (
@@ -342,6 +345,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import write_yaml
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.cli.commands import noise_floor as noise_floor_cli
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
@@ -3328,14 +3332,30 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         assert build_bundle(forking, Ladder()).reelect_offer == {}, (
             "an improving line, which builds on its parent, was offered a fork"
         )
-        close_round(callbacks.ledger, line, cycle=cycle)
-        line.append(
-            round_result(
-                2, improved=False, candidates_scored=1, optimizer_state=optimizer_state(), cells={}
+        # A round file the disk refuses is its ledger's one warning: the close lands, and so
+        # does the next round's file, with no second warning.
+        session = cycle.session
+        round_files = session.store.campaigns.layout(session.hop)
+        with LedgerIndex.of(callbacks.ledger.path, ()).projecting() as checkout:
+            checkout.add(RoundFileProjection(session.store, session.hop, session.state))
+            with monkeypatch.context() as unwritable:
+                unwritable.setattr(closed_rounds, "write_json", Mock(side_effect=OSError("full")))
+                close_round(callbacks.ledger, line, cycle=cycle)
+            line.append(
+                round_result(
+                    2,
+                    improved=False,
+                    candidates_scored=1,
+                    optimizer_state=optimizer_state(),
+                    cells={},
+                )
             )
+            set_cycle(cycle, line=line)
+            close_round(callbacks.ledger, line, cycle=cycle)
+        warned = [r.kind for _, r in callbacks.ledger.iter() if isinstance(r, RoundWarningRecord)]
+        assert warned == ["derived_file_stale"] and round_files.round_file(2).exists(), (
+            "a round file's disk fault unwound its close, went unreported, or stopped the next"
         )
-        set_cycle(cycle, line=line)
-        close_round(callbacks.ledger, line, cycle=cycle)
         forking = NodeContext(
             RoundContext(cycle=cycle, round_num=3, callbacks=callbacks),
             optimizers.NODE_MEMBERS.get("l2_context"),
