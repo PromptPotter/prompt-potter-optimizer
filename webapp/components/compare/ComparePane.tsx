@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Evidence, HierarchyCourse, SubjectReading, MeasuredLift } from "@/lib/api/types";
+import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api/types";
 import {
   CardFrame,
   DataTable,
@@ -14,22 +14,19 @@ import {
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useCompareSelection } from "@/lib/state/compare-selection";
-import { campaignAt, readPaired } from "@/lib/derivations";
+import { campaignAt } from "@/lib/derivations";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import { useEvidence } from "@/lib/hooks/useEvidence";
 import { shownData } from "@/lib/hooks/useRead";
 import {
-  sideTone,
-  fmtLift,
-  fmtLiftInterval,
   fmtSigned,
   fmtUnit,
   PLACEHOLDER,
   shortId,
 } from "@/lib/format";
 import { maskedSubject } from "@/lib/api/reads";
-import { PairedLift } from "@/components/shell/PairedLift";
 import { ChannelCards } from "./ChannelCards";
+import { liftColumns, pairedCells, withReadRank, type PairedCells } from "./lift-columns";
 import { Coverage, EvidenceCharts, SeriesLegend, type CompareView } from "./EvidenceCharts";
 import { ChannelMask } from "./ChannelMask";
 import { FactorGrid } from "./FactorGrid";
@@ -518,12 +515,9 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
     );
   }
   // Keyed on both halves: two campaigns can share one `sp_hash`.
-  const rows: RankedEdit[] = evidence.edits.map((row, i) => {
-    const pair = readPaired(row.reading);
-    return pair.read
-      ? { row, rank: i + 1, lift: pair.lift, cells: pair.cells }
-      : { row, rank: null, lift: null, cells: null };
-  });
+  const rows: RankedEdit[] = withReadRank(
+    evidence.edits.map((row) => ({ row, ...pairedCells(row.reading) })),
+  );
   return (
     <>
       <DataTable
@@ -541,13 +535,11 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
   );
 }
 
-interface RankedEdit {
+type RankedEdit = PairedCells & {
   row: Evidence["edits"][number];
   // Null where the pair was not read: an unread edit holds no rank.
   rank: number | null;
-  lift: MeasuredLift | null;
-  cells: number | null;
-}
+};
 
 function rankColumns(label: string): Column<RankedEdit>[] {
   return [
@@ -569,34 +561,7 @@ function rankColumns(label: string): Column<RankedEdit>[] {
         </span>
       ),
     },
-    {
-      id: "lift",
-      label: `${label} over its origin · 95% CI`,
-      width: "minmax(20ch, 1.5fr)",
-      wrap: true,
-      cell: ({ row, lift }) =>
-        lift === null ? (
-          <span className="l4-dim">
-            <PairedLift reading={row.reading} unread="sentence" />
-          </span>
-        ) : (
-          <span className={cx("l4-effect", sideTone(lift.estimate.side))}>
-            <span className="l4-effect-mean">
-              {fmtLift(lift.measurand.unit, lift.estimate.value)}
-            </span>
-            <span className="l4-effect-ci">
-              {fmtLiftInterval(lift.measurand.unit, lift.estimate.ci_lo, lift.estimate.ci_hi)}
-            </span>
-          </span>
-        ),
-    },
-    {
-      id: "cells",
-      label: "cells",
-      width: "7ch",
-      align: "end",
-      cell: ({ cells }) => <span className="l4-num">{cells ?? PLACEHOLDER}</span>,
-    },
+    ...liftColumns<RankedEdit>(`${label} over its origin · 95% CI`),
     {
       id: "seen",
       label: "seen",

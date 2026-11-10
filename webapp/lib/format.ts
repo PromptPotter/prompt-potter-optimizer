@@ -126,6 +126,15 @@ export function fmtInterval(
   return `[${fmtUnit(unit, lo)}, ${fmtUnit(unit, hi)}]`;
 }
 
+// A level and its 95% band, the band left off where the served reading carries none.
+export function fmtLevelBand(
+  unit: MeasurandUnit,
+  v: { value: number | null; ci_lo: number | null; ci_hi: number | null },
+): string {
+  const band = fmtInterval(unit, v.ci_lo, v.ci_hi);
+  return band === PLACEHOLDER ? fmtUnit(unit, v.value) : `${fmtUnit(unit, v.value)} ${band}`;
+}
+
 // Ties a value to its word and a bound to its pair, so a narrow line breaks only between them.
 const NBSP = String.fromCharCode(0xa0);
 

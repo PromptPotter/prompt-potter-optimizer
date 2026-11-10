@@ -1,19 +1,16 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useSelection } from "@/lib/SelectionContext";
-import { useLeafIsL4, useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/workspace";
 import { useRound } from "@/lib/hooks/useRound";
-import { useViewedLineage } from "@/lib/lineage";
-import { innerPanelIndex, nodeSchemaReading, panelCellKey } from "@/lib/derivations";
-import { pathOfAddress } from "@/lib/ids";
+import { nodeSchemaReading } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { type CellRow, type HierarchyCourse, ARM_END_INFO } from "@/lib/api/types";
-import { useCells, type CellsPreset } from "@/lib/hooks/useCells";
-import { failureOf, shownData } from "@/lib/hooks/useRead";
+import { ARM_END_INFO } from "@/lib/api/types";
+import type { CellsPreset } from "@/lib/hooks/useCells";
 import { useViewedDashboard } from "@/lib/poll";
 import { isSelectedCandidate, selectedCandidateOf, type ArmRow } from "@/lib/types";
-import type { CandidateSearchPoint, CandidateVerdict } from "@/lib/derivations";
+import type { CandidateVerdict } from "@/lib/derivations";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
-import { fmtUnit, unitCount, unitPlural } from "@/lib/format";
+import { fmtUnit, unitPlural } from "@/lib/format";
 import {
   Badge,
   CopyButton,
@@ -25,7 +22,6 @@ import {
   type Segment,
 } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
-import { PanelCellRow } from "./PanelCellRow";
 
 export function MeasurementRun({
   round,
@@ -35,19 +31,7 @@ export function MeasurementRun({
   const { dash, isLive } = useViewedDashboard();
   const read = useConnector();
   const schema = nodeSchemaReading(read);
-  const { viewedPath, leafCycleId, navigate } = useWorkspace();
-  // The DECLARED backend type, not "the tree found inner runs": minting cells would tally as misses.
-  const isL4 = useLeafIsL4();
-  const { index } = useViewedLineage();
-  // Null = not L4; empty = L4 with the sandbox not yet read, and the cells still list.
-  const cells = useMemo(
-    () => (isL4 ? innerPanelIndex(index, viewedPath) : null),
-    [isL4, index, viewedPath],
-  );
-  const openRun = (run: HierarchyCourse): void => {
-    const at = pathOfAddress(run.address).at(-1);
-    if (at && viewedPath) navigate({ path: [...viewedPath, at] });
-  };
+  const { viewedPath, leafCycleId } = useWorkspace();
   const { setSelectionForCandidate, candidate: selected } = useSelection();
   const onSelectCandidate = (c: ArmRow | null): void => {
     const arm = c?.reading.arm;
@@ -69,50 +53,10 @@ export function MeasurementRun({
   const picked = candidates.find((c) => c.reading.arm.key === candFilter);
   const narrowTo = picked && picked.source !== "inflight" ? picked.reading.arm.key : undefined;
   const preset: CellsPreset = { round, scope: "cycle", candidateId: narrowTo };
-  const cellsRead = useCells(preset).read;
-  const measured = shownData(cellsRead);
-  const cellsFailure = failureOf(cellsRead);
-  // Keyed on the arm the cell's candidate IS, and each cell names its query through its slot.
-  const cellsOf = useMemo(() => {
-    const armOf = new Map((measured?.candidates ?? []).map((c) => [c.key, c.candidate_id]));
-    const out = new Map<string, CellRow[]>();
-    for (const cell of measured?.cells ?? []) {
-      const arm = armOf.get(cell.candidate);
-      if (arm == null) continue;
-      const list = out.get(arm);
-      if (list) list.push(cell);
-      else out.set(arm, [cell]);
-    }
-    return out;
-  }, [measured]);
-  const queryAt = useMemo(
-    () => new Map((measured?.samples ?? []).map((it) => [it.position, it.query])),
-    [measured],
-  );
-
-  const groups = useMemo(() => {
-    const out: {
-      candidate: ArmRow;
-      samples: CellRow[];
-      spec: CandidateSearchPoint | null;
-    }[] = [];
-    for (const c of candidates) {
-      const { arm } = c.reading;
-      const filtered = cellsOf.get(arm.key) ?? [];
-      out.push({ candidate: c, samples: filtered, spec: seed(arm.key) });
-    }
-    if (candFilter !== "all") {
-      return out.filter((g) => g.candidate.reading.arm.key === candFilter);
-    }
-    return out;
-  }, [candidates, candFilter, seed, cellsOf]);
-
-  const totalRows = useMemo(
-    () => groups.reduce((n, g) => n + g.samples.length, 0),
-    [groups],
-  );
-
   const oneCandidate = candFilter !== "all";
+  const shown = oneCandidate
+    ? candidates.filter((c) => c.reading.arm.key === candFilter)
+    : candidates;
 
   if (!dash || (!isLiveView && roundRead.status === "loading")) {
     return (
@@ -159,48 +103,33 @@ export function MeasurementRun({
             ariaLabel="Which candidate's rows to show"
           />
         </div>
-        {cells && <span className="rsv-count">{unitCount(totalRows, unit)}</span>}
       </div>
-      {/* Without inner runs the pane below reads the same cells and says their failure. */}
-      {cells && (
-        <FailureLine
-          failure={cellsFailure}
-          lead={`Could not load round ${round}'s ${unitPlural(unit)}.`}
-          className="samples-empty"
-        />
-      )}
       <div className="rsv-groups">
-        {groups.map((g) => {
-          const { reading } = g.candidate;
-          const { arm } = reading;
-          const { end } = reading;
+        {shown.map((c) => {
+          const { reading } = c;
+          const { arm, end } = reading;
+          const spec = oneCandidate ? seed(arm.key) : null;
           const invalid = end === "invalid";
           // An invalid arm never started a walk: it renders as rejected below, never as a stop.
           const early = reading.walked_short ? end : null;
           const accuracy = reading.own?.accuracy?.value ?? null;
           const isCandSelected = isSelectedCandidate(selected, leafCycleId, arm.round, arm.key);
           const { cached, cached_share: cachedShare } = reading.panel;
-          const display = g.samples.slice(0, PANEL_RENDER_CAP);
-          const truncated = g.samples.length - display.length;
           const verdict = verdicts.get(arm.key);
           return (
             <section
-              key={g.candidate.key}
+              key={c.key}
               className={`rsv-group${isCandSelected ? " selected" : ""}`}
             >
               <button
                 type="button"
                 className="rsv-group-head"
-                onClick={() => onSelectCandidate(isCandSelected ? null : g.candidate)}
+                onClick={() => onSelectCandidate(isCandSelected ? null : c)}
                 title="Click to anchor lineage + fitness on this candidate"
               >
                 <span className="rsv-cand-label">{arm.label}</span>
                 <span className="rsv-tally">
-                  {cells ? (
-                    <span className="tag-cached" title="Each cell is an inner campaign">
-                      {unitCount(g.samples.length, unit)}
-                    </span>
-                  ) : invalid ? (
+                  {invalid ? (
                     <Badge
                       tone="danger"
                       title="Rejected by validation — it never ran, so the scores served beside it are synthetic."
@@ -254,14 +183,14 @@ export function MeasurementRun({
                   ))}
                 </div>
               )}
-              {oneCandidate && g.spec && (
+              {spec && (
                 <div className="rsv-spec-row">
                   <details className="rsv-spec">
                     <summary>What {arm.label} ran</summary>
                     <NodeSurface
                       node={null}
-                      point={g.spec}
-                      overlay={g.spec.pipeline_overlay}
+                      point={spec}
+                      overlay={spec.pipeline_overlay}
                       schema={schema}
                       mode="values"
                       compact
@@ -270,52 +199,21 @@ export function MeasurementRun({
                   <CopyButton
                     data={{
                       label: arm.label,
-                      resolved_params: g.spec.pipeline_overlay,
-                      prompts: g.spec.origin_prompts,
+                      resolved_params: spec.pipeline_overlay,
+                      prompts: spec.origin_prompts,
                     }}
                     title={`Copy what ${arm.label} ran`}
                   />
-                </div>
-              )}
-              {!cells ? null : g.samples.length === 0 ? (
-                cellsFailure === null && <div className="rsv-empty-row">
-                  {invalid
-                    ? `No ${unitPlural(unit)} — it was rejected before it ran.`
-                    : `No matching ${unitPlural(unit)}.`}
-                </div>
-              ) : (
-                <div className="rsv-rows">
-                  {display.map((s) => {
-                    const query = queryAt.get(s.position) ?? "";
-                    return (
-                      <PanelCellRow
-                        key={s.answer}
-                        cell={query}
-                        run={cells.get(panelCellKey(arm.label, query)) ?? null}
-                        cached={s.cached}
-                        onOpen={openRun}
-                      />
-                    );
-                  })}
-                  {truncated > 0 && (
-                    <div className="rsv-empty-row">
-                      +{truncated} more (rendering capped at {PANEL_RENDER_CAP}).
-                    </div>
-                  )}
                 </div>
               )}
             </section>
           );
         })}
       </div>
-      {!cells && (
-        <MeasurementsPane preset={{ ...preset, groupBy: "candidate" }} />
-      )}
+      <MeasurementsPane preset={{ ...preset, groupBy: "candidate" }} />
     </section>
   );
 }
-
-const PANEL_RENDER_CAP = 250;
 
 function Region({ children }: { children: ReactNode }) {
   return (

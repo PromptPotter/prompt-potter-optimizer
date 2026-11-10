@@ -1,4 +1,3 @@
-import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import {
   type HeadToHeadRow,
   type MeteredSpend,
@@ -141,24 +140,6 @@ export function SpentReading({ metered }: { metered: MeteredSpend | null }) {
         {sub}
       </span>
     </span>
-  );
-}
-
-export function CellMeans({ means }: { means: Record<string, number> | undefined }) {
-  const rows = CELL_MEAN_ROWS.flatMap((r) => {
-    const v = means?.[r.key];
-    return v === undefined ? [] : [{ ...r, v }];
-  });
-  if (rows.length === 0) return null;
-  return (
-    <dl className="cmp-channel-facts cmp-channel-means">
-      {rows.map((r) => (
-        <div key={r.key}>
-          <dt>{r.label}</dt>
-          <dd>{r.fmt(r.v)}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 

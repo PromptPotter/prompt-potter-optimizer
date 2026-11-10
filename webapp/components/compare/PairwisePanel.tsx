@@ -1,16 +1,7 @@
 import { CardFrame, DataTable, Empty, type Column } from "@/components/ui";
 import type { MeasuredLift, MetricReading, PairwiseComparison } from "@/lib/api/types";
-import { cx } from "@/lib/cx";
-import { readPaired } from "@/lib/derivations";
-import { PairedLift } from "@/components/shell/PairedLift";
-import {
-  PLACEHOLDER,
-  fmtLift,
-  fmtLiftInterval,
-  fmtPValue,
-  shortId,
-  sideTone,
-} from "@/lib/format";
+import { PLACEHOLDER, fmtPValue, shortId } from "@/lib/format";
+import { liftColumns, pairedCells, type PairedCells } from "./lift-columns";
 
 export function PairwisePanel({
   reading,
@@ -58,18 +49,10 @@ export function PairwisePanel({
   );
 }
 
-interface PairRow {
-  row: PairwiseComparison;
-  // Null where the pair was not read; its sentence fills the lift column.
-  lift: MeasuredLift | null;
-  cells: number | null;
-}
+type PairRow = PairedCells & { row: PairwiseComparison };
 
 function pairRow(row: PairwiseComparison): PairRow {
-  const read = readPaired(row.reading);
-  return read.read
-    ? { row, lift: read.lift, cells: read.cells }
-    : { row, lift: null, cells: null };
+  return { row, ...pairedCells(row.reading) };
 }
 
 function pairColumns(names: ReadonlyMap<string, string>): Column<PairRow>[] {
@@ -96,34 +79,7 @@ function pairColumns(names: ReadonlyMap<string, string>): Column<PairRow>[] {
         </>
       ),
     },
-    {
-      id: "lift",
-      label: "lift · 95% CI",
-      width: "minmax(20ch, 1.5fr)",
-      wrap: true,
-      cell: ({ row, lift }) =>
-        lift ? (
-          <span className={cx("l4-effect", sideTone(lift.estimate.side))}>
-            <span className="l4-effect-mean">
-              {fmtLift(lift.measurand.unit, lift.estimate.value)}
-            </span>
-            <span className="l4-effect-ci">
-              {fmtLiftInterval(lift.measurand.unit, lift.estimate.ci_lo, lift.estimate.ci_hi)}
-            </span>
-          </span>
-        ) : (
-          <span className="l4-dim">
-            <PairedLift reading={row.reading} unread="sentence" />
-          </span>
-        ),
-    },
-    {
-      id: "cells",
-      label: "cells",
-      width: "7ch",
-      align: "end",
-      cell: ({ cells }) => <span className="l4-num">{cells ?? PLACEHOLDER}</span>,
-    },
+    ...liftColumns<PairRow>("lift · 95% CI"),
     num("p", "p", (lift) => fmtPValue(lift.estimate.p_value)),
     num("p-holm", "p (Holm)", (lift) => fmtPValue(lift.family?.p_adjusted ?? null)),
     num("p-floor", "p floor", (lift) => lift.estimate.p_floor.toPrecision(2)),

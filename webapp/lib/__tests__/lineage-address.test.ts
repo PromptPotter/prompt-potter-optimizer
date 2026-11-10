@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
-import {
-  armAt,
-  candidatesAtPath,
-  EMPTY_LINEAGE,
-  indexLineage,
-  innerPanelIndex,
-  panelCellKey,
-} from "@/lib/derivations";
-import { encodeCyclePath, pathLeaf, pathOfAddress, type CyclePath } from "@/lib/ids";
+import type { SubtreeCampaign } from "@/lib/api/types";
+import { armAt, candidatesAtPath, indexLineage } from "@/lib/derivations";
+import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 import {
   courseTags,
   subtreeCampaign,
@@ -36,7 +29,7 @@ const innerRun = (outer: CyclePath, cycleId: string, task: string | null): Subtr
 };
 
 // Both courses mint a C1.1: a fork's cells join on its own course's labels.
-function tree(task: string | null = "justlogic-d234/seed-0"): SubtreeCampaign {
+function tree(task = "justlogic-d234/seed-0"): SubtreeCampaign {
   const root = [
     hierarchyCandidate(R, { id: "root-c0", label: "C0" }, { children: [innerRun(ROOT, "inner_a", task)] }),
     hierarchyCandidate(
@@ -61,9 +54,7 @@ function tree(task: string | null = "justlogic-d234/seed-0"): SubtreeCampaign {
   });
 }
 
-const index = (task?: string | null) => indexLineage(tree(task));
-const cycleOf = (run: SubtreeCourse | undefined) =>
-  run && pathLeaf(pathOfAddress(run.address)).cycleId;
+const index = () => indexLineage(tree());
 
 describe("candidatesAtPath", () => {
   it("addresses a fork's own candidates", () => {
@@ -92,25 +83,5 @@ describe("armAt", () => {
   it("is null for an arm the ledger has not minted, and without an address", () => {
     expect(armAt(index(), ROOT, "fork-c1")).toBeNull();
     expect(armAt(index(), null, "root-c1")).toBeNull();
-  });
-});
-
-describe("innerPanelIndex", () => {
-  it("keys each course's cells on the labels that course minted", () => {
-    const cell = "justlogic-d234/seed-0";
-    expect(cycleOf(innerPanelIndex(index(), FORK).get(panelCellKey("C1.1", cell)))).toBe("inner_c");
-    const panel = innerPanelIndex(index(), ROOT);
-    expect(cycleOf(panel.get(panelCellKey("C0", cell)))).toBe("inner_a");
-    expect(cycleOf(panel.get(panelCellKey("C1.1", cell)))).toBe("inner_b");
-    expect([...panel.values()].map(cycleOf)).not.toContain("inner_c");
-  });
-
-  it("drops a run with no task rather than guessing its cell", () => {
-    expect(innerPanelIndex(index(null), ROOT).size).toBe(0);
-  });
-
-  it("is empty rather than throwing when the tree or the address is missing", () => {
-    expect(innerPanelIndex(EMPTY_LINEAGE, ROOT).size).toBe(0);
-    expect(innerPanelIndex(index(), null).size).toBe(0);
   });
 });

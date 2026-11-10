@@ -1,13 +1,14 @@
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
 import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
+import { SubjectSignals } from "@/components/shell/searchpoint/SubjectSignals";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { COPY_WITHOUT_CELLS, searchpointCopyChoices, selectedNodeOf } from "@/lib/derivations";
 import { fmtUnit, PLACEHOLDER, shortId } from "@/lib/format";
 import { failureOf, shownData } from "@/lib/hooks/useRead";
 import { CopyButton, FailureLine, Said, SegmentedControl, Term } from "@/components/ui";
 import { ChannelMap } from "./ChannelMap";
-import { CellMeans, MainLine } from "./channel-parts";
+import { MainLine } from "./channel-parts";
 import { ChannelRestore, useScenarioEdits, withOverlay } from "./config-edit";
 import {
   channelLevel,
@@ -172,7 +173,9 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
           <SearchpointDrillIn
             reading={picked.reading}
             cfg={picked.cfg}
-            stats={picked.isOwn && <CellMeans means={reading.cell_means} />}
+            stats={
+              picked.isOwn && <SubjectSignals origin={reading} shown={null} compare={null} />
+            }
             measurements={
               picked.cellsPreset && (
                 <MeasurementsPane preset={{ ...picked.cellsPreset, groupBy: "none" }} />

@@ -8,11 +8,11 @@ import {
 } from "@/lib/api/types";
 import type { NodeSchemaReading } from "@/lib/types";
 import type { ReadFailure } from "@/lib/read-cache";
-import { NOT_SEPARABLE, readPaired, type ObserveConfig } from "@/lib/derivations";
+import { liftOf, NOT_SEPARABLE, type ObserveConfig } from "@/lib/derivations";
 import { FailureLine, Said, Term } from "@/components/ui";
 import {
+  fmtLevelBand,
   fmtLiftBand,
-  fmtPct1,
   fmtThetaSe,
   fmtUnit,
   PLACEHOLDER,
@@ -50,8 +50,7 @@ export function SearchpointDrillIn({
   const accuracy = reading?.own?.accuracy ?? null;
   const composite = reading?.own?.composite?.value ?? null;
   const bench = reading?.bench ?? null;
-  const pair = reading?.vs_reference ? readPaired(reading.vs_reference) : null;
-  const paired = pair?.read ? pair.lift : null;
+  const paired = liftOf(reading?.vs_reference ?? null);
   // Said once, in the first slot left empty.
   const note =
     failure !== null ? (
@@ -83,7 +82,7 @@ export function SearchpointDrillIn({
             {accuracy != null && (
               <Fact
                 k="accuracy"
-                v={`${fmtPct1(accuracy.value)}${band(accuracy)}${onPanel(reading.panel)}`}
+                v={`${fmtLevelBand("rate", accuracy)}${onPanel(reading.panel)}`}
               />
             )}
             {(benchPass != null || bench != null) && (
@@ -94,21 +93,17 @@ export function SearchpointDrillIn({
                   benchPass?.failed_as != null
                     ? <FailedPass state={benchPass.failed_as} />
                     : benchPass != null
-                    ? `${fmtPct1(benchPass.level?.value)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
+                    ? `${fmtUnit("rate", benchPass.level?.value)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
                     : bench?.level == null
                       ? `${PLACEHOLDER} of ${bench?.n}`
-                      : `${fmtPct1(bench.level.value)}${band(bench.level)} of ${bench.n}`
+                      : `${fmtLevelBand("rate", bench.level)} of ${bench.n}`
                 }
               />
             )}
             {paired != null && (
               <Fact
                 k="vs parent"
-                v={
-                  paired.measurand.unit === "rate"
-                    ? fmtPct1(paired.rate_a)
-                    : fmtUnit("score", paired.rate_a)
-                }
+                v={fmtUnit(paired.measurand.unit, paired.rate_a)}
                 hint="The candidate's PARENT — the origin at round 0, the prior round's winner after — re-scored on the samples THIS candidate measured, and the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the parent's full-set rate is the wrong comparison and would read as a phantom lift."
               />
             )}
@@ -178,11 +173,6 @@ export function SearchpointDrillIn({
 function FailedPass({ state }: { state: ReadingState }) {
   const { label, sentence, fault } = READING_STATE_INFO[state];
   return <Said tone={fault ? "danger" : "quiet"} label={label} sub={sentence} />;
-}
-
-// The 95% band, blank where the served reading carries none.
-function band(v: { ci_lo: number | null; ci_hi: number | null }): string {
-  return v.ci_lo == null || v.ci_hi == null ? "" : ` [${fmtPct1(v.ci_lo)}, ${fmtPct1(v.ci_hi)}]`;
 }
 
 // "on 12 of 20" where the walk stopped short of its length.

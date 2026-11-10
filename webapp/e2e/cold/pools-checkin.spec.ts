@@ -141,7 +141,11 @@ test.describe("the check-in's pools and recombination host", () => {
         `${fill.entries} snippets`,
       );
     }
-    await page.getByRole("combobox", { name: "recombination_host" }).selectOption("l2_context");
+    await page.getByRole("button", { name: /^recombination_host: / }).click();
+    await page
+      .getByRole("listbox", { name: "recombination_host" })
+      .getByRole("option", { name: "l2_context", exact: true })
+      .click();
     await page.locator("summary", { hasText: "Pick snippets" }).click();
     const pool = page.getByRole("group", { name: "Snippets in play" });
     await pool.getByRole("button", chip).click();
@@ -158,7 +162,7 @@ test.describe("the check-in's pools and recombination host", () => {
     expect(nodes.block_pool?.config?.active).toEqual([entry]);
 
     await optimizerStep(page);
-    await expect(page.getByRole("combobox", { name: "recombination_host" })).toHaveValue("l2_context");
+    await expect(page.getByRole("button", { name: "recombination_host: l2_context" })).toBeVisible();
     await page.locator("summary", { hasText: "Pick snippets" }).click();
     await expect(
       page.getByRole("group", { name: "Snippets in play" }).getByRole("button", chip),

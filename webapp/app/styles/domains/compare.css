@@ -239,13 +239,6 @@
   font-family: var(--font-mono);
   color: var(--color-text-secondary);
 }
-.cmp-channel-means {
-  padding: var(--space-8) var(--space-12) 0;
-  font-size: var(--text-base);
-}
-.cmp-channel-means dd {
-  color: var(--color-text-primary);
-}
 .cmp-channel-map {
   max-height: 26rem;
   overflow: auto;

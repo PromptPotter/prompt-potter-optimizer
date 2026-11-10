@@ -7,14 +7,13 @@ import {
   type ParamIntent,
   MOVABLE_AGENT_LABELS,
 } from "@/lib/api/types";
-import { CommitInput, FailureLine, ValueList } from "@/components/ui";
+import { CommitInput, FailureLine, Switch, ValueList } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 import {
   configRows,
   effortLadder,
   flatConfigKey,
-  parseNested,
   parseParam,
   nodeOverlayPatch,
   pickedRoute,
@@ -22,6 +21,7 @@ import {
   seedOverlayFromRows,
   type ConfigMode,
   type ConfigRow,
+  type ValueType,
 } from "@/lib/derivations";
 import { readGap } from "@/lib/hooks/useRead";
 import type { ReadResult } from "@/lib/read-cache";
@@ -366,42 +366,84 @@ function ConfigRowView({
           <span className={cx("config-static", row.kind === "nested" && "is-structured")}>
             {row.value || PLACEHOLDER}
           </span>
-        ) : row.kind === "nested" ? (
-          <CommitInput
-            rows={6}
-            validate={(d) => parseNested(d) !== undefined}
-            className="config-input is-structured"
-            value={row.value}
-            disabled={readOnly}
-            placeholder="inherit"
-            aria-label={row.key}
-            onCommit={onValue}
-          />
-        ) : row.kind === "bool" ? (
-          <input
-            type="checkbox"
-            className="config-check"
-            checked={row.value === "true"}
-            disabled={readOnly}
-            aria-label={row.key}
-            onChange={(e) => onValue(e.target.checked ? "true" : "false")}
-          />
         ) : (
-          <CommitInput
-            type={row.kind === "number" ? "number" : "text"}
-            inputMode={row.kind === "number" ? "decimal" : undefined}
-            // An out-of-bounds or non-integer value stays on screen uncommitted; blank inherits.
-            validate={(d) => d.trim() === "" || parseParam(row, d) !== undefined}
-            className="config-input"
-            value={row.value}
+          <KnobValue
+            type={row}
+            name={row.key}
+            text={row.value}
+            blank="inherit"
             disabled={readOnly}
-            placeholder={row.kind === "number" ? "inherit" : undefined}
-            aria-label={row.key}
+            className="config-input"
             onCommit={onValue}
           />
         )}
       </div>
     </div>
+  );
+}
+
+// The one widget a knob's value is typed into, read by both hosts. `blank` is what an emptied
+// field means to the host's transport: the base value (`inherit`) or the knob's null (`null`).
+export function KnobValue({
+  type,
+  name,
+  text,
+  blank,
+  disabled = false,
+  className,
+  onCommit,
+}: {
+  type: ValueType & { options: readonly string[] };
+  name: string;
+  text: string;
+  blank: "inherit" | "null";
+  disabled?: boolean;
+  className: string;
+  onCommit: (text: string) => void;
+}) {
+  if (type.kind === "bool") {
+    const on = text === "true";
+    return (
+      <Switch
+        checked={on}
+        label={name}
+        locked={disabled}
+        lockedNote="read-only"
+        onChange={() => onCommit(on ? "false" : "true")}
+      />
+    );
+  }
+  if (type.kind === "enum") {
+    const rest = type.options.filter((o) => o !== text);
+    return (
+      <ValueList
+        name={name}
+        values={text ? [text, ...rest] : rest}
+        readOnly={disabled}
+        onPick={onCommit}
+      />
+    );
+  }
+  // An out-of-bounds or non-integer value stays on screen uncommitted.
+  const validate = (d: string) =>
+    (blank === "inherit" && d.trim() === "") || parseParam(type, d) !== undefined;
+  const field = {
+    value: text,
+    disabled,
+    placeholder: blank === "inherit" ? "inherit" : type.nullable ? "off" : undefined,
+    "aria-label": name,
+    validate,
+    onCommit,
+  };
+  if (type.kind === "nested") {
+    return <CommitInput rows={6} className={cx(className, "is-structured")} {...field} />;
+  }
+  return (
+    <CommitInput
+      inputMode={type.kind === "number" ? (type.integer ? "numeric" : "decimal") : undefined}
+      className={className}
+      {...field}
+    />
   );
 }
 

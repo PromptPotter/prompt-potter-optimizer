@@ -6,7 +6,6 @@ export * from "./fitness";
 export * from "./fitness-shade";
 export * from "./headline-stats";
 export * from "./hierarchy";
-export * from "./inner-panel";
 export * from "./lineage-candidates";
 export * from "./lineage-descendants";
 export * from "./node-config";

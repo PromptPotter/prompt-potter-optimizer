@@ -22,13 +22,12 @@ import {
   Button,
   Chip,
   ChipGroup,
-  CommitInput,
   Empty,
   FailureLine,
   Loading,
-  Switch,
   Term,
 } from "@/components/ui";
+import { KnobValue } from "@/components/shell/node-surface/NodeConfigEditor";
 import { cx } from "@/lib/cx";
 import { fmtValue } from "@/lib/format";
 
@@ -254,7 +253,14 @@ export function KnobItem({
           {showNode ? <span className="mech-row-node">{node}</span> : null}
         </span>
         {set ? (
-          <KnobControl knob={k} value={k.value} onSet={set} />
+          <KnobValue
+            type={k}
+            name={k.key}
+            text={knobText(k.value)}
+            blank="null"
+            className="mech-knob-input"
+            onCommit={(text) => set(parseParam(k, text))}
+          />
         ) : (
           <Badge tone={k.value === true ? "success" : "quiet"}>{fmtValue(k.value)}</Badge>
         )}
@@ -459,66 +465,5 @@ function PoolPicker({
         ) : null}
       </details>
     </>
-  );
-}
-
-function KnobControl({
-  knob,
-  value,
-  onSet,
-}: {
-  knob: NodeConfigParam;
-  value: unknown;
-  onSet: (next: unknown) => void;
-}) {
-  if (knob.kind === "bool") {
-    return <Switch checked={value === true} label={knob.key} onChange={() => onSet(value !== true)} />;
-  }
-  if (knob.kind === "enum") {
-    return (
-      <select aria-label={knob.key} value={String(value)} onChange={(e) => onSet(e.target.value)}>
-        {knob.options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  const commits = (draft: string) => parseParam(knob, draft) !== undefined;
-  const commit = (draft: string) => onSet(parseParam(knob, draft));
-  if (knob.kind === "number") {
-    return (
-      <CommitInput
-        className="mech-knob-input"
-        aria-label={knob.key}
-        inputMode={knob.integer ? "numeric" : "decimal"}
-        placeholder={knob.nullable ? "off" : undefined}
-        value={knobText(value)}
-        validate={commits}
-        onCommit={commit}
-      />
-    );
-  }
-  if (knob.kind === "string") {
-    return (
-      <CommitInput
-        className="mech-knob-input"
-        aria-label={knob.key}
-        value={knobText(value)}
-        validate={commits}
-        onCommit={commit}
-      />
-    );
-  }
-  return (
-    <CommitInput
-      className="mech-knob-input mech-knob-json"
-      aria-label={`${knob.key} (JSON)`}
-      rows={2}
-      value={knobText(value)}
-      validate={commits}
-      onCommit={commit}
-    />
   );
 }

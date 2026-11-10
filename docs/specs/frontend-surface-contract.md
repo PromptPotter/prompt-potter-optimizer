@@ -60,7 +60,7 @@ invariants:
                       side: `warming_up` means no wiring yet, a missing cycle dir means GONE, and one
                       route never answers both with one body.'
   I8_floor_named:     'A rendered Δ NAMES its floor. ORIGIN is C0 — the served `RunStanding.vs_origin`
-                      pair (masthead BEST, ForestRows, PanelCellRow, run-summary), `origin_accuracy`
+                      pair (masthead BEST, ForestRows, run-summary), `origin_accuracy`
                       on the origins listing, the course''s `facts.bench.vs_origin`. PARENT is the
                       round''s own floor — every `vs_reference` reading (searchpoint drill-in,
                       OuterSignalPanel, RoundFileView, run_card''s percent pair). The engine elects on
