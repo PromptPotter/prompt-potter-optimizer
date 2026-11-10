@@ -253,7 +253,6 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.dashboard_rows import RunLimits
-from promptpotter.domain.diagnostic_run import RescoreCount
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
@@ -339,8 +338,13 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget, TokenUsageKind
-from promptpotter.domain.verification import BenchPasses, NoiseBand, VerificationPass
-from promptpotter.domain.verify_pass import VerifyStrategy
+from promptpotter.domain.verification import (
+    BenchPasses,
+    NoiseBand,
+    RescoreCount,
+    VerificationPass,
+    VerifyStrategy,
+)
 from promptpotter.domain.wounds import fatal_validation_failures
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain

@@ -10,7 +10,7 @@ against a real `mlflow server` on a short path, never the offline run.
 
 *Where* is the box's (`MLFLOW_TRACKING_URI`); *whether* becomes the campaign's: one config field, off by
 default, set at launch or check-in from all five entry points, so the sandbox check in
-`application/runner/output.py::publish_export` goes. **Closes when** a box with the server set mirrors
+`application/runner/output.py::RunArtifacts` goes. **Closes when** a box with the server set mirrors
 nothing until a campaign opts in, and an opted-in self-optimization run leaves only its own cycle there.
 
 ## 2. The model on the version, in MLflow's own field

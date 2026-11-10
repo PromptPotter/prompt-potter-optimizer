@@ -39,8 +39,7 @@ from promptpotter.domain.phase_views import (
 )
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat
 from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
-from promptpotter.domain.verification import NoiseBand
-from promptpotter.domain.verify_pass import VerifyReading
+from promptpotter.domain.verification import NoiseBand, VerifyReading
 from promptpotter.domain.wounds import COLLAPSE_WORDS
 from promptpotter.shared.composite import render_composite_fitness_block
 

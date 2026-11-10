@@ -119,7 +119,7 @@ class HardSampleCell(StrictModel):
 
 
 class HardSamples(StrictModel):
-    """``hard_samples.json``, and the same view folded per request over an archive; it fits nothing.
+    """A scope's hard-sample view, folded per request (a cycle's off its ledger); it fits nothing.
     Every sample is its ``Sample.key``; ``positions`` places each at its row in the dataset served."""
 
     cycle_id: str | None

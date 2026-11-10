@@ -9,7 +9,7 @@ from promptpotter.domain.arms import Concluded, Measuring
 from promptpotter.domain.bench import BandedValue, BenchReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RoundSummary, VerificationMark
-from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
+from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phase_views import (
     BenchScoredView,
     InitEnterView,
@@ -56,8 +56,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup, spend_slot
-from promptpotter.domain.verification import NoiseBand, VerificationKind
-from promptpotter.domain.verify_pass import VerifyReading
+from promptpotter.domain.verification import NoiseBand, VerificationKind, VerifyReading
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
 from promptpotter.infrastructure.projections.base import Projection
@@ -175,9 +174,7 @@ class LiveDashboardProjection(Projection):
     def _handle_run_wiring(self, record: RunWiringRecord) -> None:
         for name, value in LiveDashboardState.launched(record).items():
             setattr(self.state, name, value)
-        self.state.verification = [
-            m.orphaned() if m.state == "running" else m for m in self.state.verification
-        ]
+        self.state.verification = self.state.orphaned()
         self._launch()
         self._measurement_node = record.measurement_node
 
@@ -311,12 +308,7 @@ class LiveDashboardProjection(Projection):
             self._in_pass = False
         if record.phase == CampaignPhase.VERIFY and record.event == "exit":
             # A verify or a noise floor is graded inside its bracket; a bench pass after it.
-            s.verification = [
-                m.ended(scored=m.scored, level=None, failed_as=ReadingState.PASS_STOPPED)
-                if m.kind != "bench" and m.state == "running"
-                else m
-                for m in s.verification
-            ]
+            s.verification = s.orphaned(spare="bench")
         if (
             record.phase == CampaignPhase.BENCH
             and record.event == "exit"

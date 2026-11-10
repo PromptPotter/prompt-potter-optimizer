@@ -79,7 +79,7 @@ Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only 
       campaign.json  log.md
       cycles/{cycle_id}/                # root + forks + diags, ALL FLAT
         dashboard.json  index.json  export.json  optimized.md
-        log.md  review.md  hard_samples.json  readout.log
+        log.md  review.md  readout.log
         rounds/round_NNNN.json
         langfuse/                       # only when Langfuse is configured
         .runtime/
@@ -108,7 +108,7 @@ Each file's contract is its model; this table says only what the type cannot.
 | `dashboard.json` | `LiveDashboardState`, a fold of the ledger; a read serves `application/served_dashboard.py::ServedDashboard` off `projection.py::fold_at`, never the file. |
 | `index.json` | `CycleIndex`, one writer, no reader — readers fold the ledger (`projections/cycle_index.py::read_cycle_index`); branch kind is parsed from the id (`store/layout.py::sibling_kind`). |
 | `rounds/round_NNNN.json` | The round's last statement, for the operator; a round resumes from its close on the ledger (`closed_rounds.py::closed_rounds`), never from its file (`closed_rounds.py::RoundFileProjection`). |
-| `review.md` | Rendered at each close from the round audits folded off the ledger (`projections/audit_trail.py::RoundAudits`), so it counts an L2/L3 call that landed after its round closed and, at the run's end, an interrupted round's audit. The per-node I/O itself is served at `GET …/rounds/{n}/audit` (`cycle_reads.py::round_audit`); no file holds it. |
+| `log.md`, `review.md` | A projection of the ledger, nothing reads them back (`runner/output.py::RunArtifacts`, their one writer, held by the run and by the held-out pass): rendered at each round close and once more at its drainer's close, so they name the stop; a fault is the cycle's `derived_file_stale` warning. `review.md` is rendered from the round audits folded off the ledger (`projections/audit_trail.py::RoundAudits`), so it counts an L2/L3 call that landed after its round closed and, at the run's end, an interrupted round's audit. The per-node I/O itself is served at `GET …/rounds/{n}/audit` (`cycle_reads.py::round_audit`); no file holds it. |
 | `.runtime/ledger.jsonl` | The only surface saying which optimizer node RAN (`llm_call` records); an `arm` record carries the individual's whole `lineage`. |
 
 **The cycle runs on ledger records read over the fork chain**: `bank_partition` (`domain/bench.py::PartitionRecord`), appended at mint, a fork reading its parent's (`loop_start.py::cycle_partition`); `resolved_run.declaration` (search SPACE) LAST wins, `resolved_run.experiment` (CELLS) FIRST wins (`pipeline_resolve.py::resolve_pipeline_for_campaign`); a `domain/run_records.py::BackendRevision` drift is served, never refused.

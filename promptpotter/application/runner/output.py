@@ -1,21 +1,19 @@
-"""Called from runner milestones, never from RunCallbacks, which stay display-only."""
+"""A run's markdown artifacts and its registry export: the one ``RunArtifacts`` projection."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, ClassVar
 
-from promptpotter.application.intelligence.adaptive_queue_mechanism import parent_grades
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.intelligence.hard_sample_sorter import (
-    arm_thetas,
-    build_hard_samples,
     rank_hard_samples,
-    read_hard_samples,
 )
-from promptpotter.application.intelligence.rasch import build_observations
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.runner.campaign_result import read_cycle_bench
 from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.application.scoring.closed_rounds import closed_rounds
+from promptpotter.application.scoring.measurement_log import cycle_hard_samples
 from promptpotter.application.views.render.markdown import to_markdown
 from promptpotter.application.views.view_models import (
     DigestStatusView,
@@ -33,12 +31,13 @@ from promptpotter.domain.run_records import RaceStandingRecord
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import round_audits
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     LedgerSpend,
     scan_ledger_spend,
     scan_ledger_spend_by_round,
 )
-from promptpotter.infrastructure.store.io import write_json, write_text
+from promptpotter.infrastructure.store.io import write_text
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
@@ -46,38 +45,13 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
 from promptpotter.infrastructure.tracing.mlflow_server import register_export
-from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.cells import HardSamples
-    from promptpotter.domain.search_point import TaskDecomposition
+    from promptpotter.domain.run_records import RoundClosedRecord
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-
-
-def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
-    """The ONE ``hard_samples.json``: campaign scope reads one cycle's, dataset scope folds per request."""
-    ruler = cycle.difficulty.ruler
-    cells = cycle.frontier
-    frontier = cycle.difficulty.scale.frontier(cells)
-    view = build_hard_samples(
-        build_observations(cycle.rounds),
-        ruler,
-        frontier=None if frontier is None else (frontier.theta, frontier.se),
-        arm_theta=arm_thetas(cycle.rounds),
-        parent_grades=parent_grades(cells),
-        slots=session.bank.slot_of,
-        n_min=cycle.config.optimization.elimination_n_min,
-        cycle_id=session.cycle_id,
-    )
-    with graceful("hard_samples.json write failed"):
-        write_json(
-            CycleLayout(session.store.campaigns.cycle_dir(session.hop)).hard_samples,
-            view.model_dump(mode="json"),
-        )
 
 
 class _PBestTrajectories:
@@ -197,11 +171,42 @@ def _fork_summary_from_index(fork_index: CycleIndex) -> ForkSummaryView:
     )
 
 
-def write_log_md(session: Session, config: CampaignConfig) -> None:
-    """Called once more AFTER the run ends: the stop and the winner reach the ledger after the last round rendered."""
-    with graceful("log.md render failed"):
-        _render_cycle_log_md(session, config)
-        _render_campaign_log_md(session)
+class RunArtifacts(Projection):
+    """The ONE writer of a cycle's ``log.md`` and ``review.md``, its campaign's ``log.md`` and the
+    registry's copy of its export: rendered off the ledger at each round close and once more at its
+    drainer's close, where the stop and the winner have landed; a fault is its ledger's warning."""
+
+    def __init__(self, session: Session, config: CampaignConfig) -> None:
+        self._session, self._config = session, config
+
+    def _handle_round_closed(self, record: RoundClosedRecord) -> None:  # noqa: ARG002 -- the close is the cue
+        self._render()
+
+    def drain(self) -> None:
+        self._render()
+        self._publish()
+
+    def _render(self) -> None:
+        _render_cycle_log_md(self._session, self._config)
+        _render_campaign_log_md(self._session)
+        _render_review_md(self._session, self._config)
+
+    def _publish(self) -> None:
+        """Read back off disk, so the registry holds what ``export.json`` says and nothing newer."""
+        stores = self._session.store
+        final = stores.campaigns.load(self._session.hop, moment=None)
+        # A sandbox's winners are the recursion's measurements, a diagnostic cycle's an answer about
+        # the optimizer: neither is one the operator asked for.
+        if (
+            stores.projects_root != stores.shared_root
+            or final is None
+            or final.final is None
+            or final.final.mode == "diag"
+        ):
+            return
+        export = stores.campaigns.read_export(self._session.hop)
+        if export is not None:
+            register_export(export, tenant_id=stores.tenant_id)
 
 
 def _spend_by_round(layout: CycleLayout) -> dict[int, SpendRollup]:
@@ -229,7 +234,7 @@ def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
             index,
             rounds,
             hop=hop,
-            hard_samples=read_hard_samples(layout.hard_samples),
+            hard_samples=cycle_hard_samples(session.store, hop) if rounds else None,
             p_best=_p_best(layout),
             hard_sample_order=config.hard_sample_order,
             spend_by_round=_spend_by_round(layout),
@@ -284,50 +289,30 @@ def _banked_rounds(session: Session, hop: CycleHop) -> list[RoundResult]:
     return closed_rounds(session.store, hop, scoring.require_scorer(), moment=None)
 
 
-def publish_export(session: Session) -> None:
-    """Read back off disk, so the registry holds what ``export.json`` says and nothing newer."""
-    stores = session.store
-    # A sandbox's winners are the recursion's measurements, never an answer the operator asked for.
-    if stores.projects_root != stores.shared_root:
+def _render_review_md(session: Session, config: CampaignConfig) -> None:
+    store = session.store.campaigns
+    index = store.load(session.hop, moment=None)
+    rounds = _banked_rounds(session, session.hop)
+    if not index or not rounds:
         return
-    with graceful("Prompt registry write-back failed"):
-        export = stores.campaigns.read_export(session.hop)
-        if export is not None:
-            register_export(export, tenant_id=stores.tenant_id)
-
-
-def write_review_md(
-    session: Session,
-    *,
-    accuracy_ceiling: float | None,
-    optimizer: SelectedOptimizer,
-    framing: TaskDecomposition,
-) -> None:
-    with graceful("review.md render failed"):
-        store = session.store.campaigns
-        index = store.load(session.hop, moment=None)
-        if not index:
-            return
-        rounds = _banked_rounds(session, session.hop)
-        cycle_dir = store.cycle_dir(session.hop)
-        campaign = store.load_campaign(session.campaign_id)
-        audits = round_audits(cycle_dir, [r.round for r in rounds])
-        context_object = [
+    cycle_dir = store.cycle_dir(session.hop)
+    campaign = store.load_campaign(session.campaign_id)
+    framing = campaign_framing(session.store, config, session.dataset)
+    content = render_review_md(
+        index,
+        rounds,
+        round_audits=round_audits(cycle_dir, [r.round for r in rounds]),
+        context_object=[
             framing.pipeline_purpose,
             framing.optimization_goals,
             framing.key_challenges,
-        ]
-        content = render_review_md(
-            index,
-            rounds,
-            round_audits=audits,
-            context_object=context_object,
-            accuracy_ceiling=accuracy_ceiling,
-            optimizer=optimizer,
-            # Read only once the cycle has ended: nothing renders the headline before then.
-            bench=read_cycle_bench(session.store, campaign, session.hop)
-            if index.final is not None and campaign is not None
-            else None,
-            spend=scan_ledger_spend(ledger_chain(CycleDir(cycle_dir), moment=None)).spend,
-        )
-        write_text(CycleLayout(cycle_dir).review_md, content)
+        ],
+        accuracy_ceiling=config.accuracy_ceiling,
+        optimizer=select_optimizer(config.optimization),
+        # Read only once the cycle has ended: nothing renders the headline before then.
+        bench=read_cycle_bench(session.store, campaign, session.hop)
+        if index.final is not None and campaign is not None
+        else None,
+        spend=scan_ledger_spend(ledger_chain(CycleDir(cycle_dir), moment=None)).spend,
+    )
+    write_text(CycleLayout(cycle_dir).review_md, content)

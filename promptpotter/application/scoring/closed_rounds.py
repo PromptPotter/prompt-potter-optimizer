@@ -11,7 +11,6 @@ from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.results import RoundOutcome, RoundResult
-from promptpotter.domain.ruler import RulerScope
 from promptpotter.domain.scoring import CellSheet, MeasuredCell, WalkedCell
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.archive_queries import walked_answers
@@ -42,15 +41,6 @@ def campaign_scorer(stores: Stores, campaign_id: str) -> Scorer | None:
     return scorer_of(
         cycle_config(stores, campaign, campaign.root_hop).config, verifier_graded=False
     )
-
-
-def campaign_ruler_scope(stores: Stores, campaign_id: str) -> RulerScope | None:
-    """The scale a campaign's own cells are read on: its scorer over its own dataset."""
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    scorer = campaign_scorer(stores, campaign_id)
-    if campaign is None or scorer is None:
-        return None
-    return RulerScope(scorer=scorer.id, dataset=campaign.dataset_name)
 
 
 def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> CellSheet:

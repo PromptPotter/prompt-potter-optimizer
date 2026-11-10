@@ -205,10 +205,6 @@ class CycleLayout:
         return self.cycle_dir / "review.md"
 
     @property
-    def hard_samples(self) -> Path:
-        return self.cycle_dir / "hard_samples.json"
-
-    @property
     def export(self) -> Path:
         return self.cycle_dir / "export.json"
 

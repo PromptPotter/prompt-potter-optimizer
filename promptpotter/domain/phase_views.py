@@ -11,8 +11,13 @@ from promptpotter.domain.paired_reading import ArmName, ReadingState
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import Budget, CeilingMeter, campaign_cap_lines, metered_line
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.domain.verification import NoiseBand, VerificationKind, VerificationPass
-from promptpotter.domain.verify_pass import VerifyReading, VerifyStrategy
+from promptpotter.domain.verification import (
+    NoiseBand,
+    VerificationKind,
+    VerificationPass,
+    VerifyReading,
+    VerifyStrategy,
+)
 
 
 class ViewAnchors(FrozenModel):

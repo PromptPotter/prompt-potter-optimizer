@@ -107,8 +107,7 @@ A BANKING77 campaign on an n8n harness, minted from `promptpotter mcp` on a desk
   an unreadable workspace ledger answers `isError`, never a task; on a readable one the handle
   names its campaign and cycle.
 - **One fact, two words: `backend_type` and `connector`** — the definition key
-  `pipeline.backend_type`, `dataset_access.py::backend_type_of_dataset`,
-  `pipeline_resolve.py::draft_backend_type` and `DraftPipeline.backend_type` name what
+  `pipeline.backend_type`, `pipeline_resolve.py::draft_backend_type` and `DraftPipeline.backend_type` name what
   `Campaign.connector`, `Environment.connector` and `CampaignPipelineResponse.connector` name. Action:
   one word, `connector`, the definition key included; tenant definitions re-written by the landing.
   **Rides with:** CONN-rename. **Re-test:**
@@ -418,11 +417,6 @@ What the five chains of batch 19 (`door-a`, `f6`, `f5`, `pass`, `webstate-a`) le
   `optimizers/potter/members.py` and `potter/dispatch/injections/panels.py`, which are treatment-digest
   units outside PASS. Action: both ride the one record, in a chain that owns the potter members and
   re-proves the digest. **Rides with:** rk-opt. **Re-test:** `git grep -n "\.overlap\b" -- promptpotter`
-  is empty.
-- **The pass family spans three domain modules**: `RescoreCount` sits alone in
-  `domain/diagnostic_run.py` and `VerifyReading` in `domain/verify_pass.py`, beside
-  `domain/verification.py`'s `NoiseBand`. Action: one module, its digests re-proved unmoved.
-  **Rides with:** PASS. **Re-test:** `git grep -n "domain.diagnostic_run\|domain.verify_pass" -- promptpotter`
   is empty.
 
 ### The connector and entry-point seam audits (two unbiased reads, 2026-11-06)
@@ -982,49 +976,57 @@ fixtures.
   (`components/CLAUDE.md` § Component conventions). Action: the editor reads `useConnector` at an
   identity prop. **Held:** no chain owns the editor's eleven hosts (webb holds two, feed the
   `useConnector` hook). **Re-test:** `git grep -c "NodeSchemaReading" -- webapp`.
-- **A locked-in leader's caught-up cells reach the scoreboard only at the round's close, and a
-  re-seated round replays one cell short**: `runner/measurement.py::_walk_population` merges a
-  prior's caught-up cells after `run_walks`; until the close's statement folds the merged sheet
+- **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**:
+  `runner/measurement.py::_walk_population` merges a prior's caught-up cells after `run_walks`; until
+  the close's statement folds the merged sheet
   (`test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails` asserts it), the arm's fold
-  is its walk's `SampleScoredRecord.running`, since `BACKFILL` is no arm role. Re-seating that test's
-  lock-in round on its own store elects the same pick, yet walks 13 cells where the live round walked
-  14, so θ moves. Re-concluding the arm is no fix: `Concluded` carries no cell. Action: a caught-up
-  cell is a recorded row of its prior's arm, and the replay takes cells as the live walk took them.
-  **Rides with:** rk-dec. **Re-test:** run that test's locked block twice through `_peer_cycle` on
-  one `workspace`, the second refusing a fresh cell, and compare `rows(leader)`.
+  is its walk's `SampleScoredRecord.running`, since `BACKFILL` is no arm role. Re-concluding the arm
+  is no fix: `Concluded` carries no cell. Action: a caught-up cell is a recorded row of its prior's
+  arm. **Rides with:** rk-opt (its Owns hold `runner/measurement.py`'s re-read arm, which the catch-up
+  is). **Re-test:** in that test's locked block, the leader's last `running` before the close counts
+  the cells `rows(leader)` holds.
+- **A re-entered round draws its order on the current ruler** (PRE-EXISTING; `2d2e3db1e` diverges
+  worse): `optimizers/potter/members.py:212-217` orders the panel by `build_round_order` on
+  `view.ruler`, which `bench/difficulty.py::ruler_clock` under `OpenAt` reads at its current version.
+  Live, that test's lock-in round drew on no ruler; re-entered on its own store, on a ruler holding
+  round 1's δ (the round's own `link` folded them), so its order, its walk (13 cells, not 14) and θ
+  moved. Any fold between the opening and the re-entry does it: the round's `link` before a crash, or
+  another campaign on the dataset. Root: the ruler stamp is banked at the round's opening (beside
+  `RoundProposedRecord`), and a re-entered round seats it, as `DifficultyView.seat` does a banked
+  round's, never `ruler_clock`'s current version. **Rides with:** rk-opt (it owns
+  `optimizers/potter/**`; its link 2 is the re-entry). **Re-test:** pause that test's lock-in round
+  after its opening, fold a row into the dataset's ruler, resume it: the re-entered round's
+  `build_round_order` and `rows(leader)` equal the live round's.
 - **The pipeline carrier is typed only at its door**: `NodeCall`'s readers go back through
   `.laid_keys()` (21 sites) and `.laid_nodes` (26) and read its own fields by string, among them
   `connectors/dbllmbench.py:158-249` and `connectors/harbor.py:431-437`. Action: read `NodeCall`'s
-  fields. **Rides with:** conn. **Re-test:**
+  fields. **Held:** the string reads span 14 files in seven chains' Owns, and none holds
+  `dbllmbench.py`, `infrastructure/llm/openai_compat.py` or `projections/audit_trail.py`. **Re-test:**
   `git grep -cE "\.get\(\"(model|provider|route_order|temperature|max_tokens|reasoning_effort|top_p|seed)\"" -- promptpotter`
-  (44 at filing).
+  (44 at filing, 43 after landing 20's second fix pass).
 - **A relabel over a mixed concept**: `domain/pipeline_manifest.py:43-52` strips `prompt_edits` from
   each pydantic `loc`, because `NodeConfig` nests the prompt fields the operator lays flat. Action:
-  one layout for a node's prompt fields. **Rides with:** rk-run. **Re-test:**
+  one layout for a node's prompt fields. **Held:** no chain's Owns holds `domain/pipeline_manifest.py`
+  or `search_point.py::NodeConfig`, where the nesting lives. **Re-test:**
   `git grep -n "!= \"prompt_edits\"" -- promptpotter/domain/pipeline_manifest.py`.
-- **A cycle's served hard-sample scale is restamped off its last election**:
-  `scoring/measurement_log.py::cycle_hard_samples` reads each cycle's scale off the last election,
-  where landing 19 served the live ruler at the close; no served answer proves the two equal. Action:
-  one ruler per cycle, then serve one offline cycle's answer on both and diff. **Rides with:** rk-dec.
-  **Re-test:** the diff of that answer between `2d2e3db1e` and the tip.
 - **The call-key rosters are read through a private name**: `domain/search_point.py:10` imports
   `pipeline_params._Roster` to derive `WHO_ANSWERS_KEYS`, `PARAM_FORBIDDEN_KEYS`, `PARAM_SCOPE_KEYS`
   and `CALL_CONFIG_KEYS`. Action: the four live beside `NodeCall`, their nine importers re-pointed.
-  **Rides with:** rk-run. **Re-test:** `git grep -n "_Roster" -- promptpotter/domain/search_point.py`.
+  **Held:** no chain's Owns holds `domain/search_point.py`, and rk-run holds only
+  `pipeline_params.py`'s `apply_node_overlay` and `ParamLayers`. **Re-test:**
+  `git grep -n "_Roster" -- promptpotter/domain/search_point.py`.
 - **The domain carrier raises a door's error**: `pipeline_params.py::PipelineParams.with_nodes` raises
   `PayloadInvalidError` (a 422) from internal calls (`pin_default_routes`, `_without_identity`).
-  Action: the carrier raises its validation error and each door words it. **Rides with:** rk-run.
-  **Re-test:** `git grep -n "PayloadInvalidError" -- promptpotter/domain/pipeline_params.py`.
+  Action: the carrier raises its validation error and each door words it. **Held:** rk-run holds
+  only `pipeline_params.py`'s `apply_node_overlay` and `ParamLayers`, and no chain holds
+  `with_nodes`. **Re-test:** `git grep -n "PayloadInvalidError" -- promptpotter/domain/pipeline_params.py`.
 - **The election has no one-arm read**: `scoring/selection.py:177` fits a prior through
   `candidate_abilities({"read": rows}, …)`, a fake arm key. Action: a one-arm read on the election's
   fit. **Rides with:** rk-dec. **Re-test:** `git grep -n '{"read": ' -- promptpotter/application/scoring/selection.py`.
 - **A steer is typed, then sent untyped**: `commands/launching.py::_typed_steer` (`:133`) validates
   each node as `NodeCall` and keeps the dict it validated. Action: keep the typed carrier.
-  **Rides with:** startb. **Re-test:** read `_typed_steer`'s return.
-- **The verification records are three modules**: `domain/diagnostic_run.py` (16 lines) and
-  `domain/verify_pass.py` (68) beside `domain/verification.py`, with a cross-import and the
-  `VERIFY_STRATEGY_LABELS` self-check. Action: one module, its 14 importers re-pointed (about −15).
-  **Rides with:** passb. **Re-test:** `ls promptpotter/domain/diagnostic_run.py promptpotter/domain/verify_pass.py`.
+  **Held:** of `launching.py`, startb holds only the release lines and init only the diag; no chain
+  holds `_typed_steer`. **Re-test:** read `_typed_steer`'s return.
 - **`editable` cannot say "frozen" apart from "inside `permitted`"**: any cost-lever move is the babysit
   act, but a non-editable enum cost lever (`provider`) still offers its permitted values, which
   fork-preview then refuses. Action: a served per-row pickable set for the account. **Rides with:**

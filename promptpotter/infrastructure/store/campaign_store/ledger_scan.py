@@ -70,8 +70,12 @@ from promptpotter.domain.spend import (
     spend_slot,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.domain.verification import BenchPasses, VerificationKind, VerificationPass
-from promptpotter.domain.verify_pass import VerifyReading
+from promptpotter.domain.verification import (
+    BenchPasses,
+    VerificationKind,
+    VerificationPass,
+    VerifyReading,
+)
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,

@@ -35,7 +35,7 @@ from promptpotter.application.runner.campaign_result import (
     line_run,
     read_cycle_bench,
 )
-from promptpotter.application.runner.output import publish_export, write_review_md
+from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
 from promptpotter.application.scoring.closed_rounds import cycle_instrument, walked_rows
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, read_pair
@@ -44,7 +44,6 @@ from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
 from promptpotter.domain.bench import BENCH_REFUSAL_INFO, BandedValue, PartitionRecord
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.diagnostic_run import RescoreCount
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -59,8 +58,14 @@ from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase
 from promptpotter.domain.run_records import VerifySaturated
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.verification import NoiseBand, VerificationPass
-from promptpotter.domain.verify_pass import VerifyHeldAbsent, VerifyReading, VerifyStrategy
+from promptpotter.domain.verification import (
+    NoiseBand,
+    RescoreCount,
+    VerificationPass,
+    VerifyHeldAbsent,
+    VerifyReading,
+    VerifyStrategy,
+)
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, at_round
@@ -645,7 +650,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
     async with open_diagnostic(
         stores, hop, source=RunSource.OPTIMIZATION_LOOP, acting=acting
     ) as opened:
-        session, config, framing = opened.session, opened.config, opened.framing
+        session, config = opened.session, opened.config
         origin_sp = opened.points.measured(rounds[0].origin)
         clock = LaunchClock.now()
         optimizer = select_optimizer(config.optimization)
@@ -664,6 +669,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
             dashboard = projecting.add(dashboard)
             readout.open_readout(cycle_dir)
             projecting.add(readout)
+            projecting.add(RunArtifacts(session, config))
             cb = RunCallbacks(ledger)
             try:
                 try:
@@ -705,12 +711,6 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                         finished_at=utcnow_iso(),
                         optimizer_phases=optimizer.phases,
                     )
-        stores.campaigns.restate_export_bench(hop, score)
-        publish_export(session)
-        write_review_md(
-            session,
-            accuracy_ceiling=config.accuracy_ceiling,
-            optimizer=optimizer,
-            framing=framing,
-        )
+            # Before the drain renders the export's headline and hands the registry its copy.
+            stores.campaigns.restate_export_bench(hop, score)
         return score

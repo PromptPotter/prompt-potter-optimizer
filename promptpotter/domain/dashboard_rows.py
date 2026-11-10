@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import Field
 
@@ -19,8 +19,7 @@ from promptpotter.domain.ruler import LevelSeries, SeriesReading
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
-from promptpotter.domain.verification import VerificationKind
-from promptpotter.domain.verify_pass import VerifyReading
+from promptpotter.domain.verification import VerificationKind, VerifyReading
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
@@ -169,19 +168,6 @@ class RunLimits(StrictModel):
     optimizer: list[OptimizerLimit] = Field(default_factory=list)
 
 
-class VerificationKindInfo(NamedTuple):
-    name: str
-    # Appended to the row count: what the rows are, where the name does not already say it.
-    rows: str
-
-
-VERIFICATION_KIND_INFO: Worded[VerificationKind, VerificationKindInfo] = Worded(
-    {
-        "verify": VerificationKindInfo("verify", " never seen"),
-        "bench": VerificationKindInfo("held-out bench", ""),
-        "noise_floor": VerificationKindInfo("noise floor", " re-scored"),
-    }
-)
 VerificationState = Literal["running", "done", "failed"]
 
 

@@ -9,11 +9,6 @@ from promptpotter.application.runner.campaign_result import (
     bank_campaign_result,
     declare_line_bench,
 )
-from promptpotter.application.runner.output import (
-    publish_export,
-    write_log_md,
-    write_review_md,
-)
 from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.config.settings import APP_VERSION
@@ -251,18 +246,6 @@ def _finalize_run(
                 )[0],
             ),
         )
-        # After what it banked, before the digests that name the stop, and before the drain.
+        # After what it banked, and before the drain renders the artifacts that name the stop.
         declare_run_stop(session, observers, stop_reason, interrupted_by=pause_cause)
-        # A diagnostic cycle answers a question about the optimizer; it has no winner to hand on.
-        if not diag:
-            publish_export(session)
-        write_log_md(session, config)
-        # Re-rendered once `final` is banked: the bench score is taken after the last round closes.
-        if cycle is not None:
-            write_review_md(
-                session,
-                accuracy_ceiling=config.accuracy_ceiling,
-                optimizer=cycle.optimizer,
-                framing=cycle.framing,
-            )
     observers.drain_all()

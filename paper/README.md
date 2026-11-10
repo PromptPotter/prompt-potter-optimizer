@@ -108,7 +108,7 @@ Two cheap additions: re-measure the BBEH origin on the model `dataset.yaml::pipe
 
 **Each run leaves one folder under `paper/evidence/<date>-<dataset>/`**: `export.json` (the `bench`
 block plus `dataset_hash`, `treatment`, `stop_reason`, `tool_version`), `index.json`,
-`dashboard.json`, `rounds/` and `hard_samples.json`, the `launch_clock` records, the `dataset.yaml`
+`dashboard.json` and `rounds/`, the `launch_clock` records, the `dataset.yaml`
 used, the exact commands and the `noise-floor` output. The site adds one `src/data/results.ts` entry
 linking that `export.json`, and prints nothing a file does not state.
 

@@ -21,7 +21,6 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers.nodes import ReadArm, RoundContext, SliceMap
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, PoBBKnobs
 from promptpotter.application.optimizers.potter.records import (
-    POTTER_MANIFEST,
     L1Readout,
     L2Memory,
     L3Memory,
@@ -743,9 +742,7 @@ def optimizer_state(*, parse_failure: str | None = None) -> OptimizerState:
         L1Readout(l1_parse_failure=parse_failure),
         Critique(),
     )
-    return OptimizerState(
-        manifest=POTTER_MANIFEST, prompt_hashes={}, slices={}, outputs={}
-    ).holding(*held)
+    return OptimizerState(manifest="potter", prompt_hashes={}, slices={}, outputs={}).holding(*held)
 
 
 #: The reference arm every built round carries: a held round ends on it.

@@ -14,6 +14,7 @@ from promptpotter.application.jobs.coupon import bind_account
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
@@ -348,6 +349,7 @@ def _bind_observers(
     readout = projecting.add(readout)
     projecting.add(CycleIndexProjection(cycle_dir))
     projecting.add(RoundFileProjection(session.store, session.hop, session.state))
+    projecting.add(RunArtifacts(session, campaign_config))
     tracing = projecting.add(tracing)
     return RunObservers(
         store=session.store,

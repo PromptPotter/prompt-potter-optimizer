@@ -5530,11 +5530,6 @@ export interface StatusMarkInfo {
   tone: Tone;
 }
 
-export interface VerificationKindInfo {
-  name: string;
-  rows: string;
-}
-
 export interface ExportTierInfo {
   label: string;
   pasted: boolean;
@@ -5915,13 +5910,6 @@ export const SAMPLE_MOVEMENT_LABELS: Record<'new' | 'readded' | 'gained' | 'lost
   "kept": "kept position",
 };
 
-// Mirror of domain/dashboard_rows.py::VERIFICATION_KIND_INFO, in display order.
-export const VERIFICATION_KIND_INFO: Record<'verify' | 'bench' | 'noise_floor', VerificationKindInfo> = {
-  "verify": { name: "verify", rows: " never seen" },
-  "bench": { name: "held-out bench", rows: "" },
-  "noise_floor": { name: "noise floor", rows: " re-scored" },
-};
-
 // Mirror of domain/dataset_start.py::START_BLOCK_WORDS, in display order.
 export const START_BLOCK_WORDS: Record<StartBlock, string> = {
   "verifier_graded": "Each sample is graded by running a verifier rather than by a labelled answer, so it is launched from the command line, not from here.",
@@ -6153,7 +6141,7 @@ export const SPEND_KIND_LABELS: Record<TokenUsageKind, string> = {
   "bench": "Bench",
 };
 
-// Mirror of domain/verify_pass.py::VERIFY_STRATEGY_LABELS, in display order.
+// Mirror of domain/verification.py::VERIFY_STRATEGY_LABELS, in display order.
 export const VERIFY_STRATEGY_LABELS: Record<'random' | 'hard', string> = {
   "random": "picked at random",
   "hard": "hardest first",
@@ -6204,7 +6192,6 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [STATUS_MARK_INFO, ["running", "scoring", "starting", "queued", "gate", "paused", "detached", "success", "halted", "failed", "archived", "unknown"]],
   [PRECISION_VERDICT_ADVICE, ["noise", "spread"]],
   [SAMPLE_MOVEMENT_LABELS, ["new", "readded", "gained", "lost", "kept"]],
-  [VERIFICATION_KIND_INFO, ["verify", "bench", "noise_floor"]],
   [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable"]],
   [EXPORT_TIER_INFO, ["chat", "report", "notebook", "deploy", "package"]],
   [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "held", "unread"]],

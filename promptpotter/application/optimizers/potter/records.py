@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from pydantic import Field
 
@@ -11,9 +11,6 @@ from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-PotterManifest = Literal["potter"]
-POTTER_MANIFEST: PotterManifest = "potter"
 
 
 class PotterCheckpointKind(CheckpointKind):

@@ -7,27 +7,34 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.difficulty import judging_ruler
+from promptpotter.application.bench.difficulty import AbilityScale, judging_ruler, restamped
 from promptpotter.application.datasets.authored import (
     dataset_scorer,
     load_dataset_campaign_config,
 )
 from promptpotter.application.datasets.loaders import held_bank
+from promptpotter.application.intelligence.adaptive_queue_mechanism import parent_grades
 from promptpotter.application.intelligence.hard_sample_sorter import (
+    arm_thetas,
     build_hard_samples,
     rank_hard_samples,
-    read_hard_samples,
 )
-from promptpotter.application.intelligence.rasch import Observation
-from promptpotter.application.pipeline_resolve import dataset_pipeline, experiment_outside_run
+from promptpotter.application.intelligence.rasch import Observation, build_observations
+from promptpotter.application.pipeline_resolve import (
+    cycle_config,
+    dataset_pipeline,
+    experiment_outside_run,
+)
 from promptpotter.application.scoring.closed_rounds import (
-    campaign_ruler_scope,
     campaign_scorer,
+    closed_rounds,
+    cycle_bank,
     walked_rows,
 )
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
 from promptpotter.domain.arms import Cut, Measuring, Proposed, arm_name
 from promptpotter.domain.bench import PartitionRecord
+from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.cells import (
     Cell,
     CellCandidate,
@@ -43,7 +50,7 @@ from promptpotter.domain.cells import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.ruler import RulerReach, RulerScope
+from promptpotter.domain.ruler import CellScopes, RulerReach, RulerScope
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import (
     CellSheet,
@@ -285,7 +292,7 @@ class CellsScope:
         return (
             *read,
             file_sig(CampaignLayout(art.campaigns.campaign_root_dir(campaign_id)).manifest),
-            file_sig(CycleLayout(cycle_dir).hard_samples),
+            file_sig(art.ruler.path),
             *((str(path), file_sig(path)) for path in sorted(ledgers)),
         )
 
@@ -325,25 +332,42 @@ def _drawn_rows(
     return rows
 
 
-def _cycle_view(stores: Stores, hop: CycleHop) -> HardSamples:
-    """Every round's close writes ``hard_samples.json``, so a cycle without one read no scale."""
-    cycle_dir = cycle_dir_for(stores.base_dir, hop)
-    if not cycle_dir.exists():
+def cycle_hard_samples(stores: Stores, hop: CycleHop) -> HardSamples:
+    """A cycle's scale, folded off its ledger: its closed rounds read on the last election's stamp,
+    re-fit. A cycle no round of which closed reads none."""
+    if not cycle_dir_for(stores.base_dir, hop).exists():
         raise NotFoundError(f"Cycle '{hop.campaign_id}/{hop.cycle_id}' not found")
-    written = read_hard_samples(CycleLayout(cycle_dir).hard_samples)
-    if written is not None:
-        return written
-    if campaign_ruler_scope(stores, hop.campaign_id) is None:
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    scorer = campaign_scorer(stores, hop.campaign_id)
+    if campaign is None or scorer is None:
         raise NotFoundError(f"Campaign '{hop.campaign_id}' not found")
+    knobs = cycle_config(stores, campaign, hop).config.optimization
+    rounds = closed_rounds(stores, hop, scorer, moment=None)
+    bank = cycle_bank(stores, hop) if rounds else Bank.of(())
+    stamp = next((rr.election.ruler for rr in reversed(rounds) if rr.election is not None), None)
+    judging = (
+        None
+        if stamp is None or stamp.cold
+        else restamped(
+            stores.ruler,
+            stamp,
+            n_min=knobs.elimination_n_min,
+            enable_2pl=knobs.enable_2pl_graduation,
+        )
+    )
+    cells: list[GradedCell] = []
+    for rr in rounds:
+        cells = merge_known_outcomes(cells, rr.results)
+    scopes = CellScopes.of(bank.samples, campaign.dataset_name)
+    frontier = None if judging is None else AbilityScale(judging, scopes).frontier(cells)
     return build_hard_samples(
-        [],
-        None,
-        frontier=None,
-        arm_theta={},
-        parent_grades={},
-        slots={},
-        # Nothing measured: the round order is empty whatever leads it.
-        n_min=0,
+        build_observations(rounds),
+        None if judging is None else judging.ruler,
+        frontier=None if frontier is None else (frontier.theta, frontier.se),
+        arm_theta=arm_thetas(rounds),
+        parent_grades=parent_grades(cells),
+        slots=bank.slot_of,
+        n_min=knobs.elimination_n_min,
         cycle_id=hop.cycle_id,
     )
 
@@ -438,7 +462,7 @@ def _leaderboard_page(
         candidates, rows = _dataset_cells(art_store, cells.name, bank, wanted)
     else:
         drawn = art_store.campaigns.last(hop, PartitionRecord)
-        view = _cycle_view(art_store, hop)
+        view = cycle_hard_samples(art_store, hop)
         members = frozenset() if drawn is None else drawn.bank_ids
         selected = _selected(view, members, max_unmeasured, limit)
         shown = _drawn_rows(cells, drawn, selected)

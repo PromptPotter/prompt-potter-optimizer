@@ -32,7 +32,7 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.ruler import ThetaCaveat, theta_band
 from promptpotter.domain.spend import PrefixReading, TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.domain.verify_pass import VerifyReading
+from promptpotter.domain.verification import VerifyReading
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded

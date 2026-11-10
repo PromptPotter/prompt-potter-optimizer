@@ -22,11 +22,10 @@ from promptpotter.domain.command_kinds import (
     CyclePayload,
     ReadKind,
 )
-from promptpotter.domain.diagnostic_run import RescoreCount, rescore_count
 from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
 from promptpotter.domain.hierarchy import ListingLifecycle
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.verify_pass import VerifyStrategy
+from promptpotter.domain.verification import RescoreCount, VerifyStrategy, rescore_count
 from promptpotter.presentation.cli.parsers import (
     ACTIVE_CAMPAIGN,
     ACTIVE_CYCLE,

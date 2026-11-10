@@ -382,14 +382,6 @@ def runnable_definition(dataset: ResolvedDataset) -> DatasetDefinition:
     return definition
 
 
-def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
-    """Tolerant, a SURVEY's: a campaign outlives its dataset, and one bad file fails no listing."""
-    try:
-        return runnable_definition(resolve_dataset(stores, dataset_name)).backend_type
-    except (DatasetAccessError, FileUnreadableError, PayloadInvalidError, OSError):
-        return ""
-
-
 @dataclass(frozen=True)
 class PanelRead:
     experiment: dict[str, Any]

@@ -43,7 +43,7 @@ from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import RequestBody, StrictModel, UploadBytes, WireInt
-from promptpotter.domain.verify_pass import VerifyStrategy
+from promptpotter.domain.verification import VerifyStrategy
 from promptpotter.shared.identity import (
     ACCOUNT_KEYS_CAP,
     CAMPAIGN_BUDGET_CAP,

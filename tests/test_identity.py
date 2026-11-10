@@ -272,7 +272,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     DatasetCard,
     ResolvedDataset,
-    backend_type_of_dataset,
     install_dataset,
     list_readable_datasets,
     read_dataset_pipeline,
@@ -1184,7 +1183,9 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "carded": "yours",
         "solo": "research",
     }, "a name was read from another tier than the first holding it"
-    assert backend_type_of_dataset(tiered, "twin") == "termnorm", "a shadowed tier answered"
+    assert runnable_definition(resolve_dataset(tiered, "twin")).backend_type == "termnorm", (
+        "a shadowed tier answered"
+    )
     # Nothing a name's second holder blocks: every campaign lists, and so does every origin.
     for campaign_id, name in (("camp-twice", "carded"), ("camp-beside", "miscarded")):
         hop = CycleHop(campaign_id=campaign_id, cycle_id=f"cycle_{name}0000")

@@ -197,8 +197,7 @@ class RoundAxis(StrictModel):
 
 def _round_axis(state: LiveDashboardState, *, live: bool) -> RoundAxis:
     completed = [r.round for r in state.rounds if r.candidates]
-    current = state.current_round.round
-    in_flight = current if live and current not in completed else None
+    in_flight = state.current_round.round if live and not state.round_closed() else None
     return RoundAxis(
         completed=completed,
         live=in_flight,
@@ -220,11 +219,7 @@ def _walk(state: LiveDashboardState, hop: CycleHop, *, live: bool) -> SampleWalk
     current = state.current_round
     if not live:
         return None
-    rows = (
-        []
-        if any(r.round == current.round and r.candidates for r in state.rounds)
-        else (current.candidates)
-    )
+    rows = [] if state.round_closed() else current.candidates
     measured = [s.position for s in rows[-1].samples] if rows else []
     in_flight = state.current_position
     key = f"{hop.cycle_id}:{current.round}:{len(rows) - 1 if rows else '-'}"
@@ -515,9 +510,7 @@ def _serve(
             # A killed run never publishes its closing zero, so it would go on reporting calls out.
             in_flight = allowed = 0
         if standing.orphaned:
-            banked["verification"] = [
-                m.orphaned() if m.state == "running" else m for m in state.verification
-            ]
+            banked["verification"] = state.orphaned()
         elif (held := state.backpressure) is not None:
             banked["backpressure"] = ServedBackpressure.at(held, standing.at)
     verify = None if standing is None else standing.verify
@@ -619,7 +612,7 @@ def served_dashboard(
             lookahead=requested_lookahead(armed),
             lookahead_auto=armed.lookahead is not None and armed.lookahead.auto,
             verify=scan_ledger_verify(CycleLayout(cycle_path).ledger),
-            orphaned=any(m.state == "running" for m in state.verification)
+            orphaned=any(mark.state == "running" for mark in state.verification)
             and not run.producer.attached
             and JobRegistry.attach(stores.jobs_dir).pass_on(stores.campaigns.workspace, hop)
             is None,

@@ -23,11 +23,6 @@ from promptpotter.application.runner.bench import grade_round_selection, reserve
 from promptpotter.application.runner.campaign_result import line_outlay
 from promptpotter.application.runner.inner.spawn_context import pin_inner_ruler
 from promptpotter.application.runner.measurement import measure_population
-from promptpotter.application.runner.output import (
-    write_hard_samples_artifacts,
-    write_log_md,
-    write_review_md,
-)
 from promptpotter.application.runner.overlap import measure_overlap
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.scoring.passes import verify_on_saturation
@@ -534,14 +529,6 @@ async def close_round(
         outlay=line_outlay(session, cycle.optimizer.phases),
     )
     round_result = cycle.seat(closing.model_copy(update={"at_offset": offset}))
-    write_hard_samples_artifacts(session, cycle)
-    write_log_md(session, cycle.config)
-    write_review_md(
-        session,
-        accuracy_ceiling=cycle.config.accuracy_ceiling,
-        optimizer=cycle.optimizer,
-        framing=cycle.framing,
-    )
     if cycle.sample_index is not None:
         cycle.sample_index.refresh(
             session.store,

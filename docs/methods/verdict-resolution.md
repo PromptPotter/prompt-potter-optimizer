@@ -288,13 +288,13 @@ The one end-of-round mutation is the round draw (§ The between-round draw), in 
 is removed. Triage reads each failure streak: **zero-signal** is deprioritized by `p(1−p)→0`;
 **chronically failing** goes to Critique and L2/L3; **intermittent** is kept — it discriminates.
 
-**The hard-sample view fits nothing.** Each close rewrites
-`campaigns/{id}/cycles/{id}/hard_samples.json` (`domain/cells.py::HardSamples`,
+**The hard-sample view fits nothing, and no file holds it.** A cycle's is folded per read off its
+ledger (`application/scoring/measurement_log.py::cycle_hard_samples` into `domain/cells.py::HardSamples`,
 `intelligence/hard_sample_sorter.py::build_hard_samples`, the one `pick_value` caller): the cycle's
-graded cells on its ONE ruler (`Cycle.difficulty.ruler`) and the abilities read on it
+graded cells on the scale its last election read, re-fit off that stamp, and the abilities read on it
 (`Election.fit[ArmKey].theta`, `AbilityScale.frontier`). A sample off the ruler is served in its
 `DeltaState` with no δ and no pick score — never 0.0. Campaign scope names the cycle it reads
 (`application/scoring/measurement_log.py::campaign_scope_cycle`); every surface ranks via
-`::rank_hard_samples`. **Dataset scope is never persisted** (no campaign owns it):
+`::rank_hard_samples`. **Dataset scope** (no campaign owns it):
 `GET /datasets/{name}/cells?scope=dataset` anchors a ruler per request on archived cells
 (`bench/difficulty.py::calibrate_delta_ruler`) and serves δ with no pick score.

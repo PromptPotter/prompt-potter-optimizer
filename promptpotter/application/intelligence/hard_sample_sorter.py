@@ -13,12 +13,9 @@ from promptpotter.domain.cells import (
     SampleDifficulty,
 )
 from promptpotter.domain.ruler import RulerStanding
-from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from promptpotter.application.intelligence.rasch import Observation
     from promptpotter.domain.cells import HardSampleOrder
     from promptpotter.domain.results import RoundResult
@@ -115,8 +112,3 @@ def rank_hard_samples(
         return (0, -keys[key], rows[key]) if key in keys else (1, 0.0, rows[key])
 
     return resolved, sorted(rows, key=rank)
-
-
-def read_hard_samples(path: Path) -> HardSamples | None:
-    held = read_json_optional(path)
-    return None if held is None else HardSamples.model_validate(held)

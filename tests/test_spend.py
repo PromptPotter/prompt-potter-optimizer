@@ -160,7 +160,6 @@ from promptpotter.domain.command_kinds import (
     StartCheckinPayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
-from promptpotter.domain.diagnostic_run import RescoreCount
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun
@@ -222,6 +221,7 @@ from promptpotter.domain.spend import (
     TokenAccount,
 )
 from promptpotter.domain.validators import StopSignal
+from promptpotter.domain.verification import RescoreCount
 from promptpotter.infrastructure.backend import CELL, BackendClient
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.ledger import CycleEventLog
