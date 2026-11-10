@@ -35,11 +35,11 @@ landed, reviewed and stopped is [`../developer/refactor-arcs.md`](../developer/r
 | **F5** | — | landed in batch 19: the tenant directory is the owner; one claim act; consent per principal; the delegate ceiling deleted | F1, F3, F5a |
 | **F6** | M6 | landed in batch 19: resume decides before it writes; the embedded door exports `pause` and `cancel`; the mint's commit point. Its launch half (the embedded launch dispatches) is START-b's | F1 |
 | **DOOR-a** | M9 | landed in batch 19, links 0-3: one void; fork inheritance, `_Fold` and `append_row` gone. Links 5-6 are DOOR-a's rest | m9r, F2 |
-| **NODE** | M4 | the carrier's nodes typed by `NodeCall`; one config fold; one slot validation; one knob projection | F3, digest |
-| **ELECT** | M19 | one ceiling stop; the election's rows; the lock-in predicate | F2 |
+| **NODE** | M4 | landed in batch 20, links 1, 2 and 4-6: the carrier's nodes typed by `NodeCall`; one slot validation; one knob projection; a mistyped manifest key refused where it was laid. Link 3 (one config fold) was cut: the two merges differ in meaning, so folding them is a decision | F3, digest |
+| **ELECT** | M19 | landed in batch 20: one ceiling stop on the lower bound of `vs_origin`; `election_rows` leaves out the cells that crowned the parent; the lock-in asks `elect_round_winner`; a prior's caught-up cells join its round reading | F2 |
 | **WEBSTATE-a** | M16 | landed in batch 19: one address, one candidate pick in the hash. Open: the tree's detach and re-pair (the ledger's `showForest` row) | webcell |
-| **ARTIFACTS** | M13 | run artifacts are ledger projections; `hard_samples.json` | PASS, DOOR-a |
-| **KNOBROW** | M4 | the param row serves `role` and `editable` | NODE, webcell, WEBSTATE-a |
+| **ARTIFACTS** | M13 | landed in batch 20: `log.md`, `review.md` and the registry export are one projection (`RunArtifacts`); a cycle's hard-sample scale folds off its ledger and `hard_samples.json` is gone | PASS, DOOR-a |
+| **KNOBROW** | M4 | landed in batch 20: every served param row carries `role` and `editable`, and the editor reads them | NODE, webcell, WEBSTATE-a |
 | **LAND** | LAND | the landing at every process entry, keyed on the record schema; it drops unloadable run data itself; the atomic-write row first | F4, PASS |
 | **START-b** | M6 | `RunStart`, one `start()` owning the slot, one launch answer, a queued launch as a job on disk | F6 |
 | **STOP-b** | M6 | `declare_stop` is the one stop door and the one void; a command names its filer's lock | START-b, DOOR-a |
@@ -53,6 +53,8 @@ landed, reviewed and stopped is [`../developer/refactor-arcs.md`](../developer/r
 | **M11's rest** | M11 | `StatusMark`, the cell beat, `cached` / `key_source`, the export's spend, the on-disk renames | DOOR-b |
 | **FEED**, then **WEBSTATE-b** | FEED, M16 | one change feed; one served arm, served labels, closed rounds off the live body | DOOR-a's rest; ADDR |
 | **M5, M8, M18, M20, M21, M22, M23** | — | as their ledger sections say; each brief lists its files before it joins a landing | M8, M5: NODE. M18: CONN-a. M21: START-b. M23: M22 |
+
+Wave 3's chains are done; the rows they left open ride wave 4's chains, as the ledger names them.
 
 **Critical path:** F1 → F6 → START-b → STOP-b → INIT → MONEY → DOOR-b. These cross
 `launcher/admission.py`, `jobs/quota.py`, `initialization/loop_start.py` and `run_observers.py`, so
