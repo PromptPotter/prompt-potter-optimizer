@@ -7,7 +7,7 @@ import { useRead } from "./useRead";
 import type {
   DatasetPipelineResponse,
   NestedPipelineRef,
-  ServedParam,
+  NodeConfigParam,
   NodeReach,
   PipelineView,
 } from "@/lib/api/types";
@@ -20,7 +20,7 @@ interface NestedLayer {
   dataset: string;
   connector: string | null;
   view: PipelineView | null;
-  schema: Record<string, ServedParam[]> | null;
+  schema: Record<string, NodeConfigParam[]> | null;
   // Null is UNKNOWN, never shut.
   reach: Record<string, NodeReach> | null;
   nestsNode: string | null;

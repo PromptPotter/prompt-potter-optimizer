@@ -449,6 +449,21 @@ assert set(get_args(KnobLayer)) <= set(get_args(ParamLayer)), "a knob's layer is
 # Per optimizer node, the layer that last set each key of its `optimization.nodes` config.
 type KnobLayers = Mapping[str, Mapping[str, KnobLayer]]
 
+# The call fact a surface keys a control on; a model row is `kind`'s.
+ParamRole = Literal["", "provider", "effort", "answer_format", "schema_family"]
+_PARAM_ROLES: dict[str, ParamRole] = {
+    "provider": "provider",
+    "reasoning_effort": "effort",
+    SCHEMA_TOGGLE_PARAM: "answer_format",
+    "schema_family": "schema_family",
+}
+
+
+def steer_binds(key: str) -> bool:
+    """Whether a steer moving *key* can be the babysit act (decisions.md § 0005): a cost lever by
+    any move, a model by one outside what its node permits."""
+    return key in PARAM_FORBIDDEN_KEYS or key == "model"
+
 
 class NodeConfigParam(FrozenModel):
     """One param a node carries, in the COMPLETE per-node list a reader sums `movable_by` over.
@@ -500,6 +515,16 @@ class NodeConfigParam(FrozenModel):
     # The ticks an axis draws; `[]` on one is "nothing may be picked", never "not stated".
     permitted: list[str] = Field(default_factory=list)
     permitted_stated: bool = False
+    role: ParamRole = Field(
+        default="",
+        description="`provider` the route's host, `effort` the reasoning ladder a model answers, "
+        "`answer_format` the text/json toggle, `schema_family` a registry schema the backend owns",
+    )
+    editable: bool = Field(
+        description="Whether its reader may steer it past `permitted`: false where a steer that "
+        "binds the reader binds it (`steer_binds`: a cost lever, a model), on a campaign read by "
+        "an account without `campaign.babysit`; a declaration binds none"
+    )
 
 
 def _knob_kind(json_type: object) -> ParamKind:
@@ -877,12 +902,15 @@ class PipelineSchema(FrozenModel):
         self,
         own_axes: dict[str, set[str]] | None = None,
         *,
+        steer_bound: bool,
         values: Mapping[str, Mapping[str, object]] | None = None,
         sources: Mapping[str, Mapping[str, ParamSource]] | None = None,
         model_menu: list[str] | None = None,
         declared: "PipelineSchema | None" = None,
     ) -> dict[str, list[NodeConfigParam]]:
-        """COMPLETE by contract — filter downstream. *declared* is the schema BEFORE narrowing."""
+        """COMPLETE by contract — filter downstream. *declared* is the schema BEFORE narrowing;
+        *steer_bound* whether a steer `steer_binds` binds its reader, held then to `permitted`: a
+        campaign read by an account without `campaign.babysit`."""
         # A model row is synthesized on the carrier only when no node OWNS a model.
         model_declared = any(
             "model" in (n.param_keys | set(n.current_config)) for n in self.declared_nodes
@@ -970,6 +998,8 @@ class PipelineSchema(FrozenModel):
                     source=stamped.get(key, "unset"),
                     # A key that could never be an axis is never HELD: there was none to close.
                     held=not never and key in n.param_keys_held | n.prompt_fields_held,
+                    role=_PARAM_ROLES.get(key, ""),
+                    editable=not (steer_bound and steer_binds(key)),
                 )
                 knobs = n.knob_schema
                 params.append(_knob_row(row, n) if knobs and key in knobs["properties"] else row)
@@ -988,6 +1018,7 @@ class PipelineSchema(FrozenModel):
                         description="Optimizer model for this node — install-global by "
                         "default, operator-steerable on a fork.",
                         source=stamped.get("model", "unset"),
+                        editable=not (steer_bound and steer_binds("model")),
                     )
                 )
             out[n.name] = params

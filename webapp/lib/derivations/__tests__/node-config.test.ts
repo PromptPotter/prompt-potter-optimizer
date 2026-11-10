@@ -14,7 +14,7 @@ import {
 import {
   type ModelCapability,
   SCHEMA_DESCRIPTION_PREFIX as DESCRIPTION_PREFIX,
-  type ServedParam,
+  type NodeConfigParam,
 } from "@/lib/api/types";
 import { configParam as param } from "@/lib/test-fixtures";
 
@@ -84,7 +84,7 @@ describe("nodeOverlayPatch (search-space emit)", () => {
   });
 });
 
-const schema: Record<string, ServedParam[]> = {
+const schema: Record<string, NodeConfigParam[]> = {
   llm_only: [
     param({
       key: "model",
@@ -231,7 +231,7 @@ describe("configRows (values mode)", () => {
 
   // A row left out of the emission reads as the operator holding it.
   it("carries a prompt field's lock in every emit, and keeps its text out of a fork seed", () => {
-    const prompt = (key: string, open: boolean): ServedParam =>
+    const prompt = (key: string, open: boolean): NodeConfigParam =>
       param({
         key,
         value: "text",
@@ -375,7 +375,7 @@ describe("descriptionSubtree (one click on a schema-tree row)", () => {
 });
 
 describe("parseParam (a value typed in, read by its served row)", () => {
-  const knob = (over: Partial<ServedParam>): ServedParam =>
+  const knob = (over: Partial<NodeConfigParam>): NodeConfigParam =>
     param({ key: "k", integer: true, declared: 10, value: 10, ...over });
 
   it("commits only what the served type reads as the typed value", () => {

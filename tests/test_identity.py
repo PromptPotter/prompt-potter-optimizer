@@ -151,6 +151,7 @@ from promptpotter.application.pipeline_resolve import (
     fork_preview,
     identity_layer,
     permitted_narrowing,
+    resolve_pipeline_at,
     resolved_output_schemas,
 )
 from promptpotter.application.pipeline_responses import ForkPreviewResponse
@@ -235,6 +236,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
     description_key,
     narrowing_of,
+    steer_binds,
 )
 from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptPart, Snippet
@@ -295,7 +297,7 @@ from promptpotter.shared.errors import (
     SlugTakenError,
 )
 from promptpotter.shared.hashing import SourceFacts, dataset_hash, source_facts, stable_hash
-from promptpotter.shared.identity import default_identity
+from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, default_identity
 from promptpotter.shared.run_scope import scoped
 
 _L1 = Variation(node="potter:l1_generate", mode="llm")
@@ -1782,10 +1784,15 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # A row reads as the search space its ticks and padlock drew.
     params = [
         NodeConfigParam(
-            key="model", kind="model", options=["a", "b"], permitted=["a"], permitted_stated=True
+            key="model",
+            kind="model",
+            options=["a", "b"],
+            permitted=["a"],
+            permitted_stated=True,
+            editable=True,
         ),
-        NodeConfigParam(key="effort", kind="enum", options=["low", "mid", "high"]),
-        NodeConfigParam(key="temperature", kind="number"),
+        NodeConfigParam(key="effort", kind="enum", options=["low", "mid", "high"], editable=True),
+        NodeConfigParam(key="temperature", kind="number", editable=True),
     ]
     for key, ticks, unlocked, drawn in (
         # Every tick on declares nothing: an absent entry IS the menu.
@@ -1807,7 +1814,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         )
     # A padlocked prompt row holds that field alone and opens no config axis.
     prompt_row = narrowing_of(
-        [NodeConfigParam(key="persona", kind="prompt")],
+        [NodeConfigParam(key="persona", kind="prompt", editable=True)],
         [ParamIntent(key="persona", open=False, allowed=[])],
     )
     assert (prompt_row.param_keys, prompt_row.prompt_fields_held) == ([], ["persona"]), (
@@ -1983,6 +1990,22 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         ["low", "high", "xhigh"],
         ["m", "n"],
     ), "a fork's steer was checked against its root's menu, not its own"
+    # A served row says whether its reader may steer it past `permitted`: an account without
+    # `campaign.babysit` is held there on the model, an axis stays free, and an account that may
+    # babysit is held nowhere.
+    unbabysat = replace(
+        stores,
+        identity=replace(
+            stores.identity, capabilities=stores.identity.capabilities - {CAMPAIGN_BABYSIT_CAP}
+        ),
+    )
+    for reader, held_keys in ((unbabysat, {"model"}), (stores, set())):
+        served_rows = resolve_pipeline_at(reader, steered.campaign_id, "").node_config_schema
+        row_at = {row.key: row for row in served_rows["a"]}
+        assert {k for k, row in row_at.items() if not row.editable} == held_keys, (
+            "a served row let its reader steer past what babysit binds, or held one it does not"
+        )
+        assert row_at["model"].permitted == ["m", "n"] and row_at["temperature"].editable
     # An optimizer knob names the layer its mint recorded behind it, never the tier the account is
     # on now; a key no layer below the edit recorded is the operator's edit.
     knob_config = CampaignConfig.model_validate(
@@ -2052,6 +2075,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     ):
         assert steers_disallowed_model(sanctioning, steer) is babysat, why
     assert not steers_disallowed_model({}, {}), "an empty steer is not a babysit act"
+    # A served row is bound by the one predicate the verdict reads.
+    assert [steer_binds(k) for k in ("model", "provider", "temperature")] == [True, True, False], (
+        "a row a steer can take past what its node permits was served free, or a free one bound"
+    )
 
     # Every door declares through ONE seam, and a declaration is a delta over today's defaults: a
     # moved code default leaves the minted manifest alone and is named when it moves the origin.
@@ -2479,26 +2506,46 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         fold_output_contract(PipelineParams().with_nodes(base), text_schema).laid_nodes == base
     ), "an unmoved point must hash as it always did"
     # One door: whatever the carrier builds reads back off its dump, each node's keys in laid order.
-    laid = {"prompt": "p", "temperature": 0.2, "model": "m"}
+    as_laid: dict[str, object] = {"prompt": "p", "temperature": 0.2, "model": "m"}
     for built in (
-        PipelineParams().with_nodes({"nodes": laid}).with_steps(["nodes"]),
-        PipelineParams.model_validate({"steps": ["solve"], "solve": laid}),
+        PipelineParams().with_nodes({"solve": as_laid}).with_steps(["solve"]),
+        PipelineParams.model_validate({"steps": ["solve"], "solve": as_laid}),
     ):
         assert PipelineParams.model_validate(built.dump()).dump() == built.dump()
-        assert [list(cfg) for cfg in built.laid_nodes.values()] == [list(laid)], (
+        assert [list(cfg) for cfg in built.laid_nodes.values()] == [list(as_laid)], (
             "the wire sent a node's keys out of their laid order"
         )
     # The laid order is the wire's, never the call's identity: one call laid in two orders is one.
-    relaid = dict(reversed(laid.items()))
+    relaid = dict(reversed(as_laid.items()))
     assert (NodeCall.model_validate(relaid), PipelineParams.model_validate({"solve": relaid})) == (
-        NodeCall.model_validate(laid),
-        PipelineParams.model_validate({"solve": laid}),
+        NodeCall.model_validate(as_laid),
+        PipelineParams.model_validate({"solve": as_laid}),
     ), "two calls with the same keys compared unequal for their laid order"
-    for door in (PipelineParams.model_validate, PipelineParams().with_nodes):
+    # Equality reads the fields alone, however a call was built: a copy validates nothing.
+    seeded_call = NodeCall.model_validate({"model": "m", "seed": 3})
+    for one_call in (
+        NodeCall.model_validate({"model": "m"}).model_copy(update={"seed": 3}),
+        NodeCall(model="m", seed=3),
+        NodeCall.model_validate({"seed": 3, "model": "m"}),
+    ):
+        assert one_call == seeded_call and one_call.model_copy(update={"seed": 4}) != seeded_call, (
+            "two calls with the same fields compared unequal, or a moved field compared equal"
+        )
+    for build in (PipelineParams.model_validate, PipelineParams().with_nodes):
         with pytest.raises((ValidationError, PayloadInvalidError)):
-            door({"solve": {"max_tokens": 1024.0}})
+            build({"solve": {"max_tokens": 1024.0}})
     with pytest.raises(ValidationError, match="may not be named"):
         pipeline_schema(nodes=[PipelineNode(name="steps", tunes_llm=False)])
+    # No door builds a node named for a carrier field, the keyword `nodes=` included.
+    reserving: tuple[Callable[[], PipelineParams], ...] = (
+        lambda: PipelineParams(nodes={"solve": NodeCall.model_validate(as_laid)}),
+        lambda: PipelineParams().with_nodes({"nodes": as_laid}),
+        lambda: PipelineParams().with_nodes({"steps": as_laid}),
+        lambda: PipelineParams.model_validate({"nodes": as_laid}),
+    )
+    for build_reserved in reserving:
+        with pytest.raises(ValidationError):
+            build_reserved()
     chose_text = copy.deepcopy(base)
     chose_text["llm_only"][SCHEMA_TOGGLE_PARAM] = ANSWER_AS_TEXT
     chose_text["llm_only"][description_key("answer")] = "IGNORED"

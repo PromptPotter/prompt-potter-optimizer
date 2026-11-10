@@ -10,6 +10,7 @@ from promptpotter.domain.pipeline_schema import (
     SCHEMA_TOGGLE_PARAM,
     described_field,
     description_path,
+    steer_binds,
 )
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_KEYS
 
@@ -40,16 +41,16 @@ def permitted_models_from_narrowing(
 
 
 def overlay_sets_model_outside_allowed(
-    overlay: Mapping[str, Mapping[str, Any]] | None, permitted: Mapping[str, Sequence[str]] | None
+    overlay: Mapping[str, Mapping[str, Any]] | None, permitted: Mapping[str, Sequence[str]]
 ) -> bool:
-    """The babysit trigger (decisions.md § 0005). A node absent from *permitted* sanctions nothing; a cost lever always counts."""
-    for node, cfg in (overlay or {}).items():
-        if cfg.keys() & PARAM_FORBIDDEN_KEYS:
-            return True
-        model = cfg.get("model")
-        if model is not None and model not in set((permitted or {}).get(node, ())):
-            return True
-    return False
+    """The babysit trigger (decisions.md § 0005): *overlay* moves a key `steer_binds` binds past
+    *permitted*, a cost lever by any value and a model by one its node does not permit."""
+    return any(
+        steer_binds(key)
+        and (key in PARAM_FORBIDDEN_KEYS or value not in (None, *permitted.get(node, ())))
+        for node, cfg in (overlay or {}).items()
+        for key, value in cfg.items()
+    )
 
 
 def steers_disallowed_model(

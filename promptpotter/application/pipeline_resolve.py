@@ -48,7 +48,6 @@ from promptpotter.application.pipeline_responses import (
     ForkPreviewResponse,
     SteerVerdict,
     optimizer_setup,
-    served_rows,
 )
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.scoring.formula.compiler import (
@@ -657,8 +656,9 @@ class _Merge:
     layers: ParamLayers
     # The free tier fences the target's nodes: it is offered only the tier's task models.
     free: bool
-    # The account may steer past what a node permits; a draft sets what its nodes permit.
-    babysit: bool
+    # Whether a steer `steer_binds` binds the reader, held then to `permitted`: a campaign read by
+    # an account without `campaign.babysit`; never a draft, which sets what it permits.
+    steer_bound: bool
 
     @functools.cached_property
     def optimizer(self) -> SelectedOptimizer:
@@ -707,7 +707,7 @@ def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> _D
             identity=identity_layer(None, None, None, cfg.judges, active),
         ),
         free=_task_fenced(fence),
-        babysit=True,
+        steer_bound=False,
         local=local,
     )
 
@@ -746,7 +746,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
             seed=cycle.seed_overlay,
         ),
         free=_task_fenced(free_fence(stores, campaign.connector)),
-        babysit=has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP),
+        steer_bound=not has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP),
         hop=hop,
         experiment=resolved.experiment,
     )
@@ -809,6 +809,7 @@ def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
 
 def _rows(m: _Merge, folded: FoldedParams) -> dict[str, list[NodeConfigParam]]:
     return m.filtered.node_config_schema(
+        steer_bound=m.steer_bound,
         values=folded.params.laid_nodes,
         sources=folded.provenance,
         model_menu=_admitted_menu(m),
@@ -852,7 +853,7 @@ def _response(
         optimizer=m.cfg.optimization.optimizer,
         optimizer_setup=optimizer_setup(m.optimizer, mint, m.filtered, workspace),
         params=folded.params.dump(),
-        node_config_schema=served_rows(rows, babysit=m.babysit),
+        node_config_schema=rows,
         view=m.filtered.view,
         node_output_schema=resolved_output_schemas(m.filtered, folded.params),
         model_capabilities=_served_menu(m, folded.params, workspace),
@@ -985,9 +986,13 @@ def permitted_narrowing(
     narrowed by the line, never the campaign's own layer alone, which holds none of the dataset's
     optimizer blocks. A steer outside them is the babysit act (decisions.md § 0005)."""
     at = Subject(campaign.campaign_id) if hop is None else Subject.of((hop,))
+    return _permitted(_campaign_merge(stores, campaign, at).filtered)
+
+
+def _permitted(filtered: PipelineSchema) -> dict[str, NodeSearchNarrowing]:
     return {
         n.name: NodeSearchNarrowing(param_allowed_values=dict(n.param_allowed_values))
-        for n in _campaign_merge(stores, campaign, at).filtered.declared_nodes
+        for n in filtered.declared_nodes
         if n.param_allowed_values
     }
 
@@ -1031,12 +1036,12 @@ async def resolve_pipeline_for_dataset(
         narrowing=cfg.optimizer_narrowing,
         declared=pipeline_declared_nodes(definition.pipeline),
     )
-    rows = filtered.node_config_schema()
+    # Declared, valueless: nothing steers it.
+    rows = filtered.node_config_schema(steer_bound=False)
     return DatasetPipelineResponse(
         connector=definition.backend_type,
         view=filtered.view,
-        # Declared, valueless: nothing steers it.
-        node_config_schema=served_rows(rows, babysit=True),
+        node_config_schema=rows,
         reach=reach_map(rows),
         nests=_nests(schema),
     )

@@ -982,17 +982,6 @@ fixtures.
   (`components/CLAUDE.md` § Component conventions). Action: the editor reads `useConnector` at an
   identity prop. **Held:** no chain owns the editor's eleven hosts (webb holds two, feed the
   `useConnector` hook). **Re-test:** `git grep -c "NodeSchemaReading" -- webapp`.
-- **The babysit trigger is spelled twice**: `domain/pipeline_overlay.py::overlay_sets_model_outside_allowed`
-  (keys `PARAM_FORBIDDEN_KEYS`, `model`) and `application/pipeline_responses.py::served_rows`
-  (`never_axis == "cost_lever"`, `kind == "model"`). Action: one per-row predicate both read; it cannot
-  sit on `NodeConfigParam` without a digest move, since every treatment hash reaches that row.
-  `role` belongs on that row too, so `ServedParam` and `served_rows` go, and three callers pass
-  `babysit=True` (`pipeline_resolve.py:710,1039`, `pipeline_responses.py:466`), the caller steering
-  the callee. Open: what an account-less read (a dataset's pipeline, an optimizer setup) derives
-  `editable` from; the webapp's nine `ServedParam` readers follow the row. **Rides with:** rk-run (a
-  re-key landing: the digest move is already paid there; it owns `domain/pipeline_schema.py`).
-  **Re-test:**
-  `git grep -n "cost_lever\" or p.kind == \"model\"\|cfg.keys() & PARAM_FORBIDDEN_KEYS\|babysit=True" -- promptpotter`.
 - **A locked-in leader's caught-up cells reach the scoreboard only at the round's close, and a
   re-seated round replays one cell short**: `runner/measurement.py::_walk_population` merges a
   prior's caught-up cells after `run_walks`; until the close's statement folds the merged sheet
@@ -1039,7 +1028,7 @@ fixtures.
 - **`editable` cannot say "frozen" apart from "inside `permitted`"**: any cost-lever move is the babysit
   act, but a non-editable enum cost lever (`provider`) still offers its permitted values, which
   fork-preview then refuses. Action: a served per-row pickable set for the account. **Rides with:**
-  money (the coupon fence; `pipeline_responses.py` itself is unowned). **Re-test:** in the offline
+  rk-run (the row is `NodeConfigParam`, built in `domain/pipeline_schema.py`). **Re-test:** in the offline
   world, the `provider` row's `kind` is `enum` with `never_axis: cost_lever`.
 - **`JobsDock::passMark` / `passLabel` derive running/starting from `started_at === null`** (so does
   `AccountUsageTab`). Action: a served pass state. **Re-test:** `git grep -n "started_at === null" -- webapp/components`.

@@ -2,21 +2,21 @@ import {
   type CapabilityMenu,
   type DraftPatch,
   type ModelCapability,
+  type NodeConfigParam,
   type OptimizerSetup,
   type ParamIntent,
   SCHEMA_DESCRIPTION_PREFIX,
-  type ServedParam,
 } from "@/lib/api/types";
 
 export type ConfigMode = "search-space" | "values";
 
 // What a typed-in value is read as: the served row's kind and bounds; `nested` round-trips as JSON.
 export type ValueType = Pick<
-  ServedParam,
+  NodeConfigParam,
   "kind" | "integer" | "nullable" | "minimum" | "exclusive_minimum" | "maximum" | "exclusive_maximum"
 >;
 
-function valueType(p: ServedParam): ValueType {
+function valueType(p: NodeConfigParam): ValueType {
   return {
     kind: p.kind,
     integer: p.integer,
@@ -31,7 +31,7 @@ function valueType(p: ServedParam): ValueType {
 export interface ConfigRow extends ValueType {
   node: string;
   key: string;
-  role: ServedParam["role"];
+  role: NodeConfigParam["role"];
   options: string[];
   value: string;
   baseValue: string;
@@ -40,9 +40,9 @@ export interface ConfigRow extends ValueType {
   allowed: string[];
   // A transport fact (kept in the emitted seed even untouched), never provenance: that is `source`.
   inSeed: boolean;
-  source: ServedParam["source"];
-  neverAxis: ServedParam["never_axis"];
-  movableBy: ServedParam["movable_by"];
+  source: NodeConfigParam["source"];
+  neverAxis: NodeConfigParam["never_axis"];
+  movableBy: NodeConfigParam["movable_by"];
   held: boolean;
   // False: this account sets only what `permitted` names, nothing on a free-valued row.
   editable: boolean;
@@ -109,14 +109,14 @@ export function descriptionSubtree(keys: readonly string[], path: string): strin
 
 // `valuesSeed` is read in `values` mode only: search-space rows are served (`frontend-surface-contract.md::I9`).
 export function configRows(
-  schema: Record<string, ServedParam[]> | null,
+  schema: Record<string, NodeConfigParam[]> | null,
   valuesSeed: Record<string, unknown>,
   mode: ConfigMode,
   node?: string,
 ): ConfigRow[] {
   if (!schema) return [];
   const scoped = node != null ? schema[node] : undefined;
-  const entries: [string, ServedParam[]][] =
+  const entries: [string, NodeConfigParam[]][] =
     node != null ? (scoped ? [[node, scoped]] : []) : Object.entries(schema);
   const rows: ConfigRow[] = [];
   for (const [n, params] of entries) {
@@ -191,7 +191,7 @@ export function nodeOverlayPatch(node: string, rows: ConfigRow[]): DraftPatch {
 }
 
 export function nodeLockPatch(
-  schema: Record<string, ServedParam[]> | null,
+  schema: Record<string, NodeConfigParam[]> | null,
   node: string,
   keys: readonly string[],
   locked: boolean,
@@ -269,7 +269,7 @@ export function seedOverlayFromRows(
 export interface KnobGroup {
   node: string;
   kind: string;
-  knobs: ServedParam[];
+  knobs: NodeConfigParam[];
 }
 
 // Each member's knobs as its `node_config_schema` rows, in the member's declared order.

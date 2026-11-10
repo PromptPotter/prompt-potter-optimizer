@@ -45,15 +45,31 @@ class _Roster(Enum):
     SCOPE = "scope"
 
 
+class _LaidOrder(tuple[str, ...]):
+    """Keys in their laid order: the wire's, never a call's identity, so every order equals every
+    other and a call's equality reads its fields alone."""
+
+    __slots__ = ()
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _LaidOrder)
+
+    def __ne__(self, other: object) -> bool:
+        return not self == other
+
+    def __hash__(self) -> int:
+        return 0
+
+
 @shapes_optimizer_prompt
 class NodeCall(FrozenModel):
     """A node's engine call keys typed as laid (strict: a wrong type refuses, a number stays the int
     or float it was hashed as), each field its key's one spelling; other keys are its backend's."""
 
     model_config = ConfigDict(strict=True, extra="allow")
-    # The keys as laid, an ordered set: the dump keeps their order (pydantic's lists the declared
-    # fields first), equality reads them as a set, so one call laid in two orders is one call.
-    _laid: dict[str, None] = PrivateAttr(default_factory=dict)
+    # The dump keeps the laid order (pydantic's lists the declared fields first); a copy, which
+    # validates nothing, keeps its source's, and its updated keys follow.
+    _laid: _LaidOrder = PrivateAttr(default_factory=_LaidOrder)
 
     provider: Annotated[str | None, _Roster.WHO_ANSWERS, _Roster.FORBIDDEN] = None
     model: Annotated[str | None, _Roster.WHO_ANSWERS] = None
@@ -73,7 +89,7 @@ class NodeCall(FrozenModel):
     def _keeps_order(cls, laid: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
         call = handler(laid)
         if isinstance(laid, Mapping):
-            call._laid = dict.fromkeys(laid)
+            call._laid = _LaidOrder(laid)
         return call
 
     def laid_keys(self) -> dict[str, Any]:
@@ -87,7 +103,7 @@ class PipelineParams(FrozenModel):
     """The chain's ``steps`` (``None`` where none is named) beside each node's laid config, dumped
     as that document: the wire sends it and every key hashes it; empty is the one "carries none".
     Built only by reading that document, so whatever it dumps reads back; no node takes a field's
-    name (`pipeline_schema.py::PipelineSchema` refuses it)."""
+    name (`RESERVED_NODE_NAMES`)."""
 
     steps: list[str] | None = None
     nodes: dict[str, NodeCall] = Field(default_factory=dict)
@@ -103,6 +119,9 @@ class PipelineParams(FrozenModel):
     def _split(cls, laid: object) -> object:
         if not isinstance(laid, Mapping):
             return laid
+        # The keyword `PipelineParams(nodes=...)` arrives as a laid key: it refuses, never a node.
+        if taken := sorted(laid.keys() & cls.model_fields.keys() - {STEPS_KEY}):
+            raise ValueError(f"a node may not be named {taken}: the pipeline params read it")
         nodes = {k: v for k, v in laid.items() if k != STEPS_KEY}
         return {"nodes": nodes, **({"steps": laid[STEPS_KEY]} if STEPS_KEY in laid else {})}
 
@@ -146,7 +165,8 @@ class PipelineParams(FrozenModel):
         return self.with_nodes({n: c for n, c in nodes.items() if n in declared})
 
 
-# A node never takes the name of a carrier field: the laid document would read it as that field.
+# A node never takes the name of a carrier field: the laid document reads `steps` as the chain, and
+# refuses `nodes` (`_split`), so no door builds a node of either name.
 RESERVED_NODE_NAMES = frozenset(PipelineParams.model_fields)
 
 

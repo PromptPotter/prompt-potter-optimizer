@@ -3665,7 +3665,7 @@ export interface CampaignPipelineResponse {
    * carries as `resolved_params`, which makes that field this endpoint's
    * check */
   params: Record<string, unknown>;
-  node_config_schema: Record<string, ServedParam[]>;
+  node_config_schema: Record<string, NodeConfigParam[]>;
   view: PipelineView | null;
   node_output_schema: Record<string, NodeOutputSchema | null>;
   /** Keyed by the provider and model each node's rows carry AT this searchpoint */
@@ -3712,7 +3712,7 @@ export interface OptimizerSetup {
   /** Per optimizer node, its typed config rows at this config — an llm node's call
    * config and prompt fields, a member's knobs: what its pipeline graph and
    * node detail draw */
-  node_config_schema: Record<string, ServedParam[]>;
+  node_config_schema: Record<string, NodeConfigParam[]>;
   /** Where the search reaches per optimizer node at this config, summed off
    * `node_config_schema` */
   reach: Record<string, NodeReach>;
@@ -3886,8 +3886,9 @@ export interface PackOffer {
   on: boolean;
 }
 
-/** A param row as the account that asked reads it. */
-export interface ServedParam {
+/** One param a node carries, in the COMPLETE per-node list a reader sums
+ * `movable_by` over. */
+export interface NodeConfigParam {
   key: string;
   value: unknown;
   /** The value the manifest declares — a campaign's floor */
@@ -3920,9 +3921,10 @@ export interface ServedParam {
    * `answer_format` the text/json toggle, `schema_family` a registry schema
    * the backend owns */
   role: '' | 'provider' | 'effort' | 'answer_format' | 'schema_family';
-  /** Whether this account may steer it past `permitted`: false where that is the
-   * babysit act (`campaign.babysit`) it does not hold, on a cost lever or a
-   * model */
+  /** Whether its reader may steer it past `permitted`: false where a steer that
+   * binds the reader binds it (`steer_binds`: a cost lever, a model), on a
+   * campaign read by an account without `campaign.babysit`; a declaration
+   * binds none */
   editable: boolean;
 }
 
@@ -4341,7 +4343,7 @@ export interface DatasetPipelineResponse {
   connector: string;
   view: PipelineView | null;
   /** Every param each node carries, valueless — what `reach` is summed over */
-  node_config_schema: Record<string, ServedParam[]>;
+  node_config_schema: Record<string, NodeConfigParam[]>;
   reach: Record<string, NodeReach>;
   /** The pipelines this one nests in turn, one per dataset its cells measure; the
    * only wire naming them before a cell has spawned */

@@ -2,11 +2,11 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { StartCheckinOptions } from "@/lib/api";
-import type { OptimizerSetup, ServedParam } from "@/lib/api/types";
+import type { OptimizerSetup, NodeConfigParam } from "@/lib/api/types";
 import { configParam } from "@/lib/test-fixtures";
 import { HeadToHeadArms, startOptions, type HeadToHeadDraft } from "../HeadToHeadArms";
 
-function knob(key: string, value: number): ServedParam {
+function knob(key: string, value: number): NodeConfigParam {
   const description = `${key} of the arm`;
   return configParam({ key, integer: true, description, summary: description, declared: value, value });
 }

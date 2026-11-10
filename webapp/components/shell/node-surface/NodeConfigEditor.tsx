@@ -3,7 +3,7 @@ import {
   type CapabilityMenu,
   type DraftPatch,
   type ModelCapability,
-  type ServedParam,
+  type NodeConfigParam,
   type ParamIntent,
   MOVABLE_AGENT_LABELS,
 } from "@/lib/api/types";
@@ -215,7 +215,7 @@ function EmptyConfig({
   node,
 }: {
   read: ReadResult<unknown>;
-  schema: Record<string, ServedParam[]> | null;
+  schema: Record<string, NodeConfigParam[]> | null;
   node: string | undefined;
 }) {
   const scoped = node !== undefined && schema !== null ? schema[node] : undefined;

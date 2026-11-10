@@ -118,7 +118,9 @@ def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
     """The ONE ceiling stop: the selection's headline level on the origin panel, read at its paired
     interval's lower bound, never a point estimate of a truncated draw. No pair, no stop."""
     standing = cycle.standing
-    lift = None if target is None or standing is None else standing.vs_origin.headline
+    if target is None or standing is None:
+        return None
+    lift = standing.vs_origin.headline
     reached = lift is not None and lift.rate_a + lift.estimate.ci_lo >= target
     return StopReason.TARGET_HIT if reached else None
 

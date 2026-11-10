@@ -1,4 +1,4 @@
-import type { ServedParam, PipelineView, PipelineViewNode } from "@/lib/api/types";
+import type { NodeConfigParam, PipelineView, PipelineViewNode } from "@/lib/api/types";
 
 // `input` / `output` are synthetic terminals the server adds (`domain/pipeline_parsing.py`).
 export function interiorNodes(view: PipelineView | null | undefined): PipelineViewNode[] {
@@ -7,7 +7,7 @@ export function interiorNodes(view: PipelineView | null | undefined): PipelineVi
 
 // What a node calls is its served `model` row; "" for a node with none, which calls no model.
 export function nodeModel(
-  rows: Record<string, ServedParam[]> | null | undefined,
+  rows: Record<string, NodeConfigParam[]> | null | undefined,
   id: string,
 ): string {
   const value = rows?.[id]?.find((p) => p.kind === "model")?.value;

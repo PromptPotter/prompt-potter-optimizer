@@ -21,7 +21,7 @@ import type {
   LiveCandidate,
   Measured,
   MeteredSpend,
-  ServedParam,
+  NodeConfigParam,
   NodePrompt,
   OverlapReading,
   PairedReading,
@@ -59,7 +59,7 @@ const NO_METER: MeteredSpend = {
   replay_share: null,
 };
 
-export function configParam(over: Partial<ServedParam> & { key: string }): ServedParam {
+export function configParam(over: Partial<NodeConfigParam> & { key: string }): NodeConfigParam {
   return {
     role: "",
     value: null,
