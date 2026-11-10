@@ -38,7 +38,6 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop
-from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import bound_spend_book
@@ -352,16 +351,11 @@ async def init_optimization_loop(
     selected = bound_optimizer()
     init_cycle(session, resume_from_round_override=resume_from_round_override)
     await _emit_preflight_and_init_session(config, selected, dataset, cb, session, origin)
-    if resume_from_round_override is not None:
-        # Only an admitted launch retracts rounds: whatever refuses it raised above.
-        session.store.campaigns.rewind_to_round(session.hop, resume_from_round_override)
-        session.store.campaigns.leave_comparison(session.hop, ComparisonExit.REWIND)
-    # A round the ledger closed, the origin's included, is replayed, never closed again.
+    # A round the ledger closed, the origin's included, is replayed, never closed again; a rewind
+    # keeps the round it rewinds to, so it always replays and is written once the replay proceeds.
     replays = (
         session.store.campaigns.standing_rounds(session.hop, moment=None).last_closed is not None
     )
-    if no_divergence_check and replays:
-        session.store.campaigns.leave_comparison(session.hop, ComparisonExit.NO_DIVERGENCE_CHECK)
     cycle = Cycle.start(
         origin.origin,
         framing=origin.framing,
@@ -377,6 +371,7 @@ async def init_optimization_loop(
             cb,
             skip_divergence_check=no_divergence_check,
             fork_on_divergence=fork_on_divergence,
+            rewind=resume_from_round_override,
         )
         if fork is not None:
             forked_from = session.hop

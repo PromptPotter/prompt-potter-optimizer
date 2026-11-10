@@ -62,6 +62,7 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
 )
 from promptpotter.application.bench.resume_and_fork.repair import apply_correction, round_packages
 from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
+from promptpotter.application.bench.resume_and_fork.resume import resume_with_divergence_check
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import parse_cycle_seed
 from promptpotter.application.cycle_reads import open_family_ray
@@ -191,6 +192,7 @@ from promptpotter.shared.errors import (
     FileUnreadableError,
     LedgerUnreadableError,
     PotterError,
+    ResumeDivergenceError,
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
@@ -861,6 +863,46 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         "an election, close or crown stood past the rewind"
     )
     assert served() == [(ids[0], True, True)]
+    # A resume `--from 3` that halts on a divergence below it displaces no round past it.
+    halted = CycleHop(campaign_id="halted__20260101-000000", cycle_id="cycle_halted")
+    stored_campaign(stores, minted_campaign(halted, owner_user_id=str(stores.identity.user_id)))
+    stores.campaigns.mint_cycle(halted)
+    halted_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(halted)))
+    run: list[RoundResult] = []
+    for name in ("h0", "h1", "h2"):
+        _emit_round(closing, halted_ledger, run, name)
+    edited = optimizer_state().model_copy(update={"prompt_hashes": {"l1_generate": "edited"}})
+    for n in (3, 4):
+        walked_h = prompted(instruction=f"h{n}")
+        run.append(
+            _round(
+                round=n,
+                arms={ArmKey(walked_h.id): arm_state(f"h{n}", individual=walked_h)},
+                election=election(walked_h.id),
+                optimizer_state=edited if n == 3 else optimizer_state(),
+            )
+        )
+        close_round(halted_ledger, run, cycle=closing)
+    resuming = seat(stores, hop=halted)
+    resuming.cycle.session.state.resumed_from_round = stores.campaigns.rewind_enters(halted, 3)
+    with (
+        scoped(ledger=resuming.callbacks.ledger, spawn=inner_spawn_of(resuming.cycle.session)),
+        spending_under(unbounded_spend_book()),
+        pytest.raises(ResumeDivergenceError),
+    ):
+        asyncio.run(
+            resume_with_divergence_check(
+                resuming.cycle,
+                [],
+                resuming.callbacks,
+                skip_divergence_check=False,
+                fork_on_divergence=False,
+                rewind=3,
+            )
+        )
+    assert stores.campaigns.standing_rounds(halted, moment=None).last_closed == 4, (
+        "a resume its divergence halted had already rewound the line"
+    )
     # Every live fold reads the rewind off its record: a re-entered round's arm folds its new walk.
     folds = AnnouncedArms()
     walk = ArmRecord(round=1, arm=ArmKey(ids[1]), state=closed[1].arms[ArmKey(ids[1])])

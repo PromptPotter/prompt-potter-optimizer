@@ -11,7 +11,6 @@ from collections.abc import Callable, Coroutine, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter import connectors
-from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.reaper import sweep
@@ -203,22 +202,6 @@ def cycle_result_command(session: Session, cycle_result: CycleResult) -> Command
         ),
         exit_code=stop_reason_outcome(cycle_result.stop_reason).exit_code,
     )
-
-
-@functools.cache
-def divergence_hint() -> str:
-    hint = (
-        f"Checked decisions: {', '.join(sorted(replayers()))}.\n"
-        "(Every other recorded decision is archival, not divergence-gated.)\n\n"
-        "Options:\n"
-        "  • `python -m promptpotter new <dataset>` — start a fresh "
-        "campaign (most common: you wanted a new run, not a resume).\n"
-        "  • `python -m promptpotter resume --fork-on-divergence` — branch "
-        "a sibling cycle here under the current scorer.\n"
-        "  • Revert `campaign.json::scoring` — continue the original trajectory.\n"
-        "  • `python -m promptpotter resume --no-check` — accept the divergence."
-    )
-    return hint
 
 
 def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:

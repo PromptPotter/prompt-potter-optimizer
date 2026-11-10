@@ -22,7 +22,6 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.presentation.cli.commands.launch import (
     confirm_tty,
     cycle_result_command,
-    divergence_hint,
     held_run,
     inline_launch,
     log_startup_summary,
@@ -34,13 +33,12 @@ from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import budget_from_args
 from promptpotter.presentation.cli.session import load_session
-from promptpotter.shared.errors import PayloadInvalidError, ResumeDivergenceError
+from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
 
     from promptpotter.application.jobs.launcher.run_job import HeldRun
-    from promptpotter.domain.results import CycleResult
     from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
@@ -170,55 +168,6 @@ async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> Hel
     return held
 
 
-def _divergence_result(div: ResumeDivergenceError) -> CommandResult:
-    return CommandResult(
-        data={
-            "error": "resume_divergence",
-            "round": div.round_num,
-            "kind": div.kind,
-            "recorded_outcome": div.recorded_outcome,
-            "current_outcome": div.current_outcome,
-        },
-        human=f"{div}\n\n{divergence_hint()}",
-    )
-
-
-async def _run_loop(args: argparse.Namespace, ctx: SessionCtx, held: HeldRun) -> CommandResult:
-    fork_on_divergence: bool = args.fork_on_divergence
-    cycle_result: CycleResult
-    try:
-        cycle_result = await run_inline(
-            held, mode=_run_mode(args, fork_on_divergence=fork_on_divergence)
-        )
-    except ResumeDivergenceError as div:
-        if fork_on_divergence:
-            return _divergence_result(div)
-        # A non-TTY (None) falls through to the structured error, so a script gets its exit code.
-        print()
-        print(str(div))
-        print()
-        print(f"Active cycle: {ctx.cycle_id}")
-        print("Forking branches a sibling cycle at this point under the current scorer.")
-        print("The parent campaign is preserved untouched.")
-        answer = confirm_tty("Fork here?", default_no=True)
-        if answer is None:
-            return _divergence_result(div)
-        if not answer:
-            return CommandResult(
-                data={"cancelled": True, "reason": "divergence_declined"},
-                human="Cancelled. The active campaign is unchanged.",
-            )
-        logger.info(
-            "Operator accepted fork on divergence — re-running with fork_on_divergence=True"
-        )
-        # The refused run handed its slot back; the re-run is a launch — and a command — of its own.
-        rerun = _start_run(args, ctx.hop, fork_on_divergence=True)
-        held = await _dispatch_held(args, ctx, rerun)
-        cycle_result = await run_inline(held, mode=rerun.mode)
-
-    return cycle_result_command(held.session, cycle_result)
-
-
 async def _pivot_to_fresh(
     args: argparse.Namespace, ctx: SessionCtx, drift: ConfigDriftError
 ) -> CommandResult:
@@ -289,4 +238,8 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     )
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
 
-    return await _run_loop(args, ctx, held)
+    # A halt on divergence is the run's DIVERGED stop: its `next_acts` name the fork.
+    cycle_result = await run_inline(
+        held, mode=_run_mode(args, fork_on_divergence=args.fork_on_divergence)
+    )
+    return cycle_result_command(session, cycle_result)

@@ -574,6 +574,9 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     # What the origin hash was taken under, appended before the campaign is visible, so every
     # reader of it finds what its run init read.
     session.record_resolved_run()
+    campaigns.mint_cycle(hop)
+    # The mint's commit: a mint that dies before it leaves no campaign to list, and none without
+    # its cycle. Its wiring reads the campaign back, so it follows.
     campaigns.create_campaign(
         Campaign(
             campaign_id=hop.campaign_id,
@@ -592,7 +595,6 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     session.store.tenant_datasets.relabel(session.measured_dataset, declaration.dataset_hash)
     ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
     declare_run_wiring(session, plan.cycle.config, ledger, selected=plan.optimizer, tracing=None)
-    campaigns.mint_cycle(hop)
     save_active_pointer(session.store.base_dir, hop)
     logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
     return session

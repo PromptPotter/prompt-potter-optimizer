@@ -24,14 +24,13 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.results import RoundResult
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
 
 logger = logging.getLogger(__name__)
 
 
 def _stale_generation(
-    campaign_store: CampaignStore,
-    hop: CycleHop,
+    standing: StandingRounds,
     prior: list[RoundResult],
     resumed_from_round: int,
     selected: SelectedOptimizer,
@@ -39,9 +38,10 @@ def _stale_generation(
     """No recorded digest is a divergence, not a shrug; nor is a walk banked by another optimizer
     or another prompt of its nodes, which its replay would carry in unseen."""
 
-    cached = campaign_store.round_proposals(hop, resumed_from_round)
-    if cached is None or not prior:
+    held = standing.proposals.get(resumed_from_round)
+    if held is None or not prior:
         return None
+    cached = held.record
     recorded = (cached.consumed, cached.walked.manifest, cached.walked.prompt_hashes)
     current = (round_document_digest(prior[-1]), selected.name, selected.prompt_hashes())
     if recorded == current:
@@ -99,30 +99,10 @@ async def resume_with_divergence_check(
     callbacks: RunCallbacks,
     *,
     skip_divergence_check: bool,
-    fork_on_divergence: bool = False,
+    fork_on_divergence: bool,
+    rewind: int | None,
 ) -> str | None:
     """The cycle opens on the standing the last close of the line it continues stated, a fork's included."""
-    fork = await _replay_line(
-        cycle,
-        dataset,
-        callbacks,
-        skip_divergence_check=skip_divergence_check,
-        fork_on_divergence=fork_on_divergence,
-    )
-    hop = cycle.session.hop
-    line = hop if fork is None else CycleHop(campaign_id=hop.campaign_id, cycle_id=fork)
-    cycle.standing = cycle.session.store.campaigns.standing_rounds(line, moment=None).standing
-    return fork
-
-
-async def _replay_line(
-    cycle: Cycle,
-    dataset: list[Any],
-    callbacks: RunCallbacks,
-    *,
-    skip_divergence_check: bool,
-    fork_on_divergence: bool,
-) -> str | None:
     session = cycle.session
     campaign_store, hop = session.store.campaigns, session.hop
     resumed_from_round = session.state.resumed_from_round
@@ -132,81 +112,96 @@ async def _replay_line(
     # Fingerprinted BEFORE the repair, so the corrected set differs by exactly what it changed.
     packages_before = round_packages(cycle, prior, callbacks)
     cycle.replay_priors(prior)
-    # Over the cycle's whole history: a fork's lifted rounds made theirs on its parent's ledger.
+
+    # Decided on the round this run enters, before its rewind is written: a halt displaces nothing.
     standing = campaign_store.standing_rounds(hop, moment=None)
-
-    correction = await apply_correction(cycle, prior, packages_before, dataset, callbacks)
-    if correction is not None:
-        return correction
-
-    ledger_decisions = standing.decisions
-
-    if not skip_divergence_check:
-        optimizer_mismatches = _optimizer_mismatches(prior, cycle.optimizer)
-        stale = _stale_generation(campaign_store, hop, prior, resumed_from_round, cycle.optimizer)
-        campaign = campaign_store.load_campaign(hop.campaign_id)
-        # The declaration never moves; the defaults it is a delta over can, under the same name.
-        running = cycle.optimizer.treatment(
-            campaign_admits(cycle.config, session.pipeline_schema), session.store.block_packs
+    if rewind is not None:
+        standing = standing.displaced(resumed_from_round, resumed_from_round)
+    found = None if skip_divergence_check else _divergence(cycle, prior, standing)
+    if found is not None and not found[1] and not fork_on_divergence:
+        div = found[0]
+        raise ResumeDivergenceError(
+            round_num=div.round_num,
+            kind=div.kind,
+            recorded_outcome=div.recorded_outcome,
+            current_outcome=div.current_outcome,
+            diagnostics={
+                "scorer_id": scorer.id,
+                "fork_hint": (
+                    "rerun `resume --fork-on-divergence` to branch a new cycle "
+                    "here; this one keeps what the superseded package produced"
+                ),
+            },
         )
-        drifted = campaign is not None and defaults_drift(campaign, running=running) is not None
-        if not optimizer_mismatches and stale is None and not drifted:
-            return None
+    if rewind is not None:
+        campaign_store.rewind_to_round(hop, rewind)
+        campaign_store.leave_comparison(hop, ComparisonExit.REWIND)
+    if skip_divergence_check:
+        campaign_store.leave_comparison(hop, ComparisonExit.NO_DIVERGENCE_CHECK)
 
-        def _branch_or_halt(div: ReplayMismatch, *, self_inflicted: bool) -> str:
-            """A branch this resume CAUSED takes itself; a change from OUTSIDE is the operator's call."""
-            if not fork_on_divergence and not self_inflicted:
-                raise ResumeDivergenceError(
-                    round_num=div.round_num,
-                    kind=div.kind,
-                    recorded_outcome=div.recorded_outcome,
-                    current_outcome=div.current_outcome,
-                    diagnostics={
-                        "scorer_id": scorer.id,
-                        "fork_hint": (
-                            "rerun `resume --fork-on-divergence` to branch a new cycle "
-                            "here; this one keeps what the superseded package produced"
-                        ),
-                    },
-                )
-            new_cycle_id = cut_fork(
-                session.store,
-                hop,
-                div.round_num,
-                trigger=ForkTrigger.SCORING_DIVERGENCE,
-                reason=f"resume_divergence:{div.kind}",
-                issued_by=SYSTEM_PRINCIPAL,
-            ).take(session.store)
-            if not self_inflicted:
-                # The operator's flag ran the line past a divergence it halts on.
-                campaign_store.leave_comparison(
-                    CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
-                    ComparisonExit.FORK_ON_DIVERGENCE,
-                )
-            if div.round_num == 0:
-                cycle.reopen_origin()
-            else:
-                cycle.replay_priors([t for t in prior if t.round < div.round_num])
-            logger.warning(
-                "Resume diverged at round %d (%s); branched → %s. That cycle is the "
-                "continuation; this one keeps what the superseded package produced.",
-                div.round_num,
-                div.kind,
-                new_cycle_id,
-            )
-            return new_cycle_id
+    fork = await apply_correction(cycle, prior, packages_before, dataset, callbacks)
+    if fork is None and found is not None:
+        fork = _branch(cycle, prior, *found)
+    line = hop if fork is None else CycleHop(campaign_id=hop.campaign_id, cycle_id=fork)
+    cycle.standing = campaign_store.standing_rounds(line, moment=None).standing
+    return fork
 
-        for t in prior:
-            div = optimizer_mismatches.get(t.round) or replay_decisions(
-                t,
-                ledger_decisions.get(t.round, []),
-                ruler=cycle.difficulty.ruler_of(t.ruler),
-            )
-            if div is not None:
-                return _branch_or_halt(div, self_inflicted=False)
 
-        # The round about to run has no round file, so the loop above cannot visit it.
-        if stale is not None:
-            return _branch_or_halt(stale, self_inflicted=True)
+def _branch(
+    cycle: Cycle, prior: list[RoundResult], div: ReplayMismatch, self_inflicted: bool
+) -> str:
+    session = cycle.session
+    hop = session.hop
+    new_cycle_id = cut_fork(
+        session.store,
+        hop,
+        div.round_num,
+        trigger=ForkTrigger.SCORING_DIVERGENCE,
+        reason=f"resume_divergence:{div.kind}",
+        issued_by=SYSTEM_PRINCIPAL,
+    ).take(session.store)
+    if not self_inflicted:
+        # The operator's flag ran the line past a divergence it halts on.
+        session.store.campaigns.leave_comparison(
+            CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
+            ComparisonExit.FORK_ON_DIVERGENCE,
+        )
+    if div.round_num == 0:
+        cycle.reopen_origin()
+    else:
+        cycle.replay_priors([t for t in prior if t.round < div.round_num])
+    logger.warning(
+        "Resume diverged at round %d (%s); branched → %s. That cycle is the "
+        "continuation; this one keeps what the superseded package produced.",
+        div.round_num,
+        div.kind,
+        new_cycle_id,
+    )
+    return new_cycle_id
 
-    return None
+
+def _divergence(
+    cycle: Cycle, prior: list[RoundResult], standing: StandingRounds
+) -> tuple[ReplayMismatch, bool] | None:
+    """The first divergence of the line, and whether this resume CAUSED it."""
+    session = cycle.session
+    optimizer_mismatches = _optimizer_mismatches(prior, cycle.optimizer)
+    stale = _stale_generation(standing, prior, session.state.resumed_from_round, cycle.optimizer)
+    campaign = session.store.campaigns.load_campaign(session.campaign_id)
+    # The declaration never moves; the defaults it is a delta over can, under the same name.
+    running = cycle.optimizer.treatment(
+        campaign_admits(cycle.config, session.pipeline_schema), session.store.block_packs
+    )
+    drifted = campaign is not None and defaults_drift(campaign, running=running) is not None
+    if not optimizer_mismatches and stale is None and not drifted:
+        return None
+    for t in prior:
+        div = optimizer_mismatches.get(t.round) or replay_decisions(
+            t,
+            standing.decisions.get(t.round, []),
+            ruler=cycle.difficulty.ruler_of(t.ruler),
+        )
+        if div is not None:
+            return div, False
+    # The round about to run has no round file, so the loop above cannot visit it.
+    return None if stale is None else (stale, True)

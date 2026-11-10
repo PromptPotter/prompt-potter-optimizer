@@ -3906,6 +3906,18 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert not draft_dirs(stores.campaigns.workspace), "an unminted framing left its ledger"
     assert account_usd() == pytest.approx(with_draft + 0.03), "a refused mint un-spent its framing"
 
+    # A mint that dies before its commit leaves no campaign to list, run or bill.
+    def _dies(*_: object) -> None:
+        raise OSError("torn")
+
+    torn_plan = mint.resolve_cycle_plan(framing, declared, rows)
+    with monkeypatch.context() as tearing, pytest.raises(OSError, match="torn"):
+        tearing.setattr(type(stores.campaigns), "mint_cycle", _dies)
+        mint.mint(torn_plan, campaign_id="torn__000001", adopting=None)
+    assert stores.campaigns.load_campaign("torn__000001") is None, (
+        "a mint that died before its cycle left a campaign with none"
+    )
+
     # A reset follows a reshape: it drops ledgers this build no longer reads and keeps the money.
     framed_total = account_usd()
     stores.campaigns.create_campaign(minted_campaign(CycleHop(campaign_id="camp-3", cycle_id=root)))
