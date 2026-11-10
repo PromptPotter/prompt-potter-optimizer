@@ -6,87 +6,89 @@ Any new endpoint is multi-tenant by default.
 
 ## Sequence
 
-### The cleanup arcs (plan review, 2026-11-07)
+### The cleanup chains (audit, 2026-11-10)
 
-The code debt, worked as chains of small links in the order below, as far as it gets: a sequence, not
-a schedule. Sections named in a row are [`code-debt-cleanup.md`](code-debt-cleanup.md)'s; "host step
-N" is [`host-assistant.md`](host-assistant.md) § Build order. How a link is sized, briefed, landed,
-reviewed and stopped is [`../developer/refactor-arcs.md`](../developer/refactor-arcs.md)'s. "Was"
-names the earlier arc a ledger row may still cite.
+The code debt, worked as chains of one-decision links in the order below: a sequence, not a schedule.
+Rows named here are [`code-debt-cleanup.md`](code-debt-cleanup.md)'s. How a link is sized, briefed,
+landed, reviewed and stopped is [`../developer/refactor-arcs.md`](../developer/refactor-arcs.md)'s.
+"Was" names the arc a ledger row may still cite.
 
-- **The backbone first.** K0, M3, M1, DOORS and M2 landed in batches 10 to 12, M4's re-key in
-  batches 13 and 14. CONN finishes the backbone.
+- **Bugs and deletions first.** A fix chain (F) opens the jump whose files it shares; the jump's
+  reshape follows on its tip.
 - **Where.** A chain that needs no box, no TermNorm checkout, no paid call and no phone shot runs in
-  the cloud, one session per chain. Docs, the gate, phone shots, TermNorm and fix passes run locally.
-- **Model.** Sonnet for a mechanical sweep, Opus for judgement. Fable plans; it executes no arc.
-- **Deploying main waits for the operator's word.** Main keeps landing. The end: the code debt is
-  rewritten, then the operator is asked about a release.
-- **An item ships when its code-debt entry is deleted.** A shape noticed in passing is fixed at its root
-  in the same arc, unless it is a fork.
+  the cloud, one session per chain. Docs, the gate, phone shots, TermNorm, assembly and fix passes run
+  locally.
+- **Model.** Fable for a chain that carries design, Opus for a census or a review, Sonnet for a
+  mechanical sweep.
+- **A chain starts when the landing that holds its edges is assembled**, off that batch branch.
+  Main moves on the operator's word, landing by landing.
+- **Deploying main waits for the operator's word.** The end: the ledger is worked through, then the
+  operator is asked about a release.
+- **An item ships when its code-debt entry is deleted.**
 
-| Arc | Was | Closes | Decision first | Waits on |
-|---|---|---|---|---|
-| **M4** typed pipeline carrier | U1a, M4c | engine A's rest: the carrier's nodes typed by `NodeCall` (44 engine-key reads); the setup screen's knob layer and Reset | the re-key landed (batch 14) | - |
-| **CONN** connector identity | M4b, with rows of M6, M7, M12, M18 | engine A2; one resolver that refuses an unregistered connector typed at every lookup; `init_services` takes the campaign's connector and refuses a mismatch; `backend_type` becomes `connector`, the definition key included; `PipelineSchema`'s name and version; `index_terms` once; the defaults' two owners; `DEFAULT_CONNECTOR` and the endpoint default; a connector's spend, payer and wire kind declared | the landing re-writes tenant definitions (yes) | M4 |
-| **LAND** the landing as a precondition | M17's landing rows | the landing at every process entry, keyed on the record schema the code writes; it drops unloadable run data by itself and refuses unknown files alone; `block_packs/_sources` and its builder move into the checkout; one remedy for an unreadable file; a shadowed manifest proven through its reader; `LedgerUnreadableError` folded into `FileUnreadableError` | yes (operator, 2026-11-07): every later wipe is a landing step | lands before the release that carries the first wipe (operator, 2026-11-08) |
-| **READS** | M17's read rows | `banks_sharing`, the `Fate.RUN` dict rows, a whole-file read refused four ways, `CACHE_PATH` | read through `io.py`'s readers | — |
-| **M5** running set | RS | RS, census F's `exclude_nodes`, the one-node rule | accept the L4 cache miss (yes) | M4 |
-| **M6** one start | U2 | `RunStart` and `HeldRun`, `LaunchError`, config item 6 (slot lifetime), the one launch answer, the double selection, `draft_declared`, a task opened only for an admitted act, a queued launch promoted by whoever frees the slot | plan and price before admission for every start (yes) | — |
-| **M7** run init and round 0 | U2 | batch 3's init and round-0 rows, config item 5, `--diag` as a mode, the test builders, the origin-gate rows, `_peer_cycle`, a resume that takes 72 s to apply | halt a degraded origin (yes) | M6 |
-| **ADDR** an address off its record | — | the fork-summary kind, the webapp's id parses (`rootCycleId`, the short labels), parent counting | the mint record serves the kind and the short label | M7 |
-| **M8** potter call door, served roster | U1b, EP | `InjectionBundle`, `Calls.ask`, the seed rule, `PROMPT_FIELD`, swept F, the `[#N]` slots, the panel's money text, a refused L4 arm's identity | a failed critique is a typed fault (yes) | M4 |
-| **M9** ledger read stack | U3 | the projection checkouts re-cut on M2's account log (M9.5b, M9.2, M9.6; M9.5a landed in batch 15), `_unlanded`, the cold-fold snapshot (held: re-measured on the box first), the `dashboard.json` checkout, the swallowed round checkout; a derived file's fault never unwinds or stops a landed line | keep `dashboard.json` / `index.json` as projections (yes, §0) | - |
-| **M10** narration and tracing | U3, ET | one narration table, the typed phase act, ET, `ActivityItem` as `Said`, a pause's cause served | — | M9 |
-| **M11** typed run records | U3 | engine B and C, `StatusMark`, `rewound`, the act record, the cell beat, `cached` / `key_source`, the export's spend, the on-disk renames (`ArmSlot`, `CycleSeed`, `LinePayload`) | — | M9 |
-| **M12** spend | S | the book counted once, one charge value, the lost mirror, the reserved hold, stale `run_limits`, a grant verb, the host-coupon rows | a re-grant counts from `granted_at` (yes); migrates `charges.jsonl` | M9 |
-| **M13** one scoring pass | U4 | § One record shape, the artifact writers outside the roster, the skipped verify, noise-floor and seed-screen on the ledger, the catch-up cells, the verify that starts 38 s late and is never acked `accepted` | the verb is "held-out" (yes) | M9 |
-| **M14b** faults as values | Q3 | `logging` leaves `application/` and `domain/`: a mechanical sweep with no other arc open | — | M9, M10 |
-| **FEED** change feed | Q2, M15 | Q2, census E | a subject is the `Subject` path (yes) | M9 |
-| **M16** webapp (a, b) | swept C, U5 | lineage reads the served tree; one arm row; the selection in the hash | a swiped-in column stays blank until its reads land (yes) | FEED |
-| **M18** TermNorm's edge | G | the in-process `llm_only` connector, the wire-skew probe, TermNorm's wording and `prompt_info`, a named endpoint per connector, § Bypasses; local, in the TermNorm checkout | edit TermNorm where the arc needs it (operator, 2026-11-06) | CONN |
-| **M19** the election | D | the election root, the collapse gate, the lift bars, `CatchUpPool`, CAPO's survivor ranking | offline first, then priced | M13 unconfirmed |
-| **M20** MCP over HTTP | — | the MCP door served over Streamable HTTP behind the API's sign-in, a second transport of the one adapter | auth per [`access-model.md`](../operations/access-model.md) (yes) | — |
-| **M21** Turns | B | § Turns — the unsupervised limit, on M6's admission; `useRemoteModel`'s bag | — | M6 |
-| **M22** host steps 4 and 5 | A4 | the host loop, the chat, the check-in's ingest | host-assistant § Open (operator) | — |
-| **M23** host step 6 | A5 | host step 6, with the "Run the resolver now" row | — | M22, M6 |
+| Chain | Was | Closes | Waits on |
+|---|---|---|---|
+| **m9r** | M9 | M9.5b, M9.2, M9.6: a derived file's fault is a `derived_file_stale` warning; one writer per derived file | — |
+| **F1, F2, F3, F4, F5a, F7, F7b** | — | admit, then cut; Ctrl+C is the pause press; the coupon under one gate; one door into a job file; the host fact on `IdentityContext`; the tombstone is the delete; the replay serves the first deliberate row | m9r names its hunks |
+| **trace, digest, edge, gate, webcell, weblazy** | M10, —, LA, —, M16, — | the dead trace path; the digest cached by content; one outbound poster; one pytest door; one measured-cell renderer and one knob editor; the entry chunk | — |
+| **PASS** | M13 | one held-out pass at all five doors; noise floor and seed screen on the ledger; the skipped verify | m9r |
+| **F5** | — | the tenant directory is the owner; one claim act; consent per principal; the delegate ceiling deleted | F1, F3, F5a |
+| **F6** | M6 | resume decides before it writes; the embedded door dispatches; the mint's commit point | F1 |
+| **DOOR-a** | M9 | one void; fork inheritance, `_Fold` and `append_row` gone | m9r, F2 |
+| **NODE** | M4 | the carrier's nodes typed by `NodeCall`; one config fold; one slot validation; one knob projection | F3, digest |
+| **ELECT** | M19 | one ceiling stop; the election's rows; the lock-in predicate | F2 |
+| **WEBSTATE-a** | M16 | one address, one candidate pick | webcell |
+| **ARTIFACTS** | M13 | run artifacts are ledger projections; `hard_samples.json` | PASS, DOOR-a |
+| **KNOBROW** | M4 | the param row serves `role` and `editable` | NODE, webcell, WEBSTATE-a |
+| **LAND** | LAND | the landing at every process entry, keyed on the record schema; it drops unloadable run data itself; the atomic-write row first | F4, PASS |
+| **START-b** | M6 | `RunStart`, one `start()` owning the slot, one launch answer, a queued launch as a job on disk | F6 |
+| **STOP-b** | M6 | `declare_stop` is the one stop door and the one void; a command names its filer's lock | START-b, DOOR-a |
+| **CONN-a**, then **CONN-rename** | CONN | `connectors.resolve` refuses typed; the connector declares itself; `backend_type` becomes `connector` | START-b, NODE |
+| **REFUSAL** | LAND, M6 | one refusal shape: `ResumeDivergenceError` as a `PotterError` row, `LedgerUnreadableError` folded, one `ErrorCategory` row | F6, STOP-b |
+| **INIT** | M7 | `open_cycle(hop)`, one origin walk, a degraded origin halts, `--diag` as a mode, the builders call production | STOP-b |
+| **ADDR**, **READS**, **DOOR-a's rest** | ADDR, READS, M9 | the kind and label off the mint record; every row has a shape, a served read never fetches; the SSE tail on `FileMark`, the copy-on-write fold | INIT; ARTIFACTS; ARTIFACTS |
+| **MONEY** | M12 | one book of money, the run hold a charge, the sender built once on `RunScope`, the host is the declared account | START-b, CONN-a, INIT, LAND |
+| **DOOR-b** | M10, M11 | `RunCallbacks` and `declare_*` gone; tracing a projection; the typed phase act; one narration table | INIT, MONEY |
+| **OPACT**, then **SURVEY** | M11, READS | one operator-act record; one survey door that serves a faulted campaign | DOOR-b |
+| **M11's rest** | M11 | `StatusMark`, the cell beat, `cached` / `key_source`, the export's spend, the on-disk renames | DOOR-b |
+| **FEED**, then **WEBSTATE-b** | FEED, M16 | one change feed; one served arm, served labels, closed rounds off the live body | DOOR-a's rest; ADDR |
+| **M5, M8, M18, M20, M21, M22, M23** | — | as their ledger sections say; each brief lists its files before it joins a landing | M8, M5: NODE. M18: CONN-a. M21: START-b. M23: M22 |
 
-**Edges** (→ means before): M4 → CONN, M5, M8, M9. M6 → M7 → ADDR. M9 → M10, M11, M12, M13, FEED.
-M13 → M19. FEED → M16. M10 → M14b. CONN → M18. LAND lands before the release that carries the
-first wipe (M2's, on main since batch 12; M9's round-audit cache, CONN, M10 and M11, M12, M13).
+**Critical path:** F1 → F6 → START-b → STOP-b → INIT → MONEY → DOOR-b. These cross
+`launcher/admission.py`, `jobs/quota.py`, `initialization/loop_start.py` and `run_observers.py`, so
+they run one after another; everything else runs beside them.
 
-**Critical path:** M4's re-key → M9 → M13 → M19, then the next paid run. M9 → FEED → M16 runs
-beside it.
+**Re-keys.** NODE, ELECT, F7b, M8, M5, CONN-rename and REFUSAL's last link land in any order before
+the next paid run, and share one cold cache if no paid run lands between them.
 
-**Next:** the rest of M9's re-cut (`w7m9b`: M9.5b, M9.2, M9.6, census 7c); then CONN, and LAND
-before the release.
-
-**Re-keys.** M4, CONN, M8, M5 (the L4 cache) and M19 (decisions) land in any order before the next
-paid run. M4's and M8's re-keys share one cold cache only if no paid run lands
-between their merges.
+**Wipes.** Until LAND is on main, a chain that reshapes run data names the wipe as a step of its
+landing, counted first. After LAND every wipe is a landing step it runs itself. LAND lands before
+the release.
 
 **Last, at sync points with no open chain in their trees:**
 
 | Arc | What | Waits on |
 |---|---|---|
-| **LA** | § The file layout, Wave A | no open chain in `presentation/` or `infrastructure/` |
-| **LB** | Wave B | M9 |
-| **LC** | Wave C, as one re-key batch | M8, M19 |
-| **LW** | the webapp modules that break `lib/CLAUDE.md` § Where a module lives; the barrel cycle | M16, FEED |
-| **TS** | the test suite consolidated after the deletions; tests go through each module's interface | LB |
-| **R** | § Open — renames the operator picked | every other arc (it runs last) |
+| **M14b** | `logging` leaves `application/` and `domain/` | DOOR-b |
+| **LA** | the CLI as five modules; `identity/`, `live_dashboard/` and `main.py` regrouped | no open chain in `presentation/` or `infrastructure/` |
+| **LB** | `application/runner/` collapses | INIT, PASS, ARTIFACTS, DOOR-b |
+| **LC** | Wave C, as one re-key batch | M8, ELECT |
+| **LW** | the webapp modules off `lib/CLAUDE.md` § Where a module lives | WEBSTATE-b, FEED |
+| **TS** | the test suite consolidated; tests go through each module's interface | LB |
+| **R** | § Open, the renames the operator picked | every other chain |
 
-The paid run comes after M19 and the re-keys: the bench's CAPO head-to-head on `hotpotqa-closedbook`
-(§ The bench), priced first. Then the board (§ Optimizer tuning — the standing board).
+The paid run comes after ELECT and the re-keys: the bench's CAPO head-to-head on
+`hotpotqa-closedbook` (§ The bench), priced first. Then the board (§ Optimizer tuning — the standing
+board).
 
-**Forks left to the operator.** Until he decides, an arc leaves each one as it stands:
+**Forks left to the operator** (taste and policy only; an arc leaves each as it stands):
 - what "calls held equal" holds equal;
-- a bench's total (the box's definition is read first);
+- a bench's total;
 - the sub-cent money rule;
 - whether an upload's bytes are kept before the parse;
 - what `hit_spread` means;
 - how API keys are stored at rest;
 - one env file on the box;
-- one email holding two accounts;
 - an archived answer's per-node outputs;
 - the crowning bar (paper stage 3);
 - everything under § Blocked.
@@ -227,6 +229,9 @@ misses; (2) screen library blocks without the optimizer — authored arms, origi
 ([`../../paper/notes/model-per-method.md`](../../paper/notes/model-per-method.md)).
 
 **Defects** are [`code-debt-cleanup.md`](code-debt-cleanup.md) § Open — optimizer tuning.
+
+**Unmeasured:** the optimizer model's repair rate on L2/L3 structured output; read the share of an
+escalating campaign's L2/L3 calls that needed a parse repair.
 
 
 ## Variation and pools

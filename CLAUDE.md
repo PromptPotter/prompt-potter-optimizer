@@ -39,7 +39,7 @@ overlay ([`promptpotter/assets/datasets/CLAUDE.md`](promptpotter/assets/datasets
 
 ## Vocabulary
 
-"node", never service/building-block · **"optimizer prompt"** (`OptSearchPoint`) vs **"target prompt"** (`JobSearchPoint`), never "meta-prompt" · L4 is **outer/inner** and **self-optimization**, never "meta" · **"run init" / INIT**, never "bootstrap" (except machine provisioning and DSPy `BootstrapFewShot`) · evolutionary framing: generation, population, fitness, mutation, selection, individual. The banned words: [`conventions.md`](docs/developer/conventions.md) § Naming.
+"node", never service/building-block · **"optimizer prompt"** (`OptSearchPoint`) vs **"target prompt"** (`JobSearchPoint`), never "meta-prompt" · L4 is **outer/inner** and **self-optimization**, never "meta" · **"run init" / INIT**, never "bootstrap" (except machine provisioning and DSPy `BootstrapFewShot`) · evolutionary framing: generation, population, fitness, mutation, selection, individual · **"check-in"** is the resolver-and-gates process, **"draft"** its object (`DraftFile`). The banned words: [`conventions.md`](docs/developer/conventions.md) § Naming.
 
 ## Working
 

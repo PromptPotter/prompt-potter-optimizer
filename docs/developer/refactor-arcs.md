@@ -1,7 +1,7 @@
 # Refactor arcs — sizing, landing, briefing, reviewing, stopping
 
 A refactor arc closes rows of [`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md) in the
-order of [`../specs/roadmap.md`](../specs/roadmap.md) § The cleanup arcs (plan review, 2026-11-07). This
+order of [`../specs/roadmap.md`](../specs/roadmap.md) § The cleanup chains (audit, 2026-11-10). This
 page owns how an arc is run, whether by a person or by agents.
 
 ## Size and scope
@@ -15,6 +15,9 @@ page owns how an arc is run, whether by a person or by agents.
 - **No new audit pass until the backbone chains land** (M3, K0, DOORS, M2, M4, CONN; operator,
   2026-11-07). A row filed in passing names its chain in **Rides with:**, or carries a **Held:**
   reason.
+- **No arc holds a command's state anywhere but the account's command log.**
+- **No arc adds a cadence, a `revalidate` list or a cross-invalidation** beyond batch E's before FEED
+  lands; a new read polls on the descriptor it has, and A4's conversation opens no second `EventSource`.
 - **Scope, and every decision the arc needs, are settled before the first build.** A decision that
   surfaces mid-arc is asked before the next build, never built ahead of the answer.
 - **An arc owns its files.** Arcs that run together touch disjoint files, or name the one they share.
