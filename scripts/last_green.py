@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.metadata
 import json
 import os
 import sys
 import sysconfig
+import tomllib
 from collections.abc import Mapping, Sequence
+from functools import cache
 from pathlib import Path
 from stat import S_ISDIR, S_ISREG
 
@@ -23,8 +26,6 @@ OFFLINE_RUN_READS = (
     "scripts/offline_world.py",
     "scripts/last_green.py",
     "scripts/processes.py",
-    # Its import graph is what scopes each optimizer's stamp.
-    "scripts/tests_owning.py",
 )
 # Stamped by size and mtime, so a late reader is keyed on the file as it is when IT asks.
 _DIGESTS: dict[Path, tuple[tuple[int, int], bytes]] = {}
@@ -57,6 +58,78 @@ def reads(rel: str, prefixes: Sequence[str]) -> bool:
     inside = tuple(p for p in prefixes if not p.startswith("!"))
     outside = tuple(p[1:] for p in prefixes if p.startswith("!"))
     return rel.startswith(inside) or bool(outside and not rel.startswith(outside))
+
+
+def _module_name(rel: str) -> str:
+    parts = Path(rel).with_suffix("").parts
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+@cache
+def _package_modules() -> dict[str, str]:
+    rels = (p.relative_to(REPO).as_posix() for p in (REPO / "promptpotter").rglob("*.py"))
+    return {_module_name(rel): rel for rel in rels}
+
+
+def _is_type_checking(test: ast.expr) -> bool:
+    return (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
+        isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+    )
+
+
+def _import_names(path: Path) -> set[str]:
+    importer = _module_name(path.relative_to(REPO).as_posix())
+    home = importer if path.name == "__init__.py" else importer.rpartition(".")[0]
+    found: set[str] = set()
+    # An import is a statement, so no expression is walked; a function body is.
+    todo: list[ast.AST] = [ast.parse(path.read_text(encoding="utf-8"))]
+    while todo:
+        sub = todo.pop()
+        if isinstance(sub, ast.Import):
+            found.update(a.name for a in sub.names)
+        elif isinstance(sub, ast.ImportFrom):
+            base = sub.module or ""
+            if sub.level:
+                up = home.split(".")[: len(home.split(".")) - (sub.level - 1)]
+                base = ".".join([*up, base] if base else up)
+            found.add(base)
+            found.update(f"{base}.{a.name}" for a in sub.names)
+        for field, value in ast.iter_fields(sub):
+            if not isinstance(value, list) or (
+                field == "body" and isinstance(sub, ast.If) and _is_type_checking(sub.test)
+            ):
+                continue
+            todo.extend(
+                child
+                for child in value
+                if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
+            )
+    return found
+
+
+def imported(path: Path) -> set[str]:
+    """The package's files *path* imports, function bodies included, `TYPE_CHECKING` excluded."""
+    modules = _package_modules()
+    return {modules[name] for name in _import_names(path) if name in modules}
+
+
+@cache
+def bare_imports() -> frozenset[str]:
+    """What the suite imports bare off pytest's `pythonpath`, outside the suite itself."""
+    config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    path = config["tool"]["pytest"]["ini_options"]["pythonpath"]
+    todo = sorted((REPO / "tests").glob("*.py"))
+    seen: set[Path] = set()
+    while todo:
+        module = todo.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        for name in _import_names(module):
+            todo.extend(p for d in path if (p := REPO / d / f"{name}.py").is_file())
+    return frozenset(
+        rel for p in seen if not (rel := p.relative_to(REPO).as_posix()).startswith("tests/")
+    )
 
 
 class LastGreen:

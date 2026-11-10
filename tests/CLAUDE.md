@@ -8,7 +8,7 @@
 
 - **Coupling in the assertion → delete; coupling in the setup → rewire** onto `factories.py`. A renamed or restructured contract gets a fresh test; never port assertions.
 - **"This change moves no decision" is not a test** — prove it with the offline run ([`offline-run.md`](../docs/developer/offline-run.md)).
-- **`python scripts/tests_owning.py --run`** runs the tests owning everything moved since the last whole run. A new subject is a SECTION in the file that already owns its production path (`complexity_ledger.py` row `test_files`).
+- **`python scripts/gate.py --only pytest`** runs the whole suite, kept green by its content key. A new subject is a SECTION in the file that already owns its production path (`complexity_ledger.py` row `test_files`).
 
 ## One journey per section
 

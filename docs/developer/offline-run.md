@@ -10,7 +10,7 @@ PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline
 .venv/Scripts/python.exe scripts/offline_run.py --digests
 ```
 
-`--rounds` and `--rows` size it; `--bench-trigger manual` fails on a bench cell sent by the launch, then asks for the pass as an operator does (`application/embedded_run.py::grade_bench`). It refuses an interpreter whose `promptpotter` is another tree's, naming the `PYTHONPATH` that pins its own.
+`--rounds` and `--rows` size it; `--bench-trigger manual` fails on a bench cell sent by the launch, then asks for the pass as an operator does (`application/embedded_run.py::grade_bench`). `--straight` runs each optimizer's straight run alone, no nested leg: potter's is the webapp's walk world (`scripts/gate.py::_walk_world`). It refuses an interpreter whose `promptpotter` is another tree's, naming the `PYTHONPATH` that pins its own.
 
 **The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments and then `--controlled`, each in its own home of the clone's (`processes.py::clone_cache`) — whenever a file the engine runs from changed since it was last green; the pre-push hook runs it on a tip pushed to main (`gate.py --push`, in a throwaway worktree on the clone's venv, `gate.py::_tip_checkout`); pre-commit and `--changed` leave it out. A failed leg fails it; a `MOVED` never does. Each optimizer's workspace is kept green on its own, keyed by content on what that optimizer reaches (`scripts/last_green.py::OFFLINE_RUN_READS` less other optimizers' packages, `scripts/offline_run.py::unreached`); a green optimizer under the same arguments prints `unchanged since green`; another home or `--against` reruns all.
 

@@ -63,15 +63,6 @@ class _MemoryStatus(ctypes.Structure):  # MEMORYSTATUSEX
     )
 
 
-class _Counters(ctypes.Structure):  # PROCESS_MEMORY_COUNTERS
-    _fields_ = (
-        ("cb", ctypes.c_ulong),
-        ("page_faults", ctypes.c_ulong),
-        *((f"field{i}", ctypes.c_size_t) for i in range(7)),
-        ("peak_commit", ctypes.c_size_t),
-    )
-
-
 if sys.platform == "win32":
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     _kernel32.CreateJobObjectW.restype = ctypes.c_void_p
@@ -94,7 +85,6 @@ if sys.platform == "win32":
     _kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
     _kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
     _kernel32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
-    _kernel32.K32GetProcessMemoryInfo.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong)
     _ntdll = ctypes.WinDLL("ntdll")
     _ntdll.NtResumeProcess.argtypes = (ctypes.c_void_p,)
     _ntdll.NtResumeProcess.restype = ctypes.c_long  # NTSTATUS
@@ -372,19 +362,3 @@ class RamBudget:
     def offline_run_children(self, tasks: int) -> int:
         fit = self.free_mb // _OFFLINE_RUN_CHILD_MB
         return max(2, min(fit, tasks, os.cpu_count() or 2, OFFLINE_RUN_CHILDREN_MAX))
-
-
-def peak_mb() -> int:
-    """This process's peak COMMITTED memory on Windows, the figure a gate job prints (its working
-    set grows with what the box has free); its peak RSS elsewhere."""
-    if sys.platform == "win32":
-        counters = _Counters(cb=ctypes.sizeof(_Counters))
-        current = ctypes.c_void_p(-1)  # GetCurrentProcess's pseudo-handle
-        if not _kernel32.K32GetProcessMemoryInfo(current, ctypes.byref(counters), counters.cb):
-            raise ctypes.WinError(ctypes.get_last_error())
-        return int(counters.peak_commit) >> 20
-    else:
-        import resource
-
-        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS, KiB elsewhere
-        return peak >> 20 if sys.platform == "darwin" else peak >> 10

@@ -966,8 +966,7 @@ fixtures.
 - **A campaign's short label is parsed three ways**: `format.ts::shortId` (`{dataset}__{rand6}`),
   `ForestRows::shortOrigin` (`cycle_`), `ids.ts::shortFamilyTail`, used by `ComparePane::channelNames`,
   `EvidenceCharts::seriesLabel`, `SearchpointPanels`; `EvidenceCharts.tsx:77` also builds cell labels
-  with `c.split("/").pop()` beside `inner-panel.ts::panelCellLabel`, so two datasets' `…/seed-3` cells
-  share one label. Action: a served short label per subject and node.
+  with `c.split("/").pop()`, so two datasets' `…/seed-3` cells share one label. Action: a served short label per subject and node.
   **Re-test:** `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
 - **`ids.ts::rootCycleId` regexes `_fork_` / `_diag_`** to give `useLineage::parentId` /
   `isInheritedSibling` what the served tree carries. Action: read parent and spawn off the tree.
@@ -1651,12 +1650,6 @@ word's `git grep -c` for that sense is 0.
     delete. **Rides with:** NODE. **Re-test:** `git grep -n "set(k.declared)" -- webapp`.
   - The packs copy each snippet's arXiv id and method into its `tags`, so Tags repeats Source and Method.
     **Rides with:** LAND.
-- **A tree rooted past ~140 characters fails the suite's warm-up**: `tests_owning.py::_record`'s
-  `compileall` writes each `.pyc` through a `.pyc.<id>` temp, so under Windows' `LongPathsEnabled=0`
-  a 180-character root fails with `FileNotFoundError`, where an import only skips its cache. A
-  `.claude/worktrees/` tree (101) and a pushed tip's Temp checkout pass. Action: the desk's
-  `LongPathsEnabled` is 1, the root; a gate refusing the tree would only rename the failure.
-  **Held:** the operator's registry edit. **Re-test:** the gate from a 180-character root.
 - **Seen building the read catalogue** (2026-11-04):
   - **`GET /auth/me` writes**: `presentation/api/routers/reads.py:129` calls `routers/auth.py::arrive`
     (`:325`), so a read catalogued as `ReadKind.ME` opens an account. Action: the open box's principal

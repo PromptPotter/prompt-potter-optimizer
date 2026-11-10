@@ -35,7 +35,7 @@ def main(argv: list[str]) -> int:
         return 2
     if not source.is_dir():
         print(
-            f"[e2e] no workspace at {source} — run `python scripts/gate.py --only offline-run`",
+            f"[e2e] no workspace at {source} — run `python scripts/gate.py --only walk-world`",
             file=sys.stderr,
         )
         return 2

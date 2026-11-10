@@ -25,9 +25,17 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal
 
-import tests_owning
 import yaml
-from last_green import ENGINE_RUNTIME, OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen, digest, reads
+from last_green import (
+    ENGINE_RUNTIME,
+    OFFLINE_RUN,
+    OFFLINE_RUN_READS,
+    LastGreen,
+    bare_imports,
+    digest,
+    imported,
+    reads,
+)
 from processes import (
     REPO,
     Outcome,
@@ -175,12 +183,7 @@ def _layering(_: Selection) -> Outcome:
     imports: dict[str, list[str]] = {}
     for path in _sources(REPO / package, "*.py"):
         rel = path.relative_to(REPO).as_posix()
-        reached = tests_owning.imported(
-            ast.parse(path.read_text(encoding="utf-8")),
-            tests_owning.module_name(rel),
-            path.name == "__init__.py",
-        )
-        imports[rel[len(package) :]] = sorted(target[len(package) :] for target in reached)
+        imports[rel[len(package) :]] = sorted(target[len(package) :] for target in imported(path))
     hits = [
         f"{who or package}* must not import {' or '.join(banned)} — {source} imports {target}"
         for who, banned, exempt in _LAYERING
@@ -849,7 +852,7 @@ def _eslint(sel: Selection) -> Outcome:
 
 
 def _playwright(_sel: Selection) -> Outcome:
-    # `walk` serves a copy of offline-run's potter workspace; `spend` costs real money.
+    # `walk` serves a copy of the walk world; `spend` costs real money.
     tiers = _node("npx", "playwright", "test", "--project=cold", "--project=walk")
     return run(tiers, _WEBAPP, PP_E2E_WALK_WORLD=str(_WALK_WORLD))
 
@@ -1005,6 +1008,9 @@ class Check:
     product: tuple[str, ...] = ()
     # Returns `None` where ownership cannot be told, and then the whole check runs.
     narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
+    # A job peak past this many MB is red, on Windows alone: the desk's free RAM binds what runs
+    # beside builders, where a CI runner has room.
+    ceiling_mb: int | None = None
 
     def inputs(self) -> tuple[str, ...] | None:
         if self.kind == "release":  # the answer lives on the network
@@ -1038,24 +1044,21 @@ def _vitest(sel: Selection) -> Outcome:
     return run(_node("npm", "run", "test"), _WEBAPP)
 
 
-def _pytest(sel: Selection) -> Outcome:
-    if sel.narrowed is None:
-        return run([sys.executable, "scripts/tests_owning.py", "--record"], REPO)
-    if not sel.narrowed:
-        return 0, "no test owns what moved"
-    return run(_py("pytest", *sel.narrowed), REPO)
+def _pytest(_: Selection) -> Outcome:
+    # The cap is the suite's, never the compiler's: whatever `__pycache__` a checkout starts with,
+    # every module it imports is bytecode, pytest's rewritten ones too, before the job meters it.
+    job, metered.job = metered.job, None
+    for warm in (("compileall", "-q", "promptpotter", "scripts"), ("pytest", "--collect-only")):
+        code, out = run(_py(*warm), REPO)
+        if code:
+            return code, out
+    metered.job = job
+    return run(_py("pytest"), REPO)
 
 
 def _suite_reads() -> tuple[str, ...]:
-    """The suite, its runner, and every module it imports bare off pytest's `pythonpath`."""
-    beside = sorted(tests_owning.bare_imports())
-    return (*_ENGINE_RUNTIME, "tests/", "scripts/tests_owning.py", *beside)
-
-
-def _owning_tests(_changed: Sequence[str]) -> tuple[str, ...] | None:
-    # Narrowed by the tree against the last whole run's record, never by the selection's files.
-    nodes = tests_owning.tests_owning()
-    return None if nodes is None else tuple(nodes)
+    """The suite and every module it imports bare off pytest's `pythonpath`."""
+    return (*_ENGINE_RUNTIME, "tests/", *sorted(bare_imports()))
 
 
 # The plug point's one out-of-package optimizer.
@@ -1133,8 +1136,13 @@ def _optimizer_plugin(_: Selection) -> Outcome:
     return 0, out
 
 
-# What the `walk` tier serves a copy of: the straight leg's potter workspace.
-_WALK_WORLD = clone_cache() / OFFLINE_RUN / "potter"
+# What the `walk` tier serves a copy of: potter's straight run, in a home of its own.
+_WALK_WORLD = clone_cache() / "walk-world" / "potter"
+
+
+def _walk_world(_: Selection) -> Outcome:
+    argv = [sys.executable, "scripts/offline_run.py", "--optimizer=potter", "--straight"]
+    return run(argv, REPO, PROMPTPOTTER_HOME=str(_WALK_WORLD.parent))
 
 
 def _offline_run(_: Selection) -> Outcome:
@@ -1199,7 +1207,7 @@ CHECKS: tuple[Check, ...] = (
         _layering,
         on_commit=True,
         light=True,
-        reads=("promptpotter/", "scripts/tests_owning.py", *_GATE),
+        reads=("promptpotter/", *_GATE),
     ),
     Check(
         "help-imports",
@@ -1281,7 +1289,7 @@ CHECKS: tuple[Check, ...] = (
         "py",
         _pytest,
         reads=_suite_reads,
-        narrow=_owning_tests,
+        ceiling_mb=331,  # 38 MB above a measured warm 293 MB: a 40 MB growth is red
     ),
     # The script keeps a green per optimizer, keyed on the sources that optimizer reaches, so a run
     # by hand answers for it and a pushed tip reruns only the optimizers whose sources moved.
@@ -1289,6 +1297,14 @@ CHECKS: tuple[Check, ...] = (
         OFFLINE_RUN,
         "py",
         _offline_run,
+        landing=True,
+        reads=(*OFFLINE_RUN_READS, *_GATE),
+    ),
+    # "py" as it runs the engine: a `--web` gate then runs in the pinned venv `walk` serves from.
+    Check(
+        "walk-world",
+        "py",
+        _walk_world,
         landing=True,
         reads=(*OFFLINE_RUN_READS, *_GATE),
         builds=str(_WALK_WORLD),
@@ -1317,7 +1333,7 @@ CHECKS: tuple[Check, ...] = (
         _playwright,
         landing=True,
         alone=True,
-        after=("vite-build", OFFLINE_RUN),
+        after=("vite-build", "walk-world"),
         product=("webapp/out",),
         # Both servers' backend is the offline world's (`e2e/serve_app.py`); `walk` walks its run.
         reads=(*_WEBAPP_READS, *OFFLINE_RUN_READS),
@@ -1360,7 +1376,12 @@ def _execute(check: Check, sel: Selection, store: LastGreen | None) -> Result:
     finally:
         metered.job = None
         peak = close_job(job)
-    return result if result.kept else dataclasses.replace(result, peak_mb=peak)
+    if result.kept:
+        return result
+    if check.ceiling_mb is not None and peak is not None and peak > check.ceiling_mb:
+        over = f"peaked at {peak} MB, over its {check.ceiling_mb} MB cap.\n{result.out}"
+        return dataclasses.replace(result, rc=result.rc or 1, out=over, peak_mb=peak)
+    return dataclasses.replace(result, peak_mb=peak)
 
 
 def _verdict(check: Check, sel: Selection, store: LastGreen | None) -> Result:
@@ -1624,7 +1645,7 @@ def main() -> int:
         "--changed",
         action="store_true",
         help="while iterating: the checks that read a file changed since HEAD, and inside "
-        "pytest, vitest and eslint only what owns one",
+        "vitest and eslint only what owns one",
     )
     parser.add_argument(
         "--only",

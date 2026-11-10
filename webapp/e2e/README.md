@@ -16,8 +16,8 @@ First time on a machine: `npx playwright install chromium`.
 
 **`gate.py` runs `cold` and `walk`**, the walk against offline-run's potter world
 (`scripts/gate.py::_playwright`); `spend` needs money. `walk` reads no operator campaign when
-`PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`) names a run — potter's straight run is what `gate.py --only offline-run` leaves
-at `.gate_cache/offline-run/potter` — and `walk_world.py` serves a throwaway copy of it whose
+`PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`) names a run — potter's straight run is what `gate.py --only walk-world` leaves
+at `.gate_cache/walk-world/potter` — and `walk_world.py` serves a throwaway copy of it whose
 account agreed to the live terms, with the `offline` backend. Unset, `walk` reads the checkout's
 own workspace, a desk tier run by hand.
 

@@ -9,7 +9,6 @@ it: ``docs/developer/offline-run.md``.
 from __future__ import annotations
 
 import argparse
-import ast
 import asyncio
 import contextlib
 import inspect
@@ -28,9 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
-import tests_owning
 import yaml
-from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
+from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen, imported
 from offline_world import (
     LABELS,
     MARKER,
@@ -1405,10 +1403,7 @@ def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
     def imports(files: Iterable[Path]) -> set[str]:
         hit: set[str] = set()
         for path in files:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            rel = path.relative_to(REPO).as_posix()
-            package = path.name == "__init__.py"
-            for target in tests_owning.imported(tree, tests_owning.module_name(rel), package):
+            for target in imported(path):
                 hit.update(d for d in owners if target.startswith(d))
         return hit
 
@@ -1557,7 +1552,7 @@ def moved_against(workspace: Path, earlier: Path) -> str:
 
 
 def read_straight_and_resumed(
-    name: str, workspace: Path, resumed: Future[int], pause_after: int, against: Path | None
+    name: str, workspace: Path, resumed: Future[int] | None, pause_after: int, against: Path | None
 ) -> int:
     ran = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
     (cycle,) = (workspace / "projects").glob("*/campaigns/*/cycles/*")
@@ -1574,6 +1569,8 @@ def read_straight_and_resumed(
     print(f"{name}: {ran['stop_reason']}, bench lift {headline} -- {cycle}")
     if against is not None:
         print(f"{name}: against {against}: {moved_against(workspace, against / name)}")
+    if resumed is None:
+        return failed
     if rc := resumed.result():
         print(f"{name}: RESUME FAILED (exit {rc}) -- {workspace / RESUMED / 'run.log'}")
         return failed + 1
@@ -1720,6 +1717,11 @@ def main() -> int:
         help="run two arms of one head-to-head beside a foreign campaign, and without it",
     )
     ap.add_argument(
+        "--straight",
+        action="store_true",
+        help="each optimizer's straight run alone: no resumed, interrupted, gated or forked leg",
+    )
+    ap.add_argument(
         "--bench-trigger",
         choices=get_args(BenchTrigger),
         default="at_end",
@@ -1788,15 +1790,12 @@ def main() -> int:
 
     # The first optimizer's workspace holds the CLI's legs, and potter's its own: they run with it.
     first = names[0]
-    firsts = not args.controlled and first in due
+    legs = not (args.controlled or args.straight)
+    firsts = legs and first in due
     pause_after = min(1, args.rounds - 1)
     # Potter's own legs need rounds past the one they pause at.
-    potter_legs = not args.controlled and "potter" in due and pause_after > 0
-    tasks = (
-        len(due)
-        if args.controlled
-        else 2 * len(due) + (len(INTERRUPTED) + 2) * firsts + 4 * potter_legs
-    )
+    potter_legs = legs and "potter" in due and pause_after > 0
+    tasks = 2 * len(due) + (len(INTERRUPTED) + 2) * firsts + 4 * potter_legs if legs else len(due)
     pool = ThreadPoolExecutor(RamBudget.read().offline_run_children(tasks))
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
@@ -1854,7 +1853,7 @@ def main() -> int:
     )
     resumed = (
         {}
-        if args.controlled
+        if not legs
         else {
             name: spawn(
                 name,
@@ -1875,7 +1874,7 @@ def main() -> int:
             continue
         if not args.controlled:
             failed[name] += read_straight_and_resumed(
-                name, workspace, resumed[name], pause_after, args.against
+                name, workspace, resumed[name] if legs else None, pause_after, args.against
             )
     for count, leg in stopped.items():
         ok, said = leg.result()
