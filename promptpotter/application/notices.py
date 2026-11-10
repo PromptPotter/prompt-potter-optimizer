@@ -24,13 +24,22 @@ def answer_operator(text: str) -> bool:
     return notify_operator(text, ring=True)
 
 
+def _tell(one: health.Checked) -> None:
+    if one.change is not None and (said := health.notice(one)) is not None:
+        notify_operator(said, ring=one.change.state == "broken")
+
+
 def check_and_tell() -> list[health.Checked]:
     """Every entry point's health check, each change of state already told. Blocking."""
     checked = asyncio.run(health.check(default_projects_root()))
     for one in checked:
-        if one.change is not None and (said := health.notice(one)) is not None:
-            notify_operator(said, ring=one.change.state == "broken")
+        _tell(one)
     return checked
+
+
+def tell_poll(token: str, refused: str | None) -> None:
+    """What the admin bot's poll was answered, told where it changes its channel's standing."""
+    _tell(health.poll_answered(default_projects_root(), token, refused))
 
 
 def tell_power(was: PowerLevel) -> PowerLevel:

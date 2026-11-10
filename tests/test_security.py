@@ -355,37 +355,63 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     log_redaction.SecretRedactionFilter().filter(failed)
     assert bot_token not in logging.Formatter().format(failed), "a traceback carried the bot token"
 
-    # A token Telegram refuses stops the poll at once and has the channel's probe record it now;
-    # a blip is retried. Neither logs a traceback per attempt.
-    class EnoughSleepsError(Exception):
+    # What the poll is refused, no retry changes: polling stops at once, and the refusal is its
+    # channel's standing, told once, which no probe of Telegram second-guesses (none sees a second
+    # poller) until a poll is answered again. A blip is retried. No attempt logs a traceback.
+    class SeenEnoughError(Exception):
         pass
 
-    def polled(status: int) -> tuple[list[float], int]:
-        offline.token_endpoints[f"api.telegram.org/bot{bot_token}/getUpdates"] = (status, {})
+    told: list[str] = []
+
+    def tell(text: str, **_: bool) -> bool:
+        told.append(text)
+        if text.startswith("✓"):
+            raise SeenEnoughError  # the channel is held again
+        return True
+
+    def polled(status: int, body: dict[str, Any]) -> list[float]:
+        offline.token_endpoints[f"api.telegram.org/bot{bot_token}/getUpdates"] = (status, body)
         slept: list[float] = []
-        checks: list[None] = []
 
         def sleep(seconds: float) -> None:
             slept.append(seconds)
             if len(slept) == 3:
-                raise EnoughSleepsError
+                raise SeenEnoughError
 
-        with monkeypatch.context() as bot:
-            bot.setattr(notices, "check_and_tell", lambda: checks.append(None))
-            bot.setattr(notices, "forward_trail_to_briefing", lambda: False)
-            bot.setattr(notices, "tell_power", lambda was: was)
-            bot.setattr(notices, "tell_visits_digest", lambda: None)
-            bot.setattr(time, "sleep", sleep)
-            with pytest.raises(EnoughSleepsError):
+        with monkeypatch.context() as asleep:
+            asleep.setattr(time, "sleep", sleep)
+            with pytest.raises(SeenEnoughError):
                 admin_bot.run_bot(bot_token, "1", None)
-        return slept, len(checks)
+        return slept
 
-    caplog.clear()
-    slept, checks = polled(401)
-    assert admin_bot._RETRY_BACKOFF_S not in slept, "a refused token was polled again"
-    assert checks == 2, "the refusal waited for the next half-hour health check"
-    slept, checks = polled(502)
-    assert slept == [admin_bot._RETRY_BACKOFF_S] * 3 and checks == 1, "a blip stopped the poll"
+    with monkeypatch.context() as box:
+        box.setenv("PROMPTPOTTER_HOME", str(tmp_path / "bot-box"))
+        box.setattr(notices, "notify_operator", tell)
+        box.setattr(notices, "check_and_tell", lambda: [])
+        box.setattr(notices, "forward_trail_to_briefing", lambda: False)
+        box.setattr(notices, "tell_power", lambda was: was)
+        box.setattr(notices, "tell_visits_digest", lambda: None)
+        for method, result in (("getMe", {"username": "potter_bot"}), ("getWebhookInfo", {})):
+            offline.token_endpoints[f"api.telegram.org/bot{bot_token}/{method}"] = (
+                200,
+                {"ok": True, "result": result},
+            )
+        caplog.clear()
+        assert admin_bot._RETRY_BACKOFF_S not in polled(409, {}), "a refused poll was retried"
+        refusal = "⚠ channel:telegram is BROKEN: refused: another poller or a webhook holds the bot"
+        assert [said.split("\n")[0] for said in told] == [refusal], "the poll's refusal went untold"
+        assert admin_bot._RETRY_BACKOFF_S not in polled(401, {}), "a refused token was retried"
+        assert len(told) == 1, "a refusal standing already was told again"
+        checked = asyncio.run(health.check(default_projects_root()))
+        (channel,) = [c for c in checked if c.probe.name == "channel:telegram"]
+        assert channel.reading.state == "broken" and channel.change is None, (
+            "a probe second-guessed the poll's own refusal"
+        )
+        assert polled(502, {}) == [admin_bot._RETRY_BACKOFF_S] * 3, "a blip stopped the poll"
+        assert polled(200, {"ok": True, "result": []}) == [], "guard: an answer is polled on"
+        assert told[1:] == ["✓ channel:telegram works again."], (
+            "an answered poll left its channel's refusal standing"
+        )
     assert not [r for r in caplog.records if r.exc_info], "a poll attempt logged a traceback"
 
     # Secrecy is read off the field TYPE: a `SecretStr` declared tomorrow under any name needs no redactor edit.

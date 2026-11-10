@@ -198,12 +198,6 @@ class _Duties:
     def _watch_power(self) -> None:
         self._power = notices.tell_power(self._power)
 
-    def health_now(self) -> None:
-        """The next `run_due` checks health, whatever its half hour says."""
-        for index, (_, duty) in enumerate(self._roster):
-            if duty == self._health_and_trail:
-                self._due[index] = 0.0
-
     def run_due(self) -> float:
         """Every duty that is due runs; the answer is the seconds until the next one."""
         for index, (every_s, duty) in enumerate(self._roster):
@@ -250,6 +244,8 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
     offset: int | None = None
     duties = _Duties()
     polling = True
+    # The first answer since start holds the channel again, whatever an earlier poll was refused.
+    answered = False
     logger.info("Admin bot started (outbound long-poll; no inbound port).")
     with httpx.Client(
         base_url=base_url, timeout=_POLL_TIMEOUT_S + 10, verify=tls_context()
@@ -265,14 +261,17 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
                     params["offset"] = offset
                 resp = client.get("/getUpdates", params=params)
                 if (refused := health.telegram_refusal(resp.status_code)) is not None:
-                    # No retry changes it: polling stops, the bot's own duties go on, and
-                    # `channel:telegram` records it now, once, rather than at its next half hour.
+                    # No retry changes it: polling stops, the bot's own duties go on, and the
+                    # refusal is its channel's standing, told now and once.
                     logger.error("getUpdates stops: %s", refused)
                     polling = False
-                    duties.health_now()
+                    notices.tell_poll(token, refused)
                     continue
                 resp.raise_for_status()
                 updates = resp.json().get("result", [])
+                if not answered:
+                    answered = True
+                    notices.tell_poll(token, None)
             except httpx.HTTPError as blip:
                 # The long-poll blocks only on SUCCESS: without the sleep an erroring one spins.
                 logger.warning(

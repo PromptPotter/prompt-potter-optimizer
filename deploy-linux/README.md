@@ -346,7 +346,8 @@ tells them apart. Changes are audited to `blocklist_audit.jsonl` / `grants_audit
 - **The box's health** — `promptpotter health` runs every probe (`application/health.py::probes`:
   remote backends, each sign-in provider's view of `oidc.json`, each LLM key, and the operator
   channel itself, `channel:telegram`, broken on a refused token or a webhook holding the bot, which
-  no notice can report); a state change is
+  no notice can report; what the admin bot's own poll was refused, a second poller included, stands
+  as the channel's state until a poll is answered); a state change is
   recorded on the box's workspace ledger and told to the bot's chat. It runs at app start, before
   each briefing, and in `update.sh`, where a broken probe fails the deploy.
 
