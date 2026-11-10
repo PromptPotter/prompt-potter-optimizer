@@ -32,7 +32,7 @@ BASELINE = {
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
     "config_leaf_fields": 95,
     # `Settings` fields — what the environment can set.
-    "settings_env": 45,
+    "settings_env": 44,
     # Parameters annotated `Any`.
     "any_params": 39,
     # `dict[str, Any]` maps declared in `domain/`.
@@ -52,7 +52,7 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 13,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 221,
+    "p_served": 220,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 12,
     # The rows each file naming most of them leaves out.

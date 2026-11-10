@@ -48,7 +48,6 @@ from promptpotter.presentation.api.deps import (
     auth_is_open,
     build_stores_from_identity,
     open_caller,
-    require_site_records_token,
     resolve_identity,
 )
 from promptpotter.presentation.api.middleware.headers import ResponseHeadersMiddleware
@@ -57,7 +56,6 @@ from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddlew
 from promptpotter.presentation.api.routers.auth import auth_flow_router
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.reads import READ_ROUTES, reads_router
-from promptpotter.presentation.api.routers.site_records import site_records_router
 from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
@@ -307,7 +305,6 @@ API_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(reads_router, _API, open_caller),
     RouterMount(commands_router, _API, open_caller),
     RouterMount(auth_flow_router, _API, None),
-    RouterMount(site_records_router, _API, require_site_records_token),
 )
 _ROUTES = [
     route for mount in API_ROUTERS for route in mount.router.routes if isinstance(route, APIRoute)

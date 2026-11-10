@@ -31,7 +31,6 @@ Each entry is a boundary, why it sits there, and the symbol that enforces it. Pa
 
 - **A privileged identity or deployment mutation is never an inbound public route.** It goes through an operator-admin channel: an in-zone process that reaches an untrusted message channel outbound only, authenticates the operator in depth, writes through the sanctioned writers and audits to the identity zone, never a tenant ledger. The first is `presentation/admin_bot.py` over `infrastructure/identity/blocklist.py::block_email`; operator-admin reads such as `application/jobs/install_spend.py` follow the same rule. **Why:** the blocklist gates authentication itself; an inbound endpoint puts that on the public surface with its credential in a third-party cloud.
 - **An external orchestrator that must drive an admin action** sits behind an edge service-token broker plus an app token, never a bare endpoint.
-- **`/site-records/{table}` is outside the rule**: a token-gated inbound route carrying no identity or deployment state, read by nothing that decides who may act.
 
 ## 0005 — Delegated principals and capability scoping
 

@@ -1,5 +1,5 @@
-"""Who reached this app from outside without signing in, kept beside the website's visits, and the
-day's account of them the operator hears.
+"""Who reached this app from outside without signing in, and the day's account of them the
+operator hears.
 
 A row is a fact (what was asked, what answered); scanner, bot, person and fetcher are read off the
 rows at digest time, never written onto them. The digest is written for an operator who is no web
@@ -16,15 +16,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, NamedTuple
 
-from promptpotter.infrastructure.store.site_records import (
-    SiteRecord,
-    default_site_record_store,
+from promptpotter.infrastructure.store.visit_records import (
+    VisitRecord,
+    default_visit_record_store,
 )
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
 
-APP_VISITS = "app_visits"
+OUTSIDE_REQUESTS = "requests"
 # One row per day told, keyed by its local date: what was said, and that it was.
-APP_VISIT_DIGESTS = "app_visit_digests"
+_DIGESTS = "digests"
 _KEEP_DAYS = 90
 _DIGEST_HOUR = 7
 _WINDOW_S = 24 * 3600
@@ -79,7 +79,9 @@ def keep_visit(
         "ua": ua[:_FIELD_CHARS],
         "referrer": referrer[:_FIELD_CHARS],
     }
-    default_site_record_store().keep(APP_VISITS, SiteRecord(at=utcnow_iso(), key="", row=row))
+    default_visit_record_store().keep(
+        OUTSIDE_REQUESTS, VisitRecord(at=utcnow_iso(), key="", row=row)
+    )
 
 
 def _hunted(row: dict[str, Any]) -> list[str]:
@@ -118,7 +120,7 @@ class _Address:
         return self.countries.most_common(1)[0][0]
 
 
-def _addresses(records: Iterable[SiteRecord]) -> list[_Address]:
+def _addresses(records: Iterable[VisitRecord]) -> list[_Address]:
     by_ip: dict[str, _Address] = {}
     for record in records:
         at, row = epoch_seconds(record.at) or 0.0, record.row
@@ -169,7 +171,7 @@ def _local(at: float) -> str:
     return f"{local:%a} {local.day} {local:%b %H:%M}"
 
 
-def _trend(days: list[list[SiteRecord]], *, now: float, began: float) -> str:
+def _trend(days: list[list[VisitRecord]], *, now: float, began: float) -> str:
     """People per day, oldest first; a day that ended before counting began has no number."""
     counts = [
         "—"
@@ -196,9 +198,9 @@ def _scans(scanners: list[_Address], answered: list[str]) -> list[str]:
     return lines
 
 
-def visits_digest(records: Iterable[SiteRecord], *, key: str, now: float) -> VisitsDigest:
+def visits_digest(records: Iterable[VisitRecord], *, key: str, now: float) -> VisitsDigest:
     """The last day read for its people first, beside a week of them; *records* may reach further back."""
-    days: list[list[SiteRecord]] = [[] for _ in range(_DAYS_SHOWN)]
+    days: list[list[VisitRecord]] = [[] for _ in range(_DAYS_SHOWN)]
     began = now
     for record in records:
         at = epoch_seconds(record.at) or 0.0
@@ -255,17 +257,19 @@ def due_digest() -> VisitsDigest | None:
     at = time.time()
     local = datetime.fromtimestamp(at).astimezone()
     key = local.date().isoformat()
-    store = default_site_record_store()
-    if local.hour < _DIGEST_HOUR or any(r.key == key for r in store.kept(APP_VISIT_DIGESTS)):
+    store = default_visit_record_store()
+    if local.hour < _DIGEST_HOUR or any(r.key == key for r in store.kept(_DIGESTS)):
         return None
-    return visits_digest(store.kept(APP_VISITS), key=key, now=at)
+    return visits_digest(store.kept(OUTSIDE_REQUESTS), key=key, now=at)
 
 
 def mark_told(digest: VisitsDigest) -> None:
     """Kept only once heard, so a refused send is retried; the visits past retention go with it."""
-    store = default_site_record_store()
+    store = default_visit_record_store()
     store.keep(
-        APP_VISIT_DIGESTS,
-        SiteRecord(at=utcnow_iso(), key=digest.key, row={"text": digest.text, "rang": digest.ring}),
+        _DIGESTS,
+        VisitRecord(
+            at=utcnow_iso(), key=digest.key, row={"text": digest.text, "rang": digest.ring}
+        ),
     )
-    store.drop_before(APP_VISITS, time.time() - _KEEP_DAYS * 24 * 3600)
+    store.drop_before(OUTSIDE_REQUESTS, time.time() - _KEEP_DAYS * 24 * 3600)

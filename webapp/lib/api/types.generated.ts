@@ -4679,25 +4679,6 @@ export interface TermsConsent {
   terms_accepted_version: string | null;
 }
 
-export interface SiteRecordWire {
-  /** When this box kept the row, UTC */
-  at: string;
-  /** Empty on a row that is only ever added */
-  key: string;
-  /** The row as it was sent */
-  row: Record<string, unknown>;
-}
-
-export interface SiteRecordsResponse {
-  /** In the order kept; one per key where rows carry one */
-  records: SiteRecordWire[];
-}
-
-export interface SiteRecordsDropped {
-  /** Rows removed */
-  dropped: number;
-}
-
 /** Record the caller's acceptance of the Terms, server-stamped; a version other
  * than the live one is refused. */
 export interface AcceptTermsPayload {

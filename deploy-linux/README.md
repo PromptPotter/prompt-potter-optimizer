@@ -306,14 +306,14 @@ bot keeps its own clock whether or not commands can arrive: health and the brief
 minutes, power every minute on a machine with a battery, the digest once a day after 07:00 box time.
 
 **Outside visits.** Every request reaching the app from a public address without a session is kept
-in `site_records/app_visits.jsonl` (`presentation/api/middleware/visits.py`; the query only where
+in `app_visits/requests.jsonl` (`presentation/api/middleware/visits.py`; the query only where
 nothing answered, so a served sign-in code is never written), for 90 days. The digest
 (`application/app_visits.py`) puts people first: an address counts as a person only when the
 app's page called its API, so a link preview or an unnamed bot fetching one page does not. Beside
 them stand people per day for the last week (no number before counting began), then everything
 else: bots that name themselves, fetchers that never opened a page, and attack scans with what they
-were after. It is kept by date in `site_records/app_visit_digests.jsonl` and rings only when a
-scan's request was answered.
+were after. It is kept by date in `app_visits/digests.jsonl` and rings only when a scan's request
+was answered.
 
 **Your own browser is never a visitor.** Signing in as `HOST_ADMIN_EMAIL` leaves a `pp-self` cookie
 on the parent domain (`app.example.com` → `example.com`). This app's record skips that browser
@@ -349,10 +349,9 @@ tells them apart. Changes are audited to `blocklist_audit.jsonl` / `grants_audit
   no notice can report); a state change is
   recorded on the box's workspace ledger and told to the bot's chat. It runs at app start, before
   each briefing, and in `update.sh`, where a broken probe fails the deploy.
-- **Your website's records** — `SITE_RECORDS_TOKEN` in the **app's** file, then restart. A caller
-  sending `Authorization: Bearer <token>` can `POST /api/v1/site-records/{table}` (`{row, key}`),
-  `GET …?since=`, `DELETE …?before=` (keyed rows survive). The rows are files under `site_records/`;
-  the box's backup is their only copy.
+
+Your website's own records (visits, sign-ups, newsletter, messages) are not this app's: the site
+keeps them in its own small service beside it (`promptpotter-web` repo, `records/`).
 
 ### Secret hygiene
 

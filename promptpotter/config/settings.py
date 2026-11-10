@@ -181,9 +181,6 @@ class Settings(BaseSettings):
     N8N_TRAIL_WEBHOOK_URL: SecretStr = SecretStr("")
     N8N_TRAIL_WEBHOOK_SECRET: SecretStr = SecretStr("")
 
-    # Unset: `/site-records` does not exist. Set: whoever bears it reads and writes those rows.
-    SITE_RECORDS_TOKEN: SecretStr = SecretStr("")
-
     # A JSON object, like RATE_LIMITS; a unit left out keeps its default.
     HOST_COUPON: HostCoupon = HostCoupon()
 
