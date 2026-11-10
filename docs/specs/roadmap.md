@@ -31,13 +31,13 @@ landed, reviewed and stopped is [`../developer/refactor-arcs.md`](../developer/r
 | **m9r** | M9 | landed in batch 17: M9.5b, M9.2, M9.6, a derived file's fault is a `derived_file_stale` warning and one writer per derived file; M9's rest is DOOR-a and DOOR-a's rest | — |
 | **F1, F2, F3, F4, F5a, F7, F7b** | — | landed in batch 17: admit, then cut; Ctrl+C is the pause press; the coupon under one gate; one door into a job file; the host fact on `IdentityContext`; the tombstone is the delete; the replay serves the first deliberate row | m9r names its hunks |
 | **trace, digest, edge, gate, webcell, weblazy** | M10, —, LA, —, M16, — | landed in batch 18: the dead trace path; the digest cached by content; one outbound poster; one pytest door; one measured-cell renderer and one knob editor; the entry chunk | — |
-| **PASS** | M13 | one held-out pass at all five doors; noise floor and seed screen on the ledger; the skipped verify | m9r |
-| **F5** | — | the tenant directory is the owner; one claim act; consent per principal; the delegate ceiling deleted | F1, F3, F5a |
-| **F6** | M6 | resume decides before it writes; the embedded door dispatches; the mint's commit point | F1 |
-| **DOOR-a** | M9 | one void; fork inheritance, `_Fold` and `append_row` gone | m9r, F2 |
+| **PASS** | M13 | landed in batch 19, links 1-4: verify, the bench grade and the noise floor write the one `VerificationPass`; a stopped pass banks its held cells; a skipped verify banks a refusal. Open: links 5-7 (overlap and repair on the record, one served `can_run`, the verb "held-out" at all five doors) | m9r |
+| **F5** | — | landed in batch 19: the tenant directory is the owner; one claim act; consent per principal; the delegate ceiling deleted | F1, F3, F5a |
+| **F6** | M6 | landed in batch 19: resume decides before it writes; the embedded door exports `pause` and `cancel`; the mint's commit point. Its launch half (the embedded launch dispatches) is START-b's | F1 |
+| **DOOR-a** | M9 | landed in batch 19, links 0-3: one void; fork inheritance, `_Fold` and `append_row` gone. Links 5-6 are DOOR-a's rest | m9r, F2 |
 | **NODE** | M4 | the carrier's nodes typed by `NodeCall`; one config fold; one slot validation; one knob projection | F3, digest |
 | **ELECT** | M19 | one ceiling stop; the election's rows; the lock-in predicate | F2 |
-| **WEBSTATE-a** | M16 | one address, one candidate pick | webcell |
+| **WEBSTATE-a** | M16 | landed in batch 19: one address, one candidate pick in the hash. Open: the tree's detach and re-pair (the ledger's `showForest` row) | webcell |
 | **ARTIFACTS** | M13 | run artifacts are ledger projections; `hard_samples.json` | PASS, DOOR-a |
 | **KNOBROW** | M4 | the param row serves `role` and `editable` | NODE, webcell, WEBSTATE-a |
 | **LAND** | LAND | the landing at every process entry, keyed on the record schema; it drops unloadable run data itself; the atomic-write row first | F4, PASS |

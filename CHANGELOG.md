@@ -15,6 +15,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A run traced to Langfuse no longer creates a `ground_truth` dataset there**: its items were linked to no run.
 - **The embedded surface stops what it starts.** `embedded_run.py` exports `pause` (a running cycle, at its next round boundary) and `cancel` (a command by its id; `grade_bench` takes the `command_id` a host cancels it by), each dispatched as every other door's.
 - **`resume --from N` that halts on a divergence leaves its rounds standing.** The divergence is decided before the rewind is written; a halting divergence refuses before a repair branch is cut. The CLI's unreachable "Fork here?" prompt is gone: a halt is the run's `diverged` stop, whose next act names the fork.
+- **A delegate can no longer set or remove the account's API keys** (`account.keys` is the owner's alone).
+- **Terms consent is per principal.** `/me` answers each principal its own `terms_accepted_version`, so an owner and its delegate each clear the gate for themselves; a landing rebuilds each one's latest acceptance from the consent trail.
+- **`/grant` refuses delegating an account to itself, and a grant carries no `spend_ceiling_usd`.**
+- **A refused host claim rings the operator.**
+- **`verify-candidate` answers a `VerificationGradedView`**: its `refusal`, the pass kind (`noise_floor` among them) and, for a noise floor, a `NoiseBand`. The `noise-floor` CLI's `data` is that view, and a saturation verify that is skipped is banked as skipped.
+- **A pause is accepted while a launch holds its claim**, QUEUED or STARTING, and the run takes it when it starts. A command log with a corrupt line answers 409 `ledger_unreadable`.
+- **A webapp link's `k/` segment is `<round>.<arm>`**, so a pick survives a reload; links copied before this release no longer parse.
+
+### Fixed
+
+- **A pause filed while a launch waited in the queue is no longer voided when the launch starts**, and a run that exits without draining (a raise in its close) still voids what it never took.
+- **A noise floor that raises ends its dashboard mark as stopped**, where it was served running, then orphaned.
 
 ## [0.8.19] — 2026-11-06
 

@@ -263,8 +263,11 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   **Re-test:** a pause filed between the read and the lock leaves the cycle paused.
 - **A stop has two doors**: `declare_run_stop` appends to the bound ledger while
   `CampaignStore.declare_stop` serves admission and `declare_ended`, so the void is spelled at each stop
-  site. Action: one stop door voids the inbox. **Rides with:** STOP-b. **Re-test:** `void_inbox\(` 6
-  falls to the door's own.
+  site: `stores.py::Stores.void_inbox` has three callers outside the store, and the launch calls
+  `command_log.py::CommandLog.void(..., before=)` itself (`run_observers.py::build_run_observers`),
+  because the cut-off is the live claim's timestamp. Action: one stop door voids the inbox and takes
+  the cut-off. **Rides with:** STOP-b. **Re-test:** `git grep -nE "void_inbox\(|commands\.void\(" -- promptpotter/application`
+  lists four sites; the door's own leaves one.
 - **`CommandDispatcher.run_state` delegates to `Stores.run_state`**: 8 callers, one in `new.py`.
   Action: the callers read the stores'. **Held:** until `new.py` is free. **Re-test:**
   `git grep -n "def run_state" -- promptpotter/application/commands/dispatcher.py` is empty.
@@ -323,11 +326,11 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   `campaign_store/store.py::CampaignStore.append` takes `dashboard=True` from `mint_cycle` and
   `declare_stop`. Whether a line moves the dashboard file is a fact of the record (a mint, a stop),
   which the door could read off it. Action: `append` derives it from the records it lands.
-  **Rides with:** DOOR-a. **Re-test:** `git grep -n "dashboard=True" -- promptpotter` is empty.
+  **Rides with:** STOP-b (`declare_stop` is one of its two callers). **Re-test:** `git grep -n "dashboard=True" -- promptpotter` is empty.
 - **A `derived_file_stale` warning names the projection's class, never the file it could not write**:
   `read_model.py::LedgerIndex.shielded` has only the `Projected` protocol, which carries no path, and
   `TracingProjection` and `SpendBook` write no file at all. Action: `Projected` declares what it
-  derives, and the warning names that. **Rides with:** DOOR-a. **Re-test:** a `dashboard.json` write
+  derives, and the warning names that. **Rides with:** DOOR-a's rest (it owns `read_model.py`). **Re-test:** a `dashboard.json` write
   fault's warning detail names `dashboard.json`.
 - **A fork's cut lands before its admission**: `jobs/launcher/admission.py::request_jobs` claims and
   `admit_and_hold` admits money on the request's own hop, so `commands/launching.py::_launch_fork`
@@ -341,7 +344,7 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   is 0.
 - **The CLI repeats `--from`'s bound**: `presentation/cli/commands/resume_command.py` checks `>= 0`
   beside `RunMode.from_round`'s `ge=0`; start-run now refuses past the last close. Action: the CLI
-  checks neither. **Rides with:** F6. **Re-test:** `git grep -n ">= 0" -- promptpotter/presentation/cli/commands/resume_command.py`
+  checks neither. **Rides with:** START-b (one `start()` answers the bound). **Re-test:** `git grep -n ">= 0" -- promptpotter/presentation/cli/commands/resume_command.py`
   is empty.
 - **A head-to-head arm holds outside its release**: `jobs/launcher/head_to_head.py` builds
   `HeldRun.of` and claims after its try. Action: `land_and_claim` inside the arm's release.
@@ -369,7 +372,7 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   holds every `CampaignLaunch` created today, so an account under a lowered daily limit exhausts it
   without minting a campaign. `machine_status.py` reads the same listing for today's refusals, so the
   filter is the quota's, not the listing's. Action: the quota counts `j.admitted or not j.released`;
-  the listing stays whole. **Rides with:** F5. **Re-test:** `git grep -n "list_launched_today(user_id" -- promptpotter/application/jobs/quota.py`
+  the listing stays whole. **Rides with:** START-b (a queued launch becomes a job on disk). **Re-test:** `git grep -n "list_launched_today(user_id" -- promptpotter/application/jobs/quota.py`
   reads its length unfiltered.
 - **A stopped paid pass exits 1 at the CLI, a noise-floor stop exits 130**:
   `presentation/cli/campaign_runner.py::main` maps every `PotterError`, `PassStoppedError` included,
@@ -379,7 +382,8 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   **Rides with:** PASS. **Re-test:** `git grep -cE "except PassStoppedError" -- promptpotter/presentation`
   is 1 (noise_floor).
 - **`default_claim.py::is_host_tenant_dir` is named for a directory but is the user-id check**: the
-  oidc seam stamps through it too. Action: rename it to what it decides. **Rides with:** F5.
+  oidc seam stamps through it too. Action: rename it to what it decides. **Rides with:** MONEY (the
+  host row in § On the box).
   **Re-test:** `git grep -n "is_host_tenant_dir(" -- promptpotter`.
 - **The free tier's budget is both a config default and an admission bound**: `free_tier.yaml`
   `campaign.optimization.budget.usd` is laid by `application/free_tier.py::with_free_tier_layer` and read by
@@ -408,7 +412,43 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   is permanent and keyed on the id, and `runner/campaign_ids.py::mint_campaign_id` draws
   `prefix__token_hex(3)` without asking it, so a new campaign on a tombstoned id meters none of its
   own ledgers (`campaign_spend`, `CampaignStore.metered_spend`). Action: the mint re-draws an id the
-  bank holds as deleted. **Rides with:** F5. **Re-test:** `git grep -n "deleted" -- promptpotter/application/runner/campaign_ids.py`
+  bank holds as deleted. **Rides with:** MONEY (one book of money). **Re-test:** `git grep -n "deleted" -- promptpotter/application/runner/campaign_ids.py`
+  is empty.
+
+### Batch 19's fold (2026-11-10)
+
+What the five chains of batch 19 (`door-a`, `f6`, `f5`, `pass`, `webstate-a`) left standing.
+
+- **The embedded launch files no command**: `application/embedded_run.py::run_campaign` admits through
+  `jobs/launcher/admission.py::embedded_share` and mints itself, so an embedder's launch is not on the
+  account command log (bl1.B13's launch half; its stop half shipped with `pause` and `cancel`). Action:
+  an `Inline` without a slot whose held step (`jobs/launcher/mint_and_start.py::hold_fresh_mint`,
+  `::hold_existing_cycle`) carries the host's `Session`; `run_campaign` dispatches `START_RUN` /
+  `MINT_CAMPAIGN`, and `embedded_share` goes. **Rides with:** START-b. **Re-test:**
+  `git grep -n "embedded_share" -- promptpotter` names `embedded_run.py`.
+- **The mint's wiring reads its own commit back**: `run_observers.py::declare_run_wiring` loads
+  `campaign.json` for `defaults_drift`, so `jobs/mint.py::_mint_campaign` cannot write the campaign
+  last. Action: the caller hands the `Campaign` it declares. **Rides with:** DOOR-b (`declare_*` go).
+  **Re-test:** `git grep -n "load_campaign(" -- promptpotter/application/run_observers.py` is empty.
+- **A mint torn after `adopt_ledger` leaves a directory with no manifest**: no verb lists it, and the
+  draft's billed ledger sits inside it. Action: `cycles` reports it and `reset` sweeps it. **Rides
+  with:** LAND. **Re-test:** kill a mint between `adopt_ledger` and `create_campaign`: `cycles` lists
+  the directory.
+- **The sign-in exchange-failure refusal stays in the router**: `presentation/api/routers/auth.py::callback`
+  calls `account.record_refusal` and `health.is_broken` itself after a failed code exchange, because
+  `application/health.py` imports `account` and the refusal cannot move into `account.py::sign_in_oidc`
+  without a cycle. Action: split `health`'s account dependency, then the callback calls one function.
+  **Rides with:** M22. **Re-test:** `git grep -n "record_refusal" -- promptpotter/presentation` is empty.
+- **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
+  carry their passes beside `VerificationPass`. `.overlap` has 29 sites in 18 files, among them
+  `optimizers/potter/members.py` and `potter/dispatch/injections/panels.py`, which are treatment-digest
+  units outside PASS. Action: both ride the one record, in a chain that owns the potter members and
+  re-proves the digest. **Rides with:** ELECT. **Re-test:** `git grep -n "\.overlap\b" -- promptpotter`
+  is empty.
+- **The pass family spans three domain modules**: `RescoreCount` sits alone in
+  `domain/diagnostic_run.py` and `VerifyReading` in `domain/verify_pass.py`, beside
+  `domain/verification.py`'s `NoiseBand`. Action: one module, its digests re-proved unmoved.
+  **Rides with:** PASS. **Re-test:** `git grep -n "domain.diagnostic_run\|domain.verify_pass" -- promptpotter`
   is empty.
 
 ### The connector and entry-point seam audits (two unbiased reads, 2026-11-06)
@@ -618,13 +658,13 @@ later arc deletes. **Rides with:** the chain each group names, by its "Was" name
 
 **Batch 5 and after.**
 - **U5: one viewed searchpoint.** Three hosts (`searchpointCopyChoices(`) assemble a picked arm from several reads each, the Leader and
-  the inspector show one pick at once, three shapes describe one program, and `SelectionContext.tsx::SelectionProvider`
-  keys a pick beside the hash; the Leader shows the pick by default, so one pick renders twice. Action
+  the inspector show one pick at once, and three shapes describe one program; the Leader shows the pick
+  by default, so one pick renders twice. Action
   (operator, 2026-11-05): one searchpoint read and one rendering that hosts give identity only; the Leader
-  always shows the leader; the pick lives in the hash and renders once, where
+  always shows the leader; the pick (in the hash since batch 19, `workspace.tsx::pick`) renders once, where
   `ScoringInspector.tsx::ScoringInspector` stands, a region A4 keeps. The webapp's selection half lands here, so
-  every candidate component is rewritten once: `SelectionContext.tsx`, `useCandidatesModel`'s bag and the
-  workspace's four-way address become the `Subject` and the served arm row. Compare channels and their
+  every candidate component is rewritten once: `useCandidatesModel`'s bag and
+  `workspace.tsx::ViewedCycle` become the `Subject` and the served arm row. Compare channels and their
   picks are hash state too (`lib/state/compare-selection.ts` today; a reload drops both).
   **Re-test:** `git grep -n "searchpointCopyChoices(" -- webapp`.
 - **D: the catch-up pool.** `validators.py::CatchUps` and `nodes.py::NoCatchUps` declare one protocol with
@@ -809,11 +849,11 @@ Grouped by the arc each would ride; workaround comments and dead top-level names
 - **`runner/output.py`'s artifact writers run imperatively, outside the projection roster**:
   `runner/output.py::write_log_md`, `runner/output.py::write_review_md`, `runner/output.py::publish_export`
   and `runner/output.py::write_hard_samples_artifacts` are called only from `runner/round.py`,
-  `runner/cycle_close.py` and `runner/grade_bench.py`. So `log.md`, `review.md` and the export lag
+  `runner/cycle_close.py` and `scoring/passes.py`. So `log.md`, `review.md` and the export lag
   any other act that moves the ledger, and nothing says so (architecture §0 Display: a
   projection writes only the artifact it declares). Action: each a writing projection on the
   ledger, or the file goes where `readout.log` and `index.json` already carry it.
-  **Re-test:** `git grep -n "write_log_md(\|write_review_md(\|publish_export(" -- promptpotter/application/runner`.
+  **Re-test:** `git grep -n "write_log_md(\|write_review_md(\|publish_export(" -- promptpotter/application/runner promptpotter/application/scoring/passes.py`.
 - **A running verification is orphaned at two seams** (`live_dashboard/projection.py::_handle_run_wiring`,
   `served_dashboard.py::_serve`) and `orphaned=` computed a third way in `_serve`; `_round_axis` and
   `_walk` each re-decide whether `current_round` closed, by different predicates. Action: derive it
@@ -885,8 +925,8 @@ import-graph script before and after; close each wave with `gate.py --only layer
   **Re-test:** one latch.
 - **Modules still off the `lib/CLAUDE.md` § Where a module lives rule**, blocked by the ingest
   rebuild's files, which import them: to `state/` — `hard-samples`, `lineage`,
-  `poll`, `workspace`, `ingest-flow`, `scoring-mask`, `chat/thread`, `SelectionContext` (as
-  `selection.tsx`), `hooks/useConnector`'s provider; to `derivations/` — `cell-means`,
+  `poll`, `workspace`, `scoring-mask`, `chat/thread`, `hooks/useConnector`'s provider; to
+  `derivations/` — `cell-means`,
   `prompt-fields`.
   Chrome still holding a surface: `shell/searchpoint/`, `shell/scoring/` (ingest imports it),
   `shell/node-surface/`, root `PairedLift` / `SummaryBlock`; a surface holding chrome:
@@ -896,19 +936,19 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **Adapters over a flat served shape**: `useCandidatesModel.ts` joins every source it imports;
   `.facts.` opened at `git grep -c "\.facts\." -- webapp/components webapp/lib`; liveness
   re-derived at each `git grep -n "phaseWalks(" -- webapp/components` site.
-- **The derivations barrel pulls the network layer into every chunk that imports it**
-  (`derivations/index.ts` → `candidate-search-point.ts` → `@/lib/poll` → `api/client`).
-  **Rides with:** LW. **Re-test:** `git grep -n "@/lib/poll" -- webapp/lib/derivations` is empty.
-- **Several doors into one state**: candidate selection minted at each
-  `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
-  `setSelectionForSampleSet` from several surfaces, `FileTree::onSelect` drilled through its parents.
-  **Rides with:** WEBSTATE-a.
+- **The derivations barrel still reaches the network layer**: `derivations/connector-state.ts::nodeSchemaReading`
+  imports `hooks/useRead::shownData`, so the barrel reaches `read-cache.ts` → `api/client`. Action: it
+  takes the read's body, not the `ReadResult`. **Rides with:** LW. **Re-test:**
+  `git grep -n "shownData\|read-cache" -- webapp/lib/derivations ':!*__tests__*'` is empty.
+- **Several doors into one state**: the sample set is written through `setSelectionForSampleSet`
+  (`state/selection.tsx`) from several surfaces, and `FileTree::onSelect` is drilled through its parents.
+  **Rides with:** WEBSTATE-b. **Re-test:** `git grep -n "setSelectionForSampleSet" -- webapp/components`
+  lists three files.
 
 ### The candidates surface (review 2026-11-01)
 
 Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap.md) § Arrangeable workspace.
 
-- `useCandidatesModel` writes the module store during render (the per-cycle metric and overlap seeding). **Rides with:** WEBSTATE-a.
 - Two sources for one question: `wonOnTheta` reads `facts.elects_on`, `electedMetric` reads `dash.display_metric`.
 - An interval formatter beside `format.ts`: `shell/searchpoint/VerifyReading.tsx::band` prints its own `[lo, hi]` beside `format.ts::fmtLevelBand` / `fmtInterval`. Action: it reads `fmtLevelBand`. **Held:** no wave-3 chain owns `shell/searchpoint/` (webcell's one `band()` stopped at `components/compare/`). **Re-test:** `git grep -c "function band(" -- webapp` is 0.
 - `TrajectorySeriesView::SeriesHoverPopup` is a hand-built popover beside `ui/Popover`.
@@ -919,8 +959,10 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
   `ForestToggle`). The strip stays (operator, 2026-11-10): it is the bar chart's natural ordering, and
   the bars are far less readable without it. Action: one tree, two layouts, PAIRED (aligned to the
   bars) and FREED (the forest), with one button detaching and re-pairing it, as OBS docks and undocks a
-  source; the long-term UI direction is panes that pair and unpair this way. **Rides with:**
-  WEBSTATE-a. **Re-test:** `git grep -hE "^export function (dendrogram|layout)\(" -- webapp/components/candidates`
+  source; the long-term UI direction is panes that pair and unpair this way. One pick keyed on its
+  `address` (`workspace.tsx::pick`) lets both layouts highlight from it, and the detach is a
+  view-memory flag beside `showForest`. **Rides with:** [`roadmap.md`](roadmap.md) § Arrangeable
+  workspace. **Re-test:** `git grep -hE "^export function (dendrogram|layout)\(" -- webapp/components/candidates`
   prints one line.
 
 ### The webapp swept by shape (debt hunt 2026-11-02)
@@ -956,18 +998,11 @@ fixtures.
   **Re-test:** `git grep -n "rootCycleId(" -- webapp/lib webapp/components`.
 
 **D. One selection and view store.** Extends § The webapp's vanilla pass "Several doors".
-- **The picked candidate lives in two stores**, `workspace.tsx::viewedCandidateId` and
-  `SelectionContext.candidate`: `useSelectNode.pick` writes both, `MeasurementRun.onSelectCandidate`,
-  `ForestCard`'s ctx and `TimeRay` only the second. Action: one owner. **Rides with:** WEBSTATE-a.
-  **Re-test:** `git grep -nE "viewedCandidateId|setCandidate\(" -- webapp/lib webapp/components`.
 - **`showForest` / `expandedLanes` sit in `state/candidates.ts` and `view-memory.tsx::CampaignView`**,
-  written together by `hooks/useLineage.ts` and seeded during render by a latch; the hook's name
-  collides with `lib/lineage.tsx`. Action: view memory alone owns them; rename the hook. **Rides with:** WEBSTATE-a.
-  **Re-test:** `git grep -nE "showForest|expandedLanes" -- webapp/lib`.
-- **`workspace.tsx::WorkspaceState` exposes the viewed address four ways**: `viewedPath`, the root as
-  unqualified `campaignId` / `cycleId`, `leafCampaignId` / `leafCycleId`, and callers running
-  `pathRoot` / `pathLeaf(viewedPath)`. Action: one address value with named root and leaf. **Rides with:** WEBSTATE-a.
-  **Re-test:** `git grep -nE "leafCampaignId|leafCycleId|path(Root|Leaf)\(viewedPath" -- webapp/components webapp/lib`.
+  written together by `hooks/useLineage.ts`, whose latch keeps every lane visited this session open
+  while view memory records none of that; the hook's name collides with `lib/lineage.tsx`. Action:
+  decide whether a visited lane stays open, then view memory alone owns both; rename the hook.
+  **Held:** that decision. **Re-test:** `git grep -nE "showForest|expandedLanes" -- webapp/lib`.
 
 **E. Read discipline.**
 - **`hooks/useNestedPipelines.ts` walks the nest client-side** with its own `MAX_DEPTH` and self-nest
@@ -1051,30 +1086,26 @@ fixtures.
 ### One record shape for every scoring pass (2026-11-01, two independent reads agree)
 
 **Rule: the ledger writes a pass the same way whatever verb sent it**; the verb and the row set are
-fields. The per-cell records already hold it (`SampleScoredRecord` + `role`, for `RECORDED_ROLES`). The
-records ABOUT a pass do not: origin, measure (`MeasureEnterView`), backfill (`RaceCatchUpRecord`),
-overlap (`RoundCells.overlap`), repair (`RoundRestatedRecord`), verify (`VerifyEnterView`,
-`VerifyGradedView`) and bench (`BenchEnterView`, `BenchGradedView`, `BenchScoredView`) each have their
-own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
-
-**First arc: verify and the bench grade**, one act (an individual scored outside a round) built twice.
-- Essential and kept: the row population (REPORT vs BENCH scope, never paired, `SCOPE_ROLES`), the
-  subject (a candidate at a cycle vs the line), the comparator (fresh vs recorded vs origin-paired with
-  `LiftCost`), the fold scope (own ledger vs the line), the bench's reserve and `reads_before`.
-- Accidental and merged: `VerifyPass`/`BenchPass` (same facts, other names), the views, the phase, the
-  fold (one per kind), the renderers, the stop banking (only the bench banks a
-  `PassStop`; a failed verify is inferred from a bare exit), the served can-run answer (only
-  `BenchStatus.can_grade`), where `paid_pass` is taken, the spend bucket and source stamp, where the
-  reading is joined, the chat bracket, the embedded entry (bench only).
-- A skipped automatic verify (§ URGENT) lands as a refusal banked on the one pass; so does a bench pass
-  refused mid-walk, which banks zero cells over paid rows today (bl3.B4: bank the stopped pass on held
-  cells for every `RUN_STOPS`). **Rides with:** PASS.
-- Target: one `VerificationPass` keyed by `VerificationKind`, one enter view and one graded view, one
-  phase, one fold keyed `(kind, arm.key)`, a served can-run status for both. **Decided (U4): one verb
-  with a row choice** — the comparator and subject differ, so the two readings stay.
-- Names: `verify` reads as a correctness check; `bench` collides with `application/bench/` (the
-  optimizer runtime); `bench` / `grade-bench` / "Grade on bench" disagree. "held-out" is the clear word.
-- Ledger shape changes, so run data is wiped; archive and survivor rows untouched.
+fields. Verify, the bench grade and the noise floor now write the one `VerificationPass`
+(`application/scoring/passes.py`), keyed by `VerificationKind`, with one enter view, one graded view,
+one phase and one fold keyed `(kind, arm.key)`; a stopped pass banks its held cells. **Decided (U4):
+one verb with a row choice** — the comparator and subject differ, so the two readings stay.
+Seed-screen keeps its side file (it has no cycle). Overlap and repair keep their own families (a row
+in § Batch 19's fold). What is left of the arc:
+- **Only the bench serves a can-run answer**: `domain/bench.py::BenchStatus.can_grade` is the one served
+  can-run. The hand-written `webapp/components/shell/searchpoint/BenchGradeAction.tsx` and
+  `scripts/offline_run.py` read it by name, and verify serves none. Action: one served `can_run` for
+  both kinds. **Rides with:** PASS (link 6). **Re-test:** `git grep -n "can_grade" -- promptpotter webapp scripts`
+  is empty.
+- **The held-out verb has three names**: `verify`, `bench`, `grade-bench` and "Grade on bench" disagree;
+  `bench` also collides with `application/bench/` (the optimizer runtime), and "held-out" is the clear
+  word. Their holders: `application/embedded_run.py`, `domain/command_kinds.py`,
+  `presentation/cli/commands/verbs.py`, the webapp (`VerifyAction.tsx`, `BenchGradeAction.tsx`,
+  `commands.ts`, `run-phase.ts`), `scripts/offline_run.py`, `tests/test_security.py`. Action:
+  "held-out" at all five doors; the CLI and served words change. **Rides with:** PASS (link 7).
+  **Re-test:** `git grep -n "grade_bench" -- promptpotter webapp scripts` is empty.
+- Run data is wiped at the landing (ledger shape), counted first (`ls .promptpotter/projects/*/campaigns`);
+  archive and survivor rows untouched.
 
 ### Typed state — what the 2026-10-30 arc left (served words → enums + one exported table)
 
@@ -1224,13 +1255,6 @@ Found by the audit that wrote [`roadmap.md`](roadmap.md) § The cleanup chains (
 A fix chain's row lists the bug ids it closes (`bl<part>.B<n>` is the audit's id).
 
 **New shapes.**
-- **The noise band is a cycle fact on a tenant side file**: `application/diagnostics/noise_floor.py:136`
-  writes a `DiagnosticRunRecord` through `stores.diagnostic_runs.save`, which breaks architecture §0.5
-  "No campaign fact on a side file": the band is read beside the cycle's ledger, not folded from it. The
-  recorded side is round 0's fold over other cells than the band's, so the band is printed beside a
-  composite from another exam (bl3.B2). Action: the noise-floor pass is a held-out pass on the cycle's
-  ledger and the side store goes. **Rides with:** PASS. **Re-test:**
-  `git grep -n "diagnostic_runs" -- promptpotter` is empty.
 - **Two functions named `election_rows`**: `domain/origin_panel.py:242` returns the `CellSheet` an
   election reads; `optimizers/potter/dispatch/bundle.py:126` returns the ELECTIONS table's rows for a
   prompt. Action: rename the dispatch one `election_table_rows`. **Rides with:** LC (the rename is
@@ -1250,10 +1274,6 @@ A fix chain's row lists the bug ids it closes (`bl<part>.B<n>` is the audit's id
   (`presentation/` may not import `infrastructure/`). Action: if `presentation/admin_bot.py` is given a
   sanctioned infrastructure seam, drop it. **Held:** a decision on that seam. **Re-test:**
   `git grep -n "answer_operator" -- promptpotter` names `admin_bot.py` and `notices.py` alone.
-- **Sign-in policy lives in the router**: `presentation/api/routers/auth.py::callback` (`:203-255`) decides
-  blocked, claim, ceiling and announce, while `presentation/CLAUDE.md` holds no business logic. Action:
-  one `application/` sign-in act, arrival included, that the callback calls. **Rides with:** M22.
-  **Re-test:** `auth.py::callback` calls one application function and branches on no account state.
 - **The wheel's "install it elsewhere and run it" is written twice**: `.github/workflows/ci.yml:75-84` and
   `publish.yml:86-97` carry the same venv, `pip install …[api]`, `--help` and `smoke_wheel.py` block.
   Action: `scripts/smoke_wheel.py` takes the wheel, makes the venv outside the checkout and runs itself
@@ -1266,33 +1286,6 @@ A fix chain's row lists the bug ids it closes (`bl<part>.B<n>` is the audit's id
   **Re-test:** `python scripts/gate.py --py` lists `walk-world`.
 
 **Bugs, by fix chain** (each chain is one session of one-decision links).
-- **F1, a torn mint**: bl1.B15 (= bl5.B4). A mint that dies between `adopt_ledger`, `create_campaign`
-  and `mint_cycle` leaves an invisible directory or a campaign with no cycle. Root: `campaign.json` is
-  written last, as the mint's commit (`application/jobs/mint.py`). **Rides with:** `f6` (its link 4).
-  **Re-test:** `git grep -n "adopt_ledger(\|create_campaign(\|mint_cycle(" -- promptpotter/application/jobs/mint.py`
-  lists the adoption and the cycle's mint after the campaign's creation.
-- **F2, one stop, one void**: bl1.B10, B11, B16. Root: a pause is read only while held, and the launch
-  voids only what stood before its hold (`domain/phases.py`, `infrastructure/runtime_flags.py`,
-  `run_observers.py`). B10 first: the void cutoff, which opens DOOR-a. B11 follows it: a pause is
-  refused while CLAIMED, because the launch voids what was asked before its hold.
-  `domain/phases.py::RunState.pause_refusal` refuses pause on `ProducerState.CLAIMED`, and
-  `cancel-queued` 404s and a start's `cancel` raises `TaskUncancellableError` once a job is promoted, so
-  no door stops a CLAIMED cycle. Dropping the refusal alone would accept a pause that
-  `run_observers.py::build_run_observers` then voids at the boundary (`void_inbox` after `hold_cycle`).
-  Action: void only what stood before the hold (the command log's book line read before `hold_cycle`),
-  then delete the CLAIMED branch of `pause_refusal`. B16 stays with B10. **Rides with:** `door-a`.
-  **Re-test:** `git grep -n "ProducerState.CLAIMED" -- promptpotter/domain/phases.py` still shows the
-  `pause_refusal` branch.
-- **F5, identity: the owner, the claim**: bl4.B3 (= bl5.B3, `--tenant X` acts as user `default`), B4
-  (the first sign-in can orphan `projects/default/`), B5 (a delegate's accept overwrites its
-  delegator's), B6 (= bl2.B6, the delegate spend ceiling has no writer), B7, B8, bl2.B10. Root: the
-  tenant directory owns; one claim act. **Rides with:** F5. **Re-test:** B3 first:
-  `git grep -n "default_identity(tenant_id=explicit_tenant)" -- promptpotter/application/account.py`
-  lays no `user_id`, so `--tenant X` acts as user `default`.
-- **F6, resume and the embedded door**: bl1.B8 (`resume --from N` rewinds before the divergence check),
-  B13 (the embedded door launches its own way and exports no pause or cancel), B14 (the CLI's divergence
-  prompt is unreachable). Root: decide before writing; the fifth door dispatches. **Rides with:** F6.
-  **Re-test:** `git grep -n "divergence_hint" -- promptpotter` is empty.
 - **A destroyer takes the cycle claim (bl2.B7)**: `campaign_store/store.py::CampaignStore.delete_campaign`
   checks for no attached producer (`_guard_and_release`), banks, then removes, with no admission gate or
   claim held. A `start-run` admitted between the guard and the bank attaches to a cycle whose ledger is

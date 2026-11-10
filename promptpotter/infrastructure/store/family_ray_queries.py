@@ -1,4 +1,4 @@
-"""**Never read through ``CycleEventLog.iter``**: a fork's replays the prefix the ray already read."""
+"""**A ray reads each cycle's own file**: ``CycleEventLog.iter`` is an own-file read, and a fork's prefix lies in its ancestors' files, which ``ledger_chain`` joins."""
 
 from __future__ import annotations
 

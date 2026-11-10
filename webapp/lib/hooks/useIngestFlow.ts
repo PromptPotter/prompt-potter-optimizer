@@ -93,7 +93,7 @@ export interface IngestFlow {
   cancelCollision: () => void;
 }
 
-// Instantiate ONCE, in `lib/ingest-flow.tsx`. It holds the check-in of `subject`: moving to another
+// Instantiate ONCE, in `lib/state/ingest-flow.tsx`. It holds the check-in of `subject`: moving to another
 // check-in resets it, and every continuation of the one left behind is dropped (`alive`).
 export function useIngestFlow({
   subject,
