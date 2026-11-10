@@ -15,13 +15,14 @@ from promptpotter.application.runner.bench import (
 )
 from promptpotter.application.scoring.closed_rounds import cycle_instrument
 from promptpotter.domain.arms import candidate_label
-from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun, PartitionRecord
+from promptpotter.domain.bench import BenchScore, LineRun, PartitionRecord
 from promptpotter.domain.campaign import Campaign, worked_seconds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import LaunchClockRecord
 from promptpotter.domain.run_standing import LineOutlay
 from promptpotter.domain.spend import Budget, SpendRollup
+from promptpotter.domain.verification import BenchPasses
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     LedgerSpend,
     scan_bench_open,
@@ -159,7 +160,6 @@ async def bench_origin(
         session,
         passes.origin,
         subject="origin",
-        label=candidate_label(0, 0),
         reserve=Budget.amount(passes.reserve_usd, passes.reserve_tokens),
     )
     return passes

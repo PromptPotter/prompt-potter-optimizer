@@ -32,14 +32,6 @@ command or question that says it still stands. Run the re-test before acting.
   health sentence still reads `llm_only failed: llm_only: …`. Action: the message is the fault alone.
   **Rides with:** M18. **Re-test:** `git grep -n "failed: {" -- backend-api/api`
   in the TermNorm checkout.
-- **A skipped automatic verify is a log line**: `diagnostics/verify.py::verify_on_saturation` catches
-  `DiagnosticError` / `BankedSearchPointError` (no round scored the winner, its banked point does not
-  rebuild, no closed round 0, a pause before any cell, no scoreable fresh cell) into `logger.info`, and
-  `verify_candidate` re-opens the session from disk mid-loop. No verify record holds a skip: most raise
-  before `VerifyEnterView`, and propagating would stop a run over an optional pass. Action: the skip is
-  a refusal banked on the one pass that § One record shape for every scoring pass builds, served in its
-  can-run status. **Rides with:** PASS. **Re-test:**
-  `git grep -n "verify skipped" -- promptpotter/application/diagnostics/verify.py`.
 
 - **PoBB re-decides a round a pause cut, and decides it differently** — capo-pobb paused at a fresh
   cell past round 2's banked walk and resumed: the resume banks two eliminator decisions beside the
@@ -1070,7 +1062,7 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   subject (a candidate at a cycle vs the line), the comparator (fresh vs recorded vs origin-paired with
   `LiftCost`), the fold scope (own ledger vs the line), the bench's reserve and `reads_before`.
 - Accidental and merged: `VerifyPass`/`BenchPass` (same facts, other names), the views, the phase, the
-  fold (`ledger_scan.py::_Verify` vs `_Bench`), the renderers, the stop banking (only the bench banks a
+  fold (one per kind), the renderers, the stop banking (only the bench banks a
   `PassStop`; a failed verify is inferred from a bare exit), the served can-run answer (only
   `BenchStatus.can_grade`), where `paid_pass` is taken, the spend bucket and source stamp, where the
   reading is joined, the chat bracket, the embedded entry (bench only).

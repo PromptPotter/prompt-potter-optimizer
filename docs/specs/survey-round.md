@@ -61,7 +61,7 @@ seat, never inside an inner cell (`application/runner/inner/tasks.py::inner_inst
 Served; no surface recomputes it.
 
 - **Per arm:** level with a Wilson interval, the constant-answer floor, the margin over it, the modal
-  answer share, $/row and s/row. The floor logic moves from `application/diagnostics/seed_screen.py`
+  answer share, $/row and s/row. The floor logic moves from `application/scoring/seed_screen.py`
   (`class_floor`, `SeedReading`) into `domain/`, beside `domain/scoring.py::modal_answer_share`.
 - **Per round:** separability (arm-level spread against pooled SE), learnability (mean p̂(1−p̂)),
   position (against the floor, and `accuracy_ceiling` only where declared).

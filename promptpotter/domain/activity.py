@@ -8,7 +8,7 @@ from pydantic import Field
 from promptpotter.domain.arms import Cut, Measured, candidate_label
 from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phase_views import BenchEnterView
+from promptpotter.domain.phase_views import VerificationEnterView
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     CampaignPhase,
@@ -545,18 +545,18 @@ class ActivityFeed:
             return None
         # Without this bracket the pass's row ticks read as the last candidate scoring again.
         view = record.view
-        if not isinstance(view, BenchEnterView):
+        if not isinstance(view, VerificationEnterView):
             if record.event == "exit":
                 self._bench = None
             return None
-        candidate = view.label or None
-        who = "origin" if view.subject == "origin" else f"R{view.round} selection"
-        self._bench = _BenchPass(view.arm, candidate, who, view.rows)
+        candidate = view.arm.label or None
+        who = "origin" if view.subject == "origin" else f"R{view.arm.round} selection"
+        self._bench = _BenchPass(view.arm.key, candidate, who, view.rows)
         return ActivityItem(
             id=item_id,
             kind="round",
             icon="◇",
             label=f"{candidate} · bench pass" if candidate else "bench pass",
             detail=f"{who} · {view.rows} held-out rows",
-            arm=view.arm,
+            arm=view.arm.key,
         )

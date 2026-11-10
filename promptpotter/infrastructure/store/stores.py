@@ -21,7 +21,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     claim_own_definition,
     render_framing_file,
 )
-from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
 from promptpotter.infrastructure.store.draft_store import DraftStore
 from promptpotter.infrastructure.store.io import validate_path_component, write_text, write_yaml
 from promptpotter.infrastructure.store.layout import (
@@ -61,7 +60,6 @@ class Stores:
     archive: MeasurementArchive
     optimizer_reuse: LLMReuseCache
     judge_reuse: LLMReuseCache
-    diagnostic_runs: DiagnosticRunStore
     users: UserStore
     grant: GrantStore
     api_keys: TenantApiKeyStore
@@ -187,7 +185,6 @@ def build_stores(
         archive=MeasurementArchive.at(home.root),
         optimizer_reuse=LLMReuseCache(home.root, paths.OPTIMIZER_REUSE_DIR),
         judge_reuse=LLMReuseCache(home.root, paths.JUDGE_REUSE_DIR),
-        diagnostic_runs=DiagnosticRunStore(tenant_dir),
         users=UserStore(tenant_dir),
         # The account's, never a sandbox's: an L4 inner run spends from the wallet of its owner.
         grant=GrantStore(account),

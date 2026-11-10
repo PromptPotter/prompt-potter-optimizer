@@ -32,7 +32,7 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.spend import Budget, usd_text
 from promptpotter.infrastructure.store.dataset_access import resolve_dataset, runnable_definition
 from promptpotter.infrastructure.store.io import write_json
-from promptpotter.infrastructure.store.layout import dataset_id_prefix
+from promptpotter.infrastructure.store.layout import DIAGNOSTICS_DIR, dataset_id_prefix
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import DiagnosticError
 
@@ -361,11 +361,13 @@ async def _screen(
                 + (" REWARDS COLLAPSE" if reading.rewards_collapse else "")
             )
 
-        # No ledger event: a screen is not a run, nor a `DiagnosticRunRecord` (a re-scored origin).
+        # No ledger event: a screen has no cycle to file it, so it is the one pass on a side file.
         readings.sort(key=lambda r: r.rank_key)
         solver_tag = "" if model is None else "-" + re.sub(r"[^A-Za-z0-9.-]+", "-", model)
-        path = stores.diagnostic_runs.sidecar_path(
-            f"seed-screen-{dataset_id_prefix(dataset_name)}{solver_tag}-{utcnow_iso()[:10]}.json"
+        path = (
+            stores.base_dir
+            / DIAGNOSTICS_DIR
+            / f"seed-screen-{dataset_id_prefix(dataset_name)}{solver_tag}-{utcnow_iso()[:10]}.json"
         )
         write_json(
             path,

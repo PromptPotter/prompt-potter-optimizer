@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
+from promptpotter.application.scoring.seed_screen import screen_inner_seeds
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.spend import usd_text
 from promptpotter.presentation.cli.commands.result import CommandResult

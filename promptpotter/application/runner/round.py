@@ -9,7 +9,6 @@ from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext, bank_proposals, reread_walk
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.round_analysis import ended_on
-from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import (
     INITIAL_POPULATION,
@@ -31,6 +30,7 @@ from promptpotter.application.runner.output import (
 )
 from promptpotter.application.runner.overlap import measure_overlap
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
+from promptpotter.application.scoring.passes import verify_on_saturation
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
 from promptpotter.application.views.render.phase import stop_next_lines
 from promptpotter.domain.arms import ArmState, Measured, Proposal, is_leader_eligible
@@ -570,6 +570,7 @@ async def post_round(
         accuracy=None if fold is None else fold.accuracy,
         winner_id=None if election is None else election.selected,
         seed=cycle.rng(round_num, "verify").getrandbits(31),
+        cb=cb,
     )
     await grade_round_selection(cycle, session, round_result, cb=cb)
     reserve_selection_pass(cycle, session)

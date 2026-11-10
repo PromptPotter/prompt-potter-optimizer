@@ -6,20 +6,18 @@ from pathlib import Path
 from typing import assert_never
 
 from promptpotter.domain.arms import Concluded, Measuring
-from promptpotter.domain.bench import BenchReading
+from promptpotter.domain.bench import BandedValue, BenchReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
-from promptpotter.domain.dashboard_rows import RoundSummary, VerificationKind, VerificationMark
+from promptpotter.domain.dashboard_rows import RoundSummary, VerificationMark
 from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
 from promptpotter.domain.phase_views import (
-    BenchEnterView,
-    BenchGradedView,
     BenchScoredView,
     InitEnterView,
     InitExitView,
     OptimizerStepEnterView,
     RoundStartView,
-    VerifyEnterView,
-    VerifyGradedView,
+    VerificationEnterView,
+    VerificationGradedView,
 )
 from promptpotter.domain.phases import (
     CampaignPhase,
@@ -58,6 +56,8 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup, spend_slot
+from promptpotter.domain.verification import NoiseBand, VerificationKind
+from promptpotter.domain.verify_pass import VerifyReading
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
 from promptpotter.infrastructure.projections.base import Projection
@@ -280,41 +280,40 @@ class LiveDashboardProjection(Projection):
                 self._proposer_node = view.node
             case OptimizerStepEnterView():
                 self._step_node = view.node
-            case BenchEnterView():
+            case VerificationEnterView():
                 self._in_pass = True
-                arm = ArmName(key=view.arm, round=view.round, label=view.label)
-                self._mark(_opened("bench", arm, view.rows))
-            case VerifyEnterView():
-                self._in_pass = True
-                self._mark(_opened("verify", view.arm, view.rows))
+                self._mark(_opened(view.verification, view.arm, view.rows))
             case BenchScoredView():
                 for reading in (view.bench.origin, view.bench.selected):
                     if reading is not None:
                         self._place_bench(reading)
-            case BenchGradedView(bench_pass=taken, reading=reading):
-                if reading is not None:
-                    self._place_bench(reading)
-                arm = ArmName(key=ArmKey(taken.candidate_id), round=taken.round, label=view.label)
-                self._mark(
-                    _opened("bench", arm, len(taken.sample_keys)).ended(
-                        scored=len(taken.cells) if reading is None else reading.n,
-                        level=None if reading is None else reading.level,
-                        failed_as=None if reading is not None else view.state,
-                    )
-                )
-            case VerifyGradedView(verify_pass=banked, reading=read):
-                self._mark(
-                    _opened("verify", banked.arm, len(banked.positions)).ended(
-                        scored=read.fresh.n, level=read.fresh.accuracy, failed_as=None
-                    )
-                )
+            case VerificationGradedView(verification=taken, reading=read):
+                opened = _opened(taken.kind, taken.arm, len(taken.sample_keys))
+                match read:
+                    case None:
+                        ended = opened.ended(
+                            scored=len(taken.cells), level=None, failed_as=view.state
+                        )
+                    case BenchReading():
+                        self._place_bench(read)
+                        ended = opened.ended(scored=read.n, level=read.level, failed_as=None)
+                    case VerifyReading(fresh=fresh):
+                        ended = opened.ended(scored=fresh.n, level=fresh.accuracy, failed_as=None)
+                    case NoiseBand(fresh_accuracy=accuracy):
+                        # Its rows are every rescore's, as its bracket opened them.
+                        ended = _opened(taken.kind, taken.arm, len(taken.cells)).ended(
+                            scored=len(taken.cells),
+                            level=BandedValue(value=accuracy, ci_lo=None, ci_hi=None),
+                            failed_as=None,
+                        )
+                self._mark(ended)
         if record.event == "exit" and record.phase in (CampaignPhase.BENCH, CampaignPhase.VERIFY):
             self._in_pass = False
         if record.phase == CampaignPhase.VERIFY and record.event == "exit":
-            # A verify is graded inside its bracket; a bench pass after it.
+            # A verify or a noise floor is graded inside its bracket; a bench pass after it.
             s.verification = [
                 m.ended(scored=m.scored, level=None, failed_as=ReadingState.PASS_STOPPED)
-                if m.kind == "verify" and m.state == "running"
+                if m.kind != "bench" and m.state == "running"
                 else m
                 for m in s.verification
             ]

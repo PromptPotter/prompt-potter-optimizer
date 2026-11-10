@@ -36,12 +36,12 @@ from promptpotter.infrastructure.store.read_model import Moment
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.domain.bench import BenchPasses
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
+    from promptpotter.domain.verification import BenchPasses
 
 
 def _sibling_runtime_failures(session: Session) -> list[RuntimeFailure]:

@@ -144,7 +144,7 @@ fitness are read on the selecting rows; the clean number is the held-out bench s
 sees ([`../architecture.md`](../architecture.md) § The bench score is not an optimizer's selection).
 
 **The bench set is spent by reuse.** Every campaign kept or dropped off its headline is one adaptive
-query against the same rows; each pass stamps the count (`BenchPass.reads_before`), the headline
+query against the same rows; each pass stamps the count (`VerificationPass.reads_before`), the headline
 serves its selection's (`BenchStatus.reads_before`). There is deliberately no once-only split — a
 head-to-head needs every pick graded on ONE set; a new `run_seed` is the fresh holdout, and the count
 says when one is due. [arXiv:2605.05973](https://arxiv.org/abs/2605.05973) corrects the curse

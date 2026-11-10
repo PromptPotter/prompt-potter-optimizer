@@ -34,7 +34,6 @@ from promptpotter.domain.campaign import Campaign, HeadToHeadRecord
 from promptpotter.domain.checkin_draft import DraftFile, OriginResolution
 from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.diagnostic_run import DiagnosticRunRecord
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER
 from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
@@ -448,13 +447,6 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
     ),
     Kind("ruler", _WS, RULER_FILE, Fate.RUN, TypeAdapter(RulerFold)),
     Kind("diagnostic", _WS, f"{DIAGNOSTICS_DIR}/*.json", Fate.RUN),
-    Kind(
-        "diagnostic run",
-        _WS,
-        f"{DIAGNOSTICS_DIR}/runs/*.json",
-        Fate.RUN,
-        TypeAdapter(DiagnosticRunRecord),
-    ),
     Kind(
         "materialized panel",
         _WS,

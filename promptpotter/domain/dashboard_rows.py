@@ -19,6 +19,7 @@ from promptpotter.domain.ruler import LevelSeries, SeriesReading
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.domain.verification import VerificationKind
 from promptpotter.domain.verify_pass import VerifyReading
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -168,10 +169,6 @@ class RunLimits(StrictModel):
     optimizer: list[OptimizerLimit] = Field(default_factory=list)
 
 
-#: `verify` re-scores search rows the arm never read; `bench` reads the held-out rows.
-VerificationKind = Literal["verify", "bench"]
-
-
 class VerificationKindInfo(NamedTuple):
     name: str
     # Appended to the row count: what the rows are, where the name does not already say it.
@@ -182,6 +179,7 @@ VERIFICATION_KIND_INFO: Worded[VerificationKind, VerificationKindInfo] = Worded(
     {
         "verify": VerificationKindInfo("verify", " never seen"),
         "bench": VerificationKindInfo("held-out bench", ""),
+        "noise_floor": VerificationKindInfo("noise floor", " re-scored"),
     }
 )
 VerificationState = Literal["running", "done", "failed"]

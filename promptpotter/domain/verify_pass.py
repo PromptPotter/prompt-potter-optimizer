@@ -5,10 +5,8 @@ from typing import Literal, Self, get_args
 from pydantic import Field, model_validator
 
 from promptpotter.domain.bench import OwnLevel
-from promptpotter.domain.paired_reading import ArmName, PairedReading
-from promptpotter.domain.scoring import WalkedCell
+from promptpotter.domain.paired_reading import PairedReading
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.measurement_context import IndividualWalk, MeasurementRole
 from promptpotter.shared.worded import Worded
 
 VerifyStrategy = Literal["random", "hard"]
@@ -21,22 +19,6 @@ VERIFY_STRATEGY_LABELS: Worded[VerifyStrategy, str] = Worded(
 )
 if set(VERIFY_STRATEGY_LABELS) != set(get_args(VerifyStrategy)):
     raise RuntimeError("VERIFY_STRATEGY_LABELS is out of step with VerifyStrategy")
-
-
-class VerifyPass(FrozenModel):
-    """The facts a verify pass banked, never a grade of them."""
-
-    arm: ArmName
-    sp_hash: str
-    cells: list[WalkedCell]
-    positions: list[int]
-    strategy: VerifyStrategy
-    seed: int | None
-    # The grader that stamped its live reading; a reader re-grades under its own.
-    scorer_id: str
-
-    def walk(self) -> IndividualWalk[WalkedCell]:
-        return IndividualWalk(self.arm.key, frozenset({MeasurementRole.VERIFY}), self.cells)
 
 
 VerifyHeldAbsent = Literal["hard_picks", "under_two_fresh"]

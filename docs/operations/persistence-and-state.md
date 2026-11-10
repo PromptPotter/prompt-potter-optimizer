@@ -44,7 +44,8 @@ One minter and reader, `domain/cycle_paths.py::Subject` (`address` / `parse_addr
 | `verify <subject>`, `bench` | fresh search cells on one candidate (never a re-ask of a scored one); grade origin and selection on the bench rows |
 | `ab` | replay the election under the current engine, stop at the first flipped decision |
 | `evidence`, `cycles`, `machine-status`, `trail`, `price-head-to-head <plan>`, `export --tier` | reads whose answer is in no file |
-| `seed-screen`, `noise-floor`, `probe-reasoning` | CLI-only paid diagnostics outside any cycle |
+| `seed-screen`, `probe-reasoning` | CLI-only paid diagnostics outside any cycle; `seed-screen`'s reading is a side file under `diagnostics/` |
+| `noise-floor` | CLI-only: `k` fresh re-scores of the origin's round-0 rows, filed on the cycle's ledger as a `noise_floor` held-out pass beside the recorded level on exactly those rows |
 | `compact-archive <inventory \| compact \| restore \| purge-cold> [--apply]` | the only verb that can destroy a measurement: `compact` moves `domain/scoring.py::UNREAD_PIPELINE_KEYS` off `panel` answers into `measurements/cold/`, `restore` puts them back, `purge-cold` is irreversible; `origin`/`parent` answers are never eligible |
 | `reset`, `land-data`, `close-admission` | the data-root verbs — [`../decisions.md`](../decisions.md) § 0011 |
 | `reindex`, `pin-roster`, `offer-extras`, `health` | rebuild `measurements/index.jsonl`; pin a Harbor roster; list the extras the offered datasets need; check backends and sign-in providers |

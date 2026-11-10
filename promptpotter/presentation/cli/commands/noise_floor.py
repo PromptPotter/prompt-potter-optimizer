@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 
 from promptpotter.application.cycle_addressing import named_campaign, resolve_cycle_id
-from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.application.jobs.launcher.admission import PassStoppedError
+from promptpotter.application.scoring.passes import measure_noise_floor
+from promptpotter.application.views.render.ansi import render_noise_band
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import PauseCyclePayload
 from promptpotter.domain.cycle_paths import CycleHop
@@ -35,14 +36,4 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
             human=f"{stopped} No band is banked.", exit_code=StopOutcome.PAUSED.exit_code
         )
 
-    record = outcome.record
-    raw = ", ".join(f"{v:.4f}" for v in record.noise_floor_raw)
-    human = (
-        f"noise-floor {campaign_id}/{cycle_id} C0: k={record.noise_floor_k} "
-        f"composite {record.noise_floor_mean:.4f} "
-        f"[{record.noise_floor_ci_lo:.4f}, {record.noise_floor_ci_hi:.4f}] "
-        f"on {record.workspace_n} samples (raw: {raw}). "
-        f"Origin's recorded composite was {record.source_campaign_composite:.4f}. "
-        f"Record → {outcome.artifact_path}"
-    )
-    return CommandResult(data=record.model_dump(), human=human)
+    return CommandResult(data=outcome.model_dump(), human=render_noise_band(outcome))

@@ -76,7 +76,7 @@ of the cycle that sent it; the campaign's passes are the fold of its LINE's ledg
 (`application/runner/campaign_result.py::line_launches`). Only the cycle holding the line writes either.
 
 **When passes are sent is the campaign's `bench_trigger`; the default (`manual`) sends none**: the `bench` verb
-(`application/runner/grade_bench.py::grade_line_bench`) sends both on demand; `at_end` sends the origin's before
+(`application/scoring/passes.py::grade_line_bench`) sends both on demand; `at_end` sends the origin's before
 round 1 and the selection's at the end; `each_round` adds every selecting round. Where the bench stands is ONE
 served `BenchStatus` (`domain/bench.py::bench_status`), which the browser, the terminal and the verb's admission
 all read.
@@ -94,7 +94,7 @@ Every read grades under a scorer it names, through ONE derivation: facts → gra
 mask take that step, so rows banked under one formula read under another exactly as a fresh run would. **A lens
 is a scorer, not a formula over aggregates**: `score:F` is the campaign's scoring block with `per_cell` set to
 `F` ([`../operations/mask-projection.md`](../operations/mask-projection.md)). **The bench headline is one more
-such reading**: a pass banks facts (`domain/bench.py::BenchPass`) and `application/runner/bench.py::read_bench` is
+such reading**: a pass banks facts (`domain/verification.py::VerificationPass`) and `application/runner/bench.py::read_bench` is
 the one derivation to a `BenchScore`, stamped with its `scorer_id`. A formula that cannot be evaluated
 (`ScoringFormulaError`) halts the run; it is never written into a row. A formula CHANGE on a running cycle is
 [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § Changing the composite

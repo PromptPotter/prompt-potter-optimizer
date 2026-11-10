@@ -8,7 +8,6 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.diagnostics.seed_screen import class_floor, draw_bank, draw_bench
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import inner_share
 from promptpotter.application.jobs.mint import (
@@ -37,6 +36,7 @@ from promptpotter.application.runner.inner.tasks import (
     inner_instrument_config,
     panel_cell,
 )
+from promptpotter.application.scoring.seed_screen import class_floor, draw_bank, draw_bench
 from promptpotter.application.views.render.primitives import fmt_pct
 from promptpotter.domain.arm_reading import ArmFit, order_floor
 from promptpotter.domain.arms import Cut, Measured

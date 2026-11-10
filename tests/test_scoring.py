@@ -1,7 +1,7 @@
 """A wrong score or a wrong decision.
 
 Owns `application/scoring/`, `shared/statistics.py`, `optimizers/potter/pobb/` and
-`optimizers/potter/escalation/`, the runner's election, `diagnostics/verify.py` and `evidence/`.
+`optimizers/potter/escalation/`, the runner's election, `scoring/passes.py` and `evidence/`.
 The run completes, the dashboard looks fine, and a different candidate should have won.
 """
 
@@ -14,8 +14,8 @@ import json
 import random
 import signal
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterator, Sequence
+from contextlib import asynccontextmanager, contextmanager
 from itertools import count, product
 from math import sqrt
 from pathlib import Path
@@ -80,7 +80,6 @@ from promptpotter.application.commands.dispatcher import (
     CommandCall,
     CommandDispatcher,
 )
-from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.head_to_head import GuardDifference, GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.host_surface import (
@@ -92,7 +91,10 @@ from promptpotter.application.host_surface import (
     TaskResultOf,
     TaskStatusOf,
 )
-from promptpotter.application.initialization.loop_start import populate_session_scoring
+from promptpotter.application.initialization.loop_start import (
+    OpenedDiagnostic,
+    populate_session_scoring,
+)
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
 from promptpotter.application.intelligence.rasch import (
@@ -170,6 +172,7 @@ from promptpotter.application.runner.measurement import ReferencePairs
 from promptpotter.application.runner.round import announce_opening, execute_round, run_init
 from promptpotter.application.runner.termination import standing_tripped, target_tripped
 from promptpotter.application.scoring import closed_rounds, evaluators, query_loop
+from promptpotter.application.scoring import passes as held_out
 from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.scoring.evaluators import (
@@ -196,6 +199,7 @@ from promptpotter.application.scoring.paired import (
     grade_measurands,
     read_pair,
 )
+from promptpotter.application.scoring.passes import verify_member, verify_reading
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
@@ -215,11 +219,17 @@ from promptpotter.connectors import n8n
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector, cell_envelope_of
 from promptpotter.connectors.termnorm import termnorm_wire_adapter
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
-from promptpotter.domain.arms import ArmSlot, Cut, CutKind, Measured, arm_end, is_leader_eligible
+from promptpotter.domain.arms import (
+    ArmSlot,
+    Cut,
+    CutKind,
+    Measured,
+    Proposed,
+    arm_end,
+    is_leader_eligible,
+)
 from promptpotter.domain.bench import (
     COST_ABSENCE_WORDS,
-    BenchPass,
-    BenchPasses,
     CostAbsence,
     DatasetSplit,
     PassStop,
@@ -243,6 +253,8 @@ from promptpotter.domain.command_kinds import (
     VerifyCandidatePayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
+from promptpotter.domain.dashboard_rows import RunLimits
+from promptpotter.domain.diagnostic_run import RescoreCount
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
@@ -271,7 +283,7 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
     RoundArm,
 )
-from promptpotter.domain.phase_views import BenchGradedView
+from promptpotter.domain.phase_views import VerificationGradedView
 from promptpotter.domain.phases import (
     CampaignPhase,
     PauseCause,
@@ -300,6 +312,7 @@ from promptpotter.domain.run_records import (
     PhaseRecord,
     RoundWarningRecord,
     RunPhaseRecord,
+    RunWiringRecord,
 )
 from promptpotter.domain.run_standing import (
     LineOutlay,
@@ -325,7 +338,8 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget, TokenUsageKind
-from promptpotter.domain.verify_pass import VerifyPass, VerifyStrategy
+from promptpotter.domain.verification import BenchPasses, NoiseBand, VerificationPass
+from promptpotter.domain.verify_pass import VerifyStrategy
 from promptpotter.domain.wounds import fatal_validation_failures
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
@@ -339,6 +353,9 @@ from promptpotter.infrastructure.llm.spend_book import (
 )
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import cycle_held, release_cycle
+from promptpotter.infrastructure.projections.live_dashboard.projection import (
+    LiveDashboardProjection,
+)
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
@@ -352,6 +369,7 @@ from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.shared.answer_text import extract_gsm8k_number
 from promptpotter.shared.errors import (
     ConflictError,
+    DiagnosticError,
     ErrorCategory,
     NotFoundError,
     PayloadInvalidError,
@@ -359,7 +377,13 @@ from promptpotter.shared.errors import (
     SendRefusedError,
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal
-from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
+from promptpotter.shared.measurement_context import (
+    IndividualWalk,
+    MeasuredPass,
+    MeasurementRole,
+    RoleScope,
+    individual_cells,
+)
 from promptpotter.shared.plugin_registry import Registry
 from promptpotter.shared.run_scope import scoped
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
@@ -1260,7 +1284,7 @@ def _potter_says(*instructions: str) -> Callable[[dict[str, Any]], str]:
 
 def _bench_pass(
     stores: Stores, individual: str, reward: float, *, cells: int = 4, stop: PassStop | None = None
-) -> BenchPass:
+) -> VerificationPass:
     held_out = samples(4, query="b")
     rows = [
         measurement(
@@ -1880,7 +1904,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             )
         )
 
-        def graded(*held: BenchPass) -> BenchPasses:
+        def graded(*held: VerificationPass) -> BenchPasses:
             banked = bench_passes(origin_pass, *held)
             return asyncio.run(
                 bench_selection(
@@ -1940,8 +1964,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             for _, record in callbacks.ledger.iter()
             if isinstance(record, PhaseRecord) and record.event == "graded"
         ]
-        assert isinstance(stopped_view, BenchGradedView)
-        paused_pass = stopped_view.bench_pass
+        assert isinstance(stopped_view, VerificationGradedView)
+        paused_pass = stopped_view.verification
         assert stopped_view.state is ReadingState.PENDING and paused_pass.stop is not None, (
             "a paused pass read as faulted, when `resume` sends it again"
         )
@@ -2160,8 +2184,105 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert floor.exit_code == StopOutcome.PAUSED.exit_code and floor.data is None, (
             "a stopped noise-floor let its pause escape, or answered a band"
         )
+        # The band stands beside the recorded level of exactly the rows it re-scored, on the ledger (bl3.B2).
+        c0_arm = cycle.origin_round.panel[ArmKey(origin.id)]
+        callbacks.on_round_entered(0)
+        callbacks.on_arm(
+            0,
+            ArmKey(origin.id),
+            Proposed(role=c0_arm.role, slot=c0_arm.slot, individual=c0_arm.individual),
+        )
+        with at_round(0):
+            c0_walk = asyncio.run(
+                score_search_point(
+                    cycle.points.measured(cycle.measured(origin.id)),
+                    list(session.state.scoring.require_partition().search)[:4],
+                    session,
+                    label=MeasurementRole.ORIGIN,
+                    measured=MeasuredPass(origin.id, MeasurementRole.ORIGIN),
+                )
+            )
+        c0_round = cycle.origin_round.model_copy(
+            update={
+                "optimizer_state": optimizer_state(),
+                "cells": {ArmKey(origin.id): c0_walk.sheet},
+            }
+        )
+        close_round(callbacks.ledger, [c0_round], cycle=cycle)
+        round_zero = stores.campaigns.standing_rounds(_PEER_HOP, moment=None).rounds[0].close
+        assert round_zero.election is not None
+        recorded_keys = {key for key, _, _ in round_zero.cells.arms[round_zero.election.ended_on]}
+        drawn = [s for s in session.bank.samples if s.key in recorded_keys]
+        kept = [s for s in session.bank.samples if s.key != drawn[0].key]
+
+        @asynccontextmanager
+        async def _opened(*_: Any, **__: Any) -> AsyncIterator[OpenedDiagnostic]:
+            yield OpenedDiagnostic(
+                campaign=minted_campaign(_PEER_HOP),
+                session=dataclasses.replace(session, bank=Bank.of(kept)),
+                config=cycle.config,
+                framing=cycle.framing,
+            )
+
+        @asynccontextmanager
+        async def _unpaid(**_: Any) -> AsyncIterator[None]:
+            yield
+
+        with monkeypatch.context() as patched:
+            patched.setattr(held_out, "open_diagnostic", _opened)
+            patched.setattr(held_out, "paid_pass", _unpaid)
+            band = asyncio.run(
+                held_out.measure_noise_floor(stores=stores, hop=_PEER_HOP, k=RescoreCount(2))
+            )
+        assert isinstance(band.reading, NoiseBand) and len(band.reading.raw) == 2
+        assert band.reading.recorded.n == len(band.verification.sample_keys) == len(drawn) - 1, (
+            "the band stood beside a recorded level over rows it never re-scored (bl3.B2)"
+        )
+        assert band in [
+            record.view for _, record in callbacks.ledger.iter() if isinstance(record, PhaseRecord)
+        ], "the band was not filed on its cycle's ledger"
+
+        # A rescore that raises ends the band's mark at its bracket's exit: never served running.
+        async def _outage(scoring: Coroutine[Any, Any, Any]) -> NoReturn:
+            scoring.close()
+            raise DiagnosticError("the rescore measured no cell")
+
+        failed_from = callbacks.ledger.next_offset
+        with monkeypatch.context() as patched:
+            patched.setattr(held_out, "open_diagnostic", _opened)
+            patched.setattr(held_out, "paid_pass", _unpaid)
+            patched.setattr(held_out, "diagnostic_pass", _outage)
+            with pytest.raises(DiagnosticError):
+                asyncio.run(
+                    held_out.measure_noise_floor(stores=stores, hop=_PEER_HOP, k=RescoreCount(2))
+                )
+        dashboard = LiveDashboardProjection()
+        dashboard.feed(
+            RunWiringRecord(
+                round_cells_ceiling=1,
+                display_metric="accuracy",
+                elects_on="accuracy",
+                max_cells_in_flight=1,
+                measured_unit="sample",
+                measurement_node="solve",
+                langfuse_trace_url=None,
+                run_limits=RunLimits(),
+                defaults_drift=None,
+                backend_revision=None,
+            )
+        )
+        for at, record in callbacks.ledger.iter():
+            if at >= failed_from:
+                dashboard.feed(record)
+        served = dashboard.value()
+        assert served is not None
+        assert [(m.state, m.failed_as) for m in served.verification if m.kind == "noise_floor"] == [
+            ("failed", ReadingState.PASS_STOPPED)
+        ], "a noise floor that raised left its mark running"
         # A spent budget stops the pass and names the bound; the held passes beside it stand.
-        earlier = origin_pass.model_copy(update={"round": 7, "candidate_id": "an earlier pick"})
+        earlier = origin_pass.model_copy(
+            update={"arm": ArmName(key=ArmKey("an earlier pick"), round=7, label="C7.1")}
+        )
         book = require_spend_book("the bench journey")
         unspent, book.hold_of = book.hold_of, Hold(Budget(usd=0.0), book.reserve)
         short = graded(earlier)
@@ -2170,19 +2291,33 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert stop is not None and stop.cause is StopReason.SPEND_BUDGET, (
             "a spent budget stops the pass and names the bound"
         )
-        assert short.selections[earlier.candidate_id] is earlier, "a held pass was dropped"
+        assert short.selections[earlier.arm.key] is earlier, "a held pass was dropped"
+
+        # A refusal mid-walk banks the cells the pass held, never zero over paid rows (bl3.B4).
+        async def _refused_mid_pass(*_: Any) -> MeasuredCell:
+            raise SendRefusedError("no rate for this model", category=ErrorCategory.NO_RATE)
+
+        with monkeypatch.context() as patched:
+            patched.setattr(query_loop, "measure_sample", _refused_mid_pass)
+            no_rate = graded().selections[head.individual.id]
+        assert no_rate.stop is not None and no_rate.stop.cause is StopReason.NO_RATE, (
+            "a refused pass did not name its refusal"
+        )
+        assert {key for key, _, _ in paused_pass.cells} <= {key for key, _, _ in no_rate.cells}, (
+            "a refused pass banked none of the cells it held (bl3.B4)"
+        )
 
         passes = graded()
         [taken] = passes.selections.values()
-        assert (taken.candidate_id, taken.round, taken.stop) == (head.individual.id, 1, None), (
+        assert (taken.arm.key, taken.arm.round, taken.stop) == (head.individual.id, 1, None), (
             "the bench grades the pick the optimizer declared"
         )
         assert {key for key, _, _ in paused_pass.cells} <= {
             key for key, _, replayed in taken.cells if replayed
         }, "the pass after a stop bought again a cell the stopped pass had banked"
-        assert graded(taken).selections[taken.candidate_id] is taken, "a held pass was sent again"
+        assert graded(taken).selections[taken.arm.key] is taken, "a held pass was sent again"
         left = taken.model_copy(update={"sp_hash": "a pick the line left"})
-        resent = graded(left).selections[taken.candidate_id]
+        resent = graded(left).selections[taken.arm.key]
         assert [c[:2] for c in resent.cells] == [c[:2] for c in taken.cells]
         assert all(replayed for *_, replayed in resent.cells), "a resent pass bought a cell again"
         bench = read_bench(
@@ -2190,7 +2325,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             passes,
             session.state.scoring.require_scorer(),
             line=bench_line(
-                ArmName(key=ArmKey(taken.candidate_id), round=1, label=head.label),
+                taken.arm,
                 hop=session.hop,
                 instrument_id="capo-e2e",
             ),
@@ -3681,7 +3816,7 @@ def _evidence_campaign(
         )
     if steered:
         stores.campaigns.record_intervention(hop, kind="skip")
-    passes: dict[str, BenchPass] = {}
+    passes: dict[str, VerificationPass] = {}
     for role, level in (("origin", origin), ("selected", selected))[: 1 + graded]:
         # The origin is ONE individual every campaign sends; each pick is its own.
         individual = role if role == "origin" else f"{cid}:{role}"
@@ -3734,15 +3869,15 @@ def _evidence_campaign(
             PhaseRecord(
                 phase=CampaignPhase.BENCH,
                 event="graded",
-                view=BenchGradedView(
+                view=VerificationGradedView(
+                    verification=taken,
                     subject=role,  # type: ignore[arg-type]
-                    bench_pass=taken,
                     tolerance=0,
                     reserve_usd=0.05 if role == "origin" else None,
                     reserve_tokens=0 if role == "origin" else None,
                     reading=None,
                     state=ReadingState.READ,
-                    label="C0" if role == "origin" else "C1.1",
+                    refusal=None,
                 ),
             )
         )
@@ -4065,15 +4200,18 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     )
 
     # A verify reads its fresh cells alone and pairs its lift over the origin.
-    def banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerifyPass:
-        return VerifyPass(
+    def banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerificationPass:
+        return VerificationPass(
+            kind="verify",
             arm=ArmName(key=ArmKey("c"), round=round_num, label="C3.1"),
             sp_hash="h",
             cells=[(f"k{sid}", f"r.{sid}", False) for sid in range(100, 110)],
-            positions=list(range(100, 110)),
+            sample_keys=[f"k{sid}" for sid in range(100, 110)],
+            stop=None,
+            scorer_id="s",
             strategy=strategy,
             seed=1,
-            scorer_id="s",
+            reads_before=None,
         )
 
     def keyed(rows: list[GradedCell]) -> CellSheet:
@@ -4086,7 +4224,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
     c0 = ArmName(key=ArmKey("c0"), round=0, label="C0")
 
-    def verified(pass_: VerifyPass, fresh_rows: CellSheet = fresh) -> Any:
+    def verified(pass_: VerificationPass, fresh_rows: CellSheet = fresh) -> Any:
         arm = c0 if pass_.arm.round == 0 else pass_.arm
         return verify_reading(
             pass_,

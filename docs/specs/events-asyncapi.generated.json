@@ -1170,216 +1170,6 @@
         "title": "BankedStop",
         "type": "object"
       },
-      "BenchEnterView": {
-        "additionalProperties": false,
-        "description": "Every ``sample_scored`` up to the matching ``exit`` is one of its rows; round 0 is the origin.",
-        "properties": {
-          "arm": {
-            "title": "Arm",
-            "type": "string"
-          },
-          "kind": {
-            "const": "bench_enter",
-            "default": "bench_enter",
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "round": {
-            "title": "Round",
-            "type": "integer"
-          },
-          "rows": {
-            "title": "Rows",
-            "type": "integer"
-          },
-          "sp_hash": {
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "subject": {
-            "enum": [
-              "origin",
-              "selected"
-            ],
-            "title": "Subject",
-            "type": "string"
-          }
-        },
-        "required": [
-          "subject",
-          "arm",
-          "label",
-          "sp_hash",
-          "round",
-          "rows"
-        ],
-        "title": "BenchEnterView",
-        "type": "object"
-      },
-      "BenchGradedView": {
-        "additionalProperties": false,
-        "description": "``reading`` is ``None`` exactly where ``state`` is not ``read``.",
-        "properties": {
-          "bench_pass": {
-            "$ref": "#/components/schemas/BenchPass"
-          },
-          "kind": {
-            "const": "bench_graded",
-            "default": "bench_graded",
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "reading": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchReading"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reserve_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reserve Tokens"
-          },
-          "reserve_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reserve Usd"
-          },
-          "state": {
-            "$ref": "#/components/schemas/ReadingState"
-          },
-          "subject": {
-            "enum": [
-              "origin",
-              "selected"
-            ],
-            "title": "Subject",
-            "type": "string"
-          },
-          "tolerance": {
-            "title": "Tolerance",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "subject",
-          "bench_pass",
-          "tolerance",
-          "reserve_usd",
-          "reserve_tokens",
-          "reading",
-          "state",
-          "label"
-        ],
-        "title": "BenchGradedView",
-        "type": "object"
-      },
-      "BenchPass": {
-        "additionalProperties": false,
-        "description": "One individual's pass over the bench set, as the facts it banked — never a grade of them.",
-        "properties": {
-          "candidate_id": {
-            "title": "Candidate Id",
-            "type": "string"
-          },
-          "cells": {
-            "items": {
-              "maxItems": 3,
-              "minItems": 3,
-              "prefixItems": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "boolean"
-                }
-              ],
-              "type": "array"
-            },
-            "title": "Cells",
-            "type": "array"
-          },
-          "measured_datasets": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Measured Datasets",
-            "type": "object"
-          },
-          "reads_before": {
-            "title": "Reads Before",
-            "type": "integer"
-          },
-          "round": {
-            "title": "Round",
-            "type": "integer"
-          },
-          "sample_keys": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Sample Keys",
-            "type": "array"
-          },
-          "scorer_id": {
-            "title": "Scorer Id",
-            "type": "string"
-          },
-          "sp_hash": {
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "stop": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PassStop"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "round",
-          "candidate_id",
-          "sp_hash",
-          "cells",
-          "sample_keys",
-          "stop",
-          "scorer_id",
-          "reads_before"
-        ],
-        "title": "BenchPass",
-        "type": "object"
-      },
       "BenchReading": {
         "additionalProperties": false,
         "description": "One individual's bench pass, read under a named scorer.",
@@ -5093,6 +4883,37 @@
         "title": "NodeSearchNarrowing",
         "type": "object"
       },
+      "NoiseBand": {
+        "additionalProperties": false,
+        "description": "A noise-floor pass's reading: its fresh composites beside the recorded level, both over\nexactly the pass's rows (bl3.B2).",
+        "properties": {
+          "band": {
+            "$ref": "#/components/schemas/BandedValue"
+          },
+          "fresh_accuracy": {
+            "title": "Fresh Accuracy",
+            "type": "number"
+          },
+          "raw": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Raw",
+            "type": "array"
+          },
+          "recorded": {
+            "$ref": "#/components/schemas/OwnLevel"
+          }
+        },
+        "required": [
+          "raw",
+          "band",
+          "fresh_accuracy",
+          "recorded"
+        ],
+        "title": "NoiseBand",
+        "type": "object"
+      },
       "NurseOwner": {
         "description": "Who heals a runtime failure.",
         "enum": [
@@ -5769,8 +5590,6 @@
               {
                 "discriminator": {
                   "mapping": {
-                    "bench_enter": "#/components/schemas/BenchEnterView",
-                    "bench_graded": "#/components/schemas/BenchGradedView",
                     "bench_scored": "#/components/schemas/BenchScoredView",
                     "candidates_generated": "#/components/schemas/CandidatesGeneratedView",
                     "init_enter": "#/components/schemas/InitEnterView",
@@ -5780,8 +5599,8 @@
                     "optimizer_step_exit": "#/components/schemas/OptimizerStepExitView",
                     "round_complete": "#/components/schemas/RoundCompleteView",
                     "round_start": "#/components/schemas/RoundStartView",
-                    "verify_enter": "#/components/schemas/VerifyEnterView",
-                    "verify_graded": "#/components/schemas/VerifyGradedView"
+                    "verification_enter": "#/components/schemas/VerificationEnterView",
+                    "verification_graded": "#/components/schemas/VerificationGradedView"
                   },
                   "propertyName": "kind"
                 },
@@ -5802,19 +5621,13 @@
                     "$ref": "#/components/schemas/MeasureEnterView"
                   },
                   {
-                    "$ref": "#/components/schemas/BenchEnterView"
+                    "$ref": "#/components/schemas/VerificationEnterView"
                   },
                   {
                     "$ref": "#/components/schemas/BenchScoredView"
                   },
                   {
-                    "$ref": "#/components/schemas/BenchGradedView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/VerifyEnterView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/VerifyGradedView"
+                    "$ref": "#/components/schemas/VerificationGradedView"
                   },
                   {
                     "$ref": "#/components/schemas/RoundCompleteView"
@@ -9200,15 +9013,16 @@
         "title": "Variation",
         "type": "object"
       },
-      "VerifyEnterView": {
+      "VerificationEnterView": {
         "additionalProperties": false,
+        "description": "Every ``sample_scored`` up to the matching ``exit`` is one of its rows; round 0 is the origin.",
         "properties": {
           "arm": {
             "$ref": "#/components/schemas/ArmName"
           },
           "kind": {
-            "const": "verify_enter",
-            "default": "verify_enter",
+            "const": "verification_enter",
+            "default": "verification_enter",
             "title": "Kind",
             "type": "string"
           },
@@ -9216,50 +9030,170 @@
             "title": "Rows",
             "type": "integer"
           },
+          "sp_hash": {
+            "title": "Sp Hash",
+            "type": "string"
+          },
           "strategy": {
-            "enum": [
-              "random",
-              "hard"
+            "anyOf": [
+              {
+                "enum": [
+                  "random",
+                  "hard"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Strategy",
+            "title": "Strategy"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "enum": [
+                  "origin",
+                  "selected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "verification": {
+            "enum": [
+              "verify",
+              "bench",
+              "noise_floor"
+            ],
+            "title": "Verification",
             "type": "string"
           }
         },
         "required": [
+          "verification",
+          "subject",
           "arm",
+          "sp_hash",
           "rows",
           "strategy"
         ],
-        "title": "VerifyEnterView",
+        "title": "VerificationEnterView",
         "type": "object"
       },
-      "VerifyGradedView": {
+      "VerificationGradedView": {
         "additionalProperties": false,
-        "description": "The pass is the fact, the reading a cache of one grading of it.",
+        "description": "The pass is the fact, the reading a cache of one grading of it; ``reading`` is ``None``\nexactly where ``state`` is not ``read``.",
         "properties": {
           "kind": {
-            "const": "verify_graded",
-            "default": "verify_graded",
+            "const": "verification_graded",
+            "default": "verification_graded",
             "title": "Kind",
             "type": "string"
           },
           "reading": {
-            "$ref": "#/components/schemas/VerifyReading"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerifyReading"
+              },
+              {
+                "$ref": "#/components/schemas/BenchReading"
+              },
+              {
+                "$ref": "#/components/schemas/NoiseBand"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reading"
           },
-          "verify_pass": {
-            "$ref": "#/components/schemas/VerifyPass"
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "reserve_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Tokens"
+          },
+          "reserve_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Usd"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReadingState"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "enum": [
+                  "origin",
+                  "selected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "tolerance": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tolerance"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationPass"
           }
         },
         "required": [
-          "verify_pass",
-          "reading"
+          "verification",
+          "subject",
+          "tolerance",
+          "reserve_usd",
+          "reserve_tokens",
+          "reading",
+          "state",
+          "refusal"
         ],
-        "title": "VerifyGradedView",
+        "title": "VerificationGradedView",
         "type": "object"
       },
-      "VerifyPass": {
+      "VerificationPass": {
         "additionalProperties": false,
-        "description": "The facts a verify pass banked, never a grade of them.",
+        "description": "One individual's held-out pass, as the facts it banked — never a grade of them.",
         "properties": {
           "arm": {
             "$ref": "#/components/schemas/ArmName"
@@ -9284,11 +9218,38 @@
             "title": "Cells",
             "type": "array"
           },
-          "positions": {
-            "items": {
-              "type": "integer"
+          "kind": {
+            "enum": [
+              "verify",
+              "bench",
+              "noise_floor"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "measured_datasets": {
+            "additionalProperties": {
+              "type": "string"
             },
-            "title": "Positions",
+            "title": "Measured Datasets",
+            "type": "object"
+          },
+          "reads_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reads Before"
+          },
+          "sample_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sample Keys",
             "type": "array"
           },
           "scorer_id": {
@@ -9310,25 +9271,45 @@
             "title": "Sp Hash",
             "type": "string"
           },
+          "stop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PassStop"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "strategy": {
-            "enum": [
-              "random",
-              "hard"
+            "anyOf": [
+              {
+                "enum": [
+                  "random",
+                  "hard"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Strategy",
-            "type": "string"
+            "title": "Strategy"
           }
         },
         "required": [
+          "kind",
           "arm",
           "sp_hash",
           "cells",
-          "positions",
+          "sample_keys",
+          "stop",
+          "scorer_id",
           "strategy",
           "seed",
-          "scorer_id"
+          "reads_before"
         ],
-        "title": "VerifyPass",
+        "title": "VerificationPass",
         "type": "object"
       },
       "VerifyReading": {

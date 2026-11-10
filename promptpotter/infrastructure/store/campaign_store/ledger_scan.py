@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cache
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, cast, get_args
 
 from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
-from promptpotter.domain.bench import BenchPasses, BenchReading, PartitionRecord
+from promptpotter.domain.bench import BenchReading, PartitionRecord
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import (
-    BenchGradedView,
     InitEnterView,
     InitExitView,
-    VerifyGradedView,
+    VerificationGradedView,
 )
 from promptpotter.domain.phases import CampaignPhase, ErrorRecord, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
@@ -71,7 +70,8 @@ from promptpotter.domain.spend import (
     spend_slot,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.domain.verify_pass import VerifyPass, VerifyReading
+from promptpotter.domain.verification import BenchPasses, VerificationKind, VerificationPass
+from promptpotter.domain.verify_pass import VerifyReading
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
@@ -568,8 +568,8 @@ class _Answers:
                 walked = [cell for walk in walks for cell in walk.cells]
             case RaceCatchUpRecord():
                 walked = list(record.cells.values())
-            case PhaseRecord(view=VerifyGradedView(verify_pass=banked)):
-                walked = list(banked.walk().cells)
+            case PhaseRecord(view=VerificationGradedView(verification=banked)):
+                walked = banked.cells
             case PhaseRecord():
                 return
         named = [answer for _, answer, _ in walked]
@@ -585,25 +585,34 @@ class _Answers:
 
 
 class VerifyLedger(NamedTuple):
-    graded: dict[ArmKey, tuple[VerifyPass, VerifyReading]]
+    graded: dict[ArmKey, tuple[VerificationPass, VerifyReading]]
     # EVERY graded pass, oldest first: a later one buys other cells and retires none.
-    passes: list[VerifyPass]
+    passes: list[VerificationPass]
 
 
-class _Verify:
+class _Verification:
+    """Every graded held-out pass of either kind, oldest first; a reader keys it `(kind, arm.key)`."""
+
     records: ClassVar[RecordClasses] = (PhaseRecord,)
 
     def __init__(self) -> None:
-        self._graded: dict[ArmKey, tuple[VerifyPass, VerifyReading]] = {}
-        self._passes: list[VerifyPass] = []
+        self._graded: list[VerificationGradedView] = []
 
     def feed(self, record: PhaseRecord) -> None:
-        if isinstance(banked := record.view, VerifyGradedView):
-            self._graded[banked.verify_pass.arm.key] = banked.verify_pass, banked.reading
-            self._passes.append(banked.verify_pass)
+        if isinstance(record.view, VerificationGradedView):
+            self._graded.append(record.view)
 
-    def value(self) -> VerifyLedger:
-        return VerifyLedger(dict(self._graded), list(self._passes))
+    def value(self) -> list[VerificationGradedView]:
+        return list(self._graded)
+
+
+def _graded(
+    spans: Iterable[LedgerSpan], kind: VerificationKind
+) -> Iterator[VerificationGradedView]:
+    for span in spans:
+        for view in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Verification, span.until):
+            if view.verification.kind == kind:
+                yield view
 
 
 class LedgerSpend(NamedTuple):
@@ -663,22 +672,6 @@ class _Metered:
 
     def value(self) -> dict[CeilingMeter, Budget]:
         return {meter: Budget.amount(self._usd[meter], self._tokens[meter]) for meter in self._usd}
-
-
-class _Bench:
-    records: ClassVar[RecordClasses] = (PhaseRecord,)
-
-    def __init__(self) -> None:
-        self._graded: list[BenchGradedView] = []
-
-    def feed(self, record: PhaseRecord) -> None:
-        if record.phase != CampaignPhase.BENCH or record.event != "graded":
-            return
-        if isinstance(record.view, BenchGradedView):
-            self._graded.append(record.view)
-
-    def value(self) -> list[BenchGradedView]:
-        return list(self._graded)
 
 
 class _BenchOpen:
@@ -779,10 +772,9 @@ LEDGER_FOLDS = (
     _LaunchClaim,
     _Standing,
     _Answers,
-    _Verify,
+    _Verification,
     _Spend,
     _Metered,
-    _Bench,
     _BenchOpen,
     _PricedKeys,
     _Timeline,
@@ -854,32 +846,30 @@ def scan_launch_claim(ledger_path: Path) -> LaunchClaimRecord | None:
 
 def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
     held: BenchPasses | None = None
-    for span in spans:
-        for view in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Bench, span.until):
-            taken = view.bench_pass
-            if view.subject == "selected":
-                if held is not None:
-                    held = held.model_copy(
-                        update={"selections": {**held.selections, taken.candidate_id: taken}}
-                    )
-            elif held is None or held.origin != taken:
-                # A different origin pass is a new reference: no earlier selection pairs on it.
-                held = BenchPasses(
-                    tolerance=view.tolerance,
-                    origin=taken,
-                    reserve_usd=view.reserve_usd or 0.0,
-                    reserve_tokens=view.reserve_tokens or 0,
-                    selections={},
+    for view in _graded(spans, "bench"):
+        taken = view.verification
+        if view.subject == "selected":
+            if held is not None:
+                held = held.model_copy(
+                    update={"selections": {**held.selections, taken.arm.key: taken}}
                 )
+        elif held is None or held.origin != taken:
+            # A different origin pass is a new reference: no earlier selection pairs on it.
+            held = BenchPasses(
+                tolerance=view.tolerance or 0,
+                origin=taken,
+                reserve_usd=view.reserve_usd or 0.0,
+                reserve_tokens=view.reserve_tokens or 0,
+                selections={},
+            )
     return held
 
 
 def scan_bench_readings(spans: Iterable[LedgerSpan]) -> dict[tuple[int, ArmKey], BenchReading]:
     return {
-        (view.reading.round, ArmKey(view.bench_pass.candidate_id)): view.reading
-        for span in spans
-        for view in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Bench, span.until)
-        if view.reading is not None
+        (view.reading.round, view.verification.arm.key): view.reading
+        for view in _graded(spans, "bench")
+        if isinstance(view.reading, BenchReading)
     }
 
 
@@ -933,9 +923,7 @@ def scan_ledger_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[Walked
         if round_num not in closed
     ]
     # The whole chain: a fork inherits its parent's verify CELLS, though not its assurance.
-    for span in chain:
-        banked = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Verify, span.until)
-        walks += [verify_pass.walk() for verify_pass in banked.passes]
+    walks += [view.verification.walk() for view in _graded(chain, "verify")]
     return walks
 
 
@@ -945,7 +933,14 @@ _CallSpan = tuple[str, str, float, float]
 
 def scan_ledger_verify(ledger_path: Path) -> VerifyLedger:
     """Own ledger only: a fork inherits its parent's measurements, not its assurance."""
-    return _view(ledger_path, _Verify)
+    graded: dict[ArmKey, tuple[VerificationPass, VerifyReading]] = {}
+    passes: list[VerificationPass] = []
+    for view in _graded([LedgerSpan(ledger_path)], "verify"):
+        # A refused pass sent nothing: it verified no round.
+        if isinstance(view.reading, VerifyReading):
+            graded[view.verification.arm.key] = view.verification, view.reading
+            passes.append(view.verification)
+    return VerifyLedger(graded, passes)
 
 
 def _phase_spans(

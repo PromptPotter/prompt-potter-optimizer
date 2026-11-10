@@ -26,8 +26,6 @@ from promptpotter.domain.bench import (
     COLUMN_GRADE,
     BandedValue,
     BenchColumn,
-    BenchPass,
-    BenchPasses,
     BenchReading,
     BenchScope,
     BenchScore,
@@ -46,20 +44,25 @@ from promptpotter.domain.l4.proxies import line_round_levels, spent_on_line
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
+    ArmName,
     CellSetName,
     MemberAddress,
     PairedReading,
     ReadingState,
 )
-from promptpotter.domain.phase_views import BenchEnterView, BenchGradedView, BenchScoredView
+from promptpotter.domain.phase_views import (
+    BenchScoredView,
+    VerificationEnterView,
+    VerificationGradedView,
+)
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutcome
 from promptpotter.domain.run_standing import declared_selection
 from promptpotter.domain.scoring import ROW_GRADES, WalkedCell
 from promptpotter.domain.spend import Budget, SpendRollup
+from promptpotter.domain.verification import BenchPasses, VerificationPass
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.store.archive_queries import bench_reads
 from promptpotter.shared.measurement_context import (
-    IndividualWalk,
     MeasuredPass,
     MeasurementRole,
     RoleScope,
@@ -80,7 +83,7 @@ if TYPE_CHECKING:
 
 
 class _PassReading(NamedTuple):
-    bench_pass: BenchPass
+    bench_pass: VerificationPass
     # `None` where the pass read nothing; `outcome.state` then says why.
     reading: BenchReading | None
     outcome: PassOutcome
@@ -108,18 +111,12 @@ class _Graded(NamedTuple):
     vs_origin: PairedReading | None
 
 
-def _bench_walk(bench_pass: BenchPass) -> IndividualWalk[WalkedCell]:
-    return IndividualWalk(
-        bench_pass.candidate_id, frozenset({MeasurementRole.BENCH}), bench_pass.cells
-    )
-
-
 def _read_pass(
-    stores: Stores, bench_pass: BenchPass, scorer: Scorer, *, tolerance: int
+    stores: Stores, bench_pass: VerificationPass, scorer: Scorer, *, tolerance: int
 ) -> _PassReading:
     """A pass stopped short, or past *tolerance* unscored rows, reads NOTHING, never a level over fewer rows."""
     expected = len(bench_pass.sample_keys)
-    held_out = individual_cells([_bench_walk(bench_pass)], bench_pass.candidate_id, RoleScope.BENCH)
+    held_out = individual_cells([bench_pass.walk()], bench_pass.arm.key, RoleScope.BENCH)
     sheet = walked_rows(stores, held_out, scorer).standing()
     scored = len(sheet.scoreable)
 
@@ -139,7 +136,7 @@ def _read_pass(
     )
     reading = BenchReading.read(
         own,
-        round=bench_pass.round,
+        round=bench_pass.arm.round,
         sp_hash=bench_pass.sp_hash,
         headline=BENCH_HEADLINE,
     )
@@ -155,7 +152,7 @@ def bench_series(
         return None, []
     read = partial(_read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
 
-    def headline(bench_pass: BenchPass) -> float | None:
+    def headline(bench_pass: VerificationPass) -> float | None:
         reading = read(bench_pass).reading
         return None if reading is None or reading.level is None else reading.level.value
 
@@ -216,7 +213,7 @@ def _bench_member(path: CyclePath, read: _PassReading, *, instrument_id: str) ->
     return MemberRows(
         address=MemberAddress(
             path=path,
-            individual_id=bench_pass.candidate_id,
+            individual_id=bench_pass.arm.key,
             arm=None,
             pass_role=MeasurementRole.BENCH,
         ),
@@ -352,7 +349,7 @@ def bench_members(
     return _grade_bench(stores, passes, scorer, line).members
 
 
-def _standing_pass(passes: BenchPasses, run: LineRun) -> BenchPass | None:
+def _standing_pass(passes: BenchPasses, run: LineRun) -> VerificationPass | None:
     if run.selection is None or not run.rounds_closed:
         return None
     return passes.pass_of(run.selection.key)
@@ -396,18 +393,40 @@ async def score_on_bench(
     label: str,
     round_num: int,
     cb: RunCallbacks,
-) -> BenchPass:
+) -> VerificationPass:
+    """A run stop escapes once the pass it cut is graded on the cells it held."""
+    taken, stop = await _send_on_bench(
+        session,
+        search_point,
+        arm=ArmName(key=ArmKey(individual_id), round=round_num, label=label),
+        subject=subject,
+        cb=cb,
+    )
+    if stop is not None:
+        raise stop
+    return taken
+
+
+async def _send_on_bench(
+    session: Session,
+    search_point: JobSearchPoint,
+    *,
+    arm: ArmName,
+    subject: BenchSubject,
+    cb: RunCallbacks,
+) -> tuple[VerificationPass, BaseException | None]:
+    """The pass, and the run stop that cut it: a stopped pass is graded here, a whole one by its caller."""
     # No `round=` on the bracket: it would move the dashboard's round back to the one being graded.
     cb.on_phase(
         CampaignPhase.BENCH,
         "enter",
-        view=BenchEnterView(
+        view=VerificationEnterView(
+            verification="bench",
             subject=subject,
-            arm=ArmKey(individual_id),
-            label=label,
+            arm=arm,
             sp_hash=search_point.sp_hash(session.pipeline_schema),
-            round=round_num,
             rows=len(session.state.scoring.require_partition().bench),
+            strategy=None,
         ),
     )
     # Counted before the send, so the pass is never one of its own readers.
@@ -418,28 +437,21 @@ async def score_on_bench(
         control, held_lookahead=session.backend_client.connector.max_cells_in_flight
     )
     try:
-        return await _pass_on_bench(
-            session,
-            search_point,
-            individual_id=individual_id,
-            round_num=round_num,
-            reads_before=reads_before,
-        )
-    except (KeyboardInterrupt, asyncio.CancelledError) as paused:
-        # A pause banks the pass as stopped, on the cells its walk filed before it.
+        return await _pass_on_bench(session, search_point, arm=arm, reads_before=reads_before), None
+    except (KeyboardInterrupt, asyncio.CancelledError, *RUN_STOPS) as stopping:
+        # Every run stop banks the pass as stopped, on the cells its walk filed before it (bl3.B4).
         bench = list(session.state.scoring.require_partition().bench)
         held = reread_cells(search_point, bench, session, label=MeasurementRole.BENCH)
         stopped = _bench_pass(
             session,
             search_point,
-            individual_id=individual_id,
-            round_num=round_num,
+            arm=arm,
             cells=held.addresses(),
-            stop=PassStop(cause=run_stop_reason(paused), warning=None),
+            stop=PassStop(cause=run_stop_reason(stopping), warning=None),
             reads_before=reads_before,
         )
-        graded(cb, session, stopped, subject=subject, label=label)
-        raise
+        graded(cb, session, stopped, subject=subject)
+        return stopped, stopping
     finally:
         session.state.control = control
         cb.on_phase(CampaignPhase.BENCH, "exit")
@@ -449,16 +461,15 @@ async def _pass_on_bench(
     session: Session,
     search_point: JobSearchPoint,
     *,
-    individual_id: str,
-    round_num: int,
+    arm: ArmName,
     reads_before: int,
-) -> BenchPass:
+) -> VerificationPass:
     scored = await score_search_point(
         search_point,
         list(session.state.scoring.require_partition().bench),
         session,
         label=MeasurementRole.BENCH,
-        measured=MeasuredPass(individual_id, MeasurementRole.BENCH),
+        measured=MeasuredPass(arm.key, MeasurementRole.BENCH),
     )
     stop: PassStop | None = None
     if scored.stopped is not None:
@@ -472,8 +483,7 @@ async def _pass_on_bench(
     return _bench_pass(
         session,
         search_point,
-        individual_id=individual_id,
-        round_num=round_num,
+        arm=arm,
         cells=scored.cells,
         stop=stop,
         reads_before=reads_before,
@@ -484,21 +494,22 @@ def _bench_pass(
     session: Session,
     search_point: JobSearchPoint,
     *,
-    individual_id: str,
-    round_num: int,
+    arm: ArmName,
     cells: list[WalkedCell],
     stop: PassStop | None,
     reads_before: int,
-) -> BenchPass:
+) -> VerificationPass:
     bench = session.state.scoring.require_partition().bench
-    return BenchPass(
-        round=round_num,
-        candidate_id=individual_id,
+    return VerificationPass(
+        kind="bench",
+        arm=arm,
         sp_hash=search_point.sp_hash(session.pipeline_schema),
         cells=cells,
         sample_keys=[s.key for s in bench],
         stop=stop,
         scorer_id=session.state.scoring.require_scorer().id,
+        strategy=None,
+        seed=None,
         reads_before=reads_before,
         measured_datasets={s.key: s.measured_dataset for s in bench if s.measured_dataset},
     )
@@ -517,10 +528,9 @@ def _tolerance(session: Session) -> int:
 def graded(
     cb: RunCallbacks,
     session: Session,
-    bench_pass: BenchPass,
+    bench_pass: VerificationPass,
     *,
     subject: BenchSubject,
-    label: str,
     reserve: Budget | None = None,
 ) -> None:
     """The one write a line's passes are folded from: a pass no call here follows is lost with the process."""
@@ -531,15 +541,15 @@ def graded(
     cb.on_phase(
         CampaignPhase.BENCH,
         "graded",
-        view=BenchGradedView(
+        view=VerificationGradedView(
+            verification=bench_pass,
             subject=subject,
-            bench_pass=bench_pass,
             tolerance=tolerance,
             reserve_usd=None if reserve is None else reserve.usd_amount,
             reserve_tokens=None if reserve is None else reserve.token_amount,
             reading=read.reading,
             state=read.outcome.state,
-            label=label,
+            refusal=None,
         ),
     )
 
@@ -566,14 +576,12 @@ async def grade_round_selection(
         round_num=round_result.round,
         cb=cb,
     )
-    graded(cb, session, taken, subject="selected", label=label)
+    graded(cb, session, taken, subject="selected")
     cycle.bench_passes = _with_selection(passes, taken)
 
 
-def _with_selection(passes: BenchPasses, taken: BenchPass) -> BenchPasses:
-    return passes.model_copy(
-        update={"selections": {**passes.selections, taken.candidate_id: taken}}
-    )
+def _with_selection(passes: BenchPasses, taken: VerificationPass) -> BenchPasses:
+    return passes.model_copy(update={"selections": {**passes.selections, taken.arm.key: taken}})
 
 
 def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
@@ -607,7 +615,7 @@ async def bench_selection(
     picked = declared_selection(rounds)
     head = picked.head
     assert head is not None, "a closed round names the individual it ended on"
-    if head.individual.id == origin.candidate_id:
+    if head.individual.id == origin.arm.key:
         return banked
     selected_sp = points.measured(head)
     selected_hash = selected_sp.sp_hash(session.pipeline_schema)
@@ -616,30 +624,15 @@ async def bench_selection(
         selected_hash, origin.sample_keys, session.state.scoring.require_scorer().id
     ):
         return banked
-    try:
-        selected = await score_on_bench(
-            session,
-            selected_sp,
-            individual_id=head.individual.id,
-            subject="selected",
-            label=head.label,
-            round_num=picked.round,
-            cb=cb,
-        )
-    except RUN_STOPS as stop:
-        reason = run_stop_reason(stop)
-        if STOP_REASON_INFO[reason].outcome is StopOutcome.PAUSED:
-            raise
-        selected = BenchPass(
-            round=picked.round,
-            candidate_id=head.individual.id,
-            sp_hash=selected_hash,
-            cells=[],
-            sample_keys=origin.sample_keys,
-            stop=PassStop(cause=reason, warning=None),
-            scorer_id=session.state.scoring.require_scorer().id,
-            reads_before=_reads_before(session),
-            measured_datasets=origin.measured_datasets,
-        )
-    graded(cb, session, selected, subject="selected", label=head.label)
+    selected, stop = await _send_on_bench(
+        session,
+        selected_sp,
+        arm=ArmName(key=ArmKey(head.individual.id), round=picked.round, label=head.label),
+        subject="selected",
+        cb=cb,
+    )
+    if stop is None:
+        graded(cb, session, selected, subject="selected")
+    elif STOP_REASON_INFO[run_stop_reason(stop)].outcome is StopOutcome.PAUSED:
+        raise stop
     return _with_selection(banked, selected)

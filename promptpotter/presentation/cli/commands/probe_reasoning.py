@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.diagnostics.probe_reasoning import (
+from promptpotter.application.scoring.probe_reasoning import (
     probe_reasoning,
     profile_suggestion,
 )

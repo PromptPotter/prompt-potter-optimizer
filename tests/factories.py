@@ -59,8 +59,6 @@ from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     BandedValue,
     BankPartition,
-    BenchPass,
-    BenchPasses,
     BenchScore,
     LiftCost,
     LineRun,
@@ -123,6 +121,7 @@ from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer, WalkedCell
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget, CeilingMeter, SpendBucket, SpendRollup
+from promptpotter.domain.verification import BenchPasses, VerificationPass
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -929,34 +928,39 @@ def bench_pass(
     *,
     filed_as: str | None = None,
     **bend: Any,
-) -> BenchPass:
+) -> VerificationPass:
     """*individual*'s held-out pass, *rows* filed as its bench cells; *filed_as* parts two
     campaigns that send one individual."""
+    round_num = int(individual != "origin")
     fields: dict[str, Any] = {
-        "round": int(individual != "origin"),
-        "candidate_id": individual,
+        "kind": "bench",
+        "arm": ArmName(key=ArmKey(individual), round=round_num, label=f"C{round_num}"),
         "sp_hash": individual,
         "stop": None,
         "scorer_id": "",
+        "strategy": None,
+        "seed": None,
         "reads_before": 0,
     } | bend
     under = filed_under(
         [("", {"individual": filed_as or f"bench_{individual}"})], prompt_fields_id=individual
     )
-    return BenchPass(
+    return VerificationPass(
         cells=filed(stores.archive, [row.facts for row in rows], under, role="bench"),
         sample_keys=list(sample_keys),
         **fields,
     )
 
 
-def bench_passes(origin: BenchPass, *held: BenchPass, tolerance: int = 0) -> BenchPasses:
+def bench_passes(
+    origin: VerificationPass, *held: VerificationPass, tolerance: int = 0
+) -> BenchPasses:
     return BenchPasses(
         tolerance=tolerance,
         origin=origin,
         reserve_usd=0.0,
         reserve_tokens=0,
-        selections={taken.candidate_id: taken for taken in held},
+        selections={taken.arm.key: taken for taken in held},
     )
 
 

@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from promptpotter.domain.arm_reading import ArmReading, DisplayMetric
-from promptpotter.domain.bench import BenchPass, BenchReading, BenchScore, BenchSubject
+from promptpotter.domain.bench import BenchReading, BenchScore, BenchSubject
 from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
+from promptpotter.domain.paired_reading import ArmName, ReadingState
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import Budget, CeilingMeter, campaign_cap_lines, metered_line
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.domain.verify_pass import VerifyPass, VerifyReading, VerifyStrategy
+from promptpotter.domain.verification import NoiseBand, VerificationKind, VerificationPass
+from promptpotter.domain.verify_pass import VerifyReading, VerifyStrategy
 
 
 class ViewAnchors(FrozenModel):
@@ -98,16 +99,17 @@ class MeasureEnterView(FrozenModel):
     n_samples: int
 
 
-class BenchEnterView(FrozenModel):
+class VerificationEnterView(FrozenModel):
     """Every ``sample_scored`` up to the matching ``exit`` is one of its rows; round 0 is the origin."""
 
-    kind: Literal["bench_enter"] = "bench_enter"
-    subject: BenchSubject
-    arm: ArmKey
-    label: str
+    kind: Literal["verification_enter"] = "verification_enter"
+    verification: VerificationKind
+    # A bench pass's place on the line; `None` on a verify.
+    subject: BenchSubject | None
+    arm: ArmName
     sp_hash: str
-    round: int
     rows: int
+    strategy: VerifyStrategy | None
 
 
 class BenchScoredView(FrozenModel):
@@ -115,34 +117,29 @@ class BenchScoredView(FrozenModel):
     bench: BenchScore
 
 
-class BenchGradedView(FrozenModel):
-    """``reading`` is ``None`` exactly where ``state`` is not ``read``."""
+class VerificationGradedView(FrozenModel):
+    """The pass is the fact, the reading a cache of one grading of it; ``reading`` is ``None``
+    exactly where ``state`` is not ``read``."""
 
-    kind: Literal["bench_graded"] = "bench_graded"
-    subject: BenchSubject
-    bench_pass: BenchPass
-    tolerance: int
-    # `None` on a selection's pass.
+    kind: Literal["verification_graded"] = "verification_graded"
+    verification: VerificationPass
+    # A bench pass's place on the line; `None` on a verify.
+    subject: BenchSubject | None
+    # A bench pass's allowance of unscored rows; `None` on a verify, which reads what it scored.
+    tolerance: int | None
+    # Set only on the origin's bench pass.
     reserve_usd: float | None
     reserve_tokens: int | None
-    reading: BenchReading | None
+    reading: VerifyReading | BenchReading | NoiseBand | None
     state: ReadingState
-    label: str
+    # Why an automatic verify the round owed was not sent; its pass then holds no cell.
+    refusal: str | None
 
-
-class VerifyEnterView(FrozenModel):
-    kind: Literal["verify_enter"] = "verify_enter"
-    arm: ArmName
-    rows: int
-    strategy: VerifyStrategy
-
-
-class VerifyGradedView(FrozenModel):
-    """The pass is the fact, the reading a cache of one grading of it."""
-
-    kind: Literal["verify_graded"] = "verify_graded"
-    verify_pass: VerifyPass
-    reading: VerifyReading
+    @model_validator(mode="after")
+    def _refused_reads_nothing(self) -> Self:
+        if self.refusal is not None and (self.reading is not None or self.verification.cells):
+            raise ValueError("a refused pass sent nothing, so it reads nothing")
+        return self
 
 
 class RunSpendView(FrozenModel):
@@ -222,11 +219,9 @@ PhaseView = Annotated[
     | RoundStartView
     | CandidatesGeneratedView
     | MeasureEnterView
-    | BenchEnterView
+    | VerificationEnterView
     | BenchScoredView
-    | BenchGradedView
-    | VerifyEnterView
-    | VerifyGradedView
+    | VerificationGradedView
     | RoundCompleteView
     | OptimizerStepEnterView
     | OptimizerStepExitView,

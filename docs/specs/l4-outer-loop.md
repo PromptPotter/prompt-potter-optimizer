@@ -16,7 +16,7 @@ cost, and a wheel refuses the name as a research one it does not carry.
 **adopted** by that round on the cell's **held-out** rows, minus the origin's on the same rows
 (`domain/l4/proxies.py::bench_level_series` over `application/runner/bench.py::line_bench_series`, a
 rebase's discarded rounds included). The held-out rows are drawn beside the origin bank under the cell's
-seed (`application/diagnostics/seed_screen.py::draw_bench`), marked `held_out`, reached by no inner
+seed (`application/scoring/seed_screen.py::draw_bench`), marked `held_out`, reached by no inner
 node. `campaign.scoring.per_sample` re-anchors it `x + 0.5`, so the paired estimator's effect IS the mean
 held-out lift.
 

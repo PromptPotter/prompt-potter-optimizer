@@ -11440,6 +11440,37 @@
         "title": "NodeSearchNarrowing",
         "type": "object"
       },
+      "NoiseBand": {
+        "additionalProperties": false,
+        "description": "A noise-floor pass's reading: its fresh composites beside the recorded level, both over\nexactly the pass's rows (bl3.B2).",
+        "properties": {
+          "band": {
+            "$ref": "#/components/schemas/BandedValue"
+          },
+          "fresh_accuracy": {
+            "title": "Fresh Accuracy",
+            "type": "number"
+          },
+          "raw": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Raw",
+            "type": "array"
+          },
+          "recorded": {
+            "$ref": "#/components/schemas/OwnLevel"
+          }
+        },
+        "required": [
+          "raw",
+          "band",
+          "fresh_accuracy",
+          "recorded"
+        ],
+        "title": "NoiseBand",
+        "type": "object"
+      },
       "NurseOwner": {
         "description": "Who heals a runtime failure.",
         "enum": [
@@ -18021,6 +18052,112 @@
         "title": "VendorModels",
         "type": "object"
       },
+      "VerificationGradedView": {
+        "additionalProperties": false,
+        "description": "The pass is the fact, the reading a cache of one grading of it; ``reading`` is ``None``\nexactly where ``state`` is not ``read``.",
+        "properties": {
+          "kind": {
+            "const": "verification_graded",
+            "default": "verification_graded",
+            "title": "Kind",
+            "type": "string"
+          },
+          "reading": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerifyReading"
+              },
+              {
+                "$ref": "#/components/schemas/BenchReading"
+              },
+              {
+                "$ref": "#/components/schemas/NoiseBand"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reading"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "reserve_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Tokens"
+          },
+          "reserve_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Usd"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReadingState"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "enum": [
+                  "origin",
+                  "selected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "tolerance": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tolerance"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationPass"
+          }
+        },
+        "required": [
+          "verification",
+          "subject",
+          "tolerance",
+          "reserve_usd",
+          "reserve_tokens",
+          "reading",
+          "state",
+          "refusal"
+        ],
+        "title": "VerificationGradedView",
+        "type": "object"
+      },
       "VerificationMark": {
         "additionalProperties": false,
         "description": "The latest verify or bench pass on one arm, as its records left it.",
@@ -18043,7 +18180,8 @@
           "kind": {
             "enum": [
               "verify",
-              "bench"
+              "bench",
+              "noise_floor"
             ],
             "title": "Kind",
             "type": "string"
@@ -18089,6 +18227,127 @@
           "failed_as"
         ],
         "title": "VerificationMark",
+        "type": "object"
+      },
+      "VerificationPass": {
+        "additionalProperties": false,
+        "description": "One individual's held-out pass, as the facts it banked — never a grade of them.",
+        "properties": {
+          "arm": {
+            "$ref": "#/components/schemas/ArmName"
+          },
+          "cells": {
+            "items": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "verify",
+              "bench",
+              "noise_floor"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "measured_datasets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Measured Datasets",
+            "type": "object"
+          },
+          "reads_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reads Before"
+          },
+          "sample_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sample Keys",
+            "type": "array"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "sp_hash": {
+            "title": "Sp Hash",
+            "type": "string"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PassStop"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "random",
+                  "hard"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy"
+          }
+        },
+        "required": [
+          "kind",
+          "arm",
+          "sp_hash",
+          "cells",
+          "sample_keys",
+          "stop",
+          "scorer_id",
+          "strategy",
+          "seed",
+          "reads_before"
+        ],
+        "title": "VerificationPass",
         "type": "object"
       },
       "VerifyCandidatePayload": {
@@ -18166,104 +18425,6 @@
           "candidate_id"
         ],
         "title": "VerifyCandidatePayload",
-        "type": "object"
-      },
-      "VerifyGradedView": {
-        "additionalProperties": false,
-        "description": "The pass is the fact, the reading a cache of one grading of it.",
-        "properties": {
-          "kind": {
-            "const": "verify_graded",
-            "default": "verify_graded",
-            "title": "Kind",
-            "type": "string"
-          },
-          "reading": {
-            "$ref": "#/components/schemas/VerifyReading"
-          },
-          "verify_pass": {
-            "$ref": "#/components/schemas/VerifyPass"
-          }
-        },
-        "required": [
-          "verify_pass",
-          "reading"
-        ],
-        "title": "VerifyGradedView",
-        "type": "object"
-      },
-      "VerifyPass": {
-        "additionalProperties": false,
-        "description": "The facts a verify pass banked, never a grade of them.",
-        "properties": {
-          "arm": {
-            "$ref": "#/components/schemas/ArmName"
-          },
-          "cells": {
-            "items": {
-              "maxItems": 3,
-              "minItems": 3,
-              "prefixItems": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "boolean"
-                }
-              ],
-              "type": "array"
-            },
-            "title": "Cells",
-            "type": "array"
-          },
-          "positions": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Positions",
-            "type": "array"
-          },
-          "scorer_id": {
-            "title": "Scorer Id",
-            "type": "string"
-          },
-          "seed": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Seed"
-          },
-          "sp_hash": {
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "strategy": {
-            "enum": [
-              "random",
-              "hard"
-            ],
-            "title": "Strategy",
-            "type": "string"
-          }
-        },
-        "required": [
-          "arm",
-          "sp_hash",
-          "cells",
-          "positions",
-          "strategy",
-          "seed",
-          "scorer_id"
-        ],
-        "title": "VerifyPass",
         "type": "object"
       },
       "VerifyReading": {
@@ -22230,7 +22391,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/VerifyGradedView"
+                      "$ref": "#/components/schemas/VerificationGradedView"
                     },
                     {
                       "$ref": "#/components/schemas/VerifySaturated"

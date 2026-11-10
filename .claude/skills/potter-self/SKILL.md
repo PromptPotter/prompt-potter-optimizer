@@ -86,7 +86,7 @@ different `inner_origin` values never replayed each other's cells.
 - **Validate a cheap proxy at the ARM level, never per cell.** **Widen candidates semantically** — another
   evidence framing, node or edit vocabulary raises arm SD for free.
 - **A cell whose constant-answer floor exceeds its origin is disqualified**
-  (`application/diagnostics/seed_screen.py::rewards_collapse`). **An unchanged prompt can take a step**
+  (`application/scoring/seed_screen.py::rewards_collapse`). **An unchanged prompt can take a step**
   (`domain/l4/proxies.py::compute_outer_proxies` reads the promoted parent): open the cell's `review.md`
   before crediting an arm.
 - Compare arms on the cells BOTH met; a win is a few rows. Price every panel proposal in wall clock *and*

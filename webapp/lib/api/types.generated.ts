@@ -1824,7 +1824,7 @@ export interface RulerScope {
 
 /** The latest verify or bench pass on one arm, as its records left it. */
 export interface VerificationMark {
-  kind: 'verify' | 'bench';
+  kind: 'verify' | 'bench' | 'noise_floor';
   /** The arm the pass measures; `arm.key` joins it to its row. */
   arm: ArmName;
   state: 'running' | 'done' | 'failed';
@@ -4585,22 +4585,43 @@ export interface CommandAcceptedBody {
   subject: string;
 }
 
-/** The pass is the fact, the reading a cache of one grading of it. */
-export interface VerifyGradedView {
-  kind: 'verify_graded';
-  verify_pass: VerifyPass;
-  reading: VerifyReading;
+/** The pass is the fact, the reading a cache of one grading of it; ``reading`` is
+ * ``None`` exactly where ``state`` is not ``read``. */
+export interface VerificationGradedView {
+  kind: 'verification_graded';
+  verification: VerificationPass;
+  subject: 'origin' | 'selected' | null;
+  tolerance: number | null;
+  reserve_usd: number | null;
+  reserve_tokens: number | null;
+  reading: VerifyReading | BenchReading | NoiseBand | null;
+  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+  refusal: string | null;
 }
 
-/** The facts a verify pass banked, never a grade of them. */
-export interface VerifyPass {
+/** One individual's held-out pass, as the facts it banked — never a grade of
+ * them. */
+export interface VerificationPass {
+  kind: 'verify' | 'bench' | 'noise_floor';
   arm: ArmName;
   sp_hash: string;
   cells: [string, string, boolean][];
-  positions: number[];
-  strategy: 'random' | 'hard';
-  seed: number | null;
+  sample_keys: string[];
+  stop: PassStop | null;
   scorer_id: string;
+  strategy: 'random' | 'hard' | null;
+  seed: number | null;
+  reads_before: number | null;
+  measured_datasets: Record<string, string>;
+}
+
+/** A noise-floor pass's reading: its fresh composites beside the recorded level,
+ * both over exactly the pass's rows (bl3.B2). */
+export interface NoiseBand {
+  raw: number[];
+  band: BandedValue;
+  fresh_accuracy: number;
+  recorded: OwnLevel;
 }
 
 /** A verify that bought nothing: every sample of the candidate's search split was
@@ -5342,7 +5363,7 @@ export interface CommandResponses {
   "start-run": CommandAcceptedBody;
   "submit-arms": CommandAcceptedBody;
   "unarchive-campaign": CommandAcceptedBody;
-  "verify-candidate": VerifyGradedView | VerifySaturated;
+  "verify-candidate": VerificationGradedView | VerifySaturated;
 }
 
 // promptpotter.domain.checkin_draft::SetupStep
@@ -5883,9 +5904,10 @@ export const SAMPLE_MOVEMENT_LABELS: Record<'new' | 'readded' | 'gained' | 'lost
 };
 
 // Mirror of domain/dashboard_rows.py::VERIFICATION_KIND_INFO, in display order.
-export const VERIFICATION_KIND_INFO: Record<'verify' | 'bench', VerificationKindInfo> = {
+export const VERIFICATION_KIND_INFO: Record<'verify' | 'bench' | 'noise_floor', VerificationKindInfo> = {
   "verify": { name: "verify", rows: " never seen" },
   "bench": { name: "held-out bench", rows: "" },
+  "noise_floor": { name: "noise floor", rows: " re-scored" },
 };
 
 // Mirror of domain/dataset_start.py::START_BLOCK_WORDS, in display order.
@@ -6171,7 +6193,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [STATUS_MARK_INFO, ["running", "scoring", "starting", "queued", "gate", "paused", "detached", "success", "halted", "failed", "archived", "unknown"]],
   [PRECISION_VERDICT_ADVICE, ["noise", "spread"]],
   [SAMPLE_MOVEMENT_LABELS, ["new", "readded", "gained", "lost", "kept"]],
-  [VERIFICATION_KIND_INFO, ["verify", "bench"]],
+  [VERIFICATION_KIND_INFO, ["verify", "bench", "noise_floor"]],
   [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable"]],
   [EXPORT_TIER_INFO, ["chat", "report", "notebook", "deploy", "package"]],
   [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "held", "unread"]],

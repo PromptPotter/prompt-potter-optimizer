@@ -22,7 +22,7 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.phases import StopOutcome, StopReason, WalkEnd, stop_reason_outcome
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellGrade, WalkedCell
+from promptpotter.domain.scoring import CellGrade
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import stable_hash
@@ -194,59 +194,6 @@ class PassStop(FrozenModel):
         return ReadingState.PENDING if paused else ReadingState.PASS_STOPPED
 
 
-class BenchPass(FrozenModel):
-    """One individual's pass over the bench set, as the facts it banked — never a grade of them."""
-
-    round: int
-    candidate_id: str
-    sp_hash: str
-    # In walk order; a row the pass never reached is absent.
-    cells: list[WalkedCell]
-    # Every row it was sent on, by content (`Sample.key`): the cell set two passes pair on.
-    sample_keys: list[str]
-    # `None` once it sent every row.
-    stop: PassStop | None
-    # The grader that stamped its live reading; a reader re-grades under its own.
-    scorer_id: str
-    # Individuals already graded on these rows when it was sent: a high count reads the headline optimistic.
-    reads_before: int
-    # By `Sample.key`, each row measuring another dataset than the one the cycle is filed under.
-    measured_datasets: dict[str, str] = Field(default_factory=dict)
-
-    def answers(self, sp_hash: str, sample_keys: list[str], scorer_id: str) -> bool:
-        """Banked whole for this point, on these rows, under this grader: re-sending it buys nothing."""
-        return self.stop is None and (self.sp_hash, self.sample_keys, self.scorer_id) == (
-            sp_hash,
-            sample_keys,
-            scorer_id,
-        )
-
-    def by_dataset(self) -> dict[str | None, list[str]]:
-        """``None`` is the dataset the cycle is filed under."""
-        out: dict[str | None, list[str]] = {}
-        for key in self.sample_keys:
-            out.setdefault(self.measured_datasets.get(key), []).append(key)
-        return out
-
-
-class BenchPasses(FrozenModel):
-    """``runner/bench.py::read_bench`` is the one reading of these passes."""
-
-    tolerance: int
-    origin: BenchPass
-    # Set aside so the selection's pass fits under the search's ceiling (``runner/bench.py::reserve_selection_pass``).
-    reserve_usd: float
-    reserve_tokens: int
-    # The latest pass of each individual the line selected, by its id: a pass measures an
-    # individual, so a rewind displaces none.
-    selections: dict[str, BenchPass]
-
-    def pass_of(self, individual_id: str) -> BenchPass | None:
-        if individual_id == self.origin.candidate_id:
-            return self.origin
-        return self.selections.get(individual_id)
-
-
 BenchColumn = Literal["accuracy", "composite"]
 
 BENCH_HEADLINE: BenchColumn = "accuracy"
@@ -325,7 +272,7 @@ class PassOutcome(NamedTuple):
     stop: PassStop | None
     scored: int
     expected: int
-    reads_before: int
+    reads_before: int | None
 
 
 class LineRun(NamedTuple):

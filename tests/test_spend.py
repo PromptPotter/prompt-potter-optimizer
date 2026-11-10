@@ -69,9 +69,6 @@ from promptpotter.application.datasets.authored import load_dataset_campaign_con
 from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.datasets.startability import offered_dataset
-from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
-from promptpotter.application.diagnostics.probe_reasoning import probe_reasoning
-from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
 from promptpotter.application.head_to_head_price import (
     optimizer_round_price,
     priced_head_to_head,
@@ -118,7 +115,6 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner.campaign_result import line_run
-from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.application.runner.inner import spawn, spawn_context
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.termination import run_stop_reason
@@ -127,6 +123,8 @@ from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.judges import call as judge_call
 from promptpotter.application.scoring.judges.registry import build_evaluators
+from promptpotter.application.scoring.passes import grade_line_bench, measure_noise_floor
+from promptpotter.application.scoring.probe_reasoning import probe_reasoning
 from promptpotter.application.scoring.sample_measurement import (
     cell_billing,
     emit_replayed_step_tokens,
@@ -138,6 +136,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     replayable_on,
     score_search_point,
 )
+from promptpotter.application.scoring.seed_screen import screen_inner_seeds
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession

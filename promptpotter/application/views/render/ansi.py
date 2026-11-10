@@ -22,8 +22,6 @@ from promptpotter.domain.arm_reading import lift_band_text
 from promptpotter.domain.candidate_diff import group_diff_keys
 from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.phase_views import (
-    BenchEnterView,
-    BenchGradedView,
     BenchScoredView,
     CandidatesGeneratedView,
     InitEnterView,
@@ -36,11 +34,13 @@ from promptpotter.domain.phase_views import (
     RoundStartView,
     RunSpendView,
     SpDiffView,
-    VerifyEnterView,
-    VerifyGradedView,
+    VerificationEnterView,
+    VerificationGradedView,
 )
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat
 from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
+from promptpotter.domain.verification import NoiseBand
+from promptpotter.domain.verify_pass import VerifyReading
 from promptpotter.domain.wounds import COLLAPSE_WORDS
 from promptpotter.shared.composite import render_composite_fitness_block
 
@@ -230,18 +230,12 @@ def to_text(view: PhaseView) -> str:
             return _render_step_enter(view)
         case OptimizerStepExitView():
             return _render_step_exit(view)
-        case BenchEnterView():
-            return _render_bench_enter(view)
-        case BenchGradedView():
-            return _render_bench_graded(view)
+        case VerificationEnterView():
+            return _render_pass_enter(view)
+        case VerificationGradedView():
+            return _render_pass_graded(view)
         case BenchScoredView():
             return _render_bench_scored(view)
-        case VerifyEnterView():
-            return (
-                f"  {DIM}verify {view.arm.label}: {view.rows} unseen cells, {view.strategy}{RESET}"
-            )
-        case VerifyGradedView():
-            return _render_verify_graded(view)
         case RoundCompleteView():
             return ""
         case _:
@@ -258,17 +252,28 @@ def render_run_spend(v: RunSpendView) -> str:
     return f"  {DIM}spend: {' · '.join(bits)}{RESET}"
 
 
-def _render_bench_enter(v: BenchEnterView) -> str:
-    subject = "the origin" if v.subject == "origin" else f"the R{v.round} selection"
+def _render_pass_enter(v: VerificationEnterView) -> str:
+    if v.verification == "verify":
+        return f"  {DIM}verify {v.arm.label}: {v.rows} unseen cells, {v.strategy}{RESET}"
+    subject = "the origin" if v.subject == "origin" else f"the R{v.arm.round} selection"
     return f"  {DIM}bench pass: {subject} on {v.rows} held-out rows{RESET}"
 
 
-def _render_bench_graded(v: BenchGradedView) -> str:
+def _render_pass_graded(v: VerificationGradedView) -> str:
     reading = v.reading
+    if isinstance(reading, VerifyReading):
+        return _render_verify_graded(reading)
+    if isinstance(reading, NoiseBand):
+        return f"  {DIM}{render_noise_band(v)}{RESET}"
+    if v.refusal is not None:
+        return f"  {YELLOW}verify {v.verification.arm.label}: not sent — {v.refusal}{RESET}"
     if reading is None:
-        cut = v.bench_pass.stop
+        cut = v.verification.stop
         stop = "" if cut is None else f": {cut.cause.value}"
-        return f"  {YELLOW}bench: no reading — {READING_STATE_INFO[v.state].label}{stop}{RESET}"
+        return (
+            f"  {YELLOW}{v.verification.kind}: no reading — "
+            f"{READING_STATE_INFO[v.state].label}{stop}{RESET}"
+        )
     level = reading.level
     value = "—" if level is None else f"{level.value:.3f}"
     return (
@@ -277,8 +282,20 @@ def _render_bench_graded(v: BenchGradedView) -> str:
     )
 
 
-def _render_verify_graded(v: VerifyGradedView) -> str:
-    r = v.reading
+def render_noise_band(v: VerificationGradedView) -> str:
+    band = v.reading
+    assert isinstance(band, NoiseBand), "a noise-floor pass reads a band"
+    recorded = band.recorded.composite
+    raw = ", ".join(f"{c:.4f}" for c in band.raw)
+    return (
+        f"noise floor {v.verification.arm.label}: k={len(band.raw)} composite "
+        f"{band.band.value:.4f} [{band.band.ci_lo:.4f}, {band.band.ci_hi:.4f}] on "
+        f"{len(v.verification.sample_keys)} rows (raw: {raw}); recorded on the same rows "
+        f"{'—' if recorded is None else f'{recorded.value:.4f}'}"
+    )
+
+
+def _render_verify_graded(r: VerifyReading) -> str:
     levels = " → ".join(
         "—" if (level := side.accuracy) is None else f"{level.value:.3f}"
         for side in (r.recorded, r.fresh)
