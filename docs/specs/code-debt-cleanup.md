@@ -596,8 +596,7 @@ later arc deletes. **Rides with:** the chain each group names, by its "Was" name
   translator and the fan-out go. [`architecture.md`](../architecture.md) §0.5 names
   "Langfuse-shape events" as the tracing bucket's foundation; that line becomes the projections in the
   same commit (operator, 2026-11-05). `tracing/bridge.py:111` runs each sink under `graceful`, so a
-  trace is silently partial; it goes with the translator. **Rides with:** DOOR-b (the per-query path
-  goes with `trace`). **Re-test:** `git grep -n "class TracingProjection" -- promptpotter`.
+  trace is silently partial; it goes with the translator. **Rides with:** DOOR-b. **Re-test:** `git grep -n "class TracingProjection" -- promptpotter`.
 - **U3: the ledger is narrated twice.** `views/readout.py::ReadoutProjection` (the readout log) and
   `domain/activity.py::ActivityFeed` (the chat) each word the same record kinds their own way, each with
   its own hold dedupe and arm labels, and the words already drift; `AnnouncedArms` has 15 references in 8
@@ -926,8 +925,7 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
 
 - `useCandidatesModel` writes the module store during render (the per-cycle metric and overlap seeding). **Rides with:** WEBSTATE-a.
 - Two sources for one question: `wonOnTheta` reads `facts.elects_on`, `electedMetric` reads `dash.display_metric`.
-- Three interval formatters: `format.ts::fmtInterval`, `VerifyReading::band`, `SearchpointDrillIn::band`. **Rides with:** webcell.
-- Two `cell_means` renderers: `SubjectSignals` and `channel-parts::CellMeans`. **Rides with:** webcell.
+- An interval formatter beside `format.ts`: `shell/searchpoint/VerifyReading.tsx::band` prints its own `[lo, hi]` beside `format.ts::fmtLevelBand` / `fmtInterval`. Action: it reads `fmtLevelBand`. **Held:** no wave-3 chain owns `shell/searchpoint/` (webcell's one `band()` stopped at `components/compare/`). **Re-test:** `git grep -c "function band(" -- webapp` is 0.
 - `TrajectorySeriesView::SeriesHoverPopup` is a hand-built popover beside `ui/Popover`.
 - `EvidenceCharts` and `CostStrip` lost their hover readouts with the tooltip; a per-cell or per-round value they need opens in the DOM.
 - **Two lineage layouts are derived side by side**: `webapp/components/candidates/dendrogram.ts::dendrogram`
@@ -1257,33 +1255,16 @@ A fix chain's row lists the bug ids it closes (`bl<part>.B<n>` is the audit's id
   session of a person who never returns keeps their email and user id on disk. Action: the reaper's sweep
   drops expired sessions. **Rides with:** the next pass through `jobs/reaper.py`. **Re-test:**
   `git grep -n "is_expired" -- promptpotter` names a caller outside `read`.
-- **`MeasurementRun` is a second measured-cell renderer**: `webapp/components/shell/node-surface/MeasurementRun.tsx:173-310`
-  (with `PanelCellRow.tsx`) groups, filters and caps cells beside the `MeasurementsPane` preset it also
-  mounts (`:312`), and joins `/hierarchy` to `/cells` on `arm.label + task` (`lib/derivations/inner-panel.ts:15,24`).
-  `queryAt.get(s.position) ?? ""` (`:289`) shows a sample missing from the body as "pending" after its
-  round closed. Action: the node surface mounts `MeasurementsPane` alone, and `PanelCellRow` and the join
-  go. **Rides with:** webcell. **Re-test:** `git grep -c PanelCellRow -- webapp` is 0.
-- **Two knob editors**: `webapp/components/dashboard/pipeline/NodeKnobsPanel.tsx:465-524` switches its
-  widget on `knob.kind` (its enum knob is a raw `<select>`), beside `shell/node-surface/NodeConfigEditor.tsx:380-398`.
-  One nullable number reads "off" in one editor and "inherit" in the other. Action: one knob editor, read
-  by both hosts. **Rides with:** webcell. **Re-test:**
-  `git grep -n 'knob.kind === "' -- webapp/components/dashboard/pipeline/NodeKnobsPanel.tsx` is empty.
-- **A rank is minted in the browser over unread rows**: `webapp/components/compare/ComparePane.tsx:524`
-  sets `rank: i + 1` over every row, unread ones (shown "—") included, so the ranked-edits table reads
-  "1, —, 3". Action: the served order's position among the read rows. **Rides with:** webcell.
-  **Re-test:** `git grep -n "rank: i + 1" -- webapp/components` is empty.
 - **A renderer outside `views/` keeps an extra for one paper script**: `presentation/terminal/completion.py::report_completion`
   has one caller, `paper/bbeh-comparison/bbeh_potter_runner.py:38`, and alone keeps the `jupyter` extra
-  (`pyproject.toml:127`) and a deptry exception. Action: delete the module and the extra, and pin the
-  paper script to the release it ran on. **Rides with:** edge. **Re-test:**
+  (`pyproject.toml:125-127,373,384`) and a deptry exception. Action: delete the module and the extra
+  with the lock and the pinned venv, and pin the paper script to the release it ran on. **Held:** the
+  paper script runs this module, so it is pinned to its release first. **Re-test:**
   `git grep -n "terminal.completion" -- paper promptpotter` is empty.
-- **Outbound notices are an adapter its siblings import**: `presentation/admin_bot.py`'s `notify_operator`,
-  `forward_new_account_to_crm` and `check_health_and_tell` are imported by `main.py:46`,
-  `api/routers/auth.py:32` and `cli/commands/machine_status.py:10`; its four hand-rolled `httpx` posts
-  each re-spell "a non-2xx is a refusal" (the comment at `:218` records an unheard notice reported as
-  heard). Action: one outbound poster under `infrastructure/` owns the refusal check, and the three
-  importers call it. **Rides with:** edge. **Re-test:**
-  `git grep -n "from promptpotter.presentation.admin_bot" -- promptpotter` names `main.py`'s bot start alone.
+- **`application/notices.py::answer_operator` is a one-line ring wrapper** the layering rule forced
+  (`presentation/` may not import `infrastructure/`). Action: if `presentation/admin_bot.py` is given a
+  sanctioned infrastructure seam, drop it. **Held:** a decision on that seam. **Re-test:**
+  `git grep -n "answer_operator" -- promptpotter` names `admin_bot.py` and `notices.py` alone.
 - **Sign-in policy lives in the router**: `presentation/api/routers/auth.py::callback` (`:203-255`) decides
   blocked, claim, ceiling and announce, while `presentation/CLAUDE.md` holds no business logic. Action:
   one `application/` sign-in act, arrival included, that the callback calls. **Rides with:** M22.
@@ -1293,6 +1274,11 @@ A fix chain's row lists the bug ids it closes (`bl<part>.B<n>` is the audit's id
   Action: `scripts/smoke_wheel.py` takes the wheel, makes the venv outside the checkout and runs itself
   there; each workflow calls it once, and `PROMPTPOTTER_SMOKE_EXPECT_WEBAPP` is the one difference.
   **Rides with:** the next `/potter-release`. **Re-test:** `git grep -c 'RUNNER_TEMP/elsewhere' -- .github` is 0.
+- **The gate's `py` lane and "needs the pinned venv" are one flag**: `scripts/gate.py::_reexec_pinned` keys
+  on `kind == "py"`, so `walk-world` (which `serve.mjs` needs from the pinned venv) runs under `--py`, and
+  CI's check job builds a potter straight leg it does not read. Action: one fact for the venv need,
+  apart from the lane. **Held:** no chain owns `scripts/gate.py`; it waits for the next gate pass.
+  **Re-test:** `python scripts/gate.py --py` lists `walk-world`.
 
 **Bugs, by fix chain** (each chain is one session of one-decision links).
 - **F1, a torn mint**: bl1.B15 (= bl5.B4). A mint that dies between `adopt_ledger`, `create_campaign`
@@ -1346,21 +1332,16 @@ A fix chain's row lists the bug ids it closes (`bl<part>.B<n>` is the audit's id
   parse (`read_params.py::DatasetCellsParams.name`). **Rides with:** READS.
 
 **Perf, ranked by gain over effort** (measured by the audit's `pf1` and `pf2`; numbers are theirs).
-- **`/datasets` and `/origins` re-digest the recipe's source per dataset per request** (rank 1):
-  `application/datasets/loaders.py::recipe_code`, 73 % of the read in `module_source_digest`
-  (43.7 to 17.9 ms with a memo). Action: the digest is a process constant per recipe, and
-  `dataset_reading` resolves the definition once. **Rides with:** digest.
-- **Every process re-derives every treatment digest from the source tree** (rank 2): `complete_registries()`
-  634-746 ms (shaper scan 400 ms). `optimizers/nodes.py::_source_digest`, `source_scan.py::optimizer_prompt_shapers`
-  and `shared/hashing.py::module_source_digest` cache per process only. Action: one content-keyed cache
-  for the whole digest, digests unchanged. **Rides with:** digest.
+- **The treatment digest's edit probe patches `Path.read_text`.**
+  `tests/test_identity.py::test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_other`
+  simulates an edit through a patched `Path.read_text` and `nodes._source_digest.cache_clear()`, which
+  blocks keying `source_scan.py::prompt_source_digest` on a once-per-process tree hash (about 250 ms per
+  boot). Action: the probe writes the edit to a copy of the tree under a patched `_PACKAGE_ROOT`, then the
+  tree key is process-cached. **Rides with:** f5 (the test half). **Re-test:** `git grep -n "read_text" -- tests/test_identity.py` names the patch.
 - **Every dashboard read deep-copies the whole fold** (rank 3): `LiveDashboardProjection.value`
   (`model_copy(deep=True)`), 1.145 of 1.307 s in `copy.deepcopy` at 16 rounds; the listing pays it per
   course to read `run_limits`. Action: the fold's state is copy-on-write and frozen, and `run_limits` is
   its own small fold. **Rides with:** DOOR-a's rest.
-- **CI's `webapp` job runs the whole offline run again for one walk world** (rank 4): 29.4 s real
-  (`gate.py::_offline_run` as `playwright`'s dependency). Action: the walk world is its own straight leg
-  (`offline_run.py --optimizer potter`, 4.8-5.6 s). **Rides with:** gate.
 - **The polled live dashboard re-serves every closed round every 2 s** (rank 5): 570 kB at 16 rounds,
   `domain/dashboard_rows.py::served_rounds`. Action: the live body serves what moves, a closed round is
   `…/rounds/{n}` fetched once; the per-round series stays merged server-side (`webapp/lib/CLAUDE.md` § No
@@ -1372,11 +1353,6 @@ A fix chain's row lists the bug ids it closes (`bl<part>.B<n>` is the audit's id
 - **The lineage subtree's donor search is quadratic, per read** (rank 8): `application/hierarchy_subtree.py::_descent`,
   8,700 `SequenceMatcher` builds for 97 candidates. Action: "closer to" is folded once per candidate on
   the ledger. **Rides with:** DOOR-a's rest.
-- **chart.js and every pane ship in the first-paint chunk** (rank 9): 862 kB JS (284 kB gz). Action: those
-  surfaces load through `components/shell/lazy-panes.tsx`. **Rides with:** weblazy.
-- **A process start is 1.1 s** (rank 10): 864 ms of `import promptpotter.main` is pydantic schema
-  builds. Action: `defer_build=True` on `StrictModel` / `FrozenModel`. The forkserver is not taken
-  (Linux-only, a second launch path). **Rides with:** digest.
 - **`Sample.key` re-hashes on every read** (rank 12): 16,781 calls per potter leg
   (`domain/sample.py::Sample.key`). Action: computed once at validation. **Rides with:** any pass in `domain/sample.py`.
 - **`SampleScoredRecord.running` stamps a running fold on every cell** (rank 13): 9.3 % of a 1.5 MB ledger

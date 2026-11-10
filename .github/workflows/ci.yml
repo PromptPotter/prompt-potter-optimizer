@@ -111,7 +111,7 @@ jobs:
           key: eslint-${{ github.sha }}
           restore-keys: eslint-
 
-      # The `playwright` check walks the offline-run world through the API
+      # The `playwright` check walks the `walk-world` check's run through the API
       # `e2e/serve.mjs` runs out of `.venv`. The gate syncs `.venv` to its pinned
       # extras itself, so that is this job's one sync. `--with-deps` because a
       # bare runner has none of Chromium's shared libraries.

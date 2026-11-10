@@ -12,6 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A Compare arm's bench and diagnostic sends on the box's key meet the run's coupon reserve**, and one no rate prices is refused unsent, as every other send is.
 - **A free-tier launch holds at most the tier's $0.03**, whatever its `start-run` budget or a `set-limits` asks.
 - **A judge on a model off the free tier is refused**, as an optimizer node on one is.
+- **A run traced to Langfuse no longer creates a `ground_truth` dataset there**: its items were linked to no run.
 
 ## [0.8.19] — 2026-11-06
 
