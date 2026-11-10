@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -54,7 +55,7 @@ from offline_world import Router
 from pydantic import SecretStr
 from starlette.types import Message, Receive, Scope, Send
 
-from promptpotter.application import account, health
+from promptpotter.application import account, health, notices
 from promptpotter.application.app_visits import OUTSIDE_REQUESTS
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import job_status, read_command
@@ -241,6 +242,7 @@ from promptpotter.infrastructure.store.user_store import (
 )
 from promptpotter.infrastructure.store.visit_records import default_visit_record_store
 from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, _off_catalogue, app
+from promptpotter.presentation import admin_bot
 from promptpotter.presentation.api.deps import build_stores_from_identity
 from promptpotter.presentation.api.middleware.oidc import (
     OWNER_DEVICE_COOKIE_NAME,
@@ -297,9 +299,12 @@ sys.exit(0 if landing.proven and not landing.refused and not landing.caches else
 # 1. Leaks and the perimeter
 
 
-@pytest.mark.usefixtures("offline")
 def test_no_path_secret_or_dataset_text_leaves_its_fence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    built_stores: Stores,
+    offline: Router,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     with pytest.raises(ValueError):
         campaign_root_dir_for(WorkspaceDir(tmp_path), "../escape")
@@ -347,6 +352,39 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         failed = logging.LogRecord("t", logging.WARNING, "", 0, "poll failed", None, sys.exc_info())
     log_redaction.SecretRedactionFilter().filter(failed)
     assert bot_token not in logging.Formatter().format(failed), "a traceback carried the bot token"
+
+    # A token Telegram refuses stops the poll at once and has the channel's probe record it now;
+    # a blip is retried. Neither logs a traceback per attempt.
+    class EnoughSleepsError(Exception):
+        pass
+
+    def polled(status: int) -> tuple[list[float], int]:
+        offline.token_endpoints[f"api.telegram.org/bot{bot_token}/getUpdates"] = (status, {})
+        slept: list[float] = []
+        checks: list[None] = []
+
+        def sleep(seconds: float) -> None:
+            slept.append(seconds)
+            if len(slept) == 3:
+                raise EnoughSleepsError
+
+        with monkeypatch.context() as bot:
+            bot.setattr(notices, "check_and_tell", lambda: checks.append(None))
+            bot.setattr(notices, "forward_trail_to_briefing", lambda: False)
+            bot.setattr(notices, "tell_power", lambda was: was)
+            bot.setattr(notices, "tell_visits_digest", lambda: None)
+            bot.setattr(time, "sleep", sleep)
+            with pytest.raises(EnoughSleepsError):
+                admin_bot.run_bot(bot_token, "1", None)
+        return slept, len(checks)
+
+    caplog.clear()
+    slept, checks = polled(401)
+    assert admin_bot._RETRY_BACKOFF_S not in slept, "a refused token was polled again"
+    assert checks == 2, "the refusal waited for the next half-hour health check"
+    slept, checks = polled(502)
+    assert slept == [admin_bot._RETRY_BACKOFF_S] * 3 and checks == 1, "a blip stopped the poll"
+    assert not [r for r in caplog.records if r.exc_info], "a poll attempt logged a traceback"
 
     # Secrecy is read off the field TYPE: a `SecretStr` declared tomorrow under any name needs no redactor edit.
     class Grown(settings_mod.Settings):

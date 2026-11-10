@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from promptpotter.application import notices
+from promptpotter.application import health, notices
 from promptpotter.application.account import (
     block_email,
     blocked_emails,
@@ -198,6 +198,12 @@ class _Duties:
     def _watch_power(self) -> None:
         self._power = notices.tell_power(self._power)
 
+    def health_now(self) -> None:
+        """The next `run_due` checks health, whatever its half hour says."""
+        for index, (_, duty) in enumerate(self._roster):
+            if duty == self._health_and_trail:
+                self._due[index] = 0.0
+
     def run_due(self) -> float:
         """Every duty that is due runs; the answer is the seconds until the next one."""
         for index, (every_s, duty) in enumerate(self._roster):
@@ -258,20 +264,21 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
                 if offset is not None:
                     params["offset"] = offset
                 resp = client.get("/getUpdates", params=params)
-                if resp.status_code == 409:
-                    # A CONFIGURATION error no retry resolves, and `channel:telegram` reports it.
-                    logger.error(
-                        "getUpdates refused with 409: a webhook holds this bot, so commands cannot "
-                        "arrive. Give the admin channel its OWN bot; its own duties go on."
-                    )
+                if (refused := health.telegram_refusal(resp.status_code)) is not None:
+                    # No retry changes it: polling stops, the bot's own duties go on, and
+                    # `channel:telegram` records it now, once, rather than at its next half hour.
+                    logger.error("getUpdates stops: %s", refused)
                     polling = False
+                    duties.health_now()
                     continue
                 resp.raise_for_status()
                 updates = resp.json().get("result", [])
-            except httpx.HTTPError:
+            except httpx.HTTPError as blip:
                 # The long-poll blocks only on SUCCESS: without the sleep an erroring one spins.
                 logger.warning(
-                    "getUpdates failed; retrying in %ss", _RETRY_BACKOFF_S, exc_info=True
+                    "getUpdates failed (%s); retrying in %ss",
+                    type(blip).__name__,
+                    _RETRY_BACKOFF_S,
                 )
                 time.sleep(_RETRY_BACKOFF_S)
                 continue

@@ -110,6 +110,17 @@ def _llm_key(provider: str, spec: ProviderSpec, key: str) -> Probe:
     return Probe(f"llm:{provider}", check, fix)
 
 
+# Telegram holds a bot's messages for ONE reader: a webhook or a second poller takes them.
+_HELD = "another reader holds the admin bot's messages, so commands never arrive"
+
+
+def telegram_refusal(status: int) -> str | None:
+    """What a Telegram answer says that no retry changes; None where one may."""
+    if status in (401, 403, 404):
+        return f"Telegram refused the admin bot's token (HTTP {status})"
+    return _HELD if status == 409 else None
+
+
 def _operator_channel(token: str) -> Probe:
     """The channel every other notice rides: dead, it says nothing, so its health is checked here."""
 
@@ -119,18 +130,15 @@ def _operator_channel(token: str) -> Probe:
                 base_url=f"https://api.telegram.org/bot{token}", timeout=10, verify=tls_context()
             ) as client:
                 me = await client.get("/getMe")
-                if me.status_code in (401, 404):
-                    return Reading(
-                        "broken", f"Telegram refused the admin bot's token (HTTP {me.status_code})"
-                    )
+                if (refused := telegram_refusal(me.status_code)) is not None:
+                    return Reading("broken", refused)
                 hook = await client.get("/getWebhookInfo")
         except httpx.HTTPError as exc:
             return Reading("unverified", f"unreachable: {type(exc).__name__}")
         if not (me.is_success and hook.is_success):
             return Reading("unverified", f"HTTP {me.status_code} / {hook.status_code}")
         if hook.json().get("result", {}).get("url"):
-            # Telegram holds a bot's messages for ONE reader: a webhook takes them from the poll.
-            return Reading("broken", "a webhook holds the admin bot, so commands never arrive")
+            return Reading("broken", _HELD)
         return Reading("held", f"@{me.json().get('result', {}).get('username', '?')}")
 
     fix = (
