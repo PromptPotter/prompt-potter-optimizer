@@ -123,7 +123,8 @@ def _with_rows(stores: Stores, hop: CycleHop, held: StandingRound, scorer: Score
             raise NotFoundError(
                 f"round {close.round} of cycle {hop.cycle_id} closed on answers the measurement "
                 f"archive no longer holds (samples {sorted(walked - kept)}). Its rows "
-                "cannot be read back; rewind before it (`resume --from`) to walk it again."
+                "cannot be read back; a `start-run` whose `mode.from_round` is before it walks it "
+                "again."
             )
         return taken
 

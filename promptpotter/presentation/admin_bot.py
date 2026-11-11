@@ -19,9 +19,9 @@ from promptpotter.application.account import (
     trail_by_email,
     unblock_email,
 )
-from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
+from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.application.power import PowerLevel
 from promptpotter.application.views.trail import trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
@@ -288,7 +288,7 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
 
 def main() -> int:
     setup_logging()
-    complete_registries(every_treatment=False)
+    land_at_entry(every_treatment=False)
     token = settings.ADMIN_BOT_TELEGRAM_TOKEN.get_secret_value().strip()
     chat_id = settings.ADMIN_BOT_CHAT_ID.strip()
     passphrase = settings.ADMIN_BOT_PASSPHRASE.get_secret_value().strip() or None

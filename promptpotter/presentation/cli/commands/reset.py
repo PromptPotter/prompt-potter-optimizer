@@ -92,7 +92,8 @@ def _unloadable(one: Unloadable) -> str:
 
 def _render_landing(landing: Landing, *, written: bool) -> list[str]:
     lines = [f"migrate {one.said}" for one in landing.staged]
-    lines += [f"drop {_unloadable(one)}" for one in landing.caches]
+    lines += [f"drop {_unloadable(one)}" for one in (*landing.caches, *landing.runs)]
+    lines += [f"delete {one.why}, its spend banked" for one in landing.torn]
     if landing.reset is not None:
         lines.append(_render_summary(landing.reset))
     lines += [f"unknown {path}" for path in landing.unknown]
@@ -105,10 +106,11 @@ def _render_landing(landing: Landing, *, written: bool) -> list[str]:
 
 
 async def cmd_land_data(args: argparse.Namespace) -> CommandResult:
-    landing = plan_landing(default_projects_root(), reset=args.reset)
+    projects_root = default_projects_root()
+    landing = plan_landing(projects_root, reset=args.reset)
     written = not (landing.refused or args.dry_run)
     if written:
-        apply_landing(landing)
+        apply_landing(projects_root, landing)
     return CommandResult(
         data={
             "written": written,
@@ -116,6 +118,8 @@ async def cmd_land_data(args: argparse.Namespace) -> CommandResult:
             "proven": landing.proven,
             "migrated": [one.said for one in landing.staged],
             "dropped_caches": [str(one.path) for one in landing.caches],
+            "dropped_runs": [_unloadable(one) for one in landing.runs],
+            "torn_mints": [str(one.path) for one in landing.torn],
             "reset": None if landing.reset is None else len(landing.reset.drops),
             "unknown": [str(path) for path in landing.unknown],
             "unloadable": [_unloadable(one) for one in landing.unloadable],

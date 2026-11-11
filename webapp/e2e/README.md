@@ -17,7 +17,7 @@ First time on a machine: `npx playwright install chromium`.
 **`gate.py` runs `cold` and `walk`**, the walk against the `walk-world` check's run
 (`scripts/gate.py::_playwright`); `spend` needs money. `walk` reads no operator campaign when
 `PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`) names a run — potter's straight run is what `gate.py --only walk-world` leaves
-at `.gate_cache/walk-world/<key>/potter`, under that check's own key so a world is walked only
+at `.gate_cache/walk-world/<key>/potter/data`, under that check's own key so a world is walked only
 by a tree whose engine built it, and building one removes every other world beside it — and `walk_world.py` serves a throwaway copy of it whose
 account agreed to the live terms, with the `offline` backend. Unset, `walk` reads the checkout's
 own workspace, a desk tier run by hand.
@@ -56,7 +56,7 @@ without it rather than inherit one.
 | `PP_E2E_COLD_PORT` | `8124` | the throwaway server |
 | `PP_E2E_FAKEAUTH_PORT` | `8125` | the auth-CLOSED server `onboarding-signed-in.spec.ts` raises for itself |
 | `PP_E2E_COLD_HOME` | `<tmp>/promptpotter-e2e` | where the throwaway world lives; it must sit under the system temp dir or `reset_world.py` refuses to wipe it |
-| `PP_E2E_WALK_WORLD` | — | the run `walk` serves a copy of, at `PP_E2E_WALK_HOME`, with the `offline` backend (`walk-world`'s `.gate_cache/walk-world/<key>/potter`, say); never reuses a server already up |
+| `PP_E2E_WALK_WORLD` | — | the run `walk` serves a copy of, at `PP_E2E_WALK_HOME`, with the `offline` backend (`walk-world`'s `.gate_cache/walk-world/<key>/potter/data`, say); never reuses a server already up |
 | `PP_E2E_WALK_HOME` | `<tmp>/promptpotter-e2e-walk` | where that copy lives; the gate hands each run its own, so two gates never walk one copy |
 | `PP_E2E_BASE_URL` | — | walk a server already up (your `:8001`, a deployed box); the walk server then never starts |
 | `PP_E2E_SPEND` | — | `1` arms the spend tier |

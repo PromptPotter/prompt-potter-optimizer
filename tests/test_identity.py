@@ -287,6 +287,7 @@ from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.clock import iso_z
 from promptpotter.shared.errors import (
+    LANDING_REMEDY,
     ConflictError,
     DatasetAccessError,
     FileKind,
@@ -1390,23 +1391,13 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             CampaignLayout(tiered.campaigns.campaign_root_dir("camp-beside")).manifest,
             b"{not a manifest",
             lambda: tiered.campaigns.load_campaign("camp-beside"),
-            (
-                "manifest_unreadable",
-                409,
-                "No migration exists: a reset of the data root wipes it with the rest of the run "
-                "data.",
-            ),
+            ("manifest_unreadable", 409, LANDING_REMEDY),
         ),
         (
             manifest_file,
             json.dumps(manifest).encode(),
             beside_config,
-            (
-                "manifest_unreadable",
-                409,
-                "No migration exists: a reset of the data root wipes it with the rest of the run "
-                "data.",
-            ),
+            ("manifest_unreadable", 409, LANDING_REMEDY),
         ),
         (
             checkin_file,
@@ -1424,7 +1415,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             tiered.jobs_dir / "torn.json",
             b'{"job_id": 3}',
             lambda: JobRegistry.attach(tiered.jobs_dir).get("torn"),
-            ("job_unreadable", 409, "No migration exists: delete it once no run it names is live."),
+            ("job_unreadable", 409, LANDING_REMEDY),
         ),
         (
             config_file,

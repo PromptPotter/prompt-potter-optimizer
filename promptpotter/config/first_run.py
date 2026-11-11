@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import os
 import sys
+
+from pydantic import SecretStr
 
 from promptpotter.config.paths import env_file_path
 from promptpotter.config.settings import settings
@@ -11,7 +12,8 @@ _PROVIDER_KEYS = ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENRO
 
 
 def ensure_api_key() -> None:
-    if any(os.environ.get(k) for k in _PROVIDER_KEYS):
+    """The key it is given lands in the `.env` the settings read, and in this process's settings."""
+    if any(getattr(settings, k).get_secret_value() for k in _PROVIDER_KEYS):
         return
 
     env_path = env_file_path()
@@ -36,5 +38,5 @@ def ensure_api_key() -> None:
         )
         return
     write_text(env_path, f"OPENROUTER_API_KEY={key}\n")
-    os.environ["OPENROUTER_API_KEY"] = key
+    settings.OPENROUTER_API_KEY = SecretStr(key)
     print(f"Wrote {env_path}.", file=sys.stderr)

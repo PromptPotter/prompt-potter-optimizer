@@ -10,7 +10,7 @@ from promptpotter.application.account import local_stores
 from promptpotter.application.commands import archive_compaction, measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.initialization.wiring import complete_registries, init_services
+from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     embedded_share,
     probe_backend,
@@ -27,6 +27,7 @@ from promptpotter.application.jobs.mint import (
 from promptpotter.application.jobs.quota import land_job, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
+from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.views.readout import StatusFn
@@ -89,7 +90,7 @@ async def open_session(
 ) -> Session:
     """Raises what ``probe_backend`` refuses a launch on; *rows* replace the definition's bank, which the mint labels."""
     setup_logging()
-    complete_registries(every_treatment=False)
+    land_at_entry(every_treatment=False)
     if stores is None:
         stores = local_stores(tenant=None)
     down = await probe_backend(

@@ -206,10 +206,10 @@ knowing:
   loads every file under the data root as it would then stand, writing nothing. On an `unloadable
   SURVIVOR` line, the script checks the previous commit back out, reopens admission to it, starts it
   again and exits 1: no migration maps that file yet, and only a release that ships one lands (a
-  migration maps every shape its record can take, so none waits on a sweep). Run data or a file no row names that will
-  not load refuses the same way unless you pass `--reset` (`./update.sh v0.8.19 --reset`): every
-  account's run data goes, refused while a run is live. A cache that will not load is dropped
-  unasked. Last, with the API and the admin bot stopped, `land-data` plans again and writes; from
+  migration maps every shape its record can take, so none waits on a sweep). A file no row names
+  refuses the same way. Run data and a cache that will not load are dropped unasked, a campaign or
+  draft whole when its own record is the file; a live run's refuses. `--reset`
+  (`./update.sh v0.8.19 --reset`) drops every account's run data besides, refused while a run is live. Last, with the API and the admin bot stopped, `land-data` plans again and writes; from
   then on nothing rolls back. A roll-back that itself fails, or a `land-data` that crashed, exits 3,
   naming the commit the checkout is on, with the services stopped.
 - **It restarts the admin bot but never rewrites its unit.** A change to that unit — its data root,

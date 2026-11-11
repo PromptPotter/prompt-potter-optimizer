@@ -145,25 +145,14 @@ SCRIPTED_L2 = {"l1_patience": 2}
 # alike, and θ reads `prior_pinned`; 3 and 4 hold a level, 0 and 2 leave the ruler too flat.
 REBASE_HARDNESS = 3
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
-# A leg's home holds its own outputs beside the run's data root, and the legs nested in it.
-HARNESS = frozenset(
-    {
-        "requests",
-        "decisions.json",
-        "campaign.yaml",
-        "head_to_head.json",
-        "arms",
-        "foreign",
-        RESUMED,
-        DIVERGED,
-        REBASED,
-        GATED,
-        CROSSED,
-        f"{CROSSED}-{RESUMED}",
-        f"{CROSSED}-l2",
-        *INTERRUPTED.values(),
-    }
-)
+
+
+def data_root(leg: Path) -> Path:
+    """A leg's outputs and the legs nested in it sit beside its run's data root, never in it: every
+    process lands its root at entry, and a file no row names refuses the landing."""
+    return leg / "data"
+
+
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
 RESUME_APPENDS = ("phases", "run_phases", "arms", "rulers", "rounds_entered")
@@ -998,12 +987,13 @@ def interrupted(
     workspace.mkdir()
     if (rc := spawn_terminal(workspace, "new", interrupts)) != StopOutcome.PAUSED.exit_code:
         return False, f"`new` under {interrupts} SIGINT exited {rc}, not as a pause does"
-    stores = build_stores(default_identity(), projects_root=Path(long_path(workspace)) / "projects")
+    projects = Path(long_path(data_root(workspace))) / PROJECTS_DIR
+    stores = build_stores(default_identity(), projects_root=projects)
     (campaign_id,) = stores.campaigns.list_campaign_ids()
     (cycle,) = stores.campaigns.campaign_cycle_dirs(campaign_id)
     hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle.name)
     stopped = stores.run_state(hop)
-    jobs = [json.loads(p.read_text(encoding="utf-8")) for p in (workspace / "jobs").glob("*.json")]
+    jobs = [json.loads(p.read_text(encoding="utf-8")) for p in stores.jobs_dir.glob("*.json")]
     if stopped.producer.attached or any(j["released_at"] is None for j in jobs):
         return False, f"`new` exited 130 still holding its cycle or its slot ({stopped})"
     if interrupts == 1 and stopped.run_phase is not RunPhase.PAUSED:
@@ -1458,7 +1448,7 @@ def child_env(home: Path) -> dict[str, str]:
             env[key] = ""
     # The SDKs refuse an EMPTY key before sending; every transport they could reach is faked.
     env.update(dict.fromkeys(PROVIDER_KEYS, NOT_A_KEY))
-    env.update(PROMPTPOTTER_HOME=long_path(home), PYTHONUTF8="1")
+    env.update(PROMPTPOTTER_HOME=long_path(data_root(home)), PYTHONUTF8="1")
     return env
 
 
@@ -1509,7 +1499,9 @@ def recombined(workspace: Path, host: str) -> int:
             for value in node:
                 walk(value)
 
-    for path in Path(long_path(workspace)).glob("projects/*/campaigns/*/cycles/*/rounds/*.json"):
+    for path in Path(long_path(data_root(workspace))).glob(
+        "projects/*/campaigns/*/cycles/*/rounds/*.json"
+    ):
         walk(json.loads(path.read_text(encoding="utf-8")))
     return len(found)
 
@@ -1553,7 +1545,7 @@ def read_straight_and_resumed(
     name: str, workspace: Path, resumed: Future[int] | None, pause_after: int, against: Path | None
 ) -> int:
     ran = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
-    (cycle,) = (workspace / "projects").glob("*/campaigns/*/cycles/*")
+    (cycle,) = (data_root(workspace) / PROJECTS_DIR).glob("*/campaigns/*/cycles/*")
     bench = ran["bench"]
     failed = int(not _graded(bench))
     lift = None if bench is None else bench["vs_origin"]["headline"]
@@ -1590,7 +1582,7 @@ def read_straight_and_resumed(
 def paused_at(workspace: Path) -> tuple[int, bool]:
     """The round its campaign's pause stood in, off its cycle's own ledger, and whether the pause
     lay inside it: entered and not yet closed when the pause was declared."""
-    (ledger,) = Path(long_path(workspace)).glob(
+    (ledger,) = Path(long_path(data_root(workspace))).glob(
         "projects/*/campaigns/*/cycles/*/.runtime/ledger.jsonl"
     )
     entered = closed = 0
@@ -1622,18 +1614,13 @@ def said_leg(
     print(f"{name}: {what}: {ended}")
 
 
-def is_harness(rel: Path) -> bool:
-    """What this script writes into a leg's home beside the run: its outputs and the legs nested in it."""
-    top = rel.parts[0]
-    return top in HARNESS or top.startswith(("requests-", "arm-")) or top.endswith(".log")
-
-
 def proven_home(workspace: Path) -> None:
     """A landing's plan over what the run wrote: every file named by a row, loading as it shapes, and
-    nothing for a migration to stage."""
-    landing = plan_landing(workspace / PROJECTS_DIR, reset=False)
-    unknown = [p for p in landing.unknown if not is_harness(p.relative_to(workspace))]
-    refused = [f"{u.path}: {u.why}" for u in (*landing.unloadable, *landing.caches)]
+    nothing for a migration to stage or the landing to drop."""
+    landing = plan_landing(data_root(workspace) / PROJECTS_DIR, reset=False)
+    unknown = list(landing.unknown)
+    refused = [f"{u.path}: {u.why}" for u in (*landing.unloadable, *landing.caches, *landing.runs)]
+    refused += [f"{u.path}: {u.why}" for u in landing.torn]
     if unknown or refused or landing.staged:
         raise SystemExit(
             f"offline run: the run wrote what no data-root row names {unknown}, what its row's "
@@ -1653,7 +1640,7 @@ def refuse_another_tree() -> None:
 def run_child_leg(args: argparse.Namespace) -> None:
     if any(os.environ[k] != NOT_A_KEY for k in PROVIDER_KEYS):
         raise SystemExit("offline run: --child runs only under the env its parent builds")
-    workspace = Path(os.environ["PROMPTPOTTER_HOME"])
+    workspace = Path(os.environ["PROMPTPOTTER_HOME"]).parent
     if args.terminal:
         run_terminal(
             args.child,

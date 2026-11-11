@@ -125,13 +125,7 @@ async def resume_with_divergence_check(
             kind=div.kind,
             recorded_outcome=div.recorded_outcome,
             current_outcome=div.current_outcome,
-            diagnostics={
-                "scorer_id": scorer.id,
-                "fork_hint": (
-                    "rerun `resume --fork-on-divergence` to branch a new cycle "
-                    "here; this one keeps what the superseded package produced"
-                ),
-            },
+            diagnostics={"scorer_id": scorer.id},
         )
     if rewind is not None:
         campaign_store.rewind_to_round(hop, rewind)

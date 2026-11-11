@@ -1134,9 +1134,9 @@ def _optimizer_plugin(_: Selection) -> Outcome:
         code, out = run(argv, REPO, PROMPTPOTTER_HOME=str(home))
         if code:
             return code, out
-        # `offline_run.py` homes each optimizer's run under its own name.
+        # `offline_run.py` homes each optimizer's run under its own name, its data root inside.
         probe = [str(python), "-c", _PLUGIN_SOURCES_PROBE]
-        code, read = run(probe, REPO, PROMPTPOTTER_HOME=str(home / "example"))
+        code, read = run(probe, REPO, PROMPTPOTTER_HOME=str(home / "example" / "data"))
         if code:
             return code, read
         if _PLUGIN_SOURCE not in (sources := set(read.split())):
@@ -1147,17 +1147,17 @@ def _optimizer_plugin(_: Selection) -> Outcome:
     return 0, out
 
 
-# What the `walk` tier serves a copy of: potter's straight run, in a home of its own under the
-# `walk-world` check's key, so a world is read only by a tree whose engine built it. One world
+# What the `walk` tier serves a copy of: potter's straight run's data root
+# (`offline_run.py::data_root`), in a home of its own under the `walk-world` check's key, so a world is read only by a tree whose engine built it. One world
 # stands: building one removes every other entry of `walk-world/`, under the clone's lock, which
 # a walk's copy of its world takes too (`webapp/e2e/walk_world.py`), so no world goes while a tree
 # copies it; a tree whose world went builds its own again (`Check.kept` reads `builds`).
 _WALK_WORLDS = clone_cache() / "walk-world"
-_WALK_WORLD = str(_WALK_WORLDS / "{key}" / "potter")
+_WALK_WORLD = str(_WALK_WORLDS / "{key}" / "potter" / "data")
 
 
 def _walk_world(sel: Selection) -> Outcome:
-    home = sel.world.parent
+    home = sel.world.parent.parent
     for other in _WALK_WORLDS.iterdir() if _WALK_WORLDS.is_dir() else ():
         if other.is_dir() and other != home:
             shutil.rmtree(other)

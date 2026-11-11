@@ -34,6 +34,7 @@ from promptpotter.domain.campaign import Campaign, HeadToHeadRecord
 from promptpotter.domain.checkin_draft import DraftFile, OriginResolution
 from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.export import parse_prompt_export
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER
 from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
@@ -147,7 +148,19 @@ class Scope(Enum):
         self.prefixes = prefixes
 
 
-type Shape = TypeAdapter[Any] | Callable[[bytes], object] | None
+class Opaque(NamedTuple):
+    """A row a landing proves by presence alone, and why no shape loads its bytes."""
+
+    why: str
+
+
+type Shape = TypeAdapter[Any] | Callable[[bytes], object] | Opaque
+
+_HELD = Opaque("a lock or marker its process holds, never parsed")
+_AUDIT = Opaque("an audit trail its writer appends and no reader parses")
+_TREE = Opaque("a file of a tree another tool owns, read by that tool alone")
+_WALKED = Opaque("its reader walks a dict, so no model holds its shape yet")
+_FOR_A_PERSON = Opaque("written for a person to read, never read back")
 
 
 @functools.cache
@@ -163,7 +176,7 @@ class Kind(NamedTuple):
     scope: Scope
     glob: str
     fate: Fate
-    shape: Shape = None
+    shape: Shape
 
     @property
     def patterns(self) -> tuple[str, ...]:
@@ -195,9 +208,21 @@ class Kind(NamedTuple):
         return bool(patterns) and _compiled(patterns).match(rel.as_posix()) is not None
 
 
+# The key of the record schema the data root last landed under (`maintenance/landing.py`).
+LANDED_SCHEMA_FILE = ".landed-schema"
+
 _IDENTITY = IdentityPaths(root=Path(IDENTITY_DIR))
 _BLOCK_PACK = f"{BLOCK_PACKS_DIR}/*/{PACK_FILE}"
 _INSTALL, _SURVIVOR = Scope.INSTALL, Fate.SURVIVOR
+
+# An install's shadows of a shipped manifest: their shape here, and their reader's proof in the
+# landing (`maintenance/landing.py`), which reads them as the API's boot does.
+OPTIMIZER_SHADOW = Kind(
+    "optimizer manifest", _INSTALL, "optimizers/*/pipeline.yaml", _SURVIVOR, AUTHORED_MANIFEST
+)
+CHECKIN_SHADOW = Kind(
+    "check-in manifest", _INSTALL, "checkin/pipeline.yaml", _SURVIVOR, CHECKIN_MANIFEST
+)
 
 INSTALL_KINDS: tuple[Kind, ...] = (
     Kind(
@@ -208,9 +233,9 @@ INSTALL_KINDS: tuple[Kind, ...] = (
         TypeAdapter(ProviderConfigBundle),
     ),
     Kind("blocklist", _INSTALL, _IDENTITY.blocklist.as_posix(), _SURVIVOR, TypeAdapter(Blocklist)),
-    Kind("blocklist audit", _INSTALL, _IDENTITY.blocklist_audit.as_posix(), _SURVIVOR),
+    Kind("blocklist audit", _INSTALL, _IDENTITY.blocklist_audit.as_posix(), _SURVIVOR, _AUDIT),
     Kind("grants", _INSTALL, _IDENTITY.grants.as_posix(), _SURVIVOR, TypeAdapter(GrantsFile)),
-    Kind("grants audit", _INSTALL, _IDENTITY.grants_audit.as_posix(), _SURVIVOR),
+    Kind("grants audit", _INSTALL, _IDENTITY.grants_audit.as_posix(), _SURVIVOR, _AUDIT),
     Kind(
         "session",
         _INSTALL,
@@ -227,13 +252,11 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     ),
     Kind("site records", _INSTALL, f"{SITE_RECORDS_DIR}/*.jsonl", _SURVIVOR, site_record),
     Kind("install block pack", _INSTALL, _BLOCK_PACK, _SURVIVOR, TypeAdapter(BlockPack)),
-    Kind("environment", _INSTALL, ".env", _SURVIVOR),
+    Kind("environment", _INSTALL, ".env", _SURVIVOR, Opaque("dotenv lines the settings read")),
     Kind("free tier", _INSTALL, "free_tier.yaml", _SURVIVOR, FREE_TIER_ADAPTER),
-    Kind(
-        "optimizer manifest", _INSTALL, "optimizers/*/pipeline.yaml", _SURVIVOR, AUTHORED_MANIFEST
-    ),
-    Kind("check-in manifest", _INSTALL, "checkin/pipeline.yaml", _SURVIVOR, CHECKIN_MANIFEST),
-    Kind("model rates", _INSTALL, "rates.json", Fate.CACHE),
+    OPTIMIZER_SHADOW,
+    CHECKIN_SHADOW,
+    Kind("model rates", _INSTALL, "rates.json", Fate.CACHE, _WALKED),
     # Under the data root where the install cache is its `.cache` (an install with no checkout).
     Kind(
         "source facts",
@@ -250,15 +273,16 @@ INSTALL_KINDS: tuple[Kind, ...] = (
         TypeAdapter(dict[str, str]),
     ),
     # `HF_HOME`, set by `deploy-linux/install-service.sh`: the only path its unit may write.
-    Kind("dataset fetch cache", _INSTALL, f"{INSTALL_CACHE_DIR}/huggingface/**", Fate.CACHE),
+    Kind("dataset fetch cache", _INSTALL, f"{INSTALL_CACHE_DIR}/huggingface/**", Fate.CACHE, _TREE),
     # Today's launches are what the daily quota counts, so a reset keeps them.
     Kind("job", _INSTALL, f"{JOBS_DIR}/*.json", _SURVIVOR, JOB_ADAPTER),
     Kind("ended job", _INSTALL, f"{JOBS_DIR}/{ENDED_JOBS_DIR}/*.json", Fate.RUN, JOB_ADAPTER),
-    Kind("landing", _INSTALL, f"{JOBS_DIR}/{LANDING_FILE}", Fate.MACHINE),
-    Kind("admission lock", _INSTALL, f"{JOBS_DIR}/{ADMISSION_LOCK}", Fate.MACHINE),
-    Kind("producer lock", _INSTALL, f"{JOBS_DIR}/{PRODUCERS_DIR}/*.lock", Fate.MACHINE),
-    Kind("machine slot", _INSTALL, f"{JOBS_DIR}/{MACHINE_DIR}/*/*.lock", Fate.MACHINE),
-    Kind("account opening lock", _INSTALL, f"{PROJECTS_DIR}/{ACCOUNTS_LOCK}", Fate.MACHINE),
+    Kind("landing", _INSTALL, f"{JOBS_DIR}/{LANDING_FILE}", Fate.MACHINE, _HELD),
+    Kind("landed schema", _INSTALL, f"{JOBS_DIR}/{LANDED_SCHEMA_FILE}", Fate.MACHINE, _HELD),
+    Kind("admission lock", _INSTALL, f"{JOBS_DIR}/{ADMISSION_LOCK}", Fate.MACHINE, _HELD),
+    Kind("producer lock", _INSTALL, f"{JOBS_DIR}/{PRODUCERS_DIR}/*.lock", Fate.MACHINE, _HELD),
+    Kind("machine slot", _INSTALL, f"{JOBS_DIR}/{MACHINE_DIR}/*/*.lock", Fate.MACHINE, _HELD),
+    Kind("account opening lock", _INSTALL, f"{PROJECTS_DIR}/{ACCOUNTS_LOCK}", Fate.MACHINE, _HELD),
     Kind(
         "sandbox owner",
         _INSTALL,
@@ -266,11 +290,11 @@ INSTALL_KINDS: tuple[Kind, ...] = (
         Fate.RUN,
         TypeAdapter(SandboxOwner),
     ),
-    Kind("readout pointer", _INSTALL, READOUT_POINTER, Fate.RUN),
+    Kind("readout pointer", _INSTALL, READOUT_POINTER, Fate.RUN, _FOR_A_PERSON),
 )
 
 
-def _authored(name: str, glob: str, shape: Shape = None) -> tuple[Kind, Kind]:
+def _authored(name: str, glob: str, shape: Shape) -> tuple[Kind, Kind]:
     """What an account authored outlives a release; an inner sandbox's copy is its run's."""
     return (
         Kind(name, Scope.ACCOUNT, glob, _SURVIVOR, shape),
@@ -288,16 +312,18 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
     Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _SURVIVOR, TypeAdapter(ChargeRecord)),
     Kind("bank", Scope.ACCOUNT, f"{BANKS_DIR}/*.json", Fate.CACHE, read_bank),
     # An upload definition's `source:` reads it.
-    Kind("upload", Scope.ACCOUNT, f"{UPLOADS_DIR}/**", _SURVIVOR),
+    Kind(
+        "upload", Scope.ACCOUNT, f"{UPLOADS_DIR}/**", _SURVIVOR, Opaque("an uploaded file's bytes")
+    ),
     # A file two rows name takes the first one's shape.
     *_authored("dataset definition", f"{_DATASETS}/**/{DEFINITION_FILE}", definition_layer),
     *_authored("dataset framing", f"{_DATASETS}/**/{FRAMING_FILE}", dataset_framing),
     *_authored("dataset origin", f"{_DATASETS}/**/{ORIGIN_FILE}", origin_layer),
-    *_authored("dataset file", f"{_DATASETS}/**"),
+    *_authored("dataset file", f"{_DATASETS}/**", Opaque("a dataset's own file, its connector's")),
     *_authored("task context", f"{TASK_CONTEXT_DIR}/*.yaml", read_task_context),
     *_authored("bank labels", f"{BANKS_DIR}/{LABELS_FILE}", TypeAdapter(BankLabel)),
     *_authored("account block pack", _BLOCK_PACK, TypeAdapter(BlockPack)),
-    *_authored("model capability override", CAPABILITY_FILE),
+    *_authored("model capability override", CAPABILITY_FILE, _WALKED),
 )
 
 
@@ -326,7 +352,7 @@ LEAF_INFO: Worded[Leaf, LeafInfo] = Worded(
             "Connector", "What the backend produced: node-I/O cache and per-sample arrays.", False
         ),
         Leaf.STATE: LeafInfo("State", "Round checkouts, less their per-sample rows.", True),
-        Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: locks and the job log.", True),
+        Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: locks, a detached launch's log.", True),
         Leaf.HISTORY: LeafInfo("History", "The loop's event spine: its ledger.", True),
         Leaf.REPORTS: LeafInfo(
             "Reports", "Readable output: manifest, reports, hard samples.", True
@@ -347,21 +373,33 @@ class CampaignRow(NamedTuple):
     name: str
     glob: str
     leaf: Leaf
-    shape: Shape = None
+    shape: Shape
     # What `delete --keep-results` keeps.
     keepsake: bool = False
 
 
-_DECLARED_SHAPES: dict[str, Shape] = {CampaignLayout(Path()).manifest.name: TypeAdapter(Campaign)}
+_CAMPAIGN_SHAPE: Shape = TypeAdapter(Campaign)
+_DRAFT_SHAPE: Shape = TypeAdapter(DraftFile)
+# What a run IS: one of these that does not load takes its campaign or draft with it.
+_RUN_RECORDS = (RECORD_ADAPTER, _CAMPAIGN_SHAPE, _DRAFT_SHAPE)
+
+
+def _export(raw: bytes) -> object:
+    return parse_prompt_export(raw.decode())
 
 
 def _declared_rows(where: str, at: Path, layout: CycleLayout | CampaignLayout) -> list[CampaignRow]:
+    probe = CycleLayout(Path())
+    shapes: dict[str, Shape] = {
+        CampaignLayout(Path()).manifest.name: _CAMPAIGN_SHAPE,
+        probe.export.name: _export,
+    }
     return [
         CampaignRow(
             f"{where} {p.name}",
             p.as_posix(),
             Leaf.REPORTS,
-            _DECLARED_SHAPES.get(p.name),
+            shapes.get(p.name, _FOR_A_PERSON),
             keepsake=True,
         )
         for p in declared_files(layout, at)
@@ -371,24 +409,38 @@ def _declared_rows(where: str, at: Path, layout: CycleLayout | CampaignLayout) -
 def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
     """Every file a cycle directory holds, a campaign's or a check-in draft's."""
     layout = CycleLayout(cycle)
-
-    def at(path: Path) -> str:
-        return path.as_posix()
-
     return (
         *_declared_rows(where, cycle, layout),
-        CampaignRow(f"{where} round", f"{at(layout.rounds)}/{ROUND_GLOB}", Leaf.STATE),
-        CampaignRow(f"{where} ledger", at(layout.ledger), Leaf.HISTORY, RECORD_ADAPTER),
-        CampaignRow(f"{where} producer lock", at(layout.producer_lock), Leaf.TRACE),
-        CampaignRow(f"{where} pass lock", at(layout.pass_lock), Leaf.TRACE),
-        CampaignRow(f"{where} job log", at(layout.job_log), Leaf.TRACE),
+        CampaignRow(
+            f"{where} round", f"{layout.rounds.as_posix()}/{ROUND_GLOB}", Leaf.STATE, _FOR_A_PERSON
+        ),
+        CampaignRow(f"{where} ledger", layout.ledger.as_posix(), Leaf.HISTORY, RECORD_ADAPTER),
+        CampaignRow(f"{where} producer lock", layout.producer_lock.as_posix(), Leaf.TRACE, _HELD),
+        CampaignRow(f"{where} pass lock", layout.pass_lock.as_posix(), Leaf.TRACE, _HELD),
+        CampaignRow(f"{where} job log", layout.job_log.as_posix(), Leaf.TRACE, _FOR_A_PERSON),
     )
+
+
+def _layout_paths(layout: CycleLayout | CampaignLayout) -> set[str]:
+    return {
+        path.as_posix()
+        for name, attr in vars(type(layout)).items()
+        if isinstance(attr, property) and isinstance(path := getattr(layout, name), Path)
+    }
 
 
 CAMPAIGN_ROWS: tuple[CampaignRow, ...] = (
     *_declared_rows("campaign", Path(), CampaignLayout(Path())),
     *_cycle_rows("cycle", Path("cycles/*")),
 )
+
+# A row is a path its writer takes from the layout, so a row no writer can reach fails here: a
+# glob spelled beside the layout is the row a deleted writer leaves behind.
+_WRITTEN = _layout_paths(CampaignLayout(Path())) | _layout_paths(CycleLayout(Path("cycles/*")))
+assert all(
+    any(row.glob == path or row.glob.startswith(f"{path}/") for path in _WRITTEN)
+    for row in CAMPAIGN_ROWS
+), "a campaign row names a path no layout declares, so nothing writes it"
 
 
 def campaign_row(rel: PurePosixPath) -> CampaignRow | None:
@@ -410,7 +462,7 @@ _DRAFT_KINDS = _run_rows(_DRAFT, _cycle_rows("draft", Path()))
 WORKSPACE_KINDS: tuple[Kind, ...] = (
     *_CAMPAIGN_KINDS,
     *_DRAFT_KINDS,
-    Kind("draft", _WS, f"{_DRAFT}/{DRAFT_FILE}", Fate.RUN, TypeAdapter(DraftFile)),
+    Kind("draft", _WS, f"{_DRAFT}/{DRAFT_FILE}", Fate.RUN, _DRAFT_SHAPE),
     Kind(
         "draft resolution",
         _WS,
@@ -419,7 +471,7 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
         TypeAdapter(OriginResolution),
     ),
     # Retired by the hold `reset` takes on it, with the draft it claims.
-    Kind("draft claim", _WS, f"{DRAFTS_DIR}/.*.claim", Fate.RUN),
+    Kind("draft claim", _WS, f"{DRAFTS_DIR}/.*.claim", Fate.RUN, _HELD),
     Kind(
         "active session",
         _WS,
@@ -444,7 +496,7 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
         TypeAdapter(HeadToHeadRecord),
     ),
     Kind("ruler", _WS, RULER_FILE, Fate.RUN, TypeAdapter(RulerFold)),
-    Kind("diagnostic", _WS, f"{DIAGNOSTICS_DIR}/*.json", Fate.RUN),
+    Kind("diagnostic", _WS, f"{DIAGNOSTICS_DIR}/*.json", Fate.RUN, _FOR_A_PERSON),
     Kind(
         "materialized panel",
         _WS,
@@ -452,9 +504,9 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
         Fate.RUN,
         MATERIALIZED_PANEL,
     ),
-    Kind("materialized dataset", _WS, f"{MATERIALIZED_DIR}/**", Fate.RUN),
+    Kind("materialized dataset", _WS, f"{MATERIALIZED_DIR}/**", Fate.RUN, _TREE),
     Kind("bank cuts", _WS, f"{BANKS_DIR}/{CUTS_FILE}", Fate.RUN, TypeAdapter(BankCut)),
-    Kind("model capabilities", _WS, CAPABILITIES_CACHE, Fate.RUN),
+    Kind("model capabilities", _WS, CAPABILITIES_CACHE, Fate.RUN, _WALKED),
 )
 
 # What `delete` guards a cycle by: a live producer holds it.
@@ -467,7 +519,7 @@ _ARCHIVE_SHAPES: dict[ArchiveFile, Shape] = {
     ArchiveFile.CONFIG: TypeAdapter(ArchiveConfig),
     ArchiveFile.CELLS: answer_of,
     ArchiveFile.COLD: decode_cold,
-    ArchiveFile.CLAIM_LOCK: None,
+    ArchiveFile.CLAIM_LOCK: _HELD,
     ArchiveFile.CLAIM_ROW: claimed_row,
     ArchiveFile.SAMPLE_FOLD: SampleFoldRow.model_validate_json,
 }
@@ -502,14 +554,43 @@ ARCHIVE_KINDS: tuple[Kind, ...] = (
     ),
 )
 
+
+def _retired(_raw: bytes) -> object:
+    raise ValueError("no row names it: run data a retired writer left")
+
+
 KINDS: tuple[Kind, ...] = (
+    # `io.py` names every atomic write's temporary `.<random>.tmp`, beside the file it replaces:
+    # first, so a crashed write under a survivor's tree is never read as the survivor.
+    Kind("atomic write", _INSTALL, "**/.*.tmp", Fate.RUN, Opaque("a write a crash cut short")),
     *INSTALL_KINDS,
     *ACCOUNT_KINDS,
     *WORKSPACE_KINDS,
     *ARCHIVE_KINDS,
-    # `io.py` names every atomic write's temporary `.<random>.tmp`, beside the file it replaces.
-    Kind("atomic write", _INSTALL, "**/.*.tmp", Fate.RUN),
 )
+
+# Asked after every row and its write lock: a file under a campaign or a draft that nothing above
+# names is run data a retired writer left, which no reader takes, so a landing drops it.
+RETIRED_KINDS: tuple[Kind, ...] = (
+    Kind("retired run file", _WS, "campaigns/*/**", Fate.RUN, _retired),
+    Kind("retired draft file", _WS, f"{_DRAFT}/**", Fate.RUN, _retired),
+)
+
+
+def run_owner(rel: PurePosixPath) -> PurePosixPath | None:
+    """The campaign or draft directory a file under a workspace lies in, an inner sandbox's too."""
+    owner = 3 if rel.parts[0] == INNER_SANDBOXES_DIR else 2
+    if len(rel.parts) <= owner + 2 or rel.parts[owner] not in ("campaigns", DRAFTS_DIR):
+        return None
+    return PurePosixPath(*rel.parts[: owner + 2])
+
+
+def run_unit(rel: PurePosixPath, kind: Kind) -> PurePosixPath:
+    """What a run file that does not load takes with it: a campaign's or a draft's record its
+    campaign or draft whole, so no husk is left that no reader can open; any other file itself."""
+    if kind.shape not in _RUN_RECORDS or kind.scope is not Scope.WORKSPACE:
+        return rel
+    return run_owner(rel) or rel
 
 
 def _named_first(kind: Kind, pattern: str) -> bool:
@@ -541,35 +622,36 @@ def classify(rel: PurePosixPath) -> Found | None:
     """``rel`` is from the data root; ``None`` is a file no row names."""
     if named := next((k for k in KINDS if k.matches(rel)), None):
         return Found(named, lock=False)
-    locked = next((k for k in KINDS if k.locks(rel)), None)
-    return None if locked is None else Found(locked, lock=True)
+    if locked := next((k for k in KINDS if k.locks(rel)), None):
+        return Found(locked, lock=True)
+    retired = next((k for k in RETIRED_KINDS if k.matches(rel)), None)
+    return None if retired is None else Found(retired, lock=False)
 
 
-def _check(kind: Kind, raw: bytes) -> None:
-    if not isinstance(kind.shape, TypeAdapter):
-        assert kind.shape is not None
-        kind.shape(raw)
+def _check(shape: TypeAdapter[Any] | Callable[[bytes], object], kind: Kind, raw: bytes) -> None:
+    if not isinstance(shape, TypeAdapter):
+        shape(raw)
     elif kind.authored:
-        kind.shape.validate_python(parse_yaml(raw))
+        shape.validate_python(parse_yaml(raw))
     else:
-        kind.shape.validate_json(raw)
+        shape.validate_json(raw)
 
 
 def load(path: Path, found: Found, staged: bytes | None) -> None:
     """Raises what the file's own reader would; ``staged`` is what a landing writes in its place."""
-    kind = found.kind
-    if found.lock or kind.shape is None:
+    kind, shape = found.kind, found.kind.shape
+    if found.lock or isinstance(shape, Opaque):
         return
     raw = read_bytes_optional(path) if staged is None else staged
     # Gone since the listing.
     if raw is None:
         return
     if not kind.per_line:
-        _check(kind, raw)
+        _check(shape, kind, raw)
         return
     for line in complete_lines(BytesIO(raw)):
         if line.strip():
-            _check(kind, line)
+            _check(shape, kind, line)
 
 
 # What a reader raises on a file it cannot take; a gzip cut short is an `EOFError`.
@@ -590,19 +672,17 @@ def unloadable_why(path: Path, found: Found, *, staged: bytes | None) -> str | N
 def _schema(shape: Shape) -> object:
     if isinstance(shape, TypeAdapter):
         return shape.json_schema()
-    if shape is None:
+    if isinstance(shape, Opaque):
         return None
     return {"reader": f"{shape.__module__}::{shape.__qualname__}"}
+
+
+def row_schema(kind: Kind) -> dict[str, Any]:
+    return {"fate": kind.fate.value, "patterns": list(kind.patterns), "shape": _schema(kind.shape)}
 
 
 def pinned_schemas() -> dict[str, Any]:
     """The shapes a release must keep loading, or rewrite on every box first."""
     return {
-        kind.name: {
-            "fate": kind.fate.value,
-            "patterns": list(kind.patterns),
-            "shape": _schema(kind.shape),
-        }
-        for kind in KINDS
-        if kind.fate in (Fate.SURVIVOR, Fate.CACHE)
+        kind.name: row_schema(kind) for kind in KINDS if kind.fate in (Fate.SURVIVOR, Fate.CACHE)
     }

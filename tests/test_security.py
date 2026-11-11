@@ -26,7 +26,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast, override
 
 import pytest
@@ -34,6 +34,7 @@ from factories import (
     PROMPT_INFO,
     SANDBOX_CAMPAIGN,
     arm_state,
+    billed_call,
     close_round,
     cycle_result,
     inner_sandbox,
@@ -105,7 +106,7 @@ from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
-from promptpotter.config.paths import block_packs_root, default_projects_root
+from promptpotter.config.paths import PROJECTS_DIR, block_packs_root, default_projects_root
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.campaign import Optimize
@@ -171,7 +172,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.said import Said, pins
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend import NOTHING_PAID, Budget
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.identity.blocklist import (
@@ -213,8 +214,9 @@ from promptpotter.infrastructure.identity.session import OIDCSessionStore, Sessi
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.runtime_flags import derive_run_state, producer_attached
-from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs
+from promptpotter.infrastructure.store.account_spend import campaign_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
+from promptpotter.infrastructure.store.data_root import Fate, classify
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
 from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_jsonl, write_yaml
 from promptpotter.infrastructure.store.layout import (
@@ -1649,7 +1651,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     built_stores.drafts.write_draft(held_draft)
     data_root = built_stores.projects_root.parent
     written = plan_landing(built_stores.projects_root, reset=False)
-    assert not written.refused and not written.caches and not written.staged, (
+    assert not (written.refused or written.caches or written.runs or written.staged), (
         f"a writer files what no data-root row names, or what its reader refuses: {written}"
     )
     with built_stores.drafts.hold(held_draft.draft_id):
@@ -1670,7 +1672,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     )
 
     # A cache this build cannot read is dropped by a landing unasked; a file no row names
-    # refuses it, and goes only with `--reset`, which keeps the account.
+    # refuses it.
     user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
     UserStore(campaigns.workspace).save(user)
     fold = built_stores.archive.path(ArchiveFile.SAMPLE_FOLD, "0" * ADDRESS_HEX)
@@ -1683,7 +1685,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     stray.unlink()
     cache_only = plan_landing(built_stores.projects_root, reset=False)
     assert not cache_only.refused, "a cache that does not load refused a landing"
-    apply_landing(cache_only)
+    apply_landing(built_stores.projects_root, cache_only)
     assert not fold.exists(), "a landing kept a cache this build cannot read"
     assert UserStore(campaigns.workspace).load() == user, "a landing dropped a survivor"
 
@@ -1725,14 +1727,74 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         Path(campaigns.workspace) / USER_FILE,
         user.model_dump(mode="json") | {"terms_accepted": consent},
     )
-    refused = plan_landing(built_stores.projects_root, reset=False)
-    assert refused.refused and [u.path for u in refused.unloadable] == [events]
-    with pytest.raises(ConflictError):
-        apply_landing(refused)
+    # A pack built before its tags were refused from repeating Source and Method keeps the rest.
+    cited = {
+        "kind": "cited",
+        "work": "2401.00001",
+        "locator": "§2",
+        "verbatim": True,
+        "via": [],
+        "technique_family": "role-play",
+        "role": "persona",
+        "evolved_or_authored": "authored",
+        "evolved_on_model": None,
+        "reported": {
+            "task_family": None,
+            "benchmark": None,
+            "evaluated_on_models": [],
+            "score": None,
+            "lift": None,
+            "baseline": None,
+        },
+        "notes": None,
+    }
+    pack = Path(campaigns.workspace) / "block_packs" / "p" / "pack.json"
+    work = {"first_author": "A", "year": 2024, "title": "T", "license": "cc-by"}
+    write_json(
+        pack,
+        {
+            "works": {"2401.00001": work},
+            "snippets": [
+                {
+                    "text": "You are an expert.",
+                    "suits": ["persona"],
+                    "tags": ["2401.00001", "expert", "role-play"],
+                    "provenance": cited,
+                }
+            ],
+        },
+    )
+    # A write a crash cut short under an authored tree is run data, never the survivor beside it.
+    torn = PurePosixPath(PROJECTS_DIR, "u", "datasets", "d", ".x.tmp")
+    found_torn = classify(torn)
+    assert found_torn is not None and found_torn.kind.fate is Fate.RUN, "a torn write survived"
+
+    # Run data that does not load is the landing's own to drop; a file no row names refuses it,
+    # asked to reset or not, and a refused landing writes nothing.
+    write_json(stray, {})
+    for reset in (False, True):
+        refused = plan_landing(built_stores.projects_root, reset=reset)
+        assert refused.refused and list(refused.unknown) == [stray], "a file no row names landed"
+        with pytest.raises(ConflictError):
+            apply_landing(built_stores.projects_root, refused)
+    assert [one.path for one in refused.runs] == [] and refused.reset is not None
     assert refused.staged and users.consent_trail() == before, "a refused landing wrote"
-    landed = plan_landing(built_stores.projects_root, reset=True)
-    assert not landed.refused, f"a reset landing refused: {landed}"
-    apply_landing(landed)
+    assert events.is_file(), "a refused landing dropped run data"
+    stray.unlink()
+    # What a retired writer left under a campaign is run data no reader takes.
+    kept_hop = CycleHop(campaign_id="c__aaaaaa", cycle_id="x")
+    stored_campaign(built_stores, minted_campaign(kept_hop))
+    retired = Path(campaigns.cycle_dir(kept_hop), "gone.json")
+    write_json(retired, {})
+    landed = plan_landing(built_stores.projects_root, reset=False)
+    assert not landed.refused, f"a landing refused run data it drops itself: {landed}"
+    assert {one.path for one in landed.runs} == {events, retired}, (
+        "run data no reader takes was kept"
+    )
+    apply_landing(built_stores.projects_root, landed)
+    assert not events.exists(), "a landing kept run data this build cannot read"
+    landed_pack = BlockPack.model_validate_json(pack.read_bytes())
+    assert [s.tags for s in landed_pack.snippets] == [("expert",)], "a pack lost a tag of its own"
     assert registered_user_id(identity.default_claim_marker) == "u", "a landing lost the claim"
     regranted = read_grant(identity.grants, "sub")
     assert regranted is not None and regranted.delegated_by == "u", "a landing lost a grant"
@@ -1748,6 +1810,31 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     again = plan_landing(built_stores.projects_root, reset=False)
     assert not again.staged and not again.refused and users.consent_trail() == trail, (
         "a second landing migrated again, or left the tree unproven"
+    )
+
+    # A mint torn before its manifest is listed by no verb, yet holds what its draft billed: it
+    # goes as a delete takes a campaign, its spend banked, and never while a run holds its workspace.
+    torn_hop = CycleHop(campaign_id="c__bbbbbb", cycle_id="y")
+    CycleEventLog.open(CycleDir(campaigns.cycle_dir(torn_hop))).append(billed_call(0.25))
+    torn_dir = campaigns.campaign_root_dir(torn_hop.campaign_id)
+    assert campaigns.iter_campaign_dirs() == [campaigns.campaign_root_dir(kept_hop.campaign_id)]
+    # A launch admitted in the workspace may be that mint in flight, whatever cycle it names.
+    holders = JobRegistry(built_stores.jobs_dir, capacity=lambda _live: 1)
+    (holding,) = request_jobs(
+        stores=built_stores, job_registry=holders, holder=CampaignLaunch("ds1"), hop=kept_hop
+    )
+    minting = plan_landing(built_stores.projects_root, reset=False)
+    assert minting.refused and not minting.torn, "a landing took a mint a held run may finish"
+    assert [one.path for one in minting.unloadable] == [torn_dir]
+    holders.release(holding.job_id, StopReason.CONVERGED)
+    release_cycle(campaigns.cycle_dir(kept_hop))
+    spent = campaign_spend(campaigns, torn_hop.campaign_id)
+    assert spent != NOTHING_PAID
+    cleared = plan_landing(built_stores.projects_root, reset=False)
+    assert [one.path for one in cleared.torn] == [torn_dir], "a torn mint was left unlisted"
+    apply_landing(built_stores.projects_root, cleared)
+    assert not torn_dir.exists() and campaign_spend(campaigns, torn_hop.campaign_id) == spent, (
+        "a torn mint was kept, or its spend left the account's bill with it"
     )
 
     # A job released before its release named an ending is migrated off its own record, ledgers
@@ -1795,7 +1882,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     write_json(live_file, JOB_ADAPTER.dump_python(survivor, mode="json") | {"refusal": ""})
     mapped = plan_landing(built_stores.projects_root, reset=False)
     assert not mapped.refused, f"a released job waited on a sweep: {mapped.refusal}"
-    apply_landing(mapped)
+    apply_landing(built_stores.projects_root, mapped)
     landed_jobs = {path: jobs.get(path.stem) for path in old_jobs}
     assert {path: job and job.lapse for path, job in landed_jobs.items()} == old_jobs, (
         "a migrated job lost how it ended"
@@ -1813,6 +1900,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
 
     # A process that loaded no optimizer still proves a ledger banking one's state.
     banked = CycleHop(campaign_id=SANDBOX_CAMPAIGN, cycle_id="cycle_banked")
+    stored_campaign(built_stores, minted_campaign(banked))
     close_round(
         CycleEventLog.open(CycleDir(campaigns.cycle_dir(banked))),
         [round_result(0, optimizer_state=optimizer_state(), cells={})],

@@ -28,7 +28,7 @@ One workspace per optimizer, `<home>/<optimizer>/`, because the archive and the 
 
 | Path | What it is |
 |---|---|
-| `projects/default/campaigns/<id>/cycles/<cycle>/` | the campaign tree a real run writes; browse it with `PROMPTPOTTER_HOME=<home>/<optimizer>` on the server |
+| `data/projects/default/campaigns/<id>/cycles/<cycle>/` | the campaign tree a real run writes, in its own data root beside everything below (`scripts/offline_run.py::data_root`), since every process lands its root at entry; browse it with `PROMPTPOTTER_HOME=<home>/<optimizer>/data` on the server |
 | `requests/NNNN_<node>_<k>.json` | every optimizer LLM request as sent, in arrival order, beside the fake's answer |
 | `decisions.json` | every decision the run made, canonical (ids mapped to labels, timestamps and hashes dropped); `harness` adds the stop reason, unrouted URLs and call counts |
 | `run.log` | the child's stdout and stderr |

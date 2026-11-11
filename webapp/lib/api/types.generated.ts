@@ -6150,7 +6150,7 @@ export const VERIFY_STRATEGY_LABELS: Record<'random' | 'hard', string> = {
 export const LEAF_INFO: Record<Leaf, LeafInfo> = {
   "connector": { label: "Connector", description: "What the backend produced: node-I/O cache and per-sample arrays.", loop: false },
   "state": { label: "State", description: "Round checkouts, less their per-sample rows.", loop: true },
-  "trace": { label: "Trace", description: "Loop telemetry: locks and the job log.", loop: true },
+  "trace": { label: "Trace", description: "Loop telemetry: locks, a detached launch's log.", loop: true },
   "history": { label: "History", description: "The loop's event spine: its ledger.", loop: true },
   "reports": { label: "Reports", description: "Readable output: manifest, reports, hard samples.", loop: true },
   "unclassified": { label: "Unclassified", description: "A file no data-root row names: no leaf claims it, and land-data refuses it.", loop: false },

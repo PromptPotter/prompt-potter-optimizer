@@ -39,8 +39,8 @@ a commit that already runs live.
 
 - [ ] Back up the data root: `tar -C /var/lib -czf ~/backups/promptpotter-data-pre-vX.Y.Z-<stamp>.tar.gz promptpotter`.
 - [ ] `git diff <last tag> -- docs/specs/data-root.generated.json` names every survivor whose shape moved;
-      each ships a migration in `MIGRATIONS`, which `update.sh` stages and proves before it writes. A
-      BREAKING run-data shape deploys as `update.sh <tag> --reset`.
+      each ships a migration in `MIGRATIONS`, which `update.sh` stages and proves before it writes. Run
+      data a BREAKING shape leaves unloadable is the landing's own to drop; its line names each.
 - [ ] Deploy as `/potter-box` says. Verify: health on 127.0.0.1 and on the public host, both units active,
       `offer_faults()` empty for the unit's `DATASET_OFFER`, `update.sh`'s `landed: proven N file(s)` line.
 - [ ] Anything that fails here is fixed on `main`; steps 2 to 4 run again.

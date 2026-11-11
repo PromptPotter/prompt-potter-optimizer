@@ -25,11 +25,11 @@ from promptpotter.application import health, notices
 from promptpotter.application.account import record_refusal
 from promptpotter.application.commands.dispatcher import command_answer
 from promptpotter.application.datasets.startability import offer_faults
-from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.interlock import minted_producer
 from promptpotter.application.jobs.quota import RateLimitedError
 from promptpotter.application.jobs.reaper import periodic_sweep
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
 from promptpotter.config.paths import (
     default_projects_root,
@@ -92,7 +92,7 @@ def _telegram_shutdown_notice(registry: JobRegistry) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     silence_proactor_disconnect_noise()
-    complete_registries()
+    land_at_entry(every_treatment=True)
     bundle = build_identity_bundle(default_identity_paths())
     app.state.identity_bundle = bundle
     # Before any user can find out: what is broken is told now, not at its first use.

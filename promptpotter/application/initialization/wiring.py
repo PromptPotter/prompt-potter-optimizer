@@ -197,6 +197,14 @@ def _session_bank(
     return bank, read_candidate_library_file(dataset.directory)
 
 
+def read_treatment(name: str) -> None:
+    """An optimizer as every launch reads it, an install shadow included; its source digest raises
+    on a prompt-shaping helper nothing hashes."""
+    select_optimizer(OptimizerChoice(optimizer=name)).treatment(
+        frozenset(Presumption), PackShelf(account=None)
+    )
+
+
 def complete_registries(*, every_treatment: bool = True) -> None:
     """Every process calls it once, before it reads a ledger; one running ONE campaign passes ``False``."""
     connectors.CONNECTORS.complete()
@@ -209,11 +217,8 @@ def complete_registries(*, every_treatment: bool = True) -> None:
     for member in optimizers.NODE_MEMBERS.table.values():
         member.complete()
     if every_treatment:
-        # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
         for name in optimizers.MANIFESTS.table:
-            select_optimizer(OptimizerChoice(optimizer=name)).treatment(
-                frozenset(Presumption), PackShelf(account=None)
-            )
+            read_treatment(name)
         # The check-in as every check-in and mint reads it, an install shadow included.
         checkin_manifest()
         LedgerIndex.check_every_arm_read()

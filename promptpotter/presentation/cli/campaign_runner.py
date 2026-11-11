@@ -71,8 +71,8 @@ def main() -> None:
 
     # Named as a string like the handlers: `--help` loads no use case.
     if args.command in _COMPLETING:
-        wiring = importlib.import_module("promptpotter.application.initialization.wiring")
-        wiring.complete_registries(every_treatment=False)
+        landing = importlib.import_module("promptpotter.application.maintenance.landing")
+        landing.land_at_entry(every_treatment=False)
     runner = asyncio.Runner()
     try:
         # A launch verb's handler runs its preamble and THEN answers the coroutine: a preamble's

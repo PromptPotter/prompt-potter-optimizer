@@ -106,6 +106,14 @@ class Snippet(FrozenModel):
     presumes: frozenset[Presumption] = frozenset()
     provenance: Annotated[Cited | Authored, Field(discriminator="kind")]
 
+    @model_validator(mode="after")
+    def _tags_beside_provenance(self) -> Snippet:
+        if isinstance(self.provenance, Cited) and (
+            twice := {self.provenance.work, self.provenance.technique_family} & set(self.tags)
+        ):
+            raise ValueError(f"tags {sorted(twice)} repeat the snippet's source or method")
+        return self
+
     @property
     def source(self) -> str:
         return self.provenance.work if isinstance(self.provenance, Cited) else AUTHORED_SOURCE

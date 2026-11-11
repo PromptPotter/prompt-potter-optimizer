@@ -353,6 +353,13 @@ class ServiceUnavailableError(PotterError):
     code = "service_unavailable"
 
 
+# The one remedy for a file this build cannot read that a reader cannot repair: the landing's.
+LANDING_REMEDY = (
+    "`land-data` lands the data root: it drops run data this build cannot read, and names the "
+    "migration a release owes a survivor."
+)
+
+
 class FileKind(enum.Enum):
     """What a file the store refuses whole IS: its code, status and remedy, said here once."""
 
@@ -369,13 +376,9 @@ class FileKind(enum.Enum):
         "start.",
     )
     EXPORT = ("export_unreadable", 409, "An export is disposable: re-run the cycle to export it.")
-    # Never migrated: the run data it belongs to is wiped whole.
-    MANIFEST = (
-        "manifest_unreadable",
-        409,
-        "No migration exists: a reset of the data root wipes it with the rest of the run data.",
-    )
-    JOB = ("job_unreadable", 409, "No migration exists: delete it once no run it names is live.")
+    # Never migrated: the landing drops the run it belongs to whole.
+    MANIFEST = ("manifest_unreadable", 409, LANDING_REMEDY)
+    JOB = ("job_unreadable", 409, LANDING_REMEDY)
     # 500, not 422: the request was fine and the caller cannot fix a file the server persisted.
     STORED_CONFIG = ("stored_config_invalid", 500, "Fix the file.")
     # An optimizer prompt's manifest, the install's or the operator's copy shadowing it.
@@ -413,7 +416,8 @@ class FileUnreadableError(PotterError):
 
 
 class LedgerUnreadableError(ConflictError):
-    """A ledger is run data, never migrated: a line this build cannot read refuses every reader of its kind."""
+    """A ledger is run data, never migrated: a line this build cannot read refuses every reader of
+    its kind, until the landing drops it with its run."""
 
     code = "ledger_unreadable"
 
@@ -421,15 +425,9 @@ class LedgerUnreadableError(ConflictError):
         self, *, ledger: str, offset: int | None, reason: str, campaign_id: str | None
     ) -> None:
         """*offset* ``None``: the ledger lacks a record every reader of it relies on."""
-        remedy = (
-            "no verb repairs it"
-            if campaign_id is None
-            else f"a `delete-campaign` of {campaign_id} removes its campaign and keeps every "
-            "measurement cache"
-        )
         where = ledger if offset is None else f"{ledger} line {offset}"
         super().__init__(
-            f"{where} is unreadable by this build ({reason}). No migration exists: {remedy}.",
+            f"{where} is unreadable by this build ({reason}). {LANDING_REMEDY}",
             details={
                 "ledger": ledger,
                 "offset": offset,
@@ -485,7 +483,12 @@ class ContextOverflowError(UngeneratedRequestError):
         )
 
 
-class ResumeDivergenceError(RuntimeError):
+class ResumeDivergenceError(PotterError):
+    """The run's DIVERGED stop, whose acts name the fork past it."""
+
+    http_status = 409
+    code = "resume_diverged"
+
     def __init__(
         self,
         *,
@@ -500,7 +503,7 @@ class ResumeDivergenceError(RuntimeError):
         self.recorded_outcome = recorded_outcome
         self.current_outcome = current_outcome
         self.diagnostics = diagnostics or {}
-        super().__init__(self._format())
+        super().__init__(self._format(), details={"round": round_num, "decision": kind})
 
     def _format(self) -> str:
         lines = [
