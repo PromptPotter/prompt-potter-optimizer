@@ -26,8 +26,8 @@ from promptpotter.application.jobs.quota import (
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.run_phase_control import RunControl
-from promptpotter.domain.campaign import CampaignRefusal
+from promptpotter.application.run_phase_control import CycleHold
+from promptpotter.domain.campaign import CampaignRefusal, CampaignRefusedError
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.job import (
@@ -65,7 +65,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     bound_spend_book,
     spending_under,
 )
-from promptpotter.infrastructure.producer_lock import hold_pass, release_pass
 from promptpotter.infrastructure.store.dataset_access import (
     definition_version,
     resolve_dataset,
@@ -101,8 +100,8 @@ type SharedRun[S] = Callable[[HeldBudget], Awaitable[tuple[S, CycleResult]]]
 
 @dataclass(frozen=True, slots=True)
 class RunStart:
-    """A run's slot, from its admission to its one release: every launch, arm and slotless share
-    holds one. A paid pass holds none yet, and releases its job by hand (`paid_pass`)."""
+    """A job's slot, from its admission to its one release: every launch, arm, slotless share and
+    paid pass holds one."""
 
     stores: Stores
     job_registry: JobRegistry
@@ -175,14 +174,6 @@ async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingE
     if (down := await connector.unreachable()) is not None:
         return BackendUnreachableError(connector.name, connector.base_url(), down)
     return None
-
-
-class CampaignRefusedError(ConflictError):
-    """Every run and pass on its campaign is refused; its code is `refusal`'s."""
-
-    def __init__(self, refusal: CampaignRefusal, message: str) -> None:
-        super().__init__(message, code=refusal.value)
-        self.refusal = refusal
 
 
 class _DefinitionRead(NamedTuple):
@@ -664,17 +655,6 @@ class PassStoppedError(ConflictError):
     code = "pass_stopped"
 
 
-def _let_go(stores: Stores, holding: CycleHop | None, acting: str | None) -> str | None:
-    """Applies a pause asked of the pass, however it ended, before the cycle is let go; who asked
-    it, or the `cancel` of the command it acted for."""
-    if holding is None:
-        return None
-    try:
-        return _take_pause(stores, holding, acting)
-    finally:
-        release_pass(stores.campaigns.cycle_dir(holding))
-
-
 @asynccontextmanager
 async def paid_pass(
     *,
@@ -697,22 +677,23 @@ async def paid_pass(
     )
     if job.queued:
         refuse_as_busy(stores, job_registry, job)
-    holding: CycleHop | None = None
+    start = RunStart(stores, job_registry, job)
+    holding: CycleHold | None = None
     try:
         meters: CeilingMeter = (
             "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
         )
         if hop is not None:
-            cycle_dir = stores.campaigns.cycle_dir(hop)
-            hold_pass(cycle_dir)
-            holding = hop
-            # Asked of a producer gone since, as a launch's RUNNING record empties the inbox.
-            _take_pause(stores, hop, None)
+            holding = CycleHold(
+                stores, hop, scoring_pass=True, acting=() if acting is None else (acting,)
+            )
+            # What a producer gone since was asked stands no more, as a launch's RUNNING record voids it.
+            stores.void_inbox(hop)
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
-            RunCallbacks(CycleEventLog.open(CycleDir(cycle_dir))).close_dead_bench()
+            cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
+            RunCallbacks(CycleEventLog.open(cycle_dir)).close_dead_bench()
             # The rate-limit and slot waits poll it too, as a loop's do.
-            control = _pass_control(stores, hop, acting)
-            set_abort_check(control.pause_requested)
+            set_abort_check(holding.control.pause_requested)
             ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)
             declared = ceiling.over(declared)
         held = await asyncio.to_thread(
@@ -743,34 +724,23 @@ async def paid_pass(
         finally:
             unbind()
     except BaseException as exc:
-        job_registry.release(job.job_id, exc)
-        stopped_by = _let_go(stores, holding, acting)
-        if stopped_by is not None and launch_interrupted(exc):
+        start.release(exc)
+        if holding is None:
+            raise
+        try:
+            # Taken only on the stop it made on it; the release voids any other.
+            taken = holding.control.take_pause() if launch_interrupted(exc) else None
+        finally:
+            holding.release()
+        if taken is not None:
             raise PassStoppedError(
-                f"The {verb} pass stopped: {stopped_by}. Every cell it measured is banked, and a "
+                f"The {verb} pass stopped: {taken[1]}. Every cell it measured is banked, and a "
                 "rerun replays them."
             ) from None
         raise
-    job_registry.release(job.job_id)
-    _let_go(stores, holding, acting)
-
-
-def _pass_control(stores: Stores, hop: CycleHop, acting: str | None) -> RunControl:
-    return RunControl(
-        commands=stores.commands,
-        cycle=stores.subject(hop),
-        acting=() if acting is None else (acting,),
-    )
-
-
-def _take_pause(stores: Stores, hop: CycleHop, acting: str | None) -> str | None:
-    """Acks the pause standing on *hop* applied; who asked it, or the `cancel` of *acting*;
-    ``None`` where neither stands."""
-    control = _pass_control(stores, hop, acting)
-    if not control.pause_requested():
-        return None
-    taken = control.take_pause()
-    return None if taken is None else taken[1]
+    start.release()
+    if holding is not None:
+        holding.release()
 
 
 def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:

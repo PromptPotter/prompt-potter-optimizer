@@ -126,7 +126,6 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         session, result = await run_campaign(
             self.dataset_name, stores=stores, program=program, budget=Budget(), mode=RunMode()
         )
-        await session.backend_client.aclose()
 
         if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
             return student

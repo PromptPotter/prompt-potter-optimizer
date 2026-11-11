@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, Protocol, Self
 
 from promptpotter.application.bench.llm_call import run_optimizer_node
 from promptpotter.application.bench.node_context import Calls, Lineage, Progress, Replay, Ruler
@@ -32,22 +32,19 @@ from promptpotter.application.optimizers.potter.escalation.state import (
     ask_l2_escalation,
 )
 from promptpotter.application.optimizers.potter.knobs import EscalationKnobs, L1GenerateKnobs
-from promptpotter.application.optimizers.potter.records import (
-    L1Layout,
-    Ladder,
-    PotterCheckpointKind,
-    Recombination,
-)
+from promptpotter.application.optimizers.potter.records import L1Layout, Ladder, Recombination
 from promptpotter.domain.arm_reading import order_floor
 from promptpotter.domain.phase_views import OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.results import Reelection
 from promptpotter.domain.run_records import (
+    CheckpointInputs,
     ConfigOverrides,
     ForkTrigger,
     RebaseRequest,
 )
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
@@ -311,44 +308,49 @@ async def _fire_layer(ctx: NodeContext, fired: LayerCall, fire: Fire) -> Transit
     return result
 
 
-def _record_trigger(
-    ctx: NodeContext,
-    patience: int | None,
-    reading: LayerReading,
-    best: HighWater,
-    *,
-    kind: PotterCheckpointKind,
-    layer: Literal["l2", "l3"],
-    counter_round: int,
-    fired: bool,
-    rule: str,
-    heal: bool | None = None,
-    l2_guard_breaches: list[str] | None = None,
-) -> None:
-    asked: dict[str, Any] = {"rule": rule}
-    if heal is not None:
-        asked["heal"] = heal
-    if l2_guard_breaches is not None:
-        asked["l2_guard_breaches"] = l2_guard_breaches
-    ctx.read(Replay).decide(
-        kind,
-        {
-            "round_num": ctx.round_num,
-            f"{layer}_patience": patience,
-            "entry_round": counter_round if counter_round > 0 else -1,
-        },
-        fired,
-        data={
-            f"{layer}_round": counter_round,
-            "stall_count": reading.stall_count,
-            "best_composite_fitness_at_entry": reading.best_composite_fitness_at_entry,
-            "best_composite_fitness_this_round": best.composite_fitness,
-            "best_theta_at_entry": best.theta(reading.theta_peak_round_at_entry),
-            "best_theta_this_round": best.theta(best.theta_round),
-            "comparator": reading.comparator,
-            **asked,
-        },
-    )
+class EscalationReading(FrozenModel):
+    patience: int | None
+    fires: int
+    stall_count: int
+    best_composite_fitness_at_entry: float | None
+    best_composite_fitness_this_round: float | None
+    best_theta_at_entry: float | None
+    best_theta_this_round: float | None
+    comparator: str | None
+    rule: str
+
+    @classmethod
+    def read(
+        cls,
+        reading: LayerReading,
+        best: HighWater,
+        *,
+        patience: int | None,
+        fires: int,
+        rule: str,
+    ) -> Self:
+        return cls(
+            patience=patience,
+            fires=fires,
+            stall_count=reading.stall_count,
+            best_composite_fitness_at_entry=reading.best_composite_fitness_at_entry,
+            best_composite_fitness_this_round=best.composite_fitness,
+            best_theta_at_entry=best.theta(reading.theta_peak_round_at_entry),
+            best_theta_this_round=best.theta(best.theta_round),
+            comparator=reading.comparator,
+            rule=rule,
+        )
+
+
+# Archived, never replayed: each folds the cycle's escalation history, which no replay holds.
+class L2EscalationTrigger(CheckpointInputs, kind="l2_escalation_trigger"):
+    reading: EscalationReading
+
+
+class L3EscalationTrigger(CheckpointInputs, kind="l3_escalation_trigger"):
+    reading: EscalationReading
+    heal: bool
+    l2_guard_breaches: list[str]
 
 
 async def escalate_l2(
@@ -365,17 +367,15 @@ async def escalate_l2(
         l3_patience=opt.l3_patience,
     )
 
-    # Recorded fired or not: the verdict is a fold over the cycle, which no replayer holds.
-    _record_trigger(
-        ctx,
-        opt.l2_patience,
-        ask.l2,
-        best,
-        kind=PotterCheckpointKind.L2_ESCALATION_TRIGGER,
-        layer="l2",
-        counter_round=ctx.slice(Ladder).l2.fires,
-        fired=ask.next_action == NextAction.FIRE_L2,
-        rule=cause,
+    # Recorded fired or not.
+    replay = ctx.read(Replay)
+    replay.decide(
+        L2EscalationTrigger(
+            reading=EscalationReading.read(
+                ask.l2, best, patience=opt.l2_patience, fires=ctx.slice(Ladder).l2.fires, rule=cause
+            )
+        ),
+        ask.next_action == NextAction.FIRE_L2,
     )
 
     if ask.next_action == NextAction.FIRE_L2:
@@ -403,36 +403,38 @@ async def escalate_l2(
                 held_l3.theta_peak_round_at_entry,
                 None,
             )
-            _record_trigger(
-                ctx,
-                opt.l3_patience,
-                held,
-                best,
-                kind=PotterCheckpointKind.L3_ESCALATION_TRIGGER,
-                layer="l3",
-                counter_round=held_l3.fires,
-                fired=True,
-                rule=L1_LAYOUT_REFUSED,
-                heal=True,
-                l2_guard_breaches=[o.validator_id for o in result.l2_guard_breaches],
+            replay.decide(
+                L3EscalationTrigger(
+                    reading=EscalationReading.read(
+                        held,
+                        best,
+                        patience=opt.l3_patience,
+                        fires=held_l3.fires,
+                        rule=L1_LAYOUT_REFUSED,
+                    ),
+                    heal=True,
+                    l2_guard_breaches=[o.validator_id for o in result.l2_guard_breaches],
+                ),
+                True,
             )
             await _fire_layer(ctx, l3, Fire(L1_LAYOUT_REFUSED, None, best))
         return None
     if ask.next_action is NextAction.CONTINUE:
         return None
 
-    _record_trigger(
-        ctx,
-        opt.l3_patience,
-        ask.l3,
-        best,
-        kind=PotterCheckpointKind.L3_ESCALATION_TRIGGER,
-        layer="l3",
-        counter_round=ctx.slice(Ladder).l3.fires,
-        fired=ask.next_action == NextAction.FIRE_L3,
-        rule=L2_PATIENCE_SPENT,
-        heal=False,
-        l2_guard_breaches=[],
+    replay.decide(
+        L3EscalationTrigger(
+            reading=EscalationReading.read(
+                ask.l3,
+                best,
+                patience=opt.l3_patience,
+                fires=ctx.slice(Ladder).l3.fires,
+                rule=L2_PATIENCE_SPENT,
+            ),
+            heal=False,
+            l2_guard_breaches=[],
+        ),
+        ask.next_action == NextAction.FIRE_L3,
     )
 
     if ask.next_action == NextAction.FIRE_L3:

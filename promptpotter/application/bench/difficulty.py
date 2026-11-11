@@ -220,10 +220,10 @@ class DifficultyView:
     def _read(self, reach: RulerReach, judged: Collection[str]) -> JudgingRuler:
         return _session_ruler(self.session, reach, judged, self.n_min, self.enable_2pl)
 
-    def open_round(self, rounds: Sequence[RoundResult]) -> None:
+    def open_round(self, rounds: Sequence[RoundResult], reach: RulerReach) -> None:
         """At the round's open, before its draw: the parent line is what the round judges so far."""
         self.judged = frozenset(parent_line(rounds))
-        self.judging = self._read(ruler_clock(self.session), self.judged)
+        self.judging = self._read(reach, self.judged)
 
     def ruler_of(self, stamp: RulerStamp | None) -> DeltaRuler | None:
         """None for an unelected round."""

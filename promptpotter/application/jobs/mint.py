@@ -44,7 +44,6 @@ from promptpotter.application.preflight import (
 )
 from promptpotter.application.run_observers import declare_run_wiring
 from promptpotter.application.runner.campaign_ids import (
-    mint_campaign_id,
     origin_content_hash,
     root_cycle_id_of,
 )
@@ -543,7 +542,7 @@ def _prompt_axes_only(
 
 
 def fresh_campaign_id(session: Session) -> str:
-    return mint_campaign_id(session.measured_dataset)
+    return session.store.campaigns.claim_campaign_id(session.measured_dataset)
 
 
 def _write_plan(
@@ -629,16 +628,12 @@ def _record_held(plans: Sequence[CyclePlan]) -> Iterator[HeadToHeadRecord | None
 
 
 def _mint_all(
-    plans: Sequence[CyclePlan],
-    campaign_ids: Sequence[str],
-    *,
-    adopting: str | None,
-    stored: HeadToHeadRecord | None,
+    plans: Sequence[CyclePlan], *, adopting: str | None, stored: HeadToHeadRecord | None
 ) -> list[OpenedCycle]:
     """Inside `_record_held`, whose *stored* record it is; the draft it is *adopting* lands on the
     first cycle alone. Arms join their head-to-head on the framed plans they mint: a record this act declares
     is its first arm's as minted, and every arm is held to the record and to the arms minted, and
-    numbered on them."""
+    numbered on them. Each campaign id is drawn here, past every refusal and the framing."""
     first = plans[0]
     if isinstance(first.declaration.purpose, Compare):
         stores = first.session.store
@@ -648,44 +643,36 @@ def _mint_all(
         if stored is None:
             stores.campaigns.declare_head_to_head(record)
     return [
-        mint(plan, campaign_id=campaign_id, adopting=adopting if i == 0 else None)
-        for i, (plan, campaign_id) in enumerate(zip(plans, campaign_ids, strict=True))
+        mint(
+            plan,
+            campaign_id=fresh_campaign_id(plan.session),
+            adopting=adopting if i == 0 else None,
+        )
+        for i, plan in enumerate(plans)
     ]
 
 
 def mint_arms(plans: Sequence[CyclePlan], *, adopting: str | None) -> list[OpenedCycle]:
     """*plans* from ``arm_plans``, framed already: a check-in's arms frame nothing."""
     with _record_held(plans) as stored:
-        minted = _mint_all(
-            plans,
-            [fresh_campaign_id(plan.session) for plan in plans],
-            adopting=adopting,
-            stored=stored,
-        )
+        minted = _mint_all(plans, adopting=adopting, stored=stored)
     return minted
 
 
 async def mint_framed_arms(session: Session, plans: Sequence[CyclePlan]) -> list[OpenedCycle]:
     """*plans* from ``arm_plans``: a framing the dataset still owes is paid once and frames every arm."""
-    campaign_ids = [fresh_campaign_id(session) for _ in plans]
-    return await _mint_framed(session, plans, campaign_ids, task_text=None)
+    return await _mint_framed(session, plans, task_text=None)
 
 
 async def _mint_framed(
-    session: Session,
-    plans: Sequence[CyclePlan],
-    campaign_ids: Sequence[str],
-    *,
-    task_text: str | None,
+    session: Session, plans: Sequence[CyclePlan], *, task_text: str | None
 ) -> list[OpenedCycle]:
     description = _description_to_decompose(session, plans[0].cycle.config, task_text)
     with _record_held(plans) as stored:
         if description is None:
-            minted = _mint_all(plans, campaign_ids, adopting=None, stored=stored)
+            minted = _mint_all(plans, adopting=None, stored=stored)
         else:
-            minted = await _mint_after_framing(
-                session, plans, description, campaign_ids=campaign_ids, stored=stored
-            )
+            minted = await _mint_after_framing(session, plans, description, stored=stored)
     return minted
 
 
@@ -706,7 +693,6 @@ async def mint_framed_cycle(
     declaration: RunDeclaration,
     dataset: Sequence[Sample],
     *,
-    campaign_id: str,
     task_text: str | None,
     origin_override: dict[str, NodePrompt] | None = None,
 ) -> OpenedCycle:
@@ -714,7 +700,7 @@ async def mint_framed_cycle(
     assert isinstance(declaration.purpose, Optimize), "an arm is planned with its head-to-head"
     # Every refusal the mint owes, before the check-in below bills.
     plan = resolve_cycle_plan(session, declaration, dataset, origin_override=origin_override)
-    (minted,) = await _mint_framed(session, [plan], [campaign_id], task_text=task_text)
+    (minted,) = await _mint_framed(session, [plan], task_text=task_text)
     return minted
 
 
@@ -723,7 +709,6 @@ async def _mint_after_framing(
     plans: Sequence[CyclePlan],
     description: str,
     *,
-    campaign_ids: Sequence[str],
     stored: HeadToHeadRecord | None,
 ) -> list[OpenedCycle]:
     """The cycle id hashes the framing, so its call bills a draft ledger the first mint adopts or a refusal discards."""
@@ -750,7 +735,7 @@ async def _mint_after_framing(
             )
             for plan in plans
         ]
-        minted = _mint_all(framed, campaign_ids, adopting=draft_id, stored=stored)
+        minted = _mint_all(framed, adopting=draft_id, stored=stored)
     except BaseException:
         drafts.discard(drafts.hold(draft_id))
         raise

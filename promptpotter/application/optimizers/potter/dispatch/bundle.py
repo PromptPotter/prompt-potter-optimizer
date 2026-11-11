@@ -39,6 +39,14 @@ OPTIMIZER_PROMPT_FIELD_MAX_CHARS: dict[str, int] = {
 
 SCHEMA_DESCRIPTION_MAX_CHARS = 400
 
+
+def prose_ceiling(node: PipelineNode, param: str, *, inner_cells: InnerCells | None) -> int | None:
+    # An optimizer-prompt field's ceiling binds only the inner optimizer's prose, under L4.
+    if param in node.description_keys:
+        return SCHEMA_DESCRIPTION_MAX_CHARS
+    return None if inner_cells is None else OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
+
+
 L3_PLAN_MAX_CHARS = 800
 
 SCHEMA_DESCRIPTIONS_INSTRUCTION = (
@@ -60,7 +68,7 @@ SCHEMA_RENAME_INSTRUCTION = (
 )
 
 LAYOUT_SCHEMA_INSTRUCTION = (
-    "Where in the READING node's own prompt each evidence panel is rendered. A slot is a "
+    "Where in the reader node's own prompt each evidence panel is rendered. A slot is a "
     "position in that prompt, never the target-prompt field the evidence is about: the "
     "reader gets every placed panel whichever slot holds it. Keyed by SLOT — the "
     "properties are the only slots there are — each listing the panels to place there: a "
@@ -123,7 +131,7 @@ class ElectionRow(NamedTuple):
     unelected: tuple[ArmKey, ...]
 
 
-def election_rows(rounds: Sequence[RoundOutcome]) -> list[ElectionRow]:
+def election_table_rows(rounds: Sequence[RoundOutcome]) -> list[ElectionRow]:
     rows: list[ElectionRow] = []
     for rr in rounds:
         if rr.round == 0 or rr.election is None:
@@ -144,7 +152,7 @@ def reelection_roster(rounds: Sequence[RoundOutcome], *, parent: str) -> dict[st
     `fork_proposal.stand_on` names one, and the fork continues from it. An arm two rounds list is
     one entry, its first listing."""
     roster: dict[ArmKey, tuple[str, RoundArm]] = {}
-    for row in election_rows(rounds):
+    for row in election_table_rows(rounds):
         for key in ((row.picked,) if row.picked is not None else ()) + row.unelected:
             if key != parent and key not in roster:
                 label = arm_name(key, row.round.arms[key], row.round.round).label

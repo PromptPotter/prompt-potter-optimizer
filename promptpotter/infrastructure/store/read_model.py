@@ -15,7 +15,6 @@ from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_
 
 from pydantic import ValidationError
 
-from promptpotter.domain.optimizer_state import UnregisteredStatePartError
 from promptpotter.domain.run_records import (
     RECORD_ADAPTER,
     CycleRecord,
@@ -288,9 +287,7 @@ class _Feeder:
         # read whole: a reshape of one kind leaves the spend bank readable, so a delete can bank before
         # it wipes. Keyed by the model a line failed, by the fold that could not take a line (fed no
         # line after), or by `None` for a line no `CycleRecord` arm names, which a fold of every arm reads.
-        self.refused: dict[
-            type[StrictModel] | _Make | None, LedgerUnreadableError | UnregisteredStatePartError
-        ] = {}
+        self.refused: dict[type[StrictModel] | _Make | None, LedgerUnreadableError] = {}
 
     def line(self, offset: int, raw: bytes) -> None:
         for placed in self._placed:
@@ -307,7 +304,7 @@ class _Feeder:
             record = ledger_record(
                 model.model_validate_json, raw, ledger=self._ledger, offset=offset
             )
-        except (LedgerUnreadableError, UnregisteredStatePartError) as refusal:
+        except LedgerUnreadableError as refusal:
             self.refused.setdefault(model, refusal)
             return
         if record is None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import functools
 import hashlib
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from promptpotter.config.settings import settings
@@ -129,13 +128,17 @@ def _rate_caps(provider: str, paid_by: KeySource) -> tuple[int | None, int | Non
     return (caps[0] if len(caps) > 0 else None, caps[1] if len(caps) > 1 else None)
 
 
-_PROVIDER_FACTORIES: dict[str, Callable[[ProviderKey, SendPacing], LLMClientBase]] = {
-    **{
-        name: functools.partial(OpenAICompatibleClient, provider=name, spec=spec)
-        for name, spec in _OPENAI_COMPAT_SPECS.items()
-    },
+# An OpenAI-compatible client is built on its provider's spec.
+_PROVIDER_CLIENTS: dict[str, type[OpenAICompatibleClient | AnthropicClient]] = {
+    **dict.fromkeys(_OPENAI_COMPAT_SPECS, OpenAICompatibleClient),
     "anthropic": AnthropicClient,
 }
+
+
+def provider_sends(provider: str) -> frozenset[str]:
+    """What *provider*'s client puts on the wire; an asked field outside it refuses at the send."""
+    return _PROVIDER_CLIENTS[provider].SENDS
+
 
 # Bounded: under open signup each account's own key is one more account paced.
 _ACCOUNTS_PACED = 256
@@ -153,9 +156,12 @@ def get_llm_client(provider: str, key: ProviderKey) -> LLMClientBase:
 
     The key is the caller's resolution (`application/jobs/coupon.py::paying_key`), never
     read here: which wallet a send draws is an account's question, not a provider's."""
-    factory = _PROVIDER_FACTORIES.get(provider)
-    if factory is None:
-        valid = ", ".join(sorted(_PROVIDER_FACTORIES))
+    client = _PROVIDER_CLIENTS.get(provider)
+    if client is None:
+        valid = ", ".join(sorted(_PROVIDER_CLIENTS))
         raise ValueError(f"Unknown LLM provider: {provider!r}. Valid: {valid}.")
     account = hashlib.sha256(key.secret.get_secret_value().encode()).hexdigest()
-    return factory(key, send_pacing(provider, account, key.paid_by))
+    pacing = send_pacing(provider, account, key.paid_by)
+    if issubclass(client, OpenAICompatibleClient):
+        return client(key, pacing, provider=provider, spec=_OPENAI_COMPAT_SPECS[provider])
+    return client(key, pacing)

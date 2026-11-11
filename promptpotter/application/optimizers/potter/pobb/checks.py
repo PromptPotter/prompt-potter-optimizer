@@ -19,6 +19,7 @@ from promptpotter.application.scoring.selection import (
 )
 from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.origin_panel import election_rows
+from promptpotter.domain.paired_reading import PriorStanding
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, Grade, GradedCell, MeasuredCell
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.worded import Worded
@@ -75,7 +76,7 @@ class PoBBStop(StopSignal):
     check_result: EliminationContext
     cells: list[str]
     priors: dict[ArmKey, CellSheet]
-    paired_breakdown: dict[ArmKey, dict[str, float]]
+    paired_breakdown: dict[ArmKey, PriorStanding]
 
 
 def race_sheet(cells: Iterable[GradedCell]) -> CellSheet:
@@ -91,7 +92,7 @@ def graded_sheet(grades: Mapping[str, Mapping[str, object]]) -> CellSheet:
     )
 
 
-def wire_sheet(sheet: CellSheet) -> dict[str, dict[str, object]]:
+def wire_sheet(sheet: CellSheet) -> dict[str, dict[str, float | None]]:
     # What θ and the sign cap read of a cell, never its answer.
     return {
         cell.key: {"fitness": cell.grade.fitness, "objective": cell.grade.objective}
@@ -203,13 +204,9 @@ class PoBBCheck:
             return None
         leader = min(reads, key=lambda k: reads[k].p_better)
         p_best = reads[leader].p_better
-        paired_breakdown: dict[ArmKey, dict[str, float]] = {
+        paired_breakdown = {
             # The graded cells the fit read, never `n`, which counts errored rows too.
-            pid: {
-                "p_better": r.p_better,
-                "n_paired": float(r.paired),
-                "n_discordant": float(r.discordant),
-            }
+            pid: PriorStanding(p_better=r.p_better, n_paired=r.paired, n_discordant=r.discordant)
             for pid, r in reads.items()
         }
 

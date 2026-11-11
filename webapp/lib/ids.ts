@@ -6,8 +6,8 @@ import {
 } from "@/lib/api/types";
 
 // Mirror `store/layout.py::root_cycle_id` — change both.
-const SIBLING_LAST_SEP_RE = /_(fork|diag)_(?!.*_(?:fork|diag)_)([^/]*)$/;
-const SIBLING_FIRST_SEP_RE = /_(fork|diag)_/;
+const SIBLING_LAST_SEP_RE = /_(fork)_(?!.*_fork_)([^/]*)$/;
+const SIBLING_FIRST_SEP_RE = /_fork_/;
 
 export function rootCycleId(cycleId: string): string {
   const m = cycleId.match(SIBLING_FIRST_SEP_RE);

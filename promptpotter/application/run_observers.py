@@ -14,6 +14,7 @@ from promptpotter.application.jobs.coupon import bind_account
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.run_phase_control import CycleHold
 from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.views.ingress import run_spend_view
@@ -42,12 +43,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     bound_spend_book,
     reset_spend_book,
 )
-from promptpotter.infrastructure.producer_lock import (
-    cycle_held_here,
-    held,
-    hold_cycle,
-    release_cycle,
-)
+from promptpotter.infrastructure.producer_lock import held
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
@@ -143,6 +139,7 @@ class RunObservers:
     dashboard: DashboardCheckout
     readout: ReadoutProjection
     projecting: Projecting
+    hold: CycleHold
     _book_tokens: list[Token[SpendBook | None]] = field(default_factory=list)
 
     def arm_spend_book(self, book: SpendBook) -> None:
@@ -180,19 +177,11 @@ class RunObservers:
         return CycleDir(self.store.campaigns.cycle_dir(self.hop))
 
     def release(self) -> None:
-        """The run boundary, on every exit: while this process still holds the cycle, what its run
-        never took is voided, a pause filed after the stop declared included; then the cycle goes."""
+        """The run boundary, on every exit; its projections close undrained, as `drain_all` alone drains."""
         try:
-            if cycle_held_here(self.cycle_dir):
-                self.store.void_inbox(self.hop)
+            self.projecting.close(drain=False)
         finally:
-            _let_go(self.projecting, self.cycle_dir)
-
-
-def _let_go(projecting: Projecting, cycle_dir: CycleDir) -> None:
-    """Drops a run's projections undrained, since `drain_all` alone drains, then lets its cycle go."""
-    projecting.close(drain=False)
-    release_cycle(cycle_dir)
+            self.hold.release()
 
 
 def build_run_observers(
@@ -212,7 +201,7 @@ def build_run_observers(
         else None
     ) or time.time()
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
-    hold_cycle(cycle_dir)
+    hold = CycleHold(session.store, session.hop, scoring_pass=False)
     ledger = CycleEventLog.open(cycle_dir)
     projecting = LedgerIndex.of(ledger.path).projecting()
     try:
@@ -221,6 +210,7 @@ def build_run_observers(
             cycle_dir,
             ledger,
             projecting,
+            hold,
             session=session,
             campaign_config=campaign_config,
             forked_from=forked_from,
@@ -235,13 +225,12 @@ def build_run_observers(
         # The latest launch is the latest run held: a mint, a fork or a resume, from every door.
         save_active_pointer(session.store.base_dir, session.hop)
     except BaseException:
-        _let_go(projecting, cycle_dir)
+        projecting.close(drain=False)
+        hold.release()
         raise
     session.state.observers = observers
     observers.callbacks.close_dead_bench()
     if forked_from is not None:
-        # The line moved onto this cycle; the one it left is no longer this process's.
-        forked_from.release()
         # A fork's config is already admitted; a first build waits for `open_launch` to settle it.
         declare_run_wiring(
             session, campaign_config, observers.callbacks.ledger, selected=bound_optimizer()
@@ -253,6 +242,7 @@ def _bind_observers(
     cycle_dir: CycleDir,
     ledger: CycleEventLog,
     projecting: Projecting,
+    hold: CycleHold,
     *,
     session: Session,
     campaign_config: CampaignConfig,
@@ -288,4 +278,5 @@ def _bind_observers(
         dashboard=dashboard,
         readout=readout,
         projecting=projecting,
+        hold=hold,
     )

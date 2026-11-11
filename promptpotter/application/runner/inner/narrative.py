@@ -154,7 +154,8 @@ def inner_narrative(
         ]
         if anomalies:
             parts.append(", ".join(anomalies))
-        lines.append(f"R{rnd.round} " + " | ".join(parts))
+        # Each fact carries its round: a citation quotes one fact, never the line it sits on.
+        lines.append(" | ".join(f"R{rnd.round} {part}" for part in parts))
     # Earliest rounds go first: the panel's own head-keep clip would cut the latest instead.
     n_head = 3 if highlight else 2
     head_lines, round_lines = lines[:n_head], lines[n_head:]

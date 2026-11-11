@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.difficulty import ruler_clock
 from promptpotter.application.bench.node_context import NodeContext, bank_proposals, reread_walk
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.round_analysis import ended_on
@@ -35,7 +36,7 @@ from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phase_views import MeasureEnterView
 from promptpotter.domain.phases import CampaignPhase, StopLoop, StopReason
 from promptpotter.domain.results import Election, RoundResult
-from promptpotter.domain.run_records import BenchCheckpointKind
+from promptpotter.domain.run_records import PanelCoverage
 from promptpotter.domain.run_standing import line_reference, rounds_without_advance, stalls_left
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.wounds import collapse_counts
@@ -176,13 +177,7 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
     holed = sorted(key for key, arm in panel.items() if is_leader_eligible(arm) and holes[key])
     # Sink is the LEDGER: the halt below unwinds before `close_round`.
     record_decision(
-        ctx.callbacks.ledger,
-        BenchCheckpointKind.PANEL_COVERAGE,
-        {"arms": list(panel), "round_num": round_num},
-        holed,
-        node=None,
-        data={"holes_by_arm": holes},
-        round=round_num,
+        ctx.callbacks.ledger, PanelCoverage(holes_by_arm=holes), holed, node=None, round=round_num
     )
     holed_rows = [
         (key, cell) for key in holed for cell in round_result.rows(key) if cell.facts.errored
@@ -467,7 +462,9 @@ async def execute_round(
     ctx = RoundContext(cycle=cycle, round_num=round_num, callbacks=callbacks)
     await settle_owed_outputs(ctx)
     # Before the draw, which reads the scale the election will, and before an arm spawns a cell.
-    cycle.difficulty.open_round(cycle.rounds)
+    banked = cycle.banked_walk(round_num)
+    reach = ruler_clock(cycle.session) if banked is None else banked.opened_on
+    cycle.difficulty.open_round(cycle.rounds, reach)
     pin_inner_ruler(cycle.difficulty.stamp.reach)
     plan = cycle.optimizer.plan
     panel = plan.sampler.draw(NodeContext(ctx, plan.sampler), pool)

@@ -79,7 +79,6 @@ from promptpotter.shared.errors import BadRequestError
 _MINT_WORDS: dict[CourseKind, str] = {
     "root": "root",
     "fork": "fork",
-    "diag": "diag",
     "inner": "inner run",
 }
 _UNMINTED = "Its line course has no mint record, so its rounds and standing are unread."

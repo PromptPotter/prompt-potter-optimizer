@@ -131,7 +131,7 @@ def loop_end_on(
 ) -> LoopEnd:
     """A run end raised inside a round, round 0's door's included, read as the loop's end."""
     stop_reason, error = end_run_on(exc, session, where=f"at round {round_num}")
-    # Before the finalize reads a selection: the stop may sit between an election and its close.
+    # Before the finalize reads a selection or banks a decision: the stop may sit inside a round.
     cycle.unwind_unclosed()
     return LoopEnd(
         stop_reason,

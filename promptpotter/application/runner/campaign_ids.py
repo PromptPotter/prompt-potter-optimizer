@@ -3,11 +3,9 @@ ids: ``measurements/`` pools their origin scores."""
 
 from __future__ import annotations
 
-import secrets
 from typing import TYPE_CHECKING
 
 from promptpotter.application.knobs import measured_address
-from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
@@ -17,11 +15,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign import RunDeclaration
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.sample import Sample
-
-
-def mint_campaign_id(dataset_name: str) -> str:
-    prefix = dataset_id_prefix(dataset_name) if dataset_name else "campaign"
-    return f"{prefix}__{secrets.token_hex(3)}"
 
 
 def origin_content_hash(

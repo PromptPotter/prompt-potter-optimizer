@@ -218,6 +218,15 @@ def interval_side(
 ArmKey = NewType("ArmKey", str)
 
 
+class PriorStanding(FrozenModel):
+    """A racing arm's odds over one prior, and the graded cells the test read."""
+
+    p_better: float
+    n_paired: int
+    # ``None`` where the test counts no discordant pairs (CAPO's paired t).
+    n_discordant: int | None = None
+
+
 class RoundArm(FrozenModel):
     """One arm of one round, by its record's own address: an id alone names no candidate, since a
     later round can propose the same individual again."""

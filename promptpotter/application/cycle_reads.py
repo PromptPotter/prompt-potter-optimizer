@@ -8,7 +8,6 @@ from pathlib import Path
 
 from pydantic import Field
 
-from promptpotter.application import optimizers
 from promptpotter.application.hierarchy import entries_version
 from promptpotter.application.hierarchy_subtree import subtree_course
 from promptpotter.application.jobs.machine_status import machine_status
@@ -122,8 +121,6 @@ def served_round(
 
 def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFiles:
     """Every surface's export: the served tree, the served dashboard and ``export.json``, read once."""
-    # A banked round names its optimizer's state kinds, which register as their packages import.
-    optimizers.NODE_MEMBERS.complete()
     cycle = view_cycle(stores, path)
     hop = cycle.hop
     campaign = cycle.stores.campaigns.load_campaign(hop.campaign_id)

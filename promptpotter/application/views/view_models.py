@@ -87,7 +87,7 @@ class HardSamplesView:
 class ForkSummaryView:
     cycle_id: str
     # What the id's own separator says the cycle is (``layout.py::sibling_kind``).
-    kind: Literal["root", "fork", "diag"]
+    kind: Literal["root", "fork"]
     standing: RunStanding | None
     n_rounds: int
     stop_reason: StopReason | None

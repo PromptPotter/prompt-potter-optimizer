@@ -8,7 +8,14 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self, get_args
 
-from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    SerializeAsAny,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import ArmRole, ArmState, Proposal, Proposed
@@ -21,8 +28,8 @@ from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.opt_search_point import NodePrompt
-from promptpotter.domain.optimizer_state import OptimizerState
-from promptpotter.domain.paired_reading import ArmKey, RoundArm
+from promptpotter.domain.optimizer_state import OptimizerState, StatePart
+from promptpotter.domain.paired_reading import ArmKey, PriorStanding, RoundArm
 from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -42,7 +49,7 @@ from promptpotter.domain.pipeline_schema import (
     NodeSearchNarrowing,
 )
 from promptpotter.domain.results import Election, RoundCells, RoundOutcome, RoundResult
-from promptpotter.domain.ruler import LevelSeries
+from promptpotter.domain.ruler import LevelSeries, RulerReach
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import LedgerCell, WalkedCell
 from promptpotter.domain.spend import (
@@ -64,30 +71,31 @@ from promptpotter.shared.measurement_context import ARM_ROLES, MeasurementRole
 from promptpotter.shared.worded import Worded
 
 
-class CheckpointKind(enum.StrEnum):
-    """Subclassed by the bench's enum and each optimizer's, declared in its own package."""
-
-
-class BenchCheckpointKind(CheckpointKind):
-    FORK_CUT = "fork_cut"
-    PANEL_COVERAGE = "panel_coverage"
-    # The operator's pass past the origin the gate stopped: round 0's, standing while it does.
-    ORIGIN_GATE_PASS = "origin_gate_pass"
+class CheckpointInputs(StatePart, kind=None):
+    """One kind of decision, declared in the package taking it: everything its writer banks and its replay reads."""
 
 
 class ResumeCheckpointRecord(FrozenModel):
-    """``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival."""
+    """``inputs_ref`` + ``outcome`` drive divergence; parsed by kind, so a record its writer never writes refuses at the read."""
 
     record_type: Literal["decision"] = "decision"
-    # A `CheckpointKind` value or a plugin's string; replayed where `replayers.py::replayers` has it.
     kind: str
     # The manifest node whose member took the decision; ``None`` for the bench's own.
     node: str | None = None
-    inputs_ref: dict[str, Any] = Field(default_factory=dict)
+    inputs_ref: SerializeAsAny[CheckpointInputs]
     outcome: Any = None
-    data: dict[str, Any] = Field(default_factory=dict)
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_by_kind(cls, raw: object) -> object:
+        if not isinstance(raw, dict):
+            return raw
+        inputs = StatePart.parse(raw["kind"], raw["inputs_ref"])
+        if not isinstance(inputs, CheckpointInputs):
+            raise ValueError(f"{raw['kind']!r} is a state kind, never a decision's")
+        return {**raw, "inputs_ref": inputs}
 
 
 class PhaseRecord(FrozenModel):
@@ -280,6 +288,8 @@ class RoundProposedRecord(FrozenModel):
     proposals: list[Proposal]
     walked: OptimizerState
     reads: list[WalkRead]
+    # The ruler lines the round opened on: a re-entry draws on them, never on a fold since.
+    opened_on: RulerReach
     submitted: bool = False
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -410,7 +420,7 @@ class RaceStandingRecord(FrozenModel):
     current: ArmKey
     n_samples: int
     p_best: float
-    paired_breakdown: dict[ArmKey, dict[str, float]]
+    paired_breakdown: dict[ArmKey, PriorStanding]
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -774,7 +784,6 @@ def stale_file_warning(projection: str, offset: int, reason: str) -> RoundWarnin
 class ForkTrigger(enum.StrEnum):
     """One value per caller of :func:`cut_fork`."""
 
-    OPERATOR_DIAG = "operator_diag"
     OPERATOR_REWIND = "operator_rewind"
     OPERATOR_STEERED = "operator_steered"
     OPTIMIZER_REBASE = "optimizer_rebase"
@@ -794,7 +803,6 @@ class ForkDirection(enum.StrEnum):
 
 # Derived from the trigger, never stored. Exhaustiveness is checked at import below.
 FORK_DIRECTION: dict[ForkTrigger, ForkDirection] = {
-    ForkTrigger.OPERATOR_DIAG: ForkDirection.OFFSHOOT,
     ForkTrigger.OPERATOR_STEERED: ForkDirection.OFFSHOOT,
     ForkTrigger.OPERATOR_REWIND: ForkDirection.SUPERSEDE,
     ForkTrigger.OPTIMIZER_REBASE: ForkDirection.SUPERSEDE,
@@ -1116,6 +1124,22 @@ class ForkSpec(FrozenModel):
         return self.direction or FORK_DIRECTION[self.trigger]
 
 
+class ForkCutFrom(CheckpointInputs, kind="fork_cut"):
+    from_round: int
+    fork: ForkSpec
+
+
+class PanelCoverage(CheckpointInputs, kind="panel_coverage"):
+    # Every arm of the round's panel, holed or not.
+    holes_by_arm: dict[ArmKey, int]
+
+
+class OriginGatePass(CheckpointInputs, kind="origin_gate_pass"):
+    """The operator's pass past the origin the gate stopped: round 0's, standing while it does."""
+
+    by: str
+
+
 class SpawnedBy(StrictModel):
     """The outer work-item an L4 inner cycle was spawned to measure. Where `role` is an arm's,
     `cycle_id`, `round` and `individual_id` are that arm's address, which places the run under
@@ -1248,6 +1272,8 @@ class ComparisonExit(enum.StrEnum):
     SUBMIT_ARMS = "submit_arms"
     SKIP = "skip"
     SET_LIMITS = "set_limits"
+    # A diag start: its rounds are unmeasured.
+    DIAG = "diag"
 
 
 class LeftComparisonRecord(FrozenModel):

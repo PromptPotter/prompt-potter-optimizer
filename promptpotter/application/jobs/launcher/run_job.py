@@ -29,6 +29,7 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.paths import READOUT_POINTER, user_data_root
+from promptpotter.domain.campaign import CampaignRefusedError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
@@ -302,6 +303,12 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     try:
         # Asked again here, under the claim: the admitting process's answer is a handoff old.
         refuse_campaign(stores, campaign := campaign_at(stores, spec.hop))
+    except CampaignRefusedError as refused:
+        # The job's refusal, never the cycle's stop: the cycle keeps the one it had.
+        logger.warning("job %s refused past its handoff: %s", spec.job_id, refused)
+        start.release(refused)
+        return StopOutcome.FAILED
+    try:
         opened = await ExistingCycle(spec.hop, campaign, Budget()).open(stores)
     except BaseException as exc:
         logger.exception("job %s could not bind its session", spec.job_id)

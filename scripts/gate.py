@@ -1182,11 +1182,14 @@ def _mypy(_sel: Selection) -> Outcome:
 _PLUGIN_SOURCE = "example:propose"
 
 
-# Each proposed arm's source, over every round the run closed, read off its ledger.
+# Each proposed arm's source, over every round the run closed, read off its ledger; it enters
+# as every process that reads a ledger does.
 _PLUGIN_SOURCES_PROBE = """
+from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.config.paths import default_projects_root
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.identity import default_identity
+land_at_entry(every_treatment=False)
 campaigns = build_stores(default_identity(), projects_root=default_projects_root()).campaigns
 for campaign_id in campaigns.list_campaign_ids():
     hop = campaigns.load_campaign(campaign_id).root_hop

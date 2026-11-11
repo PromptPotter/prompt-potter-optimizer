@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ANSWER_LABEL_STEM,
@@ -10,6 +10,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     InjectionBundle,
     InjectionKind,
     Item,
+    prose_ceiling,
     signal,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
@@ -24,18 +25,23 @@ from promptpotter.domain.pipeline_schema import (
     described_field,
 )
 from promptpotter.domain.pool import Access
+from promptpotter.domain.sample import sample_tag
+
+if TYPE_CHECKING:
+    from promptpotter.application.runner.inner.tasks import InnerCells
 
 
 def _schema_description_block(
-    node: PipelineNode, keys: list[str], current: dict[str, Any]
+    node: PipelineNode, keys: list[str], current: dict[str, Any], *, inner_cells: InnerCells | None
 ) -> list[str]:
     """Read off the point being improved, never the declaration, which shows the prose earlier winners replaced."""
     schema = current.get(OUTPUT_SCHEMA_KEY) or (
         node.output_schema.json_schema if node.output_schema else None
     )
+    (ceiling,) = {prose_ceiling(node, key, inner_cells=inner_cells) for key in keys}
     lines = [
-        f"    {SCHEMA_DESCRIPTION_PREFIX}<path> — sent with the node's prompt; rewrite any your "
-        "edit contradicts:"
+        f"    {SCHEMA_DESCRIPTION_PREFIX}<path> — sent with the node's prompt, at most "
+        f"{ceiling} characters each; rewrite any your edit contradicts:"
     ]
     for key in keys:
         path = key.removeprefix(SCHEMA_DESCRIPTION_PREFIX)
@@ -89,18 +95,22 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
                 # Untold, a variant moving between indistinct rungs re-measures the configuration it started from.
                 if same := schema.param_indistinct(node, p):
                     preview += f"; {'='.join(same)} identical here"
-                bits.append(f"{p} [{preview}]")
+                bit = f"{p} [{preview}]"
             elif desc := descs.get(p):
-                bits.append(f"{p} ({desc[:40]})")
+                bit = f"{p} ({desc[:40]})"
             else:
-                bits.append(p)
+                bit = p
+            ceiling = prose_ceiling(node, p, inner_cells=b.inner_cells)
+            bits.append(bit if ceiling is None else f"{bit} (at most {ceiling} characters)")
         # A bare `name:` reads as an axis whose values went missing.
         if not bits and not described:
             continue
         lines.append(f"  {node_name}: {', '.join(bits)}".rstrip())
         if described:
             current = b.cycle_slice.pipeline_params.node(node_name).laid_keys()
-            lines.extend(_schema_description_block(node, described, current))
+            lines.extend(
+                _schema_description_block(node, described, current, inner_cells=b.inner_cells)
+            )
         # Only where the other arm is reachable: the cost of a move nobody can make is prompt mass.
         if ANSWER_AS_JSON in (schema.param_options(node, SCHEMA_TOGGLE_PARAM) or ()):
             lines.extend(_schema_toggle_block(b.cycle_slice.matcher))
@@ -151,7 +161,8 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
     start = (b.cycle_slice.round_num - 1) * k % len(others) if others else 0
     window = (others[start:] + others[:start])[:k]
     shown = "; ".join(
-        f"{node}: {', '.join(f'#{s.id}' for s in rows) or 'none'}" for node, rows in held.items()
+        f"{node}: {', '.join(sample_tag(s.id) for s in rows) or 'none'}"
+        for node, rows in held.items()
     )
     header = (
         "DEMO POOL — rows held out as shots, never scored. `shots` REPLACES a node's shots with "
@@ -162,7 +173,7 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
         Item(header),
         *(
             Item(
-                f"#{s.id} {' '.join(s.query.split())[:DEMO_QUERY_STEM]} -> "
+                f"{sample_tag(s.id)} {' '.join(s.query.split())[:DEMO_QUERY_STEM]} -> "
                 f"{str(s.ground_truth)[:ANSWER_LABEL_STEM]}",
                 trusted=False,
             )

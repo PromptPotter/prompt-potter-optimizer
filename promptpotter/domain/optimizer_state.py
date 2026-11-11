@@ -42,6 +42,7 @@ class StatePart(FrozenModel):
     # How many roster members may write it; every part but a pool is one member's.
     writers: ClassVar[Literal["one", "many"]] = "one"
     _registered: ClassVar[dict[str, type[StatePart]]] = {}
+    _complete: ClassVar[bool] = False
 
     def __init_subclass__(cls, *, kind: str | None, **kwargs: Unpack[ConfigDict]) -> None:
         super().__init_subclass__(**kwargs)
@@ -55,14 +56,27 @@ class StatePart(FrozenModel):
         cls.kind = kind
 
     @staticmethod
-    def of_kind(kind: str) -> type[StatePart]:
+    def complete() -> None:
+        """Every package declaring a kind has loaded: a kind still unknown is data no installed code writes."""
+        StatePart._complete = True
+
+    @staticmethod
+    def registered() -> dict[str, type[StatePart]]:
+        if not StatePart._complete:
+            raise RegistryIncompleteError("the kinds were asked before the registries completed")
+        return dict(sorted(StatePart._registered.items()))
+
+    @staticmethod
+    def parse(kind: str, raw: object) -> StatePart:
         """The ONE dispatch by kind: every read of a banked part goes through it."""
-        if (held := StatePart._registered.get(kind)) is None:
-            raise UnregisteredStatePartError(
-                f"no optimizer state kind is registered as {kind!r} (known: "
-                f"{sorted(StatePart._registered)}) — the package declaring it is not installed"
+        if (held := StatePart._registered.get(kind)) is not None:
+            return held.model_validate(raw)
+        if not StatePart._complete:
+            raise RegistryIncompleteError(
+                f"kind {kind!r} was read before this process completed its registries "
+                "(`land_at_entry`)"
             )
-        return held
+        raise ValueError(f"no installed package declares the kind {kind!r}")
 
     @classmethod
     def written_first(cls) -> bool:
@@ -78,23 +92,14 @@ class RoundOutput(StatePart, kind=None):
     """What ONE round produced, banked on that round; a round whose writer did not run holds ``cls()``, or nothing where it is written first."""
 
 
-class UnregisteredStatePartError(RuntimeError):
-    """Not a ``ValueError`` on purpose: ``ledger_record`` would refuse the line as unreadable, hiding the missing package."""
+class RegistryIncompleteError(RuntimeError):
+    """A wiring fault, so never a ``ValueError``: ``ledger_record`` would refuse the line as unreadable data."""
 
 
 class Critique(RoundOutput, kind="critique"):
     """Feedback FOR the next round's proposer, distilled after this round's scoring."""
 
     readout: CritiqueReadout | None = None
-
-
-def _by_kind(held: object) -> object:
-    if not isinstance(held, dict):
-        return held
-    return {
-        kind: StatePart.of_kind(kind).model_validate(value) if isinstance(value, dict) else value
-        for kind, value in held.items()
-    }
 
 
 class OptimizerState(FrozenModel):
@@ -117,13 +122,20 @@ class OptimizerState(FrozenModel):
             return data
         return {
             **data,
-            **{key: _by_kind(data[key]) for key in ("slices", "outputs") if key in data},
+            **{
+                key: {
+                    kind: StatePart.parse(kind, raw) if isinstance(raw, dict) else raw
+                    for kind, raw in data[key].items()
+                }
+                for key in ("slices", "outputs")
+                if isinstance(data.get(key), dict)
+            },
         }
 
     @model_validator(mode="after")
     def _each_under_its_kind(self) -> Self:
         held: dict[str, StatePart] = {**self.slices, **self.outputs}
-        if wrong := sorted(k for k, s in held.items() if type(s) is not StatePart.of_kind(k)):
+        if wrong := sorted(k for k, s in held.items() if s.kind != k):
             raise ValueError(f"optimizer_state holds {wrong} under another kind's name")
         return self
 

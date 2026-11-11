@@ -1748,6 +1748,13 @@
         "title": "CellSetName",
         "type": "string"
       },
+      "CheckpointInputs": {
+        "additionalProperties": false,
+        "description": "One kind of decision, declared in the package taking it: everything its writer banks and its replay reads.",
+        "properties": {},
+        "title": "CheckpointInputs",
+        "type": "object"
+      },
       "ComparisonExit": {
         "description": "An act that runs an arm off the comparison its head-to-head declared: admitted like on any\ncampaign, its event is the arm's exit (decisions.md § 0009).",
         "enum": [
@@ -1757,7 +1764,8 @@
           "fork",
           "submit_arms",
           "skip",
-          "set_limits"
+          "set_limits",
+          "diag"
         ],
         "title": "ComparisonExit",
         "type": "string"
@@ -3341,7 +3349,6 @@
       "ForkTrigger": {
         "description": "One value per caller of :func:`cut_fork`.",
         "enum": [
-          "operator_diag",
           "operator_rewind",
           "operator_steered",
           "optimizer_rebase",
@@ -5752,6 +5759,38 @@
         "title": "Principal",
         "type": "object"
       },
+      "PriorStanding": {
+        "additionalProperties": false,
+        "description": "A racing arm's odds over one prior, and the graded cells the test read.",
+        "properties": {
+          "n_discordant": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "N Discordant"
+          },
+          "n_paired": {
+            "title": "N Paired",
+            "type": "integer"
+          },
+          "p_better": {
+            "title": "P Better",
+            "type": "number"
+          }
+        },
+        "required": [
+          "p_better",
+          "n_paired"
+        ],
+        "title": "PriorStanding",
+        "type": "object"
+      },
       "ProjectionEnvelope": {
         "additionalProperties": false,
         "description": "One outbound SSE frame, whose receiver treats an unknown field as a drift signal.",
@@ -6089,10 +6128,7 @@
           },
           "paired_breakdown": {
             "additionalProperties": {
-              "additionalProperties": {
-                "type": "number"
-              },
-              "type": "object"
+              "$ref": "#/components/schemas/PriorStanding"
             },
             "title": "Paired Breakdown",
             "type": "object"
@@ -6217,17 +6253,10 @@
       },
       "ResumeCheckpointRecord": {
         "additionalProperties": false,
-        "description": "``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival.",
+        "description": "``inputs_ref`` + ``outcome`` drive divergence; parsed by kind, so a record its writer never writes refuses at the read.",
         "properties": {
-          "data": {
-            "additionalProperties": true,
-            "title": "Data",
-            "type": "object"
-          },
           "inputs_ref": {
-            "additionalProperties": true,
-            "title": "Inputs Ref",
-            "type": "object"
+            "$ref": "#/components/schemas/CheckpointInputs"
           },
           "kind": {
             "title": "Kind",
@@ -6273,7 +6302,8 @@
           }
         },
         "required": [
-          "kind"
+          "kind",
+          "inputs_ref"
         ],
         "title": "ResumeCheckpointRecord",
         "type": "object"
@@ -6709,6 +6739,9 @@
             "title": "Consumed",
             "type": "string"
           },
+          "opened_on": {
+            "$ref": "#/components/schemas/RulerReach"
+          },
           "proposals": {
             "items": {
               "$ref": "#/components/schemas/Proposal"
@@ -6751,7 +6784,8 @@
           "consumed",
           "proposals",
           "walked",
-          "reads"
+          "reads",
+          "opened_on"
         ],
         "title": "RoundProposedRecord",
         "type": "object"
@@ -7078,6 +7112,33 @@
           "since"
         ],
         "title": "RulerOwn",
+        "type": "object"
+      },
+      "RulerReach": {
+        "additionalProperties": false,
+        "description": "Which lines a fit reads: every line before ``version``, except past ``own.since`` only\n``own.campaign``'s.",
+        "properties": {
+          "own": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RulerOwn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "minimum": 0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "own"
+        ],
+        "title": "RulerReach",
         "type": "object"
       },
       "RulerScope": {

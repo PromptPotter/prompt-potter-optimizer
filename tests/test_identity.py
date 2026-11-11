@@ -101,7 +101,6 @@ from promptpotter.application.hierarchy import entries_version, list_hierarchy
 from promptpotter.application.initialization.scoring_scope import verb_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
-from promptpotter.application.jobs.launcher.admission import CampaignRefusedError
 from promptpotter.application.jobs.launcher.launch import Inline
 from promptpotter.application.jobs.launcher.mint_and_start import (
     OriginIncompleteError,
@@ -168,7 +167,11 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.pipeline_responses import ForkPreviewResponse
 from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.run_observers import build_run_observers, declare_run_wiring
+from promptpotter.application.run_observers import (
+    build_run_observers,
+    declare_run_stop,
+    declare_run_wiring,
+)
 from promptpotter.application.runner.arm_gate import author_arm
 from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.entry import run_optimization
@@ -199,6 +202,7 @@ from promptpotter.domain.bench import (
 from promptpotter.domain.campaign import (
     Arm,
     CampaignRefusal,
+    CampaignRefusedError,
     Compare,
     DeterminismClamp,
     Optimize,
@@ -232,7 +236,7 @@ from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.phases import PauseCause, RunPhase, StopReason
 from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,
     normalize_model_id,
@@ -679,6 +683,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "two candidates differing only in one override field share a campaign — "
         "their measurements merge under one id with no error"
     )
+    breaching = {"l1_critique": {"layout": {"thinking_style": ["no_such_panel"]}}}
+    assert inner_campaign_id(_SPEC, breaching, "e") != inner_campaign_id(_SPEC, {}, "e"), (
+        "a refused layout arm continued the floor arm's inner campaign"
+    )
     assert inner_campaign_id(
         _SPEC.model_copy(update={"run_seed": 6}), c1, "e"
     ) != inner_campaign_id(_SPEC, c1, "e"), "two seeds share one inner campaign"
@@ -859,6 +867,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         clamp: DeterminismClamp | None = None,
         *,
         temperature: float | None = None,
+        seed: int | None = None,
         **laid: Any,
     ) -> Any:
         """One optimizer call as an entry sends it; the body that reached the provider."""
@@ -880,6 +889,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
                             checkin_manifest().config.model_dump(exclude_unset=True) | laid
                         ),
                         cache=reuse,
+                        seed=seed,
                     ),
                     temperature=temperature,
                 )
@@ -902,8 +912,24 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             f"{clamp}: the node's file value or the per-call override beat the clamp — the "
             "campaign reports itself pinned and runs unpinned"
         )
-    assert len(list((tmp_path / "reuse" / "optimizer_reuse").glob("*.json"))) == 3, (
+    banked = tmp_path / "reuse" / "optimizer_reuse"
+    assert len(list(banked.glob("*.json"))) == 3, (
         "the second route replayed the first route's banked answer"
+    )
+    # A call's draw keys it on every provider; it reaches the wire only where the client sends one.
+    seeded = DeterminismClamp(temperature=0.0, seed=7)
+    for draw in (None, 111, 222):
+        sent = ask(
+            "q",
+            seeded,
+            provider="anthropic",
+            model="claude-sonnet-4-5",
+            reasoning_effort=None,
+            seed=draw,
+        )
+        assert "seed" not in sent, f"draw {draw}: anthropic was sent a seed its client cannot send"
+    assert len(list(banked.glob("*.json"))) == 6, (
+        "two draws on a provider that sends no seed replayed one banked answer"
     )
 
     # A head-to-head pins one seed on every arm: an arm's replicate (numbered at the mint, § 2)
@@ -2650,14 +2676,17 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert LedgerIndex.of(wired_ledger.path).pinned and "steered" in manifest.read_text(), (
         "a store-door append let go of the run's projections, or left its index.json stale"
     )
-    # A pause filed past the stop's declaration, while the run still holds, dies at its release
-    # (B16), on an exit that skips the drain too (a raise in the close, `entry.py`'s `finally`).
+    # A pause filed between the stop's declaration and the drain dies at the release (B16): only a
+    # producer that stops on a pause takes it, so none reads "answered" on a run that never paused.
+    declare_run_stop(
+        opened, observers, StopReason.ROUNDS_BUDGET, interrupted_by=PauseCause.INTERRUPT
+    )
     late = pause("late")
-    observers.release()
+    observers.drain_all()
     assert not LedgerIndex.of(wired_ledger.path).pinned and not cycle_held(root_dir), (
         "a released run kept its ledger's projections or its cycle"
     )
-    assert acked(late) == "voided", "a pause filed before the release outlived its run"
+    assert acked(late) == "voided", "a release took a pause no producer stopped on"
     # Outside a run, the store door holds its one-shot only while its line lands.
     stores.campaigns.record_intervention(held_campaign.root_hop, kind="steered")
     assert not LedgerIndex.of(wired_ledger.path).pinned, (

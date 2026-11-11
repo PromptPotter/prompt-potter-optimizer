@@ -381,7 +381,10 @@ class LayoutNode(LlmNode):
 
 
 def layout_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
-    """Dropped where it resolves to the node's floor, so two declarations rendering one prompt hash alike."""
+    """Dropped where it resolves to the node's floor, so two declarations rendering one prompt hash
+    alike; a refused edit is its own declaration, never the floor it would render."""
     spec = NODE_LAYOUTS[node]
-    layout, _breaches = resolve_layout_override(node, declared.get("layout"))
+    layout, breaches = resolve_layout_override(node, declared.get("layout"))
+    if breaches:
+        return {"layout": declared["layout"]}
     return {} if layout == spec.floor else {"layout": layout.model_dump(mode="json")}

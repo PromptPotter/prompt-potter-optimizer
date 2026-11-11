@@ -28,6 +28,7 @@ from promptpotter.application.notices import tell_landed
 from promptpotter.application.optimizer_manifest import checkin_manifest
 from promptpotter.config.paths import default_projects_root, jobs_dir, user_data_root
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.data_root import (
     CHECKIN_SHADOW,
@@ -390,9 +391,11 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
 
 @functools.cache
 def landing_key() -> str:
-    """Every row's patterns, fate and shape, and every migration: a reshape of any lands again."""
+    """Every row's patterns, fate and shape, every state kind a ledger line parses by, and every
+    migration: a reshape of any lands again."""
     rows = {kind.name: row_schema(kind) for kind in KINDS}
-    return stable_hash({"rows": rows, "migrations": sorted(MIGRATIONS)}, length=16)
+    kinds = {kind: held.model_json_schema() for kind, held in StatePart.registered().items()}
+    return stable_hash({"rows": rows, "kinds": kinds, "migrations": sorted(MIGRATIONS)}, length=16)
 
 
 def _stamp(projects_root: Path) -> Path:

@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     ForkCut,
-    cut_diag_sibling,
     cut_operator_fork,
 )
 from promptpotter.application.commands.dispatcher import (
@@ -285,41 +284,23 @@ def _recorded_launches(effect: CommandEffect) -> list[LaunchedJob]:
     return effect.launches
 
 
-def _diag_target(stores: Stores, hop: CycleHop, mode: RunMode) -> ForkCut | None:
-    """A diag start's target: on a cycle that ended in diag, a sibling cut off it; ``None``, the
-    cycle itself."""
-    if not mode.diag or mode.from_round is not None:
-        return None
-    index = stores.campaigns.load(hop, moment=None)
-    final = None if index is None else index.final
-    if final is None or final.mode != "diag":
-        return None
-    return cut_diag_sibling(stores=stores, hop=hop)
-
-
 async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[Launched]:
     dispatcher, payload, hop = dispatched.dispatcher, dispatched.payload, dispatched.hop
-
-    def request(on: CycleHop) -> ExistingCycle:
-        return ExistingCycle(
-            on, dispatched.campaign, payload.budget, step_rounds=payload.step_rounds
-        )
+    stores = dispatcher.stores
 
     async def _apply_start() -> Launched:
         # Refused before a slot is taken: a rewind past the last close is the operator's to fix.
         if (after := payload.mode.from_round) is not None:
-            dispatcher.stores.campaigns.rewind_enters(hop, after)
-        if (sibling := _diag_target(dispatcher.stores, hop, payload.mode)) is not None:
-            return await _launch_fork(
-                dispatcher, sibling, request(sibling.child), payload.mode, leaving=None
-            )
-        return await launch(
-            request(hop),
+            stores.campaigns.rewind_enters(hop, after)
+        return await admit(
+            ExistingCycle(
+                hop, dispatched.campaign, payload.budget, step_rounds=payload.step_rounds
+            ),
             payload.mode,
-            stores=dispatcher.stores,
+            stores=stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
-        )
+        ).launched()
 
     return _launch_applier(dispatcher, _apply_start, refused_on=hop)
 
@@ -346,28 +327,19 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
         )
         # Bounded as a start-run is: the payload's own budget, admitted from what the parent leaves.
         return await _launch_fork(
-            dispatcher,
-            cut,
-            ExistingCycle(cut.child, campaign, payload.budget),
-            payload.mode,
-            leaving=ComparisonExit.FORK,
+            dispatcher, cut, ExistingCycle(cut.child, campaign, payload.budget), payload.mode
         )
 
     return _launch_applier(dispatcher, _apply_fork)
 
 
 async def _launch_fork(
-    dispatcher: CommandDispatcher,
-    cut: ForkCut,
-    request: ExistingCycle,
-    mode: RunMode,
-    *,
-    leaving: ComparisonExit | None,
+    dispatcher: CommandDispatcher, cut: ForkCut, request: ExistingCycle, mode: RunMode
 ) -> Launched:
     """Its parent untouched until the fork's run is held: a refused fork deletes its cut and
-    leaves its parent's line, inbox, pointer and comparison as they stood. An operator's fork
-    then leaves its parent and the comparison by *leaving*; a diag sibling (``None``) neither.
-    The parent is left BEFORE the cut is taken, so a fork that fails names no parent superseded."""
+    leaves its parent's line, inbox, pointer and comparison as they stood. A held fork then leaves
+    its parent and the comparison, BEFORE the cut is taken, so a fork that fails names no parent
+    superseded."""
     stores, job_registry = dispatcher.stores, dispatcher.job_registry
     try:
         admitted = admit(
@@ -381,10 +353,9 @@ async def _launch_fork(
         held: HeldRun | None = None
         try:
             held = await admitted.held()
-            if leaving is not None:
-                # It spends the arm's ceiling and moves its parent, so the campaign leaves.
-                stores.campaigns.leave_comparison(cut.child, leaving)
-                await _leave_parent(dispatcher, cut)
+            # It spends the arm's ceiling and moves its parent, so the campaign leaves.
+            stores.campaigns.leave_comparison(cut.child, ComparisonExit.FORK)
+            await _leave_parent(dispatcher, cut)
             cut.take(stores)
         except BaseException as exc:
             if held is not None:

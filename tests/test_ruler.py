@@ -34,6 +34,7 @@ from promptpotter.application.bench.difficulty import (
     DifficultyView,
     calibrate_delta_ruler,
     judging_ruler,
+    ruler_clock,
     session_ruler_scope,
 )
 from promptpotter.application.bench.node_context import NodeContext
@@ -330,7 +331,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
         campaign="else",
         own=None,
     )
-    drawing.cycle.difficulty.open_round(drawing.cycle.rounds)
+    drawing.cycle.difficulty.open_round(drawing.cycle.rounds, ruler_clock(session))
     assert drawing.cycle.difficulty.ruler is not None, "guard: the draw under test is the warm one"
     sampler = drawing.cycle.optimizer.plan.sampler
     search = list(session.state.scoring.partition.search)
@@ -353,6 +354,24 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     assert parent_rate == pytest.approx(16 / 40, abs=0.08), (
         "the parent reads one rate on its rounds' cells and another on the pool"
     )
+    # Re-entered: a round orders its walk on the lines it opened on, never on a fold since.
+    opened_on = drawing.cycle.difficulty.stamp.reach
+    at = replace(drawing, round_num=3)
+
+    def ordered() -> list[int]:
+        return [int(s.id) for s in sampler.draw(NodeContext(at, sampler), search).order]
+
+    live = ordered()
+    session.store.ruler.fold(
+        session_ruler_scope(session),
+        [(f"g{arm}", s.key, (s.id + 0.5) / 40) for arm in range(8) for s in graded_pool],
+        campaign="else",
+        own=None,
+    )
+    drawing.cycle.difficulty.open_round(drawing.cycle.rounds, ruler_clock(session))
+    assert ordered() != live, "guard: the fold moves a draw read on the current lines"
+    drawing.cycle.difficulty.open_round(drawing.cycle.rounds, opened_on)
+    assert ordered() == live, "a re-entered round walked an order its opening never drew"
 
     # Covered: a shuffle led by the `easy` cells on the `small` model still reaches every level.
     pool = [

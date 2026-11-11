@@ -99,7 +99,7 @@ from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import BenchCheckpointKind, CycleSeed
+from promptpotter.domain.run_records import CycleSeed, OriginGatePass
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
@@ -165,9 +165,6 @@ RESUME_APPENDS = ("phases", "run_phases", "arms", "rulers", "rounds_entered")
 READING_SIDES, SIDE_SPLIT = ("a", "b"), ("bought",)
 CELL_ROWS, ROW_SPLIT = ("cells", "overlap_results"), ("cached",)
 FOLDS, FOLD_SPLIT = "folds", ("cached", "tokens")
-# Its eliminator re-decides an interrupted round on resume (`code-debt-cleanup.md`): until that
-# closes its `resumed/` leg pauses at the boundary, every other optimizer's past a banked walk.
-BOUNDARY_RESUMED = ("capo-pobb",)
 LABEL = "OFFLINE — fake optimizer LLM and fake backend; every number is synthetic"
 
 BENCH: dict[str, Any] = {
@@ -336,9 +333,9 @@ class ByCallIdentity:
         schema = body.get("response_format", {}).get("json_schema")
         node = schema["name"] if schema else self._text_node(prompt)
         self.calls[node] = self.calls.get(node, 0) + 1
-        # Concurrent sends of one node land in any order; their seeds (`Calls.ask`) tell
-        # them apart, and sends sharing a seed are sequential, so their turn is theirs alone.
-        seed: int | None = body.get("seed")
+        # Concurrent text sends of one node land in any order; their seeds tell them apart. A
+        # structured node sends one at a time, so its turn is the node's count whatever its seed.
+        seed: int | None = None if schema else body.get("seed")
         turn = self.turns.get((node, seed), 0)
         self.turns[node, seed] = turn + 1
         call = str(turn) if seed is None else f"{seed}.{turn}"
@@ -623,7 +620,6 @@ async def forked_twice(stores: Stores, fork: CycleHop, rounds: int) -> None:
             budget=Budget(),
             mode=RunMode(),
         )
-        await session.backend_client.aclose()
         ended = stop_reason_outcome(result.stop_reason).exit_code or session.hop != fork
         if ended or not closed_a_round(stores, fork):
             raise SystemExit(
@@ -699,7 +695,6 @@ async def run_one(
         step_rounds=pause_after,
         mode=RunMode(),
     )
-    await session.backend_client.aclose()
     harness.backend.before_answer = None
     if pause_after is not None or pause_in_walk is not None:
         if result.stop_reason != StopReason.PAUSED:
@@ -718,7 +713,6 @@ async def run_one(
             if diverge:
                 forked_at_init(stores, paused, session.hop)
                 await forked_twice(stores, session.hop, rounds)
-        await session.backend_client.aclose()
     cycle = await banked(
         stores, session, result, harness, out, name=optimizer, bench_trigger=bench_trigger
     )
@@ -835,7 +829,6 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
             step_rounds=step_rounds,
             mode=RunMode(),
         )
-        await session.backend_client.aclose()
     llm.rebasing = True
     session, _ = await run_campaign(
         session.hop,
@@ -844,7 +837,6 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
         budget=Budget(),
         mode=RunMode(from_round=1),
     )
-    await session.backend_client.aclose()
     cycles = dict(stores.campaigns.campaign_cycles(session.campaign_id))
     forks = [index for index in cycles.values() if index.parent_cycle_id is not None]
     if not forks:
@@ -887,7 +879,7 @@ async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
 
     def passes(hop: CycleHop) -> list[str]:
         decided = stores.campaigns.standing_rounds(hop, moment=None).decisions.get(0, [])
-        return [d.data["by"] for d in decided if d.kind == BenchCheckpointKind.ORIGIN_GATE_PASS]
+        return [d.inputs_ref.by for d in decided if isinstance(d.inputs_ref, OriginGatePass)]
 
     for fixed in (False, True):
         backend.down, backend.sent = True, []
@@ -899,7 +891,6 @@ async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
             budget=Budget(),
             mode=RunMode(),
         )
-        await session.backend_client.aclose()
         hop, lost = session.hop, {(prompt, query) for prompt, query, _ in backend.sent}
         if result.stop_reason != StopReason.ORIGIN_GATE or passes(hop):
             raise SystemExit(f"offline run: a refused origin ended {result.stop_reason}")
@@ -911,7 +902,6 @@ async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
             budget=Budget(),
             mode=RunMode(),
         )
-        await session.backend_client.aclose()
         said = f"resumed {'answering' if fixed else 'still refused'}"
         if result.stop_reason == StopReason.ORIGIN_GATE:
             raise SystemExit(f"offline run: {said}, the origin halted at the gate again")
@@ -1051,8 +1041,6 @@ async def run_arms(
         out = workspace / f"arm-{name}"
         cycle = await banked(stores, armed, result, harness, out, name=name, bench_trigger="at_end")
         arms[name] = (cycle, armed.campaign_id)
-    # Every arm runs on the one session the act opened, so on its one client.
-    await ran[0][1].backend_client.aclose()
     return arms
 
 
@@ -1262,7 +1250,7 @@ def _round(d: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
 
 
 LEDGER_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "decision": ("decisions", ("round", "kind", "outcome", "inputs_ref", "data")),
+    "decision": ("decisions", ("round", "kind", "outcome", "inputs_ref")),
     "election": ("elections", ("round", "selected", "ended_on", "fit")),
     "arm": ("arms", ("round", "arm", "state")),
     "phase": ("phases", ("round", "phase", "event")),
@@ -1565,8 +1553,8 @@ def read_straight_and_resumed(
     same = decided(workspace, after=pause_after) == again
     failed += not _graded(again["run"]["bench"]) or not same
     at, inside = paused_at(workspace / RESUMED)
-    # At the boundary it stepped to, or inside a round past it whose walk banked.
-    landed = at == pause_after if name in BOUNDARY_RESUMED else inside and at > pause_after
+    # Inside a round past the boundary, whose walk banked.
+    landed = inside and at > pause_after
     failed += not landed
     where = f"inside round {at} past its banked walk" if inside else f"after round {at}"
     print(
@@ -1837,13 +1825,7 @@ def main() -> int:
         {}
         if not legs
         else {
-            name: spawn(
-                name,
-                home / name / RESUMED,
-                f"--pause-after={pause_after}"
-                if name in BOUNDARY_RESUMED
-                else f"--pause-in-walk={pause_after + 1}",
-            )
+            name: spawn(name, home / name / RESUMED, f"--pause-in-walk={pause_after + 1}")
             for name in due
         }
     )

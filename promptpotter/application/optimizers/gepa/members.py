@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar
+from typing import TYPE_CHECKING, Annotated, ClassVar
 
 from pydantic import Field
 
@@ -16,6 +16,7 @@ from promptpotter.application.bench.node_context import (
     Replay,
     Target,
 )
+from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import cell_objectives
 from promptpotter.application.optimizers.gepa import prompts
@@ -33,7 +34,7 @@ from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.run_records import CheckpointKind
+from promptpotter.domain.run_records import CheckpointInputs
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
 
@@ -41,10 +42,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.bench.resume_and_fork.replayers import (
-        ReplayContext,
-        Replayer,
-    )
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         CatchUpFn,
@@ -65,9 +62,21 @@ if TYPE_CHECKING:
     from promptpotter.domain.search_point import JobSearchPoint
 
 
-class GepaCheckpointKind(CheckpointKind):
-    MINIBATCH_GATE = "minibatch_gate"
-    CANDIDATE_REFUSED = "candidate_refused"
+class MinibatchTested(Replayed, kind="minibatch_gate"):
+    arm: ArmKey
+    parent_id: str
+    parent_scores: dict[str, float]
+    sigma: float | None
+    sigma_prime: float | None
+
+    def replay(self, ctx: ReplayContext) -> bool:
+        rows = ctx.round_data.rows(self.arm)
+        return minibatch_improves(self.parent_scores, cell_objectives(rows))[0]
+
+
+class CandidateRefused(CheckpointInputs, kind="candidate_refused"):
+    arm: str
+    ungraded: list[str]
 
 
 class MinibatchKnobs(StrictModel):
@@ -208,7 +217,6 @@ class _GateRace(nodes.NoCatchUps):
         block_size: int,
         n_cells: int,
     ) -> None:
-        self._ctx = ctx
         self._replay = ctx.read(Replay)
         self.node = ctx.node
         self._bars = bars.bars
@@ -249,15 +257,14 @@ class _GateRace(nodes.NoCatchUps):
             graded = cell_objectives(arm_rows)
             accepted, sigma, sigma_prime = minibatch_improves(bar, graded)
             self._replay.decide(
-                GepaCheckpointKind.MINIBATCH_GATE,
-                {
-                    "arm": cid,
-                    "parent_id": parent_id,
-                    "round_num": self._ctx.round_num,
-                    "parent_scores": dict(bar),
-                },
+                MinibatchTested(
+                    arm=cid,
+                    parent_id=parent_id,
+                    parent_scores=bar,
+                    sigma=sigma,
+                    sigma_prime=sigma_prime,
+                ),
                 accepted,
-                data={"sigma": sigma, "sigma_prime": sigma_prime},
             )
             if not accepted:
                 stops[cid] = StopSignal(
@@ -301,14 +308,6 @@ class _GateRace(nodes.NoCatchUps):
         return None
 
 
-def _replay_minibatch_gate(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
-) -> bool:
-    rows = ctx.round_data.rows(ArmKey(inputs_ref["arm"]))
-    accepted, _, _ = minibatch_improves(inputs_ref["parent_scores"], cell_objectives(rows))
-    return accepted
-
-
 class MinibatchGate(nodes.Eliminator):
     name: ClassVar[str] = "minibatch_gate"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
@@ -316,9 +315,6 @@ class MinibatchGate(nodes.Eliminator):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Replay})
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
     stop_disqualifies: ClassVar[bool] = True
-    replayers: ClassVar[Mapping[str, Replayer]] = {
-        GepaCheckpointKind.MINIBATCH_GATE: _replay_minibatch_gate
-    }
 
     def race(self, ctx: NodeContext, panel: Panel, _catch_up: CatchUpFn) -> _GateRace:
         return _GateRace(
@@ -431,12 +427,7 @@ class Pareto(nodes.Selector):
             graded = cell_objectives(sheet)
             # An aggregate over fewer cells is no aggregate, for the seat as for every child.
             if ungraded := [key for key in pareto_set if key not in graded]:
-                replay.decide(
-                    GepaCheckpointKind.CANDIDATE_REFUSED,
-                    {"arm": ind.id, "round_num": ctx.round_num},
-                    False,
-                    data={"ungraded": ungraded},
-                )
+                replay.decide(CandidateRefused(arm=ind.id, ungraded=ungraded), False)
                 continue
             if ind.id != measured.parent.individual.id:
                 admitted.append(ind.id)

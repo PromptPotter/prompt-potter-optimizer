@@ -7,18 +7,9 @@ from pydantic import Field
 
 from promptpotter.domain.optimizer_state import RoundOutput, StateSlice
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
-from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-
-class PotterCheckpointKind(CheckpointKind):
-    ROUND_WINNER = "round_winner"
-    ELIMINATION_CUT = "elimination_cut"
-    LEADER_LOCK_IN = "leader_lock_in"
-    L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
-    L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
 
 
 class L1Layout(StrictModel):

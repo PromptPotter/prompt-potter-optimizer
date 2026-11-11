@@ -18,6 +18,7 @@ from promptpotter.domain.run_records import LaunchClockRecord
 from promptpotter.domain.spend import Budget, CeilingMeter
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
+from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
@@ -84,12 +85,13 @@ class DeterminismClamp(StrictModel):
     seed: int | None = Field(
         None,
         description=(
-            "Sampling seed every optimizer node sends, or draws its per-call seed from where it "
-            "asks several things in one step, so concurrent asks stay distinct draws. Temperature "
-            "0 pins the distribution and not the draw, so without a seed the provider is still "
-            "free to sample differently on identical input. It rides `hash_call`, so two "
-            "campaigns differing only here bank separate replies rather than serving one "
-            "campaign's answer under the other's name. `None` (default) sends none."
+            "The seed each optimizer call's own sampling seed is drawn off, so concurrent asks "
+            "stay distinct draws; every call whose provider sends a seed sends its draw. "
+            "Temperature 0 pins the distribution and not the draw, so without a seed the "
+            "provider is still free to sample differently on identical input. It rides "
+            "`hash_call`, so two campaigns differing only here bank separate replies rather "
+            "than serving one campaign's answer under the other's name. `None` (default) draws "
+            "each call's seed off the campaign id."
         ),
     )
     route_order: list[str] | None = Field(
@@ -311,6 +313,15 @@ class CampaignRefusal(StrEnum):
 
 
 assert {r.value for r in CampaignRefusal} <= {r.value for r in BenchRefusal}
+
+
+class CampaignRefusedError(ConflictError):
+    """Every run and pass on its campaign is refused; its code is `refusal`'s. A job it ends reads
+    refused however late it is asked (`jobs/registry.py::JobRegistry.release`)."""
+
+    def __init__(self, refusal: CampaignRefusal, message: str) -> None:
+        super().__init__(message, code=refusal.value)
+        self.refusal = refusal
 
 
 class CampaignEdit(TypedDict, total=False):

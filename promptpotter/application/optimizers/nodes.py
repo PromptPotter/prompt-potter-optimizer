@@ -48,7 +48,6 @@ if TYPE_CHECKING:
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.bench.resume_and_fork.replayers import Replayer
     from promptpotter.application.knobs import CouplingSeverity
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_callbacks import RunCallbacks
@@ -60,7 +59,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
-    from promptpotter.domain.paired_reading import ArmKey
+    from promptpotter.domain.paired_reading import ArmKey, PriorStanding
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Access, Pool, PoolEntry
@@ -188,8 +187,6 @@ class NodeMember(Protocol):
     draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType({})
     # The modules deciding what its prompts SAY; `source_digest` hashes them beside its own module.
     prompt_sources: ClassVar[tuple[ModuleType, ...]] = ()
-    # By decision kind, pure over one round; registering one is what makes a resume re-derive that kind.
-    replayers: ClassVar[Mapping[str, Replayer]] = MappingProxyType({})
     couplings: ClassVar[tuple[MemberCoupling, ...]] = ()
     # `{row: count}` of declared surface no manifest shows, which `complexity_ledger` sums.
     priced_surface: ClassVar[Mapping[str, int]] = MappingProxyType({})
@@ -633,7 +630,7 @@ class RaceSnapshot:
     p_best: float
     current: ArmKey
     n_samples: int
-    paired_breakdown: dict[ArmKey, dict[str, float]]
+    paired_breakdown: dict[ArmKey, PriorStanding]
 
 
 class Race(CatchUps, Protocol):

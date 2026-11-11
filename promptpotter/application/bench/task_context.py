@@ -261,6 +261,7 @@ def checkin_call_context(stores: Stores, ledger: CycleEventLog) -> LLMCallContex
         ledger=ledger,
         round_num=0,
         cache=stores.optimizer_reuse,
+        seed=None,
     )
 
 

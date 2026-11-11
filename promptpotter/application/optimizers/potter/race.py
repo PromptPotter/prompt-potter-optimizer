@@ -12,18 +12,23 @@ from promptpotter.application.bench.node_context import (
     Replay,
     Ruler,
 )
+from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb.checks import (
     EliminationContext,
     EliminationGate,
     PoBBCheck,
     PoBBStop,
+    graded_sheet,
+    locks_in,
+    prior_reads,
+    race_sheet,
     wire_sheet,
 )
-from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.domain.arms import Elimination
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, PriorStanding
+from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.validators import CaughtUp
 
 if TYPE_CHECKING:
@@ -36,6 +41,59 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopSignal
+
+
+class _RaceDecision(Replayed, kind=None):
+    arm: ArmKey
+    parent: ArmKey
+    prior_arms: list[ArmKey]
+    queries_scored: int
+    # The fewest shared cells a prior is read on, which the replay's fit needs too.
+    n_min: int
+    p_best: float
+    leader: ArmKey
+    paired_breakdown: dict[ArmKey, PriorStanding]
+    # Each cell by its `Sample.key`, each prior's grades as read: a replay re-fits from these.
+    candidate_cells: list[str]
+    crowned: list[str]
+    prior_histories: dict[ArmKey, dict[str, dict[str, float | None]]]
+
+    def _read(self, ctx: ReplayContext) -> tuple[CellSheet, dict[ArmKey, CellSheet]] | None:
+        """``None`` where a cell the live check read is no longer among the arm's rescored rows."""
+        rows = ctx.round_data.rows(self.arm).by_key()
+        if any(cell not in rows for cell in self.candidate_cells):
+            return None
+        priors = {pid: graded_sheet(grades) for pid, grades in self.prior_histories.items()}
+        return race_sheet(rows[cell] for cell in self.candidate_cells), priors
+
+
+class EliminationCut(_RaceDecision, kind="elimination_cut"):
+    epsilon: float
+
+    def replay(self, ctx: ReplayContext) -> bool:
+        read = self._read(ctx)
+        if read is None:
+            return False
+        reads = prior_reads(*read, ctx.ruler, n_min=self.n_min)
+        return bool(reads) and min(r.p_better for r in reads.values()) < self.epsilon
+
+
+class LeaderLockIn(_RaceDecision, kind="leader_lock_in"):
+    admission: float
+
+    def replay(self, ctx: ReplayContext) -> bool:
+        read = self._read(ctx)
+        if read is None:
+            return False
+        return locks_in(
+            self.arm,
+            *read,
+            self.parent,
+            crowned=frozenset(self.crowned),
+            n_min=self.n_min,
+            ruler=ctx.ruler,
+            admission=self.admission,
+        )
 
 
 def _reason(ctx: EliminationContext, labels: Mapping[ArmKey, str]) -> str:
@@ -173,7 +231,6 @@ class PoBBRace(CatchUpPool):
             catch_up,
             ctx.node,
         )
-        self._ctx = ctx
         self._progress, self._replay = ctx.read(Progress), ctx.read(Replay)
         frontier = ctx.read(Frontier)
         if parent_results := frontier.parent_own_rows:
@@ -201,20 +258,12 @@ class PoBBRace(CatchUpPool):
         if not isinstance(signal, PoBBStop):
             return None
         context = signal.check_result
-        gate = context["gate"]
-        round_num = self._ctx.round_num
-        inputs: dict[str, Any] = {
+        raced: dict[str, Any] = {
             "arm": key,
             "parent": self._check.parent,
             "prior_arms": list(self._check.priors),
             "queries_scored": context["queries_scored"],
-            "round_num": round_num,
-            # The fewest shared cells a prior is read on, which the replay's fit needs too.
-            "n_min": int(self._check.n_min),
-            "recorded_p_best": context["p_best"],
-        }
-        # Each cell by its `Sample.key`, each prior's grades as read: a replay re-fits from this record.
-        data: dict[str, Any] = {
+            "n_min": self._check.n_min,
             "p_best": context["p_best"],
             "leader": context["leader"],
             "paired_breakdown": signal.paired_breakdown,
@@ -222,12 +271,11 @@ class PoBBRace(CatchUpPool):
             "crowned": sorted(self._check.crowned),
             "prior_histories": {pid: wire_sheet(prior) for pid, prior in signal.priors.items()},
         }
-        if gate is EliminationGate.LOCK_IN:
-            kind = PotterCheckpointKind.LEADER_LOCK_IN
-            inputs["admission"] = context["admission"]
-        else:
-            kind = PotterCheckpointKind.ELIMINATION_CUT
-            inputs["epsilon"] = context["epsilon"]
-        self._replay.decide(kind, inputs, True, data=data)
+        inputs = (
+            LeaderLockIn(**raced, admission=context["admission"])
+            if context["gate"] is EliminationGate.LOCK_IN
+            else EliminationCut(**raced, epsilon=context["epsilon"])
+        )
+        self._replay.decide(inputs, True)
         named = {**labels, self._check.parent: "parent"}
         return Elimination(reason=_reason(context, named), context=dict(context))

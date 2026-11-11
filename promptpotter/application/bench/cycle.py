@@ -346,7 +346,11 @@ class Cycle:
         return [rr for rr in self.rounds if rr.round == 0 or rr.at_offset is not None]
 
     def unwind_unclosed(self) -> None:
-        self.restate_rounds(self.closed_rounds)
+        closed = self.closed_rounds
+        self.restate_rounds(closed)
+        # An unclosed round's decisions go with it: its re-entry decides them again.
+        held = {rr.round for rr in closed}
+        self.pending_decisions = [d for d in self.pending_decisions if d.round in held]
 
     def absorb_round(self, rr: RoundResult) -> None:
         self.restate_rounds([*self._rounds, rr])

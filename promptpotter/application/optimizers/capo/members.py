@@ -15,6 +15,7 @@ from promptpotter.application.bench.node_context import (
     Replay,
     Target,
 )
+from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.capo import prompts
 from promptpotter.application.optimizers.capo.state import CapoObjective
@@ -25,11 +26,10 @@ from promptpotter.application.optimizers.variation.members import Survival, Surv
 from promptpotter.domain.arms import Cut, Elimination, Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, PriorStanding
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.pool import DemoPool
 from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
@@ -40,10 +40,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.bench.resume_and_fork.replayers import (
-        ReplayContext,
-        Replayer,
-    )
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         CatchUpFn,
@@ -67,9 +63,38 @@ if TYPE_CHECKING:
     from promptpotter.domain.search_point import JobSearchPoint
 
 
-class CapoCheckpointKind(CheckpointKind):
-    PAIRED_T_CUT = "paired_t_cut"
-    POPULATION_KEPT = "population_kept"
+class PairedTCut(Replayed, kind="paired_t_cut"):
+    """The rivals are named, not their rows: a replay reads every arm off the rescored round."""
+
+    objective: CapoObjective
+    arm: ArmKey
+    queries_scored: int
+    alpha: float
+    survivors: int
+    raced_against: list[ArmKey]
+    outscored_by: list[ArmKey]
+
+    def replay(self, ctx: ReplayContext) -> bool:
+        rows = ctx.round_data.rows
+        arm = _cell_objectives(rows(self.arm).cells[: self.queries_scored], self.objective)
+        rivals = {
+            pid: _cell_objectives(rows(pid).cells, self.objective) for pid in self.raced_against
+        }
+        beaten = sum(1 for p, _ in _readings(arm, rivals).values() if p < self.alpha)
+        return beaten >= self.survivors
+
+
+class PopulationKept(Replayed, kind="population_kept"):
+    objective: CapoObjective
+    survivors: list[ArmKey]
+
+    def rank(self, rows: Mapping[ArmKey, CellSheet]) -> list[ArmKey]:
+        return _rank_survivors(
+            self.survivors, {key: rows[key] for key in self.survivors}, objective=self.objective
+        )
+
+    def replay(self, ctx: ReplayContext) -> list[ArmKey]:
+        return self.rank({key: ctx.round_data.rows(key) for key in self.survivors})
 
 
 def mutate_shots(
@@ -266,7 +291,6 @@ class PairedTRace(nodes.NoCatchUps):
         n_cells: int,
         objective: CapoObjective,
     ) -> None:
-        self._ctx = ctx
         self._progress, self._replay = ctx.read(Progress), ctx.read(Replay)
         self.node = ctx.node
         self._alpha = ctx.knobs(PairedTKnobs).alpha
@@ -306,7 +330,7 @@ class PairedTRace(nodes.NoCatchUps):
                 continue
             # A rival's one-sided p is also P(arm beats it) as a t fiducial, which `p_better` reads.
             breakdown = {
-                pid: {"p_better": p, "n_paired": float(width)} for pid, (p, width) in tested.items()
+                pid: PriorStanding(p_better=p, n_paired=width) for pid, (p, width) in tested.items()
             }
             p_best = min(p for p, _ in tested.values())
             snapshot = nodes.RaceSnapshot(p_best, cid, len(arm_rows), breakdown)
@@ -369,21 +393,17 @@ class PairedTRace(nodes.NoCatchUps):
         if signal.outcome != "eliminated":
             reason = f"settled {where}: {self._survivors} or fewer left racing"
             return Elimination(reason=reason, context=context)
-        # The rivals are named, not their rows: a replay reads every arm off the rescored round.
         self._replay.decide(
-            CapoCheckpointKind.PAIRED_T_CUT,
-            {
-                "arm": key,
-                "round_num": self._ctx.round_num,
-                "queries_scored": cr["queries_scored"],
-                "alpha": self._alpha,
-                "survivors": self._survivors,
-                "length_penalty": self._objective.length_penalty,
-                "length_norm": self._objective.length_norm,
-                "raced_against": list(cr["raced_against"]),
-            },
+            PairedTCut(
+                objective=self._objective,
+                arm=key,
+                queries_scored=cr["queries_scored"],
+                alpha=self._alpha,
+                survivors=self._survivors,
+                raced_against=cr["raced_against"],
+                outscored_by=cr["outscored_by"],
+            ),
             True,
-            data={"outscored_by": list(cr["outscored_by"])},
         )
         context["outscored_by"] = walk_order(cr["outscored_by"])
         outscored, raced = context["outscored_by"], context["raced_against"]
@@ -395,40 +415,12 @@ class PairedTRace(nodes.NoCatchUps):
         return None
 
 
-def _recorded_objective(inputs_ref: Mapping[str, Any]) -> CapoObjective:
-    return CapoObjective(
-        length_penalty=float(inputs_ref["length_penalty"]),
-        length_norm=int(inputs_ref["length_norm"]),
-    )
-
-
-def _replay_paired_t_cut(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
-) -> bool:
-    rows = ctx.round_data.rows
-    objective = _recorded_objective(inputs_ref)
-    arm = _cell_objectives(
-        rows(ArmKey(inputs_ref["arm"])).cells[: int(inputs_ref["queries_scored"])],
-        objective,
-    )
-    rivals = {
-        ArmKey(pid): _cell_objectives(rows(ArmKey(pid)).cells, objective)
-        for pid in inputs_ref["raced_against"]
-    }
-    alpha = float(inputs_ref["alpha"])
-    beaten = sum(1 for p, _ in _readings(arm, rivals).values() if p < alpha)
-    return beaten >= int(inputs_ref["survivors"])
-
-
 class PairedT(nodes.Eliminator):
     name: ClassVar[str] = "paired_t"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     knobs: ClassVar[type[StrictModel]] = PairedTKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({CapoObjective})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Progress, Replay})
-    replayers: ClassVar[Mapping[str, Replayer]] = {
-        CapoCheckpointKind.PAIRED_T_CUT: _replay_paired_t_cut
-    }
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
     # Cut once μ others are significantly better: it can no longer be among the μ kept.
     stop_disqualifies: ClassVar[bool] = True
@@ -644,17 +636,6 @@ class PopulationRejoin(nodes.Proposer):
         )
 
 
-def _replay_population_kept(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
-) -> list[ArmKey]:
-    survivors = [ArmKey(str(key)) for key in inputs_ref["survivors"]]
-    return _rank_survivors(
-        survivors,
-        {key: ctx.round_data.rows(key) for key in survivors},
-        objective=_recorded_objective(inputs_ref),
-    )
-
-
 class PopulationSelector(nodes.Selector):
     """Ranks the race's survivors on CAPO's objective; `survival` keeps the top μ."""
 
@@ -664,9 +645,6 @@ class PopulationSelector(nodes.Selector):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
     elects_on: ClassVar[DisplayMetric] = "accuracy"
     elects_partial: ClassVar[bool] = True
-    replayers: ClassVar[Mapping[str, Replayer]] = {
-        CapoCheckpointKind.POPULATION_KEPT: _replay_population_kept
-    }
 
     def parent_cells(
         self,
@@ -683,20 +661,9 @@ class PopulationSelector(nodes.Selector):
         return panel.block_size
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
-        survivors = measured.electable
         objective = ctx.slice(CapoObjective)
-        rows = {key: measured.rows[key] for key in survivors}
-        ranked = _rank_survivors(survivors, rows, objective=objective)
-        ctx.read(Replay).decide(
-            CapoCheckpointKind.POPULATION_KEPT,
-            {
-                "survivors": survivors,
-                "round_num": ctx.round_num,
-                "length_penalty": objective.length_penalty,
-                "length_norm": objective.length_norm,
-            },
-            ranked,
-        )
+        inputs = PopulationKept(objective=objective, survivors=measured.electable)
+        ranked = ctx.read(Replay).decide(inputs, inputs.rank(measured.rows))
         best = ranked[0] if ranked else None
         lineage = ctx.read(Lineage)
         carried = lineage.population

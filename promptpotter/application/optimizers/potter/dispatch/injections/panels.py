@@ -62,6 +62,7 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import evidence_starved_node, ran_to_output_ceiling
 from promptpotter.domain.ruler import ThetaCaveat
+from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import (
     CellSheet,
     GradedCell,
@@ -439,7 +440,7 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
     )
     sections = [Item(header)]
     for r in plan.shown:
-        parts = [f"[#{b.slot_of[r.key]}] QUERY:\n{_query_excerpt(r)}"]
+        parts = [f"[{sample_tag(b.slot_of[r.key])}] QUERY:\n{_query_excerpt(r)}"]
         if (loss := plan.losses.get(r.key)) is not None:
             parts.append(
                 f"THE PARENT'S RUN HIT THIS — {loss.lost} of {loss.tried} edits missed it; "
@@ -606,7 +607,7 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
         trace = r.facts.pipeline.reasoning_trace or ""
         sections.append(
             Item(
-                f"[#{b.slot_of[r.key]}] {label} {mark}\n{_head_at_line(trace, INNER_NARRATIVE_CAP)}",
+                f"[{sample_tag(b.slot_of[r.key])}] {label} {mark}\n{_head_at_line(trace, INNER_NARRATIVE_CAP)}",
                 trusted=False,
             )
         )
@@ -780,7 +781,7 @@ def _miss_row(
     verifier: bool,
 ) -> Item:
     row = (
-        f"  [#{b.slot_of[r.key]}] "
+        f"  [{sample_tag(b.slot_of[r.key])}] "
         + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
         + f" | {_query_stem(r, MISS_QUERY_CAP)}"
         + (_verifier_outcome(r) if verifier else _miss_outcome(r))
@@ -884,7 +885,7 @@ def _candidate_mutation(
     ]
     # In the DEMO POOL panel's ids, the only shot vocabulary L1 is shown.
     pairs += [
-        (Locus(node, SHOTS_KEY).name, ", ".join(f"#{slot_of[k]}" for k in shots) or "none")
+        (Locus(node, SHOTS_KEY).name, ", ".join(sample_tag(slot_of[k]) for k in shots) or "none")
         for node, shots in delta.shots.items()
     ]
     return pairs[:MEMORY_FIELD_CAP]
@@ -1022,7 +1023,9 @@ def _r_mutation_memory(b: InjectionBundle) -> list[Item]:
         else []
     )
     if lost := _repeatedly_lost(edits):
-        cells = " · ".join(f"#{b.slot_of[key]} in {c.lost} of {c.tried}" for key, c in lost)
+        cells = " · ".join(
+            f"{sample_tag(b.slot_of[key])} in {c.lost} of {c.tried}" for key, c in lost
+        )
         items.append(Item(f"CELLS THE PARENT'S RUN HIT THAT EDITS KEEP MISSING: {cells} edits"))
     return items
 
@@ -1043,7 +1046,7 @@ def _edit_row(edit: _Edit, slot_of: Mapping[str, int], *, charged: bool) -> str:
         scored += f", composite {fold.composite_fitness:.3f} vs {composite:.3f}"
     delta = edit.flipped()
     cells = "".join(
-        f" · {verb} {', '.join(f'#{slot_of[key]}' for key in keys)}"
+        f" · {verb} {', '.join(sample_tag(slot_of[key]) for key in keys)}"
         for verb, keys in (("gained", delta.gained), ("lost", delta.lost))
         if keys
     )

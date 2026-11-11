@@ -41,6 +41,7 @@ from promptpotter.domain.phases import STOP_REASON_INFO, PauseCause, StopReason
 from promptpotter.domain.results import CycleResult
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
+    ComparisonExit,
     ConfigOverrides,
     CycleSeed,
     RebaseRequest,
@@ -282,6 +283,9 @@ async def run_optimization(
                     f"--diag shows what an optimizer's controller does at a round boundary, and "
                     f"{optimizer.name} declares no controller node"
                 )
+            if diagnosing is not None:
+                # Its rounds are unmeasured: an arm leaves its comparison at every door.
+                session.store.campaigns.leave_comparison(session.hop, ComparisonExit.DIAG)
             try:
                 prep = await open_launch(
                     dataset, cycle, session=session, observers=observers, budget=budget

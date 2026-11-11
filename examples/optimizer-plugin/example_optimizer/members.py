@@ -15,7 +15,9 @@ from promptpotter.application.optimizers import ManifestDir, nodes, paper_templa
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.domain.campaign_config import Estimand, Knob
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
+from promptpotter.domain.run_records import CheckpointInputs
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
@@ -32,11 +34,16 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
-    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
 
 MANIFEST = ManifestDir("example", Path(__file__).parent)
+
+
+class ExampleKept(CheckpointInputs, kind="example_kept"):
+    """Archived on the ledger; a ``Replayed`` subclass would have a resume re-derive it."""
+
+    ranked: list[ArmKey]
 
 
 class DrawKnobs(StrictModel):
@@ -117,9 +124,7 @@ class Keep(nodes.Selector):
         ranked = sorted(fitness, key=lambda key: -fitness[key])
         bar = folds[measured.parent.key].composite_fitness
         selected = ranked[0] if ranked and (bar is None or fitness[ranked[0]] > bar) else None
-        ctx.read(Replay).decide(
-            "example_kept", {"round_num": ctx.round_num, "ranked": ranked}, selected or ""
-        )
+        ctx.read(Replay).decide(ExampleKept(ranked=ranked), selected or "")
         return nodes.Selection(
             selected=selected,
             leading=ranked[0] if ranked else None,

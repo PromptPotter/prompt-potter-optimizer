@@ -27,7 +27,7 @@ from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     extract_parsed_json,
 )
-from promptpotter.infrastructure.llm.registry import default_routes
+from promptpotter.infrastructure.llm.registry import default_routes, provider_sends
 from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -71,6 +71,8 @@ class LLMCallContext:
     node: str
     config: NodeConfig
     cache: LLMReuseCache
+    # Drawn per call off the run's clamp (`Cycle.rng`); it keys the reuse cache. None outside a run.
+    seed: int | None
     ledger: CycleEventLog | None = None
     round_num: int | None = None
     candidate_idx: int | None = None
@@ -147,14 +149,12 @@ def _merged_config(
     laid: dict[str, object] = {}
     if temperature is not None:
         laid["temperature"] = temperature
-    if seed is not None:
-        laid["seed"] = seed
     # The determinism clamp goes LAST: it must beat every per-call setting, steered temperature included.
     if (clamp := bound_determinism()) is not None:
         laid |= clamp.model_dump(exclude_none=True)
-        # Except the seed a call brings: `Calls.ask` draws it FROM the clamp's, one per call.
-        if seed is not None:
-            laid["seed"] = seed
+    # Except the call's own draw, drawn FROM the clamp's seed: it keys the call on every provider.
+    if seed is not None:
+        laid["seed"] = seed
     merged = config.laid(laid)
     # Keyed and sent as the host it gets, as a target node is (`pin_default_routes`).
     if route := pinned_route(merged.model, merged.route_order, merged.provider, default_routes()):
@@ -259,7 +259,8 @@ async def _provider_reply(call: _Call) -> LLMResponse:
                 response_schema=call.response_schema,
                 reasoning_effort=merged.reasoning_effort,
                 top_p=merged.top_p,
-                seed=merged.seed,
+                # The draw goes on the wire only where the provider's client sends one.
+                seed=merged.seed if "seed" in provider_sends(merged.provider) else None,
                 # An empty route pins nothing, so it is no request for one.
                 route_order=merged.route_order or None,
             ),
@@ -326,10 +327,9 @@ async def llm_call(
     response_model: type[BaseModel] | None = None,
     response_schema: dict[str, Any] | None = None,
     temperature: float | None = None,
-    seed: int | None = None,
 ) -> LLMResponse:
     node = context.node
-    merged = _merged_config(context.config, temperature=temperature, seed=seed)
+    merged = _merged_config(context.config, temperature=temperature, seed=context.seed)
     call = _Call(
         label=node,
         merged=merged,

@@ -17,16 +17,21 @@ Each row sits under the wave-4 chain that closes it ([`roadmap.md`](roadmap.md) 
 (wave 4)); `chain N` is that chain's link N. A chain re-tests its rows in its census and deletes each
 row it closes.
 
-### batch/25 · admit-2 (on the batch/25 assembly)
+### batch/26 · admit-2 (links 1-5 landed; the rows its cap left)
 
-- **`--diag` mints a sibling cycle that never leaves the comparison**: `commands/launching.py::_diag_target`
-  cuts it (`fork_siblings.py::cut_diag_sibling`) and launches it with `leaving=None`, and
-  `potter/generation_only.py` drives its rounds a second way. Action: an unmeasured mode on `RunStart`
-  the round loop reads, whose launch leaves the comparison as a `ComparisonExit` member; the sibling and
-  the second driver go. **Rides with:** admit-2, whose Owns gain `runner/loop.py` (the mode's read),
-  `bench/resume_and_fork/fork_siblings.py` and `domain/run_records.py` (`ComparisonExit`);
-  `generation_only.py` is hashed, so its hunk rides stream-rk. **Re-test:**
-  `git grep -n "def cut_diag_sibling\|leaving=None" -- promptpotter` is empty.
+- **A cycle's hold is released twice on every normal exit**: `runner/entry.py`'s `finally` releases a
+  hold `drain_all` already released, so `run_phase_control.py::CycleHold.release` keeps a double-release
+  guard. Action: `drain_all` only drains; the release is the `finally`'s and the fork handoff's. This
+  keeps the parent cycle attached through the fork mint, which moves `account_spend`'s holds, so it
+  needs its own proof. **Re-test:** `CycleHold.release` holds no already-released branch.
+- **A seat refused before it runs keeps its observers**: `runner/inner/spawn.py` (~:364) never releases
+  the observers it opened when `admission.py::slotless_share` refuses. Action: the observers open after
+  admission, or close on its refusal. **Rides with:** the slotless-doors row below. **Re-test:** a test
+  refuses a seat at `slotless_share` and finds no open observer.
+- **`--diag` drives its rounds a second way**: `potter/generation_only.py` runs a diag round beside the
+  round loop's own driver. Action: the round loop reads the diag mode; the second driver goes.
+  **Rides with:** stream-rk (`generation_only.py` is hashed). **Re-test:**
+  `git grep -n "run_generation_only_round" -- promptpotter` is empty.
 - **The embedded and inner runs still open their cycles their own way**: `jobs/launcher/launch.py::hold`
   opens every held launch's cycle, but `embedded_run.py::run_campaign` and
   `runner/inner/spawn.py::_open_seat` mint or resume through `admission.py::slotless_share`, and the
@@ -63,57 +68,49 @@ row it closes.
   a claimed mint (today it asks a torn mint only its manifest; once a mint claims first, that is the
   read `destroying` would otherwise raise `CycleBusyError` on). **Rides with:** admit-2. **Re-test:**
   `git grep -n "unit.parent.parent" -- promptpotter/application/maintenance/landing.py` is empty.
-- **A campaign id is drawn without asking the disk**: `campaign_ids.py` draws 24 bits and `mint.py` writes
-  `_write_plan`, `record_resolved_run`, `mint_cycle` and `adopt_ledger` into that campaign's cycle dir
-  before `create_campaign` refuses `campaign_exists`, so a draw colliding with a live campaign writes into
-  it, and one colliding with a torn mint lets the landing delete a live mint. Action: the mint's first
-  write takes its campaign dir exclusively (`mkdir(exist_ok=False)`) and draws again on a hit.
-  **Re-test:** a test pins the draw to an existing id and finds the old campaign's files unchanged.
 - **The embedded launch is not a command**: `embedded_run.py::run_campaign` and `::run_head_to_head`
   open their own session but file no `CommandRecord`; `run_campaign` admits through
   `admission.py::slotless_share` and mints itself, because a DSPy `program` is an in-memory object no
   payload carries. Action: `run_campaign` files `mint-campaign` or `start-run` with an `EmbeddedRun`
   holder, the program held by the filing process. **Rides with:** admit-2. **Re-test:**
   `git grep -n "slotless_share(" -- promptpotter/application/embedded_run.py` is empty.
-- **The embedded door sweeps twice per launch**: `embedded_run.py::run_campaign` and `::run_head_to_head`
-  call `enter` (land, then sweep) and then admit, which sweeps again; `presentation/teleprompter.py::acompile`
-  calls `enter()` before `run_campaign` enters again. Action: the admission's sweep is the one sweep;
-  `enter` lands only. **Rides with:** admit-2. **Re-test:** one embedded head-to-head logs one sweep.
-- **`teleprompter.py::acompile` leaks its backend client on a raise** (a regression batch/25 made: the
-  base closed it in a `finally`): it closes `session.backend_client` only after `run_campaign` returns,
-  and `embedded_run.py::run_campaign` now opens the session itself, so a raise past its mint or its
-  resume leaks the client and returns no session to the host. Action: `run_campaign`, which owns the
-  session, closes its client on every exit; it lands before the release. **Rides with:** admit-2.
-  **Re-test:** a `run_campaign` that raises leaves no open client.
-- **`connectors/dspy_module.py:351`'s refusal names `open_session`**, which is gone. Action: it names
-  `run_campaign(…, program=…)`. **Rides with:** admit-2, whose Owns gain that line. **Re-test:**
-  `git grep -n "open_session" -- promptpotter/connectors` is empty.
 - **A queued launch dies with the asking process**: the queue wait runs in the caller
   (`jobs/launcher/launch.py`). Action (the operator, 2026-11-11): a queued launch is a job on disk; the
   job file holds the principal's id, never a credential, and `jobs/registry.py::claim_next`'s promoter
   re-checks admission and spawns it when the slot frees; `jobs/CLAUDE.md`'s rule ("a queued job's intent
   never leaves the process that authenticated it") is restated in the same link. **Rides with:**
   admit-2. **Re-test:** `resume --step-rounds 1` behind a running cycle; it starts when the slot frees.
-- **A steer is typed, then sent untyped**: `commands/launching.py::_typed_steer` (`:109`) validates each
-  node as `NodeCall` and keeps the dict it validated. Action: keep the typed carrier. **Rides with:**
-  admit-2, which holds `commands/launching.py`. **Re-test:** read `_typed_steer`'s return.
-- **The CLI head-to-head prints its own launch answer**: `presentation/cli/commands/new.py::_head_to_head`
-  dumps `HeadToHeadLaunched.started` (`launcher/head_to_head.py::HeadToHeadStarted`, `::ArmStarted`)
-  where every other door serves `run_records.py::LaunchAnswer`. Action: print `LaunchAnswer`, then delete
-  `HeadToHeadStarted`, `ArmStarted` and `head_to_head_answer`'s `started`. **Rides with:** admit-2; its
-  Owns gain `presentation/cli/commands/new.py::_head_to_head` (la's file after, named shared). **Re-test:**
-  `git grep -n "class HeadToHeadStarted" -- promptpotter` is empty.
-- **A spawned job's campaign refusal is stamped as a crash**: `jobs/launcher/run_job.py` asks
-  `admission.py::refuse_campaign` past the handoff inside the bind's `except BaseException`, so the
-  refusal logs a traceback as "could not bind its session" and `RunStart.release(exc, stamps=hop)` stamps
-  the existing cycle with the stop an admitted job's raise reads as (`jobs/registry.py::release`,
-  `run_stop_reason`: `CRASHED`, an `ErrorRecord` of kind `launch_failed`). Action: a refusal past the
-  handoff releases its job refused and leaves the cycle unstamped, as `jobs/launcher/launch.py::hold`
-  does for an existing cycle. **Rides with:** admit-2, whose Owns gain `jobs/registry.py::release`'s admitted branch.
-  **Re-test:** archive a campaign between its spawn and its child's bind; the cycle keeps its last stop
-  and the job reads `refused`.
+- **A steer is typed, then sent untyped**: `commands/launching.py::_typed_steer` (`:108`) validates each
+  node as `NodeCall` and keeps the dict it validated, because `domain/run_records.py::CycleSeed.pipeline_overlay`
+  (`:326`) is `dict[str, Any]`. Action: type it `dict[str, NodeCall]` and keep the typed carrier.
+  **Rides with:** admit-2, which holds `commands/launching.py`; its Owns gain `CycleSeed.pipeline_overlay`.
+  **Re-test:** read `_typed_steer`'s return and `CycleSeed.pipeline_overlay`'s type.
+- **The inner door mints its seat before its admission**: `runner/inner/spawn.py::_run_inner_campaign`
+  calls `_open_seat` (`mint(` at `:335`) and only then `slotless_share` (`:367`) admits, so a refusal
+  leaves a minted seat. Action: admit, then mint; the reorder moves the enclosing book's room and the L4
+  equals-main, so it lands with a paid L4 re-measure. **Rides with:** admit-2, whose Owns hold
+  `spawn.py::_open_seat`. **Re-test:** `git grep -n "mint(\|slotless_share(" -- promptpotter/application/runner/inner/spawn.py`
+  lists the admission before the mint.
+- **No test pins that a raising `run_campaign` leaves no open client**: `embedded_run.py::run_campaign`
+  closes its own client on every exit (a `resolve_resume` refusal included), and nothing fails if it
+  stops. Action: a test where the resume refuses and one where the run raises each read the client closed.
+  **Rides with:** admit-2. **Re-test:** `git grep -n "aclose\|is_closed" -- tests` names both.
+- **A closed `BackendClient` reopens its pool on next use**: `infrastructure/backend.py::BackendClient.http`
+  (`:187`) builds a new `httpx.AsyncClient` when `_http.is_closed`, so a send after the run's close
+  leaks a pool nobody closes. Action: a closed client refuses a send. **Rides with:** admit-2, whose Owns
+  gain `infrastructure/backend.py::BackendClient.http`. **Re-test:** `git grep -n "is_closed" -- promptpotter/infrastructure/backend.py`
+  is empty.
+- **A non-launch command filed through `host_dispatcher` sweeps nowhere**: `embedded_run.py::host_dispatcher`
+  (`:84`) enters without a sweep now, and `run_campaign` alone sweeps (`:192`), so a pause or stop filed
+  by an embedding host reaps no dead job. Action: the sweep is the dispatcher's, for every kind.
+  **Rides with:** admit-2. **Re-test:** `git grep -n "sweep(" -- promptpotter/application/embedded_run.py`
+  names the dispatcher.
+- **`acompile` lands twice per compile**: `presentation/teleprompter.py::acompile` calls `enter()` for its
+  stores, then `run_campaign(…, stores=stores)` enters again (`embedded_run.py:130`). Action: one landing
+  per embedded compile. **Rides with:** admit-2, whose Owns gain `presentation/teleprompter.py::acompile`.
+  **Re-test:** `git grep -c "enter()" -- promptpotter/presentation/teleprompter.py` is 0.
 
-### batch/25 · passb-2 (on the batch/25 assembly; `chain N` is passb's link N)
+### The edge tail · passb-2 (after batch/26; `chain N` is passb's link N)
 
 - **Verify serves no can-run answer**: `domain/bench.py::BenchStatus.can_run` is the bench's, but
   `VerifyAction.tsx` gates its button on `busy` alone, and the refusals live only in
@@ -129,8 +126,8 @@ row it closes.
 - **The held-out verb has three names**: `verify`, `bench`, `grade-bench` and "Grade on bench"; `bench`
   also collides with `application/bench/`. It is spelled in `domain/command_kinds.py` (`grade-bench`,
   `measuring:grade_bench`, `anyone("bench")`), `cli/commands/bench.py`, `webapp/lib/api/commands.ts`,
-  `domain/job.py::ScoringVerb`, `domain/campaign_config.py:416`, `live_dashboard/projection.py:261` and
-  `domain/bench.py:329` (`can_run`'s description). Action: "held-out" at all five doors, at once.
+  `domain/job.py::ScoringVerb`, `domain/campaign_config.py:414`, `live_dashboard/projection.py:261` and
+  `domain/bench.py:349` (`can_run`'s description). Action: "held-out" at all five doors, at once.
   **Rides with:** passb-2 2, whose Owns gain those files. **Re-test:**
   `git grep -n "grade_bench" -- promptpotter webapp scripts` is empty.
 - **`restate_export_bench` rewrites `export.json` outside the roster**: `campaign_store/store.py::restate_export_bench`
@@ -142,7 +139,7 @@ row it closes.
   `presentation/cli/campaign_runner.py::main` maps `PassStoppedError` to exit 1, while
   `cli/commands/noise_floor.py::cmd_noise_floor` catches it itself. Action: `campaign_runner.py` answers
   it with the paused exit code; noise-floor's catch goes. **Rides with:** passb-2 3. **Re-test:**
-  `git grep -cE "except PassStoppedError" -- promptpotter/presentation` is 1.
+  `git grep -lE "except PassStoppedError" -- promptpotter/presentation` names `campaign_runner.py` alone.
 - **`line_run` reads a paused pass as selecting**: a pass with a pause asked reads `PAUSED`
   (`infrastructure/runtime_flags.py:88`), so `campaign_result.py::line_run` takes its hold for the loop's.
   Action: the pass's hold is read by its bracket (`producer_lock.pass_held`). **Rides with:** passb-2 3.
@@ -158,15 +155,6 @@ row it closes.
   loop command. **Rides with:** passb-2 4, whose Owns gain `store/command_log.py` and
   `command_reading.py`'s status mapping. **Re-test:** on a paused cycle, time `command` → the `verify`
   phase's `enter` in the ledger.
-- **The pass's and the run's let-go are two shapes**: `jobs/launcher/admission.py::_let_go` takes the
-  pause and releases the pass lock; `run_observers.py::_let_go` closes the projections and releases the
-  cycle lock. Action: one producer-lock holder owns both its pause intake and its release. **Rides
-  with:** passb-2 5. **Re-test:** `git grep -c "def _let_go" -- promptpotter` is 1.
-- **A paid pass hands its job back by hand, beside `RunStart.release`**:
-  `jobs/launcher/admission.py::paid_pass` calls `job_registry.release` itself on its raise and on its
-  return, so a pass's job ends by another door than every launch's. Action: the pass holds a `RunStart`
-  and releases through it. **Rides with:** passb-2 5. **Re-test:**
-  `git grep -cE "^\s+job_registry\.release\(" -- promptpotter/application/jobs/launcher/admission.py` is 0.
 - **A command whose filer died stays `filed`**: a killed verify reads `working` to every door and its
   task's result polls forever. Action: a command names its filer's OS lock (§0.5), a field on
   `domain/command_events.py::CommandRecord`, and a dead filer's command reads ended. **Rides with:**
@@ -260,12 +248,6 @@ row it closes.
   money 5. **Re-test:** `git grep -n "default_claim_marker" -- promptpotter/infrastructure/identity/default_claim.py` is empty.
 - **`default_claim.py::is_host_tenant_dir` is named for a directory but is the user-id check.** Action:
   rename it to what it decides. **Rides with:** money 5. **Re-test:** `git grep -n "is_host_tenant_dir(" -- promptpotter`.
-- **A campaign id the bank holds as deleted can be minted again**: `store/account_spend.py::WorkspaceBank.deleted`
-  is permanent and keyed on the id, and `runner/campaign_ids.py::mint_campaign_id` draws
-  `prefix__token_hex(3)` without asking it, so a campaign on a tombstoned id meters none of its own
-  ledgers. Action: the mint re-draws an id the bank holds as deleted. **Rides with:** money 5.
-  **Re-test:** `git grep -n "token_hex(3)" -- promptpotter/application/runner/campaign_ids.py` names the
-  draw with no `WorkspaceBank.deleted` read beside it.
 - **`launch_contended` is retryable but answers 409** (`quota.py::_contended`). Decided (2026-11-10): it
   serves `retry_after`. **Rides with:** money 5. **Re-test:** `git grep -n "launch_contended" -- promptpotter`.
 - **`facts.spend_lifetime` is served and read by nothing** (`domain/hierarchy.py:121,132`) since the
@@ -301,69 +283,45 @@ row it closes.
   `campaign_at` goes (`admission.py` sits above `quota.py`, so it cannot be the owner). **Rides with:**
   money 2, whose Owns gain `CampaignStore.campaign`, `admission.py::campaign_at` with its callers'
   lines, and each site's load line. **Re-test:** `git grep -n "def campaign_at" -- promptpotter` is empty.
+- **A landing that wipes the workspace ledger forgets every campaign-id tombstone and every deleted
+  campaign's banked spend**: both live in the workspace ledger (`store/data_root.py:492`, `Fate.RUN`;
+  `account_spend.py::WorkspaceBank`), not in a SURVIVOR, so the id draw mints a deleted id again and the
+  account's spend shrinks. Action: move them to a SURVIVOR row with its one-shot migration (decision
+  0011). **Rides with:** money 2 (the account's one book), whose Owns gain `data_root.py`'s
+  `workspace ledger` row and `account_spend.py::WorkspaceBank`; money 5 reads the tombstone.
+  **Re-test:** `git grep -n '"workspace ledger"' -- promptpotter/infrastructure/store/data_root.py` names
+  `Fate.SURVIVOR`.
 
-### batch/26 · rk-opt
+### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
+- **capo's `population_kept` replays an absent arm as confirmed**: `optimizers/capo/members.py::_rank_survivors`
+  reads an arm with no shared cells as a 0.0 mean, so a replay over a round that lacks the arm confirms
+  it instead of answering it absent. Action: an arm with no shared cells is absent, as in the race's
+  replay. **Re-test:** `pytest tests/test_archive.py -k replays_its_decisions` covers `population_kept`.
 - **The L4 task prompt points at a deleted doc**: `research/datasets/promptpotter-self/task.md:102`
   names `docs/specs/l4-outer-loop.md` (deleted at batch/21), kept byte-equal so the next paid L4 run
   replays. Action: the operator notes leave the prompt body; what stays points at
   `docs/concepts/l4.md` § Cost and `roadmap.md` § L4 closure. **Rides with:** rk-opt (the re-key
   window). **Re-test:** `git grep -n "l4-outer-loop" -- research/datasets/promptpotter-self/task.md`
   is empty.
-- **A checkpoint's inputs are untyped dicts**: `run_records.py::ResumeCheckpointRecord.inputs_ref` /
-  `data` are built by hand and read back by string key in each replayer, so a renamed key surfaces only
-  at resume as `replay_error:` (N1: `KeyError: 'crowned'`). Action: each checkpoint kind declares a typed
-  inputs model (`RoundWinnerInputs`), parsed at the ledger read, so a missing key is the one
-  unreadable-file refusal and an unknown kind refuses at load; the replayer's catch-all, its log and the
-  `replay_error:` state go; the test's record writes through the production writer. **Rides with:**
-  rk-opt 1. **Re-test:** `git grep -c -E 'inputs_ref\["' -- promptpotter`.
-- **Each resume decision is spelled twice**, live and by a per-member replayer over untyped dicts
-  (`potter/resume.py::_replay_round_winner`). Action: the live election and its replayer share one
-  input assembly. **Rides with:** rk-opt 1. **Re-test:** `git grep -n "def _replay_round_winner" -- promptpotter`.
-- **`RaceStandingRecord.paired_breakdown` is an untyped stat bag**: potter (`pobb/checks.py`) and capo
-  write different keys, and `views/readout.py::on_race_standing` reads `"p_better"` with two defaults.
-  Action: a typed per-prior model. **Rides with:** rk-opt 1. **Re-test:** `git grep -n '"p_better"' -- promptpotter`.
-- **PoBB re-decides a round a pause cut, and decides it differently**: a resumed capo-pobb banks two
-  eliminator decisions beside the first launch's, and its `p_best` moves on the same paired breakdown.
-  Action: an interrupted round's eliminator decisions retract on re-entry, and its reading is the one
-  the round opened on. **Rides with:** rk-opt 2. **Re-test:** drop `capo-pobb` from
-  `scripts/offline_run.py::BOUNDARY_RESUMED`; its `resumed/` leg reads UNMOVED.
-- **A re-entered round draws its order on the current ruler**: `optimizers/potter/members.py:212-217`
-  orders the panel by `build_round_order` on `view.ruler`, which `bench/difficulty.py::ruler_clock` reads
-  at its current version, so any fold between the opening and the re-entry moves its order, walk and θ.
-  Root: the ruler stamp is banked at the round's opening (beside `RoundProposedRecord`), and a re-entered
-  round seats it, as `DifficultyView.seat` does a banked round's. **Rides with:** rk-opt 2. **Re-test:**
-  pause a lock-in round after its opening, fold a row into the ruler, resume: `build_round_order` and
-  `rows(leader)` equal the live round's.
-- **The optimizer prompt spells slots its own way**: `[#N]` / `#N` (`potter/dispatch/injections/`), while
-  every surface prints `domain/sample.py::sample_tag`'s `#007`. Action: the prompt renders its slots
-  through `sample_tag`. **Rides with:** rk-opt 3. **Re-test:**
-  `git grep -nE "\[#\{|#\{" -- promptpotter/application/optimizers/potter` names no slot.
-- **A refused L4 arm's identity is the floor's**: `potter/dispatch/layout.py::layout_levers` folds a
-  breach into the floor, so `spawn.py::inner_cell_hop` reads the floor arm's campaign. Action: the
-  identity reads the refusal. **Rides with:** rk-opt 3. **Re-test:** a breaching and a floor arm get
-  different inner campaign ids.
 - **An optimizer node's template rides beside its config**: `llm_call.py::run_optimizer_node` takes a
   filled `template` and an `LLMCallContext` whose `config` named it (`critique.py::distil_critique`,
   `firing.py::_run_transition`, `task_context.py::run_checkin`, `generate.py:133`), so the two can
   disagree. Action: the call context carries the running template its fill reads. **Rides with:**
-  rk-opt 3. **Re-test:** `git grep -n "template=filled" -- promptpotter`.
+  the rest of rk-opt link 4. **Re-test:** `git grep -n "template=filled" -- promptpotter`.
 - **An edited template's unknown slot is refused at dispatch, not at selection, and names no address**:
   `dispatch/injections/registry.py` validates what `dispatch/prompts.py::load_optimizer_prompt` loads,
   and `optimizer_manifest.py::_select` cannot reach potter's `injection_table()`. Action: a member hook
-  names its known slots and selection calls it, refusing by config address. **Rides with:** rk-opt 3.
-  **Re-test:** an overlay holding `{{typo}}` is refused at `new`, naming
+  names its known slots and selection calls it, refusing by config address. **Rides with:** the rest
+  of rk-opt link 4. **Re-test:** an overlay holding `{{typo}}` is refused at `new`, naming
   `optimization.nodes.l1_generate.config.instruction`.
-- **Structured optimizer calls send the clamp's seed raw** (`bench/llm_call.py::_merged_config`) while
-  `Calls.ask` draws one per call. Action: one seed rule, read off `domain/campaign.py::run_clamp`.
-  **Rides with:** rk-opt 3.
 - **`tests/test_identity.py` reaches the spawn's private `_laid_arm`** (`_l4_arm`, `_l4_laid`, the depth
-  step). Action: the journey drives `_open_seat` over an offline inner campaign. **Rides with:** rk-opt 3.
-  **Re-test:** `grep -n "_laid_arm" tests/test_identity.py` is empty.
+  step). Action: the journey drives `_open_seat` over an offline inner campaign. **Rides with:**
+  the rest of rk-opt link 4. **Re-test:** `grep -n "_laid_arm" tests/test_identity.py` is empty.
 - **A served prompt-field set is labelled in the browser**: `webapp/lib/prompt-fields.ts::PROMPT_FIELD`.
   Action: the served prompt-field row carries its label, and the constant goes; the ink maps
   (`sample-trajectory.ts::MOVEMENT_CLASS`, `PipelineFlow`'s `tone`) wait until a served word row carries
-  its `Tone` (`domain/said.py`). **Rides with:** rk-opt 3. **Re-test:**
+  its `Tone` (`domain/said.py`). **Rides with:** the rest of rk-opt link 4. **Re-test:**
   `git grep -n "PROMPT_FIELD\|MOVEMENT_CLASS" -- webapp/lib`.
 - **Potter's calls bypass the bench's call door**: the peers ask through `node_context.py::Calls`;
   potter builds each call by hand (`dispatch/facade.py::build_bundle`, then
@@ -374,50 +332,51 @@ row it closes.
   (`evaluators.py::resolve_cell_formula`). Action: `Calls.ask(prompt, reply=Model)` with one fault
   policy; renderers read a potter-owned view in a hashed module; the rules three match functions that
   keep the name `escalation/rules.py::EscalationEvent` stamps; one formula spelling. **Rides with:**
-  rk-opt 4. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
+  the rest of rk-opt link 4. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
 - **Wave C, the optimizers in one re-key batch**: `potter/l1/` → `l1.py`, `validators/` 7 → 2, peer
   optimizers' `prompts` + `state` into `members.py`, `pobb/` and `escalation/` flattened, and
-  `runner/inner/tasks.InnerCells` moved into `domain/l4`. **Rides with:** rk-opt 4.
+  `runner/inner/tasks.InnerCells` moved into `domain/l4`. **Rides with:** the rest of rk-opt link 4.
 - **The catch-up pool**: `validators.py::CatchUps` and `nodes.py::NoCatchUps` declare one protocol with
   one implementation, and the round reading takes a lock-in's backfills at
   `runner/measurement.py::_catch_up`'s commit, a second door. Action: the bench owns the pool and the
-  race exposes only its priors. **Rides with:** rk-opt 4. **Re-test:** `git grep -c "NoCatchUps" -- promptpotter`.
+  race exposes only its priors. **Rides with:** the rest of rk-opt link 4. **Re-test:**
+  `git grep -c "NoCatchUps" -- promptpotter`.
 - **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**:
   `runner/measurement.py::_walk_population` merges a prior's caught-up cells after `run_walks`, and
   `BACKFILL` is no arm role. Action: a caught-up cell is a recorded row of its prior's arm. **Rides
-  with:** rk-opt 4. **Re-test:** in `test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails`'s
-  locked block, the leader's last `running` before the close counts the cells `rows(leader)` holds.
-- **Two functions named `election_rows`**: `domain/origin_panel.py:242` returns the `CellSheet` an
-  election reads; `optimizers/potter/dispatch/bundle.py:126` returns the ELECTIONS table's rows. Action:
-  the dispatch one becomes `election_table_rows` (prompt-shaping). **Rides with:** rk-opt 4.
-  **Re-test:** `git grep -n "def election_rows" -- promptpotter` names one.
+  with:** the rest of rk-opt link 4. **Re-test:** in
+  `test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails`'s locked block, the leader's
+  last `running` before the close counts the cells `rows(leader)` holds.
 - **Two word tables over one enum, three times** (`evidence/head_to_head.py::GUARD_STATE_INFO` beside its
   labels, `paired_reading.py::READING_STATE_KIND` beside its info, `origin_panel.py::ROUND_ADVANCE_STALL`
   beside its info), and `library.py::LibrarySnippet` flattens a cited-or-authored snippet into nullable
   fields. Action: one table each, its words outside the marked decision units; the snippet keeps its
-  union. **Rides with:** rk-opt 4.
-- **A re-read arm has two names**: `runner/measurement.py::ReferencePairs.of_round` names an individual by
-  the slot an earlier round walked it in. **Rides with:** rk-opt 4. **Re-test:** a held leader's round-3
-  pair names its round-3 slot.
-- **The READING node → reader node** in `resolved_schemas.json`'s layout prose: prompt text, so a
-  re-measure. **Rides with:** rk-opt 4.
+  union. **Rides with:** the rest of rk-opt link 4.
 - **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
-  carry their passes beside `VerificationPass`. Action: both ride the one record. **Rides with:** rk-opt 4.
-  **Re-test:** `git grep -n "\.overlap\b" -- promptpotter` is empty.
+  carry their passes beside `VerificationPass`. Action: both ride the one record. **Rides with:**
+  the rest of rk-opt link 4. **Re-test:** `git grep -n "\.overlap\b" -- promptpotter` is empty.
 - **Three bars for "is this θ lift real"**: `potter/escalation/state.py::_improved` reads
   `lift > current.se`, `potter/election.py::_lift` takes `hypot` of both arms', and
   `potter/dispatch/injections/panels.py::detectable_rows` takes `a.se * sqrt(2)`. Action: all three fold
   onto the predicate `scoring/selection.py::elect_round_winner` reads (one lift test on
   `AbilityReading`). It moves decisions and the optimizer prompt: an offline run and the re-key.
-  **Rides with:** rk-opt 4. **Re-test:** `git grep -n -E "lift > current.se|sqrt\(2" -- promptpotter/application/optimizers/potter`.
+  **Rides with:** the rest of rk-opt link 4. **Re-test:**
+  `git grep -n -E "lift > current.se|sqrt\(2" -- promptpotter/application/optimizers/potter`.
 - **The collapse gate cuts a hedging arm on noise**: `pobb/checks.py::check` →
   `domain/scoring.py::is_answer_collapsed` reads one repeated label over `n_min` answered cells as "no
   measurement". Action: collapse is judged against the parent's answers on the same cells, proven by an
-  offline run. **Rides with:** rk-opt 4.
-- **Which ruler `ab_replay` reads.** Decided (decision 21): after a formula edit, `ab` re-grades the
-  record's own cells under the current scorer and folds δ in memory at each round's link; with the
-  formula unchanged it equals today's fit. **Rides with:** rk-opt 5. **Re-test:**
+  offline run. **Rides with:** the rest of rk-opt link 4.
+- **`ab` re-fits under the current scorer on the whole ruler** (decision 21, rk-opt 5). The tenant
+  ruler at a round's reach holds other campaigns' rows, so `ab` regrades those foreign rows off the
+  archive too, not only the record's own cells, and with the formula unchanged its fit equals today's
+  (operator, 2026-11-11: option (b)). Only `ab`'s output moves. **Re-test:**
   `git grep -ln "ab_replay" -- tests` names a test that edits the formula and re-grades.
+- **`resolve_cells` runs twice per run init**: `runner/inner/connector.py::_inner_cells` (through
+  `_identity_config`, `:53`, `:98`) and `runner/inner/spawn_context.py::_outer_cells` (`:59`) each parse the
+  experiment and resolve the panel's cells. Action: the cells are resolved once, off the panel the
+  workload holds, and both read them. **Rides with:** the rest of rk-opt link 4, whose `InnerCells`
+  move into `domain/l4` names both files. **Re-test:** `git grep -n "resolve_cells(" -- promptpotter`
+  lists one call per init.
 
 ### batch/26 · stream-rk
 
@@ -454,8 +413,8 @@ row it closes.
   `run_records.py::PhaseRecord` carries a phase string, an untyped event string and a view whose kind
   repeats both; `InitEnterView` banks display text; `view_models.py::ViewContext` is a mutable bag a
   fork inherits, held on `run_callbacks.py:76` and read by `runner/open_cycle.py:317,389`,
-  `runner/round.py:245,272,414` and `run_observers.py:288`. The act's 24 `on_phase(` writers sit in 8
-  modules, some hashed (`runner/round.py`, `runner/bench.py`, `escalation/firing.py`). Action: the typed
+  `runner/round.py:245,272,414` and `run_observers.py:283`. The act's 24 `on_phase(` writers sit in 7
+  modules, some hashed (`runner/round.py`, `runner/bench.py`). Action: the typed
   act is the record, text is computed at render, and the anchors a phase view needs come from
   `Session.state` once `RunCallbacks` goes, so `ViewContext` goes; a re-key link. **Rides with:** narr 2.
   **Re-test:** `git grep -n "class ViewContext" -- promptpotter` is empty.
@@ -558,10 +517,6 @@ row it closes.
 - **The knob Reset writes the declared value, so the draft stays "edited"**: `OptimizerSetupSection.tsx`
   lays `NodeKnobsPanel`'s patch as `optimization.nodes` alone, where `EditDraftPatch.reset` is the
   delete. **Rides with:** rk-run 7. **Re-test:** `git grep -n "set(k.declared)" -- webapp`.
-- **An orphan `NodeCall` component sits in the openapi contract**: pydantic hoists it out of
-  `PipelineParams`' custom schema, and the `p_served` baseline was raised for it. Action: the carrier's
-  JSON schema names no `NodeCall`. **Rides with:** rk-run 7. **Re-test:**
-  `git grep -c '"NodeCall"' -- docs/specs/openapi.generated.json` is 0.
 - **The domain carrier raises a door's error**: `pipeline_params.py::PipelineParams.with_nodes` raises
   `PayloadInvalidError` (a 422) from internal calls. Action: the carrier raises its validation error and
   each door words it. **Rides with:** rk-run 7. **Re-test:**
@@ -643,7 +598,7 @@ row it closes.
 ### batch/26 · payer (on rk-run's tip: the assembled one, beside rk-dec)
 
 - **Every connector declares its cells the box's to pay**, the inner (L4) one included
-  (`runner/inner/connector.py:149`, `cell_payer="host"`), though each inner send is keyed per call
+  (`runner/inner/connector.py:138`, `cell_payer="host"`), though each inner send is keyed per call
   (`bench/llm_call.py` → `coupon.py::keyed_client` → `paying_key`, the account's own key first). So
   `quota.py::sends_on` prices `BackendCells(…, "host")`, which draws the coupon, and an own-key account
   past its coupon is refused `host_allowance_exhausted` on `promptpotter-self`. Root: a connector whose
@@ -651,7 +606,8 @@ row it closes.
   (`connectors/protocol.py::Connector.cell_payer: KeySource | None`), and `sends_on` lists the
   providers its sends draw. **Rides with:** payer 1 (who pays a connector's send), with harbor's raise
   below. Its Owns are every holder of the widened type: `connectors/protocol.py::Connector.cell_payer`
-  (xconn's file after), `runner/inner/connector.py:149`, `runner/open_cycle.py:129`,
+  (xconn's file after), `runner/inner/connector.py:138`, `runner/open_cycle.py:129`,
+  `application/free_tier.py:75` (`free_fence`'s `task=` read),
   `infrastructure/backend.py`'s `cell_payer` reads (`:312,422,426`), the `paid_by=CONNECTOR.cell_payer`
   lines of `connectors/{harbor,dspy_module}.py`, `scoring/query_loop.py:627` (`self.payer`), the
   `paid_by: KeySource` consumers `llm/base.py:130` and `llm/registry.py:126,145`, and
@@ -670,15 +626,15 @@ row it closes.
   / fork / diag off the cycle id, read in `runner/output.py`, `hierarchy.py` and `views/view_models.py`.
   Action: every reader takes the kind the mint recorded; `sibling_kind` goes. **Rides with:** addr 1.
   **Re-test:** `git grep -n "sibling_kind" -- promptpotter` is empty.
-- **`ids.ts::rootCycleId` regexes `_fork_` / `_diag_`** to give `useCampaignForest.ts::parentId` /
+- **`ids.ts::rootCycleId` regexes `_fork_`** to give `useCampaignForest.ts::parentId` /
   `isInheritedSibling` what the served tree carries. Action: read parent and spawn off the tree. **Rides
   with:** addr 1. **Re-test:** `git grep -n "rootCycleId(" -- webapp/lib webapp/components`.
 - **A workspace and a hop are re-derived from a path by parent counting**: `campaign_store/store.py`
   (the cycle's hop beside `cycle_dir.parent.parent`) and `store/account_trail.py`. Action: read the
   address from `Subject` / `CycleHop`. **Rides with:** addr 2. **Re-test:**
   `git grep -nE "\.parents\[[0-9]\]|\.parent\.parent" -- promptpotter` names none beside the data-layout
-  sites (`account_trail.py:110`, `campaign_store/store.py:830`, `read_model.py:162`, `layout.py:240`,
-  `archive_maintenance.py:57`).
+  sites (`account_trail.py:110`, `campaign_store/store.py:378,797`, `read_model.py:159`, `layout.py:236`,
+  `archive_maintenance.py:57`) and the landing's two (`maintenance/landing.py:255,379`).
 - **Lineage spines key on `facts.individual` and on the origin**: the compare pane's spine builder
   resolves a subject by individual id across the whole tree (`hierarchy_subtree.py::_answering` picks
   one row per id) and merges a campaign's subjects into one spine, so a diverging branch drops out;
@@ -1165,7 +1121,9 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   `git grep -n "class ForkProposal" -A20 -- promptpotter`.
 - **The fastest hosts refuse the `l1_generate` schema**: Cerebras wants `properties` on every object, Groq
   strict mode wants every property `required` (`dispatch/l1_wire_schema.py::build_l1_response_schema`).
-  Action: the wire goes all-required only together with `strict: True`. **Rides with:** tune 2.
+  Action: the wire goes all-required only together with `strict: True`; the flag is
+  `infrastructure/llm/openai_compat.py:418` (`"strict": False`). **Rides with:** tune 2, whose Owns gain
+  `openai_compat.py`'s flag (rk-opt's Owns held `l1_wire_schema.py` alone, and the proof is a paid call).
   **Re-test:** one `l1_generate` call pinned to Cerebras parses.
 - **The default host pin is a trial with no verdict**: `domain/pipeline_overlay.py::pin_default_routes`
   writes each model's default host into every node config. Decided: a model keeps its pin only where its
@@ -1229,6 +1187,11 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 - **`tests/test_archive.py::test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launch_reads_the_pass`
   walks zero cells**, so the halt passes on an empty origin. Action: hand it the origin's cells through
   the `offline` fixture. **Rides with:** tests-w. **Re-test:** the test's dataset is non-empty.
+- **The offline run imports MAIN's package from a worktree**: `PYTHONPATH=.` falls through to MAIN's
+  `promptpotter`, so an equals-main leg run in a worktree measures the wrong tree unless the path is
+  absolute. Action: `scripts/offline_run.py` puts its own repo root first on `sys.path`. **Rides with:**
+  tests-w, whose Owns gain `scripts/offline_run.py`'s path setup. **Re-test:** from a worktree,
+  `PYTHONPATH=. <venv python> scripts/offline_run.py --help` imports the worktree's `promptpotter.__file__`.
 
 ### batch/32 · ts-arch
 
@@ -1281,6 +1244,14 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **The gate's `py` lane and "needs the pinned venv" are one flag**: `scripts/gate.py::_reexec_pinned`
   keys on `kind == "py"`. Action: one fact for the venv need, apart from the lane. **Rides with:** rel 2.
   **Re-test:** `python scripts/gate.py --py` lists `walk-world`.
+- **The git hooks call bare `python`**: `.githooks/pre-commit`, `commit-msg` and `pre-push` each
+  `exec python scripts/gate.py …`, and the repo refuses bare `python` at import. Action: the hooks call the
+  pinned venv's interpreter, the one `gate.py::_reexec_pinned` names. **Rides with:** rel 2, which holds
+  `scripts/gate.py`; its Owns gain `.githooks/`. **Re-test:** `git grep -n "exec python" -- .githooks` is empty.
+- **`paper/bbeh-comparison/bbeh_potter_runner.py` closes a client the run already closed**:
+  `run_bbeh_campaign` calls `session.backend_client.aclose()` (`:229`) after `run_campaign`, which closes
+  its own. Action: the line and its `suppress` go. **Rides with:** rel 1, which holds this script.
+  **Re-test:** `git grep -n "aclose" -- paper/bbeh-comparison/bbeh_potter_runner.py` is empty.
 - **The pinned venv is keyed on the raw `uv.lock`**: `scripts/gate.py::_install_digest` hashes the lock's
   bytes, so a worktree whose lock moved only outside the pinned extras (batch/22's mlflow exit) is
   refused a venv that `uv export --frozen` proves identical. Action: hash the resolved pinned set.

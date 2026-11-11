@@ -5,12 +5,13 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar
+from typing import TYPE_CHECKING, Annotated, ClassVar
 
 import numpy as np
 from pydantic import Field, model_validator
 
 from promptpotter.application.bench.node_context import Calls, Children, Lineage, Replay, Target
+from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import (
     DescriptorFeature,
@@ -31,7 +32,6 @@ from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import greedy_column_subset, logistic
 
@@ -39,10 +39,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.bench.resume_and_fork.replayers import (
-        ReplayContext,
-        Replayer,
-    )
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         CycleRead,
@@ -59,10 +55,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
-
-
-class LeviCheckpointKind(CheckpointKind):
-    PROXY_SELECTED = "proxy_selected"
 
 
 _LLOYD_ITERATIONS = 100
@@ -117,6 +109,19 @@ def choose_proxy(
         redundancy_weight=knobs.redundancy_weight,
     )
     return [cells[j] for j in sorted(picked)]
+
+
+class ProxySelected(Replayed, ProxyCssKnobs, kind="proxy_selected"):
+    """The knobs the proxy was chosen under ride flat beside the calibration they read."""
+
+    calibration_ids: list[ArmKey]
+    order: list[str]
+
+    def choose(self, rows_by_arm: Mapping[ArmKey, CellSheet]) -> list[str]:
+        return choose_proxy(self, rows_by_arm, self.order)
+
+    def replay(self, ctx: ReplayContext) -> list[str]:
+        return self.choose({cid: ctx.round_data.sheet_of(cid) for cid in self.calibration_ids})
 
 
 class ProxyCss(nodes.Sampler):
@@ -227,20 +232,14 @@ def _calibrate(
     order: list[str],
 ) -> LeviCalibration:
     """Alg. 1 lines 8-14."""
-    proxy_knobs = ctx.knobs(ProxyCssKnobs)
     knobs = ctx.knobs(MapElitesKnobs)
     rows_by_arm = {key: rows for key, _, rows in offered}
-    proxy = choose_proxy(proxy_knobs, rows_by_arm, order)
-    ctx.read(Replay).decide(
-        LeviCheckpointKind.PROXY_SELECTED,
-        {
-            "calibration_ids": list(rows_by_arm),
-            "order": order,
-            "round_num": ctx.round_num,
-            **proxy_knobs.model_dump(),
-        },
-        proxy,
+    inputs = ProxySelected(
+        calibration_ids=list(rows_by_arm),
+        order=order,
+        **ctx.knobs(ProxyCssKnobs).model_dump(),
     )
+    proxy = ctx.read(Replay).decide(inputs, inputs.choose(rows_by_arm))
     placed = [
         d
         for _, _, rows in offered
@@ -263,16 +262,6 @@ def _calibrate(
     return LeviCalibration(proxy=proxy, centroids=centres.tolist(), stats=stats)
 
 
-def _replay_proxy_selected(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
-) -> list[str]:
-    return choose_proxy(
-        ProxyCssKnobs.model_validate({k: inputs_ref[k] for k in ProxyCssKnobs.model_fields}),
-        {cid: ctx.round_data.sheet_of(cid) for cid in inputs_ref["calibration_ids"]},
-        list(inputs_ref["order"]),
-    )
-
-
 class MapElites(nodes.Selector):
     name: ClassVar[str] = "map_elites"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
@@ -283,9 +272,6 @@ class MapElites(nodes.Selector):
     consults: ClassVar[frozenset[type]] = frozenset({ProxyCss})
     elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
-    replayers: ClassVar[Mapping[str, Replayer]] = {
-        LeviCheckpointKind.PROXY_SELECTED: _replay_proxy_selected
-    }
 
     def round_facts(
         self, _selected: SelectedOptimizer, round_result: RoundResult

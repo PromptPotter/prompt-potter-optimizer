@@ -45,7 +45,11 @@ from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool, PoolEntry
 from promptpotter.domain.results import round_document_digest
-from promptpotter.domain.run_records import RoundProposedRecord, WalkRead
+from promptpotter.domain.run_records import (
+    CheckpointInputs,
+    RoundProposedRecord,
+    WalkRead,
+)
 from promptpotter.domain.run_standing import walked_slot
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
@@ -108,6 +112,7 @@ def bank_proposals(round_: RoundContext, proposals: Sequence[Proposal], *, submi
                 )
                 for walk in round_.walks.values()
             ],
+            opened_on=round_.cycle.difficulty.stamp.reach,
             submitted=submitted,
         )
     )
@@ -475,23 +480,22 @@ class Calls(CycleRead):
     def call_context(
         self, injections: InjectionBreakdown | None = None, *, idx: int | None = None
     ) -> LLMCallContext:
-        session = self._cycle.session
+        session, node, round_num = self._cycle.session, self._member.name, self._round.round_num
         return LLMCallContext(
-            node=self._member.name,
-            config=self._cycle.optimizer.node_config(self._member.name),
+            node=node,
+            config=self._cycle.optimizer.node_config(node),
             ledger=self._round.callbacks.ledger,
-            round_num=self._round.round_num,
+            round_num=round_num,
             candidate_idx=idx,
             cache=session.store.optimizer_reuse,
+            # A resume replays its reply, a repeat anywhere else samples.
+            seed=self._cycle.rng(round_num, f"{node}:{idx}:request").getrandbits(31),
             injections=injections or InjectionBreakdown(),
         )
 
     async def ask(self, prompt: str, idx: int | None = None) -> str:
-        node = self._member.name
-        # The seed keys the reuse cache: a resume replays its reply, a repeat anywhere else samples.
-        seed = self._cycle.rng(self._round.round_num, f"{node}:{idx}:request").getrandbits(31)
         response = await llm_call(
-            [{"role": "user", "content": prompt}], context=self.call_context(idx=idx), seed=seed
+            [{"role": "user", "content": prompt}], context=self.call_context(idx=idx)
         )
         return response.content
 
@@ -632,17 +636,13 @@ class Replay(CycleRead):
     def rng(self, tag: str = "") -> random.Random:
         return self._cycle.rng(self._round.round_num, f"{self._member.name}{tag}")
 
-    def decide(
-        self, kind: str, inputs: dict[str, Any], outcome: Any, *, data: dict[str, Any] | None = None
-    ) -> Any:
-        """A resume re-derives it only where a member registers a replayer for *kind*; else it is archived."""
+    def decide(self, inputs: CheckpointInputs, outcome: Any) -> Any:
+        """A resume re-derives it only where *inputs* is ``Replayed``; else it is archived."""
         return record_decision(
             self._cycle.pending_decisions,
-            kind,
             inputs,
             outcome,
             node=self._member.name,
-            data=data,
             round=self._round.round_num,
         )
 

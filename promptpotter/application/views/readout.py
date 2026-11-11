@@ -54,7 +54,7 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, PriorStanding
 from promptpotter.domain.phase_views import (
     InitExitView,
     RoundCompleteView,
@@ -452,16 +452,14 @@ class ReadoutProjection(Projection):
         current_id: str,
         n_samples: int,
         p_best: float,
-        paired_breakdown: dict[ArmKey, dict[str, float]],
+        paired_breakdown: dict[ArmKey, PriorStanding],
     ) -> None:
         if not self._block_racing and current_id and current_id != self._standing_printed_for:
             self._standing_printed_for = current_id
             current_p = p_best
             if paired_breakdown:
-                hardest_id, hardest = min(
-                    paired_breakdown.items(), key=lambda kv: kv[1].get("p_better", 1.0)
-                )
-                hardest_tag, hardest_p = hardest_id[:6], hardest.get("p_better", 0.0)
+                hardest_id, hardest = min(paired_breakdown.items(), key=lambda kv: kv[1].p_better)
+                hardest_tag, hardest_p = hardest_id[:6], hardest.p_better
             else:
                 hardest_tag, hardest_p = "*self*", current_p
             n_priors = len(paired_breakdown)

@@ -10,7 +10,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     InjectionBundle,
     InjectionKind,
     Item,
-    election_rows,
+    election_table_rows,
     signal,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
@@ -26,6 +26,7 @@ from promptpotter.domain.arms import Measured, arm_name
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
+from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.value_tree import visibility_of
 
@@ -231,7 +232,7 @@ def format_l1_critique_for_prompt(
         for c in fh[:3]:
             ids = c["sample_ids"]
             # The panels' own mark, so a row this panel names is a row the generator may target.
-            shown = " ".join(f"[#{i}]" for i in ids[:CLUSTER_IDS_SHOWN])
+            shown = " ".join(f"[{sample_tag(i)}]" for i in ids[:CLUSTER_IDS_SHOWN])
             more = f" +{len(ids) - CLUSTER_IDS_SHOWN}" if len(ids) > CLUSTER_IDS_SHOWN else ""
             parts.append(f"  {c['mechanism']} ({len(ids)} rows: {shown}{more}) — {c['claim']}")
     if not parts:
@@ -304,7 +305,8 @@ def _r_rebase_capability(b: InjectionBundle) -> list[Item]:
     if not b.reelect_offer:
         return [Item(directive)]
     # The one carrier of the labels `fork_proposal.stand_on` names, so it renders only beside the field.
-    lines = [_election_line(row, b.measured_rounds) for row in election_rows(b.measured_rounds)]
+    rounds = b.measured_rounds
+    lines = [_election_line(row, rounds) for row in election_table_rows(rounds)]
     return [Item(directive + _STAND_ON_TEXT), Item("\n".join([_ELECTIONS_HEADER, *lines]))]
 
 

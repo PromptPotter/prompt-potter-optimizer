@@ -217,7 +217,7 @@ Surface whose work is invisible to a sweep that counts readers. A PR touching on
 - **The roster's `source_digest`** — what an optimizer node is handed is L4 measurement identity
   ([`optimizers/potter/CLAUDE.md`](../promptpotter/application/optimizers/potter/CLAUDE.md)).
 - **The core/extra split** — moving a package into core charges every embedder.
-- **Resume and fork-on-divergence** (`ResumeCheckpointRecord`, `CheckpointKind`).
+- **Resume and fork-on-divergence** (`ResumeCheckpointRecord`, `CheckpointInputs`).
 - **No campaign fact on a side file** — a campaign's result is a fold of its line's ledgers. <!-- probe: git grep -cE "result\.json" -- promptpotter/infrastructure/store/layout.py == 0 -->
 - **The hard-sample sorter** and the round order it feeds
   ([`methods/verdict-resolution.md`](methods/verdict-resolution.md) § The round order).

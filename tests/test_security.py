@@ -79,8 +79,8 @@ from promptpotter.application.jobs import quota
 from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.launcher import launch as launcher_launch
 from promptpotter.application.jobs.launcher.admission import (
-    CampaignRefusedError,
     PassStoppedError,
+    RunStart,
     destroying,
     paid_pass,
     refuse_taken_cycle,
@@ -115,7 +115,7 @@ from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import PROJECTS_DIR, block_packs_root, default_projects_root
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
-from promptpotter.domain.campaign import CampaignRefusal, Optimize
+from promptpotter.domain.campaign import CampaignRefusal, CampaignRefusedError, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_events import (
@@ -1536,6 +1536,24 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         # The asker's one token still admits a pass: no refused ask spent it.
         (spare,) = request_jobs(stores=asker, job_registry=refusing, holder=ScoringPass("bench"))
         refusing.release(spare.job_id)
+    # Asked past a spawn's handoff, the refusal ends the admitted job refused, never crashed.
+    past = JobRegistry(tmp_path.with_name(f"{tmp_path.name}-jobs"), capacity=lambda _live: 1)
+    handed = past.create(
+        user_id="u",
+        principal_id="u",
+        workspace=WorkspaceDir(tmp_path),
+        hop=hop,
+        holder=CampaignLaunch("ds1"),
+    )
+    past.mark_admitted(handed.job_id, Budget())
+    RunStart(built_stores, past, handed).release(
+        CampaignRefusedError(CampaignRefusal.NOT_ACTIVE, "archived past its handoff")
+    )
+    handed_back = past.get(handed.job_id)
+    assert handed_back is not None and (handed_back.lapse, handed_back.ending) == (
+        "refused",
+        None,
+    ), f"an admitted job's campaign refusal read as {handed_back}"
     campaigns.unarchive_campaign(hop.campaign_id, changed_at="2026-01-01T00:00:01Z")
 
     # A launch holds its cycle from the moment it is accepted; a full box queues it.

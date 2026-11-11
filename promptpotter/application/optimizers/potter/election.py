@@ -4,23 +4,25 @@ import math
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.node_context import Lineage, Replay, Ruler
+from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizers.nodes import Selection
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs
-from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.application.scoring.selection import (
     closest_to_bar,
     elect_round_winner,
     readable_lifts,
 )
+from promptpotter.domain.origin_panel import election_rows
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.ruler import DeltaRuler
+from promptpotter.domain.scoring import NO_CELLS, CellSheet
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.application.optimizers.nodes import MeasuredRound
-    from promptpotter.domain.paired_reading import ArmKey
-    from promptpotter.domain.scoring import CellSheet
 
 
 def _theta(value: float | None) -> str:
@@ -84,20 +86,48 @@ def _kept_for_a_fresh_read(
     return reads[leading] > 0.0 and not any(leading in rr.arms for rr in lineage.rounds)
 
 
+class RoundWinner(Replayed, kind="round_winner"):
+    arms: list[ArmKey]
+    coverage_floor: int
+    admission: float
+    # Names which of the round's banked references the bar was; its rows are the close's.
+    parent: ArmKey
+    crowned: list[str]
+
+    def elect(
+        self, pooled: Callable[[ArmKey], CellSheet], ruler: DeltaRuler | None
+    ) -> tuple[ArmKey | None, RoundAbilities]:
+        return elect_round_winner(
+            self.arms,
+            {key: pooled(key) for key in self.arms},
+            pooled(self.parent),
+            self.coverage_floor,
+            ruler,
+            admission=self.admission,
+        )
+
+    def replay(self, ctx: ReplayContext) -> ArmKey | None:
+        """The parent is the reference the round BANKED, never a panel rebuilt here: that one re-elects differently."""
+        rnd, crowned = ctx.round_data, frozenset(self.crowned)
+
+        def pooled(key: ArmKey) -> CellSheet:
+            return election_rows(rnd.rows(key), rnd.overlap_results.get(key, NO_CELLS), crowned)
+
+        return self.elect(pooled, ctx.ruler)[0]
+
+
 def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
     ruler = ctx.read(Ruler).difficulty.ruler
     lineage = ctx.read(Lineage)
     electable = measured.electable
-    rows: dict[ArmKey, CellSheet] = {key: measured.pooled(key) for key in electable}
-    admission = ctx.knobs(ElectionKnobs).admission
-    selected, abilities = elect_round_winner(
-        electable,
-        rows,
-        measured.pooled(measured.parent.key),
-        measured.coverage_floor,
-        ruler,
-        admission=admission,
+    inputs = RoundWinner(
+        arms=electable,
+        coverage_floor=measured.coverage_floor,
+        admission=ctx.knobs(ElectionKnobs).admission,
+        parent=measured.parent.key,
+        crowned=sorted(measured.crowned),
     )
+    selected, abilities = inputs.elect(measured.pooled, ruler)
     reads = readable_lifts(electable, measured.coverage_floor, abilities)
     leading = selected or closest_to_bar(reads)
     if selected is not None:
@@ -106,19 +136,7 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
         ranked = [lineage.parent, measured.arms[leading].individual]
     else:
         ranked = [lineage.parent]
-    ctx.read(Replay).decide(
-        PotterCheckpointKind.ROUND_WINNER,
-        {
-            "arms": electable,
-            "round_num": ctx.round_num,
-            "coverage_floor": measured.coverage_floor,
-            "admission": admission,
-            # Names which of the round's banked references the bar was; its rows are the close's.
-            "parent": measured.parent.key,
-            "crowned": sorted(measured.crowned),
-        },
-        selected,
-    )
+    ctx.read(Replay).decide(inputs, selected)
     return Selection(
         selected=selected,
         leading=leading,

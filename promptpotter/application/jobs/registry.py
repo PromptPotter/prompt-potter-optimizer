@@ -26,6 +26,7 @@ from promptpotter.application.jobs.interlock import (
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.config.paths import ENDED_JOBS_DIR
 from promptpotter.config.settings import CODE_REVISION, settings
+from promptpotter.domain.campaign import CampaignRefusedError
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.job import (
     JOB_ADAPTER,
@@ -269,9 +270,8 @@ class JobRegistry:
         """Stamps what ended the job, the one reading of it, which the cycle's declared stop takes
         (`admission.py::RunStart.release`): the `StopReason` its run returned (*stepped* where it
         paused at its round allowance); any raise in the queue withdrew it, one before its admission
-        refused it, and an interrupt
-        or a raise after it is the stop it reads as (`run_stop_reason`); nothing at all is a
-        scoring pass that returned."""
+        or a campaign's refusal at any point refused it, and an interrupt or a raise after it is the
+        stop it reads as (`run_stop_reason`); nothing at all is a scoring pass that returned."""
         with self.admission_gate():
             job = self.get(job_id)
             if job is None:
@@ -281,7 +281,9 @@ class JobRegistry:
                     stamped = self._end(job_id, ending=ended, stepped=stepped)
                 case BaseException() if job.queued:
                     stamped = self._end(job_id, lapse="withdrawn")
-                case BaseException() if not job.admitted and not launch_interrupted(ended):
+                case BaseException() if isinstance(ended, CampaignRefusedError) or (
+                    not job.admitted and not launch_interrupted(ended)
+                ):
                     refused = ended if isinstance(ended, PotterError) else PotterError(str(ended))
                     stamped = self._end(job_id, lapse="refused", refusal=Refusal.of(refused))
                 case BaseException():

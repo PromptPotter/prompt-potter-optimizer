@@ -14,7 +14,6 @@ from promptpotter.application import (
     health,  # noqa: F401 -- a reader no run imports joins the roster
     optimizers,
 )
-from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.datasets.loaders import (
     build_panel,
     resolve_bank,
@@ -38,6 +37,7 @@ from promptpotter.config.paths import default_projects_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
 from promptpotter.domain.campaign_config import OptimizerChoice
+from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.prompt_block import Presumption
@@ -216,13 +216,13 @@ def complete_registries(*, every_treatment: bool = True) -> None:
     optimizers.MANIFESTS.complete()
     for member in optimizers.NODE_MEMBERS.table.values():
         member.complete()
+    StatePart.complete()
     if every_treatment:
         for name in optimizers.MANIFESTS.table:
             read_treatment(name)
         # The check-in as every check-in and mint reads it, an install shadow included.
         checkin_manifest()
         LedgerIndex.check_every_arm_read()
-    replayers()
     for connector in connectors.CONNECTORS.table.values():
         if connector.completion_check is not None:
             connector.completion_check()

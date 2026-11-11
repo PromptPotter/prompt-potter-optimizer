@@ -19,7 +19,7 @@ from promptpotter.domain.said import Said
 from promptpotter.domain.spend import LifetimeSpend, MeteredSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
-type CourseKind = Literal["root", "fork", "diag", "inner"]
+type CourseKind = Literal["root", "fork", "inner"]
 type TagKind = Literal[
     "dataset",
     "optimizer",

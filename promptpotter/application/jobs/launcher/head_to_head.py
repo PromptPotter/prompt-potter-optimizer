@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
@@ -26,13 +27,10 @@ from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import draft_served
-from promptpotter.domain.campaign import ArmName
 from promptpotter.domain.campaign_config import CampaignConfig, effective_config
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import LaunchedJob
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import runnable_definition
 
 if TYPE_CHECKING:
@@ -46,26 +44,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ArmStarted(StrictModel):
-    arm_key: ArmName
-    job_id: str
-    hop: CycleHop
-
-
-class HeadToHeadStarted(StrictModel):
-    """What a head-to-head's act answers, and its retry under the same key: each arm's job and
-    the root cycle it minted. Arms never queue, so every hop is resolved."""
-
-    head_to_head_id: ArmName
-    arms: list[ArmStarted]
-
-
 @dataclass(frozen=True, slots=True)
 class HeadToHeadLaunched(LaunchOutcome):
-    """``launches`` is what its ack records, arm by arm; ``exits`` end as each arm's process does,
-    and a replay watches none, since another act owns them."""
+    """``launches`` is what its ack records, arm by arm in the request's order, each on the root
+    cycle it minted; ``exits`` end as each arm's process does, and a replay watches none, since
+    another act owns them."""
 
-    started: HeadToHeadStarted
     launches: list[LaunchedJob]
     exits: list[asyncio.Task[None]]
 
@@ -144,6 +128,20 @@ class HeldArm:
     held: HeldRun
 
 
+async def run_each[T](arms: list[HeldArm], act: Callable[[HeldArm], Awaitable[T]]) -> list[T]:
+    """*act* on each minted arm in order; a raise releases every arm after it, whose share no other
+    process would ever hand back."""
+    done: list[T] = []
+    for i, arm in enumerate(arms):
+        try:
+            done.append(await act(arm))
+        except BaseException as exc:
+            for rest in arms[i + 1 :]:
+                rest.held.start.release(exc, stamps=rest.held.session.hop)
+            raise
+    return done
+
+
 @dataclass(frozen=True, slots=True)
 class AdmittedHeadToHead(LaunchOutcome):
     """Every arm planned and admitted; nothing of any arm's cycle is written yet."""
@@ -198,17 +196,9 @@ class AdmittedHeadToHead(LaunchOutcome):
         ]
 
     async def launched(self) -> HeadToHeadLaunched:
-        """Each arm in its own process, as every server launch; one that fails to start takes the
-        arms after it back, since nothing else would ever release their slots."""
+        """Each arm in its own process, as every server launch."""
         arms = await self.minted()
-        exits: list[asyncio.Task[None]] = []
-        for i, arm in enumerate(arms):
-            try:
-                exits.append(await arm.held.detach(mode=RunMode()))
-            except BaseException as exc:
-                for rest in arms[i + 1 :]:
-                    rest.held.start.release(exc, stamps=rest.held.session.hop)
-                raise
+        exits = await run_each(arms, lambda arm: arm.held.detach(mode=RunMode()))
         launches = [
             LaunchedJob.of(job, arm.held.session.hop)
             for (job, _), arm in zip(self.admitted, arms, strict=True)
@@ -257,16 +247,8 @@ def head_to_head_answer(
     exits: list[asyncio.Task[None]] | None = None,
 ) -> HeadToHeadLaunched:
     """What the act answers from what its ack records, arm by arm in the request's order: first
-    as it launched, and again for a retry under its key, which watches no exit."""
-    started = [
-        ArmStarted(arm_key=arm.arm_key, job_id=launch.job_id, hop=launch.hop)
-        for arm, launch in zip(request.arms, launches, strict=True)
-        if launch.hop is not None
-    ]
-    if len(started) != len(request.arms):
+    as it launched, and again for a retry under its key, which watches no exit. Arms never queue,
+    so every arm names its cycle."""
+    if len(launches) != len(request.arms) or any(launch.hop is None for launch in launches):
         raise ValueError(f"head-to-head {request.head_to_head_id}: an arm launched no cycle")
-    return HeadToHeadLaunched(
-        HeadToHeadStarted(head_to_head_id=request.head_to_head_id, arms=started),
-        launches,
-        exits or [],
-    )
+    return HeadToHeadLaunched(launches, exits or [])

@@ -31,7 +31,7 @@ export function CleanupConfirmModal({
       }
     >
       <p className="family-tree-modal-body">
-        Removes every fork / diag dir in this campaign that has{" "}
+        Removes every fork dir in this campaign that has{" "}
         <code>n_rounds = 0</code> and no descendants. Units that ran real work,
         the active unit, session roots, and units with children are skipped.
       </p>

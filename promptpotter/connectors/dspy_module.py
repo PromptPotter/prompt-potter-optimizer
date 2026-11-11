@@ -348,7 +348,7 @@ async def _in_process_run(
     if not isinstance(program, DspyProgram) or sample.id >= len(program.examples):
         raise CellUnscoreableError(
             f"dspy connector: sample {sample.id} is no row of the trainset this run opened with "
-            "— PromptPotterOpt.acompile hands the student and its rows to open_session(program=...).",
+            "— PromptPotterOpt.acompile hands the student and its rows to run_campaign(…, program=…).",
             spent={},
         )
     example = program.examples[sample.id]

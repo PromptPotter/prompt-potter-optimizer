@@ -647,7 +647,7 @@ export interface HierarchyCourse {
  * envelope. */
 export interface CourseFacts {
   /** How the course was minted; the `mint` tag renders it. */
-  mint: 'root' | 'fork' | 'diag' | 'inner';
+  mint: 'root' | 'fork' | 'inner';
   /** Null on a root, and on a cycle cut from another tree. */
   spawn: CourseSpawn | null;
   /** The outer panel cell an L4 inner course measures. */
@@ -673,7 +673,7 @@ export interface CourseSpawn {
   parent: string;
   /** The first round it ran itself: every round below it is its parent line's. */
   cut_round: number;
-  trigger: 'operator_diag' | 'operator_rewind' | 'operator_steered' | 'optimizer_rebase' | 'scoring_divergence';
+  trigger: 'operator_rewind' | 'operator_steered' | 'optimizer_rebase' | 'scoring_divergence';
   /** Which side of the cut the run continues on, measured or implied by `trigger`. */
   direction: 'offshoot' | 'supersede' | 'equivalent';
   /** Who cut it, as its fork record names them. */
@@ -1213,7 +1213,7 @@ export interface SubtreeCourse {
  * request's lens. */
 export interface SubtreeCourseFacts {
   /** How the course was minted; the `mint` tag renders it. */
-  mint: 'root' | 'fork' | 'diag' | 'inner';
+  mint: 'root' | 'fork' | 'inner';
   /** Null on a root, and on a cycle cut from another tree. */
   spawn: CourseSpawn | null;
   /** The outer panel cell an L4 inner course measures. */
@@ -2676,13 +2676,14 @@ export interface DeterminismClamp {
    * source. `None` (default) leaves each node the value its pipeline file
    * declares. */
   temperature: number | null;
-  /** Sampling seed every optimizer node sends, or draws its per-call seed from
-   * where it asks several things in one step, so concurrent asks stay
-   * distinct draws. Temperature 0 pins the distribution and not the draw, so
+  /** The seed each optimizer call's own sampling seed is drawn off, so concurrent
+   * asks stay distinct draws; every call whose provider sends a seed sends
+   * its draw. Temperature 0 pins the distribution and not the draw, so
    * without a seed the provider is still free to sample differently on
    * identical input. It rides `hash_call`, so two campaigns differing only
    * here bank separate replies rather than serving one campaign's answer
-   * under the other's name. `None` (default) sends none. */
+   * under the other's name. `None` (default) draws each call's seed off the
+   * campaign id. */
   seed: number | null;
   /** The upstream HOSTS behind the gateway, in order, every optimizer call is
    * routed to (the gateway's own `provider_name`s — read them off `served_by`

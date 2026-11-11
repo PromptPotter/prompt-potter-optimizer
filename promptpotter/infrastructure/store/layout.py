@@ -21,8 +21,7 @@ from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
 
-_SIBLING_SEP_RE = re.compile(r"_(fork|diag)_")
-_SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag)_(?!.*_(fork|diag)_)")
+_SIBLING_SEP_RE = re.compile(r"_fork_")
 
 
 def dataset_id_prefix(name: str) -> str:
@@ -36,11 +35,8 @@ def root_cycle_id(cycle_id: str) -> str:
     return cycle_id[: m.start()] if m else cycle_id
 
 
-def sibling_kind(cycle_id: str) -> Literal["root", "fork", "diag"]:
-    m = _SIBLING_LAST_SEP_RE.search(cycle_id)
-    if m is None:
-        return "root"
-    return m.group(1)  # type: ignore[return-value]
+def sibling_kind(cycle_id: str) -> Literal["root", "fork"]:
+    return "root" if _SIBLING_SEP_RE.search(cycle_id) is None else "fork"
 
 
 def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:

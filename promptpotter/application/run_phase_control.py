@@ -10,13 +10,21 @@ from promptpotter.domain.phases import (
     PauseCause,
     StopReason,
 )
+from promptpotter.infrastructure.producer_lock import (
+    cycle_held_here,
+    hold_cycle,
+    hold_pass,
+    release_cycle,
+    release_pass,
+)
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, requested_lookahead
 
 if TYPE_CHECKING:
     from promptpotter.domain.command_kinds import SubmitArmsPayload
-    from promptpotter.domain.cycle_paths import Subject
+    from promptpotter.domain.cycle_paths import CycleHop, Subject
     from promptpotter.infrastructure.llm.spend_book import SpendBook
     from promptpotter.infrastructure.store.command_log import PauseAsk
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 @dataclass(frozen=True)
@@ -166,6 +174,29 @@ class RunControl:
         asked = self._inbox().lookahead
         if asked is not None and not asked.taken:
             self._log().ack(asked.command_id, "applied")
+
+
+class CycleHold:
+    """One producer's hold of a cycle, a run's or a scoring pass's, which holds the pass lock too.
+    Its release voids what the producer never took: only a producer stopping on a pause takes it."""
+
+    def __init__(
+        self, stores: Stores, hop: CycleHop, *, scoring_pass: bool, acting: tuple[str, ...] = ()
+    ) -> None:
+        self._stores, self._hop, self._pass = stores, hop, scoring_pass
+        self._dir = stores.campaigns.cycle_dir(hop)
+        self.control = RunControl(
+            commands=stores.commands, cycle=stores.subject(hop), acting=acting
+        )
+        (hold_pass if scoring_pass else hold_cycle)(self._dir)
+
+    def release(self) -> None:
+        """A second release voids nothing."""
+        try:
+            if cycle_held_here(self._dir):
+                self._stores.void_inbox(self._hop)
+        finally:
+            (release_pass if self._pass else release_cycle)(self._dir)
 
 
 def budget_stop(book: SpendBook) -> StopReason | None:

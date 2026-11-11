@@ -72,7 +72,7 @@ def _start_run(
 async def _dispatch_held(
     args: argparse.Namespace, ctx: SessionCtx, payload: StartRunPayload | ForkCyclePayload
 ) -> HeldRun:
-    """*ctx* follows the cycle the command answers (a fork, a diag sibling) and stays put when the hold is refused."""
+    """*ctx* follows the cycle the command answers (a fork) and stays put when the hold is refused."""
     outcome = await CommandDispatcher(ctx.store, inline=inline_launch(args)).dispatch(
         CommandCall(payload)
     )

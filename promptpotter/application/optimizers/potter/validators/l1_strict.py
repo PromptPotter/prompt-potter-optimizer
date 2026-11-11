@@ -10,8 +10,7 @@ from promptpotter.application import optimizers
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L1_HELD_PROMPT_FIELDS,
-    OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
-    SCHEMA_DESCRIPTION_MAX_CHARS,
+    prose_ceiling,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     STALL_EXPLORATION,
@@ -321,13 +320,7 @@ def l1_prose_within_ceiling(
         if node is None or not isinstance(node_params, dict):
             continue
         for param, value in node_params.items():
-            ceiling = (
-                SCHEMA_DESCRIPTION_MAX_CHARS
-                if param in node.description_keys
-                else None
-                if inner_cells is None
-                else OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
-            )
+            ceiling = prose_ceiling(node, param, inner_cells=inner_cells)
             if ceiling is not None and isinstance(value, str) and len(value) > ceiling:
                 failures.append(
                     ValidationFailure(

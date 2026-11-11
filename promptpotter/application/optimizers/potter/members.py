@@ -104,7 +104,6 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
     Recombination,
 )
-from promptpotter.application.optimizers.potter.resume import ELECTION_REPLAYERS, RACE_REPLAYERS
 from promptpotter.application.optimizers.potter.validators.l3_output import l3_plan_breaches
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct
@@ -126,7 +125,6 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.bench.resume_and_fork.replayers import Replayer
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         CatchUpFn,
@@ -334,7 +332,6 @@ class PoBB(nodes.Eliminator):
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = ABORT_LENS_SUPPRESS
     # A PoBB stop ends the buying of an arm; θ still reads what it measured.
     stop_disqualifies: ClassVar[bool] = False
-    replayers: ClassVar[Mapping[str, Replayer]] = RACE_REPLAYERS
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = POBB
 
     def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
@@ -356,7 +353,6 @@ class ThetaElection(nodes.Selector):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Replay})
     elects_on: ClassVar[DisplayMetric] = "ability"
     elects_partial: ClassVar[bool] = True
-    replayers: ClassVar[Mapping[str, Replayer]] = ELECTION_REPLAYERS
 
     def parent_cells(
         self,

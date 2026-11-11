@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -21,8 +20,8 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
-    BenchCheckpointKind,
     CycleSeedRecord,
+    ForkCutFrom,
     ForkDirection,
     ForkSpec,
     ForkTrigger,
@@ -30,10 +29,9 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.run_standing import line_reference
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
+from promptpotter.infrastructure.store.layout import root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import owned_campaign
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, CycleBusyError, PayloadInvalidError
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import acting_principal
@@ -43,7 +41,6 @@ if TYPE_CHECKING:
     from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.shared.identity import Principal
 
@@ -77,11 +74,10 @@ def _fork_sibling_setup(
     # The FORK_CUT's own offset: a parent still running appends past it, never into the fork.
     cut = CycleEventLog.open(CycleDir(parent_dir)).append(
         ResumeCheckpointRecord(
-            kind=BenchCheckpointKind.FORK_CUT,
+            kind=ForkCutFrom.kind,
             node=None,
-            inputs_ref={"from_round": from_round},
+            inputs_ref=ForkCutFrom(from_round=from_round, fork=payload),
             outcome=child.cycle_id,
-            data={"forked_at": utcnow_iso(), "fork": payload.model_dump(mode="json")},
         )
     )
     logger.info(
@@ -100,33 +96,14 @@ def _fork_sibling_setup(
         campaign_store.record_intervention(child, kind="disallowed_model_override")
 
 
-def _next_diag_sibling_id(
-    campaign_store: CampaignStore, campaign_id: str, parent_cycle_id: str
-) -> str:
-    root_id = root_cycle_id(parent_cycle_id)
-    cycles_dir = campaign_cycles_dir(campaign_store.campaign_root_dir(campaign_id))
-    pattern = re.compile(rf"^{re.escape(root_id)}_diag_(\d+)$")
-    max_n = 0
-    if cycles_dir.is_dir():
-        for entry in cycles_dir.iterdir():
-            if not entry.is_dir():
-                continue
-            m = pattern.match(entry.name)
-            if m:
-                max_n = max(max_n, int(m.group(1)))
-    return f"{root_id}_diag_{max_n + 1:03d}"
-
-
 def _fork_suffix(*parts: str) -> str:
     """The clock, at MICROSECOND resolution, is all that separates two forks of one parent: *parts* cannot."""
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     return stable_hash([*parts, stamp], length=8)
 
 
-def _sibling_id(campaign_store: CampaignStore, parent: CycleHop, payload: ForkSpec) -> str:
+def _sibling_id(parent: CycleHop, payload: ForkSpec) -> str:
     """Fixed length at any depth: the line is the `CycleMintedRecord` chain, never the id."""
-    if payload.trigger is ForkTrigger.OPERATOR_DIAG:
-        return _next_diag_sibling_id(campaign_store, parent.campaign_id, parent.cycle_id)
     return f"{root_cycle_id(parent.cycle_id)}_fork_{_fork_suffix(parent.cycle_id, payload.trigger)}"
 
 
@@ -235,7 +212,7 @@ def cut_fork(
         )
     edge = fork_edge(standing, fork_from_round, named)
     payload = ForkSpec(trigger=trigger, reason=reason, issued_by=issued_by, from_candidate=edge)
-    child = parent.model_copy(update={"cycle_id": _sibling_id(campaign_store, parent, payload)})
+    child = parent.model_copy(update={"cycle_id": _sibling_id(parent, payload)})
     _fork_sibling_setup(
         stores,
         parent,
@@ -268,17 +245,6 @@ def declare_steered_values(
                 update={"param_allowed_values": values}
             )
     return seed.model_copy(update={"optimizer_narrowing": declared})
-
-
-def cut_diag_sibling(*, stores: Stores, hop: CycleHop) -> ForkCut:
-    return cut_fork(
-        stores,
-        hop,
-        0,
-        trigger=ForkTrigger.OPERATOR_DIAG,
-        reason="diag-sibling BFS exploration",
-        issued_by=acting_principal(stores.identity),
-    )
 
 
 def cut_operator_fork(

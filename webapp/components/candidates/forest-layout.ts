@@ -54,13 +54,11 @@ export const NODE_R = 3.5;
 export const KIND_GLYPH: Record<CourseKind, string> = {
   root: "●",
   fork: "⑂",
-  diag: "Δ",
   inner: "◇",
 };
 
 export const TRIGGER_GLYPH: Record<CourseSpawn["trigger"], string> = {
   operator_steered: "✎",
-  operator_diag: "",
   operator_rewind: "",
   optimizer_rebase: "",
   scoring_divergence: "",

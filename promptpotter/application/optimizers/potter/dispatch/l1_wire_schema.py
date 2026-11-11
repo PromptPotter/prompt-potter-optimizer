@@ -10,9 +10,9 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     BLOCK_ID_INSTRUCTION,
     LAYOUT_SCHEMA_INSTRUCTION,
     OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
-    SCHEMA_DESCRIPTION_MAX_CHARS,
     SCHEMA_DESCRIPTIONS_INSTRUCTION,
     SCHEMA_RENAME_INSTRUCTION,
+    prose_ceiling,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -152,8 +152,8 @@ def build_l1_response_schema(
             else:
                 param_props[param] = {}
             # Stated, never a `maxLength`: `l1_strict.py::l1_prose_within_ceiling` rejects past it.
-            ceiling = OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
-            if ceiling is not None and inner_cells is not None:
+            ceiling = prose_ceiling(node, param, inner_cells=inner_cells)
+            if ceiling is not None:
                 param_props[param]["description"] = f"At most {ceiling} characters."
         # The one lever that can break a parser: locked, it is absent from the schema, never policed per round.
         if not schema_field_rename:
@@ -166,7 +166,7 @@ def build_l1_response_schema(
         for key in described:
             param_props[key] = {
                 "type": "string",
-                "description": f"At most {SCHEMA_DESCRIPTION_MAX_CHARS} characters.",
+                "description": f"At most {prose_ceiling(node, key, inner_cells=inner_cells)} characters.",
             }
         assert param_props.keys() <= keys, (
             f"{node_name}: the schema offers a key the node declares no param for"

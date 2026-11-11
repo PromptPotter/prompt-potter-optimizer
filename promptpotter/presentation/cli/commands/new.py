@@ -45,6 +45,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.run_records import LaunchAnswer
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES
 from promptpotter.presentation.cli.commands.launch import (
@@ -428,30 +429,34 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     payload = _head_to_head_payload(args)
     dispatcher = CommandDispatcher(stores)
     with _named_dataset(stores):
-        launched = (
-            await dispatcher.answer(launching.mint_head_to_head, CommandCall(payload))
-        ).result
-    started = launched.started
-    for arm in started.arms:
-        cycle_dir = stores.campaigns.cycle_dir(arm.hop).absolute()
-        _checkin_line(f"arm {arm.arm_key}", f"{arm.hop.campaign_id} → {cycle_dir}")
+        outcome = await dispatcher.answer(launching.mint_head_to_head, CommandCall(payload))
+    answer = outcome.answer
+    assert isinstance(answer, LaunchAnswer), "a launch kind answers its LaunchAnswer"
+    arms = [
+        (arm.arm_key, launch.hop)
+        for arm, launch in zip(payload.head_to_head.arms, answer.launches, strict=True)
+        if launch.hop is not None
+    ]
+    for arm_key, hop in arms:
+        cycle_dir = stores.campaigns.cycle_dir(hop).absolute()
+        _checkin_line(f"arm {arm_key}", f"{hop.campaign_id} → {cycle_dir}")
     logger.info("Each arm writes readout.log in its cycle; Ctrl+C pauses every arm.")
     pauses = [
-        PauseCyclePayload(campaign_id=a.hop.campaign_id, cycle_id=a.hop.cycle_id, reason="Ctrl+C")
-        for a in started.arms
+        PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
+        for _, hop in arms
     ]
     with ctrl_c_pauses(stores, pauses):
-        await asyncio.gather(*launched.exits)
+        await asyncio.gather(*outcome.result.exits)
     ended = [
-        f"  {arm.arm_key}: {arm.hop.campaign_id} — {dispatcher.stores.run_state(arm.hop).run_phase.value}"
-        for arm in started.arms
+        f"  {arm_key}: {hop.campaign_id} — {dispatcher.stores.run_state(hop).run_phase.value}"
+        for arm_key, hop in arms
     ]
-    subjects = " ".join(f"--subject campaign:{arm.hop.campaign_id}" for arm in started.arms)
+    subjects = " ".join(f"--subject campaign:{hop.campaign_id}" for _, hop in arms)
     return CommandResult(
-        data=started.model_dump(mode="json"),
+        data=answer.model_dump(mode="json"),
         human="\n".join(
             [
-                f"Head-to-head {started.head_to_head_id}:",
+                f"Head-to-head {payload.head_to_head.head_to_head_id}:",
                 *ended,
                 "",
                 f"Read it: python -m promptpotter evidence {subjects}",

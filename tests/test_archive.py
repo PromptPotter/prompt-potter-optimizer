@@ -83,10 +83,13 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.application.mask.divergence import VerdictOutcome, find_divergences
 from promptpotter.application.mask.load import load_mask_record
+from promptpotter.application.optimizers.capo.members import PairedTCut
+from promptpotter.application.optimizers.capo.state import CapoObjective
+from promptpotter.application.optimizers.gepa.members import MinibatchTested
 from promptpotter.application.optimizers.nodes import MeasuredRound, Panel, ReadArm
-from promptpotter.application.optimizers.potter.election import elect_on_theta
+from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
-from promptpotter.application.optimizers.potter.race import PoBBRace
+from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
 from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
@@ -138,7 +141,6 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
-    BenchCheckpointKind,
     ConfigOverrides,
     CycleSeed,
     CycleShareRecord,
@@ -146,6 +148,7 @@ from promptpotter.domain.run_records import (
     ForkDirection,
     ForkSpec,
     ForkTrigger,
+    OriginGatePass,
     OriginSource,
     ResumeCheckpointRecord,
     RoundEnteredRecord,
@@ -680,31 +683,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     built_stores: Stores, offline: Router, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stores = built_stores
-    # A replayer that cannot re-derive its decision is a named divergence, never a clean match.
-    blind = replay_decisions(
-        _round(
-            round=0,
-            cells={
-                ArmKey("c1"): sheet(
-                    [measurement(0, 1.0, objective=1.0, query="q", predicted="p", ground_truth="g")]
-                )
-            },
-        ),
-        [
-            ResumeCheckpointRecord.model_validate(
-                {
-                    "kind": "round_winner",
-                    "inputs_ref": {"arms": ["c1"], "round_num": 0, "coverage_floor": 1},
-                    "outcome": "c1",
-                }
-            )
-        ],
-    )
-    assert blind is not None, "an unreproducible decision was reported as a clean replay"
-    assert blind.kind == "replay_error:round_winner", (
-        "the mismatch must name WHICH check went blind"
-    )
-
     # A cut the live race made past an errored cell replays on the cells it was fit on.
     parent = prompted(instruction="parent")
     hits = sheet(measurements([1.0] * 10))
@@ -745,10 +723,41 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     reading = race.judge(race.rule([]).check(walked.cells), ArmKey("c1"), {ArmKey("c1"): "C3.1"})
     assert reading is not None and reading.context["gate"] == EliminationGate.EPSILON
     [cut] = racing.cycle.pending_decisions
-    assert cut.data["candidate_cells"] == [str(i) for i in range(8) if i != 2]
+    assert isinstance(cut.inputs_ref, EliminationCut)
+    assert cut.inputs_ref.candidate_cells == [str(i) for i in range(8) if i != 2]
     assert replay_decisions(_round(round=3, cells={ArmKey("c1"): walked}), [cut]) is None, (
         "the cut the live rule made is not the cut its own record replays"
     )
+    # Every replayer that reads an arm replays an absent one as no cut, no gain and no winner.
+    unwalked, bar_arm = ArmKey("c1"), ArmKey(parent.id)
+    paired = PairedTCut(
+        objective=CapoObjective(length_penalty=0.0, length_norm=1),
+        arm=unwalked,
+        queries_scored=8,
+        alpha=0.05,
+        survivors=1,
+        raced_against=[bar_arm],
+        outscored_by=[bar_arm],
+    )
+    minibatch = MinibatchTested(
+        arm=unwalked, parent_id=parent.id, parent_scores={"g0": 0.0}, sigma=0.0, sigma_prime=1.0
+    )
+    winner = RoundWinner(
+        arms=[unwalked], coverage_floor=1, admission=0.5, parent=bar_arm, crowned=[]
+    )
+    for inputs, recorded in (
+        (cut.inputs_ref, True),
+        (paired, True),
+        (minibatch, True),
+        (winner, unwalked),
+    ):
+        gone = replay_decisions(
+            _round(round=3, cells={}),
+            [ResumeCheckpointRecord(kind=inputs.kind, inputs_ref=inputs, outcome=recorded)],
+        )
+        assert gone is not None and gone.current_outcome in (False, None), (
+            f"{inputs.kind}: an absent arm's decision replayed"
+        )
 
     # A parent's charged error replays at the grade the live election read.
     scorer = scorer_of()
@@ -1863,6 +1872,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                     submitted=False,
                     walked=cycle.round_state(2),
                     reads=[],
+                    opened_on=cycle.difficulty.stamp.reach,
                 )
             )
         set_cycle(cycle, line=line)
@@ -1962,7 +1972,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
 
     def passes() -> list[str]:
         decided = stores.campaigns.standing_rounds(hop, moment=None).decisions.get(0, [])
-        return [d.data["by"] for d in decided if d.kind == BenchCheckpointKind.ORIGIN_GATE_PASS]
+        return [d.inputs_ref.by for d in decided if isinstance(d.inputs_ref, OriginGatePass)]
 
     # An origin that scored no cell has nothing to gate: it halts.
     assert launch(replayed=False) is StopReason.ORIGIN_GATE, "an unscored origin held or ran on"

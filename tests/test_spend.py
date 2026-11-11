@@ -93,7 +93,6 @@ from promptpotter.application.jobs.launcher.admission import (
     paid_pass,
     slotless_share,
 )
-from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadStarted
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
@@ -200,6 +199,7 @@ from promptpotter.domain.run_records import (
     ForkRemainder,
     ForkSpec,
     ForkTrigger,
+    LaunchAnswer,
     RoundEnteredRecord,
     RoundWarningRecord,
     RunPhaseRecord,
@@ -274,7 +274,12 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
 from promptpotter.infrastructure.store.io import read_lines, rmtree_robust, write_jsonl, write_yaml
-from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, draft_dirs
+from promptpotter.infrastructure.store.layout import (
+    CampaignLayout,
+    CycleLayout,
+    dataset_id_prefix,
+    draft_dirs,
+)
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, Projected
@@ -1222,6 +1227,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
                     | {"provider": "openai", "model": "m"}
                 ),
                 cache=loop_reuse,
+                seed=None,
             ),
         )
         with scoped(judge_cache=judge_reuse):
@@ -3571,12 +3577,12 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         ],
     )
     campaign_runner.main()
-    started = HeadToHeadStarted.model_validate_json(capsys.readouterr().out)
+    answered = LaunchAnswer.model_validate_json(capsys.readouterr().out).launches
     arms = mint.standing_arms(stores, "duel-1")
-    assert {a.arm_key: a.hop for a in started.arms} == {k: c.root_hop for k, c in arms.items()}, (
+    assert [launch.hop for launch in answered] == [arms[k].root_hop for k in ("capo", "capo-b3")], (
         "the terminal answered other arms than the head-to-head records"
     )
-    assert [spec.hop for spec in detached] == [a.hop for a in started.arms], (
+    assert [spec.hop for spec in detached] == [launch.hop for launch in answered], (
         "an arm ran in no process of its own, or in another arm's cycle"
     )
     assert len({c.root_content_hash for c in arms.values()}) == 1, (
@@ -3912,11 +3918,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     )
     declared = mint.declare(framing, CampaignConfig.model_validate(unframed), purpose=Optimize())
     with pytest.raises(PayloadInvalidError):
-        asyncio.run(
-            mint.mint_framed_cycle(
-                framing, declared, rows, campaign_id="framed__000001", task_text="frame this"
-            )
-        )
+        asyncio.run(mint.mint_framed_cycle(framing, declared, rows, task_text="frame this"))
     assert not draft_dirs(stores.campaigns.workspace), "an unminted framing left its ledger"
     assert account_usd() == pytest.approx(with_draft + 0.03), "a refused mint un-spent its framing"
 
@@ -4054,3 +4056,22 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
             with pytest.raises(ValueError, match="no rate for it"):
                 book.hold(bound, bound, "optimizer", what="next", reservation=None, paid_by="host")
                 pytest.fail(f"the {asking} book sent past a bill the {folding} fold left uncounted")
+
+    # A campaign id is drawn again over a live campaign's dir and a tombstone's id.
+    campaigns = built_stores.campaigns
+    prefix = dataset_id_prefix("ds1")
+    live = campaigns.campaign_root_dir(f"{prefix}__aaaaaa") / "cycles"
+    live.mkdir(parents=True)
+    (live / "mark").write_text("live", encoding="utf-8")
+    gone = CycleHop(campaign_id=f"{prefix}__bbbbbb", cycle_id="cycle-0")
+    CycleEventLog.open(CycleDir(campaigns.cycle_dir(gone))).append(billed_call(0.1))
+    assert campaigns.delete_campaign(
+        f"{prefix}__bbbbbb", keep_results=True, changed_at="2026-01-01T00:00:00Z"
+    )
+    drawn = iter(["aaaaaa", "bbbbbb", "cccccc"])
+    monkeypatch.setattr("secrets.token_hex", lambda _n: next(drawn))
+    assert campaigns.claim_campaign_id("ds1") == f"{prefix}__cccccc", (
+        "a draw took a live campaign's or a deleted one's id"
+    )
+    assert [p.name for p in live.iterdir()] == ["mark"], "the draw wrote into a live campaign"
+    assert (live / "mark").read_text(encoding="utf-8") == "live"

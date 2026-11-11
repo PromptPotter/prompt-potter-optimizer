@@ -14,7 +14,7 @@ from promptpotter.application.runner.loop import LoopEnd, loop_end_on
 from promptpotter.application.runner.round import emit_origin_round, run_init
 from promptpotter.application.runner.termination import RUN_ENDS, origin_gate_tripped
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
-from promptpotter.domain.run_records import BenchCheckpointKind
+from promptpotter.domain.run_records import OriginGatePass
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import at_round
 
@@ -115,19 +115,9 @@ async def bench_line_origin(cycle: Cycle, cb: RunCallbacks, spend: SpendRollup) 
 
 def pass_origin_gate(cb: RunCallbacks, *, by: str) -> None:
     """The operator's override, a decision of round 0: every later launch of the cycle reads it."""
-    record_decision(
-        cb.ledger,
-        BenchCheckpointKind.ORIGIN_GATE_PASS,
-        {},
-        "proceed",
-        node=None,
-        data={"by": by},
-        round=0,
-    )
+    record_decision(cb.ledger, OriginGatePass(by=by), "proceed", node=None, round=0)
 
 
 def origin_gate_passed(session: Session) -> bool:
     standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
-    return any(
-        d.kind == BenchCheckpointKind.ORIGIN_GATE_PASS for d in standing.decisions.get(0, ())
-    )
+    return any(isinstance(d.inputs_ref, OriginGatePass) for d in standing.decisions.get(0, ()))

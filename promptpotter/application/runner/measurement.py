@@ -293,13 +293,12 @@ class ReferencePairs:
         declared: Sequence[str],
     ) -> ReferencePairs:
         session = ctx.cycle.session
+        # A re-read individual is named by this round's slot, never the one it was first walked in.
         names = {
             key: arm_name(key, arm, rr.round)
             for rr in ctx.cycle.rounds
             for key, arm in rr.arms.items()
-        }
-        for key, arm in arms.items():
-            names.setdefault(key, arm_name(key, arm, ctx.round_num))
+        } | {key: arm_name(key, arm, ctx.round_num) for key, arm in arms.items()}
         return cls(
             path=(session.hop,),
             instrument_id=session.instrument_id,

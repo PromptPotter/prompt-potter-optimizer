@@ -4483,7 +4483,6 @@
         "enum": [
           "root",
           "fork",
-          "diag",
           "inner"
         ],
         "type": "string"
@@ -5254,7 +5253,7 @@
                 "type": "null"
               }
             ],
-            "description": "Sampling seed every optimizer node sends, or draws its per-call seed from where it asks several things in one step, so concurrent asks stay distinct draws. Temperature 0 pins the distribution and not the draw, so without a seed the provider is still free to sample differently on identical input. It rides `hash_call`, so two campaigns differing only here bank separate replies rather than serving one campaign's answer under the other's name. `None` (default) sends none.",
+            "description": "The seed each optimizer call's own sampling seed is drawn off, so concurrent asks stay distinct draws; every call whose provider sends a seed sends its draw. Temperature 0 pins the distribution and not the draw, so without a seed the provider is still free to sample differently on identical input. It rides `hash_call`, so two campaigns differing only here bank separate replies rather than serving one campaign's answer under the other's name. `None` (default) draws each call's seed off the campaign id.",
             "title": "Seed"
           },
           "temperature": {
@@ -7122,7 +7121,6 @@
       "ForkTrigger": {
         "description": "One value per caller of :func:`cut_fork`.",
         "enum": [
-          "operator_diag",
           "operator_rewind",
           "operator_steered",
           "optimizer_rebase",

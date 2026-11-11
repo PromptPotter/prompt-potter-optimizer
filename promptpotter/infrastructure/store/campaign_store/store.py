@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import shutil
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -96,6 +97,7 @@ from promptpotter.infrastructure.store.layout import (
     campaign_root_dir_for,
     campaigns_root_dir_for,
     cycle_dir_for,
+    dataset_id_prefix,
     head_to_head_path,
     read_sandbox_owner,
     root_cycle_id,
@@ -158,6 +160,23 @@ class CampaignStore:
 
     def campaign_root_dir(self, campaign_id: str) -> Path:
         return campaign_root_dir_for(self._base_dir, campaign_id)
+
+    def claim_campaign_id(self, dataset_name: str) -> str:
+        """A mint's first write: drawn again until it takes a campaign dir exclusively and names no
+        deleted campaign, so it never writes into a live campaign, a torn mint or a tombstone's id."""
+        prefix = dataset_id_prefix(dataset_name) if dataset_name else "campaign"
+        bank = workspace_bank(self._base_dir)
+        while True:
+            campaign_id = f"{prefix}__{secrets.token_hex(3)}"
+            if bank.deleted(campaign_id):
+                continue
+            root = self.campaign_root_dir(campaign_id)
+            root.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                root.mkdir()
+            except FileExistsError:
+                continue
+            return campaign_id
 
     def cycle_dir(self, hop: CycleHop) -> Path:
         return cycle_dir_for(self._base_dir, hop)

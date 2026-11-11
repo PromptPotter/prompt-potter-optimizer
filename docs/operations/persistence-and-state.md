@@ -11,7 +11,7 @@ The on-disk shape of [`../architecture.md`](../architecture.md) § Four entities
 | Workspace | `projects/{tenant}/` | the tenant |
 | Dataset | tenant upload `projects/{tenant}/datasets/{slug}/` first, then shipped template `promptpotter/assets/datasets/{name}/` | its content; the slug is a label |
 | Campaign | `campaigns/{campaign_id}/campaign.json` | `{dataset}__{6 hex}`, fresh per `new`; a nested name's `/` is written `.` |
-| Cycle | `campaigns/{campaign_id}/cycles/{cycle_id}/` | `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`); a path resolves as `(campaign_id, cycle_id)` |
+| Cycle | `campaigns/{campaign_id}/cycles/{cycle_id}/` | `cycle_{content_hash[:12]}` (+ `_fork_`); a path resolves as `(campaign_id, cycle_id)` |
 
 ### The hierarchy address
 

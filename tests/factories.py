@@ -24,7 +24,7 @@ from promptpotter.application.initialization.session import LaunchState, ScorerS
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.jobs.launcher.admission import slotless_share
-from promptpotter.application.jobs.mint import declare, fresh_campaign_id, mint_framed_cycle
+from promptpotter.application.jobs.mint import declare, mint_framed_cycle
 from promptpotter.application.jobs.quota import land_job, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import bench_defaults_pin
@@ -624,7 +624,6 @@ async def run_init_round(
             session,
             declaration,
             session.bank.samples,
-            campaign_id=fresh_campaign_id(session),
             task_text=None,
         )
         running, cycle_config = minted.session, minted.cycle

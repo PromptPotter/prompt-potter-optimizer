@@ -18,7 +18,6 @@ from promptpotter.application.jobs.launcher.admission import campaign_sends
 from promptpotter.application.jobs.mint import (
     OpenedCycle,
     declare,
-    fresh_campaign_id,
     mint_framed_cycle,
     resolve_resume,
 )
@@ -113,7 +112,6 @@ class FreshMint:
             session,
             declare(session, self.campaign_config(), purpose=Optimize()),
             session.bank.samples,
-            campaign_id=fresh_campaign_id(session),
             task_text=self.task_text,
         )
 
@@ -146,9 +144,13 @@ class ExistingCycle:
 
     async def open(self, stores: Stores) -> OpenedCycle:
         """The cycle on disk, bound and drift-checked: in the admitting process, and again in a
-        detached run's own."""
+        detached run's own. A refusal closes the client it opened; the opened cycle's caller closes it after."""
         session = await bind_cycle_session(stores, self.campaign, self.hop)
-        plan = resolve_resume(session, self.campaign, session.bank.samples)
+        try:
+            plan = resolve_resume(session, self.campaign, session.bank.samples)
+        except BaseException:
+            await session.backend_client.aclose()
+            raise
         return OpenedCycle(plan.cycle, plan.session, plan.optimizer)
 
 

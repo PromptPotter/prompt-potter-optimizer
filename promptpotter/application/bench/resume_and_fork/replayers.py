@@ -1,21 +1,16 @@
-"""A replayer is PURE over ``ReplayContext``; a kind with none registered is archived and never compared."""
+"""A replay is PURE over ``ReplayContext``; a kind whose inputs are no ``Replayed`` is archived and never compared."""
 
 from __future__ import annotations
 
-import functools
-import logging
-from collections.abc import Callable, Iterator, Mapping
+import abc
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application import optimizers
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.run_records import ResumeCheckpointRecord
+from promptpotter.domain.run_records import CheckpointInputs, ResumeCheckpointRecord
 
 if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler
-
-
-logger = logging.getLogger(__name__)
 
 
 class ReplayMismatch(NamedTuple):
@@ -29,44 +24,32 @@ class ReplayMismatch(NamedTuple):
 
 
 class ReplayContext(NamedTuple):
-    """ONE round and no history, so a decision needing the cycle's is ``ARCHIVAL``; the anchor rides the decision."""
+    """ONE round and no history, so a decision needing the cycle's is archived; the anchor rides the decision."""
 
     round_data: RoundResult
     decisions: list[ResumeCheckpointRecord]
     ruler: DeltaRuler | None
 
 
-Replayer = Callable[[ReplayContext, dict[str, Any], dict[str, Any]], Any]
+class Replayed(CheckpointInputs, kind=None):
+    """A kind a resume re-derives off the round's rows, by the rule its live call ran."""
+
+    @abc.abstractmethod
+    def replay(self, ctx: ReplayContext) -> Any: ...
 
 
 def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
-    round_data = ctx.round_data
     for rec in ctx.decisions:
-        kind = rec.kind
-        fn = replayers().get(kind)
-        if fn is None:
+        if not isinstance(rec.inputs_ref, Replayed):
             continue
-
-        try:
-            current = fn(ctx, rec.inputs_ref, rec.data)
-        except Exception as exc:
-            # A replayer that cannot ANSWER is a third state, never a match: agreement would pass rounds nothing verified.
-            logger.exception("replayer for decision kind %r could not re-derive its record", kind)
-            yield ReplayMismatch(
-                round_num=round_data.round,
-                kind=f"replay_error:{kind}",
-                recorded_outcome=rec.outcome,
-                current_outcome=f"{type(exc).__name__}: {exc}",
-                inputs_ref=dict(rec.inputs_ref),
-            )
-            continue
+        current = rec.inputs_ref.replay(ctx)
         if current != rec.outcome:
             yield ReplayMismatch(
-                round_num=round_data.round,
-                kind=kind,
+                round_num=ctx.round_data.round,
+                kind=rec.kind,
                 recorded_outcome=rec.outcome,
                 current_outcome=current,
-                inputs_ref=dict(rec.inputs_ref),
+                inputs_ref=rec.inputs_ref.model_dump(mode="json"),
             )
 
 
@@ -84,13 +67,3 @@ def replay_all_mismatches(
     ruler: DeltaRuler | None = None,
 ) -> list[ReplayMismatch]:
     return list(_iter_mismatches(ReplayContext(round_data, decisions, ruler)))
-
-
-@functools.cache
-def replayers() -> Mapping[str, Replayer]:
-    table: dict[str, Replayer] = {}
-    for member in optimizers.NODE_MEMBERS.table.values():
-        if clash := sorted(set(table) & set(member.replayers)):
-            raise RuntimeError(f"{member.name} registers replayers another holds: {clash}")
-        table.update(member.replayers)
-    return table
