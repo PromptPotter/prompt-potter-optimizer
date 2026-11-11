@@ -37,7 +37,7 @@ export function RunControlButton() {
         aria-label={run.label}
         title={
           run.action === "pause"
-            ? "Pause at the next checkpoint, once the cells in flight answer"
+            ? "Pause at the next checkpoint, once cells in flight answer"
             : (run.pauseNote ??
               (run.action === "resume" ? "Resume the paused run" : "Start / resume the run"))
         }

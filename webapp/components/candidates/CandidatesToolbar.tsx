@@ -103,7 +103,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
           }
           title={
             m.areCourses
-              ? "These bars are runs, not scored cells — open a run to compare its candidates."
+              ? "Bars are runs: open one to compare its candidates"
               : overlapNext[rung]
           }
           onClick={m.stepOverlap}
@@ -170,8 +170,8 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
               }}
               title={
                 m.hasCompareKey
-                  ? "Read this searchpoint beside other campaigns, branches and searchpoints on the Compare tab."
-                  : "Pick a candidate first — a bar, a dendrogram node or a forest stub."
+                  ? "Read this searchpoint beside others on the Compare tab"
+                  : "Pick a candidate first: a bar, a node or a forest stub"
               }
             >
               Compare this searchpoint

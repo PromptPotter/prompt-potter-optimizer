@@ -7,7 +7,7 @@ import {
   type ParamIntent,
   MOVABLE_AGENT_LABELS,
 } from "@/lib/api/types";
-import { CommitInput, FailureLine, Switch, ValueList } from "@/components/ui";
+import { CommitInput, FailureLine, HoverCard, Switch, Term, ValueList } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 import {
@@ -181,20 +181,23 @@ export function NodeConfigEditor(props: {
       {!isSingleNode && freeValued.length > 0 ? (
         <div className="config-row config-node-row">
           <span className="config-label">Tuning</span>
-          <button
-            type="button"
-            className={cx("config-lock", nodeLocked && "is-locked")}
-            onClick={toggleNodeLock}
-            disabled={readOnly}
-            aria-pressed={nodeLocked}
-            title={
+          <HoverCard
+            content={
               nodeLocked
                 ? "Every free-valued param on this node is held at its origin value. Click to let the optimizer tune them."
                 : "The optimizer may tune the unlocked params above. Click to hold them at origin."
             }
           >
-            {nodeLocked ? "🔒 Params locked" : "🔓 Params open"}
-          </button>
+            <button
+              type="button"
+              className={cx("config-lock", nodeLocked && "is-locked")}
+              onClick={toggleNodeLock}
+              disabled={readOnly}
+              aria-pressed={nodeLocked}
+            >
+              {nodeLocked ? "🔒 Params locked" : "🔓 Params open"}
+            </button>
+          </HoverCard>
         </div>
       ) : null}
       {narrowChannel ? (
@@ -333,12 +336,12 @@ function ConfigRowView({
         {row.key}
         <EvolvedMark row={row} />
         {ignoredBy ? (
-          <span
+          <Term
             className="config-optlocked"
-            title={`${ignoredBy} does not accept ${row.key} — it is dropped by the provider, so this value has no effect.`}
+            content={`${ignoredBy} does not accept ${row.key} — it is dropped by the provider, so this value has no effect.`}
           >
             ⊘
-          </span>
+          </Term>
         ) : null}
         {onToggleLock ? (
           <LockButton locked={row.locked} readOnly={readOnly} onClick={onToggleLock} />
@@ -468,17 +471,14 @@ export function LockButton({
   onClick: () => void;
 }) {
   return (
+    // A bare button: `.schema-field-row > .config-lock` places it in its grid column.
     <button
       type="button"
       className={cx("config-lock", locked && "is-locked")}
       onClick={onClick}
       disabled={readOnly}
       aria-pressed={locked}
-      title={
-        locked
-          ? "Origin-locked — the optimizer keeps this fixed. Click to let it tune."
-          : "Open — the optimizer may tune this. Click to lock at origin."
-      }
+      title={locked ? "Origin-locked: click to let the optimizer tune it" : "Open to tuning: click to lock it at origin"}
     >
       {locked ? "🔒" : "🔓"}
     </button>

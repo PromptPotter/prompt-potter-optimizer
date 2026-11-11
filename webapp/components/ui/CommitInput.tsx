@@ -54,6 +54,12 @@ function useCommitted(
 // Defaults a caller may override: a key or a password field asks the browser for its own.
 const DEFAULTS = { spellCheck: false, autoComplete: "off" } as const;
 
+// A range commits on release too, so a drag is one commit.
+const released = (commit: (asked: boolean) => void) => ({
+  onPointerUp: () => commit(false),
+  onKeyUp: () => commit(false),
+});
+
 function Line({ value, onCommit, validate, ...rest }: OneLine) {
   const { commit, field } = useCommitted(value, onCommit, validate);
   return (
@@ -61,6 +67,7 @@ function Line({ value, onCommit, validate, ...rest }: OneLine) {
       {...DEFAULTS}
       {...rest}
       {...field}
+      {...(rest.type === "range" ? released(commit) : {})}
       onKeyDown={(e) => {
         if (e.key !== "Enter") return;
         e.preventDefault();

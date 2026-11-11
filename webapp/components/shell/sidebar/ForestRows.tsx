@@ -24,7 +24,7 @@ import type {
 import { useLineageTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { PLACEHOLDER } from "@/lib/format";
-import { ReadState } from "@/components/ui";
+import { HoverCard, ReadState } from "@/components/ui";
 import { CampaignMenu } from "./CampaignMenu";
 import { CampaignRowLabel, PhaseMark } from "./CampaignRowLabel";
 import { CompareToggle } from "./CompareToggle";
@@ -55,7 +55,7 @@ function GroupRow({
   openByDefault,
   ctx,
   className,
-  title,
+  hint,
   name,
   meta,
   children,
@@ -64,21 +64,30 @@ function GroupRow({
   openByDefault: boolean;
   ctx: TreeCtx;
   className: string;
-  title?: string;
+  hint?: string;
   name: ReactNode;
   meta?: ReactNode;
   children: ReactNode;
 }) {
   const open = ctx.isNodeOpen(addr, openByDefault);
+  const row = (
+    <span className="unit-library-row">
+      <span className="unit-library-name">{name}</span>
+      <span className="unit-library-meta">{meta}</span>
+    </span>
+  );
   return (
     <>
       <div className={`unit-library-family ${className}`}>
         <Twist open={open} onClick={() => ctx.toggleNode(addr)} />
-        <span className="unit-library-item origin-label" title={title}>
-          <span className="unit-library-row">
-            <span className="unit-library-name">{name}</span>
-            <span className="unit-library-meta">{meta}</span>
-          </span>
+        <span className="unit-library-item origin-label">
+          {hint ? (
+            <HoverCard content={hint} focusable>
+              {row}
+            </HoverCard>
+          ) : (
+            row
+          )}
         </span>
       </div>
       {open && <ul className="unit-library-children">{children}</ul>}
@@ -95,7 +104,7 @@ function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
       openByDefault
       ctx={ctx}
       className="origin-row"
-      title={`${campaigns.length} campaigns start from this same specification (${rootCycleId}). Identical runs mean the candidates that produced them collapsed to the same prompt.`}
+      hint={`${campaigns.length} campaigns start from this same specification (${rootCycleId}). Identical runs mean the candidates that produced them collapsed to the same prompt.`}
       name={
         <>
           spec {shortOrigin(rootCycleId)}

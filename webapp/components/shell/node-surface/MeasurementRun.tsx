@@ -125,11 +125,10 @@ export function MeasurementRun({
                 <span className="rsv-cand-label">{arm.label}</span>
                 <span className="rsv-tally">
                   {invalid ? (
-                    <Badge
-                      tone="danger"
-                      title="Rejected by validation — it never ran, so the scores served beside it are synthetic."
-                    >
-                      rejected
+                    <Badge tone="danger">
+                      <Term content="Rejected by validation — it never ran, so the scores served beside it are synthetic.">
+                        rejected
+                      </Term>
                     </Badge>
                   ) : (
                     <span className="rsv-tally-score">
@@ -147,12 +146,12 @@ export function MeasurementRun({
                     </Badge>
                   )}
                   {cached != null && cached > 0 && (
-                    <span
+                    <Term
                       className="tag-cached"
-                      title={`Reused ${unitPlural(unit)} from a prior identical searchpoint — no fresh backend call`}
+                      content={`Reused ${unitPlural(unit)} from a prior identical searchpoint — no fresh backend call`}
                     >
                       📖 {cachedShare === 1 ? "all cached" : `${cached} cached`}
-                    </span>
+                    </Term>
                   )}
                 </span>
               </button>

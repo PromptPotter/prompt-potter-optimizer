@@ -38,12 +38,12 @@
 .st-series-row{display:flex;gap:3px}
 .st-series-cells{display:flex;gap:3px}
 .st-series-cell{cursor:pointer}
-.st-series-cell.hovered{outline:1px solid var(--color-accent);outline-offset:-1px}
+.st-series-cell:hover,.st-series-cell:focus-visible{outline:1px solid var(--color-accent);outline-offset:-1px}
 .st-legend{display:flex;flex-wrap:wrap;gap:var(--space-12);margin-top:var(--space-6);padding-left:42px}
 .st-legend-item{display:inline-flex;align-items:center;gap:var(--space-4)}
 .st-legend-swatch{width:12px;height:12px;font-size:0}
 .st-legend-label{font-size:var(--text-xs);color:var(--color-text-secondary);font-family:var(--font-mono)}
-.st-hover{position:fixed;z-index:1000;width:300px;max-height:260px;overflow-y:auto;padding:var(--space-8);border:0.5px solid var(--color-border);border-radius:4px;background:var(--color-background-primary);box-shadow:0 6px 24px rgba(0,0,0,0.35);font-family:var(--font-mono);pointer-events:none}
+.st-hover{--hovercard-max-w:300px;--hovercard-max-h:260px;font-family:var(--font-mono)}
 .st-hover-head{font-size:var(--text-xs);color:var(--color-text-secondary);margin-bottom:var(--space-6)}
 .st-hover-chips{display:flex;flex-wrap:wrap;gap:3px}
 .st-hover-foot{font-size:var(--text-xs);color:var(--color-text-secondary);margin-top:var(--space-6)}

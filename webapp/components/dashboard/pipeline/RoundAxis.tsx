@@ -39,7 +39,7 @@ export function RoundAxis() {
               aria-selected={active}
               className={cx("round-tab", active && "active")}
               onClick={() => setSelectionForRound(r)}
-              title={`Show round ${r} — its candidates, its optimizer nodes, its samples`}
+              title={`Show round ${r}`}
             >
               {r}
             </button>

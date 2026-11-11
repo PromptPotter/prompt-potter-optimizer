@@ -1,4 +1,4 @@
-import { Button, Chip, CommitInput, ValueList } from "@/components/ui";
+import { Button, Chip, CommitInput, HoverCard, ValueList } from "@/components/ui";
 import { LockButton } from "./NodeConfigEditor";
 
 type Schema = Record<string, unknown>;
@@ -215,9 +215,11 @@ function FieldRow({
         ) : null}
         {onAnswer ? (
           <span className="schema-field-answer">
-            <Chip on={isAnswer} onClick={onAnswer} title="A slot graded against the ground truth; several are graded field by field">
-              answer
-            </Chip>
+            <HoverCard content="A slot graded against the ground truth; several are graded field by field">
+              <Chip on={isAnswer} onClick={onAnswer}>
+                answer
+              </Chip>
+            </HoverCard>
           </span>
         ) : null}
         <Button

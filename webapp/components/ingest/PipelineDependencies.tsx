@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { DraftDependency } from "@/lib/api/types";
+import { Select } from "@/components/ui";
 
 interface DependencyProps {
   librarySize: number;
@@ -41,18 +42,13 @@ function DependencyRow({
       <p>{dep.hint}</p>
       {headers.length > 0 ? (
         <p>
-          <select
+          <Select
             value={column}
             disabled={busy}
-            onChange={(e) => setColumn(e.target.value)}
+            options={headers.map((h) => ({ value: h, label: h }))}
+            onChange={setColumn}
             aria-label="Dataset column to build the library from"
-          >
-            {headers.map((h) => (
-              <option key={h} value={h}>
-                {h}
-              </option>
-            ))}
-          </select>{" "}
+          />{" "}
           <button type="button" disabled={busy || !column} onClick={() => onBuildFromColumn(column)}>
             Build from this column
           </button>

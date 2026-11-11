@@ -17,6 +17,7 @@ import {
   Chip,
   CommitInput,
   FailureLine,
+  HoverCard,
   IconMore,
   Menu,
   MenuRadioGroup,
@@ -87,15 +88,11 @@ export function VerifyAction({
   return (
     <div className="verify-action">
       <div className="verify-action-row">
-        <button
-          type="button"
-          className="btn"
-          onClick={run}
-          disabled={busy}
-          title="Re-score this candidate on search cells it has never been measured on."
-        >
-          {busy ? "Verifying…" : `Verify ${candidate.label}`}
-        </button>
+        <HoverCard content="Re-score this candidate on search cells it has never been measured on.">
+          <button type="button" className="btn" onClick={run} disabled={busy}>
+            {busy ? "Verifying…" : `Verify ${candidate.label}`}
+          </button>
+        </HoverCard>
         {acting && (
           <button
             type="button"

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef } from "react";
-import { FailureLine } from "@/components/ui";
+import { FailureLine, HoverCard } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { HEARTBEAT_INTERVAL_S } from "@/lib/api/types";
 import { fmtGap } from "@/lib/format";
@@ -103,11 +103,13 @@ function Gap({ seconds }: { seconds: number }) {
   const label = fmtGap(seconds);
   if (!label) return null;
   return (
-    <span
-      className="dash-time-ray-gap"
-      title={`No step and no heartbeat anywhere in this family for ${label}. An open call beats every ${HEARTBEAT_INTERVAL_S} s, so this is real silence, not a long call.`}
-    >
-      ── {label} ──
+    <span className="dash-time-ray-gap">
+      <HoverCard
+        focusable
+        content={`No step and no heartbeat anywhere in this family for ${label}. An open call beats every ${HEARTBEAT_INTERVAL_S} s, so this is real silence, not a long call.`}
+      >
+        ── {label} ──
+      </HoverCard>
     </span>
   );
 }

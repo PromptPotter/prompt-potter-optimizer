@@ -27,7 +27,7 @@ import {
   type ObserveSubject,
 } from "@/lib/derivations";
 import { fmtSecs, fmtUnit, fmtValue, PLACEHOLDER } from "@/lib/format";
-import { CopyButton, Empty, FailureLine, Loading, SegmentedControl } from "@/components/ui";
+import { CopyButton, Empty, FailureLine, Loading, SegmentedControl, Term } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
 import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
@@ -478,12 +478,12 @@ function CallRun({
               >
                 <div className="opt-detail-col-head">
                   <span>Thinking</span>
-                  <span
+                  <Term
                     className="opt-detail-col-note"
-                    title="The model's own reasoning, recorded for analysis. It never feeds the optimizer's decisions — no score, gate or selection reads it."
+                    content="The model's own reasoning, recorded for analysis. It never feeds the optimizer's decisions — no score, gate or selection reads it."
                   >
                     analysis only
-                  </span>
+                  </Term>
                 </div>
                 <div className="opt-detail-col-body">
                   <pre className="opt-detail-pre opt-detail-reasoning">{reasoning}</pre>

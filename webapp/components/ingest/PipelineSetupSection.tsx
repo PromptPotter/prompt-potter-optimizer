@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api/types";
-import { CopyButton, ReadState } from "@/components/ui";
+import { CopyButton, ReadState, Select } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { interiorNodes, nodeSchemaReading, searchPoint } from "@/lib/derivations";
@@ -49,18 +49,17 @@ export function PipelineSetupSection({
             <p>
               <label>
                 Mode{" "}
-                <select
+                <Select
                   value={llmOnly ? "llm" : "research"}
-                  onChange={(e) => {
-                    const runs = e.target.value === "llm" ? LLM_ONLY : researchSteps;
+                  options={[
+                    { value: "llm", label: "LLM only — one call per query" },
+                    { value: "research", label: "Research + Match", disabled: !hasResearch },
+                  ]}
+                  onChange={(mode) => {
+                    const runs = mode === "llm" ? LLM_ONLY : researchSteps;
                     onApply({ config: { exclude_nodes: chain.filter((id) => !runs.includes(id)) } });
                   }}
-                >
-                  <option value="llm">LLM only — one call per query</option>
-                  <option value="research" disabled={!hasResearch}>
-                    Research + Match
-                  </option>
-                </select>
+                />
               </label>{" "}
               <CopyButton
                 data={{

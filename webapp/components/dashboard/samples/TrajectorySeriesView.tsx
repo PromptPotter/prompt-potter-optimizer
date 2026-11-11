@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { pressable } from "@/components/ui";
+import { useMemo } from "react";
+import { HoverCard, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/state/selection";
 import {
@@ -8,20 +8,18 @@ import {
   sameSampleSet,
   seedFromOrder,
   type SelectMode,
-  type StepOrder,
-  unionFirstAppearance,
   type SortedRounds,
+  unionFirstAppearance,
 } from "@/lib/derivations";
 import { fmtSampleTag } from "@/lib/format";
 import { SAMPLE_MOVEMENT_LABELS } from "@/lib/api/types";
 
-interface HoverState {
+interface Step {
   round: number;
+  selection: number[];
   sampleId: number;
   position: number; // 1-indexed
-  total: number;
-  x: number;
-  y: number;
+  selectMode: SelectMode;
 }
 
 export function SeriesView({
@@ -34,20 +32,12 @@ export function SeriesView({
   maxHeight?: number;
 }) {
   const columns = useMemo(() => unionFirstAppearance(sorted.rounds), [sorted.rounds]);
-  const { sampleSet, setSelectionForSampleSet } = useSelection();
-  const [hover, setHover] = useState<HoverState | null>(null);
-
-  const hoveredSelection = hover
-    ? (sorted.rounds.find((r) => r.round === hover.round)?.selection ?? [])
-    : [];
-  const order = hover ? orderAtStep(hoveredSelection, hover.sampleId, hover.position) : null;
-  const seedSet = order ? seedFromOrder(order, selectMode) : [];
+  const { setSelectionForSampleSet } = useSelection();
 
   return (
     <div
       className={cx("st-series", maxHeight != null && "scrollable")}
       style={maxHeight != null ? { maxHeight } : undefined}
-      onMouseLeave={() => setHover(null)}
     >
       <div className="st-series-inner">
         <div className="st-series-row">
@@ -78,35 +68,19 @@ export function SeriesView({
                     pp !== undefined && pp !== p
                       ? `${SAMPLE_MOVEMENT_LABELS[kind]}: pos ${pp} → ${p}`
                       : SAMPLE_MOVEMENT_LABELS[kind];
-                  const isHovered = hover?.round === r.round && hover.sampleId === sid;
-                  const activate = () => {
-                    const o = orderAtStep(r.selection, sid, p);
-                    setSelectionForSampleSet(seedFromOrder(o, selectMode));
-                  };
+                  const step: Step = { round: r.round, selection: r.selection, sampleId: sid, position: p, selectMode };
                   return (
-                    <span
-                      key={sid}
-                      className={cx("st-sq", MOVEMENT_CLASS[kind], "st-series-cell", isHovered && "hovered")}
-                      aria-label={`Sample ${sid}, round ${r.round}, position ${p} of ${total}. ${titleNote}. Hover for the sample order at this step; click to compare fitness on the samples up to here.`}
-                      onMouseEnter={(e) =>
-                        setHover({ round: r.round, sampleId: sid, position: p, total, x: e.clientX, y: e.clientY })
-                      }
-                      onMouseMove={(e) =>
-                        setHover((h) =>
-                          h && h.round === r.round && h.sampleId === sid
-                            ? { ...h, x: e.clientX, y: e.clientY }
-                            : { round: r.round, sampleId: sid, position: p, total, x: e.clientX, y: e.clientY },
-                        )
-                      }
-                      onFocus={(e) => {
-                        const box = e.currentTarget.getBoundingClientRect();
-                        setHover({ round: r.round, sampleId: sid, position: p, total, x: box.right, y: box.bottom });
-                      }}
-                      onBlur={() => setHover((h) => (h?.round === r.round && h.sampleId === sid ? null : h))}
-                      {...pressable(activate)}
-                    >
-                      {p}
-                    </span>
+                    <HoverCard key={sid} className="st-hover" content={<StepOrderCard step={step} />}>
+                      <span
+                        className={cx("st-sq", MOVEMENT_CLASS[kind], "st-series-cell")}
+                        aria-label={`Sample ${sid}, round ${r.round}, position ${p} of ${total}. ${titleNote}. Hover for the sample order at this step; click to compare fitness on the samples up to here.`}
+                        {...pressable(() =>
+                          setSelectionForSampleSet(seedFromOrder(orderAtStep(r.selection, sid, p), selectMode)),
+                        )}
+                      >
+                        {p}
+                      </span>
+                    </HoverCard>
                   );
                 })}
               </span>
@@ -115,36 +89,21 @@ export function SeriesView({
         })}
         <Legend />
       </div>
-      {hover && order && (
-        <SeriesHoverPopup
-          hover={hover}
-          order={order}
-          loadedSet={sampleSet}
-          seedSet={seedSet}
-        />
-      )}
     </div>
   );
 }
 
-function SeriesHoverPopup({
-  hover,
-  order,
-  loadedSet,
-  seedSet,
-}: {
-  hover: HoverState;
-  order: StepOrder;
-  loadedSet: number[] | null;
-  seedSet: number[];
-}) {
-  const left = Math.min(hover.x + 14, window.innerWidth - 320);
-  const top = Math.min(hover.y + 14, window.innerHeight - 280);
-  const isLoaded = sameSampleSet(loadedSet, seedSet);
+// The sample order at one step, read only while its card is open.
+function StepOrderCard({ step }: { step: Step }) {
+  const { sampleSet } = useSelection();
+  const order = orderAtStep(step.selection, step.sampleId, step.position);
+  const seedSet = seedFromOrder(order, step.selectMode);
+  const isLoaded = sameSampleSet(sampleSet, seedSet);
   return (
-    <div role="tooltip" className="st-hover" style={{ left, top }}>
+    <>
       <div className="st-hover-head">
-        R{hover.round} · order at sample {fmtSampleTag(hover.sampleId)} (step {hover.position}/{hover.total})
+        R{step.round} · order at sample {fmtSampleTag(step.sampleId)} (step {step.position}/
+        {step.selection.length})
       </div>
       <div className="st-hover-chips">
         {order.computed.map((sid) => (
@@ -165,7 +124,7 @@ function SeriesHoverPopup({
         {order.computed.length} computed · {order.planned.length} planned —{" "}
         {isLoaded ? "loaded in fitness ✓" : `click to compare fitness on ${seedSet.length} samples`}
       </div>
-    </div>
+    </>
   );
 }
 

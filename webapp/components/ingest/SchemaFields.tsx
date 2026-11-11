@@ -1,4 +1,4 @@
-import { CommitInput } from "@/components/ui";
+import { CommitInput, Select } from "@/components/ui";
 import { childOf as child, type FieldSchema } from "@/lib/derivations";
 import { CAP_AXIS_INFO } from "@/lib/api/types";
 import { isCapAxis, parseCapIn } from "@/lib/run-limits";
@@ -113,18 +113,12 @@ function SchemaField({
         <label>
           {field.title}
           {note}{" "}
-          <select value={text} onChange={(e) => onCommit([], e.target.value, writeOnly)}>
-            {text === "" ? (
-              <option value="" disabled>
-                — pick —
-              </option>
-            ) : null}
-            {field.enum.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={text}
+            placeholder="— pick —"
+            options={field.enum.map((v) => ({ value: v, label: v }))}
+            onChange={(v) => onCommit([], v, writeOnly)}
+          />
         </label>
       </p>
     );

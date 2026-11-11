@@ -4,6 +4,37 @@ import react from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
+// The components whose `title` is a heading drawn on the page, not a hover text.
+const HEADINGS = new Set(["AccountSection", "Card", "Dialog", "Empty", "Overrides", "SidePanel"]);
+// A label fits on one hover line; past this, a title is prose.
+const LABEL_MAX = 60;
+
+const staticText = (node) => {
+  if (node?.type === "JSXExpressionContainer") return staticText(node.expression);
+  if (node?.type === "Literal" && typeof node.value === "string") return node.value;
+  if (node?.type === "TemplateLiteral") return node.quasis.map((q) => q.value.cooked ?? "").join("");
+  // Either branch may be what shows: the longer one is measured.
+  if (node?.type === "ConditionalExpression" || node?.type === "LogicalExpression") {
+    const [a, b] = node.type === "LogicalExpression" ? [node.left, node.right] : [node.consequent, node.alternate];
+    const [ta, tb] = [staticText(a), staticText(b)];
+    return ta.length >= tb.length ? ta : tb;
+  }
+  return "";
+};
+
+const titleIsALabel = {
+  meta: { type: "suggestion", schema: [] },
+  create: (context) => ({
+    JSXAttribute(node) {
+      if (node.name.name !== "title") return;
+      const el = node.parent.name;
+      if (el.type === "JSXIdentifier" && HEADINGS.has(el.name)) return;
+      if (staticText(node.value).length < LABEL_MAX) return;
+      context.report({ node, message: "Teaching prose in `title=`: say it through `ui/Term` or `ui/HoverCard`." });
+    },
+  }),
+};
+
 const eslintConfig = defineConfig([
   {
     files: ["**/*.{js,jsx,mjs,ts,tsx,mts}"],
@@ -38,6 +69,12 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-deprecated": "error",
       "@typescript-eslint/no-misused-promises": "error",
     },
+  },
+  // A `title=` is a label; teaching prose goes through `ui/Term` or `ui/HoverCard` (components/CLAUDE.md).
+  {
+    files: ["components/**/*.tsx"],
+    plugins: { local: { rules: { "title-is-a-label": titleIsALabel } } },
+    rules: { "local/title-is-a-label": "error" },
   },
   globalIgnores([
     "out/**",

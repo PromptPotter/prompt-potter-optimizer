@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CardFrame, DataTable, Empty, Said, type Column } from "@/components/ui";
+import { CardFrame, DataTable, Empty, Said, Select, type Column } from "@/components/ui";
 import type { Evidence, FactorReading } from "@/lib/api/types";
 import { fmtMetric, fmtMetricInterval, type MetricFormat } from "@/lib/format";
 
@@ -26,14 +26,14 @@ function FactorPicker({
   return (
     <label className="l4-factor-pick">
       <span>{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
-        {options.map((f) => (
-          <option key={f.key} value={f.key}>
-            {f.key}
-            {f.confounded_with.length > 0 ? " (aliased)" : ""}
-          </option>
-        ))}
-      </select>
+      <Select
+        value={value}
+        options={options.map((f) => ({
+          value: f.key,
+          label: `${f.key}${f.confounded_with.length > 0 ? " (aliased)" : ""}`,
+        }))}
+        onChange={onChange}
+      />
     </label>
   );
 }

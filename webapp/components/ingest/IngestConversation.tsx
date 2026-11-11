@@ -14,6 +14,7 @@ import { useCellTerms, useConnector } from "@/lib/hooks/useConnector";
 import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { useRegistry } from "@/lib/hooks/useRegistry";
+import { useSeededOnce } from "@/lib/hooks/useSeededOnce";
 import type { BlockItem } from "@/lib/chat/thread";
 import { useCheckinSubject, useIngest } from "@/lib/state/ingest-flow";
 import { useAuth } from "@/lib/state/auth";
@@ -200,16 +201,15 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
     useRead(served ? backendHealthRead(served.pipeline.connector) : null),
   );
   const [h2h, setH2h] = useState<HeadToHeadDraft>({ id: "", arms: [] });
-  const [seededFor, setSeededFor] = useState<string | null>(null);
-  if (served && served.draft_id !== seededFor) {
-    setSeededFor(served.draft_id);
+  useSeededOnce(served?.draft_id ?? null, () => {
+    if (!served) return;
     setH2h({ id: `${served.slug}-h2h`, arms: [] });
     // Per step: a step's key is no patch path, so its fields commit from their own root.
     const stepSchemas = Object.values((served.setup_schema as FieldSchema).properties ?? {});
     setLaunch(
       Object.assign({}, ...stepSchemas.map((s) => writeOnlyDefaults(s))) as StartCheckinOptions,
     );
-  }
+  });
   const cellTerms = useCellTerms();
   // Start sits right below the refusal, so scrolling to it shows both.
   const startRef = useRef<HTMLButtonElement>(null);

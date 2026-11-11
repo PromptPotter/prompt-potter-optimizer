@@ -5,7 +5,7 @@ import { DendrogramStrip } from "./DendrogramStrip";
 import { ThetaCaveats } from "./AbilityInfo";
 import { CandidatesToolbar } from "./CandidatesToolbar";
 import { useCandidatesModel, type CandidatesModel } from "./useCandidatesModel";
-import { CardFrame, Chip, IconTree, Loading, ReadState } from "@/components/ui";
+import { CardFrame, Chip, HoverCard, IconTree, Loading, ReadState } from "@/components/ui";
 import { Criterion } from "@/components/shell/scoring/Criterion";
 import { ApplyScenarioPanel } from "@/components/candidates/ApplyScenarioPanel";
 import { setScoringMask } from "@/lib/scoring-mask";
@@ -26,7 +26,7 @@ function ForestToggle({ model: m }: { model: CandidatesModel }) {
           ? "Hide the lineage forest"
           : `Show the lineage forest — the full campaign tree, ${totalDescendants} descendant${totalDescendants === 1 ? "" : "s"}`
       }
-      title={`${showForest ? "Hide" : "Show"} the campaign tree — every cycle and fork side by side (${totalDescendants} descendant${totalDescendants === 1 ? "" : "s"})`}
+      title={`${showForest ? "Hide" : "Show"} the campaign tree`}
       onClick={() => m.setShowForest(!showForest)}
     >
       <span className="cand-forest-toggle">
@@ -42,20 +42,30 @@ function FitnessLegend({ model: m }: { model: CandidatesModel }) {
   if (legend.length === 0) return null;
   return (
     <div className="fitness-legend">
-      {legend.map((s) => (
-        <span key={s.key} title={s.hint?.(seriesCtx)}>
-          <span
-            className={cx(
-              "swatch",
-              s.kind === "line" && "line",
-              s.kind === "mark" && "mark",
-              s.mark?.filled && "filled",
-            )}
-            style={{ "--ink": `var(${s.ink(seriesCtx)})` } as CSSProperties}
-          />
-          {s.legend?.(seriesCtx)}
-        </span>
-      ))}
+      {legend.map((s) => {
+        const hint = s.hint?.(seriesCtx);
+        const item = (
+          <>
+            <span
+              className={cx(
+                "swatch",
+                s.kind === "line" && "line",
+                s.kind === "mark" && "mark",
+                s.mark?.filled && "filled",
+              )}
+              style={{ "--ink": `var(${s.ink(seriesCtx)})` } as CSSProperties}
+            />
+            {s.legend?.(seriesCtx)}
+          </>
+        );
+        return hint ? (
+          <HoverCard key={s.key} content={hint} focusable>
+            {item}
+          </HoverCard>
+        ) : (
+          <span key={s.key}>{item}</span>
+        );
+      })}
     </div>
   );
 }

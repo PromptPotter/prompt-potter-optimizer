@@ -900,7 +900,6 @@ import-graph script before and after; close each wave with `gate.py --only layer
 Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap.md) § Arrangeable workspace.
 
 - Two sources for one question: `wonOnTheta` reads `facts.elects_on`, `electedMetric` reads `dash.display_metric`.
-- An interval formatter beside `format.ts`: `shell/searchpoint/VerifyReading.tsx::band` prints its own `[lo, hi]` beside `format.ts::fmtLevelBand` / `fmtInterval`. Action: it reads `fmtLevelBand`. **Held:** no wave-3 chain owns `shell/searchpoint/` (webcell's one `band()` stopped at `components/compare/`). **Re-test:** `git grep -c "function band(" -- webapp` is 0.
 - `TrajectorySeriesView::SeriesHoverPopup` is a hand-built popover beside `ui/Popover`.
 - `EvidenceCharts` and `CostStrip` lost their hover readouts with the tooltip; a per-cell or per-round value they need opens in the DOM.
 - **Two lineage layouts are derived side by side**: `webapp/components/candidates/dendrogram.ts::dendrogram`
@@ -1190,10 +1189,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `user_store.py::read_accounts` are held by no test; `campaign_store/store.py:345-346 list_campaigns`
   swallows a `FileUnreadableError` into a log, so the campaign vanishes from every list. Action: a survey serves a bad row with its fault,
   and a test holds each catch. **Re-test:** a tenant tree with one unreadable dataset lists the rest.
-- `llm/pricing.py::CACHE_PATH` binds `rates.json` to the data root at import, while every other reader
-  resolves the root per call: a home set after the import reads and writes the first root's rates
-  (batch 6's review). Action: the path resolves per call, through the store's reader. **Re-test:**
-  `git grep -n "^CACHE_PATH = user_data_root()" -- promptpotter/infrastructure/llm/pricing.py`.
 
 **B. A refusal spelled per door.**
 - `shared/errors.py::LedgerUnreadableError` stands beside `FileUnreadableError`. **Rides with:** LAND.

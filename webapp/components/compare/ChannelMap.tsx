@@ -9,6 +9,7 @@ import {
 import type { RoundNodePos } from "@/components/candidates/forest-layout";
 import { Empty, ReadState } from "@/components/ui";
 import { shownData } from "@/lib/hooks/useRead";
+import { useSeededOnce } from "@/lib/hooks/useSeededOnce";
 import { useChannelView, useCompareSelection } from "@/lib/state/compare-selection";
 import { nodeOverlays, type CompareItem } from "@/lib/derivations";
 import { fmtUnit } from "@/lib/format";
@@ -53,13 +54,8 @@ export function ChannelMap({
     return root ? [root.facts.root] : [];
   }, [root, points, index]);
   // Compared as a string: `points` is rebuilt every evidence fetch, and re-seeding would drop opened lanes.
-  const seed = laneKeys.join("~");
-  const [seeded, setSeeded] = useState<string | null>(null);
-  if (seed && seed !== seeded) {
-    setSeeded(seed);
-    // `expanded` only: clearing the selection here leaves the head picker lit on nothing.
-    setExpanded(new Set(laneKeys));
-  }
+  // `expanded` only: clearing the selection here leaves the head picker lit on nothing.
+  useSeededOnce(laneKeys.join("~"), () => setExpanded(new Set(laneKeys)));
 
   const onLaneActivate = useCallback((key: string) => {
     setExpanded((prev) => {

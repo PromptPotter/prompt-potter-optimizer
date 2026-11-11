@@ -122,9 +122,9 @@ export function ValueList({
                       aria-label={`Permit ${value} for ${name}`}
                       title={
                         lastTick
-                          ? "The only permitted value — the axis is pinned here. Tick another first."
+                          ? "The only permitted value: tick another first"
                           : isInert && isOn
-                            ? "Permitted, but the current selection refuses it — untick to repair"
+                            ? "Refused by the current selection: untick to repair"
                             : isOn
                               ? "Permitted — untick to rule it out"
                               : "Ruled out — tick to permit it"

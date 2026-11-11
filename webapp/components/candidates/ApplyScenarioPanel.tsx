@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { commands, cycleAddress } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { FailureLine } from "@/components/ui";
+import { FailureLine, HoverCard } from "@/components/ui";
 import type { CyclePath } from "@/lib/ids";
 
 export function ApplyScenarioPanel({
@@ -70,15 +70,13 @@ export function ApplyScenarioPanel({
           Forked at round {at}. The sidebar follows the new branch as it comes up.
         </p>
       ) : (
-        <button
-          type="button"
-          className="cmp-button"
-          disabled={pending}
-          onClick={apply}
-          title={`Mint a branch at round ${at} carrying this criterion, keeping every round before it. Tagged operator_rewind in lineage.`}
+        <HoverCard
+          content={`Mint a branch at round ${at} carrying this criterion, keeping every round before it. Tagged operator_rewind in lineage.`}
         >
-          {pending ? "Applying…" : isLive ? `Stop & apply from round ${at}` : `Apply from round ${at}`}
-        </button>
+          <button type="button" className="cmp-button" disabled={pending} onClick={apply}>
+            {pending ? "Applying…" : isLive ? `Stop & apply from round ${at}` : `Apply from round ${at}`}
+          </button>
+        </HoverCard>
       )}
     </div>
   );

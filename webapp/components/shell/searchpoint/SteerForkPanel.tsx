@@ -15,7 +15,7 @@ import { useEntry } from "@/lib/hooks/useRegistry";
 import { phaseWalks, searchPoint } from "@/lib/derivations";
 import type { NodeSchemaReading, SelectedCandidate } from "@/lib/types";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
-import { Empty, FailureLine, ReadState, Said } from "@/components/ui";
+import { Empty, FailureLine, HoverCard, ReadState, Said } from "@/components/ui";
 import { LimitReconcile } from "./LimitReconcile";
 
 // The editor hands back the candidate's whole config with the edit laid in; the steer is the edit.
@@ -163,15 +163,16 @@ export function SteerForkPanel({
         <button type="button" className="steer-fork-cancel" onClick={onCancel} disabled={pending}>
           Cancel
         </button>
-        <button
-          type="button"
-          className="steer-fork-confirm"
-          onClick={confirm}
-          disabled={pending || checking || refused}
-          title="Mint a fork rooted at this searchpoint, carrying your edits. Tagged operator_steered in lineage."
-        >
-          {pending ? "Forking…" : isLive ? "Stop & steer-fork" : "Confirm steered fork"}
-        </button>
+        <HoverCard content="Mint a fork rooted at this searchpoint, carrying your edits. Tagged operator_steered in lineage.">
+          <button
+            type="button"
+            className="steer-fork-confirm"
+            onClick={confirm}
+            disabled={pending || checking || refused}
+          >
+            {pending ? "Forking…" : isLive ? "Stop & steer-fork" : "Confirm steered fork"}
+          </button>
+        </HoverCard>
       </div>
     </div>
   );

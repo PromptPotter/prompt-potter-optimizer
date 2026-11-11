@@ -32,7 +32,7 @@ export function RemoteControl() {
           className="remote-btn remote-drill"
           onClick={m.toOuter}
           aria-label="Return to the outer campaign"
-          title="Viewing an inner run's dashboard. Return to the outer campaign."
+          title="Return to the outer campaign"
         >
           <span aria-hidden="true">↑</span>
           <span className="remote-btn-label">outer</span>
@@ -57,7 +57,7 @@ export function RemoteControl() {
           onClick={m.skip}
           disabled={m.pending !== null}
           aria-label="Skip the rest of this searchpoint"
-          title="Cut the remaining samples of the searchpoint scoring now, accept the partial, and keep the cycle running. Marks the cycle babysat."
+          title="Accept the partial score, keep running; marks it babysat"
         >
           {SKIP_ICON}
           <span className="remote-btn-label">Skip</span>

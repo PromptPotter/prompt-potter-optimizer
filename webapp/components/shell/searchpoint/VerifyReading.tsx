@@ -4,16 +4,16 @@ import {
   VERIFY_STRATEGY_LABELS,
 } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
-import { fmtSigned, fmtUnit, unitCount } from "@/lib/format";
+import {
+  fmtLevelBand,
+  fmtLift,
+  fmtLiftInterval,
+  fmtSigned,
+  fmtUnit,
+  unitCount,
+} from "@/lib/format";
 import { Term } from "@/components/ui";
 import { PairedLift } from "@/components/shell/PairedLift";
-
-function band(
-  v: { ci_lo: number | null; ci_hi: number | null } | null,
-  fmt: (n: number) => string,
-): string {
-  return v?.ci_lo == null || v.ci_hi == null ? "" : ` [${fmt(v.ci_lo)}, ${fmt(v.ci_hi)}]`;
-}
 
 export function VerifyReading({ reading, unit }: { reading: Reading; unit: MeasuredUnit }) {
   const { fresh, recorded } = reading;
@@ -33,8 +33,10 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
           </dt>
           <dd>
             {fmtUnit("rate", recorded.accuracy?.value)} →{" "}
-            <strong>{fmtUnit("rate", fresh.accuracy?.value)}</strong>
-            {band(fresh.accuracy, (n) => fmtUnit("rate", n))} ({fmtSigned(reading.accuracy_increment, 2)})
+            <strong>
+              {fresh.accuracy ? fmtLevelBand("rate", fresh.accuracy) : fmtUnit("rate", null)}
+            </strong>{" "}
+            ({fmtSigned(reading.accuracy_increment, 2)})
           </dd>
         </div>
         <div>
@@ -57,10 +59,10 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
           </dt>
           <dd>
             <PairedLift reading={reading.vs_origin} unread="sentence">
-              {({ estimate }, shared) => (
+              {({ estimate, measurand }, shared) => (
                 <>
-                  <strong>{fmtSigned(estimate.value, 2)}</strong>
-                  {band(estimate, (n) => fmtSigned(n, 2))} on {shared} shared
+                  <strong>{fmtLift(measurand.unit, estimate.value)}</strong>{" "}
+                  {fmtLiftInterval(measurand.unit, estimate.ci_lo, estimate.ci_hi)} on {shared} shared
                 </>
               )}
             </PairedLift>

@@ -16,6 +16,7 @@ export * from "./Popover";
 export * from "./pressable";
 export * from "./Said";
 export * from "./SegmentedControl";
+export * from "./Select";
 export * from "./states";
 export * from "./Switch";
 export * from "./Term";

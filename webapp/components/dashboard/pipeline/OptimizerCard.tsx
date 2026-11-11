@@ -71,7 +71,7 @@ export function OptimizerCard() {
                 ? `Optimizer knobs — ${clashCount} clash${clashCount === 1 ? "" : "es"} in this config`
                 : "Optimizer knobs"
           }
-          title="Optimizer knobs — each node's configuration for this campaign"
+          title="Optimizer knobs"
           onClick={() => setKnobsOpen(true)}
         >
           <IconSliders />

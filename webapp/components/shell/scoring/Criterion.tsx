@@ -300,51 +300,39 @@ function DialRow({
   onWeight: ((weight: number) => void) | undefined;
   onRemove: (() => void) | undefined;
 }) {
-  // Commits on release: on Compare the mask is in the fetch key, so a drag is one read.
-  const [draft, setDraft] = useState(weight);
-  const [seen, setSeen] = useState(weight);
-  if (weight !== seen) {
-    setSeen(weight);
-    setDraft(weight);
-  }
-  const commit = () => {
-    if (draft !== weight) onWeight?.(draft);
-  };
   const Glyph = TERM_GLYPHS[term.name];
 
   return (
-    <div className={cx("criterion-row", draft === 0 && "off")}>
+    <div className={cx("criterion-row", weight === 0 && "off")}>
       <span className="criterion-glyph" aria-hidden="true">
         {Glyph ? <Glyph /> : null}
       </span>
       <Term className="criterion-name" content={term.description || term.name}>
         {term.name}
       </Term>
-      <input
+      {/* Commits on release: on Compare the mask is in the fetch key, so a drag is one read. */}
+      <CommitInput
         type="range"
         className="criterion-range"
         min={0}
         max={1}
         step={0.01}
-        value={draft}
+        value={String(weight)}
         disabled={!onWeight}
         aria-label={`${term.name} importance`}
-        onChange={(e) => setDraft(parseFloat(e.target.value))}
-        onPointerUp={commit}
-        onKeyUp={commit}
-        onBlur={commit}
+        onCommit={(raw) => onWeight?.(Number(raw))}
       />
       {onWeight ? (
         <CommitInput
           className="criterion-pct"
           inputMode="decimal"
-          value={pct(draft)}
+          value={pct(weight)}
           aria-label={`${term.name} importance, percent`}
           validate={(raw) => raw.trim() !== "" && Number(raw) >= 0 && Number(raw) <= 100}
           onCommit={(raw) => onWeight(Number(raw) / 100)}
         />
       ) : (
-        <span className="criterion-pct">{pct(draft)}</span>
+        <span className="criterion-pct">{pct(weight)}</span>
       )}
       <span className="criterion-unit">%</span>
       <span className="criterion-anchor">

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Empty, ReadState } from "@/components/ui";
+import { Empty, ReadState, Select, type SelectOption } from "@/components/ui";
 import { billText, ratePricedText } from "@/lib/derivations";
 import { fmtCompact } from "@/lib/format";
 import { seriesVar } from "@/lib/theme";
@@ -15,6 +15,10 @@ import {
 import { wordKeys } from "@/lib/api/words";
 
 const WINDOW_ORDER = wordKeys(ACTIVITY_WINDOW_INFO);
+const GROUP_BY_OPTIONS: readonly SelectOption<ActivityGroupBy>[] = [
+  { value: "model", label: "By Model" },
+  { value: "api_key", label: "By API Key" },
+];
 
 export function AccountActivityTab() {
   const [window, setWindow] = useState<ActivityWindow>("1d");
@@ -25,26 +29,19 @@ export function AccountActivityTab() {
     <>
       <div className="activity-window-row">
         <label htmlFor="activity-window-select">Window</label>
-        <select
+        <Select
           id="activity-window-select"
           value={window}
-          onChange={(e) => setWindow(e.target.value as ActivityWindow)}
-        >
-          {WINDOW_ORDER.map((id) => (
-            <option key={id} value={id}>
-              {ACTIVITY_WINDOW_INFO[id].label}
-            </option>
-          ))}
-        </select>
+          options={WINDOW_ORDER.map((id) => ({ value: id, label: ACTIVITY_WINDOW_INFO[id].label }))}
+          onChange={setWindow}
+        />
         <label htmlFor="activity-group-select">Color by</label>
-        <select
+        <Select
           id="activity-group-select"
           value={groupBy}
-          onChange={(e) => setGroupBy(e.target.value as ActivityGroupBy)}
-        >
-          <option value="model">By Model</option>
-          <option value="api_key">By API Key</option>
-        </select>
+          options={GROUP_BY_OPTIONS}
+          onChange={setGroupBy}
+        />
       </div>
       <ReadState
         read={read}

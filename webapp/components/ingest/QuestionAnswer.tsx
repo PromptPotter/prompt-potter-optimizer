@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CheckinQuestion, DraftPatch } from "@/lib/api/types";
+import { Select } from "@/components/ui";
 import { setIn } from "./SchemaFields";
 
 // A served question carries the patch path its answer is written at, and the answers it takes.
@@ -21,16 +22,15 @@ export function QuestionAnswer({
     <>
       {question.prompt}{" "}
       {question.options.length > 0 ? (
-        <select defaultValue="" onChange={(e) => submit(e.target.value)}>
-          <option value="" disabled>
-            — choose —
-          </option>
-          {question.options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
+        <Select
+          value={text}
+          placeholder="— choose —"
+          options={question.options.map((opt) => ({ value: opt, label: opt }))}
+          onChange={(opt) => {
+            setText(opt);
+            submit(opt);
+          }}
+        />
       ) : (
         <>
           <input
