@@ -73,7 +73,7 @@ campaign:
 
 ## Self-healing a node
 
-A node emits `diagnostics.warnings[]`; PromptPotter synthesizes a `RuntimeFailure` on the candidate, shown to the next round's generation; the trip rate is `optimization.degradation_threshold` (0 disables). Who heals which wound: `domain/results_health.py::classify_result`. TermNorm's `web_search` exposes `strategy` (`snippets` / `scrape` / `hybrid`) as an axis; each issues one metered query per match.
+A node emits `diagnostics.warnings[]`; PromptPotter synthesizes a `RuntimeFailure` on the candidate, shown to the next round's generation ([`../architecture.md`](../architecture.md) § Errors heal upward). Which advisories are fatal: `domain/results_health.py::classify_result`. TermNorm's `web_search` exposes `strategy` (`snippets` / `scrape` / `hybrid`) as an axis; each issues one metered query per match.
 
 ## Package cache — a containerized cell measures the agent, never the network
 

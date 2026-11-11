@@ -16,7 +16,7 @@
 
 ## The archive is not scoped by campaign
 
-**`measurements/` is ONE content-addressed tree per archive home, and it outlives the campaigns that filled it.** A row is filed under the dataset hash it measured, never a label or the paying campaign; the join is `CandidateFacts.reading.sp_hash` → `prompt_fields_id`. **Every archive path is built from `measurement_archive.py::ArchiveFile`** <!-- probe: git grep -cE "MEASUREMENTS_DIR\s*/" -- promptpotter == 0 -->; a dataset name in any other tenant path is one segment, `layout.py::dataset_id_prefix`.
+**`measurements/` is ONE content-addressed tree per archive home, and it outlives the campaigns that filled it.** A row is filed under the dataset hash it measured, never a label or the paying campaign; the join is `CandidateFacts.reading.sp_hash` → `prompt_fields_id`. **`MeasurementArchive` is the archive's only gateway**; programmatic reads go through `archive_queries.py`. **Every archive path is built from `measurement_archive.py::ArchiveFile`** <!-- probe: git grep -cE "MEASUREMENTS_DIR\s*/" -- promptpotter == 0 -->; a dataset name in any other tenant path is one segment, `layout.py::dataset_id_prefix`.
 
 ## Dataset content has three tiers, and only one is writable
 

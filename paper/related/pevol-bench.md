@@ -1,6 +1,6 @@
 # PEvol-Bench — Benchmarks for Algorithm Configuration
 
-**v1 draft (2026-04-29)** — definition only; instance assembly TBD. PromptPotter is the reference solver. Live trials log: [`benchmarks.md`](benchmarks.md).
+**v1 draft (2026-04-29)** — definition only; instance assembly TBD. PromptPotter is the reference solver. Live trials log: [`benchmarks.md`](../../docs/research/benchmarks.md).
 
 ## Framing
 

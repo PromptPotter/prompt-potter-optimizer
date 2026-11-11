@@ -19,7 +19,7 @@ Each entry is a boundary and why it sits there. Paths are under `promptpotter/` 
 - **Spend rides the per-cycle ledger, and the account is charged at the same send**: a cycle's ledger is run data a wipe takes, an account's bill is not. The run's spend book admits every paid send before it goes out, admitted or refused, never queued.
 - **`cost_usd` is provider-reported or nothing.** A call no provider priced is priced at our rate table, which every ceiling counts and no surface calls spent.
 - **One host-wallet gate: the host coupon.** It bounds what the box's keys pay for an account over its life; past it the account sends on its own key. What is left is a fold of charges by payer, never a counter. **Why lifetime, not daily:** a resetting cap is unbounded given patience.
-- **One rule names who pays a send:** `application/jobs/coupon.py::paying_key` — the account's own key, else the box's, else none. <!-- probe: git grep -cE "get_llm_client\(" -- promptpotter/*.py <= 3 -->
+- **One rule names who pays a send:** `application/jobs/coupon.py::paying_key` — the account's own key, else the box's, else none; `infrastructure/llm/registry.py::get_llm_client`'s callers are `application/jobs/coupon.py::keyed_client` and `connectors/harbor.py::_AgentModel` (the box's key, `CONNECTOR.cell_payer`). <!-- probe: git grep -cE "get_llm_client\(" -- promptpotter/*.py <= 3 -->
 - **Admitted whole, or refused; never clamped.** A run runs to what it was admitted at, and a run in flight holds its reserve against the next admission.
 - **The money axes are the campaign's**, so its live cycles share one ceiling; `rounds` and `wall_clock_s` are not money and are not shared.
 - **Deleting data never un-spends it.** Every cycle destroyer banks its spend before its rows go.
@@ -35,7 +35,7 @@ Each entry is a boundary and why it sits there. Paths are under `promptpotter/` 
 - **Attenuation, never escalation.** A delegate's capabilities are a subset of its delegator's, never the account's keys, checked at grant and at read, one level deep. Grants live in the identity zone, which a delegate cannot write.
 - **A delegate carries no spend bound of its own**: its delegator's coupon is its one bound. **Why:** a grant's spend ceiling had no writer, and where set it clamped each launch, never the delegate.
 - **Per-channel grants are not offered until channel identity is unspoofable.**
-- **One capability seam**, checked at dispatch; denial is 404. Removing a high rung leaves a bounded one; `campaign.lookahead` is its own rung because it spends the box's shared rate bucket and taints nothing.
+- **One capability seam**, checked at dispatch; denial is 404. Removing a high rung leaves a bounded one: `campaign.step` keeps the bounded controls and launches nothing; `campaign.lookahead` is its own rung because it spends the box's shared rate bucket and taints nothing.
 - **Babysit is provenance, not an unlock control.** An overlay edit outside what the campaign permits needs `campaign.babysit`, warns, stamps the fork, and grades every answer that cycle files C, which every clean-measurement consumer excludes.
 
 ## 0006 — Embeddable core and extras
@@ -54,7 +54,7 @@ Each entry is a boundary and why it sits there. Paths are under `promptpotter/` 
 ## 0008 — Content is identity
 
 - **A dataset is its content**; its name is a tenant's label. An answer is filed under `(config_key, sample_key)` and the dataset hash, never a position or a name.
-- **Optimizer state is a map of typed parts**, and a roster leaving a part open is refused at load.
+- **An individual is `{locus: value}`** over its pipeline's roster (`domain/opt_search_point.py::Locus`); a prompt node declaring no fields is refused at parse. **Optimizer state is a map of typed parts**, and a roster leaving a part open is refused at load.
 - **Cross-tenant measurement sharing is a policy, refused by default.** **Why:** a hit tells one account what another ran. A store keyed by what one account holds or decided (labels, the δ ruler) stays the tenant's.
 
 ## 0009 — Optimize or compare
@@ -70,7 +70,7 @@ Each entry is a boundary and why it sits there. Paths are under `promptpotter/` 
 ## 0010 — Every paid pass lean, stoppable, visible
 
 - **No pass scores more than `domain/scoring.py::MAX_PASS_ROWS`**; rows past a short confidence band buy no decision. A request for more is refused before a cell is sent, never silently cut.
-- **Every paid pass stops on the one stop** that pauses a campaign, from every entry point; a pause leaves it owed, never faulted, and its cells replay by content (§ 0008). A pass in flight is visible on the campaign, whichever door launched it.
+- **Every paid pass stops on the one stop** that pauses a campaign, or on its command's `cancel`, from every entry point; a pause leaves it owed, never faulted, and its cells replay by content (§ 0008). A pass in flight is visible on the campaign, whichever door launched it.
 
 ## 0011 — What outlives a release
 

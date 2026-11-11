@@ -98,11 +98,12 @@ Potter's, not the bench's: [`concepts/the-loop.md`](concepts/the-loop.md) § Esc
 ### Errors heal upward, tolerantly
 
 One failed measurement is innocent; repeats on one candidate are its fault; failure on every arm is an
-outage that halts (`StopReason.BACKEND_UNREACHABLE`). `application/scoring/classification.py::DegradationCheck`
-stops any optimizer's arm **`broken`** past `optimization.degradation_threshold` or on one fatal-classified
-sighting (`degradation_fatal_fastpath`); only the eliminator says **`eliminated`** (`domain/arms.py::Cut.kind`).
-**No retry of a (sample, candidate) pair**: a transport resend and the origin's one re-score after a transient
-abort are not second verdicts. An L1 validation failure reaches L1's own next call, not L2.
+outage that halts (`StopReason.BACKEND_UNREACHABLE`).
+`application/scoring/classification.py::DegradationCheck` stops any optimizer's arm **`broken`** past
+`optimization.degradation_threshold` (0 disables) or on one fatal-classified sighting
+(`degradation_fatal_fastpath`); only the eliminator says **`eliminated`** (`domain/arms.py::Cut.kind`).
+**No retry of a (sample, candidate) pair**: a transport resend and the origin's one re-score after a
+transient abort are not second verdicts. An L1 validation failure reaches L1's own next call, not L2.
 
 ### Dispatch hub
 

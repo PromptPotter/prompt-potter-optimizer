@@ -38,7 +38,6 @@ A step's offset is the line index in its course's own ledger. A fork is stored a
 
 - **`compact-archive` is the only verb that can destroy a measurement**; its `purge-cold --apply` is irreversible and `origin`/`parent` answers are never eligible.
 - `reset`, `land-data`, `close-admission` are the data-root verbs — [`../decisions.md`](../decisions.md) § 0011.
-- `evidence`, `cycles`, `machine-status`, `trail`, `price-head-to-head` are reads whose answer is in no file.
 - Nothing the loop decides reads a diagnostic (`seed-screen`, `probe-reasoning`, `noise-floor`). A paid diagnostic or a held-out pass holds a machine slot and an account reservation, refused `409 cycle_busy` / `409 machine_busy` rather than queued.
 
 ## Layout
@@ -80,7 +79,7 @@ Each file's contract is its model; this says only what the type cannot.
 | `log.md`, `review.md` | A projection of the ledger nothing reads back, rendered at each round close and once more at its drainer's close, so they name the stop. The per-node I/O is served at `GET …/rounds/{n}/audit`; no file holds it. |
 | `.runtime/ledger.jsonl` | The only surface saying which optimizer node RAN (`llm_call` records); an `arm` record carries the individual's whole lineage. |
 
-**The cycle runs on ledger records read over the fork chain**: the bank partition is appended at mint and a fork reads its parent's; the search SPACE's last record wins, the CELLS' first record wins; a backend revision drift is served, never refused.
+**The cycle runs on ledger records read over the fork chain**: the bank partition is appended at mint and a fork reads its parent's; `resolved_run`'s `read` (the search SPACE, `PipelineRead.declaration`) last wins, its `experiment` (the CELLS) first wins; a backend revision drift is served, never refused.
 
 ## Diagnosing a live or stuck run
 
@@ -97,7 +96,7 @@ A command is taken at the next **per-sample** checkpoint, so a pause asked mid-c
 
 `run_phase` is derived from the ledger and the producer lock, never written; `dashboard.json::declared_phase` is the runner's own record and says `running` forever after a `kill -9`. **Attached is the producer lock and nothing else**; `live` / `idle` / `wedged` is graded off the LEDGER's mtime, never `dashboard.json`'s (debounced). The reaper stamps `producer_vanished` only on a `running` cycle whose lock nobody holds.
 
-### Commands ride the ledger
+### No control file; the budget rides the ledger
 
 `.runtime/` holds no control file. The standing budget is the last `standing_budget` record on the cycle's ledger; its money axes are the campaign's, the last `campaign_ceiling` record on the ROOT's ledger.
 

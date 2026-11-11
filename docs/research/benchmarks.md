@@ -19,7 +19,7 @@ names the solver.
 - **Saturated** = near ceiling, so every optimizer ties. A saturated dataset is not tested, so **an
   absent dataset is usually saturated, not overlooked**.
 - **A low score is not admission either** — near zero has no reachable headroom.
-- **The band is an approximate, unproven estimate: a lower origin is better, but one at 60–70% still
+- **The band — an origin with room to climb above its floor — is an approximate, unproven estimate: a lower origin is better, but one at 60–70% still
   leaves room to climb** (operator, 2026-11-10).
 - **Floor** = the best constant answer on the same rows. A seat needs a settled gap over the floor
   ([`../operations/datasets.md`](../operations/datasets.md) § Selection criteria, 1b) — screen it

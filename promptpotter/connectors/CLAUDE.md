@@ -16,7 +16,7 @@ A bug whose cause sits in TermNorm's code is fixed in TermNorm, the one exceptio
 
 ## The answer shape — declared, never inferred
 
-A **ranked-label** connector yields `ground_truth: "<label>"`; a **verifier-graded** one yields `ground_truth: None` and is read off a `required_observation_keys` entry (`env_reward`). Ask `domain/scoring.py::is_verifier_graded`, never `predicted == NO_RESULT` <!-- probe: git grep -cE "predicted == NO_RESULT" -- promptpotter/*.py <= 3 -->. On a verifier-graded backend never invent a ranking or declare the node a `RANKER`. `Connector.measured_unit` declares what one row IS (`sample` | `cell`): no surface spells the literal beside a count, and nothing caps on measured counts, which jitter.
+A **ranked-label** connector yields `ground_truth: "<label>"`; a **verifier-graded** one yields `ground_truth: None` and is read off a `required_observation_keys` entry (`env_reward`). Ask `domain/scoring.py::is_verifier_graded`, never `predicted == NO_RESULT` <!-- probe: git grep -cE "predicted == NO_RESULT" -- promptpotter/*.py <= 3 -->. On a verifier-graded backend never invent a ranking or declare the node a `RANKER`. `Connector.measured_unit` declares what one row IS (`sample` | `cell`): no surface spells the literal beside a count (`domain/connector.py::unit_count`), and nothing caps on measured counts, which jitter.
 
 ## A connector is trusted code, not sandboxed
 

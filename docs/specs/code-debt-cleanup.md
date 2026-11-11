@@ -3,7 +3,7 @@
 **Only work that is blocked or multi-arc** — including every shape a pass noticed off its task (root
 `CLAUDE.md` `<situational-awareness>`). Anything one edit closes is fixed in the pass that found it; never the root of a patch just shipped (root `CLAUDE.md` `<root-fix>`). An item ships by
 being deleted. Each entry: `file::symbol` — the defect — the action — **Rides with:** the chain that
-reaches it ([`roadmap.md`](roadmap.md) § The cleanup chains (audit, 2026-11-10)), or **Held:** why
+reaches it ([`roadmap.md`](roadmap.md) § The cleanup chains (wave 4)), or **Held:** why
 none can yet (a digest, a decision, a mechanism, a served change, a survivor) — **Re-test:** the
 command or question that says it still stands. Run the re-test before acting.
 
@@ -515,6 +515,12 @@ row it closes.
 
 ### batch/26 · rk-opt
 
+- **The L4 task prompt points at a deleted doc**: `research/datasets/promptpotter-self/task.md:102`
+  names `docs/specs/l4-outer-loop.md` (deleted at batch/21), kept byte-equal so the next paid L4 run
+  replays. Action: the operator notes leave the prompt body; what stays points at
+  `docs/concepts/l4.md` § Cost and `roadmap.md` § L4 closure. **Rides with:** rk-opt (the re-key
+  window). **Re-test:** `git grep -n "l4-outer-loop" -- research/datasets/promptpotter-self/task.md`
+  is empty.
 - **A checkpoint's inputs are untyped dicts**: `run_records.py::ResumeCheckpointRecord.inputs_ref` /
   `data` are built by hand and read back by string key in each replayer, so a renamed key surfaces only
   at resume as `replay_error:` (N1: `KeyError: 'crowned'`). Action: each checkpoint kind declares a typed
@@ -893,6 +899,10 @@ row it closes.
   **Rides with:** faults 1. **Re-test:** `git grep -l "^import logging" -- promptpotter/application`.
 - **`shared/errors.py::LedgerUnreadableError` stands beside `FileUnreadableError`.** Action: it folds into
   `FileUnreadableError` at every raise, catch and import (13 files). **Rides with:** faults 2.
+- **The wound map has no home** (`docs/developer/self-healing-internals.md`, deleted at batch/21). Action:
+  its two-axis table and `classify_result`'s two row rules become `domain/results_health.py::classify_result`'s
+  docstring, from `git show d9012dc0e:docs/developer/self-healing-internals.md`. **Rides with:** faults.
+  **Re-test:** `git grep -n "NurseOwner" -- promptpotter/domain/results_health.py` is non-empty.
 
 ### batch/29 · xconn
 
@@ -901,26 +911,54 @@ row it closes.
   connector's probe serves the wire contract it speaks, and the check-in refuses a node config that
   contract rejects. **Rides with:** xconn 1. **Re-test:** a launch against a backend one wire rename
   behind fails at the probe, naming the key.
+- **A TermNorm schema edit lays keys only `llm_only` accepts**: `datasets/draft_patch.py::_authored_contract`
+  writes `answer_fields` and `response_format: json` on whichever node the edit names, and
+  `domain/pipeline_parsing.py::parse_pipeline_response` offers the `response_format` axis on every
+  `tunes_llm` node; TermNorm's `xconn` branch refuses both on `entity_profiling` and `llm_ranking`
+  (400 `wire_key_unknown`), and `top_p` on any node. Action: a node's served accepted keys bound what an
+  edit lays and what an axis offers, refused at the mint. **Rides with:** xconn 1, before TermNorm's
+  `xconn` reaches the box. **Re-test:** a check-in schema edit on `llm_ranking` mints and its first cell answers.
 - **A connector's endpoint is one per install**: `config/settings.py` `TERMNORM_URL`, `N8N_HARNESS_URL`;
   a second workflow edits `.env` and re-keys every banked cell of the first (`n8n.py::INSTRUMENT_KEY`
   hashes the URL). Action: operator config holds named endpoints per connector, and a dataset names one;
   the credential never leaves operator config ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md)
   § The credential rides the connector). **Rides with:** xconn 2. **Re-test:** two n8n datasets on two
   workflows both run, no `.env` edit between them.
-- **Cross-repo (TermNorm `backend-api`):** a `/version` endpoint, then bump
-  `connectors/termnorm.py::_EXPECTED_REVISION`; fold the revision pin into the measurement-cache key, so
-  a co-owned backend fix no longer replays stale results. **Rides with:** xconn 3. **Re-test:**
-  `_EXPECTED_REVISION` is `None`.
+- **The TermNorm probe reads `/status`, and no cache keys on the backend revision**: TermNorm's `xconn`
+  branch serves `GET /version` (`{revision, contract}`), while `connectors/termnorm.py` probes `/status`
+  and `::_EXPECTED_REVISION` is `None`, so a co-owned backend fix replays stale results. Action: the
+  probe reads `/version`, and the revision folds into the measurement-cache key. **Rides with:** xconn 3.
+  **Re-test:** `connectors/termnorm.py` probes `/version` and `_EXPECTED_REVISION` is not `None`.
+- **A moved capability or backend revision alone passes a resume**: it is a drift cause only when the
+  origin hash also mismatches (`jobs/mint.py::resolve_resume`, `::_revision_moved`). Action: a resume
+  refuses a moved capability or backend revision. **Rides with:** xconn 3. **Re-test:** a resume after a
+  backend revision bump is refused naming it.
 - **TermNorm words a warning's step into its message** (`research_pipeline.py`), though `StepWarning`
   carries the step as a field. Action: the message is the fault alone. **Rides with:** xconn 4.
   **Re-test:** `git grep -n "failed: {" -- backend-api/api` in the TermNorm checkout.
-- **TermNorm's live datasets (`llm_only`, `entity_profiling`, `llm_ranking`) are refused at parse**:
-  `direct_prompt` gains a `prompt_info` in the TermNorm checkout. **Rides with:** xconn 4. **Re-test:**
-  `python -m promptpotter new llm_only` parses its pipeline.
+- **TermNorm serves `direct_prompt` as a node no step runs**: it parses, but `/pipeline` lists it as an
+  llm `ranker` absent from `STEP_REGISTRY`, so PP reads its prompt fields as config axes. Action: in the
+  TermNorm checkout, the block leaves `nodes` for a top-level `prompts` section. **Rides with:** xconn 4.
+  **Re-test:** TermNorm's `pipeline.json` holds no `direct_prompt` under `nodes`.
 - **`infrastructure/llm/send_pacing.py::SendBudget` stops at the relay's door**: TermNorm's
   `_MAX_ATTEMPTS`, and terminus-2's `_query_llm` thrice over `connectors/harbor.py::_AgentModel`, retry
   on their own. Patched singly, each fix is one more copy; the remedy is the upstream redesign. **Rides
   with:** xconn 4. **Re-test:** `grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`.
+
+### batch/29 · mkey
+
+- **No inbound credential for the campaign surface**: `presentation/api/deps.py` resolves a session
+  cookie alone; the one bearer opens only `/site-records`, so a third party needs `PROMPTPOTTER_AUTH=off`.
+  Action: an account mints a named, scoped, revocable token (hash at rest, a SURVIVOR row of
+  `store/data_root.py::KINDS`); a bearer resolves through the one caller dependency, a new auth door
+  reviewed in `access-model.md` (`identity/bundle.py::identity_of_session` per carrier; `deps.py::open_caller`
+  splits the rate draw from the `Caller` build, the seam mcp 2 rides); stable-api § 8 shows
+  submit → poll → fetch with it. **Rides with:** mkey 1, 2. **Re-test:** a bearer reader besides
+  `require_site_records_token` in `promptpotter/presentation/api/`.
+- **The host's exemption ignores the door**: `jobs/quota.py::refuse_request_rate`
+  exempts the host from every bucket, and auth-off makes every caller the host (`deps.py::resolve_identity`),
+  so a leaked host bearer spends the box's keys unbounded. Action: the host is refused on a bearer door.
+  **Rides with:** mkey 2. **Re-test:** a host-account token minted at mkey 1 is refused.
 
 ### batch/29 · mcp
 
@@ -932,9 +970,12 @@ row it closes.
 - **The MCP door speaks stdio only, so a browser chat cannot reach it**:
   `promptpotter/presentation/mcp/server.py::serve_stdio` is the one transport. Action: serve
   `promptpotter/presentation/mcp/server.py::host_server` over Streamable HTTP, mounted on the API behind
-  its sign-in, a second transport of the one adapter; its auth follows
+  its sign-in, a second transport of the one adapter, on mkey's bearer; its auth follows
   [`access-model.md`](../operations/access-model.md). **Rides with:** mcp 2. **Re-test:** in claude.ai,
   a custom connector at the box's MCP URL answers `tools/list`.
+- **`main.py::API_ROUTERS` declares `APIRouter`s only**, so an ASGI mount (the webapp's `StaticFiles`,
+  MCP next) sits outside the declared gate and `_off_catalogue`. Action: a mount is a declared row.
+  **Rides with:** mcp 2. **Re-test:** `git grep -n "app.mount(" -- promptpotter/main.py` is empty.
 
 ### batch/30 · ws
 
@@ -961,10 +1002,6 @@ row it closes.
   reads the live declaration, because an `ArchiveEntry` records only `node_configs`. Action: a per-node
   output-key map filed with the answer; a replay reads the bank. **Rides with:** forks 2. **Re-test:**
   `git grep -n "dataset_pipeline(" -- promptpotter/application/scoring/measurement_log.py`.
-- **A moved capability or backend revision alone passes a resume**: it is a drift cause only when the
-  origin hash also mismatches (`jobs/mint.py::resolve_resume`). Action: a resume refuses a moved
-  capability or backend revision. **Rides with:** forks 3. **Re-test:** a resume after a backend revision
-  bump is refused naming it.
 - **`api_keys.json` holds account keys in plaintext at rest.** Action: encrypt under a box key, with its
   survivor migration. **Rides with:** forks 4. **Re-test:** `cat` one.
 

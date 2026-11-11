@@ -111,7 +111,7 @@ is capability, not a benchmark result.
 | **Runs in your editor** — a whole campaign from the terminal (`/potter-run`) | 🔴 | 🔴 | 🟢 |
 | **Tunes the whole pipeline** — model, temperature and node thresholds evolve with the prompt | 🟡 | 🟡 | 🟢 |
 | **Stops losers early** — budget to the questions that separate candidates (PoBB), scores on one scale | 🟡 | 🟡 | 🟢 |
-| **Self-healing** — an invalid proposal is taught to a *different* layer, not discarded ([internals](../developer/dispatch-hub.md)) | 🟡 | 🟡 | 🟢 |
+| **Self-healing** — an invalid proposal is taught back to the layer that owns its fix (L1's own next call; a refused L2 layout fires L3), not discarded ([internals](../architecture.md#errors-heal-upward-tolerantly)) | 🟡 | 🟡 | 🟢 |
 | **Carries knowledge across runs** — parameter impact, query difficulty, failure patterns and a block library survive the campaign | 🟡 | 🟢 | 🟢 |
 | **Every measurement is priced** — a cache-served result keeps its full cost on the ledger | 🔴 | — | 🟢 |
 | **Open & inspectable** — code on GitHub, a browser control plane, a campaign you pause, resume, rewind or fork | 🟡 | 🔴 | 🟢 |

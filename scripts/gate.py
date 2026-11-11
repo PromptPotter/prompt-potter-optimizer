@@ -8,6 +8,7 @@ import fnmatch
 import json
 import logging
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ import tempfile
 import threading
 import time
 import tomllib
+import urllib.parse
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -659,12 +661,12 @@ def _symbol_in(path: Path, symbol: str) -> bool:
         return any(fnmatch.fnmatchcase(n, symbol) for n in names) or symbol in tails
     if path.suffix in (".yaml", ".yml", ".toml"):
         return _key_path(_document(path), symbol.split("."))
+    word = _word(symbol)
+    if path.suffix == ".md":
+        return bool(re.search(rf"(?m)^#{{1,6}}[ \t].*(?<![\w-]){word}", _unfenced(path)))
     text = path.read_text(encoding="utf-8")
     if path.suffix in (".ts", ".tsx"):
         return _ts_holds(text, symbol)
-    word = _word(symbol)
-    if path.suffix == ".md":
-        return bool(re.search(rf"(?m)^#{{1,6}}[ \t].*(?<![\w-]){word}", _FENCE.sub("", text)))
     rules = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
     if symbol.startswith("--"):
         return bool(re.search(rf"(?<![\w-]){word}[ \t]*:", rules))
@@ -703,24 +705,33 @@ _HEADING = re.compile(r"(?m)^#{1,6}[ \t]+(.+?)[ \t#]*$")
 
 
 @cache
+def _unfenced(path: Path) -> str:
+    return _FENCE.sub("", path.read_text("utf-8"))
+
+
+@cache
 def _headings(path: Path) -> tuple[str, ...]:
-    text = _FENCE.sub("", path.read_text("utf-8"))
-    return tuple(h.replace("`", "") for h in _HEADING.findall(text))
+    return tuple(h.replace("`", "") for h in _HEADING.findall(_unfenced(path)))
 
 
-def _section_claims(rel: str, prose: str) -> list[str]:
+def _link_target(rel: str, cited: str) -> str:
+    """Where *cited*, a link path written in the doc *rel*, lands: a repo-relative POSIX path, or
+    `../…` when it leaves the repo. No filesystem is read, so a checkout's name and OS never vote."""
+    if cited.startswith("/"):
+        return posixpath.normpath(cited.lstrip("/") or ".")
+    return posixpath.normpath(posixpath.join(posixpath.dirname(rel), cited)) if cited else rel
+
+
+def _section_claims(rel: str, prose: str, tree: frozenset[str]) -> list[str]:
     """Each `[...](doc.md) § Name` names exactly one heading there: the longest prefix of the
     name ending on a word boundary that matches any heading must match only one."""
     failures = []
-    here = (REPO / rel).parent
     for target, name in _SECTION_CLAIM.findall(prose):
-        path = Path(os.path.normpath(here / target.partition("#")[0]))
-        if path.suffix != ".md" or not path.is_relative_to(REPO):
-            continue  # a sibling checkout's page, or a section of no markdown file
+        at = _link_target(rel, urllib.parse.unquote(target.partition("#")[0]))
+        if not at.endswith(".md") or at.startswith("../") or at not in tree:
+            continue  # a sibling checkout's page, a section of no markdown file, or `_link_claims`'s
+        path = REPO / at
         claim = f"  {rel}: `{target}` § {' '.join(name.split())}"
-        if not path.is_file():
-            failures.append(f"{claim}: no such file")
-            continue
         headings = _headings(path)
         words = " ".join(name.replace("`", "").split())
         cuts = [m.start() for m in re.finditer(r"(?<=\w)(?!\w)", words)]
@@ -735,6 +746,66 @@ def _section_claims(rel: str, prose: str) -> list[str]:
     return failures
 
 
+# A link's target: `[text](target "title")`, or a `[label]: target` definition.
+_LINK = re.compile(r"\]\(\s*<?([^)\s>]+)|^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*<?([^\s>]+)", re.MULTILINE)
+_SCHEME = re.compile(r"[A-Za-z][\w+.-]*://|mailto:")
+# The checkouts beside this one a link may enter; no clone can vouch for their pages.
+_SIBLING_CHECKOUTS = ("promptpotter-web", "TermNorm-excel")
+
+
+@cache
+def _anchors(path: Path) -> frozenset[str]:
+    """GitHub's heading ids: lower-cased, punctuation dropped, spaces dashed, a repeat suffixed `-N`.
+    Not modelled: emphasis or inline HTML inside a heading, setext headings, a `-N` id colliding."""
+    anchors = set(re.findall(r"<a\s+(?:id|name)=\"([^\"]+)\"", _unfenced(path)))
+    seen: dict[str, int] = {}
+    for heading in _headings(path):
+        words = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", heading).lower()
+        slug = re.sub(r"[^\w\- ]", "", words).replace(" ", "-")
+        anchors.add(f"{slug}-{seen[slug]}" if slug in seen else slug)
+        seen[slug] = seen.get(slug, 0) + 1
+    return frozenset(anchors)
+
+
+def _link_claims(rel: str, prose: str, tree: frozenset[str]) -> list[str]:
+    """Each relative link names a path in *tree* (the files git would commit, and their directories),
+    and its `#anchor` a heading when it is a doc; one leaving the repo enters a sibling checkout or
+    fails. Resolved repo-relative in POSIX space, so a worktree, CI and any OS agree."""
+    failures = []
+    for inline, defined in _LINK.findall(prose):
+        target = inline or defined
+        if _SCHEME.match(target):
+            continue
+        cited, _, anchor = target.partition("#")
+        cited = urllib.parse.unquote(cited.partition("?")[0])
+        claim = f"  {rel}: `{target}`"
+        if "\\" in cited:
+            failures.append(f"{claim}: a link path is spelled with `/`")
+            continue
+        at = _link_target(rel, cited)
+        if at.startswith("../"):
+            if at.split("/")[1] not in _SIBLING_CHECKOUTS:
+                failures.append(f"{claim} leaves the repo for no sibling checkout")
+            continue
+        if at != "." and at not in tree:
+            failures.append(f"{claim} names no tracked path")
+        elif anchor and at.endswith(".md") and anchor not in _anchors(REPO / at):
+            failures.append(f"{claim}: no heading has the id `{anchor}`")
+    return failures
+
+
+# The link check's own proof, run with it: a link red (True) or green beside the root CLAUDE.md.
+_LINK_PROOF = {
+    "[deleted](gone.md)": True,
+    "[web](../promptpotter-web/BRAND.md)": False,
+    "[one ../ too many](../../promptpotter-web/BRAND.md)": True,
+    "[no heading](#no-such-heading)": True,
+    "[defined]: gone.md": True,
+    "[out by this repo's name](../prompt-potter-optimizer/CLAUDE.md)": True,
+    "[backslash](docs\\architecture.md)": True,
+}
+
+
 def _doc_claims(_: Selection) -> Outcome:
     code, claim_docs = _on_disk(*_CLAIM_DOCS)
     if code:
@@ -746,15 +817,22 @@ def _doc_claims(_: Selection) -> Outcome:
     if code:
         return code, listed[0]
     tails: dict[str, list[Path]] = {}
+    tree = set(listed)
     for path in listed:
         parts = path.split("/")
         for i in range(len(parts)):
             tails.setdefault("/".join(parts[i:]), []).append(REPO / path)
-    failures: list[str] = []
+        tree.update("/".join(parts[:i]) for i in range(1, len(parts)))
+    linkable = frozenset(tree)
+    failures: list[str] = [
+        f"  the link check calls `{link}` {'green' if red else 'red'}"
+        for link, red in _LINK_PROOF.items()
+        if bool(_link_claims("CLAUDE.md", link, linkable)) != red
+    ]
     for rel in claim_docs:
         # A cited path is relative to the doc, or the tail of ONE tracked path: `runner/round.py`.
         here = (REPO / rel).parent
-        prose = _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8"))
+        prose = _unfenced(REPO / rel)
         for span in _BACKTICKED.findall(prose):
             for cited, symbol in _SYMBOL_CLAIM.findall(span):
                 claim = f"  {rel}: `{cited}::{symbol}`"
@@ -786,10 +864,11 @@ def _doc_claims(_: Selection) -> Outcome:
     ]
     probes: list[tuple[str, ...]] = []
     for rel in every_doc:
-        unfenced = _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8"))
-        failures += _section_claims(rel, unfenced)
-        # A probe quoted in code is an example, never one to run.
+        unfenced = _unfenced(REPO / rel)
+        failures += _section_claims(rel, unfenced, linkable)
+        # A probe or link quoted in code is an example, never one to run.
         prose = _BACKTICKED.sub("", unfenced)
+        failures += _link_claims(rel, prose, linkable)
         for opened in _PROBE_OPENS.finditer(prose):
             if not (parsed := _PROBE.match(prose, opened.start())):
                 line = prose[opened.start() :].partition("\n")[0]

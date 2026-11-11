@@ -25,7 +25,7 @@ Not to be re-investigated: **GPQA Diamond / Main** (top of band, N=198); **MMLU-
 
 **Deferred, pending a recon at the bar:** **AA-Omniscience** (`ArtificialAnalysis/AA-Omniscience-Public`; floor risk); **the Popper task families** ([arXiv 2005.02259](https://arxiv.org/abs/2005.02259)); **Nemotron-PII** (`nvidia/Nemotron-PII`; needs a span-F1 matcher).
 
-A trialed dataset outside its band is recorded rejected in benchmarks.md with the empirical reason, and its tenant definition and recipe are deleted.
+A trialed dataset rejected for a measured reason (no headroom over its floor, saturation, a broken grader) is recorded in benchmarks.md with that reason, and its tenant definition and recipe are deleted.
 
 ### What a cell costs
 

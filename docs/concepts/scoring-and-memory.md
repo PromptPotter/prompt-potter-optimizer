@@ -45,7 +45,7 @@ rows ([`../research/benchmarks.md`](../research/benchmarks.md) § The winner's o
 line that closed no round declared none.
 
 **The graded result is the CAMPAIGN's, never a cycle's**: the fold of its line's ledgers. **When passes are
-sent is the campaign's `bench_trigger`; the default (`manual`) sends none.** Where the bench stands is ONE
+sent is the campaign's `bench_trigger`; the default (`manual`) sends none**, and a Compare run's `manual` reads `at_end` (`jobs/mint.py::declare`). Where the bench stands is ONE
 served status every door reads.
 
 ## Rescore-on-load
@@ -72,8 +72,8 @@ formula — fork, never swap.
   divides by the SEARCH's share alone. **A controlled arm's ceiling caps this one**: arms of one head-to-head
   may replay each other's cells, so a ceiling on the bill would hand whichever arrived second a larger search.
 
-**Either cost lands in a bucket named for who spent it** (Connector / Optimizer / Judge / Diagnostic /
-Bench). A bucket is never an exemption: a `bill` ceiling
+**Either cost lands in a bucket named for who spent it** (`optimizer` / `backend` / `judge` / `diagnostic` /
+`bench`). A bucket is never an exemption: a `bill` ceiling
 counts all five, a `search_incurred` one counts the search kinds alone.
 
 **Two caches, and the word only belongs to one.** A **replay** — our archive answered, nothing billed — is a

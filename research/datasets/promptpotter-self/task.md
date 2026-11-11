@@ -99,4 +99,4 @@ The committed inner config (``panel/dataset.yaml::panel`` — the source of trut
 inner geometry; don't restate its numbers here) keeps each outer "sample" at
 order-of-minutes. Trade-off is signal quality — bump sample count + rounds before
 publication runs. Cost shape + what remains:
-``docs/concepts/l4.md`` § Cost + ``docs/specs/roadmap.md`` § L4 closure.
+``docs/specs/l4-outer-loop.md`` § Cost + § Open.
