@@ -23,7 +23,7 @@ assert HARD_SAMPLE_ORDER_LABELS.keys() == set(get_args(HardSampleOrder))
 # How much evidence a cell buys, never what it is: out of every key, so a deepened cell CONTINUES
 # its campaign. Named as `runner/inner/tasks.py::InnerTaskSpec` names them, which subtracts the same set.
 DEPTH_FIELDS: frozenset[str] = frozenset(
-    {"n_rounds", "depth_nodes", "lives", "n_samples", "n_samples_origin", "n_samples_bench"}
+    {"n_rounds", "depth_nodes", "n_samples", "n_samples_origin", "n_samples_bench"}
 )
 
 

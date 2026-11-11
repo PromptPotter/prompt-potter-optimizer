@@ -1351,3 +1351,63 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   itself (its log line beside the act went). Action: split `health`'s account dependency; the callback
   calls one function. **Held:** `health`'s account split (M22, [`roadmap.md`](roadmap.md) § Host assistant).
   **Re-test:** `git grep -n "record_refusal" -- promptpotter/presentation` is empty.
+- **The committed L4 panel resolves only on this account**: `research/datasets/promptpotter-self/panel/dataset.yaml`
+  seats `hotpotqa-distractor` and `legalbench-fods`, account definitions no committed tier holds, so
+  the box refuses the panel at init. Action: commit both to the research tier, or keep the README's
+  prerequisite. **Held:** the operator's call (a research-tier definition gets `defaults.yaml` laid
+  under it, a tenant one does not). **Re-test:** `promptpotter-self/panel` inits on a fresh account.
+- **An outer early cut can skip a benchmark**: `intelligence/rasch.py::build_round_order` orders a round's cells by
+  δ, not by benchmark, so an arm PoBB cuts at 4 of 6 cells may read none of one benchmark's seats.
+  Action: draw the outer round stratified by `Sample.measured_dataset` (potter's `_strata` exists).
+  **Held:** a decision on the outer draw. **Re-test:** a cut arm's cells span every benchmark.
+- **The inner measurand differs by benchmark**: justlogic seats inherit `justlogic/family.yaml`'s
+  `per_cell` token discount while hotpotqa and legalbench score raw `em_match` / `label_match`, and
+  hotpotqa's `escalation.l1_patience: 5` differs from the others; `runner/inner/tasks.py::_lever`
+  leaves knobs out, so nothing flags it. Action: one inner measurand and one ladder across seats, or a
+  refusal. **Held:** a decision. **Re-test:** the three definitions' `scoring` and `escalation` blocks.
+- **Merge hazard at landing**: MAIN's uncommitted `promptpotter-self/panel/dataset.yaml`,
+  `openapi.generated.json` and `types.generated.ts` overlap `arc/l4-robust2`. Action: regenerate the
+  specs and types after the merge. **Held:** the landing. **Re-test:** `git status` on MAIN.
+- **Two builders of one sandbox store**: `infrastructure/store/stores.py::inner_sandbox_store` and
+  `runner/inner/spawn.py::sandbox_stores`. Action: one builder from (stores, hop). **Held:** none
+  claims it. **Re-test:** `git grep -n "def inner_sandbox_store\|def sandbox_stores" -- promptpotter`.
+- **Two fits of one reading**: `runner/measurement.py::measure_population` and
+  `scoring/selection.py` both fit `candidate_abilities` over the same rows. Action: the election takes
+  the measured abilities. **Held:** none claims it. **Re-test:** `git grep -n "candidate_abilities(" -- promptpotter`.
+- **A sandbox writes account labels**: an inner mint relabels the account's dataset label from inside
+  a sandbox (`jobs/mint.py::mint`, `tenant_datasets.relabel`); benign only while `dataset_hash` covers
+  the whole dataset. Action: a sandboxed mint writes no account label. **Held:** none claims it.
+  **Re-test:** an inner mint leaves the account's label file untouched.
+- **A ± that measures nothing**: `seed-screen`'s `margin_se` reads 0.000 over identical temperature-0
+  passes, which carry no row-sampling variance, and the panel quotes it as a precision. Action: an SE
+  over row resamples, or none served. **Held:** none claims it. **Re-test:** a temperature-0 screen's
+  `margin_se`.
+- **The outer prompt ranks on θ, not the scored term**: Shape: `potter/dispatch/injections/panels.py`'s
+  "weakest first" and "worse than the origin beyond their own error bar" read `mean_round_delta`, which
+  is in-sample and scores nothing, because `held_out_lift` carries no SE. Action: serve the held-out
+  lift's SE (a binomial 20-row bench a pass) and rank and separate on it; θ stays a column.
+  **Held:** a served SE. **Re-test:** `git grep -n "mean_round_delta" -- promptpotter/application/optimizers/potter/dispatch/injections/panels.py`.
+- **"Which benchmark a row measures" is spelled three ways**: Shape: `runner/overlap.py` (`or filed`),
+  `potter/members.py::_strata` (`or ""`), `domain/verification.py` (`.get`, None = filed); and
+  `origin_panel.py::origin_panel(scope_of=…)` / `BenchScope` partition by benchmark under the word
+  `RulerScope` owns. Action: one `Sample` reader of its benchmark; `scope_of` → `benchmark_of`.
+  **Held:** the rename's digest. **Re-test:** `git grep -n "measured_dataset or\|scope_of=" -- promptpotter`.
+- **`AbilityScale` wraps one field**: Shape: `bench/difficulty.py::AbilityScale` holds `judging` alone,
+  and its `caveat` / `frontier` belong on `JudgingRuler`. Action: fold the wrapper. **Held:** none
+  claims it. **Re-test:** `git grep -n "class AbilityScale" -- promptpotter`.
+- **Nothing keeps an L4 edit L4-only**: Shape: nothing refuses a mark in `runner/inner/narrative.py` or
+  an optimizer import of it, and potter's `panels.py` reaches `OuterSampleProxies`, `outer_proxies_of`,
+  `inner_facts_of` and `InnerCellFacts`, so an edit to the scored term re-keys every potter campaign.
+  Action: an import-time check in `runner/inner/tasks.py::measurement_modules`' module that no estimator
+  module is a shaper; the injection reads L4 cells through the connector's served terms. **Held:** the
+  re-key. **Re-test:** `git grep -n "domain.l4" -- promptpotter/application/optimizers`.
+- **`floor_reason` and the bench read different rounds**: Shape: `domain/l4/proxies.py::floor_reason`
+  reads `result.rounds`, the last cycle only, while the bench and `n_rounds_after_origin` read the line
+  (`runner/cycle_close.py`), so after a fork "no proposal reached a cell" is judged without the rounds
+  the rebase discarded. Action: `CycleResult` carries the line's spent rounds (`LineSpan.own`).
+  **Held:** a `CycleResult` reshape. **Re-test:** a forked inner line whose pre-fork rounds all spoiled.
+- **The abort knob and the floor disagree**: Shape: `potter/knobs.py`'s `terminate_capability` names
+  an unrecoverable upstream fault as an abort's intended use, while `domain/l4/proxies.py::floor_reason`
+  floors every `OPTIMIZER_ABORT` as prompt-owned, one after a real held-out gain included. Action: an
+  abort carries who owns it, and only a prompt-owned one floors. **Held:** a decision. **Re-test:** an
+  inner run aborted on a backend fault reads `held_out_lift` -1.

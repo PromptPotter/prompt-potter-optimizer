@@ -67,7 +67,7 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
-from promptpotter.application.runner.inner.connector import measurement_modules
+from promptpotter.application.runner.inner.tasks import measurement_modules
 from promptpotter.config.paths import (
     PROJECTS_DIR,
     default_projects_root,

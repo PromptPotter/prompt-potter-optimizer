@@ -9,8 +9,7 @@ from pydantic import Field
 from promptpotter.domain.arms import Cut
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap
-from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING
-from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import GradedCell, PipelineData
@@ -107,9 +106,12 @@ def inner_facts_of(pipeline: PipelineData) -> InnerCellFacts | None:
     )
 
 
-def held_out_lift_of(pipeline: PipelineData) -> float | None:
-    value = pipeline.cell_report.get("held_out_lift")
-    return None if value is None else float(value)
+def outer_proxies_of(pipeline: PipelineData) -> OuterSampleProxies | None:
+    """The scored term's one reader; ``None`` on a row the recursion did not write."""
+    report = pipeline.cell_report
+    if INNER_FACTS_KEY not in report:
+        return None
+    return OuterSampleProxies.model_validate({key: report[key] for key in OUTER_PROXY_KEYS})
 
 
 def _origin_headroom(result: CycleResult) -> float | None:
@@ -233,17 +235,9 @@ def mean_parent_level_se(result: CycleResult) -> float | None:
     return float(sum(ses) / len(ses))
 
 
-def _is_evidential(rnd: RoundResult) -> bool:
-    """A round that lost its candidates to an empty optimizer response is missing data, not a bad mutation."""
-    panel = rnd.panel.values()
-    if not panel:
-        return not rnd.closed_state.lost_to_empty_response()
-    return not all(
-        isinstance(arm, Cut)
-        and arm.kind == "invalid"
-        and any(vf.reason == PARSE_FAILURE_TOOLING for vf in arm.validation_failures)
-        for arm in panel
-    )
+def _spoiled(rnd: RoundResult) -> bool:
+    """No proposal reached a cell, whatever the reply's failure: an empty panel is spoiled too."""
+    return all(isinstance(arm, Cut) and arm.kind == "invalid" for arm in rnd.panel.values())
 
 
 def no_evidence_reason(result: CycleResult) -> str | None:
@@ -267,12 +261,15 @@ def no_evidence_reason(result: CycleResult) -> str | None:
 
 def floor_reason(result: CycleResult) -> str | None:
     """Optimizer-prompt-OWNED, so FLOORED rather than excluded: it is reproducible, hence evidence."""
+    if result.stop_reason is StopReason.OPTIMIZER_ABORT:
+        return "its optimizer prompt terminated the inner campaign (optimizer_abort)"
     if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
         return None
-    if result.rounds and not any(_is_evidential(r) for r in result.rounds):
+    spent = [r for r in result.rounds if spent_on_line(r.round, None)]
+    if spent and all(_spoiled(r) for r in spent):
         return (
-            f"every one of its {len(result.rounds)} L1 round(s) lost its candidates to an "
-            "empty optimizer response"
+            f"no proposal of its {len(spent)} L1 round(s) reached a cell: a reply that yielded "
+            "none, or only invalid edits"
         )
     return None
 

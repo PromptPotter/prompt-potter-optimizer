@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench import difficulty
-from promptpotter.application.intelligence import rasch
 from promptpotter.application.runner.inner.spawn import (
     inner_cell_envelope_s,
     inner_cell_hop,
@@ -18,11 +16,9 @@ from promptpotter.application.runner.inner.tasks import (
     parse_panel,
     parse_resolved,
 )
-from promptpotter.application.scoring import metrics, selection
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cells import Seat
-from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import (
     INNER_CELL_TERMS,
@@ -30,11 +26,10 @@ from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
 )
 from promptpotter.shared.errors import PayloadInvalidError
-from promptpotter.shared.hashing import module_source_digest, stable_hash
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from types import ModuleType
 
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.pipeline_params import PipelineParams
@@ -46,12 +41,6 @@ logger = logging.getLogger(__name__)
 
 # A RESOURCE ceiling (peak RSS, one shared provider key), never a scientific one.
 MAX_CELLS_IN_FLIGHT = 4
-
-
-def measurement_modules() -> tuple[ModuleType, ...]:
-    """Never ``APP_VERSION``: it voids every banked cell on each release, measurement changed or not."""
-    # The δ scale: how it is fit, and what each cell reads it on.
-    return (rasch, metrics, selection, proxies, difficulty)
 
 
 def _inner_cells(stores: Stores, experiment: Mapping[str, Any] | None) -> InnerCells:
@@ -73,7 +62,7 @@ def _identity_config(
 ) -> dict[str, dict[str, Any]]:
     """What reads every cell's number alike; what measures ONE cell is in its pin (`_instrument`)."""
     cells = _inner_cells(stores, experiment)
-    return {cells.chain[0]: {INNER_ORIGIN_KEY: module_source_digest(*measurement_modules())}}
+    return {cells.chain[0]: {INNER_ORIGIN_KEY: cells.estimator}}
 
 
 def _instrument(cells: InnerCells, cell: Seat) -> str:

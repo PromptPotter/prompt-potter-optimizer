@@ -308,7 +308,7 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.ruler import CellScopes, ThetaCaveat
+from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.run_records import (
     CampaignCeilingRecord,
     ComparisonExit,
@@ -4257,12 +4257,11 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         Sample(id=i, query=f"q{i}", ground_truth=None, measured_dataset=ds)
         for i, ds in enumerate("aabb")
     ]
-    scopes = CellScopes.of(seated, "outer")
     assert origin_panel(
         [0, 1],
         line_cells=range(4),
         poolable=range(4),
-        scope_of={s.id: scopes.by_key[s.key] for s in seated},
+        scope_of=dict(enumerate("aabb")),
         size=2,
     ) == [0, 1, 2, 3], "a scope the line drew and C0 never sat was left off the panel"
     on_bench = pair_on_bench(

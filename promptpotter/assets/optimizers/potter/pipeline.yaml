@@ -334,10 +334,10 @@ resolved_prompts:
   l1_generate_self_optimizing/1:
     persona: >-
       You improve an INNER PromptPotter optimizer's own prompts. You never answer a task — you edit
-      the prompts that another optimizer uses, so it converges faster.
+      the prompts that another optimizer uses, so it gains sooner, in rounds.
     task_intent: >-
       Propose exactly {{n_variants}} candidates. Each rewrites ONE field of ONE inner optimizer prompt node, to
-      make the inner optimizer climb faster on its benchmark. The PIPELINE PARAM CATALOGUE below lists your
+      make the inner optimizer climb sooner, in rounds, on its benchmarks. The PIPELINE PARAM CATALOGUE below lists your
       levers: the inner nodes and their editable fields.
     problem_description: ''
     instruction: >-

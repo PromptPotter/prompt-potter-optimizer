@@ -12,8 +12,12 @@ from typing import TYPE_CHECKING, Any
 from pydantic import Field, ValidationError, model_validator
 
 from promptpotter import connectors
+from promptpotter.application.bench import difficulty
 from promptpotter.application.datasets.authored import dataset_campaign_block
+from promptpotter.application.intelligence import rasch
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
+from promptpotter.application.runner.inner import narrative
+from promptpotter.application.scoring import metrics, selection
 from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.campaign_config import (
@@ -21,11 +25,11 @@ from promptpotter.domain.campaign_config import (
     NODE_OVERLAYS,
     ArmGateMode,
     CampaignConfig,
-    LivesConfig,
     OptimizationConfig,
     merge_config_layers,
 )
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
+from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
@@ -43,9 +47,16 @@ from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_pipeline,
     resolve_dataset,
 )
-from promptpotter.shared.errors import CellUnscoreableError
+from promptpotter.shared.errors import (
+    CellUnscoreableError,
+    DatasetAccessError,
+    PayloadInvalidError,
+)
+from promptpotter.shared.hashing import module_source_digest
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -64,7 +75,6 @@ class InnerBenchmarkConfig(FrozenModel):
     inner_nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
     # Held OUT of the identity: how much evidence a cell buys, never what it is.
     inner_depth_nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
-    inner_lives: LivesConfig | None = None
     # At the file default, identical optimizer prompts generate different candidates and the swing swamps the outer proxy.
     inner_optimizer_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
 
@@ -157,7 +167,14 @@ class InnerTasks(FrozenModel):
         cfg = self.inner_benchmark_config
         by_dataset: dict[str, InnerCell] = {}
         for name in sorted(self.datasets):
-            dataset = resolve_dataset(stores, name)
+            try:
+                dataset = resolve_dataset(stores, name)
+            except DatasetAccessError as missing:
+                seats = ", ".join(cell.id for cell in self.tasks if self.dataset_for(cell) == name)
+                raise PayloadInvalidError(
+                    f"seat(s) {seats} measure {name!r}, which no tier this account reads holds",
+                    code="pipeline_config_invalid",
+                ) from missing
             campaign = dataset_campaign_block(dataset)
             opt = CampaignConfig.model_validate(campaign).optimization
             identity = select_optimizer(
@@ -184,6 +201,7 @@ class InnerTasks(FrozenModel):
                 seat.id: self._seat_spec(by_dataset[self.dataset_for(seat)].treatment, seat)
                 for seat in self.tasks
             },
+            estimator=module_source_digest(*measurement_modules()),
         )
 
     def _seat_spec(self, treatment: str, cell: Seat) -> InnerTaskSpec:
@@ -199,7 +217,6 @@ class InnerTasks(FrozenModel):
             n_rounds=cell.n_rounds or cfg.max_inner_rounds,
             nodes=cfg.inner_nodes,
             depth_nodes=cfg.inner_depth_nodes,
-            lives=cfg.inner_lives,
             inner_model=cell.inner_model,
             inner_provider=cell.inner_provider,
             inner_route_order=cell.inner_route_order,
@@ -288,7 +305,6 @@ class InnerTaskSpec(FrozenModel):
     n_rounds: int
     nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
     depth_nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
-    lives: LivesConfig | None = None
     inner_model: str | None = None
     inner_provider: str | None = None
     inner_route_order: list[str] | None = None
@@ -301,6 +317,12 @@ class InnerTaskSpec(FrozenModel):
 
 
 assert set(InnerTaskSpec.model_fields) >= DEPTH_FIELDS
+
+
+def measurement_modules() -> tuple[ModuleType, ...]:
+    """Never ``APP_VERSION``: it voids every banked cell on each release, measurement changed or not."""
+    # The δ scale (how it is fit, what each cell reads it on) and what the outer model reads.
+    return (rasch, metrics, selection, proxies, difficulty, narrative)
 
 
 def is_self_optimization(backend_type: str) -> bool:
@@ -379,6 +401,8 @@ class InnerCells:
     by_dataset: Mapping[str, InnerCell]
     # Each seat's spec, by id: a pinned seat carries no depth, so it is read here, never off the pin.
     specs: Mapping[str, InnerTaskSpec]
+    # Read once per resolve: the outer identity and every cell's campaign id key on this one value.
+    estimator: str
 
     def held(self, cell: Seat) -> InnerCell:
         return self.by_dataset[self.spec(cell).inner_dataset]
@@ -481,7 +505,8 @@ def inner_instrument_config(
     """Caps are LIFTED: one tripping on measured tokens truncates nondeterministically; the outer book admits every send."""
     opt_update: dict[str, Any] = {
         "budget": Budget(usd=None, tokens=None, rounds=spec.n_rounds, wall_clock_s=None),
-        "lives": spec.lives,
+        # No lives: the round budget is the width of the area its lift is read over.
+        "lives": None,
         # Each gate's await is unbounded, and an instrument cannot ask a human anything.
         "origin_gate": "off",
         # Under 2PL θ is in units of 1/a and each cycle graduates on its OWN CV, so the panel would average a mixture of scales.

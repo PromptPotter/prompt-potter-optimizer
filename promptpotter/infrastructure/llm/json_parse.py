@@ -73,7 +73,7 @@ class OptimizerPromptParseError(RuntimeError):
 
     @property
     def is_empty(self) -> bool:
-        """Downstream DELETES an L4 round on this: ``finish_reason="length"`` is never degradation."""
+        """Downstream charges no candidate on this: ``finish_reason="length"`` is never degradation."""
         if self.first_finish_reason == "length":
             return False
         if self.retry_kind == RETRY_CLEAN_REASK and self.reproduced:

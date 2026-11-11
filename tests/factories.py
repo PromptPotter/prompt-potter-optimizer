@@ -862,7 +862,7 @@ def inner_cells(*optimizers: str, dataset: str | None = None) -> InnerCells:
             n_rounds=1,
         )
     cells = tuple(Seat(kind="seat", id=name, inner_dataset=on[name]) for name in optimizers)
-    return InnerCells(cells=cells, by_dataset=by_dataset, specs=specs)
+    return InnerCells(cells=cells, by_dataset=by_dataset, specs=specs, estimator="e")
 
 
 def pobb_knobs(**bend: Any) -> PoBBKnobs:

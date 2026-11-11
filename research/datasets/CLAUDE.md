@@ -10,4 +10,4 @@ campaign shows only because it exists. The install's `defaults.yaml` lays under 
 
 ## L4 — `promptpotter-self`
 
-Its `pipeline` declares no nodes: the connector serves the graph from the manifest the panel's cells run, so any preset can be an inner. The inner instrument is `justlogic/d234`; each depth cut has its own δ scale, so a new cut is a new `justlogic/dNNN/`. `panel/` is the instrument, `e2e/` the browser walk's degenerate fixture (`webapp/e2e/spend/l4.spec.ts`).
+Its `pipeline` declares no nodes: the connector serves the graph from the manifest the panel's cells run, so any preset can be an inner. The inner instruments are `panel/`'s seats, each dataset its own δ scale, so a new cut is a new definition (`justlogic/dNNN/`). `panel/` is the instrument, `e2e/` the browser walk's degenerate fixture (`webapp/e2e/spend/l4.spec.ts`).

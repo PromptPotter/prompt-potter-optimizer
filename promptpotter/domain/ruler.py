@@ -4,7 +4,7 @@ from collections import Counter
 from collections.abc import Collection, Iterable, Mapping
 from enum import StrEnum
 from statistics import NormalDist
-from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
+from typing import Annotated, Literal, NamedTuple
 
 from pydantic import Field
 
@@ -12,9 +12,6 @@ from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.worded import Worded
-
-if TYPE_CHECKING:
-    from promptpotter.domain.sample import Sample
 
 # A bare δ is 1PL (a ≡ 1); a ``(δ, a)`` pair is 2PL.
 RulerEntry = float | tuple[float, float]
@@ -31,20 +28,6 @@ class RulerScope(FrozenModel):
 
     scorer: str
     dataset: str
-
-
-class CellScopes(NamedTuple):
-    """The dataset each cell measures, by `Sample.key`; one scorer reads them all, so the dataset
-    alone tells two `RulerScope`s apart."""
-
-    by_key: Mapping[str, str]
-
-    @classmethod
-    def of(cls, samples: Iterable[Sample], dataset: str) -> CellScopes:
-        return cls({s.key: s.measured_dataset or dataset for s in samples})
-
-    def spanned(self, keys: Iterable[str]) -> int:
-        return len({self.by_key[k] for k in keys})
 
 
 class RulerFold(FrozenModel):
@@ -116,8 +99,6 @@ class ThetaCaveat(StrEnum):
 
     # All-miss, so θ sits on the prior's floor and every LIFT taken against it reads 0.000.
     FLOOR_PINNED = "floor_pinned"
-    # The cells span several `RulerScope`s, which share no cell, so no one δ scale reads them.
-    DISJOINT_SCOPES = "disjoint_scopes"
     # No δ scale: θ is logit-accuracy, read on the cells an arm shares with the parent it is judged against.
     COLD_RULER = "cold_ruler"
     # The INSTRUMENT: the ruler itself spans almost nothing, so no draw could have been wider.
@@ -143,13 +124,6 @@ class ThetaCaveatInfo(NamedTuple):
 THETA_CAVEAT_INFO: Annotated[Worded[ThetaCaveat, ThetaCaveatInfo], shapes_optimizer_prompt] = (
     Worded(
         {
-            ThetaCaveat.DISJOINT_SCOPES: ThetaCaveatInfo(
-                "θ mixes datasets",
-                "These samples come from more than one dataset, and difficulty is only rated within one, "
-                "so this θ averages scales that don't compare. Read each dataset on its own; a lift "
-                "against the parent still holds.",
-                "attention",
-            ),
             ThetaCaveat.COLD_RULER: ThetaCaveatInfo(
                 "θ is plain accuracy so far",
                 "Too few earlier answers to rate how hard each sample is, so θ is accuracy on another "
@@ -200,13 +174,11 @@ if _missing_caveat_info:
 
 
 def theta_caveat(
-    ruler: DeltaRuler | None, cells: Collection[str], *, scopes: int, all_miss: bool
+    ruler: DeltaRuler | None, cells: Collection[str], *, all_miss: bool
 ) -> ThetaCaveat | None:
     """The one deriver, over the cells a θ was read on; the order is severity."""
     if all_miss:
         return ThetaCaveat.FLOOR_PINNED
-    if scopes > 1:
-        return ThetaCaveat.DISJOINT_SCOPES
     if ruler is None:
         return ThetaCaveat.COLD_RULER
     if (band := ruler.band_span(cells)) is not None:

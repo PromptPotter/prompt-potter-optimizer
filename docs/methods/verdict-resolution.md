@@ -90,8 +90,6 @@ potter's L2/L3 stall comparator keeps the high-water, as its own signal.
 verdict, per level, per arm and per series (asked before differencing two levels); a sound round can
 carry a pinned arm. In severity order:
 
-- **Disjoint datasets** (`disjoint_scopes`). Each `RulerScope` is its own scale; a lift paired on
-  shared cells still holds.
 - **The 0% floor** (`floor_pinned`, per arm). An all-miss arm pins θ to a constant whatever it saw,
   so every lift from it is `0.000`. Not answer-collapse (one answer everywhere, which the election refuses): an
   arm can answer differently every time and be wrong every time.

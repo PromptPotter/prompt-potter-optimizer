@@ -299,6 +299,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     install_dataset,
     list_readable_datasets,
+    read_dataset_definition,
     read_dataset_pipeline,
     resolve_dataset,
     runnable_definition,
@@ -670,17 +671,20 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "one text under two declarations hashed apart: the hash reads a second door"
     )
 
-    # The inner campaign id separates two candidates, two seeds and two treatments.
+    # The inner campaign id separates two candidates, two seeds, two treatments and two estimators.
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
     c2 = {"l1_generate": {"instruction": "narrow the axes"}}
-    ids = {inner_campaign_id(_SPEC, o) for o in (c1, c2, {}, mutated)}
+    ids = {inner_campaign_id(_SPEC, o, "e") for o in (c1, c2, {}, mutated)}
     assert len(ids) == 4, (
         "two candidates differing only in one override field share a campaign — "
         "their measurements merge under one id with no error"
     )
-    assert inner_campaign_id(_SPEC.model_copy(update={"run_seed": 6}), c1) != inner_campaign_id(
-        _SPEC, c1
-    ), "two seeds share one inner campaign"
+    assert inner_campaign_id(
+        _SPEC.model_copy(update={"run_seed": 6}), c1, "e"
+    ) != inner_campaign_id(_SPEC, c1, "e"), "two seeds share one inner campaign"
+    assert inner_campaign_id(_SPEC, c1, "e") != inner_campaign_id(_SPEC, c1, "f"), (
+        "a moved estimator continued the campaign the old one banked"
+    )
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
     as_run, as_cut = (
         select_optimizer(OptimizerChoice(optimizer="potter", nodes=n))
@@ -689,8 +693,8 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         for n in ({}, cut)
     )
     assert inner_campaign_id(
-        _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1
-    ) != inner_campaign_id(_SPEC.model_copy(update={"optimizer_treatment": as_cut}), c1), (
+        _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1, "e"
+    ) != inner_campaign_id(_SPEC.model_copy(update={"optimizer_treatment": as_cut}), c1, "e"), (
         "a moved optimizer knob ran under the inner campaign of the unmoved one"
     )
     rewalked = capo.manifest.model_copy(update={"initial_population_walks": "alone"})
@@ -2360,6 +2364,28 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "an L4 seat runs another config than the one its seat declared"
     )
     assert l4.run_seed == 3, "an L4 seat's declaration lost the seed its seat names"
+    # The seat's inner run opens that ACCOUNT definition inside its sandbox: a sandbox isolates
+    # campaign state, never the account's datasets, or a tenant seat refuses every arm.
+    sandboxed = spawn.sandbox_stores(
+        InnerSpawnContext(
+            inner_sandbox_root=tmp_path / "sandbox",
+            identity=stores.identity,
+            shared_root=stores.shared_root,
+            install_datasets_root=stores.install_datasets_root,
+            research_datasets_root=stores.research_datasets_root,
+            inside=(CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"),),
+            enclosing=(),
+            acting=(),
+            purpose=Optimize(),
+            ruler=RulerReach(version=0, own=None),
+        )
+    )
+    assert resolve_dataset(sandboxed, "decl") == resolve_dataset(stores, "decl"), (
+        "an inner run resolved its seat's account dataset elsewhere than the panel that seated it"
+    )
+    assert sandboxed.campaigns.campaign_root_dir("c").is_relative_to(tmp_path / "sandbox"), (
+        "an inner run's campaign state left its sandbox for the account's"
+    )
     l4_arm = declare(
         opened,
         seat_config,
@@ -2508,7 +2534,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         ruler=RulerReach(version=0, own=None),
     )
     inner_hop = CycleHop(
-        campaign_id=inner_campaign_id(seats.spec(inner_seat), seats.own(inner_seat, {})),
+        campaign_id=inner_campaign_id(
+            seats.spec(inner_seat), seats.own(inner_seat, {}), seats.estimator
+        ),
         cycle_id="cycle-0",
     )
     stored_campaign(spawn.sandbox_stores(spawning), minted_campaign(inner_hop, dataset_name="decl"))
@@ -2797,12 +2825,35 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
 
     # An invented param is rejected, and so is the individual a variation wrote it on.
-    # A checkout resolves its research tier with no setting: the L4 panel needs no landing line.
+    # A checkout resolves its research tier with no setting; a seat no committed tier holds is the
+    # account's: a panel the account cannot resolve refuses at init, naming the seat.
     outer_stores = build_stores(default_identity(), projects_root=tmp_path / "outer")
     outer = resolve_dataset(outer_stores, "promptpotter-self/panel")
     assert (outer.tier, outer.tier_root) == ("research", _RESEARCH), (
         "a checkout did not resolve the L4 panel from its own research tier"
     )
+    declared_panel = read_dataset_definition(outer)
+    assert declared_panel is not None and declared_panel.panel is not None, "guard"
+    unheld = "unheld/seed-0"
+    unheld_seat = {"kind": "seat", "id": unheld, "inner_dataset": "unheld", "run_seed": 0}
+    with pytest.raises(PayloadInvalidError) as unseated:
+        InnerTasks.model_validate({**declared_panel.panel, "tasks": [unheld_seat]}).resolve_cells(
+            outer_stores
+        )
+    assert unheld in str(unseated.value), (
+        "a panel refused a seat its account does not hold without naming the seat"
+    )
+    for seated in InnerTasks.model_validate(declared_panel.panel).datasets:
+        try:
+            resolve_dataset(outer_stores, seated)
+        except DatasetAccessError:
+            write_yaml(
+                outer_stores.tenant_datasets.dataset_dir(seated) / DEFINITION_FILE,
+                {
+                    "pipeline": {"backend_type": "termnorm"},
+                    "campaign": {"optimization": {"degradation_threshold": 0.4}},
+                },
+            )
     outer_schema = parse_pipeline_response(
         asyncio.run(
             dataset_pipeline(

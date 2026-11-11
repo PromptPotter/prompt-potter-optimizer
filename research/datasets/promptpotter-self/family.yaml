@@ -36,34 +36,33 @@ campaign:
   # ONE measurand: what the inner search DELIVERED on rows it never searched — `held_out_lift`, the
   # ADOPTED prompt's accuracy on the cell's held-out bench minus the origin's, averaged over the
   # round budget, so exploring costs nothing and a promotion that fits its own rows buys nothing.
-  # The four-factor composite this replaces is described in `domain/l4/proxies.py`; measured over a
-  # 39-cell panel, only a lift term discriminated between optimizer prompts, and the quality
-  # factors carried more seed variance than arm variance while holding authority over the
-  # ordering. The search split's θ lift (`mean_round_delta`) is served beside it wherever the
+  # Measured over a 39-cell panel, only a lift term discriminated between optimizer prompts; the
+  # quality factors of a four-factor composite carried more seed variance than arm variance while
+  # holding authority over the ordering. The search split's θ lift (`mean_round_delta`) is served beside it wherever the
   # inner series differences, and scores nothing: read on the rows the search selected on, it
   # is in-sample.
   # The re-anchor is LINEAR and only exists because `compile_scorer` refuses an empty formula and
-  # `clamp_unit_score` clamps [0,1]. Being linear, the paired estimator's reported effect IS the
-  # mean held-out lift in accuracy points — a number you can read, not merely order by. The window
-  # is half a unit each side of zero: a 20-row bench moves in steps of 0.05, so a cell clips only
-  # past ten rows of lift or loss, and the floor (-1) lands at exactly 0.0. Re-check here, not by
-  # intuition, once a banked corpus exists under this measurand.
+  # `clamp_unit_score` clamps [0,1]: one accuracy point of lift is one fitness point, so the paired
+  # estimator's reported effect IS the mean held-out lift — a number you can read, not merely order
+  # by. The window is half a unit each side of zero: a 20-row bench moves in steps of 0.05, so a
+  # cell clips only past ten rows of lift or loss, and the floor (-1) lands at exactly 0.0. Re-check
+  # here, not by intuition, once a banked corpus exists under this measurand.
   scoring:
     per_sample: max(0.0, min(1.0, held_out_lift + 0.5))
   display_metric: ability
   optimization:
-    # Priced against `budget.usd`, not intuition: C0 costs ~$0.47 for the 6-cell calibration panel
-    # and a 3-variant round runs ~2.3 arms to completion (PoBB refunds the rest), so an optimizing
-    # round is ~$1.08. 4 lands at ~$3.7 of the $5.00 ceiling; 5 would halt mid-round on budget
-    # rather than on the cap.
+    # What C0 and a round cost is unmeasured under the panel's geometry (40 rows a round, three
+    # benchmarks, up to the whole round budget an inner run). The next C0 reads it off the
+    # cycle ledgers; re-price `budget.usd` from there, never from arithmetic over the knobs.
     #
     # It must also be falsifiable: ONE optimizing round is a coin toss rather than a test of a
     # challenger, whatever the outer SE reads under the held-out measurand.
     budget: {usd: 5.0, rounds: 4}
     # `degradation_threshold` stays at the default, and that is calibrated, not inherited: it is
     # on the fitness scale, so it moves with the re-anchor above. What it must NOT reject, from
-    # the inner cycles: a WINNING inner round buys 1-4 rows in 28 (+0.036 / +0.071 / +0.107 /
-    # +0.143 are the only positive values ever recorded) and 10 of 17 rounds bought exactly zero.
+    # the inner cycles at the retired 28-row geometry: a WINNING inner round bought 1-4 rows in 28
+    # (+0.036 / +0.071 / +0.107 / +0.143) and 10 of 17 rounds bought exactly zero; re-check it
+    # against the first corpus the panel banks.
     # Improvement here is granular and infrequent by nature; a bar that rejects a 1-row win
     # rejects most real wins.
     elimination_n_min: 4

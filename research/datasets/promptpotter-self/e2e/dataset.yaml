@@ -6,9 +6,6 @@ pipeline:
     Self-optimization smoke test: one small inner campaign per outer cell.
 
 campaign:
-  # No `per_cell` term: the panel's prices fitness against a 500s/cell latency anchor measured on
-  # 4-round cells. A 1-round cell is nowhere near that anchor, so applying it would dress a
-  # geometry artefact up as a cost signal.
   # Every number here is the smallest that still exercises the TRANSITION it belongs to, and
   # none of them is calibrated. `family.yaml::campaign` above this directory carries the reasoning
   # for the real values — the panel width that lets PoBB eliminate, the round count that makes a lift
@@ -76,7 +73,6 @@ panel:
       l1_generate:
         config:
           n_variants: 1
-    # No `inner_lives`: with one round there is nothing for a life to stop early.
     inner_optimizer_temperature: 0.0
   tasks:
     # Seed 0 only. The real panel's six seeds were each chosen against a measured

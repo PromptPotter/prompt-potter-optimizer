@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from pydantic import Field
 
-from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING, RoundOutput, StateSlice
+from promptpotter.domain.optimizer_state import RoundOutput, StateSlice
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -140,6 +140,3 @@ class L1Readout(RoundOutput, kind="l1_readout"):
     l1_parse_failure: str | None = None
     # The AxisIndex's peaked axes as L1 proposed, which no later reading of the index rebuilds.
     axis_memory_peaked: list[str] = Field(default_factory=list)
-
-    def lost_to_empty_response(self) -> bool:
-        return self.l1_parse_failure == PARSE_FAILURE_TOOLING

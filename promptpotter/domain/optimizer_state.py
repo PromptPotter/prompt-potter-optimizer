@@ -10,7 +10,8 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 PARSE_FAILURE_MALFORMED: Annotated[str, shapes_optimizer_prompt] = "optimizer_prompt_parse_failure"
 PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
-# Empty or truncated content is missing data, not a verdict: the round is EXCLUDED, never charged.
+# Empty or truncated content is missing data, not a verdict: never charged, yet an L4 cell whose
+# every round reached no cell FLOORS, whatever the reason (`l4/proxies.py::floor_reason`).
 PARSE_FAILURE_TOOLING: Annotated[str, shapes_optimizer_prompt] = "l1_provider_empty_response"
 # A response whose every variant leaves its parent unchanged: zero candidates, never charged.
 PARSE_FAILURE_ALL_NO_OP: Annotated[str, shapes_optimizer_prompt] = "l1_all_no_op_variants"
@@ -75,10 +76,6 @@ class StateSlice(StatePart, kind=None):
 
 class RoundOutput(StatePart, kind=None):
     """What ONE round produced, banked on that round; a round whose writer did not run holds ``cls()``, or nothing where it is written first."""
-
-    def lost_to_empty_response(self) -> bool:
-        """Asked only of a round with no arm; one with arms answers off them (``l4/proxies.py::_is_evidential``)."""
-        return False
 
 
 class UnregisteredStatePartError(RuntimeError):
@@ -154,6 +151,3 @@ class OptimizerState(FrozenModel):
         """``None`` too where the manifest distils no critique: L4 and the bench ask every optimizer."""
         held = self.outputs.get(Critique.kind)
         return held.readout if isinstance(held, Critique) else None
-
-    def lost_to_empty_response(self) -> bool:
-        return any(o.lost_to_empty_response() for o in self.outputs.values())

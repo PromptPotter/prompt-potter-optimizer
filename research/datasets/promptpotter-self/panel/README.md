@@ -5,11 +5,15 @@ inner PromptPotter cycle. Connector boundary: `promptpotter/application/runner/i
 [`docs/concepts/l4.md`](../../../../docs/concepts/l4.md).
 
 Each outer "sample" is one entry in `dataset.yaml::panel`: it mints and runs a full inner campaign on
-`justlogic/d234`. Each inner run reports a vector of proxy measurements
-(`domain/l4/proxies.py::OuterSampleProxies`); the outer formula in `dataset.yaml::campaign.scoring`
-re-anchors **one** of them — `held_out_lift`, read on rows the inner search never saw — into
-[0,1] and nothing else, the quality terms having carried more SEED variance than arm variance while
-holding authority over the ordering. The rationale lives on `OuterSampleProxies`.
+the seat's benchmark. Each inner run reports a vector of measurements
+(`domain/l4/proxies.py::OuterSampleProxies` is the scored one); the family formula
+(`research/datasets/promptpotter-self/family.yaml::campaign.scoring`) re-anchors **one** of them — `held_out_lift`, the area
+under the inner run's held-out curve — into [0,1] and nothing else. The rationale lives in
+[`docs/concepts/l4.md`](../../../../docs/concepts/l4.md) § The measurand.
+
+**Prerequisite: the account holds `hotpotqa-distractor` and `legalbench-fods`.** Four seats measure
+those two account definitions (tenant tier), which no committed tier carries, so on any other account
+— the box included — the panel refuses at init and names the seat.
 
 **What remains** — owned by
 [`docs/specs/roadmap.md`](../../../../docs/specs/roadmap.md) § L4 closure.
@@ -20,9 +24,8 @@ multiply, and an arithmetic estimate was 3× under the measured rate.
 
 ## Reading a cost figure
 
-**An absolute campaign total is not quotable** — how many inner rounds each cell runs depends on the
-`justlogic/d234` origin→target gap and on where the lives brake stops it. The per-cell rate is, and
-it comes off the ledger, never a stopwatch: group `token_usage` records by `(kind, node, cached)`
+**An absolute campaign total is not quotable** — it depends on how many arms elimination cuts and
+how much of each cell replays. The per-cell rate is, and it comes off the ledger, never a stopwatch: group `token_usage` records by `(kind, node, cached)`
 and price them with `infrastructure/llm/pricing.py::compute_usd`.
 
 **`TokenUsageRecord.cached` is what makes such a figure honest.** The content-addressed caches are

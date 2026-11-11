@@ -85,7 +85,6 @@ from promptpotter.domain.paired_reading import (
     MemberAddress,
     PairedReading,
 )
-from promptpotter.domain.ruler import CellScopes
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import CellSheet, GradedCell, ScoringFormulaError, WalkedCell
 from promptpotter.domain.spend import SpendRollup
@@ -825,7 +824,6 @@ def _cycle_facts(stores: Stores, campaign: Campaign, hop: CycleHop, cycle_dir: P
                 n_min=opt.elimination_n_min,
                 enable_2pl=opt.enable_2pl_graduation,
             ),
-            CellScopes.of(cycle_bank(stores, hop).samples, series.stamp.scope.dataset),
         )
     )
     return _CycleFacts(

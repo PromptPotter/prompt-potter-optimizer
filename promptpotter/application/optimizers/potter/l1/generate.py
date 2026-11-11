@@ -133,7 +133,8 @@ async def l1_generate(
             template=filled.template,
         )
     except OptimizerPromptParseError as parse_err:
-        # TOOLING drops the round from L4 outer scoring; a truncation never is: a prompt that outgrew max_tokens owns its failure.
+        # TOOLING is never charged, a truncation always: a prompt that outgrew max_tokens owns its failure.
+        # Either way an L4 cell whose every round yields nothing FLOORS (`l4/proxies.py::floor_reason`).
         is_empty = parse_err.is_empty
         truncated = parse_err.first_finish_reason == "length"
         reason = PARSE_FAILURE_TOOLING if is_empty else PARSE_FAILURE_MALFORMED

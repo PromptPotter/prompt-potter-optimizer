@@ -30,7 +30,7 @@ class Sample(StrictModel):
     # Where the row sits, never what it is: out of `key`, so its cells replay under any membership.
     held_out: bool = False
 
-    # The dataset this cell measures where it is not the one it is filed under: its δ scale's. Out of `key`.
+    # The dataset this cell measures where it is not the one it is filed under. Out of `key`.
     measured_dataset: str | None = None
 
     @property

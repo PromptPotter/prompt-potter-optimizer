@@ -50,7 +50,6 @@ from promptpotter.application.intelligence.rasch import (
     graduate_ruler_model,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
-from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import (
     compute_outer_proxies,
@@ -58,13 +57,17 @@ from promptpotter.domain.l4.proxies import (
     inner_cell_report,
     mean_parent_level_se,
 )
-from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
+from promptpotter.domain.optimizer_state import (
+    PARSE_FAILURE_ALL_NO_OP,
+    PARSE_FAILURE_MALFORMED,
+    PARSE_FAILURE_TOOLING,
+    PARSE_FAILURE_WRONG_TYPE,
+)
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.ruler import (
-    CellScopes,
     DeltaRuler,
     RulerOwn,
     RulerReach,
@@ -415,27 +418,12 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
         (tied, ["1", "2", "3"], ThetaCaveat.PRIOR_PINNED),
         (None, ["1", "2"], ThetaCaveat.COLD_RULER),
     ):
-        served = theta_caveat(scale, read_on, scopes=1, all_miss=False)
+        served = theta_caveat(scale, read_on, all_miss=False)
         assert served is expected, "the pin cancels inside a lift, a skipped cell does not"
     # The id names the δ, never key order; a cold cycle's names its OBJECTIVE.
     assert fitted.anchor_id == anchor_id_of({"3": 0.0, "2": -1.25, "1": 1.5}, 0.0, 2.0, "1PL")
     assert fitted.anchor_id != anchor_id_of({"1": 1.5, "2": -1.2500001, "3": 0.0}, 0.0, 2.0, "1PL")
     assert flat_ruler_id("acc") != flat_ruler_id("acc_minus_latency")
-
-    # Two datasets: two seats on `a`, two on `b`, two δ scales that never shared a cell.
-    seated = [
-        Sample(id=i, query=f"q{i}", ground_truth=None, measured_dataset=ds)
-        for i, ds in enumerate(("a", "a", "b", "b"))
-    ]
-    key = {s.id: s.key for s in seated}
-    scopes = CellScopes.of(seated, "outer")
-    two = _anchored({key[0]: -2.0, key[1]: 0.0, key[2]: 0.5, key[3]: 2.0})
-
-    def caveat(ids: list[int]) -> ThetaCaveat | None:
-        cells = [key[i] for i in ids]
-        return theta_caveat(two, cells, scopes=scopes.spanned(cells), all_miss=False)
-
-    assert caveat([0, 1]) is None and caveat([0, 2]) is ThetaCaveat.DISJOINT_SCOPES
 
     # Stratified: a stratum short of its share hands the rest on; an empty one takes nothing.
     assert stratum_shares([2, 10, 10], 9) == [2, 4, 3]
@@ -565,47 +553,22 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     assert cold.stamp.cold and cold.caveat is ThetaCaveat.COLD_RULER and cold.plateau() is None, (
         "a series on no δ scale read as one that differences"
     )
-    # Cold AND across two datasets: the caveat names the scopes, and still no level differences.
+    # One fold, one scale: cells measuring two datasets, all folded under the run's scope, read it.
     split = [s.model_copy(update={"measured_dataset": "other"}) if s.id % 2 else s for s in bank]
-    [both] = series_of(OpenAt(), lone, [run], split)
-    assert both.stamp.cold and both.caveat is ThetaCaveat.DISJOINT_SCOPES, (
-        "the series lost the caveat that outranks a cold scale"
+    [mixed] = series_of(OpenAt(), warmed, [run], split)
+    assert mixed.caveat is None and mixed.plateau() == pytest.approx(series.plateau()), (
+        "a δ scale the fold wrote once read as several"
     )
-    assert all(
-        both.level(r) is None and (read := both.reading(r)) is not None and read.caveat is not None
-        for r in both.rounds
-    ), "a level its series' caveat withholds read as one two rounds may difference"
-    # Each line is caveated on its OWN cells: a line spanning two scopes withholds no other line.
-    evens = [
-        round_result(
-            n,
-            arms={ArmKey(k): arm_state(k)},
-            cells={
-                ArmKey(k): sheet(
-                    measurement(s.id, h, objective=h, sample_key=s.key)
-                    for s, h in zip(bank, hits[k], strict=True)
-                    if s.id % 2 == 0
-                )
-            },
-            election=election(
-                k,
-                ended_on=k,
-                ruler=RulerStamp(id=f"v{n}", version=n, own=None, scope=scope, excluded=()),
-            ),
+    withheld = inner_cell_facts(
+        cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)]).model_copy(
+            update={"level_series": cold}
         )
-        for n, k in ((0, "o"), (1, "a"))
-    ]
-    mixed, plain = series_of(OpenAt(), warmed, [run, evens], split)
-    assert mixed.caveat is not None and plain.caveat is None, (
-        "one line's caveat withheld the levels of a line whose own cells carry none"
     )
-    two_scopes = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
-    withheld = inner_cell_facts(two_scopes.model_copy(update={"level_series": both}))
-    assert both.plateau() is None and withheld.mean_round_delta is None, (
+    assert withheld.mean_round_delta is None, (
         "a reader asked the stamp, not the series' caveat, and differenced a cold series"
     )
-    assert withheld.series_reason is ThetaCaveat.DISJOINT_SCOPES, (
-        "the withheld θ lift lost the caveat that outranks a cold scale"
+    assert withheld.series_reason is ThetaCaveat.COLD_RULER, (
+        "the withheld θ lift lost the caveat its series carries"
     )
 
 
@@ -693,16 +656,29 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
             "the L4 tape line lost the reason its θ lift was withheld"
         )
 
-    # Ending on its own terms, an all-tooling cycle is FLOORED: the loss reproduces.
-    floored = compute_outer_proxies(cyc([0.40], rounds=tooling))
-    assert floored.held_out_lift == -1.0
+    # Ending on its own terms, a cycle none of whose L1 proposals reached a cell is FLOORED,
+    # whatever its replies' failure: potter banks an empty panel, a paper optimizer Invalid arms.
+    def failed(reason: str, rnd: int) -> RoundResult:
+        return round_result(rnd, parse_failure=reason)
 
-    def lost(reason: str) -> RoundResult:
-        arm = arm_state("x", slot=ArmSlot(round=1, idx=0, total=1), invalid_reason=reason)
-        return round_result(1, candidates_scored=0, arms={ArmKey("x"): arm})
-
-    tooled = cyc([0.40], rounds=[lost(PARSE_FAILURE_TOOLING)])
-    assert compute_outer_proxies(tooled).held_out_lift == -1.0, "empty replies floor"
-    assert delta([0.40, 0.55], rounds=[lost(PARSE_FAILURE_MALFORMED), round_result(2)]) == (
-        pytest.approx(0.175)
-    ), "a malformed reply is the prompt's verdict and scores"
+    for spoiled in (
+        [failed(PARSE_FAILURE_TOOLING, 1)],
+        [round_result(0), failed(PARSE_FAILURE_MALFORMED, 1), failed(PARSE_FAILURE_MALFORMED, 2)],
+        [failed(PARSE_FAILURE_ALL_NO_OP, 1), failed(PARSE_FAILURE_WRONG_TYPE, 2)],
+        [round_result(1, candidates_scored=0, no_op=1, dup=1)],
+        [round_result(1, candidates_scored=0, no_op=2), failed(PARSE_FAILURE_MALFORMED, 2)],
+    ):
+        assert compute_outer_proxies(cyc([0.40, 0.40], rounds=spoiled)).held_out_lift == -1.0, (
+            f"no proposal of {[r.round for r in spoiled]} reached a cell, yet the cell scored"
+        )
+    owned = cyc([0.40], stop_reason=StopReason.OPTIMIZER_ABORT)
+    assert compute_outer_proxies(owned).held_out_lift == -1.0, (
+        "its optimizer's own abort was excluded or scored as a held lift"
+    )
+    reached = [failed(PARSE_FAILURE_MALFORMED, 1), round_result(2, no_op=1)]
+    assert compute_outer_proxies(cyc([0.40, 0.55], rounds=reached)).held_out_lift == 0.0, (
+        "a cycle one proposal of which reached a cell floored"
+    )
+    assert delta([0.40, 0.55], rounds=reached) == pytest.approx(0.175), (
+        "a malformed reply is the prompt's verdict and scores"
+    )

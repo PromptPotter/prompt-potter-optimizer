@@ -1486,7 +1486,7 @@ export interface ArmAbility {
   /** Upper bound of the same interval. */
   ci_hi: number | null;
   /** Why `theta` is not this arm's ability, of the ARM's own scope. */
-  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  caveat: 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** What one arm's round decided about it. Built by :meth:`of` alone. */
@@ -1792,7 +1792,7 @@ export interface SeriesReading {
   reading: AbilityReading;
   /** The level's own caveat, else its series'. Null, and it differences any other
    * level of the series that is null too. */
-  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  caveat: 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** A Rasch θ and the δ scale it was read on, held as one value because apart they
@@ -1805,7 +1805,7 @@ export interface AbilityReading {
   ruler_span: number | null;
   round_span: number | null;
   calibration_model: '1PL' | '2PL' | null;
-  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  caveat: 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
   unlinked: number;
   pinned_share: number | null;
 }
@@ -2314,7 +2314,7 @@ export interface Election {
 export interface ArmFit {
   theta: number | null;
   theta_se: number | null;
-  theta_caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  theta_caveat: 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
   vs_reference: PairedReading | null;
 }
 
@@ -5341,7 +5341,7 @@ export type MovableAgent = 'proposer' | 'optimizer';
 export type PoolSource = 'library' | 'partition';
 
 // promptpotter.domain.ruler::ThetaCaveat
-export type ThetaCaveat = 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta';
+export type ThetaCaveat = 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta';
 
 // promptpotter.domain.run_standing::LivesWord
 export type LivesWord = 'banked' | 'spent_pip' | 'empty' | 'empty_sentence' | 'life' | 'lives';
@@ -5974,7 +5974,6 @@ export const HEALTH_GRADE_INFO: Record<'healthy' | 'degraded' | 'critical' | 'un
 
 // Mirror of domain/ruler.py::THETA_CAVEAT_INFO, in display order.
 export const THETA_CAVEAT_INFO: Record<ThetaCaveat, ThetaCaveatInfo> = {
-  "disjoint_scopes": { label: "θ mixes datasets", detail: "These samples come from more than one dataset, and difficulty is only rated within one, so this θ averages scales that don't compare. Read each dataset on its own; a lift against the parent still holds.", tone: "attention" },
   "cold_ruler": { label: "θ is plain accuracy so far", detail: "Too few earlier answers to rate how hard each sample is, so θ is accuracy on another scale. A lift against the parent holds; θ compared across rounds or candidates does not.", tone: "attention" },
   "flat_ruler": { label: "θ is plain accuracy here", detail: "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as accuracy does. No round can change that.", tone: "attention" },
   "collapsed_band": { label: "θ is plain accuracy this round", detail: "This round's samples were all about equally hard, so θ ranks candidates exactly as accuracy does. A round drawing harder and easier samples reads differently.", tone: "attention" },
@@ -6108,7 +6107,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [POOL_SOURCE_INFO, ["library", "partition"]],
   [HEALTH_CAUSE_INFO, ["origin_unmeasured", "origin_incomplete", "structural", "unscoreable", "holed", "evidence_starved", "structural_untested", "persistent", "degraded", "transient"]],
   [HEALTH_GRADE_INFO, ["healthy", "degraded", "critical", "unmeasured"]],
-  [THETA_CAVEAT_INFO, ["disjoint_scopes", "cold_ruler", "flat_ruler", "collapsed_band", "prior_pinned", "unmeasured_delta", "floor_pinned"]],
+  [THETA_CAVEAT_INFO, ["cold_ruler", "flat_ruler", "collapsed_band", "prior_pinned", "unmeasured_delta", "floor_pinned"]],
   [VERIFY_WORDS, ["saturated"]],
   [LIVES_WORDS, ["banked", "spent_pip", "empty", "empty_sentence", "life", "lives"]],
   [SAMPLE_STATUS_LABELS, ["HIT", "MISS", "ERR", "UNSC"]],

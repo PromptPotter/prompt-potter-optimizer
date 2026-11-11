@@ -50,7 +50,7 @@ from promptpotter.domain.cells import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.ruler import CellScopes, RulerReach, RulerScope
+from promptpotter.domain.ruler import RulerReach, RulerScope
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import (
     CellSheet,
@@ -358,8 +358,7 @@ def cycle_hard_samples(stores: Stores, hop: CycleHop) -> HardSamples:
     cells: list[GradedCell] = []
     for rr in rounds:
         cells = merge_known_outcomes(cells, rr.results)
-    scopes = CellScopes.of(bank.samples, campaign.dataset_name)
-    frontier = None if judging is None else AbilityScale(judging, scopes).frontier(cells)
+    frontier = None if judging is None else AbilityScale(judging).frontier(cells)
     return build_hard_samples(
         build_observations(rounds),
         None if judging is None else judging.ruler,

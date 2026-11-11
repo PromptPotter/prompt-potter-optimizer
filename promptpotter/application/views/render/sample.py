@@ -11,7 +11,7 @@ from promptpotter.application.views.render.primitives import (
 )
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.l4.inner_facts import series_reason_head
-from promptpotter.domain.l4.proxies import held_out_lift_of, inner_facts_of
+from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
 from promptpotter.domain.results_health import is_deprecated, terminal_node
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import StaleOutcome, graded_answer
@@ -106,17 +106,16 @@ def fmt_query_result(
         return f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} {err[:40]!r} gt:{gt!r} q:{q!r}"
 
     # An L4 outer sample never reaches the HIT threshold and its ground truth is a placeholder.
-    if (held_out := held_out_lift_of(pd)) is not None:
+    # The connector's report rides the ledger, so a live tape and its replay read one line.
+    if (scored := outer_proxies_of(pd)) is not None and (inner := inner_facts_of(pd)) is not None:
         fit_col = f" fit {grade.fitness:.2f}" if grade.fitness is not None else ""
-        # The connector's report rides the ledger, so a live tape and its replay read one line.
-        inner = inner_facts_of(pd)
-        lift = None if inner is None else inner.mean_round_delta
+        lift = inner.mean_round_delta
         delta_col = " θ Δ —" if lift is None else f" θ Δ {lift:+.3f} logits"
         line = (
-            f"{indent}{time_col} {sid_col} held-out lift {held_out * 100:+.1f} acc pts"
+            f"{indent}{time_col} {sid_col} held-out lift {scored.held_out_lift * 100:+.1f} acc pts"
             f"{delta_col}{fit_col}{step_block}{tok_col} q:{q!r}"
         )
-        if inner is None or inner.series_reason is None:
+        if inner.series_reason is None:
             return line
         return _append_annotation(
             line,

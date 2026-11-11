@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
-from functools import cached_property
 from typing import TYPE_CHECKING, NamedTuple, assert_never
 
 from promptpotter.application.initialization.session import Session
@@ -19,7 +18,6 @@ from promptpotter.domain.measurement_provenance import meets_grade
 from promptpotter.domain.results import InRunCells
 from promptpotter.domain.ruler import (
     AbilityReading,
-    CellScopes,
     DeltaRuler,
     LevelSeries,
     RulerOwn,
@@ -121,20 +119,14 @@ def restamped(
 
 
 class AbilityScale(NamedTuple):
-    """What a θ is minted on: one judging fit, and the dataset each cell measures."""
+    """What a θ is minted on: one judging fit, on the one `RulerScope` its session's fold writes."""
 
     judging: JudgingRuler
-    scopes: CellScopes
 
     def caveat(self, rows: Iterable[GradedCell]) -> ThetaCaveat | None:
         rows = list(rows)
         cells = [cell.key for cell in rows if cell.scored]
-        return theta_caveat(
-            self.judging.ruler,
-            cells,
-            scopes=self.scopes.spanned(cells),
-            all_miss=is_floor_pinned(rows),
-        )
+        return theta_caveat(self.judging.ruler, cells, all_miss=is_floor_pinned(rows))
 
     def frontier(self, results: Iterable[GradedCell]) -> AbilityReading | None:
         """The SOLE stamping site: θ, its scale and its caveat are minted together."""
@@ -275,18 +267,14 @@ class DifficultyView:
             own=ruler_clock(session).own,
         )
 
-    @cached_property
-    def scopes(self) -> CellScopes:
-        return CellScopes.of(self.session.bank.samples, self.session.measured_dataset)
-
     @property
     def scale(self) -> AbilityScale:
-        return AbilityScale(self.judging, self.scopes)
+        return AbilityScale(self.judging)
 
     def level_series(self, lines: Sequence[Sequence[RoundResult]]) -> list[LevelSeries]:
         """ONE fit less every line's parents, so lines' levels sum; each caveats on its own cells."""
         judged = frozenset(a for rounds in lines for a in parent_line(rounds))
-        scale = AbilityScale(self._read(ruler_clock(self.session), judged), self.scopes)
+        scale = AbilityScale(self._read(ruler_clock(self.session), judged))
         return [
             LevelSeries(
                 stamp=scale.judging.stamp,

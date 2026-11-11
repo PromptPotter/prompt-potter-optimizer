@@ -16963,7 +16963,6 @@
         "description": "A state in which θ is NOT ability; every number still renders, so WHICH fired is the fact.\nEach is read off the cells a θ was read on: one level's, one arm's, a whole series'.",
         "enum": [
           "floor_pinned",
-          "disjoint_scopes",
           "cold_ruler",
           "flat_ruler",
           "collapsed_band",

@@ -54,7 +54,7 @@ from promptpotter.domain.candidate_diff import (
 )
 from promptpotter.domain.connector import unit_count, unit_plural
 from promptpotter.domain.l4.inner_facts import InnerCellFacts
-from promptpotter.domain.l4.proxies import held_out_lift_of, inner_facts_of
+from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, overlap_line, triggered_rates
 from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading
@@ -510,11 +510,11 @@ def _paired_cell(
 
 def _paired_bench(r: GradedCell, origin: GradedCell | None) -> float | None:
     """The scored term, paired the same way; it carries no SE, so the θ pair keeps the ranking."""
-    own = held_out_lift_of(r.facts.pipeline)
-    base = held_out_lift_of(origin.facts.pipeline) if origin is not None else None
+    own = outer_proxies_of(r.facts.pipeline)
+    base = outer_proxies_of(origin.facts.pipeline) if origin is not None else None
     if own is None or base is None:
         return None
-    return own - base
+    return own.held_out_lift - base.held_out_lift
 
 
 class _NarratedCell(NamedTuple):
@@ -540,7 +540,9 @@ def _narrated_cells(b: InjectionBundle) -> list[_NarratedCell]:
             if paired
             else (inner.mean_round_delta, inner.mean_parent_level_se)
         )
-        bench = _paired_bench(r, o) if paired else held_out_lift_of(r.facts.pipeline)
+        scored = outer_proxies_of(r.facts.pipeline)
+        own = None if scored is None else scored.held_out_lift
+        bench = _paired_bench(r, o) if paired else own
         upper = None if d is None else d + _CELL_SEPARATION_SIGMAS * (bar or 0.0)
         cells.append(_NarratedCell(upper, d, bar, bench, paired, r))
     cells.sort(key=lambda c: (c.upper is None, 0.0 if c.upper is None else c.upper))
@@ -1112,13 +1114,7 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
     rows: list[str] = []
     a = d.ability
     caveat = a.caveat if a is not None else None
-    if caveat is ThetaCaveat.DISJOINT_SCOPES:
-        rows.append(
-            f"DISJOINT DATASETS — this round's {unit_plural(b.measured_unit)} measure more than "
-            "one dataset, and a difficulty is fitted within one only, so θ averages scales that "
-            "never shared a cell. Read the lift paired on shared cells, never the level."
-        )
-    elif caveat is ThetaCaveat.COLD_RULER:
+    if caveat is ThetaCaveat.COLD_RULER:
         rows.append(
             "COLD RULER — no difficulty scale yet, so θ is logit-accuracy, each arm read beside "
             "the parent on the cells both answered. Read each arm's lift, never a level."
