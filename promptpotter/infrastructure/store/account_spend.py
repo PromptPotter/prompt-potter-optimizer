@@ -154,7 +154,7 @@ class WorkspaceBank(NamedTuple):
         return Subject(campaign_id, "") in self.subjects
 
 
-_SPEND_FOLDS = (_Spend, _Tombstones)
+_SPEND_FOLDS = LedgerIndex.readers(_Spend, _Tombstones)
 
 
 def _unreported_once_stopped(ledger: Path, held: PaidSpend) -> PaidSpend:
@@ -264,7 +264,7 @@ class _Usage:
         return self._held
 
 
-_CHARGE_FOLDS = (_Charges, _Usage)
+_CHARGE_FOLDS = LedgerIndex.readers(_Charges, _Usage)
 
 
 def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[UsageRow]:

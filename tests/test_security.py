@@ -1428,6 +1428,19 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     assert sessions.read(held_session) is None, "an invalid session file signed someone in"
     assert not session_file.exists(), "an invalid session file was kept"
 
+    # A person who never returns: their expired session leaves the disk at the next sign-in.
+    lapsed = paths.sessions_dir / "never-returns.json"
+    write_json(lapsed, session.model_copy(update={"expires_at": 1}).model_dump(mode="json"))
+    sessions.create(
+        user_id=session.user_id,
+        tenant_id=session.tenant_id,
+        issuer=session.issuer,
+        subject=session.subject,
+        email=session.email,
+        provider=session.provider,
+    )
+    assert not lapsed.exists(), "an expired session kept its email and user id on disk"
+
 
 # 3. Unattended deletes
 

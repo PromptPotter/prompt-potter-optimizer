@@ -25,7 +25,7 @@ from promptpotter.infrastructure.store.io import (
     HeldLock,
     PairWrite,
     append_jsonl,
-    read_bytes_optional,
+    file_stat,
     read_lines,
     replace_lines,
     rewrite_pair,
@@ -241,7 +241,7 @@ class _CellFile:
 
     def refresh(self, path: Path) -> None:
         try:
-            st = path.stat()
+            st = file_stat(path)
         except FileNotFoundError:
             self._mark, self._stat = ABSENT, None
             self._empty()
@@ -346,7 +346,7 @@ class MeasurementArchive:
         path = self._index_path()
         with self._lock:
             try:
-                st = path.stat()
+                st = file_stat(path)
             except FileNotFoundError:
                 self._invalidate()
                 return {}
@@ -533,13 +533,12 @@ class MeasurementArchive:
 
     def cold_bytes_on_disk(self, file_key: str) -> int:
         try:
-            return self.cold_path(file_key).stat().st_size
+            return file_stat(self.cold_path(file_key)).st_size
         except OSError:
             return 0
 
     def read_cold(self, file_key: str) -> list[MovedFields]:
-        held = read_bytes_optional(self.cold_path(file_key))
-        return [] if held is None else decode_cold(held)
+        return read_file(self.cold_path(file_key), decode_cold) or []
 
     def reindex(self) -> dict[str, int]:
         counts = replace_lines(self._index_path(), self._built_index)
@@ -672,8 +671,7 @@ class ReplayFeed:
     def claimed_cell(self, sample_key: str) -> MeasuredCell | None:
         path = self._archive.path(ArchiveFile.CLAIM_ROW, self.cell_key(sample_key))
         try:
-            raw = read_bytes_optional(path)
+            return read_file(path, claimed_row)
         except PermissionError:
             # Windows: a holder is unlinking or replacing it this instant — the next poll reads again.
             return None
-        return None if raw is None else claimed_row(raw)

@@ -66,7 +66,7 @@ def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]
         monkeypatch.setattr(settings, key, SecretStr(NOT_A_KEY))
     monkeypatch.setattr(settings, "RATE_LIMITS", {})
     # The fetched price list lands in this journey's tree, never the checkout's cache.
-    monkeypatch.setattr(pricing, "CACHE_PATH", tmp_path / "fetched_rates.json")
+    monkeypatch.setattr(pricing, "cache_path", lambda: tmp_path / "fetched_rates.json")
     pricing.load_rates.cache_clear()
     world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
     restore = install_network(world)

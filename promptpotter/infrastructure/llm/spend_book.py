@@ -1111,7 +1111,7 @@ class _HoldTrail:
         )
 
 
-_TRAIL_FOLDS = (_HoldTrail,)
+_TRAIL_FOLDS = LedgerIndex.readers(_HoldTrail)
 
 
 def unreported_on(ledger: CycleEventLog) -> Unreported:

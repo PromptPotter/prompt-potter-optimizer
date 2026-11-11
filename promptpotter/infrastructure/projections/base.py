@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, ClassVar, get_args
 
 from promptpotter.domain.run_records import CycleRecord
-from promptpotter.infrastructure.store.read_model import RecordClasses, feed_fold
+from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
 
 # By name, so a handler's module may import its record for typing alone.
 _ARMS: dict[str, type[CycleRecord]] = {
@@ -34,15 +33,12 @@ class Projection:
             routes[_ARMS[named]] = handler
         cls._routes = routes
         cls.records = tuple(routes)
+        LedgerIndex.readers(cls)
 
     def feed(self, record: CycleRecord) -> None:
         handler = self._routes.get(type(record))
         if handler is not None:
             handler(self, record)
-
-    def on_record(self, record: CycleRecord, offset: int, *, ledger: Path) -> None:
-        self.at_offset = offset
-        feed_fold(self, record, ledger=ledger, offset=offset)
 
     def drain(self) -> None:
         """Settle buffered state on teardown; a no-op where every event already flushes."""

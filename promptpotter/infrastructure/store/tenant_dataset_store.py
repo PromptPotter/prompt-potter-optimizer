@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Callable, Iterable, Sequence
 from functools import partial
 from pathlib import Path
@@ -33,7 +34,9 @@ from promptpotter.infrastructure.store.read_model import (
     read_rows,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import FileKind
+from promptpotter.shared.errors import FileKind, FileUnreadableError
+
+logger = logging.getLogger(__name__)
 
 # Panels a definition's `source:` built for this tenant, and the task directories they name.
 MATERIALIZED_DIR = "materialized"
@@ -169,7 +172,14 @@ class TenantDatasetStore:
         root = self._base_dir / BANKS_DIR
         found: set[str] = set()
         for path in sorted(root.glob("*.json")) if root.is_dir() else ():
-            held = derived(("bank_keys", path), sig=file_sig(path), compute=partial(_keys, path))
+            # A survey: a bank this build cannot read shares no proven rows, and its own read refuses it.
+            try:
+                held = derived(
+                    ("bank_keys", path), sig=file_sig(path), compute=partial(_keys, path)
+                )
+            except FileUnreadableError as exc:
+                logger.warning("%s", exc)
+                continue
             if not held.isdisjoint(keys):
                 found.add(path.stem)
         return frozenset(found)

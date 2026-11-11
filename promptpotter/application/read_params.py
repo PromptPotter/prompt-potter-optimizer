@@ -13,9 +13,9 @@ import functools
 import inspect
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import Field
+from pydantic import AfterValidator, Field
 
 from promptpotter.application import account, cycle_files
 from promptpotter.application.backend_listing import (
@@ -110,6 +110,7 @@ from promptpotter.domain.cycle_paths import (
     parse_lens,
     parse_sample_ids,
 )
+from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.export import ExportTier
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.hierarchy import (
@@ -135,6 +136,10 @@ _DESCEND = (
 
 # Filled as each model declares the row it answers: the ONE row → params table.
 PARAMS_FOR_READ: dict[ReadKind, type[ReadParams]] = {}
+
+
+# Parsed where the params parse: a malformed name is the caller's 422, never a store's 500.
+DatasetName = Annotated[str, AfterValidator(validate_dataset_name)]
 
 
 class ReadParams(StrictModel):
@@ -762,7 +767,7 @@ class DatasetPipelineParams(
 ):
     """One dataset's declared pipeline, gated by the resolver every dataset read shares."""
 
-    name: str = Field(min_length=1, description="The dataset name")
+    name: DatasetName = Field(min_length=1, description="The dataset name")
 
     async def answer(self, caller: Caller) -> DatasetPipelineResponse:
         return await resolve_pipeline_for_dataset(caller.stores, self.name)
@@ -774,7 +779,7 @@ class DatasetCellsParams(
     """The measurement log; under a filter, ``samples`` and ``candidates`` shrink to the ones
     holding a kept cell."""
 
-    name: str = Field(min_length=1, description="The dataset name")
+    name: DatasetName = Field(min_length=1, description="The dataset name")
     limit: int = Field(default=50, ge=1, le=1000, description="Samples per page.")
     max_unmeasured: int | None = Field(
         default=None,
@@ -855,7 +860,7 @@ class DatasetCellParams(
 ):
     """One answer opened: its row assembled into a trace."""
 
-    name: str = Field(min_length=1, description="The dataset name")
+    name: DatasetName = Field(min_length=1, description="The dataset name")
     # `answer` on the wire; `answer` is the read's own method.
     answer_id: str = Field(
         min_length=1, alias="answer", description="The answer's address in the log"

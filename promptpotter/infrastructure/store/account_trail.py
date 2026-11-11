@@ -98,7 +98,7 @@ class _Trail:
 
 # A roster is per PROCESS (`LedgerIndex._screened`): once a read names this one, every ledger that
 # process indexes keeps its run stops. The admin bot, the `trail` verb and a delete pay that.
-_TRAIL_FOLDS = (_Trail,)
+_TRAIL_FOLDS = LedgerIndex.readers(_Trail)
 
 
 def _where(campaign_id: str, cycle_id: str, inside: str) -> str:

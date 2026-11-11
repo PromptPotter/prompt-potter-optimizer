@@ -62,10 +62,10 @@ def main() -> int:
     ):
         assert value.is_relative_to(home_path), f"{name} = {value}, expected under {home_path}"
 
-    from promptpotter.infrastructure.llm.pricing import CACHE_PATH
+    from promptpotter.infrastructure.llm.pricing import cache_path
 
-    assert CACHE_PATH.is_relative_to(home_path), (
-        f"rates cache = {CACHE_PATH}, expected under {home_path}"
+    assert cache_path().is_relative_to(home_path), (
+        f"rates cache = {cache_path()}, expected under {home_path}"
     )
 
     from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer

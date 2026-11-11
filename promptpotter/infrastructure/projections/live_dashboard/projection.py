@@ -55,7 +55,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import MeasuredCell
-from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup, spend_slot
+from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.domain.verification import NoiseBand, VerificationKind, VerifyReading
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
@@ -146,7 +146,7 @@ class LiveDashboardProjection(Projection):
 
     def value(self) -> LiveDashboardState | None:
         """`None`: no `RunWiringRecord` yet (a check-in still authoring its origin)."""
-        return None if self._unwired is not None else self.composed().model_copy(deep=True)
+        return None if self._unwired is not None else self.composed()
 
     def feed(self, record: CycleRecord) -> None:
         if type(record) not in self._routes:
@@ -449,8 +449,14 @@ class LiveDashboardProjection(Projection):
             )
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
+        # Copied, then banked: a snapshot `value` served holds the rollups as they were.
+        key = str(record.spend_round)
+        held = self.state.spend_by_round.get(key)
+        rollup = SpendRollup() if held is None else held.model_copy(deep=True)
+        self.state.spend = self.state.spend.model_copy(deep=True)
         self.state.spend.bank(record)
-        spend_slot(self.state.spend_by_round, str(record.spend_round), SpendRollup).bank(record)
+        rollup.bank(record)
+        self.state.spend_by_round = {**self.state.spend_by_round, key: rollup}
 
     def spend_metered(self, meters: CeilingMeter) -> MeteredSpend:
         return MeteredSpend.of(self.state.spend, meters)
@@ -503,7 +509,7 @@ class LiveDashboardProjection(Projection):
         }
 
     def composed(self) -> LiveDashboardState:
-        """Shares the fold's own fields, so it is read before the next record lands."""
+        """A snapshot: the fold replaces a field, never changes one in place, so what it shares stands."""
         s = self.state
         if any(self._flight):
             in_flight, allowed, most = self._flight
@@ -569,7 +575,7 @@ class DashboardCheckout:
         """The run's own fold, fed on as its ledger grows."""
         return self._index.live(LiveDashboardProjection, seed=_seed(self._prefix))
 
-    def on_record(self, record: CycleRecord, offset: int, *, ledger: Path) -> None:  # noqa: ARG002 -- the index's fold took it
+    def feed(self, record: CycleRecord) -> None:
         with self._lock:
             if type(record) in _AT_ONCE:
                 self._write()

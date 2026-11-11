@@ -163,6 +163,11 @@ def _text_ratio(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+def _length_bound(a: int, b: int) -> float:
+    """The most two texts of these lengths can share: `SequenceMatcher.real_quick_ratio`."""
+    return 2.0 * min(a, b) / (a + b) if a + b else 1.0
+
+
 def _similarity(a: object, b: object) -> float:
     """Text by its matching blocks, shots by the keys they share, anything else equal or not."""
     if isinstance(a, str) and isinstance(b, str):
@@ -219,10 +224,11 @@ def _descent(c: _Candidate, everyone: list[_Candidate]) -> None:
                 continue
             if (other := x.loci.get(locus)) is None:
                 continue
+            # `real_quick_ratio`'s bound off the lengths alone: no matcher is built for a pair it rules out.
             if (
                 isinstance(value, str)
                 and isinstance(other, str)
-                and SequenceMatcher(None, value, other).real_quick_ratio() <= floor
+                and _length_bound(len(value), len(other)) <= floor
             ):
                 continue
             if (alike := _similarity(value, other)) > floor:

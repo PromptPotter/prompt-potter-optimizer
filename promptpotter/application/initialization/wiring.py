@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from promptpotter import connectors
-from promptpotter.application import optimizers
+from promptpotter.application import (
+    health,  # noqa: F401 -- a reader no run imports joins the roster
+    optimizers,
+)
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.datasets.loaders import (
     build_panel,
@@ -25,7 +28,6 @@ from promptpotter.application.datasets.tabular_ingest import read_candidate_libr
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.pipeline_resolve import ServedPipeline, served_pipeline
-from promptpotter.application.run_observers import check_every_record_reported
 from promptpotter.application.scoring.evaluators import (
     connector_name_refusals,
     connector_report_owner,
@@ -44,6 +46,9 @@ from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities
+from promptpotter.infrastructure.projections import (
+    event_stream,  # noqa: F401 -- a reader no run imports joins the roster
+)
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     dataset_experiment,
@@ -51,6 +56,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     resolve_dataset,
     runnable_definition,
 )
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext
@@ -210,8 +216,8 @@ def complete_registries(*, every_treatment: bool = True) -> None:
             )
         # The check-in as every check-in and mint reads it, an install shadow included.
         checkin_manifest()
+        LedgerIndex.check_every_arm_read()
     replayers()
-    check_every_record_reported()
     for connector in connectors.CONNECTORS.table.values():
         if connector.completion_check is not None:
             connector.completion_check()

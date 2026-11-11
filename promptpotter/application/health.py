@@ -178,6 +178,9 @@ class _Standing:
         return dict(self._last)
 
 
+_HEALTH_FOLDS = LedgerIndex.readers(_Standing)
+
+
 def _box(projects_root: Path) -> WorkspaceDir:
     """The box's own tenant: what fails for every account is kept where its host reads."""
     return build_stores(registered_or_default_identity(), projects_root=projects_root).base_dir
@@ -186,7 +189,7 @@ def _box(projects_root: Path) -> WorkspaceDir:
 def standing(projects_root: Path) -> dict[str, HealthRecord]:
     """Each probe's last change; no record reads as held."""
     ledger = CycleEventLog.workspace_path(_box(projects_root))
-    return LedgerIndex.of(ledger, (_Standing,)).view(_Standing)
+    return LedgerIndex.of(ledger, _HEALTH_FOLDS).view(_Standing)
 
 
 def is_broken(projects_root: Path, name: str) -> bool:

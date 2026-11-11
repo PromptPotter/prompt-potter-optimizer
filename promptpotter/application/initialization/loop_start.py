@@ -14,6 +14,7 @@ from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import ScorerSetup, Session
 from promptpotter.application.initialization.wiring import bind_cycle_session
+from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline, cycle_config
@@ -260,24 +261,24 @@ def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
         yield
 
 
-def _campaigns_on_origin(session: Session) -> list[str]:
-    campaigns = session.store.campaigns
-    own = campaigns.load_campaign(session.campaign_id) if session.campaign_id else None
+def _campaigns_on_origin(session: Session, survey: CampaignSurvey) -> list[str]:
+    own = next((c for c in survey.campaigns if c.campaign_id == session.campaign_id), None)
     if own is None:
         return []
     return sorted(
         other.campaign_id
-        for other in campaigns.list_campaigns(lifecycle="all")
+        for other in survey.campaigns
         if other.campaign_id != own.campaign_id and other.root_content_hash == own.root_content_hash
     )
 
 
-def _banked_instruments(session: Session) -> list[str]:
-    campaigns = session.store.campaigns
-    dataset_name = session.measured_dataset
+def _banked_instruments(session: Session, survey: CampaignSurvey) -> list[str]:
     banked: list[str] = []
-    for campaign in campaigns.list_campaigns(dataset_name, lifecycle="all"):
-        origin = campaigns.standing_rounds(campaign.root_hop, moment=None).rounds.get(0)
+    for campaign in survey.campaigns:
+        if campaign.dataset_name != session.measured_dataset:
+            continue
+        standing = survey.standing(campaign.root_hop)
+        origin = None if standing is None else standing.rounds.get(0)
         instrument = (
             None
             if origin is None
@@ -303,6 +304,7 @@ async def _emit_preflight_and_init_session(
     bound = await cell_bound(session, session.pipeline_params)
     measured = measured_cell_price(session, session.pipeline_params)
     instrument = inner_origin_of(session.pipeline_params)
+    survey = CampaignSurvey(session.store.campaigns)
     preflight_warnings = run_preflight_checks(
         config,
         selected,
@@ -311,9 +313,9 @@ async def _emit_preflight_and_init_session(
         framing=origin.framing,
         cell_usd=None if bound is None else bound.usd,
         measured_cell_usd=None if measured is None else measured.usd,
-        origin_campaigns=_campaigns_on_origin(session),
+        origin_campaigns=_campaigns_on_origin(session, survey),
         instrument=instrument,
-        banked_instruments=[] if instrument is None else _banked_instruments(session),
+        banked_instruments=[] if instrument is None else _banked_instruments(session, survey),
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)

@@ -10,11 +10,8 @@ from promptpotter.application.runner.campaign_result import (
     declare_line_bench,
 )
 from promptpotter.application.runner.round import flush_pending_decisions
-from promptpotter.application.scoring.evaluators import resolve_cell_formula
-from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.phases import (
     SELF_PAUSE_CAUSE,
     STOP_REASON_INFO,
@@ -88,39 +85,6 @@ def build_cycle_result(
     )
 
 
-def _export_artifact(
-    session: Session,
-    cycle_result: CycleResult,
-    cycle: Cycle | None,
-    *,
-    formula: str | None,
-) -> PromptExport | None:
-    # A cycle no round of which closed has nothing on record to export.
-    if cycle is None or (series := cycle_result.level_series) is None:
-        return None
-    winner = cycle.selection
-    campaign = session.store.campaigns.load_campaign(session.campaign_id)
-    return build_prompt_export(
-        winner,
-        cycle.rounds,
-        tool_version=APP_VERSION,
-        campaign_id=session.campaign_id,
-        cycle_id=session.cycle_id,
-        dataset_name=session.measured_dataset,
-        dataset_hash=session.bank.dataset_hash,
-        treatment=campaign.treatment if campaign else None,
-        stop_reason=cycle_result.stop_reason,
-        finished_at=cycle_result.finished_at,
-        formula=formula,
-        own=own_level(winner.results),
-        level=series.reading(winner.round),
-        schema=session.pipeline_schema,
-        framing=cycle.framing,
-        demo=session.state.scoring.require_partition().demo,
-        bench=cycle_result.bench,
-    )
-
-
 def close_cycle(
     cycle: Cycle | None,
     session: Session,
@@ -137,36 +101,39 @@ def close_cycle(
     """*rebasing*: the line continues onto a fork, whose close banks the launch's clock."""
     finished_at = utcnow_iso()
     selected = bound_optimizer()
-    # Before the result is built: a decision made after the last round has no next `close_round`.
-    if cycle is not None:
-        flush_pending_decisions(cycle, observers.callbacks.ledger)
-    banked = None if cycle is None else cycle.bench_passes
-    bench = declare_line_bench(
-        session, config, observers.callbacks, passes=banked, selecting=False, ending=stop_reason
-    )
-    cycle_result = build_cycle_result(
-        cycle,
-        session,
-        stop_reason=stop_reason,
-        stepped=pause_cause is PauseCause.STEP and stop_reason is StopReason.PAUSED,
-        cycle_error=cycle_error,
-        finished_at=finished_at,
-        # In-memory, never the debounced ``dashboard.json``.
-        spend=observers.dashboard.live.state.spend,
-        bench=bench,
-    )
-    _finalize_run(
-        session,
-        observers,
-        cycle_result,
-        config=config,
-        selected=selected,
-        cycle=cycle,
-        diag=diag,
-        open_round=open_round,
-        pause_cause=pause_cause,
-        rebasing=rebasing,
-    )
+    # Drained on every exit, a raise while banking included: the artifacts name what landed.
+    try:
+        # Before the result is built: a decision made after the last round has no next `close_round`.
+        if cycle is not None:
+            flush_pending_decisions(cycle, observers.callbacks.ledger)
+        banked = None if cycle is None else cycle.bench_passes
+        bench = declare_line_bench(
+            session, config, observers.callbacks, passes=banked, selecting=False, ending=stop_reason
+        )
+        cycle_result = build_cycle_result(
+            cycle,
+            session,
+            stop_reason=stop_reason,
+            stepped=pause_cause is PauseCause.STEP and stop_reason is StopReason.PAUSED,
+            cycle_error=cycle_error,
+            finished_at=finished_at,
+            # In-memory, never the debounced ``dashboard.json``.
+            spend=observers.dashboard.live.state.spend,
+            bench=bench,
+        )
+        _finalize_run(
+            session,
+            observers,
+            cycle_result,
+            config=config,
+            selected=selected,
+            diag=diag,
+            open_round=open_round,
+            pause_cause=pause_cause,
+            rebasing=rebasing,
+        )
+    finally:
+        observers.drain_all()
     return cycle_result
 
 
@@ -177,7 +144,6 @@ def _finalize_run(
     *,
     config: CampaignConfig,
     selected: SelectedOptimizer,
-    cycle: Cycle | None,
     diag: bool,
     open_round: int | None,
     pause_cause: PauseCause,
@@ -234,15 +200,6 @@ def _finalize_run(
                 result_prompt_fields=cycle_result.result_prompt_fields,
                 result_pipeline_params=cycle_result.result_pipeline_params,
             ),
-            export=_export_artifact(
-                session,
-                cycle_result,
-                cycle,
-                formula=resolve_cell_formula(
-                    session.state.scoring.require_scorer().per_cell, session.pipeline_schema
-                )[0],
-            ),
         )
         # After what it banked, and before the drain renders the artifacts that name the stop.
         declare_run_stop(session, observers, stop_reason, interrupted_by=pause_cause)
-    observers.drain_all()

@@ -10,6 +10,7 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     rank_hard_samples,
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.runner.bench import own_level
 from promptpotter.application.runner.campaign_result import read_cycle_bench
 from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.application.scoring.closed_rounds import closed_rounds
@@ -22,18 +23,22 @@ from promptpotter.application.views.view_models import (
     LogMdView,
     RoundDigestView,
 )
+from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.cells import HardSampleOrder
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.export import build_prompt_export
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import RaceStandingRecord
+from promptpotter.domain.run_standing import declared_selection
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import round_audits
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     LedgerSpend,
+    scan_closed_bench,
     scan_ledger_spend,
     scan_ledger_spend_by_round,
 )
@@ -171,7 +176,7 @@ def _fork_summary_from_index(fork_index: CycleIndex) -> ForkSummaryView:
 
 
 class RunArtifacts(Projection):
-    """The ONE writer of a cycle's ``log.md`` and ``review.md`` and its campaign's ``log.md``:
+    """The ONE writer of a cycle's ``log.md``, ``review.md`` and ``export.json`` and its campaign's ``log.md``:
     rendered off the ledger at each round close and once more at its drainer's close, where the
     stop and the winner have landed; a fault is its ledger's warning."""
 
@@ -182,6 +187,7 @@ class RunArtifacts(Projection):
         self._render()
 
     def drain(self) -> None:
+        _render_export(self._session, self._config)
         self._render()
 
     def _render(self) -> None:
@@ -268,6 +274,47 @@ def _banked_rounds(session: Session, hop: CycleHop) -> list[RoundResult]:
     if not session.store.campaigns.standing_rounds(hop, moment=None).rounds:
         return []
     return closed_rounds(session.store, hop, scoring.require_scorer(), moment=None)
+
+
+def _render_export(session: Session, config: CampaignConfig) -> None:
+    """An ended cycle's winner as its ledger states it; a pause or a cycle no round closed has none."""
+    store, hop = session.store.campaigns, session.hop
+    index = store.load(hop, moment=None)
+    series = store.standing_rounds(hop, moment=None).level_series
+    rounds = _banked_rounds(session, hop)
+    campaign = store.load_campaign(session.campaign_id)
+    bench = scan_closed_bench(store.ledger(hop))
+    if (
+        index is None
+        or index.final is None
+        or index.stop_reason is None
+        or index.finished_at is None
+        or series is None
+        or not rounds
+        or bench is None
+    ):
+        return
+    winner = declared_selection(rounds)
+    export = build_prompt_export(
+        winner,
+        rounds,
+        tool_version=APP_VERSION,
+        campaign_id=session.campaign_id,
+        cycle_id=session.cycle_id,
+        dataset_name=session.measured_dataset,
+        dataset_hash=session.bank.dataset_hash,
+        treatment=None if campaign is None else campaign.treatment,
+        stop_reason=index.stop_reason,
+        finished_at=index.finished_at,
+        formula=index.scorer_cell_formula,
+        own=own_level(winner.results),
+        level=series.reading(winner.round),
+        schema=session.pipeline_schema,
+        framing=campaign_framing(session.store, config, session.dataset),
+        demo=session.state.scoring.require_partition().demo,
+        bench=bench,
+    )
+    store.write_export(hop, export)
 
 
 def _render_review_md(session: Session, config: CampaignConfig) -> None:

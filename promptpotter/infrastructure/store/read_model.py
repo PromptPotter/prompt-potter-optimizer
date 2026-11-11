@@ -357,7 +357,7 @@ def folded[F: LedgerFold[Any, Any]](
 class Projected(Protocol):
     """A fold that writes (`projections/base.py::Projection`), fed after its index's folds."""
 
-    def on_record(self, record: CycleRecord, offset: int, *, ledger: Path) -> None: ...
+    def feed(self, record: CycleRecord) -> None: ...
 
     def drain(self) -> None: ...
 
@@ -396,7 +396,23 @@ class LedgerIndex(_LedgerTail):
 
     _registry: ClassVar[OrderedDict[Path, LedgerIndex]] = OrderedDict()
     _screened: ClassVar[list[_Make]] = []
+    # Every fold a reader declares (`readers`), whichever index it is read on.
+    _readers: ClassVar[list[type[Any]]] = []
     _registry_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    @classmethod
+    def readers[*F](cls, *folds: *F) -> tuple[*F]:
+        """The roster every reader of a ledger declares its folds on, a `Projection` by subclassing."""
+        cls._readers.extend(cast("tuple[type[Any], ...]", folds))
+        return folds
+
+    @classmethod
+    def check_every_arm_read(cls) -> None:
+        """Every `CycleRecord` arm is a `records` arm of a fold on the roster: a kind none reads is a
+        state the system enters and reports nowhere. Run once the readers are imported."""
+        read = {arm for fold in cls._readers for arm in fold.records}
+        if unread := sorted(k.decode() for k, arm in _ARM_MODELS.items() if arm not in read):
+            raise RuntimeError(f"No fold on the roster reads these record kinds: {unread}.")
 
     def __init__(self, path: Path) -> None:
         self._seeds: dict[_Make, LedgerFold[Any, Any] | None] = {}
@@ -505,8 +521,9 @@ class LedgerIndex(_LedgerTail):
                     )
                     fed = cast("CycleRecord", read)
                     for projection in held:
-                        on_record = partial(projection.on_record, fed, at_line, ledger=self._path)
-                        self.shielded(projection, on_record, at_line)
+                        if isinstance(projection, Positioned):
+                            projection.at_offset = at_line
+                        self.shielded(projection, partial(projection.feed, fed), at_line)
             finally:
                 self._drainer = None
 

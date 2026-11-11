@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, cast, get_args
 
 from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
-from promptpotter.domain.bench import BenchReading, PartitionRecord
+from promptpotter.domain.bench import BenchReading, BenchScore, PartitionRecord
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import (
+    BenchScoredView,
     InitEnterView,
     InitExitView,
     VerificationGradedView,
@@ -610,6 +611,26 @@ class _Verification:
         return list(self._graded)
 
 
+class _ClosedBench:
+    """The last bench a run declared: its close's, which carries the run's own word on its ending."""
+
+    records: ClassVar[RecordClasses] = (PhaseRecord,)
+
+    def __init__(self) -> None:
+        self._bench: BenchScore | None = None
+
+    def feed(self, record: PhaseRecord) -> None:
+        if isinstance(record.view, BenchScoredView):
+            self._bench = record.view.bench
+
+    def value(self) -> BenchScore | None:
+        return self._bench
+
+
+def scan_closed_bench(ledger_path: Path) -> BenchScore | None:
+    return _view(ledger_path, _ClosedBench)
+
+
 def _graded(
     spans: Iterable[LedgerSpan], kind: VerificationKind
 ) -> Iterator[VerificationGradedView]:
@@ -755,7 +776,7 @@ class _Timeline:
         )
 
 
-LEDGER_FOLDS = (
+LEDGER_FOLDS = LedgerIndex.readers(
     *map(
         _last,
         (

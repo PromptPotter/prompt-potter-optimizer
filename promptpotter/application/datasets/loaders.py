@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import functools
 import json
 import logging
+import os
 import random
 import re
 import sys
@@ -515,6 +517,7 @@ def _reached(value: object, seen: set[object]) -> set[ModuleType]:
     return set().union(*(_reached(v, seen) for v in (*names, *cells)))
 
 
+@functools.cache
 def recipe_modules(recipe: str) -> tuple[ModuleType, ...]:
     """What a recipe's code IS: this module and every module of this package it runs."""
     run = (BANK_RECIPES | PANEL_RECIPES)[recipe]
@@ -523,7 +526,15 @@ def recipe_modules(recipe: str) -> tuple[ModuleType, ...]:
 
 
 def recipe_code(recipe: str) -> str:
-    return module_source_digest(*recipe_modules(recipe))
+    """Kept by its modules' mtimes: a served read re-digests only a recipe whose code moved on disk."""
+    modules = recipe_modules(recipe)
+    return _recipe_digest(modules, tuple(os.stat(str(m.__file__)).st_mtime_ns for m in modules))
+
+
+@functools.lru_cache(maxsize=64)
+def _recipe_digest(modules: tuple[ModuleType, ...], mtimes: tuple[int, ...]) -> str:
+    del mtimes
+    return module_source_digest(*modules)
 
 
 def definition_source(dataset: ResolvedDataset) -> Source | None:

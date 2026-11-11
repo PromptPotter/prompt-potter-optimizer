@@ -122,7 +122,6 @@ from promptpotter.shared.errors import (
     FileKind,
     FileUnreadableError,
     NotFoundError,
-    graceful,
 )
 
 logger = logging.getLogger(__name__)
@@ -351,6 +350,7 @@ class CampaignStore:
         lifecycle: LifecycleFilter = "active",
     ) -> list[Campaign]:
         out: list[Campaign] = []
+        bank = workspace_bank(self._base_dir)
         for cid in self.list_campaign_ids():
             # A survey: one manifest this build cannot read must not hide the account's others.
             try:
@@ -360,6 +360,9 @@ class CampaignStore:
                 continue
             if campaign is None:
                 continue
+            # Its tombstone IS the delete: a delete torn after it lists deleted, whatever the manifest says.
+            if bank.deleted(cid) and campaign.lifecycle_status != "deleted":
+                campaign = campaign.edited(lifecycle_status="deleted")
             if dataset_name and campaign.dataset_name != dataset_name:
                 continue
             if lifecycle != "all" and campaign.lifecycle_status != lifecycle:
@@ -575,20 +578,17 @@ class CampaignStore:
         final: CycleFinal,
         *,
         interrupted_round: int | None = None,
-        export: PromptExport | None = None,
     ) -> None:
         self.append(hop, CycleFinalRecord(final=final, interrupted_round=interrupted_round))
-        if export is not None:
-            with graceful("Export artifact write failed"):
-                self._write_export(hop, export)
 
-    def _write_export(self, hop: CycleHop, export: PromptExport) -> None:
+    def write_export(self, hop: CycleHop, export: PromptExport) -> None:
+        """`runner/output.py::RunArtifacts` writes it off the ledger as the run drains."""
         write_text(self.layout(hop).export, export.to_json())
 
     def restate_export_bench(self, hop: CycleHop, bench: BenchScore) -> None:
         export = self.read_export(hop)
         if export is not None:
-            self._write_export(hop, export.model_copy(update={"bench": bench}))
+            self.write_export(hop, export.model_copy(update={"bench": bench}))
 
     def read_export(self, hop: CycleHop) -> PromptExport | None:
         """An export this build does not read is refused as one, by its path."""

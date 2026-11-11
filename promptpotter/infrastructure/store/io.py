@@ -257,6 +257,11 @@ def write_text(path: Path, content: str) -> None:
     _atomic_write(path, lambda f: f.write(content))
 
 
+def file_stat(path: Path) -> os.stat_result:
+    """THE stat of run data: through the long-path prefix, as every read here opens it."""
+    return os.stat(_long_path(path))
+
+
 def read_bytes_optional(path: Path) -> bytes | None:
     try:
         with open(_long_path(path), "rb") as f:
@@ -748,7 +753,7 @@ def newest_mtime_ns(*paths: Path) -> int | None:
     newest: int | None = None
     for p in paths:
         try:
-            m = p.stat().st_mtime_ns
+            m = file_stat(p).st_mtime_ns
         except OSError:
             continue
         if newest is None or m > newest:

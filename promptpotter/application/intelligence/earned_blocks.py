@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter.domain.candidate_diff import candidate_delta
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.scoring import ANSWER_SPACE_CAP
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CellOf,
@@ -16,13 +16,45 @@ from promptpotter.infrastructure.store.archive_queries import (
     memory_scope,
     walked_answers,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
+from promptpotter.shared.errors import LedgerUnreadableError
 
 if TYPE_CHECKING:
+    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
     from promptpotter.domain.paired_reading import MemberAddress, PairedReading
     from promptpotter.domain.run_records import RoundStatement
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
     from promptpotter.infrastructure.store.stores import Stores
+
+logger = logging.getLogger(__name__)
+
+
+class CampaignSurvey:
+    """THE cross-campaign survey: every campaign listed once, a cycle's standing rounds read through
+    the store's reader. A campaign whose ledger this build cannot read is a faulted row, named in
+    `faulted` and skipped, never a crash of the run that surveys it."""
+
+    def __init__(self, campaigns: CampaignStore) -> None:
+        self._store = campaigns
+        self.campaigns = campaigns.list_campaigns(lifecycle="all")
+        self.faulted: dict[str, LedgerUnreadableError] = {}
+
+    def standing(self, hop: CycleHop) -> StandingRounds | None:
+        if hop.campaign_id in self.faulted:
+            return None
+        try:
+            return self._store.standing_rounds(hop, moment=None)
+        except LedgerUnreadableError as exc:
+            logger.warning("the survey skips %s: %s", hop.campaign_id, exc)
+            self.faulted[hop.campaign_id] = exc
+            return None
+
+    def cycles(self, campaign: Campaign) -> Iterable[StandingRounds]:
+        for cycle_dir in self._store.campaign_cycle_dirs(campaign.campaign_id):
+            hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
+            if (standing := self.standing(hop)) is not None:
+                yield standing
 
 
 # The long fields (instruction, problem_description) are task-specific, not transferable.
@@ -113,9 +145,9 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
 
     acc: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     counted: set[MemberAddress] = set()
-    for campaign in stores.campaigns.list_campaigns(lifecycle="all"):
-        for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign.campaign_id):
-            standing = scan_standing_rounds(ledger_chain(CycleDir(cycle_dir), moment=None))
+    survey = CampaignSurvey(stores.campaigns)
+    for campaign in survey.campaigns:
+        for standing in survey.cycles(campaign):
             fields_of = {
                 arm.individual.id: arm.individual.prompts
                 for held in standing.rounds.values()

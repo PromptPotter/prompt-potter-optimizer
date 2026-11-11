@@ -68,7 +68,6 @@ UPSTREAM_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/"
     "litellm/model_prices_and_context_window_backup.json"
 )
-CACHE_PATH = user_data_root() / "rates.json"
 BUNDLED_PATH = Path(__file__).parent / "data" / "rates.json"
 _KEEP_FIELDS = (
     "input_cost_per_token",
@@ -95,9 +94,14 @@ def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def cache_path() -> Path:
+    """Resolved per call, as every data-root reader is: a home set after import reads its own rates."""
+    return user_data_root() / "rates.json"
+
+
 def _cache_fresh() -> bool:
     try:
-        age_s = time.time() - CACHE_PATH.stat().st_mtime
+        age_s = time.time() - cache_path().stat().st_mtime
     except OSError:
         return False
     return age_s < _TTL_SECONDS
@@ -125,9 +129,9 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
         return False
 
     stripped = _strip_upstream(raw)
-    write_text(CACHE_PATH, json.dumps({"models": stripped}, indent=0, separators=(",", ":")))
+    write_text(cache_path(), json.dumps({"models": stripped}, indent=0, separators=(",", ":")))
     load_rates.cache_clear()
-    logger.info("spend: refreshed %d model rates → %s", len(stripped), CACHE_PATH)
+    logger.info("spend: refreshed %d model rates → %s", len(stripped), cache_path())
     return True
 
 
@@ -192,11 +196,11 @@ def _as_tokens(raw: object) -> int | None:
 @functools.lru_cache(maxsize=1)
 def load_rates() -> RateTable:
     bundled = _read_models(BUNDLED_PATH)
-    fetched = _read_models(CACHE_PATH)
+    fetched = _read_models(cache_path())
     if bundled is None and fetched is None:
         logger.warning(
             "spend: no rate table available (cache %s + bundle %s both missing)",
-            CACHE_PATH,
+            cache_path(),
             BUNDLED_PATH,
         )
         return RateTable({})
@@ -294,6 +298,21 @@ def route_priced(model: str, provider: str, *, hosts: tuple[str, ...] | None = N
         return route_ceiling(model, provider, hosts=hosts) is not None
     except PriceListUnreachableError:
         return None
+
+
+def remembered_priced(model: str, provider: str) -> bool | None:
+    """`route_priced` off what is already known, never a fetch: a served read answers from the memo
+    that run init and every send fill. ``None`` where only a fetch would answer, as for an outage."""
+    if provider.lower() == "openrouter":
+        key = _route_model(model)
+        if key is None:
+            return False
+        try:
+            held = _remembered(_memo_key(key, None))
+        except PriceListUnreachableError:
+            return None
+        return None if held is _MISS else held is not None
+    return lookup_rate(model, provider) is not None
 
 
 def _route_model(model: str) -> str | None:

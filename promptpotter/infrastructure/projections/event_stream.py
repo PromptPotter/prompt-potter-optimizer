@@ -10,6 +10,8 @@ from promptpotter.infrastructure.store.io import complete_lines
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, ledger_record, line_dict
 
+LedgerIndex.readers(ActivityFeed)
+
 
 class CycleLedgerTail:
     """Synchronous file I/O: a caller on an event loop uses ``asyncio.to_thread``. Its activity is the

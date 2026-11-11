@@ -106,7 +106,7 @@ from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
-from promptpotter.infrastructure.llm.pricing import route_priced
+from promptpotter.infrastructure.llm.pricing import remembered_priced
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
@@ -819,7 +819,8 @@ def _rows(m: _Merge, folded: FoldedParams) -> dict[str, list[NodeConfigParam]]:
 
 def _admitted_menu(m: _Merge) -> list[str]:
     """Never offers a model the Start would refuse: one no rate prices under a dollar ceiling,
-    or one the free tier does not list for a free account."""
+    or one the free tier does not list for a free account. A served read: it never fetches a price
+    list, and a model no known rate settles yet stays offered, as through an outage."""
     models = m.filtered.selectable_models()
     if m.free:
         models = [model for model in models if model in free_task_models()]
@@ -827,7 +828,9 @@ def _admitted_menu(m: _Merge) -> list[str]:
     if not providers or m.cfg.optimization.budget.usd is None:
         return models
     return [
-        model for model in models if any(route_priced(model, p) is not False for p in providers)
+        model
+        for model in models
+        if any(remembered_priced(model, p) is not False for p in providers)
     ]
 
 
