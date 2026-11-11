@@ -52,9 +52,9 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 13,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 223,
+    "p_served": 194,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
-    "p_command": 11,
+    "p_command": 10,
     # The rows each file naming most of them leaves out.
     "p_command_drift": 0,
     # What every optimizer member is handed: `NodeContext`'s public members, inherited ones included,

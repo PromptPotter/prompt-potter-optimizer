@@ -257,14 +257,12 @@ class OptimizationConfig(OptimizerChoice):
     origin_gate: Annotated[OriginGateMode, Knob(Estimand.GATE)] = Field(
         "strict",
         description=(
-            "Hold after round 0 for the operator's decision when the origin's degradation "
-            "verdict is non-healthy, instead of optimizing against a broken floor — the "
-            "common failure while bringing up a new connector. ``strict`` (default) holds "
-            "on ``critical`` or ``degraded``; ``critical_only`` holds only on a "
-            "structurally-broken origin; ``off`` disarms the gate. The decision "
-            "(`origin-gate`) proceeds into the search anyway, re-scores the origin, "
-            "or aborts the cycle. An origin that scored no cell halts instead, and starting "
-            "the cycle again re-measures it."
+            "Halt after round 0 when the origin's degradation verdict is non-healthy, "
+            "instead of optimizing against a broken floor — the common failure while "
+            "bringing up a new connector. ``strict`` (default) halts on ``critical`` or "
+            "``degraded``; ``critical_only`` halts only on a structurally-broken origin; "
+            "``off`` disarms the gate. Resuming re-measures the cells the origin lost and "
+            "grades it again; an origin still unhealthy when resumed proceeds into the search."
         ),
     )
 

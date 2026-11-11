@@ -6,23 +6,15 @@ from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
-from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.bench.resume_and_fork.resume import (
-    resume_with_divergence_check,
-)
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import ScorerSetup, Session
 from promptpotter.application.initialization.wiring import bind_cycle_session
-from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
-from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline, cycle_config
-from promptpotter.application.preflight import refuse_below_reasoning_floor, run_preflight_checks
+from promptpotter.application.preflight import refuse_below_reasoning_floor
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.inner.spawn_context import (
     inner_spawn_of,
-    retarget_inner_spawn,
 )
 from promptpotter.application.scoring.classification import build_degradation_checks
 from promptpotter.application.scoring.evaluators import (
@@ -30,15 +22,12 @@ from promptpotter.application.scoring.evaluators import (
     observation_owner,
 )
 from promptpotter.application.scoring.judges.registry import build_evaluators
-from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
-from promptpotter.application.views.ingress import init_enter, init_exit
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import Compare, Optimize
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop
+from promptpotter.domain.phases import STOP_REASON_INFO, StopLoop
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import bound_spend_book
@@ -54,8 +43,6 @@ from promptpotter.shared.errors import DiagnosticError
 from promptpotter.shared.run_scope import RunScope, run_scope, scoped
 
 if TYPE_CHECKING:
-    from promptpotter.application.origin import CampaignOrigin
-    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.campaign_config import CampaignConfig
@@ -66,48 +53,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def init_cycle(session: Session, *, resume_from_round_override: int | None) -> None:
-    """A present-but-BROKEN cycle propagates: swallowing it re-spends the campaign from scratch."""
-    store = session.store.campaigns
-    hop = session.hop
-    # Before anything that can raise: a fork's state is its parent's until this line.
-    session.state.resumed_from_round = (
-        _next_round(session)
-        if resume_from_round_override is None
-        else store.rewind_enters(hop, resume_from_round_override)
-    )
-    # Restated on every launch: the backend may have moved its axes since.
-    session.record_resolved_run()
-    store.write_optimized_surface(
-        hop,
-        session.pipeline_schema.value_tree(
-            prompt_delivery=session.backend_client.connector.prompt_delivery(
-                session.pipeline_params
-            )
-        ),
-    )
-    existing = store.load(hop, moment=None)
-    if existing is not None:
-        session.state.human_intervened = existing.human_intervened
-
-
-def _next_round(session: Session) -> int:
-    """The round NUMBER after the highest one closed, never a count: the origin is round 0."""
-    last = session.store.campaigns.standing_rounds(session.hop, moment=None).last_closed
-    return 1 if last is None else last + 1
-
-
-def populate_session_scoring(
-    session: Session,
-    campaign_config: CampaignConfig,
-    *,
-    source: RunSource,
-    partition: BankPartition,
-) -> None:
-    """The one writer of ``state.scoring``, built whole: `{}` judges declares none, never "keep"."""
-    session.state.source = source
+def scorer_setup(
+    session: Session, campaign_config: CampaignConfig, *, partition: BankPartition
+) -> ScorerSetup:
+    """What *session* scores under *campaign_config*, built whole once per launch or pass."""
     connector = session.backend_client.connector
-    session.state.scoring = ScorerSetup(
+    return ScorerSetup(
         scorer=scorer_of(
             campaign_config,
             verifier_graded=all_verifier_graded(s.ground_truth for s in session.bank.samples),
@@ -165,10 +116,10 @@ def arm_diagnostic_scoring(
     # A run is refused at its mint (`jobs/mint.py::refuse_unrunnable`); a pass outside one, here.
     refuse_below_reasoning_floor(session.pipeline_params.nodes.items())
     with session_scope(session):
-        populate_session_scoring(
+        session.state.source = source
+        session.state.scoring = scorer_setup(
             session,
             campaign_config,
-            source=source,
             partition=cycle_partition(session, session.bank.samples, campaign_config),
         )
         yield
@@ -259,146 +210,3 @@ def verb_ledger(stores: Stores, hop: CycleHop | None) -> Iterator[CycleEventLog]
 def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
     with verb_ledger(stores, hop), filed_as("diagnostic"):
         yield
-
-
-def _campaigns_on_origin(session: Session, survey: CampaignSurvey) -> list[str]:
-    own = next((c for c in survey.campaigns if c.campaign_id == session.campaign_id), None)
-    if own is None:
-        return []
-    return sorted(
-        other.campaign_id
-        for other in survey.campaigns
-        if other.campaign_id != own.campaign_id and other.root_content_hash == own.root_content_hash
-    )
-
-
-def _banked_instruments(session: Session, survey: CampaignSurvey) -> list[str]:
-    banked: list[str] = []
-    for campaign in survey.campaigns:
-        if campaign.dataset_name != session.measured_dataset:
-            continue
-        standing = survey.standing(campaign.root_hop)
-        origin = None if standing is None else standing.rounds.get(0)
-        instrument = (
-            None
-            if origin is None
-            else inner_origin_of(origin.close.origin.individual.pipeline_params)
-        )
-        if instrument is not None:
-            banked.append(instrument)
-    return banked
-
-
-async def _emit_preflight_and_init_session(
-    config: CampaignConfig,
-    selected: SelectedOptimizer,
-    dataset: list[Sample],
-    cb: RunCallbacks,
-    session: Session,
-    origin: CampaignOrigin,
-) -> None:
-
-    target_node_configs = list(session.pipeline_params.nodes.items())
-    target_models = tuple(v.model for _, v in target_node_configs if v.model)
-
-    bound = await cell_bound(session, session.pipeline_params)
-    measured = measured_cell_price(session, session.pipeline_params)
-    instrument = inner_origin_of(session.pipeline_params)
-    survey = CampaignSurvey(session.store.campaigns)
-    preflight_warnings = run_preflight_checks(
-        config,
-        selected,
-        dataset,
-        target_models,
-        framing=origin.framing,
-        cell_usd=None if bound is None else bound.usd,
-        measured_cell_usd=None if measured is None else measured.usd,
-        origin_campaigns=_campaigns_on_origin(session, survey),
-        instrument=instrument,
-        banked_instruments=[] if instrument is None else _banked_instruments(session, survey),
-    )
-    for w in preflight_warnings:
-        logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
-    cb.on_phase(
-        CampaignPhase.INIT,
-        "enter",
-        view=init_enter(
-            cb.view_context,
-            config=config,
-            dataset=dataset,
-            session=session,
-            warnings=preflight_warnings,
-        ),
-    )
-
-    if session.index_terms:
-        await session.backend_client.init_session(session.index_terms)
-
-
-async def init_optimization_loop(
-    origin: CampaignOrigin,
-    dataset: list[Sample],
-    config: CampaignConfig,
-    *,
-    cb: RunCallbacks,
-    no_divergence_check: bool,
-    fork_on_divergence: bool,
-    resume_from_round_override: int | None,
-    session: Session,
-) -> tuple[Cycle, CycleHop | None]:
-    """The cycle holds the session it runs on, and beside it the cycle a divergence forked it from.
-
-    INIT stays open: its caller moves onto a fork first, then closes it (`finalize_loop_state`).
-    """
-    selected = bound_optimizer()
-    init_cycle(session, resume_from_round_override=resume_from_round_override)
-    await _emit_preflight_and_init_session(config, selected, dataset, cb, session, origin)
-    # A round the ledger closed, the origin's included, is replayed, never closed again; a rewind
-    # keeps the round it rewinds to, so it always replays and is written once the replay proceeds.
-    replays = (
-        session.store.campaigns.standing_rounds(session.hop, moment=None).last_closed is not None
-    )
-    cycle = Cycle.start(
-        origin.origin,
-        framing=origin.framing,
-        session=session,
-        config=config,
-        optimizer=selected,
-    )
-    forked_from: CycleHop | None = None
-    if replays:
-        fork = await resume_with_divergence_check(
-            cycle,
-            dataset,
-            cb,
-            skip_divergence_check=no_divergence_check,
-            fork_on_divergence=fork_on_divergence,
-            rewind=resume_from_round_override,
-        )
-        if fork is not None:
-            forked_from = session.hop
-            cycle.session = session.bound(
-                CycleHop(campaign_id=session.campaign_id, cycle_id=fork), purpose=session.purpose
-            )
-            # Off the fork's own chain: one cut at round 0 closes the origin again, then runs round 1.
-            cycle.session.state.resumed_from_round = _next_round(cycle.session)
-    return cycle, forked_from
-
-
-def finalize_loop_state(cycle: Cycle, cb: RunCallbacks) -> None:
-    """*cb* is the cycle's own: INIT exits on the cycle the loop runs, a fork's included."""
-    session = cycle.session
-    cycle.sample_index = SampleIndex.ensure_for(
-        session.store,
-        scorer=session.state.scoring.require_scorer(),
-        bank=session.bank,
-        sample_ids=session.state.scoring.require_partition().admitted_ids,
-    )
-    # A RUNNING cycle's `log.md` reads its formula off this bracket (`scorer_cell_formula`).
-    cb.on_phase(
-        CampaignPhase.INIT,
-        "exit",
-        view=init_exit(cb.view_context, cycle=cycle, session=session),
-    )
-    # The cycle id is FINAL only here; the spawn context was published before a fork could move it.
-    retarget_inner_spawn(session)

@@ -25,7 +25,7 @@ export function CriticalAlertBanner() {
   // unit in view, the reads that list and point at runs are the connection.
   const connection = connectionSaid(
     cycleId ? failureOf(read) : (pointerFailure ?? registryFailure),
-    goneAddress ? "left" : !cycleId ? "listing" : pinned ? "pinned" : "followed",
+    goneAddress ? goneAddress.cause : !cycleId ? "listing" : pinned ? "pinned" : "followed",
   );
   const backend: SaidRow | null =
     health === null || health.status === "live"

@@ -38,6 +38,7 @@ from factories import (
     measurement,
     measurements,
     minted_campaign,
+    minted_dataset,
     optimizer_state,
     pipeline_schema,
     prompted,
@@ -96,7 +97,8 @@ from promptpotter.application.pipeline_resolve import (
     steer_verdict,
 )
 from promptpotter.application.runner.inner.spawn_context import inner_spawn_of
-from promptpotter.application.runner.loop import run_round_loop
+from promptpotter.application.runner.loop import LoopEnd, run_round_loop
+from promptpotter.application.runner.origin_gate import open_origin_round
 from promptpotter.application.runner.round import run_init
 from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_rounds
@@ -155,7 +157,7 @@ from promptpotter.domain.run_standing import line_reference, walked_slot
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
@@ -1081,10 +1083,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             "optimizer_narrowing": {"a": {"param_allowed_values": {"model": ["m"]}}},
         }
     )
-    stored_campaign(
-        stores,
-        minted_campaign(scenario, config=permits_m),
-    )
+    scenario_campaign = minted_campaign(scenario, config=permits_m)
+    stored_campaign(stores, scenario_campaign)
+    minted_dataset(stores, scenario_campaign)
     scenario_rounds: list[RoundResult] = []
     scenario_pick = ArmKey(
         [_emit_round(closing, scenario_log, scenario_rounds, f"s{n}") for n in range(2)][-1]
@@ -1946,8 +1947,15 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
                 cycle,
                 line=[cycle.origin_round.model_copy(update={"at_offset": closed.at_offset})],
             )
+
+        async def walk() -> LoopEnd:
+            gated = await open_origin_round(
+                cycle, [], ctx.callbacks, spend=SpendRollup(), diagnosing=False
+            )
+            return gated or await run_round_loop(cycle, cycle.config, session, ctx.callbacks)
+
         with scoped(ledger=ctx.callbacks.ledger), spending_under(unbounded_spend_book()):
-            end = asyncio.run(run_round_loop(cycle, [], cycle.config, session, ctx.callbacks))
+            end = asyncio.run(walk())
         if not crashes:
             ctx.callbacks.ledger.append(RunPhaseRecord.stop(end.stop_reason))
         return end.stop_reason

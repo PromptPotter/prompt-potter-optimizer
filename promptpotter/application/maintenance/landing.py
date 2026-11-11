@@ -28,7 +28,6 @@ from promptpotter.application.notices import tell_landed
 from promptpotter.application.optimizer_manifest import checkin_manifest
 from promptpotter.config.paths import default_projects_root, jobs_dir, user_data_root
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.data_root import (
     CHECKIN_SHADOW,
@@ -58,7 +57,7 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.infrastructure.store.layout import INNER_SANDBOXES_DIR, CampaignLayout
 from promptpotter.infrastructure.store.stores import tenant_stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, CycleBusyError, PotterError
+from promptpotter.shared.errors import ConflictError, PotterError
 from promptpotter.shared.hashing import stable_hash
 
 logger = logging.getLogger(__name__)
@@ -101,8 +100,9 @@ class Landing(NamedTuple):
     # What refuses the landing: a file no row names, a survivor that does not load, a live run's.
     unknown: tuple[Path, ...]
     unloadable: tuple[Unloadable, ...]
-    # What the act found a run or a pass took since the plan, so it kept (`apply_landing`): the
-    # stamp then names no key, and the next entry lands the root again.
+    # What the act found a run or a pass took since the plan, or a mint it planned torn that wrote
+    # its manifest since, so it kept (`apply_landing`): the stamp then names no key, and the next
+    # entry lands the root again.
     kept: tuple[Unloadable, ...]
 
     @property
@@ -160,7 +160,7 @@ class Landing(NamedTuple):
                 *((f"migrated {len(self.staged)} file(s)",) if self.staged else ()),
                 *(f"dropped {n} {name}" for name, n in sorted(dropped.items())),
                 *((f"deleted {len(self.torn)} torn mint(s)",) if self.torn else ()),
-                *((f"kept {len(self.kept)} a run or a pass holds",) if self.kept else ()),
+                *((f"kept {len(self.kept)} taken or minted since the plan",) if self.kept else ()),
                 *(() if self.reset is None else (f"reset {len(self.reset.drops):,} run file(s)",)),
             )
         )
@@ -328,8 +328,8 @@ def _refusal(data_root: Path, refused: Refused) -> ConflictError:
 
 
 class LandedStamp(FrozenModel):
-    """The root's last landing: the record schema it landed under (``None`` where it kept what a
-    run or a pass took, so the next entry lands it again), when, and what it wrote, dropped and
+    """The root's last landing: the record schema it landed under (``None`` where it kept what
+    moved since its plan, so the next entry lands it again), when, and what it wrote, dropped and
     kept (`Landing.said`)."""
 
     key: str | None
@@ -339,9 +339,9 @@ class LandedStamp(FrozenModel):
 
 def apply_landing(projects_root: Path, landing: Landing) -> Landing:
     """A refused landing raises before a write, and so does a reset's own refusal, asked again.
-    Every wipe asks again at its act, under the admission gate: a run or a mint a run or a pass
-    took since the plan is kept. Returns the landing as applied, and stamps the root with what it
-    did (`Landing.said`)."""
+    Every wipe asks again at its act, under the admission gate: a run's files a run or a pass took
+    since the plan are kept, and so is a torn mint that wrote its manifest since. Returns the landing as
+    applied, and stamps the root with what it did (`Landing.said`)."""
     if (refused := landing.refused) is not None:
         raise _refusal(projects_root.parent, refused)
     data_root = projects_root.parent
@@ -370,18 +370,17 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
                 unlink_robust(run.path)
             runs.append(run)
         for mint in landing.torn:
-            stores = tenant_stores(projects_root, WorkspaceDir(mint.path.parent.parent))
-            try:
-                with destroying(stores, registry, mint.path.name):
-                    stores.campaigns.delete_campaign(
-                        mint.path.name, keep_results=False, changed_at=utcnow_iso()
-                    )
-            except CycleBusyError as busy:
-                scoring = busy.details["status"] == RunPhase.SCORING.value
-                kept.append(
-                    mint._replace(why=f"{mint.path}: {'a pass' if scoring else 'a run'} holds it")
-                )
+            # Every hold is admitted on its campaign read under the gate (a handoff re-claims under
+            # its parent's live claim), so only a mint that wrote its manifest since the plan can be
+            # held: it is no torn one. The plan's own question, so an unreadable manifest never raises.
+            if CampaignLayout(mint.path).manifest.is_file():
+                kept.append(mint._replace(why=f"{mint.path}: minted since the plan"))
                 continue
+            stores = tenant_stores(projects_root, WorkspaceDir(mint.path.parent.parent))
+            with destroying(stores, registry, mint.path.name):
+                stores.campaigns.delete_campaign(
+                    mint.path.name, keep_results=False, changed_at=utcnow_iso()
+                )
             torn.append(mint)
     applied = landing._replace(runs=tuple(runs), torn=tuple(torn), kept=tuple(kept))
     stamp = LandedStamp(key=None if kept else landing_key(), at=utcnow_iso(), said=applied.said)

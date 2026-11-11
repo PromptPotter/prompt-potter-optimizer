@@ -3,7 +3,7 @@ import { STORAGE_KEYS, useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { ownerOfAddress } from "@/lib/ids";
 
 // Bumping this DROPS every stored record rather than migrating it.
-const RECORD_VERSION = 3;
+const RECORD_VERSION = 4;
 
 const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -23,6 +23,8 @@ export interface CampaignView {
   showForest: boolean;
   // Lane keys (course addresses), the same space `forest-layout::layout` matches.
   expandedLanes: string[];
+  // The viewed lane last opened for its visit: a manual collapse is not undone.
+  expandedForLane: string | null;
 }
 
 type Store = Record<string, CampaignView>;
@@ -39,6 +41,7 @@ export function emptyView(): CampaignView {
     viewedPick: null,
     showForest: false,
     expandedLanes: [],
+    expandedForLane: null,
   };
 }
 

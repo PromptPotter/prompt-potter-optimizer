@@ -13,13 +13,6 @@ export function toggleInSet(set: number[], sid: number): number[] {
   return [...next].sort((a, b) => a - b);
 }
 
-// Excludes the planned order on purpose: a planned-but-unmeasured sample reads 0 on every bar.
-export function measuredUniverse(rounds: ServedRound[]): number[] {
-  const set = new Set<number>();
-  for (const r of rounds) for (const sid of r.selection) set.add(sid);
-  return [...set].sort((a, b) => a - b);
-}
-
 interface RoundMeasuredSet {
   round: number;
   ids: number[];
@@ -29,12 +22,4 @@ export function roundMeasuredSets(rounds: ServedRound[]): RoundMeasuredSet[] {
   return rounds
     .filter((r) => r.selection.length > 0)
     .map((r) => ({ round: r.round, ids: [...new Set(r.selection)].sort((a, b) => a - b) }));
-}
-
-export function roundsCoveringSample(rounds: ServedRound[]): Map<number, number> {
-  const out = new Map<number, number>();
-  for (const r of rounds) {
-    for (const sid of new Set(r.selection)) out.set(sid, (out.get(sid) ?? 0) + 1);
-  }
-  return out;
 }

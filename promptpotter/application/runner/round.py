@@ -463,7 +463,7 @@ async def execute_round(
 ) -> RoundWalked:
     """One round, each role handed what the ones before it left."""
     # The search split alone: a bench or demo row a round could draw would elect on held-out rows.
-    pool = list(cycle.session.state.scoring.require_partition().search)
+    pool = list(cycle.session.state.scoring.partition.search)
     ctx = RoundContext(cycle=cycle, round_num=round_num, callbacks=callbacks)
     await settle_owed_outputs(ctx)
     # Before the draw, which reads the scale the election will, and before an arm spawns a cell.
@@ -532,7 +532,7 @@ async def close_round(
     if cycle.sample_index is not None:
         cycle.sample_index.refresh(
             session.store,
-            scorer=session.state.scoring.require_scorer(),
+            scorer=session.state.scoring.scorer,
         )
     return round_result
 

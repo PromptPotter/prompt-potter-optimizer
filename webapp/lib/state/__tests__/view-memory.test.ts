@@ -61,6 +61,7 @@ describe("viewMemoryCodec", () => {
       [
         "at",
         "autoExpandedFor",
+        "expandedForLane",
         "expandedLanes",
         "showForest",
         "toggled",

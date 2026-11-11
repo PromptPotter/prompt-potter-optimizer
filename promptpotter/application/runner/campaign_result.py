@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import scorer_of
+from promptpotter.application.jobs.launcher.admission import campaign_refusal
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.bench import (
     BenchLine,
@@ -37,6 +38,7 @@ from promptpotter.shared.clock import utcnow_iso
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import LaunchClock, Session
     from promptpotter.application.run_callbacks import RunCallbacks
+    from promptpotter.domain.campaign import CampaignRefusal
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.scoring import Scorer
@@ -129,8 +131,8 @@ async def bench_origin(
     held = line_passes(stores, hop.campaign_id)
     if held is not None and held.origin.answers(
         origin_sp.sp_hash(session.pipeline_schema),
-        [s.key for s in session.state.scoring.require_partition().bench],
-        session.state.scoring.require_scorer().id,
+        [s.key for s in session.state.scoring.partition.bench],
+        session.state.scoring.scorer.id,
     ):
         passes = held
     else:
@@ -145,7 +147,7 @@ async def bench_origin(
             round_num=0,
             cb=cb,
         )
-        split = session.state.scoring.require_partition().split
+        split = session.state.scoring.partition.split
         after = _bench_counted(spend)
         passes = BenchPasses(
             tolerance=split.tolerance if split is not None else 0,
@@ -234,6 +236,7 @@ def bench_line(
         hop=hop,
         on_line=holder == hop,
         inner=stores.inner,
+        refused=_refused(stores, campaign),
         held_by=None if holder == hop else holder.cycle_id,
         trigger=config.bench_trigger,
         held_out=len(drawn.bench_ids) if drawn is not None else 0 if split is None else split.bench,
@@ -243,6 +246,12 @@ def bench_line(
         run=run,
         spend=read_line_spend(stores, campaign).spend,
     )
+
+
+def _refused(stores: Stores, campaign: Campaign) -> CampaignRefusal | None:
+    """The refusal a pass on *campaign* is admitted under, as its bench line serves it."""
+    refused = campaign_refusal(stores, campaign)
+    return None if refused is None else refused.refusal
 
 
 def bench_under(
@@ -279,6 +288,7 @@ def declare_line_bench(
             hop=hop,
             on_line=False,
             inner=stores.inner,
+            refused=None if campaign is None else _refused(stores, campaign),
             held_by=None,
             trigger=config.bench_trigger,
             held_out=0 if split is None else split.bench,

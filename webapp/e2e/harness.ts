@@ -9,7 +9,7 @@ import {
   type ServedRound,
 } from "@/lib/api/types";
 import { isStopReason, tagValue } from "@/lib/derivations";
-import { decodeCyclePath } from "@/lib/ids";
+import { decodeCyclePath, encodeCyclePath } from "@/lib/ids";
 
 const API = "/api/v1";
 
@@ -152,12 +152,11 @@ export async function campaigns(
   return entries.flatMap((c) => {
     const root = c.level === "campaign" ? decodeCyclePath(c.facts.root)?.[0] : undefined;
     if (!root) return [];
-    // The `cycle_` prefix is stripped in the address and nowhere else (`lib/address.ts`).
     return [
       {
         id: c.address,
         cycleId: root.cycleId,
-        addr: `#/c/${c.address}/${root.cycleId.replace(/^cycle_/, "")}`,
+        addr: `#/${encodeCyclePath([root])}`,
         dataset: tagValue(c, "dataset"),
       },
     ];

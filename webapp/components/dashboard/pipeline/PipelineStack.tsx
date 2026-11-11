@@ -138,8 +138,8 @@ export function PipelineStack({ datasetName }: Props) {
     <div className="pipeline-stack" id="pipeline-stack">
       {zoomStrip}
       {at(start).map(draw)}
-      {nested.truncated && (
-        <p className="pipeline-stack-note">Stack incomplete — {nested.truncated}.</p>
+      {nested.unread && (
+        <p className="pipeline-stack-note">Stack incomplete — {nested.unread}.</p>
       )}
     </div>
   );

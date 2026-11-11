@@ -21,8 +21,12 @@ header, then the operator asked about a release.
    pricing, and a resume runs on the campaign's; one resolver rule, `--set` on the patch's own paths,
    no read opens an account; the stage view as its own route, following the running campaign: stopb,
    conn-2, doors, tv. tv's exhibit (link 3) rides tv-2 (batch/29).
-5. **batch/25** — run init as one module, one admission for every launch, one pass verb, served arm
-   rows: init-2, admit on its tip, passb, webb-3. The decision window opens.
+5. **batch/25** — run init as one module, round 0 one door, a degraded origin halting and the
+   `origin-gate` verb gone; one hold opening every launch's cycle, the embedded launch opening its own
+   session, a retired campaign refused at admission; a bench status serving `can_run`; one served arm,
+   coverage, the nest and the followed `hop` served, the hash as `Subject`'s address: init-2, init-3,
+   init-4, admit (links 1–2), passb (link 1), webb-2, webb-3. admit-2 and passb-2 follow on its tip;
+   webb-4 waits on addr. The decision window opens.
 6. **batch/26** — every re-key: money, rk-opt and stream-rk on its tip (`RunCallbacks` and the
    `declare_*` doors), then narr (one narration, the typed phase act) on stream-rk's; rk-run, addr;
    then payer (who pays a connector's send) and rk-dec beside it, on the assembled tip, rk-run's
@@ -41,7 +45,7 @@ check-in, their lift and n kept, the origin field's snippet ids served, the prov
 **Rules.** No paid run between batch/25's start and batch/26's push. From batch/22 the landing drops
 unloadable run data itself; a survivor reshape ships its migration in its landing; the live box asks.
 A short window defers from the end (pending tracks, ren, faults, the ts private-reach link, lb, la, lw),
-never w0, the trim, stream, startb, stopb, land, init-2, admit, money, rk-opt, rk-run, payer or rel.
+never w0, the trim, stream, startb, stopb, land, admit-2, money, rk-opt, rk-run, payer or rel.
 
 **Forks left to the operator** (taste and policy; a chain leaves each as it stands): whether `log.md`
 and `review.md` go (md) · whether the visits analytics move to the site repo · what "calls held equal"

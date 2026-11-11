@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_VIEWS, formatAddress } from "@/lib/address";
+import { DEFAULT_VIEWS, NO_KEYS, formatAddress } from "@/lib/address";
 import { ThreadProvider } from "@/lib/chat/thread";
 import { IngestFlowProvider } from "@/lib/state/ingest-flow";
 import { clearReadCache } from "@/lib/read-cache";
@@ -58,7 +58,7 @@ describe("CriticalAlertBanner — a 404 names a gone campaign on the viewed cycl
   it("says a 404 on the followed active run's dashboard is a gone campaign it does not leave", async () => {
     serve({
       "/backends": [],
-      "/sessions/active": { tenant_id: "t", campaign_id: "c", cycle_id: "y" },
+      "/sessions/active": { tenant_id: "t", hop: { campaign_id: "c", cycle_id: "y" } },
       "/hierarchy": { entries: [] },
     });
     view();
@@ -69,10 +69,24 @@ describe("CriticalAlertBanner — a 404 names a gone campaign on the viewed cycl
     window.history.replaceState(
       null,
       "",
-      formatAddress({ subject: { path: [{ campaignId: "c", cycleId: "y" }] }, views: DEFAULT_VIEWS }),
+      formatAddress({ subject: { path: [{ campaignId: "c", cycleId: "y" }] }, views: DEFAULT_VIEWS, keys: NO_KEYS }),
     );
     serve({ "/backends": [], "/hierarchy": { entries: [] } });
     view();
     expect(await goneDetail()).toMatch(RETURNING);
+  });
+});
+
+describe("CriticalAlertBanner — a link this version reads no address in opens nothing in its place", () => {
+  beforeEach(() => clearReadCache(true));
+  afterEach(() => window.history.replaceState(null, "", window.location.pathname));
+
+  it("says an earlier version's link is refused, and leaves it in the address bar", async () => {
+    const earlier = "#/c/justlogic__cf67b3/ee7bb41bbde0";
+    window.history.replaceState(null, "", earlier);
+    serve({ "/backends": [], "/hierarchy": { entries: [] } });
+    view();
+    expect(await screen.findByText("This link is from an earlier version")).toBeTruthy();
+    expect(window.location.hash).toBe(earlier);
   });
 });

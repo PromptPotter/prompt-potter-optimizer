@@ -17,16 +17,17 @@ from factories import (
     arm_state,
     cycle_result,
     election,
+    jumping_clock,
     loop_session,
     measurement,
     pipeline_schema,
-    prompted,
     round_result,
+    run_init_round,
     samples,
-    seat,
     sheet,
     workspace,
 )
+from offline_world import Router
 from pydantic import TypeAdapter
 
 from promptpotter.application.bench.difficulty import (
@@ -36,7 +37,6 @@ from promptpotter.application.bench.difficulty import (
     session_ruler_scope,
 )
 from promptpotter.application.bench.node_context import NodeContext
-from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     covered_prefix,
     stratum_shares,
@@ -76,8 +76,7 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet, LedgerCell, Scorer
-from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.scoring import LedgerCell, Scorer
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
@@ -247,7 +246,9 @@ def _anchored(delta: dict[str, float], *, mu: float = 0.0) -> DeltaRuler:
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: Path) -> None:
+def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
+    tmp_path: Path, offline: Router
+) -> None:
     # Calibrated: eight samples clear any sample floor, so the arm count is the binding condition.
     arm_a = [Observation("a", str(sid), 1.0 if sid % 3 else 0.0) for sid in range(8)]
     arm_b = [Observation("b", str(sid), 1.0 if sid < 5 else 0.0) for sid in range(8)]
@@ -308,20 +309,17 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 
     # Drawn blind: the parent hits the easiest 16 of 40 cells on a graded ruler, and each round's
     # cells must still be the pool's, or the election reads rows the held-out bench never would.
-    graded_pool = samples(40, "t", query="d")
+    graded_pool = samples(40, "TRUE", query="d")
+    answered = offline.backend.matches
 
-    def hits_easiest(session: Session) -> CellSheet:
-        return sheet(
-            (measurement(s.id, float(s.id < 16), sample_key=s.key) for s in graded_pool),
-            session.state.scoring.require_scorer().id,
-        )
+    def hits_easiest(payload: dict[str, Any]) -> dict[str, Any]:
+        answer = answered(payload)
+        hit = int(payload["query"].removeprefix("d")) < 16
+        answer["data"]["final_ranking"][0]["candidate"] = "TRUE" if hit else "FALSE"
+        return answer
 
-    drawing = seat(
-        workspace(tmp_path / "draw"),
-        bank=graded_pool,
-        origin=(prompted(instruction="Answer."), hits_easiest),
-        framing=TaskDecomposition(pipeline_purpose="Answer each query."),
-    )
+    offline.backend.matches = hits_easiest  # type: ignore[method-assign]
+    drawing = jumping_clock(run_init_round(workspace(tmp_path / "draw"), offline, graded_pool))
     session = drawing.cycle.session
     session.store.ruler.fold(
         session_ruler_scope(session),
@@ -332,7 +330,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     drawing.cycle.difficulty.open_round(drawing.cycle.rounds)
     assert drawing.cycle.difficulty.ruler is not None, "guard: the draw under test is the warm one"
     sampler = drawing.cycle.optimizer.plan.sampler
-    search = list(session.state.scoring.require_partition().search)
+    search = list(session.state.scoring.partition.search)
 
     def drawn_on(round_num: int) -> list[int]:
         at = replace(drawing, round_num=round_num)

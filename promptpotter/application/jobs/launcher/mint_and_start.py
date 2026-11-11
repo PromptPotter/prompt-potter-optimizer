@@ -12,28 +12,24 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.datasets.draft_build import draft_task_context
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
-from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.initialization.wiring import bind_cycle_session, init_services
 from promptpotter.application.jobs.coupon import Send
-from promptpotter.application.jobs.launcher.admission import (
-    RunStart,
-    admit_and_hold,
-    campaign_sends,
-    claim_cycle,
-)
-from promptpotter.application.jobs.launcher.run_job import HeldRun, open_held_cycle
+from promptpotter.application.jobs.launcher.admission import campaign_sends
 from promptpotter.application.jobs.mint import (
+    OpenedCycle,
     declare,
     fresh_campaign_id,
     mint_framed_cycle,
+    resolve_resume,
 )
-from promptpotter.application.jobs.quota import land_job, sends_on
+from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch
-from promptpotter.domain.spend import Budget, HeldBudget
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     own_definition,
@@ -106,6 +102,21 @@ class FreshMint:
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return sends_on(stores, self.campaign_config(), self.backend_type(stores))
 
+    async def open(self, stores: Stores) -> OpenedCycle:
+        """The session, then the mint: a refused one writes nothing."""
+        t0 = time.perf_counter()
+        session = await init_services(
+            dataset_name=self.dataset_name, identity=stores.identity, stores=stores
+        )
+        logger.info("mint[%s]: init_services=%.2fs", self.dataset_name, time.perf_counter() - t0)
+        return await mint_framed_cycle(
+            session,
+            declare(session, self.campaign_config(), purpose=Optimize()),
+            session.bank.samples,
+            campaign_id=fresh_campaign_id(session),
+            task_text=self.task_text,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ExistingCycle:
@@ -133,54 +144,12 @@ class ExistingCycle:
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return campaign_sends(stores, self.hop)
 
-
-def land_and_claim(start: RunStart, hop: CycleHop, held: HeldBudget) -> None:
-    """A job onto the cycle its hold just minted, the claim taken off the job as it stands now:
-    promoted out of the queue, its stage the one the cycle reads."""
-    stores, job_registry, job_id = start.stores, start.job_registry, start.job_id
-    land_job(stores, job_registry, job_id, hop, held.share)
-    promoted = job_registry.get(job_id)
-    if promoted is None:
-        raise RuntimeError(f"job {job_id} was cleared while its cycle was minted")
-    claim_cycle(stores, job_registry, promoted, hop)
-
-
-async def hold_fresh_mint(request: FreshMint, start: RunStart) -> HeldRun:
-    """Admit, then session, then mint: nothing is written before admission, so a refusal leaves none."""
-    dataset_name, stores = request.dataset_name, start.stores
-    # Bound only after the mint, so the failure path knows whether a cycle exists to stamp.
-    hop: CycleHop | None = None
-    try:
-        held = await admit_and_hold(request, start)
-
-        _t0 = time.perf_counter()
-        session = await init_services(
-            dataset_name=dataset_name,
-            identity=stores.identity,
-            stores=stores,
-        )
-        logger.info("mint[%s]: init_services=%.2fs", dataset_name, time.perf_counter() - _t0)
-
-        minted = await mint_framed_cycle(
-            session,
-            declare(session, request.campaign_config(), purpose=Optimize()),
-            session.bank.samples,
-            campaign_id=fresh_campaign_id(session),
-            task_text=request.task_text,
-        )
-        hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
-        land_and_claim(start, hop, held)
-        logger.info(
-            "mint: minted %s/%s for user %s (job %s)",
-            minted.campaign_id,
-            minted.cycle_id,
-            stores.identity.user_id,
-            start.job_id,
-        )
-        return HeldRun.of(start, minted, held)
-    except BaseException as exc:
-        start.release(exc, stamps=hop)
-        raise
+    async def open(self, stores: Stores) -> OpenedCycle:
+        """The cycle on disk, bound and drift-checked: in the admitting process, and again in a
+        detached run's own."""
+        session = await bind_cycle_session(stores, self.campaign, self.hop)
+        plan = resolve_resume(session, self.campaign, session.bank.samples)
+        return OpenedCycle(plan.cycle, plan.session, plan.optimizer)
 
 
 def commit_upload_definition(
@@ -208,16 +177,3 @@ def persist_origin_candidate_library(stores: Stores, slug: str, draft: DraftFile
     """Tenant datasets only: a reopened repo benchmark is not ours to mutate."""
     if draft.candidate_library and own_definition(stores, slug) is not None:
         stores.tenant_datasets.write_candidate_library(slug, draft.candidate_library)
-
-
-async def hold_existing_cycle(request: ExistingCycle, start: RunStart) -> HeldRun:
-    try:
-        held = await admit_and_hold(request, start)
-        session, cycle, optimizer = await open_held_cycle(
-            start.stores, request.campaign, request.hop
-        )
-    except BaseException as exc:
-        # Unstamped: a refusal writes nothing on the cycle, so it stays as resumable as it was.
-        start.release(exc)
-        raise
-    return HeldRun(start, session, cycle, held, optimizer)

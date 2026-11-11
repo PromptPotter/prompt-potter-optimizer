@@ -6,35 +6,24 @@ from dataclasses import dataclass, replace
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
-from promptpotter.application.initialization.loop_start import (
-    cycle_partition,
-    finalize_loop_state,
-    init_optimization_loop,
-    session_scope,
-)
-from promptpotter.application.initialization.session import LaunchClock, Session
+from promptpotter.application.initialization.scoring_scope import session_scope
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.nodes import Controller
-from promptpotter.application.run_observers import (
-    RunObservers,
-    build_run_observers,
-    declare_run_stop,
-)
-from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.run_observers import RunObservers, declare_run_stop
 from promptpotter.application.runner.bench import bench_selection
-from promptpotter.application.runner.campaign_result import (
-    bench_origin,
-    declare_line_bench,
-)
 from promptpotter.application.runner.cycle_close import close_cycle
 from promptpotter.application.runner.loop import run_round_loop
-from promptpotter.application.runner.run_prep import (
+from promptpotter.application.runner.open_cycle import (
     PreparedRun,
-    arm_run_controls,
+    close_init,
     declare_round_allowance,
-    prepare_run,
-    rebase_held,
+    onto_fork,
+    open_cycle,
+    open_launch,
+    start_launch,
 )
+from promptpotter.application.runner.origin_gate import open_origin_round
 from promptpotter.application.runner.termination import (
     RUN_ENDS,
     RUN_STOPS,
@@ -44,7 +33,6 @@ from promptpotter.application.runner.termination import (
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.campaign import run_clamp
 from promptpotter.domain.campaign_config import (
-    CampaignConfig,
     CycleConfig,
     apply_config_overrides,
 )
@@ -59,12 +47,10 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import HeldBudget
-from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.spend_book import SpendBook, require_spend_book
-from promptpotter.infrastructure.llm.telemetry import at_round, bind_priced
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
+from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import PayloadInvalidError
-from promptpotter.shared.run_scope import rescope, scoped
+from promptpotter.shared.run_scope import scoped
 
 logger = logging.getLogger(__name__)
 
@@ -85,15 +71,13 @@ class _CycleOutcome:
 async def _run_single_cycle(
     prep: PreparedRun,
     *,
-    dataset: list[Sample],
     session: Session,
     observers: RunObservers,
     mode: RunMode,
     diagnosing: Controller | None,
     step_rounds: int | None,
 ) -> _CycleOutcome:
-    origin = prep.origin
-    campaign_config = prep.campaign_config
+    dataset, campaign_config = prep.dataset, prep.campaign_config
     cb = observers.callbacks
 
     cycle: Cycle | None = None
@@ -104,69 +88,27 @@ async def _run_single_cycle(
     open_round: int | None = None
     pause_cause = PauseCause.INTERRUPT
     try:
-        cycle, forked_from = await init_optimization_loop(
-            origin,
-            dataset,
-            campaign_config,
-            cb=cb,
-            no_divergence_check=mode.no_divergence_check,
-            fork_on_divergence=mode.fork_on_divergence,
-            resume_from_round_override=mode.from_round,
-            session=session,
-        )
+        cycle, forked_from = await open_cycle(prep, session=session, cb=cb, mode=mode)
         if forked_from is not None:
             # On the parent's own ledger, as a rebase's close ends it, before its readout names the fork.
             declare_run_stop(session, observers, StopReason.REBASED, interrupted_by=pause_cause)
             observers.drain_all()
-            observers = _onto_fork(
+            observers = onto_fork(
                 cycle.session, forked_from, observers, campaign_config=campaign_config
             )
             cb = observers.callbacks
         session = cycle.session
-        finalize_loop_state(cycle, cb)
-
-        book = require_spend_book("the bench's set-aside")
-        if (
-            campaign_config.bench_trigger != "manual"
-            and session.state.scoring.require_partition().bench
-        ):
-            # Its price is set aside so the selection's pass still fits under the search's ceiling.
-            cycle.bench_passes = await bench_origin(
-                session,
-                cycle.points.job(origin.origin.individual),
-                origin_id=origin.origin.individual.id,
-                spend=observers.dashboard.live.state.spend,
-                cb=cb,
-            )
-            if cycle.bench_passes is not None and book.binds("bench"):
-                book.set_aside(cycle.bench_passes.reserve_usd, cycle.bench_passes.reserve_tokens)
-            if (
-                cycle.bench_passes is not None
-                and campaign_config.bench_trigger == "each_round"
-                and len(cycle.rounds) > 1
-            ):
-                # The selection a resumed line stands on, graded where its line holds no pass:
-                # a re-enacting fork's floor, read today as the round it re-runs will be.
-                with at_round(cycle.rounds[-1].round):
-                    cycle.bench_passes = await bench_selection(
-                        session,
-                        cycle.rounds,
-                        points=cycle.points,
-                        banked=cycle.bench_passes,
-                        cb=cb,
-                    )
-        declare_line_bench(
-            session, campaign_config, cb, passes=cycle.bench_passes, selecting=True, ending=None
-        )
+        close_init(cycle, cb)
         declare_round_allowance(session, step_rounds)
-        stop_reason, cycle_error, fork, open_round, cancel_exc, stepped = await run_round_loop(
+        book = require_spend_book("the bench's set-aside")
+        ended = await open_origin_round(
             cycle,
             dataset,
-            campaign_config,
-            session,
             cb,
-            diagnosing=diagnosing,
-        )
+            spend=observers.dashboard.live.state.spend,
+            diagnosing=diagnosing is not None,
+        ) or await run_round_loop(cycle, campaign_config, session, cb, diagnosing=diagnosing)
+        stop_reason, cycle_error, fork, open_round, cancel_exc, stepped = ended
         if stepped:
             pause_cause = PauseCause.STEP
     except RUN_ENDS as exc:
@@ -215,25 +157,6 @@ async def _run_single_cycle(
     )
 
 
-def _onto_fork(
-    session: Session,
-    parent: CycleHop,
-    observers: RunObservers,
-    *,
-    campaign_config: CampaignConfig,
-) -> RunObservers:
-    rebase_held(session, parent)
-    observers = build_run_observers(
-        session=session,
-        campaign_config=campaign_config,
-        forked_from=observers,
-    )
-    # The line's every emit lands on the cycle it moved onto, under the launch's one scope.
-    rescope(ledger=observers.callbacks.ledger)
-    arm_run_controls(session, observers)
-    return observers
-
-
 def _mint_and_rebase_fork(
     prep: PreparedRun,
     *,
@@ -274,7 +197,7 @@ def _mint_and_rebase_fork(
         child, branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices}))
     )
     session = session.bound(child, purpose=session.purpose)
-    observers = _onto_fork(
+    observers = onto_fork(
         session,
         parent,
         observers,
@@ -295,7 +218,6 @@ def _mint_and_rebase_fork(
 async def _run_line(
     prep: PreparedRun,
     *,
-    dataset: list[Sample],
     session: Session,
     observers: RunObservers,
     mode: RunMode,
@@ -305,7 +227,6 @@ async def _run_line(
     while True:
         outcome = await _run_single_cycle(
             prep,
-            dataset=dataset,
             session=session,
             observers=observers,
             mode=mode,
@@ -342,7 +263,7 @@ async def run_optimization(
     if not session.cycle_id:
         raise RuntimeError("run_optimization runs a minted cycle: bind its session first")
     campaign_config = cycle.config
-    session.state.clock = LaunchClock.now()
+    start_launch(session)
     try:
         # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
         # The run's one scope (`run_scope.py`); a cell's run nests its own inside the spawner's.
@@ -361,28 +282,9 @@ async def run_optimization(
                     f"--diag shows what an optimizer's controller does at a round boundary, and "
                     f"{optimizer.name} declares no controller node"
                 )
-            partition = cycle_partition(session, dataset, campaign_config)
-            dataset = list(partition.search)
-            # Before this launch takes a cell: a re-read of a cell the campaign priced prices nothing.
-            campaigns = session.store.campaigns
-            bind_priced(
-                scan_ledger_priced_keys(campaigns.campaign_cycle_ledgers(session.campaign_id))
-            )
-            refresh_rates_in_background()
-            # Fresh per launch, keeping only the cycles this run measures FOR.
-            session.state.control = RunControl(
-                commands=session.store.commands,
-                enclosing=session.state.control.enclosing,
-                acting=session.state.control.acting,
-            )
             try:
-                prep = await prepare_run(
-                    dataset,
-                    cycle,
-                    session=session,
-                    partition=partition,
-                    observers=observers,
-                    budget=budget,
+                prep = await open_launch(
+                    dataset, cycle, session=session, observers=observers, budget=budget
                 )
             except RUN_STOPS as stop:
                 stop_reason, cycle_error = end_run_on(stop, session, where="in run prep")
@@ -421,7 +323,6 @@ async def run_optimization(
             else:
                 outcome = await _run_line(
                     prep,
-                    dataset=dataset,
                     session=session,
                     observers=observers,
                     mode=mode,

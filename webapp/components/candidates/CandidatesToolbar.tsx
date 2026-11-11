@@ -79,7 +79,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
             key={id}
             icon
             on={m.metrics.has(id)}
-            ink={`var(${metricInkToken(id, m.electedMetric)})`}
+            ink={`var(${metricInkToken(id, m.displayMetric)})`}
             ariaLabel={d.label}
             title={d.title}
             onClick={() => m.toggleMetric(id)}

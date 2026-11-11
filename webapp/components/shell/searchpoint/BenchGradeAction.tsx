@@ -25,7 +25,7 @@ export function BenchGradeAction() {
       .finally(() => setActing(null));
   }
   const button = (
-    <Button disabled={grading || !status.can_grade} onClick={grade}>
+    <Button disabled={grading || !status.can_run} onClick={grade}>
       {grading ? "Grading…" : "Grade on bench"}
     </Button>
   );

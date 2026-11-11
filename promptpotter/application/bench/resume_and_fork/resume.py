@@ -106,7 +106,7 @@ async def resume_with_divergence_check(
     session = cycle.session
     campaign_store, hop = session.store.campaigns, session.hop
     resumed_from_round = session.state.resumed_from_round
-    scorer = session.state.scoring.require_scorer()
+    scorer = session.state.scoring.scorer
     prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round, moment=None)
 
     # Fingerprinted BEFORE the repair, so the corrected set differs by exactly what it changed.

@@ -18,7 +18,7 @@ import { pickOf } from "@/lib/derivations";
 import { shortFamilyTail } from "@/lib/ids";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { Forest, type CladogramCtx } from "./Forest";
-import { useLineage } from "@/lib/hooks/useLineage";
+import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
 import { useViewedCourse } from "@/lib/lineage";
 
 export function ForestCard() {
@@ -55,11 +55,11 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
     deleteViewed,
     deleting,
     deleteFailure,
-  } = useLineage({
+  } = useCampaignForest({
     campaignId,
     cycleId,
     path: viewedPath,
-    electedMetric: dash.display_metric,
+    displayMetric: dash.display_metric,
   });
 
   const ctx = useMemo<CladogramCtx>(

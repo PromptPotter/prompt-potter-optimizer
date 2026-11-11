@@ -17,14 +17,13 @@ from promptpotter.application.scoring.closed_rounds import campaign_scorer, clos
 from promptpotter.application.served_dashboard import WarmingDashboard, served_dashboard
 from promptpotter.application.views.render.export import ExportFiles, Provenance, export_files
 from promptpotter.config.settings import APP_VERSION
-from promptpotter.domain.arm_reading import ArmReading, ScoreboardRow
-from promptpotter.domain.arms import ArmState
+from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
+from promptpotter.domain.dashboard_rows import ServedArm
 from promptpotter.domain.export import ExportTier
 from promptpotter.domain.hierarchy import HierarchySteps
-from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.results import Election
+from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.audit_trail import round_audits
@@ -90,31 +89,33 @@ class RoundView(StrictModel):
     diagnostics, optimizer state — stays on the ledger."""
 
     round: int
-    arms: dict[ArmKey, ArmState]
     election: Election | None
-    scoreboard: list[ScoreboardRow]
+    candidates: list[ServedArm] = Field(description="Every arm the round read, in rank order.")
     headline: ArmReading | None = Field(
         description="The arm the round ENDED on (`election.ended_on`), read: the headline's "
         "numbers are its own. Null on a diag round, which elects nothing."
     )
 
 
+def _closed(
+    stores: Stores, hop: CycleHop, round_num: int, *, moment: Moment | None
+) -> RoundResult | None:
+    scorer = campaign_scorer(stores, hop.campaign_id)
+    return None if scorer is None else closed_round(stores, hop, round_num, scorer, moment=moment)
+
+
 def served_round(
     stores: Stores, hop: CycleHop, round_num: int, *, moment: Moment | None
 ) -> RoundView | None:
-    graded_under = campaign_scorer(stores, hop.campaign_id)
-    closed = (
-        None
-        if graded_under is None
-        else closed_round(stores, hop, round_num, graded_under, moment=moment)
-    )
+    closed = _closed(stores, hop, round_num, moment=moment)
     if closed is None:
         return None
     return RoundView(
         round=closed.round,
-        arms=closed.arms,
         election=closed.election,
-        scoreboard=closed.scoreboard,
+        candidates=[
+            ServedArm.of(row.reading, closed.arms[row.reading.arm.key]) for row in closed.scoreboard
+        ],
         headline=closed.headline,
     )
 
@@ -137,10 +138,8 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
     course = subtree_course(stores, path)
     standing = course.facts.standing
     selection = None if standing is None else standing.selection
-    round_view = (
-        None if selection is None else served_round(cycle.stores, hop, selection.round, moment=None)
-    )
-    arm = None if round_view is None or selection is None else round_view.arms.get(selection.key)
+    closed = None if selection is None else _closed(cycle.stores, hop, selection.round, moment=None)
+    arm = None if closed is None or selection is None else closed.arms.get(selection.key)
     models = (
         {}
         if arm is None

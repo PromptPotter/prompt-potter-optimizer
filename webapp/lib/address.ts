@@ -1,6 +1,9 @@
-// The `cycle_` prefix is stripped HERE, never in `ids.ts`, whose encoding is the `?descend=` wire.
+// The hash: the viewed subject in `domain/cycle_paths.py::Subject`'s hierarchy grammar
+// (`ids.ts::encodeCyclePath`, then `/r{round}/{arm}`), the open views, then the view keys as `;name=value`.
 
-import { validIdComponent, type CyclePath } from "./ids";
+import { CYCLE_PATH_UNIT_SEP } from "@/lib/api/types";
+import { decodeCyclePath, encodeCyclePath, validIdComponent, type CyclePath } from "./ids";
+import type { ObserveState } from "./derivations/search-point";
 
 // A client-side closed set on purpose: no route names a view. `components/shell/families.tsx` labels each.
 export const FAMILY_IDS = [
@@ -47,27 +50,24 @@ export function nodeOfKey(key: string): SelectedNode | null {
   return (scope === "optimizer" || scope === "target") && id ? { scope, id } : null;
 }
 
-// A candidate picked on a course: its place below the course, the served address's
-// `/r{round}/{arm_key}` tail (`ids.ts::courseAddressOf`). The hash spells it `k/<round>.<arm key>`.
+// A candidate picked on a course: its place below the course, the served address's `r{round}/{arm_key}` tail.
 export interface CandidatePick {
   round: number;
   arm: string;
 }
 
 export function formatPick({ round, arm }: CandidatePick): string {
-  return `${round}.${arm}`;
+  return `r${round}/${arm}`;
 }
 
 export function parsePick(s: string): CandidatePick | null {
-  const dot = s.indexOf(".");
-  const round = s.slice(0, dot);
-  const arm = s.slice(dot + 1);
-  return dot > 0 && /^\d+$/.test(round) && validIdComponent(arm) ? { round: Number(round), arm } : null;
+  const m = /^r(\d+)\/(.+)$/.exec(s);
+  return m && validIdComponent(m[2]!) ? { round: Number(m[1]), arm: m[2]! } : null;
 }
 
 // The picked candidate's hierarchy address under its course's.
-export function pickedAddressOf(course: string, { round, arm }: CandidatePick): string {
-  return `${course}/r${round}/${arm}`;
+export function pickedAddressOf(course: string, pick: CandidatePick): string {
+  return `${course}/${formatPick(pick)}`;
 }
 
 // null follows the active run; a check-in's null draft is a fresh one no file or pick has minted.
@@ -76,19 +76,40 @@ export type ViewedSubject =
   | { draftId: string | null }
   | null;
 
+// What rides beside the subject on the viewed leaf; a subject switch clears them.
+export interface ViewKeys {
+  // null follows live; a pick reads its own round.
+  round: number | null;
+  // `null` is no pick (the served set); `[]` is the picker open with nothing selected.
+  samples: number[] | null;
+  // `null` follows `resolveObserveSubject`'s own rule.
+  observe: ObserveState | null;
+}
+
+export const NO_KEYS: ViewKeys = { round: null, samples: null, observe: null };
+
 export interface Address {
   subject: ViewedSubject;
   // Never empty: the order is the order opened, the newest the ones a screen shows.
   views: readonly View[];
+  keys: ViewKeys;
 }
 
-const CYCLE_PREFIX = "cycle_";
-const CAND_SEG = "k";
-const AT_SEG = "t";
-const CYCLE_SEG = "c";
+// Why a hash opens nothing: a link in the grammar before this one (`#/c/{campaign}/{cycle}…`),
+// or one in no grammar this version reads.
+export type AddressRefusal = "retired" | "malformed";
+
+export interface RefusedAddress {
+  refused: AddressRefusal;
+}
+
+const MALFORMED: RefusedAddress = { refused: "malformed" };
+// The cycle segment of the grammar before the hierarchy's.
+const RETIRED_CYCLE_SEG = "c";
 const DRAFT_SEG = "d";
 const NEW_SEG = "new";
 const KEY_SEP = "=";
+const OBSERVE: readonly ObserveState[] = ["best", "latest", "round", "selected"];
 
 export const DEFAULT_VIEWS: readonly View[] = [{ family: "chat", key: null }];
 
@@ -96,27 +117,26 @@ export function withViews(views: readonly View[]): readonly View[] {
   return views.length > 0 ? views : DEFAULT_VIEWS;
 }
 
-function shortCycle(cycleId: string): string {
-  return cycleId.startsWith(CYCLE_PREFIX) ? cycleId.slice(CYCLE_PREFIX.length) : cycleId;
-}
-
 // `workspace.tsx` writes this address as no hash at all.
 export const EMPTY_ADDRESS = "#/";
 
-export function formatAddress({ subject, views }: Address): string {
+export function formatAddress({ subject, views, keys }: Address): string {
   const segs: string[] = [];
+  const named: string[] = [];
   if (subject !== null && "draftId" in subject) {
     segs.push(...(subject.draftId === null ? [NEW_SEG] : [DRAFT_SEG, subject.draftId]));
   } else if (subject !== null) {
-    segs.push(CYCLE_SEG);
-    for (const hop of subject.path) segs.push(hop.campaignId, shortCycle(hop.cycleId));
-    if (subject.pick) segs.push(CAND_SEG, formatPick(subject.pick));
-    if (subject.at != null) segs.push(AT_SEG, String(subject.at));
+    const course = encodeCyclePath(subject.path);
+    segs.push(subject.pick ? pickedAddressOf(course, subject.pick) : course);
+    if (subject.at != null) named.push(`at=${subject.at}`);
   }
   // The default view is omitted, so the common address stays short.
   const bare = views.length === 1 && views[0]!.family === "chat" && views[0]!.key === null;
   if (!bare) for (const v of views) segs.push(v.key === null ? v.family : `${v.family}${KEY_SEP}${v.key}`);
-  return `#/${segs.join("/")}`;
+  if (keys.round !== null) named.push(`round=${keys.round}`);
+  if (keys.samples !== null) named.push(`samples=${keys.samples.join(",")}`);
+  if (keys.observe !== null) named.push(`observe=${keys.observe}`);
+  return `#/${[segs.join("/"), ...named].join(";")}`;
 }
 
 function isFamily(s: string): s is FamilyId {
@@ -131,60 +151,63 @@ function parseView(seg: string): View | null {
   return validIdComponent(key) ? { family, key } : null;
 }
 
-export function parseAddress(hash: string): Address | null {
-  const segs = hash.replace(/^#/, "").split("/").filter(Boolean);
-  let subject: ViewedSubject = null;
-  let i = 0;
+const COUNT_RE = /^\d+$/;
 
-  if (segs[0] === NEW_SEG) {
-    subject = { draftId: null };
-    i = 1;
-  } else if (segs[0] === DRAFT_SEG) {
-    const draftId = segs[1];
-    if (draftId === undefined || !validIdComponent(draftId)) return null;
-    subject = { draftId };
-    i = 2;
-  } else if (segs[0] === CYCLE_SEG) {
-    // A campaign id always contains `__` (`campaign_ids.py::mint_campaign_id`), so it never equals a view, `k` or `t`.
-    const path: CyclePath = [];
-    i = 1;
-    while (i < segs.length) {
-      const head = segs[i]!;
-      if (head === CAND_SEG || head === AT_SEG || parseView(head)) break;
-      const cycle = segs[i + 1];
-      if (cycle === undefined) return null;
-      // Validate BEFORE restoring the prefix: `cycle_..` passes the all-dots rejection that `..` fails.
-      if (!validIdComponent(head) || !validIdComponent(cycle)) return null;
-      path.push({ campaignId: head, cycleId: CYCLE_PREFIX + cycle });
-      i += 2;
-    }
-    if (path.length === 0) return null;
-    const run: { path: CyclePath; pick: CandidatePick | null; at: number | null } = {
-      path,
-      pick: null,
-      at: null,
-    };
-    if (segs[i] === CAND_SEG) {
-      const pick = parsePick(segs[i + 1] ?? "");
-      if (pick === null) return null;
-      run.pick = pick;
-      i += 2;
-    }
-    if (segs[i] === AT_SEG) {
-      const offset = segs[i + 1];
-      if (offset === undefined || !/^\d+$/.test(offset)) return null;
-      run.at = Number(offset);
-      i += 2;
-    }
-    subject = run;
+// Takes the subject's segments off the front of *segs*; undefined is a malformed subject.
+function takeSubject(segs: string[]): ViewedSubject | undefined {
+  const head = segs[0];
+  if (head === NEW_SEG) {
+    segs.shift();
+    return { draftId: null };
   }
+  if (head === DRAFT_SEG) {
+    const draftId = segs[1];
+    segs.splice(0, 2);
+    return draftId !== undefined && validIdComponent(draftId) ? { draftId } : undefined;
+  }
+  // Only a hop holds the unit separator, so a view or a typo never reads as a course.
+  if (head === undefined || !head.includes(CYCLE_PATH_UNIT_SEP)) return null;
+  const path = decodeCyclePath(head);
+  segs.shift();
+  if (!path) return undefined;
+  if (!/^r\d+$/.test(segs[0] ?? "")) return { path, pick: null, at: null };
+  const pick = parsePick(segs.slice(0, 2).join("/"));
+  segs.splice(0, 2);
+  return pick ? { path, pick, at: null } : undefined;
+}
 
+export function parseAddress(hash: string): Address | RefusedAddress {
+  const [head = "", ...named] = hash.replace(/^#\/?/, "").split(";");
+  const segs = head.split("/").filter(Boolean);
+  if (segs[0] === RETIRED_CYCLE_SEG) return { refused: "retired" };
+  const subject = takeSubject(segs);
+  if (subject === undefined) return MALFORMED;
   const views: View[] = [];
-  for (const seg of segs.slice(i)) {
+  for (const seg of segs) {
     const view = parseView(seg);
     // Trailing junk is not ignorable, and one family never shows twice.
-    if (!view || views.some((v) => v.family === view.family)) return null;
+    if (!view || views.some((v) => v.family === view.family)) return MALFORMED;
     views.push(view);
   }
-  return { subject, views: withViews(views) };
+
+  const keys: ViewKeys = { ...NO_KEYS };
+  let at: number | null = null;
+  const seen = new Set<string>();
+  for (const seg of named) {
+    const eq = seg.indexOf(KEY_SEP);
+    const name = seg.slice(0, eq);
+    const value = seg.slice(eq + 1);
+    if (eq < 0 || seen.has(name)) return MALFORMED;
+    seen.add(name);
+    if (name === "at" && COUNT_RE.test(value) && subject !== null && "path" in subject) at = Number(value);
+    else if (name === "round" && COUNT_RE.test(value)) keys.round = Number(value);
+    else if (name === "observe" && (OBSERVE as readonly string[]).includes(value)) keys.observe = value as ObserveState;
+    else if (name === "samples" && /^(\d+(,\d+)*)?$/.test(value)) keys.samples = value ? value.split(",").map(Number) : [];
+    else return MALFORMED;
+  }
+  return {
+    subject: subject !== null && "path" in subject ? { ...subject, at } : subject,
+    views: withViews(views),
+    keys,
+  };
 }

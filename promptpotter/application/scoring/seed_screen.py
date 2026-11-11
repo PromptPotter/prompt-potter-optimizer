@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
-from promptpotter.application.initialization.loop_start import (
+from promptpotter.application.initialization.scoring_scope import (
     arm_diagnostic_scoring,
     diagnostic_pass,
     diagnostic_trace,

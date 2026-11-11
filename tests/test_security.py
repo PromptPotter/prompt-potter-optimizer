@@ -40,11 +40,12 @@ from factories import (
     inner_sandbox,
     loop_session,
     minted_campaign,
+    minted_dataset,
     optimizer_state,
     pipeline_schema,
     round_result,
+    run_init_round,
     samples,
-    seat,
     stored_campaign,
     workspace,
 )
@@ -78,6 +79,7 @@ from promptpotter.application.jobs import quota
 from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.launcher import launch as launcher_launch
 from promptpotter.application.jobs.launcher.admission import (
+    CampaignRefusedError,
     PassStoppedError,
     destroying,
     paid_pass,
@@ -113,7 +115,7 @@ from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import PROJECTS_DIR, block_packs_root, default_projects_root
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
-from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.campaign import CampaignRefusal, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_events import (
@@ -222,6 +224,7 @@ from promptpotter.infrastructure.identity.provider_config import (
 )
 from promptpotter.infrastructure.identity.session import OIDCSessionStore, SessionData
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.runtime_flags import derive_run_state, producer_attached
 from promptpotter.infrastructure.store.account_spend import campaign_spend, sandbox_cycle_dirs
@@ -1478,10 +1481,13 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
 
 @pytest.mark.usefixtures("optimizing_memory")
 async def test_nothing_is_deleted_while_its_owner_still_holds_it(
-    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     campaigns = built_stores.campaigns
     hop = CycleHop(campaign_id=SANDBOX_CAMPAIGN, cycle_id="cycle-0")
+    held_campaign = minted_campaign(hop)
+    stored_campaign(built_stores, held_campaign)
+    minted_dataset(built_stores, held_campaign)
     campaigns.mint_cycle(hop)
     cycle_dir = campaigns.cycle_dir(hop)
 
@@ -1499,6 +1505,38 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         # Every destroyer's guard, asked of each of the campaign's cycles under the admission gate.
         with pytest.raises(CycleBusyError), destroying(built_stores, jobs, hop.campaign_id):
             pytest.fail("a destroyer passed a taken cycle")
+
+    # An archived campaign's launch and pass are refused at the slot door, under that same gate and
+    # before all else: on a full box or a free one, nothing queues, claims its cycle, writes a job
+    # or spends the asker's rate token.
+    campaigns.archive_campaign(hop.campaign_id, changed_at="2026-01-01T00:00:00Z")
+    asker = dataclasses.replace(
+        built_stores,
+        identity=dataclasses.replace(
+            built_stores.identity, host=False, user_id=UserId("archived-asker")
+        ),
+    )
+    ledger = campaigns.ledger(hop)
+    ledger_bytes = ledger.read_bytes() if ledger.exists() else b""
+    with monkeypatch.context() as one_token:
+        one_token.setattr(settings_mod.settings, "USER_RATE_BURST", 1)
+        one_token.setattr(settings_mod.settings, "USER_RATE_PER_MIN", 0)
+        for room, capacity in ((0, lambda _live: 0), (1, lambda _live: 1)):
+            refusing = JobRegistry(tmp_path / "jobs", capacity=capacity)
+            for holder in (CampaignLaunch("ds1"), ScoringPass("bench")):
+                with pytest.raises(CampaignRefusedError) as archived:
+                    request_jobs(stores=asker, job_registry=refusing, holder=holder, hop=hop)
+                assert archived.value.refusal is CampaignRefusal.NOT_ACTIVE, (
+                    f"an archived campaign's {holder} was admitted on room {room}"
+                )
+            assert not refusing.list_all(), f"a refused act wrote a job on room {room}"
+        assert (ledger.read_bytes() if ledger.exists() else b"") == ledger_bytes, (
+            "a refused launch claimed and released its archived campaign's cycle"
+        )
+        # The asker's one token still admits a pass: no refused ask spent it.
+        (spare,) = request_jobs(stores=asker, job_registry=refusing, holder=ScoringPass("bench"))
+        refusing.release(spare.job_id)
+    campaigns.unarchive_campaign(hop.campaign_id, changed_at="2026-01-01T00:00:01Z")
 
     # A launch holds its cycle from the moment it is accepted; a full box queues it.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
@@ -1550,7 +1588,6 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
             backend_revision=None,
         )
     )
-    stored_campaign(built_stores, minted_campaign(hop))
     ledger = CycleLayout(cycle_dir).ledger
     hold_cycle(cycle_dir)
     os.utime(ledger, (0, 0))
@@ -1976,20 +2013,25 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     release_cycle(campaigns.cycle_dir(kept_hop))
     spent = campaign_spend(campaigns, torn_hop.campaign_id)
     assert spent != NOTHING_PAID
+    late_hop = CycleHop(campaign_id="c__cccccc", cycle_id="y")
+    campaigns.mint_cycle(late_hop)
+    late_dir = campaigns.campaign_root_dir(late_hop.campaign_id)
     cleared = plan_landing(built_stores.projects_root, reset=False)
-    assert [one.path for one in cleared.torn] == [torn_dir], "a torn mint was left unlisted"
-    # A pass registered since the plan keeps its mint, said kept, and the next entry lands again.
-    (scoring_torn,) = request_jobs(
-        stores=built_stores, job_registry=holders, holder=ScoringPass("bench"), hop=torn_hop
-    )
-    kept_torn = apply_landing(built_stores.projects_root, cleared)
+    assert [one.path for one in cleared.torn] == [torn_dir, late_dir], "a torn mint was unlisted"
+    # No run or pass takes a torn mint: every door reads its campaign first.
+    with pytest.raises(NotFoundError):
+        request_jobs(
+            stores=built_stores, job_registry=holders, holder=ScoringPass("bench"), hop=torn_hop
+        )
+    # A mint that wrote its manifest past the plan's scan is no torn one, whoever holds it now:
+    # the act asks again, keeps it, says so, and the next entry lands again.
+    stored_campaign(built_stores, minted_campaign(late_hop))
+    applied = apply_landing(built_stores.projects_root, cleared)
     unlanded = last_landing(built_stores.projects_root)
-    assert torn_dir.is_dir() and kept_torn.said == (f"kept {torn_dir}: a pass holds it",), (
-        f"a mint a pass holds was deleted, or said deleted: {kept_torn.said}"
+    assert late_dir.is_dir() and [one.path for one in applied.kept] == [late_dir], (
+        f"a mint that wrote its manifest since the plan was deleted: {applied.said}"
     )
-    assert unlanded is not None and unlanded.key is None and unlanded.said == kept_torn.said
-    holders.release(scoring_torn.job_id)
-    apply_landing(built_stores.projects_root, plan_landing(built_stores.projects_root, reset=False))
+    assert unlanded is not None and unlanded.key is None and unlanded.said == applied.said
     assert not torn_dir.exists() and campaign_spend(campaigns, torn_hop.campaign_id) == spent, (
         "a torn mint was kept, or its spend left the account's bill with it"
     )
@@ -2064,11 +2106,15 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
 
     # A process that loaded no optimizer still proves a ledger banking one's state.
     banked = CycleHop(campaign_id=SANDBOX_CAMPAIGN, cycle_id="cycle_banked")
+    # The cycle whose bank the close reads opens in a tree of its own: its install and fetched price
+    # list are no files of the landing under proof.
+    beside = workspace(tmp_path.parent / f"{tmp_path.name}-init")
+    monkeypatch.setattr(pricing, "cache_path", lambda: beside.projects_root / "rates.json")
     stored_campaign(built_stores, minted_campaign(banked))
     close_round(
         CycleEventLog.open(CycleDir(campaigns.cycle_dir(banked))),
         [round_result(0, optimizer_state=optimizer_state(), cells={})],
-        cycle=seat(built_stores).cycle,
+        cycle=(await run_init_round(beside, offline, samples(1, "TRUE"))).cycle,
     )
     banked_ledger = CycleLayout(campaigns.cycle_dir(banked)).ledger.read_text(encoding="utf-8")
     assert '"l2_memory"' in banked_ledger, "the ledger banks no optimizer's own state kind"
@@ -2442,7 +2488,9 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
     )
 
     held = CycleHop(campaign_id="held", cycle_id="cycle_held")
-    stores.campaigns.create_campaign(minted_campaign(held))
+    held_campaign = minted_campaign(held)
+    stores.campaigns.create_campaign(held_campaign)
+    minted_dataset(stores, held_campaign)
     stores.campaigns.mint_cycle(held)
 
     with pytest.raises(PassStoppedError):
@@ -2896,7 +2944,9 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
     # A queued launch records the cycle its job already knows; once its job is reaped, a retry
     # under its key replays that launch, and its task reads the job's own ending, never a relaunch.
     step_hop = CycleHop(campaign_id="camp-step", cycle_id="cycle_step0000000")
-    stored_campaign(caller.stores, minted_campaign(step_hop))
+    step_campaign = minted_campaign(step_hop)
+    stored_campaign(caller.stores, step_campaign)
+    minted_dataset(caller.stores, step_campaign)
     caller.stores.campaigns.mint_cycle(step_hop)
     queuing = JobRegistry(tmp_path / "queue", capacity=lambda _live: 0)
     stepping = HostSession(Caller(caller.stores, queuing))

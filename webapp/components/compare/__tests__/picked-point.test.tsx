@@ -35,6 +35,7 @@ const SCORING = dash({
     round: 1,
     candidates: [liveRow({ reading: armReading({ arm: ARM }), resolved_params: { temperature: 0.3 } })],
   }),
+  round_axis: { completed: [], live: 1, position: 1, unfiled: 1 },
 });
 
 const EDITING = { edits: NO_EDITS, setEdits: () => {} };

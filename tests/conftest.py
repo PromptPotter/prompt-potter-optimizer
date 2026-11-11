@@ -45,7 +45,7 @@ def bound_potter() -> Iterator[None]:
 
 @pytest.fixture
 def optimizing_memory() -> Iterator[None]:
-    """What an optimizing run remembers (`loop_start.py::run_memory`), for a test driving a cycle
+    """What an optimizing run remembers (`scoring_scope.py::run_memory`), for a test driving a cycle
     outside the entry that scopes it; unasked, a memory read raises as it does outside a run."""
     with scoped(memory=OpenAt()):
         yield

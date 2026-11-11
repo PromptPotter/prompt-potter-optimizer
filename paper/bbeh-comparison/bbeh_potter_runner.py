@@ -15,7 +15,7 @@ from promptpotter.application.datasets.authored import (
     with_optimization,
 )
 from promptpotter.application.datasets.loaders import samples_from_dicts
-from promptpotter.application.embedded_run import open_session, run_campaign
+from promptpotter.application.embedded_run import enter, run_campaign
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
@@ -33,11 +33,11 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
-from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
+from promptpotter.infrastructure.store.dataset_access import ResolvedDataset, resolve_dataset
 from promptpotter.presentation.terminal.completion import report_completion
 
 # The bbeh definition is the SoT for everything about the task — its `pipeline` section drives
-# the target-layer schema (read by open_session via dataset_name="bbeh", which resolves it in the
+# the target-layer schema (read by run_campaign on the dataset "bbeh", which resolves it in the
 # account's own tier), its `campaign` section carries every loop-control knob, task.md the framing.
 
 
@@ -96,16 +96,24 @@ async def run_bbeh_campaign(
     print(f"GLOBAL OPTIMIZATION ({len(train_norm)} train samples)")
     print("=" * 60)
 
-    session = await open_session("bbeh", rows=train_norm)
+    stores = enter()
+    campaign_config = build_campaign_config(
+        resolve_dataset(stores, "bbeh"),
+        budget_rounds=budget_rounds,
+        n_variants=n_variants,
+        sp_budget_round=sp_budget_round,
+    )
+    session, cycle_result = await run_campaign(
+        "bbeh",
+        campaign_config,
+        stores=stores,
+        rows=train_norm,
+        readout_sink=print,
+        budget=Budget(),
+        mode=RunMode(),
+    )
     try:
-        assert session.dataset is not None, "open_session resolves the dataset it names"
-        campaign_config = build_campaign_config(
-            session.dataset,
-            budget_rounds=budget_rounds,
-            n_variants=n_variants,
-            sp_budget_round=sp_budget_round,
-        )
-        # Read only: the mint configures the session it is handed, as every launch does.
+        # Read only: the session the run answers, configured under the campaign as the mint did.
         configured = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
         pipeline_params = configured.pipeline_params
         # The model this run actually reaches, resolved from `bbeh/dataset.yaml::pipeline` — never
@@ -122,13 +130,6 @@ async def run_bbeh_campaign(
             )
         target_model = models.pop()
 
-        session, cycle_result = await run_campaign(
-            session,
-            campaign_config,
-            readout_sink=print,
-            budget=Budget(),
-            mode=RunMode(),
-        )
         report_completion(cycle_result, session=session)
         origin = cycle_result.origin
         origin_train_acc = (

@@ -49,6 +49,7 @@ from factories import (
     measurements,
     member_rows,
     minted_campaign,
+    minted_dataset,
     optimizer_state,
     pipeline_schema,
     pobb_knobs,
@@ -92,9 +93,9 @@ from promptpotter.application.host_surface import (
     TaskResultOf,
     TaskStatusOf,
 )
-from promptpotter.application.initialization.loop_start import (
+from promptpotter.application.initialization.scoring_scope import (
     OpenedDiagnostic,
-    populate_session_scoring,
+    scorer_setup,
 )
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
@@ -234,7 +235,14 @@ from promptpotter.domain.bench import (
     PassStop,
     partition_bank,
 )
-from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
+from promptpotter.domain.campaign import (
+    Arm,
+    CampaignRefusal,
+    Compare,
+    HeadToHeadRecord,
+    Optimize,
+    Purpose,
+)
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes, unscoreable_cells
 from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
@@ -244,7 +252,6 @@ from promptpotter.domain.command_kinds import (
     CommandKind,
     CommandPayload,
     GradeBenchPayload,
-    OriginGateDecisionPayload,
     PauseCyclePayload,
     SkipSearchpointPayload,
     SubmitArmsPayload,
@@ -254,7 +261,6 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
-from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
@@ -904,11 +910,8 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
             judges={name: spec},
         )
         try:
-            populate_session_scoring(
-                session,
-                config,
-                source=RunSource.ORIGIN,
-                partition=partition_bank(session.bank.samples, None, seed=0),
+            scorer_setup(
+                session, config, partition=partition_bank(session.bank.samples, None, seed=0)
             )
         except ValueError:
             return True
@@ -1211,9 +1214,9 @@ def _peer_cycle(
                     s, session, PipelineParams.model_validate({"solve": {"prompt": "Answer."}})
                 )
             )
-            for s in list(session.state.scoring.require_partition().search)[:4]
+            for s in list(session.state.scoring.partition.search)[:4]
         ]
-        return session.state.scoring.require_scorer().sheet(rows)
+        return session.state.scoring.scorer.sheet(rows)
 
     with at_round(1):
         seated = seat(
@@ -1531,7 +1534,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             offline.llm.says = capo_says
             session = cycle.session
             running.append(True)
-            search = list(session.state.scoring.require_partition().search)
+            search = list(session.state.scoring.partition.search)
             if cut_round == 1:
                 # Run init scores the origin through the gateway — here on half of CAPO's first block.
                 asyncio.run(
@@ -1826,7 +1829,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     ):
         offline.llm.says = crossover_says
         session = cycle.session
-        search = list(session.state.scoring.require_partition().search)
+        search = list(session.state.scoring.partition.search)
         with monkeypatch.context() as patched:
             patched.setattr(query_loop, "measure_sample", unpriced)
             asyncio.run(
@@ -1914,7 +1917,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         # The one stop reaches a pass in flight: the cycle reads as scoring, the pause is taken at
         # the next cell, and the pass banks as stopped on the cells it walked.
         stores = session.store
-        stores.campaigns.create_campaign(minted_campaign(_PEER_HOP))
+        peer = minted_campaign(_PEER_HOP)
+        stores.campaigns.create_campaign(peer)
+        minted_dataset(stores, peer)
         stores.campaigns.mint_cycle(_PEER_HOP)
         cycle_dir = stores.campaigns.cycle_dir(_PEER_HOP)
         loop_control, session.state.control = (
@@ -2195,7 +2200,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             c0_walk = asyncio.run(
                 score_search_point(
                     cycle.points.measured(cycle.measured(origin.id)),
-                    list(session.state.scoring.require_partition().search)[:4],
+                    list(session.state.scoring.partition.search)[:4],
                     session,
                     label=MeasurementRole.ORIGIN,
                     measured=MeasuredPass(origin.id, MeasurementRole.ORIGIN),
@@ -2321,7 +2326,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         bench = read_bench(
             session.store,
             passes,
-            session.state.scoring.require_scorer(),
+            session.state.scoring.scorer,
             line=bench_line(
                 taken.arm,
                 hop=session.hop,
@@ -2383,6 +2388,16 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             None,
         ),
         (None, {}, ReadingState.NOT_ASKED, True, None, (None, []), None),
+        # A campaign its pass's admission refuses: no grade is offered.
+        (
+            None,
+            {"refused": CampaignRefusal.NOT_ACTIVE},
+            ReadingState.NOT_ASKED,
+            False,
+            None,
+            (None, []),
+            None,
+        ),
         (
             None,
             {"held_by": "cyc_beside"},
@@ -2408,7 +2423,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             "origin",
         ),
     )
-    for banked, run, state, can_grade, lift, series, stopped in line_cases:
+    for banked, run, state, can_run, lift, series, stopped in line_cases:
         case = f"banked={banked} run={run}"
         line_passes: BenchPasses | None = None
         if banked is not None:
@@ -2438,7 +2453,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             **run,
         )
         line_bench = read_bench(line_stores, line_passes, line_scorer, line=line)
-        assert (line_bench.status.state, line_bench.status.can_grade) == (state, can_grade), case
+        assert (line_bench.status.state, line_bench.status.can_run) == (state, can_run), case
         headline = line_bench.vs_origin.headline
         assert (None if headline is None else headline.estimate.value) == lift, case
         assert line_bench.status.subject == stopped or not stopped, f"{case}: names who stopped"
@@ -3700,7 +3715,6 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         return index.human_intervened
 
     skip = SkipSearchpointPayload(**address)
-    gate_abort = OriginGateDecisionPayload(**address, decision="abort")
     try:
         untaken = press(skip, "skip-1")
         assert acks(untaken) == ["accepted"], "a press was acked as a cut"
@@ -3715,14 +3729,6 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             assert control.spend_skip()
             assert not control.spend_skip(), "one press cut two searchpoints"
             assert (acks(taken), acks(untaken)) == (["accepted", "applied"], ["accepted", "voided"])
-            with pytest.raises(ConflictError):
-                press(gate_abort, "gate-early")
-            assert control.take_gate_decision() is None, "a refused decision reached the gate"
-            commands.append(RunPhaseRecord(run_phase=RunPhase.GATE, gate="origin"))
-            press(gate_abort, "gate-open")
-            assert control.take_gate_decision() == "abort"
-            assert control.take_gate_decision() is None, "one decision was taken twice"
-            commands.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
             press(PauseCyclePayload(**address), "pause-1")
             assert control.pause_requested()
             waiting = commanded.run_state(command_hop).pause

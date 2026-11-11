@@ -30,12 +30,10 @@ from promptpotter.domain.draft_edit import (
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.phases import (
     INNER_ARMS_REFUSAL,
-    INNER_GATE_REFUSAL,
     INNER_LAUNCH_REFUSAL,
     INNER_PAUSE_REFUSAL,
     INNER_SKIP_REFUSAL,
     STOP_REASON_INFO,
-    GateDecision,
 )
 from promptpotter.domain.pipeline_schema import ParamIntent
 from promptpotter.domain.run_mode import RunMode
@@ -144,13 +142,6 @@ class CommandKind(StrEnum):
         "loop_commands:pause_cycle",
         CAMPAIGN_STEP_CAP,
         anyone("pause"),
-        True,
-    )
-    ORIGIN_GATE = (
-        "origin-gate",
-        "loop_commands:origin_gate_decision",
-        CAMPAIGN_STEP_CAP,
-        anyone("origin-gate"),
         True,
     )
     SUBMIT_ARMS = (
@@ -499,17 +490,6 @@ class SetSampleLookaheadPayload(LoopPayload, kind=CommandKind.SET_SAMPLE_LOOKAHE
     auto: bool = Field(
         default=False,
         description="As deep as the stop rules allow, every round, until pressed off.",
-    )
-
-
-class OriginGateDecisionPayload(LoopPayload, kind=CommandKind.ORIGIN_GATE):
-    """Answer a cycle holding at the round-0 origin gate; refused where the cycle is not holding."""
-
-    inner_refusal: ClassVar[str | None] = INNER_GATE_REFUSAL
-    follow_up: ClassVar[str] = "A cycle holding at the gate acts on it within a second."
-
-    decision: GateDecision = Field(
-        description="`proceed` into L1 anyway, `rescore` the origin force-fresh, or `abort` the cycle."
     )
 
 

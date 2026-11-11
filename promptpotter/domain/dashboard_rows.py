@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import Field
 
 from promptpotter.domain.arm_reading import ArmReading
-from promptpotter.domain.arms import arm_name
+from promptpotter.domain.arms import ArmState, Proposed, arm_name
 from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import NodePrompt
@@ -132,8 +133,9 @@ class DashboardCandidate(FrozenModel):
     reading: ArmReading
 
 
-class LiveCandidate(DashboardCandidate):
-    """A candidate of the round in flight, with its searchpoint, sample tape and rejection reason."""
+class ServedArm(DashboardCandidate):
+    """One arm as every round read serves it, in flight (`current_round.candidates`) or filed
+    (`RoundView.candidates`): its reading, its searchpoint and why it was refused."""
 
     prompts: dict[str, NodePrompt] | None = Field(
         default=None,
@@ -141,10 +143,41 @@ class LiveCandidate(DashboardCandidate):
         "seeds from. Null until the candidate is announced.",
     )
     resolved_params: dict[str, Any] | None = None
+    validation_failures: list[ValidationFailure] = Field(default_factory=list)
+
+    @classmethod
+    def of(cls, reading: ArmReading, arm: ArmState) -> ServedArm:
+        return cls(
+            reading=reading,
+            prompts=arm.individual.prompts,
+            resolved_params=None if isinstance(arm, Proposed) else arm.resolved_params,
+            validation_failures=arm.validation_failures,
+        )
+
+
+class LiveCandidate(ServedArm):
+    """A candidate of the round in flight, with its sample tape beside its served arm."""
+
     pipeline_overlay: dict[str, dict[str, Any]] | None = None
     samples: list[DashboardSample] = Field(default_factory=list)
-    validation_failures: list[ValidationFailure] = Field(default_factory=list)
     composite_fitness_formula_short: str | None = None
+
+    @classmethod
+    def in_flight(
+        cls,
+        reading: ArmReading,
+        arm: ArmState,
+        *,
+        samples: list[DashboardSample],
+        composite_fitness_formula_short: str | None,
+    ) -> LiveCandidate:
+        """The arm as `ServedArm.of` serves it, its overlay and tape beside it."""
+        return cls(
+            **dict(ServedArm.of(reading, arm)),
+            pipeline_overlay=arm.overlay,
+            samples=samples,
+            composite_fitness_formula_short=composite_fitness_formula_short,
+        )
 
 
 class OptimizerLimit(FrozenModel):
@@ -316,6 +349,27 @@ def sample_movements(
         return "gained" if at < before else "lost" if at > before else "kept"
 
     return [movement(sample_id) for sample_id in selection]
+
+
+class SampleRounds(FrozenModel):
+    sample_id: int
+    rounds: int = Field(description="How many of the measuring rounds measured it")
+
+
+class SampleCoverage(FrozenModel):
+    """Every sample a closed round measured, in id order: the set a sample-set picker offers."""
+
+    measuring_rounds: int = Field(description="The closed rounds that measured any sample")
+    samples: list[SampleRounds]
+
+    @classmethod
+    def of(cls, rounds: Sequence[RoundSummary]) -> SampleCoverage:
+        measuring = [set(r.selection) for r in rounds if r.selection]
+        counts = Counter(sample_id for ids in measuring for sample_id in ids)
+        return cls(
+            measuring_rounds=len(measuring),
+            samples=[SampleRounds(sample_id=s, rounds=n) for s, n in sorted(counts.items())],
+        )
 
 
 def served_rounds(

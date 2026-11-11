@@ -782,7 +782,7 @@ async def execute_stale_data_protocol(
                     rerun,
                     stale_outcome=StaleOutcome.RETRIED,
                     rerun_comparison=compare_rerun(
-                        cached_result, rerun, session.state.scoring.require_scorer()
+                        cached_result, rerun, session.state.scoring.scorer
                     ),
                 )
                 if not is_deprecated(result):

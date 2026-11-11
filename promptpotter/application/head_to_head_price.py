@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from pydantic import Field
 
 from promptpotter.application.datasets.startability import offered_dataset
-from promptpotter.application.initialization.loop_start import cycle_partition
+from promptpotter.application.initialization.scoring_scope import cycle_partition
 from promptpotter.application.jobs.launcher.head_to_head import dataset_arms
 from promptpotter.application.jobs.mint import arm_config
 from promptpotter.application.optimizer_manifest import select_optimizer

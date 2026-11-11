@@ -1,10 +1,6 @@
-import { liveCandidates, roundOf } from "./live-candidates";
-import type { ServedDashboard, ArmReading, RoundView } from "@/lib/api/types";
+import { liveCandidates } from "./live-candidates";
+import type { ServedDashboard } from "@/lib/api/types";
 import type { ArmRow, RoundCandidates } from "@/lib/types";
-
-export function scoreboardReading(doc: RoundView | null, key: string): ArmReading | null {
-  return doc?.scoreboard.find((r) => r.reading.arm.key === key)?.reading ?? null;
-}
 
 export function roundCandidates(dash: ServedDashboard | null): ArmRow[] {
   const out: ArmRow[] = [];
@@ -15,9 +11,9 @@ export function roundCandidates(dash: ServedDashboard | null): ArmRow[] {
     );
   }
 
-  // Tests `completed`, never `round_axis.live`: a stopped run's live rows stand in for its round too.
-  const liveRound = roundOf(dash);
-  if (dash && liveRound != null && !dash.round_axis.completed.includes(liveRound)) {
+  // `unfiled`, never `round_axis.live`: a stopped run's live rows stand in for its round too.
+  const liveRound = dash?.round_axis.unfiled ?? null;
+  if (dash && liveRound != null) {
     liveCandidates(dash).forEach(({ reading }, idx) =>
       out.push({ key: `R${liveRound}.${idx}`, round: liveRound, source: "inflight", reading }),
     );

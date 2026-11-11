@@ -145,29 +145,16 @@
         "additionalProperties": false,
         "description": "The run to follow (`followed_cycle`): a running one first, else the latest launch.",
         "properties": {
-          "campaign_id": {
+          "hop": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CycleHop"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Campaign of the run to follow; null when no session is active.",
-            "title": "Campaign Id"
-          },
-          "cycle_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Cycle of the run to follow; null when no session is active.",
-            "title": "Cycle Id"
+            "description": "The cycle of the run to follow; null when no session is active."
           },
           "tenant_id": {
             "description": "Tenant the pointer belongs to — the caller's own, always known",
@@ -177,8 +164,7 @@
         },
         "required": [
           "tenant_id",
-          "campaign_id",
-          "cycle_id"
+          "hop"
         ],
         "title": "ActiveSessionResponse",
         "type": "object"
@@ -224,21 +210,7 @@
         "properties": {
           "actions": {
             "items": {
-              "discriminator": {
-                "mapping": {
-                  "origin-gate": "#/components/schemas/GateAction",
-                  "submit-arms": "#/components/schemas/KeepDraftsAction"
-                },
-                "propertyName": "kind"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/GateAction"
-                },
-                {
-                  "$ref": "#/components/schemas/KeepDraftsAction"
-                }
-              ]
+              "$ref": "#/components/schemas/KeepDraftsAction"
             },
             "title": "Actions",
             "type": "array"
@@ -1373,31 +1345,6 @@
         },
         "type": "object"
       },
-      "ArmSlot": {
-        "additionalProperties": false,
-        "description": "Where an individual was walked as an arm, its latest walk for a re-read: the ``idx``-th of its round's ``total``.",
-        "properties": {
-          "idx": {
-            "title": "Idx",
-            "type": "integer"
-          },
-          "round": {
-            "title": "Round",
-            "type": "integer"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "round",
-          "idx",
-          "total"
-        ],
-        "title": "ArmSlot",
-        "type": "object"
-      },
       "BackendHealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1771,6 +1718,9 @@
           "inner",
           "no_manifest",
           "held_elsewhere",
+          "campaign_not_active",
+          "definition_unread",
+          "connector_moved",
           "no_holdout",
           "in_flight",
           "selecting",
@@ -1978,9 +1928,9 @@
         "additionalProperties": false,
         "description": "Where a campaign's bench stands, and whether asking for its pass would be admitted.",
         "properties": {
-          "can_grade": {
+          "can_run": {
             "description": "Whether `bench` / `grade-bench` is admitted now. Every entry point reads this one answer.",
-            "title": "Can Grade",
+            "title": "Can Run",
             "type": "boolean"
           },
           "expected": {
@@ -2032,7 +1982,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why not, exactly where `can_grade` is false."
+            "description": "Why not, exactly where `can_run` is false."
           },
           "scored": {
             "anyOf": [
@@ -2087,7 +2037,7 @@
         "required": [
           "state",
           "trigger",
-          "can_grade",
+          "can_run",
           "refusal",
           "offered",
           "subject",
@@ -2125,30 +2075,6 @@
           "file"
         ],
         "title": "Body_ingest_upload_api_v1_commands_ingest_upload_post",
-        "type": "object"
-      },
-      "Broken": {
-        "additionalProperties": false,
-        "description": "The bench's run-health rules stopped it.",
-        "properties": {
-          "degradation": {
-            "$ref": "#/components/schemas/DegradationContext"
-          },
-          "failure": {
-            "$ref": "#/components/schemas/RuntimeFailure"
-          },
-          "kind": {
-            "const": "broken",
-            "default": "broken",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "failure",
-          "degradation"
-        ],
-        "title": "Broken",
         "type": "object"
       },
       "Budget": {
@@ -4714,105 +4640,6 @@
         "title": "CurrentRound",
         "type": "object"
       },
-      "Cut": {
-        "additionalProperties": false,
-        "description": "Stopped short of its panel against it.",
-        "properties": {
-          "expected_samples": {
-            "title": "Expected Samples",
-            "type": "integer"
-          },
-          "individual": {
-            "$ref": "#/components/schemas/OptSearchPoint"
-          },
-          "overlay": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Overlay",
-            "type": "object"
-          },
-          "reason": {
-            "discriminator": {
-              "mapping": {
-                "broken": "#/components/schemas/Broken",
-                "eliminated": "#/components/schemas/Eliminated",
-                "invalid": "#/components/schemas/Invalid",
-                "skipped": "#/components/schemas/Skipped"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Eliminated"
-              },
-              {
-                "$ref": "#/components/schemas/Broken"
-              },
-              {
-                "$ref": "#/components/schemas/Invalid"
-              },
-              {
-                "$ref": "#/components/schemas/Skipped"
-              }
-            ],
-            "title": "Reason"
-          },
-          "resolved_params": {
-            "additionalProperties": true,
-            "title": "Resolved Params",
-            "type": "object"
-          },
-          "role": {
-            "enum": [
-              "origin",
-              "panel",
-              "parent"
-            ],
-            "title": "Role",
-            "type": "string"
-          },
-          "slot": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmSlot"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "sp_hash": {
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "state": {
-            "const": "cut",
-            "default": "cut",
-            "title": "State",
-            "type": "string"
-          },
-          "validation_failures": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationFailure"
-            },
-            "title": "Validation Failures",
-            "type": "array"
-          }
-        },
-        "required": [
-          "role",
-          "slot",
-          "individual",
-          "sp_hash",
-          "resolved_params",
-          "expected_samples",
-          "reason"
-        ],
-        "title": "Cut",
-        "type": "object"
-      },
       "CycleHop": {
         "additionalProperties": false,
         "description": "One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle alone.",
@@ -5217,9 +5044,9 @@
             "type": "string"
           },
           "nests": {
-            "description": "The pipelines this one nests in turn, one per dataset its cells measure; the only wire naming them before a cell has spawned",
+            "description": "The pipelines this one nests in turn, one per dataset its cells measure, each read whole down to its innermost: the only wire naming them before a cell has spawned",
             "items": {
-              "$ref": "#/components/schemas/NestedPipelineRef"
+              "$ref": "#/components/schemas/NestedPipeline"
             },
             "title": "Nests",
             "type": "array"
@@ -5329,45 +5156,6 @@
           "treatment"
         ],
         "title": "DefaultsPin",
-        "type": "object"
-      },
-      "DegradationContext": {
-        "additionalProperties": false,
-        "description": "The bench's reading of a ``BROKEN`` arm, empty on every other.",
-        "properties": {
-          "degraded_count": {
-            "title": "Degraded Count",
-            "type": "integer"
-          },
-          "degraded_rate": {
-            "title": "Degraded Rate",
-            "type": "number"
-          },
-          "dominant_warning": {
-            "title": "Dominant Warning",
-            "type": "string"
-          },
-          "fatal": {
-            "title": "Fatal",
-            "type": "boolean"
-          },
-          "source": {
-            "title": "Source",
-            "type": "string"
-          },
-          "total_scored": {
-            "title": "Total Scored",
-            "type": "integer"
-          },
-          "warning_types": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "Warning Types",
-            "type": "object"
-          }
-        },
-        "title": "DegradationContext",
         "type": "object"
       },
       "DeleteCampaignPayload": {
@@ -6172,46 +5960,6 @@
         "title": "ElectionColumn",
         "type": "object"
       },
-      "Eliminated": {
-        "additionalProperties": false,
-        "properties": {
-          "elimination": {
-            "$ref": "#/components/schemas/Elimination"
-          },
-          "kind": {
-            "const": "eliminated",
-            "default": "eliminated",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "elimination"
-        ],
-        "title": "Eliminated",
-        "type": "object"
-      },
-      "Elimination": {
-        "additionalProperties": false,
-        "description": "The eliminator's reading of a stop it made, for the arm or against it.",
-        "properties": {
-          "context": {
-            "additionalProperties": true,
-            "title": "Context",
-            "type": "object"
-          },
-          "reason": {
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reason",
-          "context"
-        ],
-        "title": "Elimination",
-        "type": "object"
-      },
       "EnvironmentReading": {
         "additionalProperties": false,
         "description": "One cell as an ENVIRONMENT, the block the subjects are compared within. ``snr`` is the\nsubjects' spread at this cell over the roster's pooled residual — which environments tell the\nsubjects apart, read without a replicate, which the content-addressed instrument cannot give.\nA held-out cell reads the subjects' bench passes, which only a round's selection has.",
@@ -6524,28 +6272,6 @@
           "metric"
         ],
         "title": "Evidence",
-        "type": "object"
-      },
-      "EvidenceGrounding": {
-        "additionalProperties": false,
-        "description": "The panel field and citation L1 declares to justify a mutation.",
-        "properties": {
-          "citation": {
-            "description": "Short string naming the panel entry cited.",
-            "title": "Citation",
-            "type": "string"
-          },
-          "field": {
-            "description": "A citable panel named in the prompt, or stall_exploration.",
-            "title": "Field",
-            "type": "string"
-          }
-        },
-        "required": [
-          "field",
-          "citation"
-        ],
-        "title": "EvidenceGrounding",
         "type": "object"
       },
       "EvidencePower": {
@@ -7404,47 +7130,6 @@
         ],
         "title": "ForkTrigger",
         "type": "string"
-      },
-      "GateAction": {
-        "additionalProperties": false,
-        "description": "One button: a press sends `decision` as `kind` to the cycle whose activity carries it.",
-        "properties": {
-          "decision": {
-            "enum": [
-              "rescore",
-              "proceed",
-              "abort"
-            ],
-            "title": "Decision",
-            "type": "string"
-          },
-          "kind": {
-            "const": "origin-gate",
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "variant": {
-            "enum": [
-              "primary",
-              "ghost",
-              "danger"
-            ],
-            "title": "Variant",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label",
-          "variant",
-          "kind",
-          "decision"
-        ],
-        "title": "GateAction",
-        "type": "object"
       },
       "GeneSource": {
         "additionalProperties": false,
@@ -8681,59 +8366,6 @@
         ],
         "type": "string"
       },
-      "IndividualLineage": {
-        "additionalProperties": false,
-        "description": "The provenance of one mint: its edges, variations and words; it names no individual.",
-        "properties": {
-          "changes_description": {
-            "default": "",
-            "title": "Changes Description",
-            "type": "string"
-          },
-          "evidence_grounding": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/EvidenceGrounding"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "parent_ids": {
-            "description": "Every individual this one derives from — one for a mutation, several for a crossover, its main first and its donor second; empty at the origin. A tree view hangs it under `parent_ids[0]`.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Parent Ids",
-            "type": "array"
-          },
-          "variations": {
-            "description": "Every variation node that wrote it, in the order they ran; empty for an individual the bench minted as an origin. A later node appends its own and rewrites none.",
-            "items": {
-              "$ref": "#/components/schemas/Variation"
-            },
-            "title": "Variations",
-            "type": "array"
-          }
-        },
-        "title": "IndividualLineage",
-        "type": "object"
-      },
-      "Invalid": {
-        "additionalProperties": false,
-        "description": "Refused before a cell: the reasons are the arm's own fatal ``validation_failures``.",
-        "properties": {
-          "kind": {
-            "const": "invalid",
-            "default": "invalid",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "title": "Invalid",
-        "type": "object"
-      },
       "JsonValue": {},
       "JudgeSpec": {
         "additionalProperties": false,
@@ -9534,7 +9166,7 @@
       },
       "LiveCandidate": {
         "additionalProperties": false,
-        "description": "A candidate of the round in flight, with its searchpoint, sample tape and rejection reason.",
+        "description": "A candidate of the round in flight, with its sample tape beside its served arm.",
         "properties": {
           "composite_fitness_formula_short": {
             "anyOf": [
@@ -10198,88 +9830,6 @@
         ],
         "type": "string"
       },
-      "Measured": {
-        "additionalProperties": false,
-        "properties": {
-          "expected_samples": {
-            "title": "Expected Samples",
-            "type": "integer"
-          },
-          "individual": {
-            "$ref": "#/components/schemas/OptSearchPoint"
-          },
-          "locked_in": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Elimination"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "overlay": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Overlay",
-            "type": "object"
-          },
-          "resolved_params": {
-            "additionalProperties": true,
-            "title": "Resolved Params",
-            "type": "object"
-          },
-          "role": {
-            "enum": [
-              "origin",
-              "panel",
-              "parent"
-            ],
-            "title": "Role",
-            "type": "string"
-          },
-          "slot": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmSlot"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "sp_hash": {
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "state": {
-            "const": "measured",
-            "default": "measured",
-            "title": "State",
-            "type": "string"
-          },
-          "validation_failures": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationFailure"
-            },
-            "title": "Validation Failures",
-            "type": "array"
-          }
-        },
-        "required": [
-          "role",
-          "slot",
-          "individual",
-          "sp_hash",
-          "resolved_params",
-          "expected_samples",
-          "locked_in"
-        ],
-        "title": "Measured",
-        "type": "object"
-      },
       "MeasuredLift": {
         "additionalProperties": false,
         "description": "One measurand's lift of member `b` over member `a`, on the cells both scored.",
@@ -10345,104 +9895,6 @@
         ],
         "title": "MeasurementRole",
         "type": "string"
-      },
-      "Measuring": {
-        "additionalProperties": false,
-        "description": "What is known as the walk opens; its cells and their fold land on their own records.",
-        "properties": {
-          "block": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "integer"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Block"
-          },
-          "expected_samples": {
-            "title": "Expected Samples",
-            "type": "integer"
-          },
-          "individual": {
-            "$ref": "#/components/schemas/OptSearchPoint"
-          },
-          "n_priors": {
-            "default": 0,
-            "title": "N Priors",
-            "type": "integer"
-          },
-          "overlay": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Overlay",
-            "type": "object"
-          },
-          "resolved_params": {
-            "additionalProperties": true,
-            "title": "Resolved Params",
-            "type": "object"
-          },
-          "role": {
-            "enum": [
-              "origin",
-              "panel",
-              "parent"
-            ],
-            "title": "Role",
-            "type": "string"
-          },
-          "sample_order": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Sample Order",
-            "type": "array"
-          },
-          "slot": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmSlot"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "sp_hash": {
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "state": {
-            "const": "measuring",
-            "default": "measuring",
-            "title": "State",
-            "type": "string"
-          },
-          "validation_failures": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationFailure"
-            },
-            "title": "Validation Failures",
-            "type": "array"
-          }
-        },
-        "required": [
-          "role",
-          "slot",
-          "individual",
-          "sp_hash",
-          "resolved_params",
-          "expected_samples"
-        ],
-        "title": "Measuring",
-        "type": "object"
       },
       "MemberAddress": {
         "additionalProperties": false,
@@ -10955,6 +10407,52 @@
         ],
         "type": "string"
       },
+      "NestedPipeline": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset": {
+            "description": "Slug of the pipeline that node runs; fetch it the same way.",
+            "title": "Dataset",
+            "type": "string"
+          },
+          "node": {
+            "description": "Node id in this pipeline whose measurement runs `dataset`.",
+            "title": "Node",
+            "type": "string"
+          },
+          "pipeline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetPipelineResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null where it did not resolve"
+          },
+          "unread": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why `pipeline` is null: the typed refusal, or that it nests a dataset above it",
+            "title": "Unread"
+          }
+        },
+        "required": [
+          "node",
+          "dataset",
+          "pipeline",
+          "unread"
+        ],
+        "title": "NestedPipeline",
+        "type": "object"
+      },
       "NestedPipelineRef": {
         "additionalProperties": false,
         "description": "Which node of this pipeline runs another whole pipeline, and whose.",
@@ -11074,155 +10572,6 @@
           "schema_repair_errors"
         ],
         "title": "NodeBlock",
-        "type": "object"
-      },
-      "NodeCall": {
-        "additionalProperties": true,
-        "description": "A node's engine call keys typed as laid (strict: a wrong type refuses, a number stays the int\nor float it was hashed as), each field its key's one spelling; other keys are its backend's.",
-        "properties": {
-          "max_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Tokens"
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
-          },
-          "prompt_family": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt Family"
-          },
-          "prompt_version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt Version"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider"
-          },
-          "reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reasoning Effort"
-          },
-          "route_order": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Route Order"
-          },
-          "schema_family": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schema Family"
-          },
-          "schema_version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schema Version"
-          },
-          "seed": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Seed"
-          },
-          "temperature": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Temperature"
-          },
-          "top_p": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Top P"
-          }
-        },
-        "title": "NodeCall",
         "type": "object"
       },
       "NodeConfigParam": {
@@ -11672,15 +11021,6 @@
         "title": "NoiseBand",
         "type": "object"
       },
-      "NurseOwner": {
-        "description": "Who heals a runtime failure.",
-        "enum": [
-          "l1",
-          "operator"
-        ],
-        "title": "NurseOwner",
-        "type": "string"
-      },
       "OpenDatasetDraftPayload": {
         "additionalProperties": false,
         "description": "Open an authored dataset's files as a prefilled check-in draft; nothing runs until ``start-checkin``.",
@@ -11713,29 +11053,6 @@
           "origin_id"
         ],
         "title": "OpenOriginDraftPayload",
-        "type": "object"
-      },
-      "OptSearchPoint": {
-        "additionalProperties": false,
-        "description": "The individual: a value per locus of the roster — prompt fields and shots per prompt node, node config — plus its lineage.",
-        "properties": {
-          "lineage": {
-            "$ref": "#/components/schemas/IndividualLineage"
-          },
-          "pipeline_params": {
-            "$ref": "#/components/schemas/PipelineParams",
-            "description": "Its node configuration, resolved: the active steps named, the output contract folded, no rendered prompt. `configured` is the one writer."
-          },
-          "prompts": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/NodePrompt"
-            },
-            "description": "Per prompt node, the loci it sets there; a node it sets nothing on is absent.",
-            "title": "Prompts",
-            "type": "object"
-          }
-        },
-        "title": "OptSearchPoint",
         "type": "object"
       },
       "OptimizationConfig": {
@@ -11859,7 +11176,7 @@
           },
           "origin_gate": {
             "default": "strict",
-            "description": "Hold after round 0 for the operator's decision when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds only on a structurally-broken origin; ``off`` disarms the gate. The decision (`origin-gate`) proceeds into the search anyway, re-scores the origin, or aborts the cycle. An origin that scored no cell halts instead, and starting the cycle again re-measures it.",
+            "description": "Halt after round 0 when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) halts on ``critical`` or ``degraded``; ``critical_only`` halts only on a structurally-broken origin; ``off`` disarms the gate. Resuming re-measures the cells the origin lost and grades it again; an origin still unhealthy when resumed proceeds into the search.",
             "enum": [
               "strict",
               "critical_only",
@@ -12434,54 +11751,6 @@
           "created_at"
         ],
         "title": "OriginEntry",
-        "type": "object"
-      },
-      "OriginGateDecisionPayload": {
-        "additionalProperties": false,
-        "description": "Answer a cycle holding at the round-0 origin gate; refused where the cycle is not holding.",
-        "properties": {
-          "campaign_id": {
-            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "cycle_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Cycle Id",
-            "type": "string"
-          },
-          "decision": {
-            "description": "`proceed` into L1 anyway, `rescore` the origin force-fresh, or `abort` the cycle.",
-            "enum": [
-              "rescore",
-              "proceed",
-              "abort"
-            ],
-            "title": "Decision",
-            "type": "string"
-          },
-          "descend": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Descend"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "cycle_id",
-          "decision"
-        ],
-        "title": "OriginGateDecisionPayload",
         "type": "object"
       },
       "OriginLastResolution": {
@@ -13384,7 +12653,7 @@
                 "type": "null"
               }
             ],
-            "description": "Hold after round 0 for the operator's decision when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds only on a structurally-broken origin; ``off`` disarms the gate. The decision (`origin-gate`) proceeds into the search anyway, re-scores the origin, or aborts the cycle. An origin that scored no cell halts instead, and starting the cycle again re-measures it.",
+            "description": "Halt after round 0 when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) halts on ``critical`` or ``degraded``; ``critical_only`` halts only on a structurally-broken origin; ``off`` disarms the gate. Resuming re-measures the cells the origin lost and grades it again; an origin still unhealthy when resumed proceeds into the search.",
             "title": "Origin Gate"
           },
           "panel_gate": {
@@ -13536,10 +12805,6 @@
           "at"
         ],
         "title": "PauseReading",
-        "type": "object"
-      },
-      "PipelineParams": {
-        "additionalProperties": true,
         "type": "object"
       },
       "PipelineView": {
@@ -14065,61 +13330,6 @@
         ],
         "title": "PromptPart",
         "type": "string"
-      },
-      "Proposed": {
-        "additionalProperties": false,
-        "properties": {
-          "individual": {
-            "$ref": "#/components/schemas/OptSearchPoint"
-          },
-          "overlay": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Overlay",
-            "type": "object"
-          },
-          "role": {
-            "enum": [
-              "origin",
-              "panel",
-              "parent"
-            ],
-            "title": "Role",
-            "type": "string"
-          },
-          "slot": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmSlot"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "state": {
-            "const": "proposed",
-            "default": "proposed",
-            "title": "State",
-            "type": "string"
-          },
-          "validation_failures": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationFailure"
-            },
-            "title": "Validation Failures",
-            "type": "array"
-          }
-        },
-        "required": [
-          "role",
-          "slot",
-          "individual"
-        ],
-        "title": "Proposed",
-        "type": "object"
       },
       "ProposerRow": {
         "additionalProperties": false,
@@ -14669,12 +13879,25 @@
             ],
             "description": "The round the run stands at: `live`, else the newest of `completed`. Null before any round measured.",
             "title": "Position"
+          },
+          "unfiled": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`current_round` while no round file holds it (its arms are its candidates).",
+            "title": "Unfiled"
           }
         },
         "required": [
           "completed",
           "live",
-          "position"
+          "position",
+          "unfiled"
         ],
         "title": "RoundAxis",
         "type": "object"
@@ -14743,34 +13966,13 @@
         "additionalProperties": false,
         "description": "One closed round as a surface reads it: its arms and its verdict. Its rows are the\nmeasurement log's (`GET /datasets/{name}/cells`); what the engine banks beside them — folds,\ndiagnostics, optimizer state — stays on the ledger.",
         "properties": {
-          "arms": {
-            "additionalProperties": {
-              "discriminator": {
-                "mapping": {
-                  "cut": "#/components/schemas/Cut",
-                  "measured": "#/components/schemas/Measured",
-                  "measuring": "#/components/schemas/Measuring",
-                  "proposed": "#/components/schemas/Proposed"
-                },
-                "propertyName": "state"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/Proposed"
-                },
-                {
-                  "$ref": "#/components/schemas/Measuring"
-                },
-                {
-                  "$ref": "#/components/schemas/Cut"
-                },
-                {
-                  "$ref": "#/components/schemas/Measured"
-                }
-              ]
+          "candidates": {
+            "description": "Every arm the round read, in rank order.",
+            "items": {
+              "$ref": "#/components/schemas/ServedArm"
             },
-            "title": "Arms",
-            "type": "object"
+            "title": "Candidates",
+            "type": "array"
           },
           "election": {
             "anyOf": [
@@ -14796,20 +13998,12 @@
           "round": {
             "title": "Round",
             "type": "integer"
-          },
-          "scoreboard": {
-            "items": {
-              "$ref": "#/components/schemas/ScoreboardRow"
-            },
-            "title": "Scoreboard",
-            "type": "array"
           }
         },
         "required": [
           "round",
-          "arms",
           "election",
-          "scoreboard",
+          "candidates",
           "headline"
         ],
         "title": "RoundView",
@@ -15262,83 +14456,6 @@
         "title": "RunsWithParam",
         "type": "object"
       },
-      "RuntimeFailure": {
-        "additionalProperties": false,
-        "description": "One candidate's degradation evidence from its evaluation, beside a score that stands.",
-        "properties": {
-          "changes_description": {
-            "default": "",
-            "description": "What the originating candidate changed; informational, not a join key.",
-            "title": "Changes Description",
-            "type": "string"
-          },
-          "degraded_count": {
-            "description": "Sample count with at least one warning.",
-            "title": "Degraded Count",
-            "type": "integer"
-          },
-          "degraded_rate": {
-            "description": "Fraction of scored samples that emitted any pipeline warning.",
-            "title": "Degraded Rate",
-            "type": "number"
-          },
-          "dominant_warning": {
-            "description": "``{node_name}:{warning_type}`` of the most frequent warning across the candidate's measurements; the prefix selects the node whose config is captured in ``observed_config``.",
-            "title": "Dominant Warning",
-            "type": "string"
-          },
-          "first_seen_round": {
-            "default": 0,
-            "description": "Round number that first recorded this failure (dedup key component).",
-            "title": "First Seen Round",
-            "type": "integer"
-          },
-          "node": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The node whose config ``observed_config`` captures: the ``dominant_warning`` prefix. ``None`` on a ``scoring_error_abort``, which names an error, not a node, and captures the whole config.",
-            "title": "Node"
-          },
-          "observed_config": {
-            "additionalProperties": true,
-            "description": "Snapshot of the failing node's effective config — the (param, value) tuples the `l1_config_not_in_runtime_failures` validator scans on subsequent rounds to reject re-proposals.",
-            "title": "Observed Config",
-            "type": "object"
-          },
-          "owner": {
-            "$ref": "#/components/schemas/NurseOwner",
-            "default": "l1",
-            "description": "Who heals this runtime failure. Defaults to ``L1`` (a rate-based degradation L1 retunes the node config around); a deterministic-for-config break whose only fix is a locked surface (schema/model) is stamped ``OPERATOR`` so it escalates instead of churning in-loop."
-          },
-          "source": {
-            "description": "Failure family: ``degradation`` (mid-eval DegradationCheck fired on warning-rate) or ``scoring_error_abort`` (scoring raised mid-eval and the candidate was retired).",
-            "title": "Source",
-            "type": "string"
-          },
-          "total_scored": {
-            "description": "Sample count actually measured for the candidate.",
-            "title": "Total Scored",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "source",
-          "dominant_warning",
-          "node",
-          "degraded_rate",
-          "degraded_count",
-          "total_scored",
-          "observed_config"
-        ],
-        "title": "RuntimeFailure",
-        "type": "object"
-      },
       "Said": {
         "additionalProperties": false,
         "description": "One line composed once for a person: every medium renders it as served, none rewords it.",
@@ -15396,6 +14513,30 @@
           "label"
         ],
         "title": "Said",
+        "type": "object"
+      },
+      "SampleCoverage": {
+        "additionalProperties": false,
+        "description": "Every sample a closed round measured, in id order: the set a sample-set picker offers.",
+        "properties": {
+          "measuring_rounds": {
+            "description": "The closed rounds that measured any sample",
+            "title": "Measuring Rounds",
+            "type": "integer"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/SampleRounds"
+            },
+            "title": "Samples",
+            "type": "array"
+          }
+        },
+        "required": [
+          "measuring_rounds",
+          "samples"
+        ],
+        "title": "SampleCoverage",
         "type": "object"
       },
       "SampleLookahead": {
@@ -15514,6 +14655,26 @@
         "title": "SampleLookahead",
         "type": "object"
       },
+      "SampleRounds": {
+        "additionalProperties": false,
+        "properties": {
+          "rounds": {
+            "description": "How many of the measuring rounds measured it",
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "sample_id": {
+            "title": "Sample Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sample_id",
+          "rounds"
+        ],
+        "title": "SampleRounds",
+        "type": "object"
+      },
       "SampleWalk": {
         "additionalProperties": false,
         "description": "The scoring walk of the arm being measured: the axis it DECLARED plus a cursor. Past the\ncursor is declared, never promised — an eliminator can stop the arm before its tail.",
@@ -15543,25 +14704,6 @@
           "key"
         ],
         "title": "SampleWalk",
-        "type": "object"
-      },
-      "ScoreboardRow": {
-        "additionalProperties": false,
-        "description": "One rank-ordered row of a round's scoreboard: an arm's reading at its rank.",
-        "properties": {
-          "rank": {
-            "title": "Rank",
-            "type": "integer"
-          },
-          "reading": {
-            "$ref": "#/components/schemas/ArmReading"
-          }
-        },
-        "required": [
-          "rank",
-          "reading"
-        ],
-        "title": "ScoreboardRow",
         "type": "object"
       },
       "ScoringPass": {
@@ -15617,6 +14759,54 @@
           "caveat"
         ],
         "title": "SeriesReading",
+        "type": "object"
+      },
+      "ServedArm": {
+        "additionalProperties": false,
+        "description": "One arm as every round read serves it, in flight (`current_round.candidates`) or filed\n(`RoundView.candidates`): its reading, its searchpoint and why it was refused.",
+        "properties": {
+          "prompts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NodePrompt"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`OptSearchPoint.prompts`; with the resolved params, what a steered fork seeds from. Null until the candidate is announced.",
+            "title": "Prompts"
+          },
+          "reading": {
+            "$ref": "#/components/schemas/ArmReading"
+          },
+          "resolved_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Params"
+          },
+          "validation_failures": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationFailure"
+            },
+            "title": "Validation Failures",
+            "type": "array"
+          }
+        },
+        "required": [
+          "reading"
+        ],
+        "title": "ServedArm",
         "type": "object"
       },
       "ServedBackpressure": {
@@ -16028,6 +15218,9 @@
             ],
             "description": "The run's pinned line (`run_said`), its producer among the rows; null where nothing needs the operator."
           },
+          "sample_coverage": {
+            "$ref": "#/components/schemas/SampleCoverage"
+          },
           "spend_metered": {
             "anyOf": [
               {
@@ -16107,6 +15300,7 @@
           "round_cells_ceiling",
           "run_limits",
           "current_round",
+          "sample_coverage",
           "campaign_id",
           "cycle_id",
           "run_phase",
@@ -16457,20 +15651,6 @@
           "cycle_id"
         ],
         "title": "SkipSearchpointPayload",
-        "type": "object"
-      },
-      "Skipped": {
-        "additionalProperties": false,
-        "description": "The operator stopped it.",
-        "properties": {
-          "kind": {
-            "const": "skipped",
-            "default": "skipped",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "title": "Skipped",
         "type": "object"
       },
       "SlotBound": {
@@ -21365,79 +20545,6 @@
         ]
       }
     },
-    "/api/v1/commands/origin-gate": {
-      "post": {
-        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
-        "operationId": "origin_gate_api_v1_commands_origin_gate_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Command-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 64,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Command-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 256,
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OriginGateDecisionPayload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Origin-Gate",
-        "tags": [
-          "Commands"
-        ]
-      }
-    },
     "/api/v1/commands/pause": {
       "post": {
         "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
@@ -23681,7 +22788,7 @@
     },
     "/api/v1/sessions/active": {
       "get": {
-        "description": "The caller-tenant's run to follow: one running first, else its latest launch (a resume is\none) from any entry point.\n\nNo active session is a steady state: it answers null ids, never a not-found.",
+        "description": "The caller-tenant's run to follow: one running first, else its latest launch (a resume is\none) from any entry point.\n\nNo active session is a steady state: it answers a null `hop`, never a not-found.",
         "operationId": "active_session_api_v1_sessions_active_get",
         "responses": {
           "200": {

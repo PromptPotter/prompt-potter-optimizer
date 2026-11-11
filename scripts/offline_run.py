@@ -56,7 +56,7 @@ from promptpotter.application.commands.dispatcher import CommandCall, CommandDis
 from promptpotter.application.commands.measuring import grade_bench
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.loaders import definition_source
-from promptpotter.application.embedded_run import open_session, run_campaign, run_head_to_head
+from promptpotter.application.embedded_run import host_dispatcher, run_campaign, run_head_to_head
 from promptpotter.application.evidence.head_to_head import GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.initialization.wiring import complete_registries
@@ -617,7 +617,8 @@ async def forked_twice(stores: Stores, fork: CycleHop, rounds: int) -> None:
         ).take(stores)
         fork = CycleHop(campaign_id=fork.campaign_id, cycle_id=cycle_id)
         session, result = await run_campaign(
-            await rebound_session(stores, fork),
+            fork,
+            stores=stores,
             readout_sink=print,
             budget=Budget(),
             mode=RunMode(),
@@ -629,13 +630,6 @@ async def forked_twice(stores: Stores, fork: CycleHop, rounds: int) -> None:
                 f"offline run: the fork from round {from_round} ended {result.stop_reason}"
             )
     print(f"forked twice: {fork.cycle_id} is a fork of a fork")
-
-
-async def rebound_session(stores: Stores, hop: CycleHop) -> Session:
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    assert campaign is not None
-    session = await open_session(DATASET, stores=stores)
-    return session.bound(hop, purpose=campaign.declaration.purpose)
 
 
 @dataclass(frozen=True)
@@ -694,12 +688,12 @@ async def run_one(
 
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
-    session = await open_session(DATASET, stores=stores)
     if pause_in_walk is not None:
         harness.backend.before_answer = pausing_in_walk(stores, pause_in_walk)
     session, result = await run_campaign(
-        session,
+        DATASET,
         config,
+        stores=stores,
         readout_sink=print,
         budget=Budget(),
         step_rounds=pause_after,
@@ -713,10 +707,10 @@ async def run_one(
         # The resume reads its rounds off the ledger and the archive: their checkouts are gone.
         shutil.rmtree(stores.campaigns.layout(session.hop).rounds)
         paused = session.hop
-        session = await rebound_session(stores, paused)
         with edited_proposer(config) if diverge else contextlib.nullcontext():
             session, result = await run_campaign(
-                session,
+                paused,
+                stores=stores,
                 readout_sink=print,
                 budget=Budget(),
                 mode=RunMode(fork_on_divergence=diverge),
@@ -749,7 +743,7 @@ def pausing_in_walk(stores: Stores, round_num: int) -> Callable[[], Awaitable[No
         payload = PauseCyclePayload(
             campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="offline: inside a walk"
         )
-        await CommandDispatcher(stores).dispatch(CommandCall(payload))
+        await host_dispatcher(stores).dispatch(CommandCall(payload))
 
     return pause
 
@@ -789,10 +783,10 @@ async def banked(
         sent = spend.by_kind["bench"]
         if sent.incurred_usd or sent.input_tokens or sent.output_tokens:
             raise SystemExit(f"offline run: a manual launch of {name} sent bench cells")
-        if bench.status.state != "not_asked" or not bench.status.can_grade:
+        if bench.status.state != "not_asked" or not bench.status.can_run:
             raise SystemExit(f"offline run: a manual launch of {name} serves {bench}")
         call = CommandCall(GradeBenchPayload(campaign_id=session.hop.campaign_id))
-        bench = (await CommandDispatcher(stores).answer(grade_bench, call)).result
+        bench = (await host_dispatcher(stores).answer(grade_bench, call)).result
     decisions = extract(cycle, bench)
     decisions["harness"] = {
         "stop_reason": str(result.stop_reason),
@@ -833,8 +827,9 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     # The first campaign banks the rows the second's ruler is fit on; the second pauses at 1.
     for step_rounds in (None, 1):
         session, _ = await run_campaign(
-            await open_session(DATASET, stores=stores),
+            DATASET,
             config,
+            stores=stores,
             readout_sink=print,
             budget=Budget(),
             step_rounds=step_rounds,
@@ -843,7 +838,8 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
         await session.backend_client.aclose()
     llm.rebasing = True
     session, _ = await run_campaign(
-        await rebound_session(stores, session.hop),
+        session.hop,
+        stores=stores,
         readout_sink=print,
         budget=Budget(),
         mode=RunMode(from_round=1),
@@ -896,8 +892,9 @@ async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
     for fixed in (False, True):
         backend.down, backend.sent = True, []
         session, result = await run_campaign(
-            await open_session(DATASET, stores=stores),
+            DATASET,
             config,
+            stores=stores,
             readout_sink=print,
             budget=Budget(),
             mode=RunMode(),
@@ -908,7 +905,8 @@ async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
             raise SystemExit(f"offline run: a refused origin ended {result.stop_reason}")
         backend.down, backend.sent = not fixed, []
         session, result = await run_campaign(
-            await rebound_session(stores, hop),
+            hop,
+            stores=stores,
             readout_sink=print,
             budget=Budget(),
             mode=RunMode(),
@@ -1023,7 +1021,6 @@ async def run_arms(
     )
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
-    session = await open_session(DATASET, stores=stores)
     sent = {name: c.model_dump(mode="json", exclude_unset=True) for name, c in configs.items()}
     request = HeadToHeadRequest(
         head_to_head_id="h2h",
@@ -1042,18 +1039,20 @@ async def run_arms(
     for knob in ("optimizer", "nodes"):
         shared["optimization"].pop(knob, None)
     ran = await run_head_to_head(
-        session,
+        DATASET,
         CampaignConfig.model_validate(shared),
         request,
+        stores=stores,
         mode=RunMode(),
         readout_sink=print,
     )
-    await session.backend_client.aclose()
     arms = {}
     for name, armed, result in ran:
         out = workspace / f"arm-{name}"
         cycle = await banked(stores, armed, result, harness, out, name=name, bench_trigger="at_end")
         arms[name] = (cycle, armed.campaign_id)
+    # Every arm runs on the one session the act opened, so on its one client.
+    await ran[0][1].backend_client.aclose()
     return arms
 
 

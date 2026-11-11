@@ -58,7 +58,7 @@ def init_enter(
     ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}
 
     # Resolved at INIT.enter so the live dashboard stamps the formula before origin scoring fires.
-    full, short = resolve_cell_formula(session.state.scoring.require_scorer().per_cell, schema)
+    full, short = resolve_cell_formula(session.state.scoring.scorer.per_cell, schema)
     ctx.composite_fitness_formula = full
     ctx.composite_fitness_formula_short = short
 
@@ -74,7 +74,7 @@ def init_enter(
 
 def init_exit(ctx: ViewContext, *, cycle: Cycle, session: Session) -> InitExitView:
     full, short = resolve_cell_formula(
-        session.state.scoring.require_scorer().per_cell, session.pipeline_schema
+        session.state.scoring.scorer.per_cell, session.pipeline_schema
     )
     ctx.composite_fitness_formula = full
     ctx.composite_fitness_formula_short = short
@@ -82,7 +82,7 @@ def init_exit(ctx: ViewContext, *, cycle: Cycle, session: Session) -> InitExitVi
 
     ctx.original_sp_flat.update(flatten_prompts(cycle.parent.prompts))
 
-    partition = session.state.scoring.require_partition()
+    partition = session.state.scoring.partition
     return InitExitView(
         origin_acc=None if (fold := cycle.origin_round.fold) is None else fold.accuracy,
         cycle_id_short=session.cycle_id[:12],

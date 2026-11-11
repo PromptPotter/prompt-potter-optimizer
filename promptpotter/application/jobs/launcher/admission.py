@@ -6,7 +6,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NoReturn, assert_never
+from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of
@@ -16,6 +16,7 @@ from promptpotter.application.jobs.quota import (
     check_launch_quotas,
     declare_run_budget,
     hold_moved,
+    land_job,
     move_campaign_money,
     next_launch_budget,
     sends_on,
@@ -26,6 +27,7 @@ from promptpotter.application.jobs.registry import JobRegistry, launch_interrupt
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
+from promptpotter.domain.campaign import CampaignRefusal
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.job import (
@@ -64,18 +66,28 @@ from promptpotter.infrastructure.llm.spend_book import (
     spending_under,
 )
 from promptpotter.infrastructure.producer_lock import hold_pass, release_pass
+from promptpotter.infrastructure.store.dataset_access import (
+    definition_version,
+    resolve_dataset,
+    runnable_definition,
+)
+from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
+    DatasetAccessError,
+    FileUnreadableError,
     MachineBusyError,
     NotFoundError,
+    PayloadInvalidError,
 )
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
+    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.results import CycleResult
 
@@ -112,6 +124,18 @@ class RunStart:
                 self.job_registry.release(self.job_id)
             case _:
                 self.job_registry.release(self.job_id, ended.stop_reason, stepped=ended.stepped)
+
+    def land(self, hop: CycleHop, held: HeldBudget) -> None:
+        """The job onto the cycle its hold just minted, its share with it; a slotted job claims the
+        cycle off the job as it stands now: promoted out of the queue, its stage the one the cycle
+        reads."""
+        land_job(self.stores, self.job_registry, self.job_id, hop, held.share)
+        if not isinstance(self.job.holder, CampaignLaunch):
+            return
+        promoted = self.job_registry.get(self.job_id)
+        if promoted is None:
+            raise RuntimeError(f"job {self.job_id} was cleared while its cycle was minted")
+        claim_cycle(self.stores, self.job_registry, promoted, hop)
 
     def _fail(self, exc: BaseException, stamps: CycleHop | None) -> None:
         job = self.job_registry.release(self.job_id, exc)
@@ -153,6 +177,76 @@ async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingE
     return None
 
 
+class CampaignRefusedError(ConflictError):
+    """Every run and pass on its campaign is refused; its code is `refusal`'s."""
+
+    def __init__(self, refusal: CampaignRefusal, message: str) -> None:
+        super().__init__(message, code=refusal.value)
+        self.refusal = refusal
+
+
+class _DefinitionRead(NamedTuple):
+    """The connector a dataset's definition names, read as the mint read it, or why it reads as
+    none (``connector`` empty then)."""
+
+    connector: str
+    unread: str | None
+
+
+def _definition_read(stores: Stores, name: str) -> _DefinitionRead:
+    """Derived on the definition's stats, so a served read parses it once per edit."""
+
+    def read() -> _DefinitionRead:
+        try:
+            named = runnable_definition(resolve_dataset(stores, name)).backend_type
+        except (DatasetAccessError, FileUnreadableError, PayloadInvalidError) as unread:
+            return _DefinitionRead("", str(unread))
+        return _DefinitionRead(named, None)
+
+    return derived(
+        ("definition_read", str(stores.identity.tenant_id), name, stores.research_datasets_root),
+        sig=definition_version(stores, name),
+        compute=read,
+    )
+
+
+def campaign_refusal(stores: Stores, campaign: Campaign) -> CampaignRefusedError | None:
+    """THE campaign's own refusal, a pure read of it and of its dataset's definition (read as the
+    mint read it), answered, never raised: admission raises it (`refuse_campaign`), and a served
+    can-run answer serves its `refusal` (`runner/bench.py::BenchLine.refused`)."""
+    if not campaign.active:
+        return CampaignRefusedError(
+            CampaignRefusal.NOT_ACTIVE,
+            f"campaign {campaign.campaign_id} is {campaign.lifecycle_status}, so nothing runs on "
+            "it: restore it, or start a fresh campaign",
+        )
+    read = _definition_read(stores, campaign.dataset_name)
+    if read.unread is not None:
+        return CampaignRefusedError(
+            CampaignRefusal.DEFINITION_UNREAD,
+            f"campaign {campaign.campaign_id} runs on {campaign.dataset_name}, which reads as no "
+            f"definition naming a connector, so nothing ran: {read.unread}",
+        )
+    if (named := read.connector) != campaign.connector:
+        return CampaignRefusedError(
+            CampaignRefusal.CONNECTOR_MOVED,
+            f"campaign {campaign.campaign_id} was minted on {campaign.connector}, and "
+            f"{campaign.dataset_name} now names {named}, so nothing ran: its measurements are "
+            f"{campaign.connector}'s. Point {campaign.dataset_name} back at {campaign.connector}, "
+            "or start a fresh campaign on it; this one is preserved.",
+        )
+    return None
+
+
+def refuse_campaign(stores: Stores, campaign: Campaign) -> None:
+    """Asked of every run and pass on *campaign* before anything is queued, claimed, probed or
+    bound: first under the slot door's gate (`request_jobs`) or, for an embedded resume, before
+    its session opens (`embedded_run.py`), and again past a queue's wait or a detached run's
+    handoff. The inner door asks `campaign_refusal` itself: its refusal is a cell's."""
+    if (refused := campaign_refusal(stores, campaign)) is not None:
+        raise refused
+
+
 def request_jobs(
     *,
     stores: Stores,
@@ -167,6 +261,10 @@ def request_jobs(
     assert count == 1 or hop == UNRESOLVED_HOP, "jobs asked together mint their cycles"
     # ONE gate: the quota count and the slot count come off the same on-disk jobs.
     with job_registry.admission_gate(), slot_rate(stores, holder, hop, asked=count):
+        # First, under the gate an archive or a delete takes too: a refused campaign's act is
+        # queued, claimed and debited nothing.
+        if hop != UNRESOLVED_HOP:
+            refuse_campaign(stores, campaign_at(stores, hop))
         # A scoring pass is load, never a campaign the concurrent and daily ceilings count.
         if isinstance(holder, CampaignLaunch):
             check_launch_quotas(
@@ -301,9 +399,12 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
     hop = None if request.hop == UNRESOLVED_HOP else request.hop
     if job.queued:
         await job_registry.await_claim(job.job_id)
-        promoted = job_registry.get(job.job_id)
-        if hop is not None and promoted is not None:
-            claim_cycle(stores, job_registry, promoted, hop)
+        if hop is not None:
+            # Asked again past the wait: the slot door's claim held off an archive or a delete,
+            # never a definition moved while the job waited.
+            refuse_campaign(stores, campaign_at(stores, hop))
+            if (promoted := job_registry.get(job.job_id)) is not None:
+                claim_cycle(stores, job_registry, promoted, hop)
 
     t0 = time.perf_counter()
     if (down := await probe_backend(request.backend_type(stores))) is not None:
@@ -673,17 +774,18 @@ def _take_pause(stores: Stores, hop: CycleHop, acting: str | None) -> str | None
 
 
 def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    if campaign is None:
-        raise NotFoundError(f"campaign not found: {hop.campaign_id}")
-    config = cycle_config(stores, campaign, hop).config
+    config = cycle_config(stores, campaign_at(stores, hop), hop).config
     return next_launch_budget(config, stores=stores, hop=hop).only(MONEY_AXES)
+
+
+def campaign_at(stores: Stores, hop: CycleHop) -> Campaign:
+    if (campaign := stores.campaigns.load_campaign(hop.campaign_id)) is None:
+        raise NotFoundError(f"campaign not found: {hop.campaign_id}")
+    return campaign
 
 
 def campaign_sends(stores: Stores, hop: CycleHop) -> tuple[Send, ...]:
     """What a run or pass on *hop* sends, under its campaign's resolved config and connector."""
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    if campaign is None:
-        raise NotFoundError(f"campaign not found: {hop.campaign_id}")
+    campaign = campaign_at(stores, hop)
     config = cycle_config(stores, campaign, hop).config
     return sends_on(stores, config, campaign.connector)

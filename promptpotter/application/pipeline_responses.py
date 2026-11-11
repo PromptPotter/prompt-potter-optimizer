@@ -278,9 +278,16 @@ class DatasetPipelineResponse(StrictModel):
         description="Every param each node carries, valueless — what `reach` is summed over"
     )
     reach: dict[str, NodeReach]
-    nests: list[NestedPipelineRef] = Field(
-        description="The pipelines this one nests in turn, one per dataset its cells measure; the "
-        "only wire naming them before a cell has spawned"
+    nests: list[NestedPipeline] = Field(
+        description="The pipelines this one nests in turn, one per dataset its cells measure, "
+        "each read whole down to its innermost: the only wire naming them before a cell has spawned"
+    )
+
+
+class NestedPipeline(NestedPipelineRef):
+    pipeline: DatasetPipelineResponse | None = Field(description="Null where it did not resolve")
+    unread: str | None = Field(
+        description="Why `pipeline` is null: the typed refusal, or that it nests a dataset above it"
     )
 
 

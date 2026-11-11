@@ -1,5 +1,4 @@
-import { liveCandidates } from "./live-candidates";
-import type { ServedDashboard, ValidationFailure, RoundView } from "@/lib/api/types";
+import type { ServedArm, ValidationFailure } from "@/lib/api/types";
 
 export interface CandidateVerdict {
   // `""` when absent — never a placeholder, which would read as the optimizer's words.
@@ -7,25 +6,11 @@ export interface CandidateVerdict {
   failures: ValidationFailure[];
 }
 
-export function candidateVerdicts(doc: RoundView | null): Map<string, CandidateVerdict> {
-  const out = new Map<string, CandidateVerdict>();
-  if (!doc) return out;
-  for (const { reading } of doc.scoreboard) {
-    const arm = doc.arms[reading.arm.key];
-    if (!arm) continue;
-    out.set(reading.arm.key, {
-      changes: reading.changes_description,
-      failures: arm.validation_failures,
-    });
-  }
-  return out;
-}
-
-export function liveCandidateVerdicts(dash: ServedDashboard | null): Map<string, CandidateVerdict> {
+export function armVerdicts(arms: readonly ServedArm[]): Map<string, CandidateVerdict> {
   return new Map(
-    liveCandidates(dash).map((c) => [
-      c.reading.arm.key,
-      { changes: c.reading.changes_description, failures: c.validation_failures },
+    arms.map((a) => [
+      a.reading.arm.key,
+      { changes: a.reading.changes_description, failures: a.validation_failures },
     ]),
   );
 }

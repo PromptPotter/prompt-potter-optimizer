@@ -18,7 +18,7 @@ export function Stage() {
     <main className="stage-screen">
       <ReadState read={read} subject="the run to follow">
         {(active) =>
-          active.campaign_id === null ? (
+          active.hop === null ? (
             <Empty title="No run to follow yet">
               This screen follows your running campaign, else your latest launch.
             </Empty>

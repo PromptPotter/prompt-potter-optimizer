@@ -35,15 +35,19 @@ from factories import (
     arm_state,
     backend_client,
     inner_cells,
+    inner_sandbox,
+    jumping_clock,
     loop_session,
     minted_campaign,
     pipeline_schema,
     prompted,
     round_result,
+    run_init_round,
     samples,
     seat,
     set_cycle,
     stored_campaign,
+    workspace,
 )
 from offline_world import Router
 from pydantic import ValidationError
@@ -92,10 +96,12 @@ from promptpotter.application.datasets.origin_resolve import (
 )
 from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
+from promptpotter.application.embedded_run import run_campaign
 from promptpotter.application.hierarchy import entries_version, list_hierarchy
-from promptpotter.application.initialization.loop_start import verb_ledger
+from promptpotter.application.initialization.scoring_scope import verb_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
+from promptpotter.application.jobs.launcher.admission import CampaignRefusedError
 from promptpotter.application.jobs.launcher.launch import Inline
 from promptpotter.application.jobs.launcher.mint_and_start import (
     OriginIncompleteError,
@@ -103,7 +109,6 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 )
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
-    ConnectorMovedError,
     CyclePlan,
     arm_plans,
     declare,
@@ -165,10 +170,12 @@ from promptpotter.application.pipeline_responses import ForkPreviewResponse
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_observers import build_run_observers, declare_run_wiring
 from promptpotter.application.runner.arm_gate import author_arm
+from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.connector import CONNECTOR, promptpotter_wire_adapter
 from promptpotter.application.runner.inner.spawn import inner_campaign_id
+from promptpotter.application.runner.inner.spawn_context import InnerSpawnContext
 from promptpotter.application.runner.inner.tasks import (
     InnerBenchmarkConfig,
     InnerTasks,
@@ -183,12 +190,20 @@ from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import (
+    BenchRefusal,
     DatasetSplit,
     PartitionRecord,
     partition_bank,
     restored_partition,
 )
-from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, run_clamp
+from promptpotter.domain.campaign import (
+    Arm,
+    CampaignRefusal,
+    Compare,
+    DeterminismClamp,
+    Optimize,
+    run_clamp,
+)
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     CycleConfig,
@@ -198,7 +213,7 @@ from promptpotter.domain.campaign_config import (
     declare_run,
     effective_config,
 )
-from promptpotter.domain.cells import Seat
+from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.command_kinds import (
     ArmRequest,
@@ -250,6 +265,7 @@ from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptPart, Snippet
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
+from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     ConfigOverrides,
@@ -299,6 +315,7 @@ from promptpotter.presentation.cli.commands import new as cli_new
 from promptpotter.shared.clock import iso_z
 from promptpotter.shared.errors import (
     LANDING_REMEDY,
+    CellUnscoreableError,
     ConflictError,
     DatasetAccessError,
     FileKind,
@@ -531,7 +548,14 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 
     # An L4 override moves the prompt and the hash of every preset, and the inner campaign it runs.
     capo = select_optimizer(OptimizerChoice(optimizer="capo"))
-    capo_seat = seat(built_stores, optimization={"optimizer": "capo"})
+    capo_seat = jumping_clock(
+        run_init_round(
+            workspace(tmp_path / "capo"),
+            offline,
+            samples(40, "TRUE"),
+            optimization={"optimizer": "capo"},
+        )
+    )
     calls = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate")).read(Calls)
     values = {"task_description": "sort the list", "instruction": "Sort it."}
     mutated = {
@@ -547,7 +571,14 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     baseline = potter.prompt_hashes()
     assert potter.prompt_hashes() == baseline, "an unmoved preset re-hashed"
     capo_calls = NodeContext(
-        seat(built_stores, optimization=_l4_arm("capo", mutated)),
+        jumping_clock(
+            run_init_round(
+                workspace(tmp_path / "mutated"),
+                offline,
+                samples(40, "TRUE"),
+                optimization=_l4_arm("capo", mutated),
+            )
+        ),
         optimizers.NODE_MEMBERS.get("capo_mutate"),
     ).read(Calls)
     assert (
@@ -1515,7 +1546,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
-    tmp_path: Path, built_stores: Stores, offline: Router, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    built_stores: Stores,
+    offline: Router,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     # The draft's CHAIN reaches the mint on a reused dataset.
     pinned = {
@@ -2270,7 +2305,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         minted = mint_arms(asyncio.run(arm_plans(arming, door, request, rows_30)), adopting=None)
         purposes: dict[str, Compare] = {}
         for cycle in minted:
-            campaign = stores.campaigns.load_campaign(cycle.campaign_id)
+            campaign = stores.campaigns.load_campaign(cycle.hop.campaign_id)
             assert campaign is not None and isinstance(campaign.declaration.purpose, Compare)
             purposes[campaign.declaration.purpose.arm.arm_key] = campaign.declaration.purpose
         return purposes
@@ -2425,14 +2460,86 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         resolve_resume(
             replace(opened, candidate_library=("an unlisted label",)), held_campaign, rows_30
         )
-    # A resume runs on the connector its campaign was minted on: one bound to another is refused,
-    # at the one resume door every entry point reaches.
-    minted = held_campaign.declaration
-    on_n8n = minted.model_copy(
-        update={"environment": minted.environment.model_copy(update={"connector": "n8n"})}
+    # A resume runs on the connector its campaign was minted on: its dataset re-pointed since is
+    # refused at the terminal's door, the embedded one and the inner one alike, before any probes
+    # or binds a connector.
+    decl_definition = stores.tenant_datasets.dataset_dir("decl") / DEFINITION_FILE
+    as_minted = {
+        "pipeline": {"backend_type": "termnorm"},
+        "campaign": {"optimization": {"degradation_threshold": 0.4}},
+    }
+    write_yaml(decl_definition, {**as_minted, "pipeline": {"backend_type": "n8n"}})
+    asked = (len(offline.backend.asked), len(offline.harness.asked))
+    with monkeypatch.context() as cli:
+        cli.setenv("PROMPTPOTTER_HOME", str(tmp_path))
+        cli.setattr(
+            sys,
+            "argv",
+            ["promptpotter", "--json", "resume", "--campaign", held_campaign.campaign_id],
+        )
+        capsys.readouterr()
+        with pytest.raises(SystemExit):
+            campaign_runner.main()
+    assert json.loads(capsys.readouterr().out)["code"] == "connector_moved", (
+        "the terminal's resume ran a campaign on a connector its dataset no longer names"
     )
-    with pytest.raises(ConnectorMovedError):
-        resolve_resume(opened, held_campaign.model_copy(update={"declaration": on_n8n}), rows_30)
+    with pytest.raises(CampaignRefusedError) as embedded:
+        asyncio.run(
+            run_campaign(held_campaign.root_hop, stores=stores, budget=Budget(), mode=RunMode())
+        )
+    assert embedded.value.refusal is CampaignRefusal.CONNECTOR_MOVED, (
+        "the embedded resume ran a campaign on a connector its dataset no longer names"
+    )
+    # The inner door asks it of a continuing seat before its session opens: the cell's fault.
+    seats = inner_cells("potter", dataset="decl")
+    (inner_seat,) = seats.cells
+    owner = held_campaign.root_hop
+    spawning = InnerSpawnContext(
+        inner_sandbox_root=inner_sandbox(stores, owner.campaign_id, owner.cycle_id),
+        identity=stores.identity,
+        shared_root=stores.shared_root,
+        install_datasets_root=stores.install_datasets_root,
+        research_datasets_root=None,
+        inside=(owner,),
+        enclosing=(),
+        acting=(),
+        cells=seats,
+        purpose=Optimize(),
+        ruler=RulerReach(version=0, own=None),
+    )
+    inner_hop = CycleHop(
+        campaign_id=inner_campaign_id(seats.spec(inner_seat), seats.own(inner_seat, {})),
+        cycle_id="cycle-0",
+    )
+    stored_campaign(spawn.sandbox_stores(spawning), minted_campaign(inner_hop, dataset_name="decl"))
+    pin = PinnedCell(cell=inner_seat, instrument="i").pin()
+    with (
+        scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
+        pytest.raises(CellUnscoreableError) as inner,
+    ):
+        asyncio.run(
+            spawn.run_inner_cycle(
+                Sample(id=0, query=inner_seat.id, ground_truth=None, source_pin=pin), {}
+            )
+        )
+    refused_inner = inner.value.__cause__
+    assert isinstance(refused_inner, CampaignRefusedError), "the inner door refused no campaign"
+    assert refused_inner.refusal is CampaignRefusal.CONNECTOR_MOVED, (
+        "the inner seat ran a campaign on a connector its dataset no longer names"
+    )
+    assert (len(offline.backend.asked), len(offline.harness.asked)) == asked, (
+        "a door probed or bound a connector before it refused the moved one"
+    )
+    # The served bench reads the one refusal its pass's admission raises: no grade is offered.
+    holder = stores.campaigns.line_holder(held_campaign.root_hop)
+    bench_config = cycle_config(stores, held_campaign, holder).config.model_copy(
+        update={"scoring": {"per_sample": "label_match(predicted, ground_truth)"}}
+    )
+    bench_read = cycle_bench(stores, held_campaign, holder, bench_config).status
+    assert (bench_read.can_run, bench_read.refusal) == (False, BenchRefusal.CONNECTOR_MOVED), (
+        "the served bench offers a grade on a connector its dataset no longer names"
+    )
+    write_yaml(decl_definition, as_minted)
     # A steering seed is its fork's declared delta, never a waiver of the root's own drift.
     steered_hop = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_steered")
     stores.campaigns.mint_cycle(steered_hop)
@@ -2922,7 +3029,7 @@ _EXPORTED_ROWS = [
 
 @pytest.mark.usefixtures("offline", "optimizing_memory")
 def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
-    monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores, tmp_path: Path, offline: Router
 ) -> None:
     # A mis-decoded label grades every cell against text the person never wrote, with no error.
     for filename, blob in (
@@ -3476,8 +3583,13 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         Sample(id=0, query="justlogic-d234/seed-0", ground_truth=None),
         proposals[0].individual.pipeline_params,
     )
-    capo_seat = seat(
-        built_stores, optimization=_l4_arm("capo", payload["optimizer_prompt_overrides"])
+    capo_seat = jumping_clock(
+        run_init_round(
+            workspace(tmp_path / "inner"),
+            offline,
+            samples(40, "TRUE"),
+            optimization=_l4_arm("capo", payload["optimizer_prompt_overrides"]),
+        )
     )
     sent = (
         NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate"))

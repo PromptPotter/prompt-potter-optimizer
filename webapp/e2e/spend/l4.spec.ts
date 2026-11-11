@@ -107,7 +107,7 @@ test.describe("the recursion, end to end", () => {
     });
     expect(started.status, `start-run: ${started.body}`).toBeLessThan(300);
 
-    // An unattended run stops dead at the origin gate, so it is answered here.
+    // An unhealthy origin halts the run at its gate; resuming it is the operator's proceed.
     let gated = false;
     let completed = 0;
     let stopped = "";
@@ -115,18 +115,18 @@ test.describe("the recursion, end to end", () => {
       .poll(
         async () => {
           const d = await dashboard(request, outer!);
-          const blob = JSON.stringify(d ?? {});
           const rounds = d?.rounds;
           completed = Array.isArray(rounds) ? rounds.length : 0;
           stopped = String(d?.stop_reason ?? "");
-          if (!gated && /origin_gate/.test(blob)) {
+          if (!gated && stopped === "origin_gate") {
             gated = true;
-            const ans = await command(request, "origin-gate", {
+            stopped = "";
+            const ans = await command(request, "start-run", {
               campaign_id: outer!.id,
               cycle_id: outer!.cycleId,
-              decision: "proceed",
+              budget: { usd: BUDGET_USD },
             });
-            console.log(`[e2e] origin gate answered proceed → ${ans.status}`);
+            console.log(`[e2e] origin gate halted; resumed to proceed → ${ans.status}`);
           }
           return completed >= WANT_ROUNDS || !!stopped;
         },

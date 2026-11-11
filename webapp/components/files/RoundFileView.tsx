@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Badge, CardFrame, DataTable, FailureLine, Term, type Column } from "@/components/ui";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { PairedLift } from "@/components/shell/PairedLift";
-import type { CellSet, PairedReading, ScoreboardRow } from "@/lib/api/types";
+import type { PairedReading, ServedArm } from "@/lib/api/types";
 import { liftVersus } from "@/lib/derivations";
 import { fmtLiftBand, fmtPct1, fmtSigned, fmtUnit } from "@/lib/format";
 import { failureOf, readyData } from "@/lib/hooks/useRead";
@@ -19,9 +19,15 @@ function ArmLift({ reading }: { reading: PairedReading | null }) {
   );
 }
 
-function scoreboardColumns(wonOnTheta: boolean, cells: CellSet | null | undefined): Column<ScoreboardRow>[] {
+// The served order IS the rank: `RoundView.candidates` lists the round's arms as its scoreboard ranks them.
+function scoreboardColumns(
+  wonOnTheta: boolean,
+  arms: readonly ServedArm[],
+): Column<ServedArm>[] {
+  // The lift column's sheet, as its readings name it: every arm's is the round's one.
+  const cells = arms.find((r) => r.reading.vs_reference?.cell_set)?.reading.vs_reference?.cell_set;
   return [
-    { id: "rank", label: "#", width: "3rem", cell: (r) => r.rank },
+    { id: "rank", label: "#", width: "3rem", cell: (r) => arms.indexOf(r) + 1 },
     {
       id: "candidate",
       label: "Candidate",
@@ -128,15 +134,11 @@ export function RoundFileView({
         <FailureLine failure={failure} />
       </div>
 
-      {doc && doc.scoreboard.length > 0 && (
-        <CardFrame title={<span>Scoreboard</span>} actions={<Badge>{doc.scoreboard.length}</Badge>}>
+      {doc && doc.candidates.length > 0 && (
+        <CardFrame title={<span>Scoreboard</span>} actions={<Badge>{doc.candidates.length}</Badge>}>
           <DataTable
-            columns={scoreboardColumns(
-              election?.elects_on === "ability",
-              // The column's sheet, as its readings name it: every arm's is the round's one.
-              doc.scoreboard.find((r) => r.reading.vs_reference?.cell_set)?.reading.vs_reference?.cell_set,
-            )}
-            rows={doc.scoreboard}
+            columns={scoreboardColumns(election?.elects_on === "ability", doc.candidates)}
+            rows={doc.candidates}
             getRowId={(r) => r.reading.arm.key}
             ariaLabel={`Round ${round} scoreboard`}
           />

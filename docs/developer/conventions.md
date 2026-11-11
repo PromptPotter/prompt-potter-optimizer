@@ -4,7 +4,7 @@ Rules not derivable from the code. Root [`CLAUDE.md`](../../CLAUDE.md) holds the
 
 ## Code style
 
-- **`logging` in library code; `print()` only where a human reads it** (the CLI, terminal views, the server banner, first-run setup, the origin gate). In a live run every readout line goes through `ReadoutProjection._write`.
+- **`logging` in library code; `print()` only where a human reads it** (the CLI, terminal views, the server banner, first-run setup). In a live run every readout line goes through `ReadoutProjection._write`.
 - **Direct field access** — `dict[key]` for a guaranteed field, never `.get(key, fallback)`.
 
 ## Prose in the source

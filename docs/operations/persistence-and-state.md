@@ -113,7 +113,7 @@ A failed cell's `ErrorCategory` and message land in the latest `rounds/round_NNN
 | Operator rewind | `resume --rewind N` | Fork a sibling lifting rounds `0..N-1`, continue at N under the fork's overrides. |
 | Fork on divergence | `resume --fork-on-divergence` | Mint a sibling cycle rooted at the divergent round and continue. |
 
-Until an L1 round closes, a resume re-enters round 0 and holds at the origin gate. Refusals, from every way in: `409 cycle_busy`; `409 config_drift` (the dataset no longer resolves to the minted origin, unless policy-only); `409 ledger_unreadable` (remedy `delete-campaign <campaign>`, which keeps the caches). **Which edits need a fork** is a knob's `Scope`: `POLICY` resumes in place; `DATA` and `IDENTITY` run divergence detection and halt rather than drift — revert, or fork. **A panel fork off a candidate that edits nothing inherits that candidate's measured C0** and buys no origin re-measure; a steer or seed re-measures it.
+Until an L1 round closes, a resume re-enters round 0 and asks the origin gate again; an origin the gate halted, resumed still unhealthy, passes on that resume. Refusals, from every way in: `409 cycle_busy`; `409 config_drift` (the dataset no longer resolves to the minted origin, unless policy-only); `409 ledger_unreadable` (remedy `delete-campaign <campaign>`, which keeps the caches). **Which edits need a fork** is a knob's `Scope`: `POLICY` resumes in place; `DATA` and `IDENTITY` run divergence detection and halt rather than drift — revert, or fork. **A panel fork off a candidate that edits nothing inherits that candidate's measured C0** and buys no origin re-measure; a steer or seed re-measures it.
 
 ### The primitive
 

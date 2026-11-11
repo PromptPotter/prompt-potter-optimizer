@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  measuredUniverse,
   orderAtStep,
   roundMeasuredSets,
   sameSampleSet,
@@ -24,10 +23,6 @@ describe("sample-set primitives", () => {
   it("toggleInSet adds/removes and returns a sorted set", () => {
     expect(toggleInSet([1, 3], 2)).toEqual([1, 2, 3]);
     expect(toggleInSet([1, 2, 3], 2)).toEqual([1, 3]);
-  });
-
-  it("measuredUniverse unions selections, unique + sorted", () => {
-    expect(measuredUniverse([round(1, [2, 0]), round(2, [0, 1])])).toEqual([0, 1, 2]);
   });
 
   it("roundMeasuredSets skips empty rounds and sorts each", () => {

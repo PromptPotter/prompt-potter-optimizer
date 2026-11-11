@@ -9,8 +9,6 @@ interface Picked<T> {
 }
 
 interface CandidatesState {
-  showForest: boolean;
-
   // Drives both the bar series and the number on every node (`useMetrics`). Never empty.
   metrics: Picked<ReadonlySet<DisplayMetric>> | null;
 
@@ -18,22 +16,12 @@ interface CandidatesState {
   showOverlap: Picked<boolean> | null;
 
   showCache: boolean;
-
-  // Course addresses, not cycle ids: inner cycle ids repeat across sibling sandboxes.
-  expanded: ReadonlySet<string>;
-  expandedForCampaign: string | null;
-  // Latch: keeps a manual collapse from being undone on the next render.
-  expandedForLane: string | null;
 }
 
 const store = createModuleStore<CandidatesState>({
-  showForest: false,
   metrics: null,
   showOverlap: null,
   showCache: false,
-  expanded: new Set<string>(),
-  expandedForCampaign: null,
-  expandedForLane: null,
 });
 
 export const setCandidatesState = store.set;

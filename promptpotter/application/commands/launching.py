@@ -466,7 +466,7 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
     stores = dispatcher.stores
 
     async def _admit() -> Admitted:
-        # Refused before the ack; the Start's own read waits for its slot (`_commit_checkin`).
+        # Refused before the ack; the Start's own read waits for its slot (`CheckinStart.open`).
         draft = owned_draft(stores, claim.draft_id)
         served = await draft_served(stores, draft)
         assert_origin_ready(draft, draft_pipeline(stores, draft, served))

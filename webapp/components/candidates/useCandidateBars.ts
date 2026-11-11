@@ -8,7 +8,6 @@ import {
   candidatesAtPath,
   courseAt,
   liveCandidates,
-  measuredUniverse,
   type LineageIndex,
 } from "@/lib/derivations";
 import { useWorkspace } from "@/lib/workspace";
@@ -29,7 +28,8 @@ export function useCandidateBars(index: LineageIndex) {
     [history, lineRoundNum],
   );
 
-  const sampleUniverse = useMemo(() => measuredUniverse(history), [history]);
+  const coverage = dash?.sample_coverage ?? null;
+  const sampleUniverse = useMemo(() => coverage?.samples.map((s) => s.sample_id) ?? [], [coverage]);
 
   // A pick holding inner courses is drilled into: its bars are those courses.
   const viewedNode = useMemo(() => {
@@ -66,6 +66,7 @@ export function useCandidateBars(index: LineageIndex) {
   return {
     history,
     overlap,
+    coverage,
     sampleUniverse,
     viewedNode,
     areCourses,

@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cached_property
-from typing import Literal, NamedTuple, Self
+from typing import TYPE_CHECKING, Literal, NamedTuple, Self
 
 from pydantic import Field, model_validator
 
@@ -27,6 +27,10 @@ from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
+
+if TYPE_CHECKING:
+    # `campaign.py` imports this module: the refusal is read here by its member's name.
+    from promptpotter.domain.campaign import CampaignRefusal
 
 
 class DatasetSplit(StrictModel):
@@ -291,6 +295,10 @@ class BenchRefusal(StrEnum):
     INNER = "inner"
     NO_MANIFEST = "no_manifest"
     HELD_ELSEWHERE = "held_elsewhere"
+    # The campaign's own refusals serve `CampaignRefusal`'s values: one word at both doors.
+    NOT_ACTIVE = "campaign_not_active"
+    DEFINITION_UNREAD = "definition_unread"
+    CONNECTOR_MOVED = "connector_moved"
     NO_HOLDOUT = "no_holdout"
     IN_FLIGHT = "in_flight"
     SELECTING = "selecting"
@@ -306,6 +314,18 @@ BENCH_REFUSAL_INFO: Worded[BenchRefusal, str] = Worded(
         BenchRefusal.HELD_ELSEWHERE: (
             "Another cycle (`held_by`) holds this campaign's line, and the bench grades the "
             "campaign's result. Ask for that cycle."
+        ),
+        BenchRefusal.NOT_ACTIVE: (
+            "An archived or deleted campaign scores nothing more; restore an archived one to "
+            "grade its line."
+        ),
+        BenchRefusal.DEFINITION_UNREAD: (
+            "This campaign's dataset no longer reads as a definition naming a connector, so "
+            "nothing grades its line until it does."
+        ),
+        BenchRefusal.CONNECTOR_MOVED: (
+            "This campaign's dataset now names another connector than the one it was minted on, "
+            "so its line grades on neither. Point the dataset back, or start a fresh campaign."
         ),
         BenchRefusal.NO_HOLDOUT: READING_STATE_INFO[ReadingState.NO_HOLDOUT].sentence,
         BenchRefusal.IN_FLIGHT: "A bench pass is grading now; its reading lands when it ends.",
@@ -325,11 +345,11 @@ class BenchStatus(FrozenModel):
 
     state: ReadingState
     trigger: BenchTrigger
-    can_grade: bool = Field(
+    can_run: bool = Field(
         description="Whether `bench` / `grade-bench` is admitted now. Every entry point reads "
         "this one answer."
     )
-    refusal: BenchRefusal | None = Field(description="Why not, exactly where `can_grade` is false.")
+    refusal: BenchRefusal | None = Field(description="Why not, exactly where `can_run` is false.")
     offered: bool = Field(
         description="Whether the grade control shows: admitted, or a pass still waited on. "
         "Never on an inner run, whose line no command grades."
@@ -351,7 +371,7 @@ class BenchStatus(FrozenModel):
 
     @model_validator(mode="after")
     def _refusal_fits(self) -> Self:
-        if self.can_grade is (self.refusal is not None):
+        if self.can_run is (self.refusal is not None):
             raise ValueError("a refusal is given exactly where the pass cannot be asked for")
         return self
 
@@ -362,11 +382,14 @@ def bench_status(
     bench_size: int,
     on_line: bool,
     inner: bool,
+    refused: CampaignRefusal | None,
     held_by: str | None,
     origin: PassOutcome | None,
     selected: PassOutcome | None,
     run: LineRun,
 ) -> BenchStatus:
+    """*refused* is the campaign's own refusal, the one admission refuses a pass with
+    (`admission.py::campaign_refusal`)."""
     subject: BenchSubject | None = None
     decided: PassOutcome | None = None
     outcome = None if run.ending is None else stop_reason_outcome(run.ending)
@@ -400,6 +423,8 @@ def bench_status(
         refusal = BenchRefusal.INNER
     elif not on_line:
         refusal = BenchRefusal.NO_MANIFEST if held_by is None else BenchRefusal.HELD_ELSEWHERE
+    elif refused is not None:
+        refusal = BenchRefusal(refused.value)
     elif not bench_size:
         refusal = BenchRefusal.NO_HOLDOUT
     elif run.pass_open:
@@ -415,7 +440,7 @@ def bench_status(
     return BenchStatus(
         state=state,
         trigger=trigger,
-        can_grade=refusal is None,
+        can_run=refusal is None,
         refusal=refusal,
         offered=refusal is None
         or (not inner and READING_STATE_KIND[state] is ReadingStateKind.WAITING),

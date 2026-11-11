@@ -108,8 +108,6 @@ class RunPhase(enum.StrEnum):
 
 LaunchStage = Literal[RunPhase.QUEUED, RunPhase.STARTING]
 
-GateDecision = Literal["rescore", "proceed", "abort"]
-
 # What a ``gate`` declaration holds for: the origin's verdict, or the arms a round measures.
 GateKind = Literal["origin", "arms"]
 
@@ -247,7 +245,6 @@ INNER_LAUNCH_REFUSAL = "An inner run is launched by the outer cell that measures
 INNER_PAUSE_REFUSAL = (
     "An inner run stops with the outer run that spawned it. Pause the outer run instead."
 )
-INNER_GATE_REFUSAL = "An inner run never holds at the origin gate."
 INNER_ARMS_REFUSAL = "An inner run never holds for an operator's arms."
 INNER_SKIP_REFUSAL = (
     "An inner run is one cell of an outer measurement, and a cut searchpoint would change what "
@@ -287,13 +284,6 @@ class RunState(NamedTuple):
         if self.inner:
             return INNER_PAUSE_REFUSAL
         return "" if self.producer.attached else "No run of this cycle is in flight to pause."
-
-    @property
-    def gate_refusal(self) -> str:
-        """Why `origin-gate` is refused; empty where it is admitted."""
-        if self.inner:
-            return INNER_GATE_REFUSAL
-        return "" if self.gate == "origin" else "This cycle is not holding at its origin gate."
 
     def arms_refusal(self, keep: Sequence[int]) -> str:
         """Why `submit-arms` keeping the drafts at *keep* is refused; empty where it is admitted."""

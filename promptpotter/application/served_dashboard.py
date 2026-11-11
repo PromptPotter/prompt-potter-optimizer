@@ -12,7 +12,13 @@ from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
-from promptpotter.domain.dashboard_rows import RoundHealth, RunLimits, ServedRound, served_rounds
+from promptpotter.domain.dashboard_rows import (
+    RoundHealth,
+    RunLimits,
+    SampleCoverage,
+    ServedRound,
+    served_rounds,
+)
 from promptpotter.domain.origin_panel import overlap_line
 from promptpotter.domain.paired_reading import ArmName
 from promptpotter.domain.phases import (
@@ -193,15 +199,20 @@ class RoundAxis(StrictModel):
         description="The round the run stands at: `live`, else the newest of `completed`. Null "
         "before any round measured."
     )
+    unfiled: int | None = Field(
+        description="`current_round` while no round file holds it (its arms are its candidates)."
+    )
 
 
 def _round_axis(state: LiveDashboardState, *, live: bool) -> RoundAxis:
     completed = [r.round for r in state.rounds if r.candidates]
-    in_flight = state.current_round.round if live and not state.round_closed() else None
+    current = state.current_round.round
+    in_flight = current if live and not state.round_closed() else None
     return RoundAxis(
         completed=completed,
         live=in_flight,
         position=in_flight if in_flight is not None else completed[-1] if completed else None,
+        unfiled=None if any(r.round == current for r in state.rounds) else current,
     )
 
 
@@ -245,6 +256,7 @@ class ServedDashboard(DashboardFacts):
 
     # The served rounds narrow the banked ones; nothing assigns through this list.
     rounds: list[ServedRound]  # type: ignore[assignment]
+    sample_coverage: SampleCoverage
     campaign_id: str
     cycle_id: str
     backpressure: ServedBackpressure | None
@@ -527,6 +539,7 @@ def _serve(
     axis = _round_axis(state, live=live)
     return ServedDashboard(
         **banked | {"rounds": rounds},
+        sample_coverage=SampleCoverage.of(rounds),
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,
         run_phase=run.run_phase,

@@ -46,6 +46,7 @@ from promptpotter.application.pipeline_responses import (
     CampaignPipelineResponse,
     DatasetPipelineResponse,
     ForkPreviewResponse,
+    NestedPipeline,
     SteerVerdict,
     optimizer_setup,
 )
@@ -126,6 +127,7 @@ from promptpotter.shared.errors import (
     FileUnreadableError,
     LedgerUnreadableError,
     PayloadInvalidError,
+    PotterError,
     validation_reason,
 )
 from promptpotter.shared.hashing import stable_hash
@@ -1028,8 +1030,9 @@ def campaign_config_map(stores: Stores, campaign_id: str) -> ConfigMapResponse:
 
 
 async def resolve_pipeline_for_dataset(
-    stores: Stores, dataset_name: str
+    stores: Stores, dataset_name: str, *, above: frozenset[str] = frozenset()
 ) -> DatasetPipelineResponse:
+    """*above*: the datasets enclosing this one on its branch, which it may not nest."""
     dataset = resolve_dataset(stores, dataset_name)
     experiment = experiment_outside_run(stores, dataset)
     declared = await dataset_pipeline(stores, dataset, experiment=experiment)
@@ -1049,8 +1052,18 @@ async def resolve_pipeline_for_dataset(
         view=filtered.view,
         node_config_schema=rows,
         reach=reach_map(rows),
-        nests=_nests(schema),
+        nests=[await _nested(stores, ref, above | {dataset_name}) for ref in _nests(schema)],
     )
+
+
+async def _nested(stores: Stores, ref: NestedPipelineRef, above: frozenset[str]) -> NestedPipeline:
+    if ref.dataset in above:
+        return NestedPipeline(**dict(ref), pipeline=None, unread=f"{ref.dataset} nests itself")
+    try:
+        nested = await resolve_pipeline_for_dataset(stores, ref.dataset, above=above)
+    except PotterError as exc:
+        return NestedPipeline(**dict(ref), pipeline=None, unread=str(exc))
+    return NestedPipeline(**dict(ref), pipeline=nested, unread=None)
 
 
 # A prompt, a description and a nested value are no setting one line can print.

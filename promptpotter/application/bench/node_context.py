@@ -116,7 +116,7 @@ def bank_proposals(round_: RoundContext, proposals: Sequence[Proposal], *, submi
 async def reread_walk(round_: RoundContext, reads: Sequence[WalkRead]) -> None:
     """A replayed walk makes the reads its first walk made, each a replay off the archive."""
     cycle = round_.cycle
-    pool = {s.key: s for s in cycle.session.state.scoring.require_partition().search}
+    pool = {s.key: s for s in cycle.session.state.scoring.partition.search}
     for read in reads:
         arm = cycle.measured(read.individual_id)
         cells = [pool[key] for key in read.cells]
@@ -125,12 +125,10 @@ async def reread_walk(round_: RoundContext, reads: Sequence[WalkRead]) -> None:
         )
 
 
-async def rewalk_origin(
-    round_: RoundContext, scoring_set: list[Sample], *, force_fresh: bool
-) -> None:
+async def rewalk_origin(round_: RoundContext, scoring_set: list[Sample]) -> None:
     """Round 0 closes again on ONE walk of the origin over its scoring set, under ORIGIN. The
-    archive never replays an errored cell, so a plain walk sends exactly the holes and the cells
-    never sent; the gate's rescore sends every cell *force_fresh*."""
+    archive never replays an errored cell, so the walk sends exactly the holes and the cells never
+    sent."""
     cycle = round_.cycle
     callbacks = round_.callbacks
     callbacks.on_phase(CampaignPhase.ORIGIN, "enter", round=0)
@@ -141,7 +139,6 @@ async def rewalk_origin(
             cycle.parent_point,
             scoring_set,
             role=MeasurementRole.ORIGIN,
-            force_fresh=force_fresh,
         )
     finally:
         callbacks.on_phase(CampaignPhase.ORIGIN, "exit", round=0)
@@ -155,7 +152,6 @@ async def measure_as_parent(
     cells: list[Sample],
     *,
     role: ArmRole,
-    force_fresh: bool = False,
 ) -> ReadArm:
     """A reference read is an arm of the round whoever asked; a re-read continues that arm's walk."""
     cycle = round_.cycle
@@ -182,7 +178,6 @@ async def measure_as_parent(
         sample_index=cycle.sample_index,
         measured=MeasuredPass(individual.id, role),
         held=round_.held(key),
-        force_fresh=force_fresh,
     )
     # A partial pass is kept: `read_pair` pairs each arm on the cells both scored.
     if walked.stopped is not None:
@@ -205,7 +200,7 @@ def _drawn(round_: RoundContext, member: NodeMember, kind: type[Pool]) -> tuple[
     cycle = round_.cycle
     if kind not in cycle.optimizer.draws(member):
         return ()
-    demo = cycle.session.state.scoring.require_partition().demo
+    demo = cycle.session.state.scoring.partition.demo
     return cycle.slices.get(kind).drawn({s.key: s for s in demo})
 
 
@@ -415,7 +410,7 @@ class Target(CycleRead):
     @property
     def demo_split(self) -> tuple[Sample, ...]:
         """The demo partition whole, which resolves the shots an individual already holds; a reader draws through ``drawn``."""
-        return self._cycle.session.state.scoring.require_partition().demo
+        return self._cycle.session.state.scoring.partition.demo
 
     @property
     def measured_unit(self) -> MeasuredUnit:
@@ -430,13 +425,13 @@ class Target(CycleRead):
     def cell_formula(self) -> str | None:
         session = self._cycle.session
         formula, _ = resolve_cell_formula(
-            session.state.scoring.require_scorer().per_cell, session.pipeline_schema
+            session.state.scoring.scorer.per_cell, session.pipeline_schema
         )
         return formula
 
     @property
     def matcher(self) -> str | None:
-        return self._cycle.session.state.scoring.require_scorer().matcher
+        return self._cycle.session.state.scoring.scorer.matcher
 
     @property
     def inner_cells(self) -> InnerCells | None:
@@ -458,7 +453,7 @@ class Target(CycleRead):
             (cell.facts.ground_truth for cell in self._cycle.origin_round.results),
             dataset=session.measured_dataset,
         )
-        return earned_blocks_for(session.store, signature)
+        return earned_blocks_for(session.store, self._cycle.survey, signature)
 
 
 class Calls(CycleRead):

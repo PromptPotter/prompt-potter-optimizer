@@ -242,7 +242,7 @@ def build_run_observers(
     if forked_from is not None:
         # The line moved onto this cycle; the one it left is no longer this process's.
         forked_from.release()
-        # A fork's config is already admitted; a first build waits for `prepare_run` to settle it.
+        # A fork's config is already admitted; a first build waits for `open_launch` to settle it.
         declare_run_wiring(
             session, campaign_config, observers.callbacks.ledger, selected=bound_optimizer()
         )

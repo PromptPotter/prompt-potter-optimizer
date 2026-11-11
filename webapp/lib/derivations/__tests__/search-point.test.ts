@@ -7,14 +7,14 @@ import type {
 } from "@/lib/api/types";
 import { describe, expect, it } from "vitest";
 import {
-  candidateObserveConfig,
-  liveCandidateObserveConfig,
+  armObserveConfig,
   observeOptions,
   originPoint,
   resolveObserveSubject,
   type ObserveSelection,
   type ObserveSubject,
 } from "../search-point";
+import { servedArm } from "../candidate-search-point";
 import {
   armReading,
   currentRound,
@@ -22,7 +22,6 @@ import {
   hierarchyCandidate,
   liveRow,
   ownLevel,
-  measuredArm,
   pairedReading,
   roundDoc,
   roundOfArms,
@@ -51,74 +50,41 @@ const liveDash = (candidates: (Partial<LiveCandidate> & { label: string })[]): S
     }),
   });
 
-describe("liveCandidateObserveConfig", () => {
+describe("armObserveConfig", () => {
   const snap = liveDash([
     { label: "C1.1", prompts: p("a"), resolved_params: { llm: { model: "x" } } },
     { label: "C1.2", prompts: p("b"), resolved_params: { llm: { model: "y" } } },
   ]);
+  const inFlight = snap.current_round.candidates;
+  const doc = roundOfArms(2, [
+    { key: "cand-a", label: "C2.1", prompts: p("a"), resolved_params: { llm: { model: "ma" } } },
+    { key: "cand-b", label: "C2.2", prompts: p("b"), resolved_params: { llm: { model: "mb" } } },
+  ]);
 
-  it("locates the in-flight candidate by label (not the latest-seeded one)", () => {
-    const r = liveCandidateObserveConfig(snap, "C1.1", "selected · C1.1");
+  it("projects an arm in flight and a filed one alike, off its key", () => {
+    const r = armObserveConfig(servedArm(inFlight, "C1.1"), "selected · C1.1");
     expect(r?.label).toBe("selected · C1.1");
     expect(r?.prompts).toEqual(p("a"));
     expect(r?.config).toEqual({ llm: { model: "x" } });
-  });
-
-  it("returns null for an unknown / not-yet-seeded label", () => {
-    expect(liveCandidateObserveConfig(snap, "C1.10", "x")).toBeNull();
-    expect(liveCandidateObserveConfig(snap, "", "x")).toBeNull();
-  });
-
-  it("returns null without a live round", () => {
-    expect(liveCandidateObserveConfig(null, "C1.1", "x")).toBeNull();
-    expect(liveCandidateObserveConfig(dash({}), "C1.1", "x")).toBeNull();
-  });
-});
-
-describe("the origin as an ordinary candidate", () => {
-  const round0 = roundOfArms(0, [
-    { key: "c0", label: "C0", arm: measuredArm({ prompts: p("o"), resolved_params: { llm: { model: "m0" } } }) },
-  ]);
-
-  it("resolves C0 out of round 0 by its arm key", () => {
-    const r = candidateObserveConfig(round0, "c0", "selected · C0");
-    expect(r?.label).toBe("selected · C0");
-    expect(r?.config).toEqual({ llm: { model: "m0" } });
-    expect(r?.prompts).toEqual(p("o"));
-  });
-
-  it("returns null before round 0 is written", () => {
-    expect(candidateObserveConfig(null, "c0", "C0")).toBeNull();
-    expect(candidateObserveConfig(roundDoc({ round: 0 }), "c0", "C0")).toBeNull();
-  });
-});
-
-describe("candidateObserveConfig", () => {
-  const doc = roundOfArms(2, [
-    { key: "cand-a", label: "C2.1", arm: measuredArm({ prompts: p("a"), resolved_params: { llm: { model: "ma" } } }) },
-    { key: "cand-b", label: "C2.2", arm: measuredArm({ prompts: p("b"), resolved_params: { llm: { model: "mb" } } }) },
-  ]);
-
-  it("locates a candidate by its arm key and projects its resolved config", () => {
-    const r = candidateObserveConfig(doc, "cand-b", "winner · C2.2");
-    expect(r?.label).toBe("winner · C2.2");
-    expect(r?.config).toEqual({ llm: { model: "mb" } });
-    expect(r?.prompts).toEqual(p("b"));
+    const f = armObserveConfig(servedArm(doc.candidates, "cand-b"), "winner · C2.2");
+    expect(f?.config).toEqual({ llm: { model: "mb" } });
+    expect(f?.prompts).toEqual(p("b"));
   });
 
   it("a node reads the prompt IT runs; the whole searchpoint reads every node's", () => {
     const both = { ...p("own", "solve"), ...p("node", "l1_generate") };
-    const outer = roundOfArms(1, [{ key: "c", label: "C1.1", arm: measuredArm({ prompts: both }) }]);
-    const prompts = (node?: string) => candidateObserveConfig(outer, "c", "x", node)?.prompts;
+    const outer = roundOfArms(1, [{ key: "c", label: "C1.1", prompts: both }]);
+    const prompts = (node?: string) =>
+      armObserveConfig(servedArm(outer.candidates, "c"), "x", node)?.prompts;
     expect(prompts("l1_generate")).toEqual(p("node", "l1_generate"));
     expect(prompts("l2_analyze")).toEqual({});
     expect(prompts()).toEqual(both);
   });
 
-  it("returns null for a missing label / doc", () => {
-    expect(candidateObserveConfig(doc, "C9.9", "x")).toBeNull();
-    expect(candidateObserveConfig(null, "C2.1", "x")).toBeNull();
-    expect(candidateObserveConfig(roundDoc({ round: 1 }), "C2.1", "x")).toBeNull();
+  it("returns null for a missing arm", () => {
+    expect(armObserveConfig(servedArm(inFlight, "C1.10"), "x")).toBeNull();
+    expect(armObserveConfig(servedArm(doc.candidates, "C9.9"), "x")).toBeNull();
+    expect(armObserveConfig(servedArm(roundDoc({ round: 1 }).candidates, "C2.1"), "x")).toBeNull();
   });
 });
 
@@ -204,12 +170,12 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
   const closed = dash({
     rounds,
     observed: { round: 2, label: "C2.3", key: "r2c2" },
-    round_axis: { completed: [0, 1, 2], live: null, position: 2 },
+    round_axis: { completed: [0, 1, 2], live: null, position: 2, unfiled: null },
   });
   const running = dash({
     rounds,
     observed: { round: 3, label: "C3.2", key: "C3.2" },
-    round_axis: { completed: [0, 1, 2], live: 3, position: 3 },
+    round_axis: { completed: [0, 1, 2], live: 3, position: 3, unfiled: 3 },
     current_round: currentRound({
       round: 3,
       candidates: [
@@ -318,7 +284,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
     const generating = dash({
       ...closed,
       current_round: currentRound({ round: 3 }),
-      round_axis: { completed: [0, 1, 2], live: 3, position: 3 },
+      round_axis: { completed: [0, 1, 2], live: 3, position: 3, unfiled: 3 },
     });
     const s = resolveObserveSubject(generating, stood, true, NO_PICK);
     expect(s.state).toBe("best");

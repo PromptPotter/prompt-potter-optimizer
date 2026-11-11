@@ -28,7 +28,6 @@ from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CommandKind,
     LoopPayload,
-    OriginGateDecisionPayload,
     PauseCyclePayload,
     SetSampleLookaheadPayload,
     SkipSearchpointPayload,
@@ -68,7 +67,6 @@ class Controls(NamedTuple):
     pause: PauseAsk | None = None
     skips: tuple[str, ...] = ()
     lookahead: LookaheadAsk | None = None
-    gate_decisions: tuple[tuple[str, str], ...] = ()
     submissions: tuple[tuple[str, SubmitArmsPayload], ...] = ()
 
 
@@ -131,8 +129,6 @@ class _Inbox:
                 held = held._replace(pause=PauseAsk(command_id, asked.issued_by, asked.timestamp))
             case SkipSearchpointPayload():
                 held = held._replace(skips=(*held.skips, command_id))
-            case OriginGateDecisionPayload(decision=decision):
-                held = held._replace(gate_decisions=(*held.gate_decisions, (command_id, decision)))
             case SubmitArmsPayload() as submitted:
                 held = held._replace(submissions=(*held.submissions, (command_id, submitted)))
             case SetSampleLookaheadPayload(cells=cells, auto=auto):
@@ -154,10 +150,6 @@ class _Inbox:
             held = held._replace(pause=None)
         elif kind is SkipSearchpointPayload:
             held = held._replace(skips=tuple(s for s in held.skips if s != command_id))
-        elif kind is OriginGateDecisionPayload:
-            held = held._replace(
-                gate_decisions=tuple(d for d in held.gate_decisions if d[0] != command_id)
-            )
         elif kind is SubmitArmsPayload:
             held = held._replace(
                 submissions=tuple(s for s in held.submissions if s[0] != command_id)

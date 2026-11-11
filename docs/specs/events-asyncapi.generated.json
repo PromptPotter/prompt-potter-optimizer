@@ -163,21 +163,7 @@
         "properties": {
           "actions": {
             "items": {
-              "discriminator": {
-                "mapping": {
-                  "origin-gate": "#/components/schemas/GateAction",
-                  "submit-arms": "#/components/schemas/KeepDraftsAction"
-                },
-                "propertyName": "kind"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/GateAction"
-                },
-                {
-                  "$ref": "#/components/schemas/KeepDraftsAction"
-                }
-              ]
+              "$ref": "#/components/schemas/KeepDraftsAction"
             },
             "title": "Actions",
             "type": "array"
@@ -1249,6 +1235,9 @@
           "inner",
           "no_manifest",
           "held_elsewhere",
+          "campaign_not_active",
+          "definition_unread",
+          "connector_moved",
           "no_holdout",
           "in_flight",
           "selecting",
@@ -1422,9 +1411,9 @@
         "additionalProperties": false,
         "description": "Where a campaign's bench stands, and whether asking for its pass would be admitted.",
         "properties": {
-          "can_grade": {
+          "can_run": {
             "description": "Whether `bench` / `grade-bench` is admitted now. Every entry point reads this one answer.",
-            "title": "Can Grade",
+            "title": "Can Run",
             "type": "boolean"
           },
           "expected": {
@@ -1476,7 +1465,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why not, exactly where `can_grade` is false."
+            "description": "Why not, exactly where `can_run` is false."
           },
           "scored": {
             "anyOf": [
@@ -1531,7 +1520,7 @@
         "required": [
           "state",
           "trigger",
-          "can_grade",
+          "can_run",
           "refusal",
           "offered",
           "subject",
@@ -3360,47 +3349,6 @@
         ],
         "title": "ForkTrigger",
         "type": "string"
-      },
-      "GateAction": {
-        "additionalProperties": false,
-        "description": "One button: a press sends `decision` as `kind` to the cycle whose activity carries it.",
-        "properties": {
-          "decision": {
-            "enum": [
-              "rescore",
-              "proceed",
-              "abort"
-            ],
-            "title": "Decision",
-            "type": "string"
-          },
-          "kind": {
-            "const": "origin-gate",
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "variant": {
-            "enum": [
-              "primary",
-              "ghost",
-              "danger"
-            ],
-            "title": "Variant",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label",
-          "variant",
-          "kind",
-          "decision"
-        ],
-        "title": "GateAction",
-        "type": "object"
       },
       "HealthRecord": {
         "additionalProperties": false,

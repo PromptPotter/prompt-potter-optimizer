@@ -21,7 +21,7 @@ export interface SeriesCtx {
   views: readonly CandidateBar[];
   overlapBasis: number | null;
   unit: MeasuredUnit;
-  electedMetric: DisplayMetric;
+  displayMetric: DisplayMetric;
 }
 
 interface SeriesSpec {
@@ -47,7 +47,7 @@ export function metricInkToken(m: DisplayMetric, elected: DisplayMetric): string
 const metricInk =
   (m: DisplayMetric) =>
   (ctx: SeriesCtx): string =>
-    metricInkToken(m, ctx.electedMetric);
+    metricInkToken(m, ctx.displayMetric);
 
 // A course bar carries no arm, so no pass of this cycle reads it.
 const verifyOf = (v: CandidateBar) => (v.reading ? v.verify : null);

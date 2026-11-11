@@ -6,7 +6,6 @@ import { VendorSprite } from "@/components/ui";
 import { Sidebar } from "@/components/shell/sidebar/Sidebar";
 import { SidebarResizer } from "@/components/shell/sidebar/SidebarResizer";
 import { JobsDock } from "@/components/shell/JobsDock";
-import { SelectionProvider } from "@/lib/state/selection";
 import { IngestFlowProvider } from "@/lib/state/ingest-flow";
 import { ThreadProvider } from "@/lib/chat/thread";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
@@ -32,8 +31,6 @@ function AppShellInner() {
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
 
   return (
-    // Every surface reading the viewed tree composes `sampleSet` into the masked read.
-    <SelectionProvider cycleId={viewed?.leaf.cycleId ?? null}>
     <div
       className={cx(
         "shell",
@@ -70,6 +67,5 @@ function AppShellInner() {
       <RemoteControl />
       <VendorSprite />
     </div>
-    </SelectionProvider>
   );
 }

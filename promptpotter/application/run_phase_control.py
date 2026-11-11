@@ -3,11 +3,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
-    GateDecision,
     PauseCause,
     StopReason,
 )
@@ -146,14 +145,6 @@ class RunControl:
             return False
         self._log().ack(skips[0], "applied")
         return True
-
-    def take_gate_decision(self) -> GateDecision | None:
-        standing = self._inbox().gate_decisions
-        if not standing:
-            return None
-        command_id, asked = standing[0]
-        self._log().ack(command_id, "applied")
-        return cast("GateDecision", asked)
 
     def standing_submission(self) -> tuple[str, SubmitArmsPayload] | None:
         """Read, not taken: the round's arms are banked before `take_submission` acks them."""

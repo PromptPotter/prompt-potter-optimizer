@@ -133,7 +133,7 @@ def _accumulate(
                 acc[(answer_space, locus.key, block)].append(lift)
 
 
-def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
+def mine_earned_blocks(stores: Stores, survey: CampaignSurvey) -> dict[str, list[EarnedBlock]]:
     """Optimize mines the campaign TREE as it stands; an arm and an L4 cell mine none."""
     match scope := memory_scope():
         case OpenAt():
@@ -145,7 +145,6 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
 
     acc: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     counted: set[MemberAddress] = set()
-    survey = CampaignSurvey(stores.campaigns)
     for campaign in survey.campaigns:
         for standing in survey.cycles(campaign):
             fields_of = {
@@ -165,9 +164,9 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
 
 
 def earned_blocks_for(
-    stores: Stores, fit_signature: str, *, per_field_cap: int = 3
+    stores: Stores, survey: CampaignSurvey, fit_signature: str, *, per_field_cap: int = 3
 ) -> dict[str, tuple[str, ...]]:
-    earned = mine_earned_blocks(stores).get(fit_signature, [])
+    earned = mine_earned_blocks(stores, survey).get(fit_signature, [])
     by_field: dict[str, list[str]] = defaultdict(list)
     for block in earned:
         if len(by_field[block.field]) < per_field_cap:

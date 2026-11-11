@@ -4,23 +4,21 @@ import asyncio
 import logging
 from collections.abc import Coroutine
 from dataclasses import dataclass
-from typing import Any, assert_never
+from typing import Any
 
 from promptpotter.application.jobs.launcher.admission import (
     RunStart,
+    admit_and_hold,
     refuse_as_busy,
     request_jobs,
 )
-from promptpotter.application.jobs.launcher.checkin import CheckinStart, hold_checkin_start
-from promptpotter.application.jobs.launcher.mint_and_start import (
-    ExistingCycle,
-    FreshMint,
-    hold_existing_cycle,
-    hold_fresh_mint,
-)
+from promptpotter.application.jobs.launcher.checkin import CheckinStart
+from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle, FreshMint
 from promptpotter.application.jobs.launcher.run_job import HeldRun
+from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import LaunchedJob
 from promptpotter.infrastructure.store.stores import Stores
@@ -61,16 +59,32 @@ class Launched(LaunchOutcome):
         return [self.launch]
 
 
-async def _hold(request: LaunchRequest, start: RunStart) -> HeldRun:
-    match request:
-        case FreshMint():
-            return await hold_fresh_mint(request, start)
-        case ExistingCycle():
-            return await hold_existing_cycle(request, start)
-        case CheckinStart():
-            return await hold_checkin_start(request, start)
-        case _:
-            assert_never(request)
+async def hold(request: LaunchRequest, start: RunStart) -> HeldRun:
+    """THE way into a held run: past the queue and the money admission, then the request's cycle
+    opened. One with no hop yet mints it, so a refusal before then leaves nothing written and one
+    after stamps the minted cycle; an existing cycle's is never stamped, so it stays as resumable
+    as it was. A check-in's claim ends with this hold however it ends."""
+    stamps: CycleHop | None = None
+    try:
+        held = await admit_and_hold(request, start)
+        opened = await request.open(start.stores)
+        if request.hop == UNRESOLVED_HOP:
+            stamps = opened.hop
+            start.land(opened.hop, held)
+            logger.info(
+                "%s: minted %s/%s (job %s)",
+                request.verb,
+                opened.hop.campaign_id,
+                opened.hop.cycle_id,
+                start.job_id,
+            )
+        return HeldRun.of(start, opened, held)
+    except BaseException as exc:
+        start.release(exc, stamps=stamps)
+        raise
+    finally:
+        if isinstance(request, CheckinStart):
+            request.claim.release()
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +106,7 @@ class Admitted(LaunchOutcome):
 
     async def held(self) -> HeldRun:
         """Its run held: past the queue, the money admission and the cycle's session."""
-        return await _hold(self.request, self.start)
+        return await hold(self.request, self.start)
 
     async def launched(self) -> Launched:
         return await self.hand_over(self.held())
@@ -125,7 +139,9 @@ def admit(
     job_registry: JobRegistry,
     inline: Inline | None,
 ) -> Admitted:
-    """Call AFTER everything a person types: a slot held across an interactive check-in is lost."""
+    """Call AFTER everything a person types: a slot held across an interactive check-in is lost.
+    Every door's launch first reclaims what a dead producer left, so the machine it counts is live."""
+    sweep(stores.projects_root)
     (job,) = request_jobs(
         stores=stores,
         job_registry=job_registry,

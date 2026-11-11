@@ -236,16 +236,31 @@ async def init_services(
     program: object | None = None,
     served: ServedPipeline | None = None,
 ) -> Session:
-    """*stores* is the ONE way to relocate the tree: the L4 inner runner passes a sandboxed one.
-    *served* is a check-in Start's one backend read, under which it landed the definition."""
+    """A session on what *dataset_name*'s definition names: a campaign's own is bound by
+    `bind_cycle_session`, on the connector its mint froze. *stores* is the ONE way to relocate the
+    tree: the L4 inner runner passes a sandboxed one. *served* is a check-in Start's one backend
+    read, under which it landed the definition."""
     if stores is None:
         stores = build_stores(identity, projects_root=default_projects_root())
-
-    await ensure_model_capabilities(Path(stores.base_dir))
-
     dataset = resolve_dataset(stores, dataset_name)
+    connector = connectors.CONNECTORS.get(runnable_definition(dataset).backend_type)
+    return await _open_session(
+        stores, dataset, connector, identity=identity, program=program, served=served
+    )
+
+
+async def _open_session(
+    stores: Stores,
+    dataset: ResolvedDataset,
+    connector: Connector,
+    *,
+    identity: IdentityContext,
+    program: object | None = None,
+    served: ServedPipeline | None = None,
+) -> Session:
+    await ensure_model_capabilities(Path(stores.base_dir))
+    dataset_name = dataset.name
     definition = runnable_definition(dataset)
-    connector = connectors.CONNECTORS.get(definition.backend_type)
     panel = dataset_experiment(stores, dataset, connector)
     if panel is None and connector.owns_panel and build_panel(stores, dataset):
         panel = dataset_experiment(stores, dataset, connector)
@@ -302,9 +317,10 @@ async def bind_cycle_session(
     hop: CycleHop,
 ) -> Session:
     """Bound, never configured: a resume's drift refusal reads the schema before the config lands."""
-    session = await init_services(
-        dataset_name=campaign.dataset_name,
+    session = await _open_session(
+        stores,
+        resolve_dataset(stores, campaign.dataset_name),
+        connectors.CONNECTORS.get(campaign.connector),
         identity=stores.identity,
-        stores=stores,
     )
     return session.bound(hop, purpose=campaign.declaration.purpose)

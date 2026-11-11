@@ -151,7 +151,7 @@ Read-only projections fed by their ledger. **Run state is derived, never a fresh
 
 #### Control-local
 
-Ctrl+C and a typed gate decision at the producing process — an INPUT, never a transport: each
+Ctrl+C at the producing process — an INPUT, never a transport: it
 dispatches the command every other door sends.
 
 #### Control-remote

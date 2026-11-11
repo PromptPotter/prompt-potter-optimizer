@@ -88,7 +88,7 @@ def _branch_round(index: CycleIndex) -> int | None:
 def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
     """Every cycle of the run's campaign read on ONE scale, so θ sum up a lineage that forks."""
     session = difficulty.session
-    stores, scorer = session.store, session.state.scoring.require_scorer()
+    stores, scorer = session.store, session.state.scoring.scorer
     edges: list[tuple[str, CycleIndex, frozenset[int]]] = []
     lines: list[list[RoundResult]] = []
     for hop, index in stores.campaigns.campaign_cycles(session.campaign_id):

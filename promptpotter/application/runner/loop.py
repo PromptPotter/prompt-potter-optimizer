@@ -6,32 +6,15 @@ from typing import NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext
-from promptpotter.application.bench.resume_and_fork.repair import rewalk_lost_origin
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import Controller, RoundContext
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import budget_stop
-from promptpotter.application.runner.origin_gate import (
-    origin_gate_passed,
-    pass_origin_gate,
-    run_origin_gate,
-)
-from promptpotter.application.runner.round import (
-    emit_origin_round,
-    execute_round,
-    post_round,
-    run_init,
-)
-from promptpotter.application.runner.termination import (
-    RUN_ENDS,
-    end_run_on,
-    origin_gate_tripped,
-    target_tripped,
-)
+from promptpotter.application.runner.round import execute_round, post_round
+from promptpotter.application.runner.termination import RUN_ENDS, end_run_on, target_tripped
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.phases import ErrorRecord, StopLoop, StopReason
 from promptpotter.domain.run_records import RebaseRequest
-from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import at_round
 
@@ -66,41 +49,19 @@ def round_bounds(session: Session, config: CampaignConfig) -> tuple[CampaignConf
 
 async def run_round_loop(
     cycle: Cycle,
-    dataset: list[Sample],
     config: CampaignConfig,
     session: Session,
     cb: RunCallbacks,
     *,
     diagnosing: Controller | None = None,
 ) -> LoopEnd:
-    """*diagnosing* is ``--diag``'s controller: the run closes the round it resumes on and stops."""
-    opt = config.optimization
+    """Round 1 on, past round 0's door (`origin_gate.py::open_origin_round`). *diagnosing* is
+    ``--diag``'s controller: the run closes the round it resumes on and stops."""
     round_num = session.state.resumed_from_round
     clean_rounds = max(session.state.resumed_from_round - 1, 0)
     open_round: int | None = None
 
     try:
-        run_init(cycle, cb)
-        # Until an L1 round closes, every launch asks the gate, unless round 0 banked a pass.
-        if diagnosing is None and clean_rounds == 0:
-            # A replayed origin closed on the ledger already; a fresh or re-measured one closes here.
-            open_round = 0
-            await rewalk_lost_origin(cycle, dataset, cb)
-            if cycle.origin_round.at_offset is None:
-                await emit_origin_round(cycle, session, cb)
-            open_round = None
-            if (
-                not origin_gate_passed(session)
-                and origin_gate_tripped(cycle.origin_round.health, opt.origin_gate) is not None
-            ):
-                if session.store.campaigns.resumed_ending(session.hop) is StopReason.ORIGIN_GATE:
-                    # Resuming an origin the gate halted, still unhealthy, is the operator's override.
-                    pass_origin_gate(cb, by="resume")
-                elif (
-                    gate_stop := await run_origin_gate(cycle, dataset, session, cb, opt.origin_gate)
-                ) is not None:
-                    return LoopEnd(gate_stop)
-
         while True:
             # SET on the config every reader holds, not merely compared: a moved cap reads one way.
             bounded, pause_at = round_bounds(session, config)
@@ -162,14 +123,21 @@ async def run_round_loop(
             round_num += 1
 
     except RUN_ENDS as exc:
-        stop_reason, error = end_run_on(exc, session, where=f"at round {round_num}")
-        # Before the finalize reads a selection: the stop may sit between an election and its close.
-        cycle.unwind_unclosed()
-        return LoopEnd(
-            stop_reason,
-            error,
-            fork=exc.fork if isinstance(exc, StopLoop) else None,
-            interrupted_round=open_round,
-            # Handed back, never swallowed: `runner/entry.py` re-raises it past the finalize.
-            cancelled=exc if isinstance(exc, asyncio.CancelledError) else None,
-        )
+        return loop_end_on(exc, cycle, session, round_num=round_num, open_round=open_round)
+
+
+def loop_end_on(
+    exc: BaseException, cycle: Cycle, session: Session, *, round_num: int, open_round: int | None
+) -> LoopEnd:
+    """A run end raised inside a round, round 0's door's included, read as the loop's end."""
+    stop_reason, error = end_run_on(exc, session, where=f"at round {round_num}")
+    # Before the finalize reads a selection: the stop may sit between an election and its close.
+    cycle.unwind_unclosed()
+    return LoopEnd(
+        stop_reason,
+        error,
+        fork=exc.fork if isinstance(exc, StopLoop) else None,
+        interrupted_round=open_round,
+        # Handed back, never swallowed: `runner/entry.py` re-raises it past the finalize.
+        cancelled=exc if isinstance(exc, asyncio.CancelledError) else None,
+    )

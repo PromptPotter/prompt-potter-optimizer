@@ -18,7 +18,7 @@ from promptpotter.domain.arms import (
     Skipped,
 )
 from promptpotter.domain.phases import WalkEnd
-from promptpotter.domain.validators import BrokenSignal, StopSignal
+from promptpotter.domain.validators import BrokenSignal
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
 from promptpotter.shared.errors import ErrorCategory
 
@@ -29,12 +29,6 @@ if TYPE_CHECKING:
 
 
 _CONFIG_DETERMINISTIC_ABORT = frozenset({ErrorCategory.CLIENT.value, ErrorCategory.PIPELINE.value})
-
-
-def is_transient_scoring_abort(signal: StopSignal | None) -> bool:
-    if not isinstance(signal, BrokenSignal) or signal.check_name != SCORING_ERROR_ABORT:
-        return False
-    return not _abort_is_config_break(signal.check_result)
 
 
 def _abort_is_config_break(cr: DegradationContext) -> bool:

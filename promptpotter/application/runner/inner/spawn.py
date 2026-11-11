@@ -9,10 +9,9 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.launcher.admission import slotless_share
+from promptpotter.application.jobs.launcher.admission import campaign_refusal, slotless_share
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
-    ConnectorMovedError,
     declare,
     mint,
     resolve_cycle_plan,
@@ -377,7 +376,7 @@ def _continue_inner_campaign(
     bound = session.bound(hop, purpose=campaign.declaration.purpose)
     try:
         plan = resolve_resume(bound, campaign, train_data)
-    except (ConfigDriftError, ConnectorMovedError) as refused:
+    except ConfigDriftError as refused:
         raise CellUnscoreableError(str(refused), spent={}) from refused
 
     logger.info(
@@ -440,6 +439,12 @@ def _laid_arm(config: CampaignConfig, overrides: Overrides) -> CampaignConfig:
 
 async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
     ctx, spec = cell.ctx, cell.spec
+    # The campaign that exists decides, never an id its origin content derives: a drifted origin
+    # reaches the drift refusal rather than a fresh root. A continuing seat's campaign refusal is
+    # asked before its session opens, so the session binds a connector already known to agree.
+    campaign = store.campaigns.load_campaign(cell.campaign_id)
+    if campaign is not None and (refused := campaign_refusal(store, campaign)) is not None:
+        raise CellUnscoreableError(str(refused), spent={}) from refused
     session = await init_services(
         dataset_name=spec.inner_dataset,
         identity=ctx.identity,
@@ -475,9 +480,6 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
     try:
         config = _laid_arm(instrument, cell.overrides)
         declaration = declare(session, config, purpose=ctx.purpose)
-        # The campaign that exists decides, never an id its origin content derives: a drifted
-        # origin reaches the drift refusal rather than a fresh root.
-        campaign = session.store.campaigns.load_campaign(cell.campaign_id)
         if campaign is None:
             minted = mint(
                 resolve_cycle_plan(session, declaration, train_data),

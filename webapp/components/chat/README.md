@@ -56,8 +56,8 @@ To strip this down to a generic chat + tool-activity app, remove:
   `sample_scored` cases, the `phase` round headline and the held-out pass (`candidate`, `round`
   `ActivityKind`s). Keep the generic `running`/`done`/`progress`/`warning`/`error`/`merge`
   readings; rewire them to your own tool's event records.
-- **The optimizer-specific decision** — the served `ActivityDecision` (the origin-gate group) and the
-  origin-gate verb `LiveSegment` fires; keep `LiveSegment`'s button rendering and point it at
+- **The optimizer-specific decision** — the served `ActivityDecision` (a round's arms) and the
+  `submit-arms` verb `LiveSegment` fires; keep `LiveSegment`'s button rendering and point it at
   your own gated commands.
 - **The run card** — `components/chat/RunCard.tsx` (the sample walk, `HardSamplesPreview.tsx`),
   plus `RunSummaryItem`, which renders the frozen course entry. Keep the

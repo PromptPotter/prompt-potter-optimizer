@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 
     from promptpotter.application.commands.dispatcher import DispatchedToCycle
     from promptpotter.domain.command_kinds import (
-        OriginGateDecisionPayload,
         PauseCyclePayload,
         SetSampleLookaheadPayload,
         SkipSearchpointPayload,
@@ -31,12 +30,6 @@ def read_payload_file(path: Path) -> Any:
 
 async def pause_cycle(dispatched: DispatchedToCycle[PauseCyclePayload]) -> Applier[object]:
     return Applier.for_loop(dispatched.dispatcher.stores.run_state(dispatched.hop).pause_refusal)
-
-
-async def origin_gate_decision(
-    dispatched: DispatchedToCycle[OriginGateDecisionPayload],
-) -> Applier[object]:
-    return Applier.for_loop(dispatched.dispatcher.stores.run_state(dispatched.hop).gate_refusal)
 
 
 async def submit_arms(dispatched: DispatchedToCycle[SubmitArmsPayload]) -> Applier[object]:

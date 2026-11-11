@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Annotated, ClassVar, Literal, NamedTuple, assert_never, get_args
+from typing import ClassVar, Literal, NamedTuple, assert_never, get_args
 
 from pydantic import Field
 
@@ -13,12 +13,9 @@ from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     CampaignPhase,
     ErrorRecord,
-    GateDecision,
     GateKind,
     RunPhase,
 )
-from promptpotter.domain.results_health import health_finding, health_reading
-from promptpotter.domain.round_health import HEALTH_CAUSE_INFO, DegradationHealth
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
@@ -114,15 +111,6 @@ class ActivityState(FrozenModel):
     )
 
 
-class GateAction(FrozenModel):
-    """One button: a press sends `decision` as `kind` to the cycle whose activity carries it."""
-
-    label: str
-    variant: Literal["primary", "ghost", "danger"]
-    kind: Literal[CommandKind.ORIGIN_GATE]
-    decision: GateDecision
-
-
 class KeepDraftsAction(FrozenModel):
     """One button: a press sends `keep` as `kind` to the cycle holding for its round's arms."""
 
@@ -139,85 +127,7 @@ class ActivityDecision(FrozenModel):
     lead: str = Field(description="The paragraph under the title.")
     facts: list[Said] = Field(description="The evidence, in reading order.")
     reasons: list[str] = Field(description="Why the run is holding, one fragment each.")
-    actions: list[Annotated[GateAction | KeepDraftsAction, Field(discriminator="kind")]]
-
-
-_GATE_ACTIONS: dict[GateDecision, tuple[str, Literal["primary", "ghost", "danger"]]] = {
-    "rescore": ("Re-score origin", "primary"),
-    "proceed": ("Proceed anyway", "ghost"),
-    "abort": ("Abort", "danger"),
-}
-if set(_GATE_ACTIONS) != set(get_args(GateDecision)):
-    raise RuntimeError("the origin gate's buttons are out of step with their type")
-
-
-def _gate_facts(health: DegradationHealth) -> list[Said]:
-    """COVERAGE LEADS: the degraded rate and the reading are computed over disjoint rows."""
-    panel = health.samples + health.not_attempted
-    measured = f"{health.samples} of {panel}"
-    if health.not_attempted > 0:
-        measured += f" · {health.not_attempted} never sent"
-    facts = [Said(key="cells_measured", tone="quiet", label="Cells measured", value=measured)]
-    if health.hole_count > 0:
-        facts.append(
-            Said(
-                key="returned_nothing",
-                tone="quiet",
-                label="Returned nothing",
-                value=str(health.hole_count),
-            )
-        )
-    # Holes never reach the degraded numerator, so the rate shows only where something came back.
-    if health.samples - health.hole_count > 0:
-        facts.append(
-            Said(
-                key="degraded_rate",
-                tone="quiet",
-                label="Degraded rate",
-                value=f"{health.degraded_rate:.0%} · {health.structural_count} structural / "
-                f"{health.transient_count} transient",
-            )
-        )
-    if health.output_ceiling_count > 0:
-        facts.append(
-            Said(
-                key="output_ceiling",
-                tone="quiet",
-                label="Ran to the output ceiling",
-                value=str(health.output_ceiling_count),
-            )
-        )
-    if health.last_error:
-        facts.append(
-            Said(key="last_error", tone="danger", label="Last error", value=health.last_error)
-        )
-    return facts
-
-
-def _origin_gate(health: DegradationHealth | None) -> ActivityDecision:
-    held = "The run holds before round 1: the origin is not healthy enough to optimize against."
-    title, lead, reasons, facts = "Origin gate", held, list[str](), list[Said]()
-    # The cause's row words the hold; with no graded close read yet, the hold alone is said.
-    if health is not None and (reading := health_reading(0, health)) is not None:
-        title = reading.title
-        lead = f"{held} {HEALTH_CAUSE_INFO[reading.cause].remedy}"
-        reasons = [health_finding(health, reading.cause)]
-        facts = _gate_facts(health)
-    return ActivityDecision(
-        title=title,
-        lead=lead,
-        facts=facts,
-        reasons=reasons,
-        actions=[
-            GateAction(
-                label=label,
-                variant=variant,
-                kind=CommandKind.ORIGIN_GATE,
-                decision=decision,
-            )
-            for decision, (label, variant) in _GATE_ACTIONS.items()
-        ],
-    )
+    actions: list[KeepDraftsAction]
 
 
 def _arms_gate(round_num: int | None, drafts: list[Said]) -> ActivityDecision:
@@ -280,7 +190,6 @@ class ActivityFeed:
         self._bench: _BenchPass | None = None
         self._gate: GateKind | None = None
         self._offered: list[Said] = []
-        self._origin_health: DegradationHealth | None = None
         # Each held sender's notice id.
         self._held: dict[str, str] = {}
         # Each arm's label by its key, off its records: a sample names its individual alone.
@@ -288,11 +197,7 @@ class ActivityFeed:
         self._arms = AnnouncedArms()
 
     def state(self) -> ActivityState:
-        decision: ActivityDecision | None = None
-        if self._gate == "origin":
-            decision = _origin_gate(self._origin_health)
-        elif self._gate == "arms":
-            decision = _arms_gate(self._round, self._offered)
+        decision = _arms_gate(self._round, self._offered) if self._gate == "arms" else None
         return ActivityState(status=self._status, notices=list(self._notices), decision=decision)
 
     def feed(self, record: ActivityRecord) -> None:
@@ -318,7 +223,7 @@ class ActivityFeed:
         match record:
             case RunPhaseRecord():
                 self._status = None
-                # The hold lasts to the next declaration, so a re-score under way is still at the gate.
+                # The hold lasts to the next declaration.
                 self._gate = record.gate
                 self._offered = [
                     Said(
@@ -334,9 +239,6 @@ class ActivityFeed:
                 # A declaration starts or stops the sends a hold notice describes.
                 self._notices = [n for n in self._notices if n.id not in self._held.values()]
                 self._held.clear()
-            case RoundClosedRecord(round=0):
-                # The last close stands: a re-score at the gate closes round 0 again.
-                self._origin_health = record.health
             case RoundEnteredRecord():
                 self._arms.enter(record)
                 if self._round is not None and record.round != self._round:

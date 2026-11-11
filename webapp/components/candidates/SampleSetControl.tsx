@@ -1,15 +1,9 @@
 import { useState } from "react";
-import type { MeasuredUnit, OverlapReading, ServedRound } from "@/lib/api/types";
+import type { MeasuredUnit, OverlapReading, SampleCoverage, ServedRound } from "@/lib/api/types";
 import { fmtSampleTag, unitCount } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/state/selection";
-import {
-  measuredUniverse,
-  roundMeasuredSets,
-  roundsCoveringSample,
-  sameSampleSet,
-  toggleInSet,
-} from "@/lib/derivations";
+import { roundMeasuredSets, sameSampleSet, toggleInSet } from "@/lib/derivations";
 import { Button, Chip, ChipGroup, HoverCard, SegmentedControl, type Segment } from "@/components/ui";
 import { SampleTrajectorySeries } from "@/components/dashboard/samples/SampleTrajectory";
 
@@ -22,10 +16,12 @@ const LOAD_MODES: readonly Segment<LoadMode>[] = [
 
 export function SampleSetControl({
   rounds,
+  coverage,
   overlap,
   unit,
 }: {
   rounds: ServedRound[];
+  coverage: SampleCoverage | null;
   overlap: OverlapReading | null;
   unit: MeasuredUnit;
 }) {
@@ -33,24 +29,22 @@ export function SampleSetControl({
   const [detailOpen, setDetailOpen] = useState(false);
   const [load, setLoad] = useState<LoadMode>("measured");
 
-  if (sampleSet == null) return null;
+  if (sampleSet == null || coverage == null) return null;
 
-  const universe = measuredUniverse(rounds);
+  const universe = coverage.samples.map((s) => s.sample_id);
   const roundSets = roundMeasuredSets(rounds);
   const inSet = new Set(sampleSet);
-  const coverage = roundsCoveringSample(rounds);
-  const fullyCovered = roundSets.length;
+  const of = coverage.measuring_rounds;
   const shared = new Set(overlap?.positions ?? []);
 
   return (
     <div className="ss-control">
       <div className="ss-strip">
-        {universe.map((sid) => {
+        {coverage.samples.map(({ sample_id: sid, rounds: seen }) => {
           const on = inSet.has(sid);
-          const seen = coverage.get(sid) ?? 0;
-          const everywhere = seen >= fullyCovered && fullyCovered > 0;
+          const everywhere = seen === of;
           const note =
-            `Measured in ${seen}/${fullyCovered} rounds` +
+            `Measured in ${seen}/${of} rounds` +
             (everywhere
               ? " — every bar can be read on it."
               : " — a bar for a round that never bought it is blank, not zero.") +

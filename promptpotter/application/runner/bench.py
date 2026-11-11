@@ -76,6 +76,7 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.arms import PointContext
+    from promptpotter.domain.campaign import CampaignRefusal
     from promptpotter.domain.results import RoundOutcome, RoundResult
     from promptpotter.domain.scoring import CellSheet, Scorer
     from promptpotter.domain.search_point import JobSearchPoint
@@ -95,6 +96,8 @@ class BenchLine:
     hop: CycleHop
     on_line: bool
     inner: bool
+    # The campaign's own refusal (`admission.py::campaign_refusal`): its pass is refused with it.
+    refused: CampaignRefusal | None
     held_by: str | None
     trigger: BenchTrigger
     held_out: int
@@ -272,6 +275,7 @@ def read_bench(
         bench_size=line.held_out if passes is None else len(passes.origin.sample_keys),
         on_line=line.on_line,
         inner=line.inner,
+        refused=line.refused,
         held_by=line.held_by,
         origin=None if graded is None else graded.origin.outcome,
         selected=None if selected is None else selected.outcome,
@@ -380,7 +384,7 @@ def _reads_before(session: Session) -> int:
     return bench_reads(
         session.store,
         bank=session.bank,
-        sample_keys=frozenset(s.key for s in session.state.scoring.require_partition().bench),
+        sample_keys=frozenset(s.key for s in session.state.scoring.partition.bench),
     )
 
 
@@ -425,7 +429,7 @@ async def _send_on_bench(
             subject=subject,
             arm=arm,
             sp_hash=search_point.sp_hash(session.pipeline_schema),
-            rows=len(session.state.scoring.require_partition().bench),
+            rows=len(session.state.scoring.partition.bench),
             strategy=None,
         ),
     )
@@ -440,7 +444,7 @@ async def _send_on_bench(
         return await _pass_on_bench(session, search_point, arm=arm, reads_before=reads_before), None
     except (KeyboardInterrupt, asyncio.CancelledError, *RUN_STOPS) as stopping:
         # Every run stop banks the pass as stopped, on the cells its walk filed before it (bl3.B4).
-        bench = list(session.state.scoring.require_partition().bench)
+        bench = list(session.state.scoring.partition.bench)
         held = reread_cells(search_point, bench, session, label=MeasurementRole.BENCH)
         stopped = _bench_pass(
             session,
@@ -466,7 +470,7 @@ async def _pass_on_bench(
 ) -> VerificationPass:
     scored = await score_search_point(
         search_point,
-        list(session.state.scoring.require_partition().bench),
+        list(session.state.scoring.partition.bench),
         session,
         label=MeasurementRole.BENCH,
         measured=MeasuredPass(arm.key, MeasurementRole.BENCH),
@@ -499,7 +503,7 @@ def _bench_pass(
     stop: PassStop | None,
     reads_before: int,
 ) -> VerificationPass:
-    bench = session.state.scoring.require_partition().bench
+    bench = session.state.scoring.partition.bench
     return VerificationPass(
         kind="bench",
         arm=arm,
@@ -507,7 +511,7 @@ def _bench_pass(
         cells=cells,
         sample_keys=[s.key for s in bench],
         stop=stop,
-        scorer_id=session.state.scoring.require_scorer().id,
+        scorer_id=session.state.scoring.scorer.id,
         strategy=None,
         seed=None,
         reads_before=reads_before,
@@ -521,7 +525,7 @@ def declare_bench(cb: RunCallbacks, score: BenchScore) -> BenchScore:
 
 
 def _tolerance(session: Session) -> int:
-    split = session.state.scoring.require_partition().split
+    split = session.state.scoring.partition.split
     return split.tolerance if split is not None else 0
 
 
@@ -535,9 +539,7 @@ def graded(
 ) -> None:
     """The one write a line's passes are folded from: a pass no call here follows is lost with the process."""
     tolerance = _tolerance(session)
-    read = _read_pass(
-        session.store, bench_pass, session.state.scoring.require_scorer(), tolerance=tolerance
-    )
+    read = _read_pass(session.store, bench_pass, session.state.scoring.scorer, tolerance=tolerance)
     cb.on_phase(
         CampaignPhase.BENCH,
         "graded",
@@ -597,7 +599,7 @@ def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
     if not costs:
         return
     # One cell on top of the mean: the last row is admitted at the dearest bill, never the average.
-    usd = len(session.state.scoring.require_partition().bench) * fmean(costs) + max(costs)
+    usd = len(session.state.scoring.partition.bench) * fmean(costs) + max(costs)
     if usd > book.set_aside_usd:
         book.set_aside(usd, round(book.set_aside_tokens * usd / book.set_aside_usd))
 
@@ -621,7 +623,7 @@ async def bench_selection(
     selected_hash = selected_sp.sp_hash(session.pipeline_schema)
     held = banked.pass_of(head.individual.id)
     if held is not None and held.answers(
-        selected_hash, origin.sample_keys, session.state.scoring.require_scorer().id
+        selected_hash, origin.sample_keys, session.state.scoring.scorer.id
     ):
         return banked
     selected, stop = await _send_on_bench(

@@ -48,7 +48,7 @@ def build_cycle_result(
     spent = 0
     round_budget: int | None = None
     if cycle is not None:
-        scorer = session.state.scoring.require_scorer()
+        scorer = session.state.scoring.scorer
         spans = line_spans(session.store, scorer, session.hop)
         spent = sum(len(span.own) for span in spans)
         bench_origin, bench_levels = line_bench_series(
@@ -194,7 +194,7 @@ def _finalize_run(
                     if (origin := cycle_result.origin) is None or origin.composite is None
                     else origin.composite.value
                 ),
-                scorer_id=session.state.scoring.require_scorer().id,
+                scorer_id=session.state.scoring.scorer.id,
                 mode="diag" if diag else "full",
                 result_round=cycle_result.result_round,
                 result_prompt_fields=cycle_result.result_prompt_fields,

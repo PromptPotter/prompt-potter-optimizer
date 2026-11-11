@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import selectors
+import shutil
 import time
 from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from dataclasses import replace
@@ -11,11 +12,21 @@ from pathlib import Path
 from types import EllipsisType
 from typing import Any, cast
 
-from offline_world import FakeBackend
+from offline_world import FakeBackend, Router
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import DifficultyView
+from promptpotter.application.datasets.authored import dataset_campaign_block
+from promptpotter.application.datasets.loaders import definition_source
+from promptpotter.application.embedded_run import enter
+from promptpotter.application.initialization.scoring_scope import session_scope
 from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
+from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
+from promptpotter.application.jobs.launcher.admission import slotless_share
+from promptpotter.application.jobs.mint import declare, fresh_campaign_id, mint_framed_cycle
+from promptpotter.application.jobs.quota import land_job, sends_on
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers.nodes import ReadArm, RoundContext, SliceMap
@@ -27,6 +38,7 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
 )
 from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
 from promptpotter.application.runner.inner.tasks import (
@@ -34,8 +46,15 @@ from promptpotter.application.runner.inner.tasks import (
     InnerCells,
     InnerTaskSpec,
 )
+from promptpotter.application.runner.open_cycle import (
+    close_init,
+    open_cycle,
+    open_launch,
+    start_launch,
+)
 from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.paired import MemberRows
+from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector, cell_envelope_of
 from promptpotter.connectors.termnorm import termnorm_wire_adapter
@@ -65,7 +84,7 @@ from promptpotter.domain.bench import (
     bench_status,
     partition_bank,
 )
-from promptpotter.domain.campaign import Campaign, Optimize, Purpose
+from promptpotter.domain.campaign import Campaign, Optimize, Purpose, run_clamp
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -75,6 +94,7 @@ from promptpotter.domain.campaign_config import (
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
@@ -109,6 +129,7 @@ from promptpotter.domain.ruler import (
     anchor_id_of,
     flat_ruler_id,
 )
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     PipelineRead,
     RunPhaseRecord,
@@ -119,7 +140,7 @@ from promptpotter.domain.run_standing import LineOutlay, RunStanding
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer, WalkedCell
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.spend import Budget, CeilingMeter, SpendBucket, SpendRollup
+from promptpotter.domain.spend import Budget, CeilingMeter, HeldBudget, SpendBucket, SpendRollup
 from promptpotter.domain.verification import BenchPasses, VerificationPass
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
@@ -128,13 +149,19 @@ from promptpotter.infrastructure.llm.spend_book import Hold, SpendBook
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import hold_cycle
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
-from promptpotter.infrastructure.store.io import write_json
+from promptpotter.infrastructure.store.dataset_access import (
+    DEFINITION_FILE,
+    ResolvedDataset,
+    install_dataset,
+    resolve_dataset,
+)
+from promptpotter.infrastructure.store.io import write_json, write_yaml
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir, sandbox_owner_path
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive, config_key
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.identity import IdentityContext, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
+from promptpotter.shared.run_scope import scoped
 
 
 class _SpentWaits(selectors.DefaultSelector):
@@ -431,7 +458,7 @@ def loop_session(
     dataset: ResolvedDataset | None = None,
     dataset_name: str | None = None,
 ) -> Session:
-    return Session(
+    session = Session(
         store=stores,
         backend_client=backend_client(
             stores.jobs_dir, max_cells_in_flight=1, cancel_stops_billing=True, holds_own_sends=True
@@ -447,11 +474,18 @@ def loop_session(
         cycle_id="" if hop is None else hop.cycle_id,
         drawn=None if hop is None else partition,
         state=LaunchState(
-            scoring=ScorerSetup(scorer=scorer, partition=partition),
             source=RunSource.OPTIMIZATION_LOOP,
             control=RunControl() if control is None else control,
         ),
     )
+    session.state.scoring = ScorerSetup(
+        scorer=scorer or scorer_of(),
+        display_metric="accuracy",
+        partition=partition or BankPartition(None, tuple(samples), (), ()),
+        degradation_checks=(),
+        judges=(),
+    )
+    return session
 
 
 PROMPT_INFO = NodePromptInfo(fields=PROMPT_FIELDS)
@@ -493,6 +527,7 @@ def seat(
         {
             "optimization": {"degradation_threshold": 0.0, **(optimization or {})},
             "dataset_split": {"bench": bench, "demo": demo},
+            "scoring": "label_match(predicted, ground_truth)",
         }
     )
     hop = hop or CycleHop(campaign_id="seats", cycle_id=f"seat{next(_SEATS)}")
@@ -515,6 +550,7 @@ def seat(
             optimizer=selected,
             slices=SliceMap(selected.slices),
             difficulty=DifficultyView.open(session, config, origin="origin"),
+            survey=CampaignSurvey(stores.campaigns),
             framing=framing,
         )
     else:
@@ -533,8 +569,111 @@ def seat(
             session=session,
             config=config,
             optimizer=selected,
+            survey=CampaignSurvey(stores.campaigns),
         )
     return RoundContext(seated, round_num, callbacks=RunCallbacks(ledger))
+
+
+LAUNCHED_DATASET = "justlogic/d234"
+
+
+async def run_init_round(
+    stores: Stores,
+    world: Router,
+    bank: Sequence[Sample],
+    *,
+    round_num: int = 1,
+    optimization: dict[str, Any] | None = None,
+    split: dict[str, int] | None = None,
+) -> RoundContext:
+    """Round *round_num* of a cycle run init opened, as every door opens one: the offline *world*
+    answers *bank*'s origin walk and an empty price list, admission holds the budget, the mint
+    declares the campaign, unframed. A sync journey runs it on `jumping_clock`."""
+    world.backend.truth |= {s.query: s.ground_truth for s in bank}
+    if world.rates is None:
+        world.rates = {}
+    raw = dict(dataset_campaign_block(install_dataset(install_datasets_root(), LAUNCHED_DATASET)))
+    held = raw["optimization"]
+    if "optimizer" in (optimization or {}):
+        # The template's node overlay is written for the optimizer it selects, and only that one.
+        held.pop("nodes", None)
+    raw |= {
+        "optimization": held | {"budget": {"usd": 1000.0}} | (optimization or {}),
+        "dataset_split": split or {"bench": 0, "demo": 0},
+        "task_framing": "off",
+    }
+    config = CampaignConfig.model_validate(raw)
+    # The definition's chain, root-down: the defaults, the family, the leaf.
+    family = LAUNCHED_DATASET.split("/")[0]
+    shutil.copytree(
+        install_datasets_root() / family, stores.install_datasets_root / family, dirs_exist_ok=True
+    )
+    shutil.copy(install_datasets_root() / "defaults.yaml", stores.install_datasets_root)
+    # The bank as the cut of the definition's own `source:`: no fetch reaches the hub.
+    source = definition_source(resolve_dataset(stores, LAUNCHED_DATASET))
+    assert source is not None, f"{LAUNCHED_DATASET} names a source"
+    stores.tenant_datasets.record_cut(source.identity, Bank.of(bank))
+    session = await init_services(
+        dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=enter(stores)
+    )
+    declaration = declare(session, config, purpose=Optimize())
+    opened: list[RoundContext] = []
+
+    async def run(held: HeldBudget) -> tuple[None, CycleResult]:
+        minted = await mint_framed_cycle(
+            session,
+            declaration,
+            session.bank.samples,
+            campaign_id=fresh_campaign_id(session),
+            task_text=None,
+        )
+        running, cycle_config = minted.session, minted.cycle
+        land_job(stores, JobRegistry.attach(stores.jobs_dir), held.job_id, running.hop, held.share)
+        observers = build_run_observers(session=running, campaign_config=cycle_config.config)
+        start_launch(running)
+        determinism = cycle_config.config.optimization.determinism
+        try:
+            with (
+                at_round(0),
+                scoped(
+                    ledger=observers.callbacks.ledger,
+                    optimizer=minted.optimizer,
+                    determinism=run_clamp(determinism, running.purpose),
+                ),
+                session_scope(running),
+            ):
+                prep = await open_launch(
+                    list(running.bank.samples),
+                    cycle_config,
+                    session=running,
+                    observers=observers,
+                    budget=held,
+                )
+                cycle, _ = await open_cycle(
+                    prep, session=running, cb=observers.callbacks, mode=RunMode()
+                )
+                close_init(cycle, observers.callbacks)
+        finally:
+            observers.release()
+        opened.append(RoundContext(cycle, round_num, callbacks=RunCallbacks(cycle_ledger(cycle))))
+        return None, cycle_result([], None, [], cost=0.0)
+
+    await slotless_share(
+        config,
+        stores=stores,
+        holder=EmbeddedRun(session.measured_dataset),
+        hop=None,
+        requested=Budget(),
+        step_rounds=None,
+        sends=sends_on(stores, config, declaration.environment.connector),
+        run=run,
+    )
+    (ctx,) = opened
+    return ctx
+
+
+def cycle_ledger(cycle: Cycle) -> CycleEventLog:
+    return CycleEventLog.open(CycleDir(cycle.session.store.campaigns.cycle_dir(cycle.session.hop)))
 
 
 def set_cycle(
@@ -582,6 +721,15 @@ def minted_campaign(
             bench_defaults_pin=bench_defaults_pin(),
         ),
         **fields,
+    )
+
+
+def minted_dataset(stores: Stores, campaign: Campaign) -> None:
+    """The definition *campaign* was minted from, naming the connector it froze: every run and
+    pass on it reads it first (`admission.py::refuse_campaign`)."""
+    write_yaml(
+        stores.tenant_datasets.dataset_dir(campaign.dataset_name) / DEFINITION_FILE,
+        {"pipeline": {"backend_type": campaign.connector}},
     )
 
 
@@ -694,23 +842,26 @@ def inner_sandbox(stores: Stores, owner_campaign_id: str, owner_cycle_id: str) -
     return sandbox
 
 
-def inner_cells(*optimizers: str) -> InnerCells:
-    """One seat per named manifest, on a dataset of its own, so each cell runs its own optimizer."""
+def inner_cells(*optimizers: str, dataset: str | None = None) -> InnerCells:
+    """One seat per named manifest, on a dataset of its own, so each cell runs its own optimizer;
+    a lone seat runs on *dataset* where one is named."""
+    assert dataset is None or len(optimizers) == 1, "two seats never share a dataset"
+    on = {name: dataset or f"{name}ds" for name in optimizers}
     by_dataset: dict[str, InnerCell] = {}
     specs: dict[str, InnerTaskSpec] = {}
     for name in optimizers:
         selected = select_optimizer(OptimizerChoice(optimizer=name))
         treatment = selected.treatment(frozenset(Presumption), PackShelf(account=None)).digest
-        by_dataset[f"{name}ds"] = InnerCell({}, None, selected, treatment)
+        by_dataset[on[name]] = InnerCell({}, None, selected, treatment)
         specs[name] = InnerTaskSpec(
-            inner_dataset=f"{name}ds",
+            inner_dataset=on[name],
             optimizer_treatment=treatment,
             run_seed=0,
             n_samples=1,
             n_samples_bench=1,
             n_rounds=1,
         )
-    cells = tuple(Seat(kind="seat", id=name, inner_dataset=f"{name}ds") for name in optimizers)
+    cells = tuple(Seat(kind="seat", id=name, inner_dataset=on[name]) for name in optimizers)
     return InnerCells(cells=cells, by_dataset=by_dataset, specs=specs)
 
 
@@ -986,6 +1137,7 @@ def bench_line(
         "hop": CycleHop(campaign_id="camp", cycle_id="cyc"),
         "on_line": True,
         "inner": False,
+        "refused": None,
         "held_by": None,
         "trigger": "at_end",
         "held_out": 4,
@@ -1086,6 +1238,7 @@ def cycle_result(
             bench_size=0,
             on_line=True,
             inner=False,
+            refused=None,
             held_by=None,
             origin=None,
             selected=None,

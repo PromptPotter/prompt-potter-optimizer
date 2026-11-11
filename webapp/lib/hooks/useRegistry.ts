@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { activeRead, hierarchyRead } from "@/lib/api/reads";
 import type {
   ActiveSessionResponse,
+  CycleHop,
   HierarchyCampaign,
   HierarchyCourse,
   HierarchyEntry,
@@ -74,22 +75,19 @@ export function useCampaign(address: string | null): HierarchyCampaign | null {
   return address === null ? null : campaignAt(byAddress, address);
 }
 
-// The followed run's cycle (`cycle_addressing.py::followed_cycle`), under the served names: both
-// ids, or none.
-export type ActiveCycle = { [K in "campaign_id" | "cycle_id"]: NonNullable<ActiveSessionResponse[K]> };
-
 interface ActivePointer {
   read: ReadResult<ActiveSessionResponse>;
-  // Null while none is: "no active session" is null ids on a 200
+  // Null while none is: "no active session" is a null `hop` on a 200
   // (`cycle_addressing.py::active_session`), never a failure.
-  active: ActiveCycle | null;
+  active: CycleHop | null;
 }
 
 export function useActivePointer(): ActivePointer {
   const read = useRead(activeRead());
-  const body = shownData(read);
-  const campaignId = body?.campaign_id ?? null;
-  const cycleId = body?.cycle_id ?? null;
+  const hop = shownData(read)?.hop ?? null;
+  const campaignId = hop?.campaign_id ?? null;
+  const cycleId = hop?.cycle_id ?? null;
+  // Keyed on the ids: a re-read's fresh body is the same hop.
   const active = useMemo(
     () => (campaignId && cycleId ? { campaign_id: campaignId, cycle_id: cycleId } : null),
     [campaignId, cycleId],

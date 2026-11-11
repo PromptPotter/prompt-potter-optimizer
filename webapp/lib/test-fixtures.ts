@@ -19,16 +19,15 @@ import type {
   HierarchyStep,
   HierarchyTag,
   LiveCandidate,
-  Measured,
   MeteredSpend,
   NodeConfigParam,
-  NodePrompt,
   OverlapReading,
   PairedReading,
   ProducerReading,
   ProviderRoute,
   RoundHealth,
   RoundView,
+  ServedArm,
   RunStanding,
   ServedDashboard,
   ServedRound,
@@ -475,51 +474,29 @@ export function liveRow(over: Partial<LiveCandidate> = {}): LiveCandidate {
   };
 }
 
-export function measuredArm({
-  prompts = {},
-  ...over
-}: Partial<Measured> & { prompts?: Record<string, NodePrompt> } = {}): Measured {
-  return {
-    role: "panel",
-    slot: null,
-    individual: {
-      prompts,
-      pipeline_params: {},
-      lineage: { parent_ids: [], changes_description: "", variations: [], evidence_grounding: null },
-    },
-    overlay: {},
-    validation_failures: [],
-    sp_hash: "",
-    resolved_params: {},
-    expected_samples: 0,
-    state: "measured",
-    locked_in: null,
-    ...over,
-  };
-}
-
 export function roundDoc(over: Partial<RoundView> = {}): RoundView {
   return {
     round: 0,
-    arms: {},
     election: null,
-    scoreboard: [],
+    candidates: [],
     headline: null,
     ...over,
   };
 }
 
-// The scoreboard names each arm, in the order given, as the wire keys `arms` by it.
+// A filed round's arms, in the order given, as the round read serves them.
 export function roundOfArms(
   round: number,
-  arms: { key: string; label: string; arm: Measured }[],
+  arms: ({ key: string; label: string } & Partial<Omit<ServedArm, "reading">>)[],
 ): RoundView {
   return roundDoc({
     round,
-    arms: Object.fromEntries(arms.map(({ key, arm }) => [key, arm])),
-    scoreboard: arms.map(({ key, label }, i) => ({
-      rank: i + 1,
+    candidates: arms.map(({ key, label, ...over }) => ({
       reading: armReading({ arm: { round, label, key }, state: "measured" }),
+      prompts: {},
+      resolved_params: {},
+      validation_failures: [],
+      ...over,
     })),
   });
 }
@@ -538,6 +515,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     round: 0,
     measuring_arm: null,
     rounds: [],
+    sample_coverage: { measuring_rounds: 0, samples: [] },
     overlap_line_round: null,
     overlap_line_n: null,
     verification: [],
@@ -592,7 +570,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     current_round: currentRound(),
     observed: null,
     walk: null,
-    round_axis: { completed: [], live: null, position: null },
+    round_axis: { completed: [], live: null, position: null, unfiled: null },
     pause: null,
     said: null,
     ...over,

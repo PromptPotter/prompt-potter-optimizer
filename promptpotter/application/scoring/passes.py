@@ -15,7 +15,7 @@ from promptpotter.application.bench.difficulty import (
     ruler_clock,
     session_ruler_scope,
 )
-from promptpotter.application.initialization.loop_start import (
+from promptpotter.application.initialization.scoring_scope import (
     diagnostic_pass,
     diagnostic_trace,
     open_diagnostic,
@@ -313,7 +313,7 @@ async def verify_candidate(
         prior = stores.archive.measurements_for_config(predicate)
         measured_keys = {m.cell.sample_key for m in prior} & session.bank.slot_of.keys()
         # Search split only: `verify_on_saturation` runs inside the loop, which must decide on no bench row.
-        search = session.state.scoring.require_partition().search
+        search = session.state.scoring.partition.search
         unmeasured = [s for s in search if s.key not in measured_keys]
         round_cells = select_optimizer(campaign_config.optimization).round_cells(len(search))
         if not unmeasured:
@@ -344,7 +344,7 @@ async def verify_candidate(
             session_ruler_scope(session),
             ruler_clock(session),
             {sp_hash},
-            objective_id=session.state.scoring.require_scorer().id,
+            objective_id=session.state.scoring.scorer.id,
             n_min=campaign_config.optimization.elimination_n_min,
             enable_2pl=campaign_config.optimization.enable_2pl_graduation,
         ).ruler
@@ -405,12 +405,12 @@ async def verify_candidate(
                 cells=cells,
                 sample_keys=[s.key for s in picked],
                 stop=None,
-                scorer_id=session.state.scoring.require_scorer().id,
+                scorer_id=session.state.scoring.scorer.id,
                 strategy=strategy,
                 seed=seed,
                 reads_before=None,
             )
-            reading = read_verify(stores, hop, banked, session.state.scoring.require_scorer())
+            reading = read_verify(stores, hop, banked, session.state.scoring.scorer)
             if reading.fresh.accuracy is None:
                 raise DiagnosticError(
                     f"the fresh cells of {label!r} produced no scoreable sample — there is "
@@ -531,7 +531,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
             raise DiagnosticError(
                 f"none of round 0's {len(sample_keys)} scored sample(s) is in the bank the cycle drew."
             )
-        scorer = session.state.scoring.require_scorer()
+        scorer = session.state.scoring.scorer
         kept = {s.key for s in scoring_set}
         # Re-folded on exactly the rows the band re-scores, never round 0's whole fold (bl3.B2).
         recorded = own_level(
@@ -624,7 +624,7 @@ class BenchTriggerError(ConflictError):
 
 
 async def grade_line_bench(*, stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
-    """Admitted exactly where the served status says so (``BenchStatus.can_grade``); *acting* is
+    """Admitted exactly where the served status says so (``BenchStatus.can_run``); *acting* is
     the command it grades for, whose `cancel` stops it."""
     async with paid_pass(
         stores=stores,

@@ -12,7 +12,7 @@ from promptpotter.application.cycle_addressing import (
     resolve_cycle_id,
 )
 from promptpotter.application.datasets.loaders import no_dataset_hint
-from promptpotter.application.initialization.loop_start import open_diagnostic
+from promptpotter.application.initialization.scoring_scope import open_diagnostic
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource

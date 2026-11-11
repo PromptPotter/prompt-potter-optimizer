@@ -14,16 +14,13 @@ from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.free_tier import free_fence
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.coupon import Send
-from promptpotter.application.jobs.launcher.admission import RunStart, admit_and_hold
 from promptpotter.application.jobs.launcher.mint_and_start import (
     assert_origin_ready,
     commit_upload_definition,
-    land_and_claim,
     persist_origin_candidate_library,
 )
-from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
-    MintedCycle,
+    OpenedCycle,
     declare,
     fresh_campaign_id,
     mint,
@@ -88,6 +85,22 @@ class CheckinStart:
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return draft_sends(stores, owned_draft(stores, self.claim.draft_id))
+
+    async def open(self, stores: Stores) -> OpenedCycle:
+        """Nothing before the slot is HELD touches the draft: it lands, mints and closes here."""
+        draft_id = self.claim.draft_id
+        served = await draft_served(stores, owned_draft(stores, draft_id))
+        opened = await open_checkin(stores, draft_id, served, overlays=[{}])
+        session = opened.session
+        plan = resolve_cycle_plan(
+            session,
+            declare(session, opened.declared, purpose=Optimize()),
+            session.bank.samples,
+            origin_override=opened.origin_override,
+        )
+        minted = mint(plan, campaign_id=fresh_campaign_id(session), adopting=draft_id)
+        stores.drafts.close(draft_id)
+        return minted
 
 
 def _land_draft(
@@ -166,38 +179,3 @@ async def open_checkin(
         served=served,
     )
     return OpenedCheckin(draft, session, pipeline.config, origin_override)
-
-
-async def _commit_checkin(stores: Stores, request: CheckinStart) -> MintedCycle:
-    draft_id = request.claim.draft_id
-    served = await draft_served(stores, owned_draft(stores, draft_id))
-    opened = await open_checkin(stores, draft_id, served, overlays=[{}])
-    session = opened.session
-    plan = resolve_cycle_plan(
-        session,
-        declare(session, opened.declared, purpose=Optimize()),
-        session.bank.samples,
-        origin_override=opened.origin_override,
-    )
-    minted = mint(plan, campaign_id=fresh_campaign_id(session), adopting=draft_id)
-    stores.drafts.close(draft_id)
-    return minted
-
-
-async def hold_checkin_start(request: CheckinStart, start: RunStart) -> HeldRun:
-    """Nothing before the slot is HELD touches the draft, and the claim ends with this Start however it ends."""
-    hop: CycleHop | None = None
-    try:
-        held = await admit_and_hold(request, start)
-        minted = await _commit_checkin(start.stores, request)
-        hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
-        land_and_claim(start, hop, held)
-        logger.info(
-            "start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, start.job_id
-        )
-        return HeldRun.of(start, minted, held)
-    except BaseException as exc:
-        start.release(exc, stamps=hop)
-        raise
-    finally:
-        request.claim.release()

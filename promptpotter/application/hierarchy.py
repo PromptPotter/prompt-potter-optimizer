@@ -373,7 +373,7 @@ def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> li
         tags.extend(
             HierarchyTag(kind="vendor", value=v.vendor, label=v.vendor) for v in runs_with.vendors
         )
-    if campaign.lifecycle_status != "active":
+    if not campaign.active:
         status = campaign.lifecycle_status
         tags.append(
             HierarchyTag(

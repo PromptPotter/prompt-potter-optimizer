@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics, head_health
 from promptpotter.application.datasets.loaders import sample_dataset
+from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.nodes import ReadArm, SliceMap
@@ -144,6 +145,8 @@ class Cycle:
     optimizer: SelectedOptimizer
     slices: SliceMap
     difficulty: DifficultyView
+    # Read once at the cycle's open (`runner/open_cycle.py`): what every round's earned blocks mine.
+    survey: CampaignSurvey
     # By round, what each round not yet closed has produced, which its close banks (`close_state`).
     outputs: dict[int, dict[str, RoundOutput]] = field(default_factory=dict)
     _axes: AxisIndex | None = None
@@ -175,6 +178,7 @@ class Cycle:
         session: Session,
         config: CampaignConfig,
         optimizer: SelectedOptimizer,
+        survey: CampaignSurvey,
     ) -> Cycle:
         sp = session.points(framing).job(origin.individual)
         _assert_overlay_preserved(sp, session.pipeline_params)
@@ -183,6 +187,7 @@ class Cycle:
             config=config,
             optimizer=optimizer,
             slices=SliceMap(optimizer.slices),
+            survey=survey,
             # Hashed here because the parent advances with every round's head.
             difficulty=DifficultyView.open(
                 session, config, origin=sp.sp_hash(session.pipeline_schema)

@@ -273,7 +273,7 @@ def _banked_rounds(session: Session, hop: CycleHop) -> list[RoundResult]:
     # A run stopped before its origin closed has no round and may have no scorer either.
     if not session.store.campaigns.standing_rounds(hop, moment=None).rounds:
         return []
-    return closed_rounds(session.store, hop, scoring.require_scorer(), moment=None)
+    return closed_rounds(session.store, hop, scoring.scorer, moment=None)
 
 
 def _render_export(session: Session, config: CampaignConfig) -> None:
@@ -311,7 +311,7 @@ def _render_export(session: Session, config: CampaignConfig) -> None:
         level=series.reading(winner.round),
         schema=session.pipeline_schema,
         framing=campaign_framing(session.store, config, session.dataset),
-        demo=session.state.scoring.require_partition().demo,
+        demo=session.state.scoring.partition.demo,
         bench=bench,
     )
     store.write_export(hop, export)

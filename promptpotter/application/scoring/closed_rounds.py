@@ -166,7 +166,7 @@ class RoundFileProjection(Projection):
             own = scan_standing_rounds([LedgerSpan(self._ledger)]).rounds
             wanted |= {n for n in own if not self._layout.round_file(n).exists()}
             self._synced = True
-        scorer = self._state.scoring.require_scorer()
+        scorer = self._state.scoring.scorer
         for n in sorted(wanted):
             path = self._layout.round_file(n)
             try:

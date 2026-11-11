@@ -29,7 +29,7 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
   });
 
   const goneAddress = useWorkspace().goneAddress;
-  const addressGone = goneAddress !== null && goneAddress === key;
+  const addressGone = goneAddress?.cause === "gone" && goneAddress.address === key;
 
   useEffect(() => {
     const p = pathRef.current;

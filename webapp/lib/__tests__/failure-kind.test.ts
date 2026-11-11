@@ -77,7 +77,7 @@ describe("failureKind", () => {
     const gone = { kind: "gone" as const, message: "Not found." };
     const returning = /Returning to the active run/;
     expect(connectionSaid(gone, "pinned")?.detail).toMatch(returning);
-    expect(connectionSaid(null, "left")?.detail).toMatch(returning);
+    expect(connectionSaid(null, "gone")?.detail).toMatch(returning);
     const followed = connectionSaid(gone, "followed");
     expect(followed?.key).toBe("address_gone");
     expect(followed?.detail).not.toMatch(returning);

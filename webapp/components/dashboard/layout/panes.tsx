@@ -5,7 +5,7 @@ import { HEALTH_GRADE_INFO } from "@/lib/api/types";
 import { useViewedDashboard } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData } from "@/lib/hooks/useRead";
-import { useCandidatesState } from "@/lib/state/candidates";
+import { useViewMemory } from "@/lib/state/view-memory";
 import { usePickedCandidate } from "@/lib/hooks/usePickedCandidate";
 import { hasTag } from "@/lib/derivations";
 import { useEntry } from "@/lib/hooks/useRegistry";
@@ -71,8 +71,8 @@ export function LeaderPane() {
 
 export function CandidatesPane() {
   const picked = usePickedCandidate();
-  const { pickCandidate } = useWorkspace();
-  const { showForest } = useCandidatesState();
+  const { viewed, pickCandidate } = useWorkspace();
+  const { showForest } = useViewMemory().viewFor(viewed?.root.campaignId ?? null);
   return (
     <>
       <CandidatesCard />

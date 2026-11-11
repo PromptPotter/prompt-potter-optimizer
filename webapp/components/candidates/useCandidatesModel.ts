@@ -23,7 +23,7 @@ import {
 } from "@/lib/derivations";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
-import { useLineage } from "@/lib/hooks/useLineage";
+import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { useViewedCourse, useViewedLineage } from "@/lib/lineage";
 import type { CandidateBar } from "@/lib/types";
@@ -41,17 +41,13 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const { sampleSet, setSelectionForSampleSet } = useSelection();
   const comparing = useCompareSelection();
 
-  const {
-    showForest,
-    showOverlap: overlapPicked,
-    showCache,
-  } = useCandidatesState();
-  const electedMetric = dash.display_metric;
-  const metrics = useMetrics(cycleId, electedMetric);
+  const { showOverlap: overlapPicked, showCache } = useCandidatesState();
+  const displayMetric = dash.display_metric;
+  const metrics = useMetrics(cycleId, displayMetric);
   const overlay = useViewedLineage();
   const wonOnTheta = useViewedCourse()?.facts.elects_on === "ability";
   const { lens, setLens, maskActive, readUnder, scoringMaskActive } = overlay;
-  const { history, overlap, sampleUniverse, viewedNode, areCourses, views, floorPinned } =
+  const { history, overlap, coverage, sampleUniverse, viewedNode, areCourses, views, floorPinned } =
     useCandidateBars(overlay.index);
 
   const { open: maskOpen, mask } = useMaskState();
@@ -66,11 +62,12 @@ export function useCandidatesModel(dash: ServedDashboard) {
         })
       : null;
 
-  const { metric, forkedFrom, revealLane, setShowForest, totalDescendants } = useLineage({
+  const { metric, forkedFrom, revealLane, showForest, setShowForest, totalDescendants } =
+    useCampaignForest({
     campaignId,
     cycleId,
     path: viewedPath,
-    electedMetric,
+    displayMetric,
   });
 
   const [showTheta, setShowTheta] = useState(false);
@@ -164,9 +161,9 @@ export function useCandidatesModel(dash: ServedDashboard) {
       views,
       overlapBasis,
       unit,
-      electedMetric,
+      displayMetric,
     }),
-    [metrics, maskOpen, showCache, rung, views, overlapBasis, unit, electedMetric],
+    [metrics, maskOpen, showCache, rung, views, overlapBasis, unit, displayMetric],
   );
   const legend = useMemo(
     () => activeSeries(seriesCtx).filter((s) => s.metric == null),
@@ -194,8 +191,9 @@ export function useCandidatesModel(dash: ServedDashboard) {
     navigate,
     pickCandidate,
     history,
+    coverage,
     ability: history.at(-1)?.series_reading ?? null,
-    electedMetric,
+    displayMetric,
     wonOnTheta,
     views,
     areCourses,

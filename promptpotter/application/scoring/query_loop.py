@@ -167,7 +167,7 @@ class QueryLoopState:
 
     @property
     def scorer(self) -> Scorer:
-        return self.session.state.scoring.require_scorer()
+        return self.session.state.scoring.scorer
 
     def running(self, results: Sequence[GradedCell]) -> ScoreSummary:
         held = frozenset(cell.key for cell in self.held)

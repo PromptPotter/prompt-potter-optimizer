@@ -55,21 +55,13 @@ class ActiveSessionResponse(StrictModel):
     tenant_id: str = Field(
         description="Tenant the pointer belongs to — the caller's own, always known"
     )
-    campaign_id: str | None = Field(
-        description="Campaign of the run to follow; null when no session is active."
-    )
-    cycle_id: str | None = Field(
-        description="Cycle of the run to follow; null when no session is active."
+    hop: CycleHop | None = Field(
+        description="The cycle of the run to follow; null when no session is active."
     )
 
 
 def active_session(stores: Stores) -> ActiveSessionResponse:
-    hop = followed_cycle(stores)
-    return ActiveSessionResponse(
-        tenant_id=stores.tenant_id,
-        campaign_id=None if hop is None else hop.campaign_id,
-        cycle_id=None if hop is None else hop.cycle_id,
-    )
+    return ActiveSessionResponse(tenant_id=stores.tenant_id, hop=followed_cycle(stores))
 
 
 def holds_active_pointer(*, tenant: str | None) -> bool:

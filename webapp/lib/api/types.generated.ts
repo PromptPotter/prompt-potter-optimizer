@@ -196,10 +196,15 @@ export interface ActivityBucket {
 export interface ActiveSessionResponse {
   /** Tenant the pointer belongs to — the caller's own, always known */
   tenant_id: string;
-  /** Campaign of the run to follow; null when no session is active. */
-  campaign_id: string | null;
-  /** Cycle of the run to follow; null when no session is active. */
-  cycle_id: string | null;
+  /** The cycle of the run to follow; null when no session is active. */
+  hop: CycleHop | null;
+}
+
+/** One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle
+ * alone. */
+export interface CycleHop {
+  campaign_id: string;
+  cycle_id: string;
 }
 
 export interface MachineStatusResponse {
@@ -278,13 +283,6 @@ export interface CampaignLaunch {
 export interface ScoringPass {
   verb: 'bench' | 'noise-floor' | 'probe-reasoning' | 'seed-screen' | 'verify';
   kind: 'scoring_pass';
-}
-
-/** One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle
- * alone. */
-export interface CycleHop {
-  campaign_id: string;
-  cycle_id: string;
 }
 
 /** Always a launch: a scoring pass finding no slot is refused, never queued. */
@@ -948,9 +946,9 @@ export interface BenchStatus {
   trigger: 'manual' | 'at_end' | 'each_round';
   /** Whether `bench` / `grade-bench` is admitted now. Every entry point reads this
    * one answer. */
-  can_grade: boolean;
-  /** Why not, exactly where `can_grade` is false. */
-  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
+  can_run: boolean;
+  /** Why not, exactly where `can_run` is false. */
+  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
   /** Whether the grade control shows: admitted, or a pass still waited on. Never on
    * an inner run, whose line no command grades. */
   offered: boolean;
@@ -1621,6 +1619,7 @@ export interface ServedDashboard {
   backend_revision: BackendRevision | null;
   catch_up_log: CatchUpLogEntry[];
   current_round: CurrentRound;
+  sample_coverage: SampleCoverage;
   campaign_id: string;
   cycle_id: string;
   /** The cycle's phase, derived at the read (`derive_run_state`) — never the
@@ -1980,17 +1979,17 @@ export interface CurrentRound {
   racing: RacingBlock | null;
 }
 
-/** A candidate of the round in flight, with its searchpoint, sample tape and
- * rejection reason. */
+/** A candidate of the round in flight, with its sample tape beside its served
+ * arm. */
 export interface LiveCandidate {
   reading: ArmReading;
   /** `OptSearchPoint.prompts`; with the resolved params, what a steered fork seeds
    * from. Null until the candidate is announced. */
   prompts: Record<string, NodePrompt> | null;
   resolved_params: Record<string, unknown> | null;
+  validation_failures: ValidationFailure[];
   pipeline_overlay: Record<string, Record<string, unknown>> | null;
   samples: DashboardSample[];
-  validation_failures: ValidationFailure[];
   composite_fitness_formula_short: string | null;
 }
 
@@ -2003,6 +2002,44 @@ export interface NodePrompt {
    * pool — resolved to each row's query and ground truth only when the prompt
    * renders. */
   shots: string[];
+}
+
+/** An L1 output that broke a parse-time invariant, scoring its candidate a
+ * synthetic zero. */
+export interface ValidationFailure {
+  /** The parameter path that failed, ``{node_name}.{param}`` (e.g.
+   * ``llm_only.model``), or an axis on the generator's own output rather than
+   * a pipeline param: ``l1_generate.output`` (parse/shape failures) or
+   * ``variant`` (no-op / duplicate mutations). */
+  axis: string;
+  /** The offending value as rendered for the prompt; truncated to ≤300 chars for
+   * raw LLM output. Always a string — original type is encoded into the
+   * rendering when relevant. */
+  value: string;
+  /** The accept-set the validator checked against. Empty list when the failure is
+   * mode-based (parse error, forbidden axis) rather than membership-based. */
+  allowed: string[];
+  /** Reason code that steers L2's healing direction. One of: ``forbidden_axis``
+   * (operator-locked param touched), ``type_mismatch`` (wrong declared type),
+   * ``not_in_available_models`` / ``not_in_param_allowed_values`` /
+   * ``not_accepted_by_model`` (value outside the axis's resolved space — the
+   * last where the node declared it and the chosen model refuses it, so the
+   * healing move is the model, not the value),
+   * ``reproposes_known_failing_config`` (matches a prior
+   * ``RuntimeFailure.observed_config`` row), ``l1_provider_empty_response`` /
+   * ``optimizer_prompt_parse_failure`` / ``optimizer_prompt_unexpected_type``
+   * (generator-side failure), ``steers_inner_stopping`` (an L4 override
+   * telling the inner loop when to STOP rather than how to search — it edits
+   * the frame `held_out_lift` averages over instead of the search it
+   * measures), ``steers_across_seeds`` (an L4 override making an inner node
+   * reason over the seed panel, which exists only one level up — the rule
+   * renders empty where it lands), ``guts_inherited_contract`` (an L4
+   * override replacing a long prompt field with a fraction of its length,
+   * deleting contracts the parent carried in plain prose), ``no_op_variant``
+   * / ``duplicate_variant`` (invariant-detect), ``hallucinated_node`` (named
+   * a node absent from the schema — NON-fatal: the phantom edit is stripped,
+   * the candidate still scores; routed as signal, not a synthetic-0). */
+  reason: string;
 }
 
 /** One scored sample as `dashboard.json` serves it, display-trimmed and one shape
@@ -2054,44 +2091,6 @@ export interface DashboardSample {
   cache_read_tokens: number | null;
 }
 
-/** An L1 output that broke a parse-time invariant, scoring its candidate a
- * synthetic zero. */
-export interface ValidationFailure {
-  /** The parameter path that failed, ``{node_name}.{param}`` (e.g.
-   * ``llm_only.model``), or an axis on the generator's own output rather than
-   * a pipeline param: ``l1_generate.output`` (parse/shape failures) or
-   * ``variant`` (no-op / duplicate mutations). */
-  axis: string;
-  /** The offending value as rendered for the prompt; truncated to ≤300 chars for
-   * raw LLM output. Always a string — original type is encoded into the
-   * rendering when relevant. */
-  value: string;
-  /** The accept-set the validator checked against. Empty list when the failure is
-   * mode-based (parse error, forbidden axis) rather than membership-based. */
-  allowed: string[];
-  /** Reason code that steers L2's healing direction. One of: ``forbidden_axis``
-   * (operator-locked param touched), ``type_mismatch`` (wrong declared type),
-   * ``not_in_available_models`` / ``not_in_param_allowed_values`` /
-   * ``not_accepted_by_model`` (value outside the axis's resolved space — the
-   * last where the node declared it and the chosen model refuses it, so the
-   * healing move is the model, not the value),
-   * ``reproposes_known_failing_config`` (matches a prior
-   * ``RuntimeFailure.observed_config`` row), ``l1_provider_empty_response`` /
-   * ``optimizer_prompt_parse_failure`` / ``optimizer_prompt_unexpected_type``
-   * (generator-side failure), ``steers_inner_stopping`` (an L4 override
-   * telling the inner loop when to STOP rather than how to search — it edits
-   * the frame `held_out_lift` averages over instead of the search it
-   * measures), ``steers_across_seeds`` (an L4 override making an inner node
-   * reason over the seed panel, which exists only one level up — the rule
-   * renders empty where it lands), ``guts_inherited_contract`` (an L4
-   * override replacing a long prompt field with a fraction of its length,
-   * deleting contracts the parent carried in plain prose), ``no_op_variant``
-   * / ``duplicate_variant`` (invariant-detect), ``hallucinated_node`` (named
-   * a node absent from the schema — NON-fatal: the phantom edit is stripped,
-   * the candidate still scores; routed as signal, not a synthetic-0). */
-  reason: string;
-}
-
 /** One optimizer node's call in one round: what it was asked, what it answered
  * and what that cost. */
 export interface NodeBlock {
@@ -2138,6 +2137,20 @@ export interface RacingBlock {
   current_id: string;
   n_samples: number;
   top: Record<string, unknown>[];
+}
+
+/** Every sample a closed round measured, in id order: the set a sample-set picker
+ * offers. */
+export interface SampleCoverage {
+  /** The closed rounds that measured any sample */
+  measuring_rounds: number;
+  samples: SampleRounds[];
+}
+
+export interface SampleRounds {
+  sample_id: number;
+  /** How many of the measuring rounds measured it */
+  rounds: number;
 }
 
 /** One cycle's producer as served: its state and its two server-measured clocks.
@@ -2242,6 +2255,8 @@ export interface RoundAxis {
   /** The round the run stands at: `live`, else the newest of `completed`. Null
    * before any round measured. */
   position: number | null;
+  /** `current_round` while no round file holds it (its arms are its candidates). */
+  unfiled: number | null;
 }
 
 /** What a cycle with no dashboard state serves, at 200 rather than 404 so a
@@ -2265,183 +2280,12 @@ export interface WarmingDashboard {
  * beside them — folds, diagnostics, optimizer state — stays on the ledger. */
 export interface RoundView {
   round: number;
-  arms: Record<string, Proposed | Measuring | Cut | Measured>;
   election: Election | null;
-  scoreboard: ScoreboardRow[];
+  /** Every arm the round read, in rank order. */
+  candidates: ServedArm[];
   /** The arm the round ENDED on (`election.ended_on`), read: the headline's numbers
    * are its own. Null on a diag round, which elects nothing. */
   headline: ArmReading | null;
-}
-
-export interface Proposed {
-  role: 'origin' | 'panel' | 'parent';
-  slot: ArmSlot | null;
-  individual: OptSearchPoint;
-  overlay: Record<string, Record<string, unknown>>;
-  validation_failures: ValidationFailure[];
-  state: 'proposed';
-}
-
-/** Where an individual was walked as an arm, its latest walk for a re-read: the
- * ``idx``-th of its round's ``total``. */
-export interface ArmSlot {
-  round: number;
-  idx: number;
-  total: number;
-}
-
-/** The individual: a value per locus of the roster — prompt fields and shots per
- * prompt node, node config — plus its lineage. */
-export interface OptSearchPoint {
-  /** Per prompt node, the loci it sets there; a node it sets nothing on is absent. */
-  prompts: Record<string, NodePrompt>;
-  /** Its node configuration, resolved: the active steps named, the output contract
-   * folded, no rendered prompt. `configured` is the one writer. */
-  pipeline_params: Record<string, unknown>;
-  lineage: IndividualLineage;
-}
-
-/** The provenance of one mint: its edges, variations and words; it names no
- * individual. */
-export interface IndividualLineage {
-  /** Every individual this one derives from — one for a mutation, several for a
-   * crossover, its main first and its donor second; empty at the origin. A
-   * tree view hangs it under `parent_ids[0]`. */
-  parent_ids: string[];
-  changes_description: string;
-  /** Every variation node that wrote it, in the order they ran; empty for an
-   * individual the bench minted as an origin. A later node appends its own
-   * and rewrites none. */
-  variations: Variation[];
-  evidence_grounding: EvidenceGrounding | null;
-}
-
-/** The panel field and citation L1 declares to justify a mutation. */
-export interface EvidenceGrounding {
-  /** A citable panel named in the prompt, or stall_exploration. */
-  field: string;
-  /** Short string naming the panel entry cited. */
-  citation: string;
-}
-
-/** What is known as the walk opens; its cells and their fold land on their own
- * records. */
-export interface Measuring {
-  role: 'origin' | 'panel' | 'parent';
-  slot: ArmSlot | null;
-  individual: OptSearchPoint;
-  overlay: Record<string, Record<string, unknown>>;
-  validation_failures: ValidationFailure[];
-  sp_hash: string;
-  resolved_params: Record<string, unknown>;
-  expected_samples: number;
-  state: 'measuring';
-  sample_order: number[];
-  n_priors: number;
-  block: Record<string, number> | null;
-}
-
-/** Stopped short of its panel against it. */
-export interface Cut {
-  role: 'origin' | 'panel' | 'parent';
-  slot: ArmSlot | null;
-  individual: OptSearchPoint;
-  overlay: Record<string, Record<string, unknown>>;
-  validation_failures: ValidationFailure[];
-  sp_hash: string;
-  resolved_params: Record<string, unknown>;
-  expected_samples: number;
-  state: 'cut';
-  reason: Eliminated | Broken | Invalid | Skipped;
-}
-
-export interface Eliminated {
-  kind: 'eliminated';
-  elimination: Elimination;
-}
-
-/** The eliminator's reading of a stop it made, for the arm or against it. */
-export interface Elimination {
-  reason: string;
-  context: Record<string, unknown>;
-}
-
-/** The bench's run-health rules stopped it. */
-export interface Broken {
-  kind: 'broken';
-  failure: RuntimeFailure;
-  degradation: DegradationContext;
-}
-
-/** One candidate's degradation evidence from its evaluation, beside a score that
- * stands. */
-export interface RuntimeFailure {
-  /** Failure family: ``degradation`` (mid-eval DegradationCheck fired on warning-
-   * rate) or ``scoring_error_abort`` (scoring raised mid-eval and the
-   * candidate was retired). */
-  source: string;
-  /** ``{node_name}:{warning_type}`` of the most frequent warning across the
-   * candidate's measurements; the prefix selects the node whose config is
-   * captured in ``observed_config``. */
-  dominant_warning: string;
-  /** The node whose config ``observed_config`` captures: the ``dominant_warning``
-   * prefix. ``None`` on a ``scoring_error_abort``, which names an error, not
-   * a node, and captures the whole config. */
-  node: string | null;
-  /** Fraction of scored samples that emitted any pipeline warning. */
-  degraded_rate: number;
-  /** Sample count with at least one warning. */
-  degraded_count: number;
-  /** Sample count actually measured for the candidate. */
-  total_scored: number;
-  /** Snapshot of the failing node's effective config — the (param, value) tuples
-   * the `l1_config_not_in_runtime_failures` validator scans on subsequent
-   * rounds to reject re-proposals. */
-  observed_config: Record<string, unknown>;
-  /** Round number that first recorded this failure (dedup key component). */
-  first_seen_round: number;
-  /** What the originating candidate changed; informational, not a join key. */
-  changes_description: string;
-  /** Who heals this runtime failure. Defaults to ``L1`` (a rate-based degradation
-   * L1 retunes the node config around); a deterministic-for-config break
-   * whose only fix is a locked surface (schema/model) is stamped ``OPERATOR``
-   * so it escalates instead of churning in-loop. */
-  owner: 'l1' | 'operator';
-}
-
-/** The bench's reading of a ``BROKEN`` arm, empty on every other. */
-export interface DegradationContext {
-  degraded_rate?: number;
-  degraded_count?: number;
-  total_scored?: number;
-  dominant_warning?: string;
-  fatal?: boolean;
-  warning_types?: Record<string, number>;
-  source?: string;
-}
-
-/** Refused before a cell: the reasons are the arm's own fatal
- * ``validation_failures``. */
-export interface Invalid {
-  kind: 'invalid';
-}
-
-/** The operator stopped it. */
-export interface Skipped {
-  kind: 'skipped';
-}
-
-export interface Measured {
-  role: 'origin' | 'panel' | 'parent';
-  slot: ArmSlot | null;
-  individual: OptSearchPoint;
-  overlay: Record<string, Record<string, unknown>>;
-  validation_failures: ValidationFailure[];
-  sp_hash: string;
-  resolved_params: Record<string, unknown>;
-  expected_samples: number;
-  state: 'measured';
-  locked_in: Elimination | null;
 }
 
 /** What a round's selector decided over its arms, by key; ``selected`` null = the
@@ -2488,10 +2332,16 @@ export interface Principal {
   display: string;
 }
 
-/** One rank-ordered row of a round's scoreboard: an arm's reading at its rank. */
-export interface ScoreboardRow {
-  rank: number;
+/** One arm as every round read serves it, in flight (`current_round.candidates`)
+ * or filed (`RoundView.candidates`): its reading, its searchpoint and why it
+ * was refused. */
+export interface ServedArm {
   reading: ArmReading;
+  /** `OptSearchPoint.prompts`; with the resolved params, what a steered fork seeds
+   * from. Null until the candidate is announced. */
+  prompts: Record<string, NodePrompt> | null;
+  resolved_params: Record<string, unknown> | null;
+  validation_failures: ValidationFailure[];
 }
 
 /** One round's audit twin: each optimizer node's call in firing order, and the
@@ -2561,16 +2411,7 @@ export interface ActivityDecision {
   facts: Said[];
   /** Why the run is holding, one fragment each. */
   reasons: string[];
-  actions: (GateAction | KeepDraftsAction)[];
-}
-
-/** One button: a press sends `decision` as `kind` to the cycle whose activity
- * carries it. */
-export interface GateAction {
-  label: string;
-  variant: 'primary' | 'ghost' | 'danger';
-  kind: 'origin-gate';
-  decision: 'rescore' | 'proceed' | 'abort';
+  actions: KeepDraftsAction[];
 }
 
 /** One button: a press sends `keep` as `kind` to the cycle holding for its
@@ -3621,14 +3462,13 @@ export interface OptimizationConfig {
    * added anything over what it recombined. An arm with no parent has no
    * reference. */
   lift_reference: 'best_so_far' | 'parents';
-  /** Hold after round 0 for the operator's decision when the origin's degradation
-   * verdict is non-healthy, instead of optimizing against a broken floor —
-   * the common failure while bringing up a new connector. ``strict``
-   * (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds
-   * only on a structurally-broken origin; ``off`` disarms the gate. The
-   * decision (`origin-gate`) proceeds into the search anyway, re-scores the
-   * origin, or aborts the cycle. An origin that scored no cell halts instead,
-   * and starting the cycle again re-measures it. */
+  /** Halt after round 0 when the origin's degradation verdict is non-healthy,
+   * instead of optimizing against a broken floor — the common failure while
+   * bringing up a new connector. ``strict`` (default) halts on ``critical``
+   * or ``degraded``; ``critical_only`` halts only on a structurally-broken
+   * origin; ``off`` disarms the gate. Resuming re-measures the cells the
+   * origin lost and grades it again; an origin still unhealthy when resumed
+   * proceeds into the search. */
   origin_gate: 'strict' | 'critical_only' | 'off';
   /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
    * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
@@ -4371,9 +4211,21 @@ export interface DatasetPipelineResponse {
   /** Every param each node carries, valueless — what `reach` is summed over */
   node_config_schema: Record<string, NodeConfigParam[]>;
   reach: Record<string, NodeReach>;
-  /** The pipelines this one nests in turn, one per dataset its cells measure; the
-   * only wire naming them before a cell has spawned */
-  nests: NestedPipelineRef[];
+  /** The pipelines this one nests in turn, one per dataset its cells measure, each
+   * read whole down to its innermost: the only wire naming them before a cell
+   * has spawned */
+  nests: NestedPipeline[];
+}
+
+export interface NestedPipeline {
+  /** Node id in this pipeline whose measurement runs `dataset`. */
+  node: string;
+  /** Slug of the pipeline that node runs; fetch it the same way. */
+  dataset: string;
+  /** Null where it did not resolve */
+  pipeline: DatasetPipelineResponse | null;
+  /** Why `pipeline` is null: the typed refusal, or that it nests a dataset above it */
+  unread: string | null;
 }
 
 /** The measurement log of one scope, in served order. */
@@ -5058,14 +4910,13 @@ export interface PartialOptimizationConfig {
    * added anything over what it recombined. An arm with no parent has no
    * reference. */
   lift_reference: 'best_so_far' | 'parents' | null;
-  /** Hold after round 0 for the operator's decision when the origin's degradation
-   * verdict is non-healthy, instead of optimizing against a broken floor —
-   * the common failure while bringing up a new connector. ``strict``
-   * (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds
-   * only on a structurally-broken origin; ``off`` disarms the gate. The
-   * decision (`origin-gate`) proceeds into the search anyway, re-scores the
-   * origin, or aborts the cycle. An origin that scored no cell halts instead,
-   * and starting the cycle again re-measures it. */
+  /** Halt after round 0 when the origin's degradation verdict is non-healthy,
+   * instead of optimizing against a broken floor — the common failure while
+   * bringing up a new connector. ``strict`` (default) halts on ``critical``
+   * or ``degraded``; ``critical_only`` halts only on a structurally-broken
+   * origin; ``off`` disarms the gate. Resuming re-measures the cells the
+   * origin lost and grades it again; an origin still unhealthy when resumed
+   * proceeds into the search. */
   origin_gate: 'strict' | 'critical_only' | 'off' | null;
   /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
    * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
@@ -5092,19 +4943,6 @@ export interface OpenDatasetDraftPayload {
  * nothing runs until ``start-checkin``. */
 export interface OpenOriginDraftPayload {
   origin_id: string;
-}
-
-/** Answer a cycle holding at the round-0 origin gate; refused where the cycle is
- * not holding. */
-export interface OriginGateDecisionPayload {
-  /** The campaign acted on, by its id or a prefix naming one, resolved by the
-   * dispatcher for every door; the root of a `descend` chain is named by its
-   * full id. */
-  campaign_id: string;
-  cycle_id: string;
-  /** `proceed` into L1 anyway, `rescore` the origin force-fresh, or `abort` the
-   * cycle. */
-  decision: 'rescore' | 'proceed' | 'abort';
 }
 
 /** Ask a running cycle to stop at its next checkpoint; it resumes from there. */
@@ -5301,7 +5139,7 @@ export const TONES = ["quiet", "success", "live", "attention", "warn", "danger"]
 export type Tone = (typeof TONES)[number];
 
 // Each kind whose `Press` claims the browser door (domain/command_kinds.py::CommandKind.browser).
-export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "ingest-upload" | "open-dataset-draft" | "open-origin-draft" | "origin-gate" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "ingest-upload" | "open-dataset-draft" | "open-origin-draft" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -5328,7 +5166,6 @@ export interface CommandPayloads {
   "mint-campaign": CommandSent<MintCampaignPayload, "dataset_name">;
   "open-dataset-draft": CommandSent<OpenDatasetDraftPayload, "dataset_name">;
   "open-origin-draft": CommandSent<OpenOriginDraftPayload, "origin_id">;
-  "origin-gate": CommandSent<OriginGateDecisionPayload, "campaign_id" | "cycle_id" | "decision">;
   "pause": CommandSent<PauseCyclePayload, "campaign_id" | "cycle_id">;
   "remove-api-key": CommandSent<RemoveApiKeyPayload, "provider">;
   "rename-campaign": CommandSent<SetCampaignLabelPayload, "campaign_id" | "label">;
@@ -5366,7 +5203,6 @@ export interface CommandResponses {
   "mint-campaign": LaunchAnswer;
   "open-dataset-draft": DraftCampaignWire;
   "open-origin-draft": DraftCampaignWire;
-  "origin-gate": CommandAcceptedBody;
   "pause": CommandAcceptedBody;
   "remove-api-key": CommandAcceptedBody;
   "rename-campaign": CommandAcceptedBody;
@@ -5460,7 +5296,7 @@ export type DisplayMetric = 'accuracy' | 'composite' | 'ability';
 export type MeasurandUnit = 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
 
 // promptpotter.domain.bench::BenchRefusal
-export type BenchRefusal = 'inner' | 'no_manifest' | 'held_elsewhere' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection';
+export type BenchRefusal = 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection';
 
 // promptpotter.domain.bench::CostAbsence
 export type CostAbsence = 'no_lift' | 'unpriced_tokens' | 'zero_spend';
@@ -5877,6 +5713,9 @@ export const BENCH_REFUSAL_INFO: Record<BenchRefusal, string> = {
   "inner": "An inner run is one cell of its outer campaign; no command grades its line.",
   "no_manifest": "This campaign has no manifest on disk.",
   "held_elsewhere": "Another cycle (`held_by`) holds this campaign's line, and the bench grades the campaign's result. Ask for that cycle.",
+  "campaign_not_active": "An archived or deleted campaign scores nothing more; restore an archived one to grade its line.",
+  "definition_unread": "This campaign's dataset no longer reads as a definition naming a connector, so nothing grades its line until it does.",
+  "connector_moved": "This campaign's dataset now names another connector than the one it was minted on, so its line grades on neither. Point the dataset back, or start a fresh campaign.",
   "no_holdout": "The campaign's dataset_split holds no rows out, so the bench has none to grade.",
   "in_flight": "A bench pass is grading now; its reading lands when it ends.",
   "selecting": "The run is still selecting. Pause it or let it end first.",
@@ -6244,7 +6083,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [DISPLAY_METRIC_INFO, ["accuracy", "ability", "composite"]],
   [UNIT_FORMATS, ["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]],
   [ARM_END_INFO, ["invalid", "skipped", "broken", "eliminated", "locked_in"]],
-  [BENCH_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection"]],
+  [BENCH_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "campaign_not_active", "definition_unread", "connector_moved", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection"]],
   [COST_ABSENCE_WORDS, ["no_lift", "unpriced_tokens", "zero_spend"]],
   [LIFECYCLE_STATUS_LABELS, ["active", "archived", "deleted"]],
   [HARD_SAMPLE_ORDER_LABELS, ["info_gain", "difficulty"]],

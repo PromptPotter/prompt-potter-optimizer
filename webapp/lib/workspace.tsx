@@ -19,6 +19,7 @@ import {
 import {
   DEFAULT_VIEWS,
   EMPTY_ADDRESS,
+  NO_KEYS,
   formatAddress,
   formatPick,
   nodeOfKey,
@@ -27,10 +28,12 @@ import {
   pickedAddressOf,
   withViews,
   type Address,
+  type AddressRefusal,
   type CandidatePick,
   type FamilyId,
   type SelectedNode,
   type View,
+  type ViewKeys,
   type ViewedSubject,
 } from "./address";
 import type { ListedCampaign } from "@/lib/api/types";
@@ -54,7 +57,7 @@ interface WorkspaceState {
   // Null while a check-in is viewed: an unstarted campaign has no cycle, so nothing of a run shows.
   viewed: ViewedCycle | null;
   checkin: { draftId: string | null } | null;
-  // The one candidate pick, on the viewed path (the hash's `k/`); `address` is its hierarchy entry's.
+  // The one candidate pick, on the viewed path (the hash's `/r{round}/{arm}`); `address` is its hierarchy entry's.
   pick: (CandidatePick & { address: string }) | null;
   // The pick's one writer: on `path` (the viewed one when omitted), keeping the moment while the
   // path stays the viewed one; null unpicks.
@@ -62,6 +65,9 @@ interface WorkspaceState {
   // An offset in the viewed LEAF's ledger (`StepFacts.offset`); null is the head.
   at: number | null;
   views: readonly View[];
+  keys: ViewKeys;
+  // The view keys' one writer. A round other than the pick's unpicks: a pick reads its own round.
+  setViewKeys: (patch: Partial<ViewKeys>) => void;
   // The subject is a path the operator picked, not the active run followed.
   pinned: boolean;
   // `resume` is a campaign ROOT row's: view memory may deepen the path.
@@ -72,7 +78,15 @@ interface WorkspaceState {
   reveal: { family: FamilyId } | null;
   close: (family: FamilyId) => void;
   reportAddressGone: (address: string) => void;
-  goneAddress: string | null;
+  goneAddress: GoneAddress | null;
+}
+
+// An address the workspace just left or would not open, said for `GONE_NOTICE_MS`: a pinned
+// cycle whose campaign is gone, or a hash naming no address this version reads, which stays in
+// the bar until the screen moves.
+export interface GoneAddress {
+  address: string;
+  cause: "gone" | AddressRefusal;
 }
 
 const WorkspaceContext = createContext<WorkspaceState | null>(null);
@@ -113,38 +127,61 @@ export function useViewedListing(): ListedCampaign | null {
   return unstarted.find((c) => c.address === checkin.draftId) ?? null;
 }
 
-const FOLLOWING: Address = { subject: null, views: DEFAULT_VIEWS };
+const FOLLOWING: Address = { subject: null, views: DEFAULT_VIEWS, keys: NO_KEYS };
+
+function pickOf(subject: ViewedSubject): string | null {
+  return subject !== null && "path" in subject && subject.pick ? formatPick(subject.pick) : null;
+}
+
+// The keys a move from the viewed *fromPath* to *to* keeps: a new path clears them; a pick changed
+// on the same one reads its own round.
+function keysAfter(from: Address, fromPath: string | null, to: ViewedSubject): ViewKeys {
+  const toPath = to !== null && "path" in to ? encodeCyclePath(to.path) : null;
+  if (toPath === null || toPath !== fromPath) return NO_KEYS;
+  if (pickOf(to) === pickOf(from.subject)) return from.keys;
+  return { ...from.keys, observe: null, round: pickOf(to) || pickOf(from.subject) ? null : from.keys.round };
+}
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<Address>(FOLLOWING);
   const [initialized, setInitialized] = useState(false);
-  const [goneAddress, setGoneAddress] = useState<string | null>(null);
+  const [goneAddress, setGoneAddress] = useState<GoneAddress | null>(null);
   const [reveal, setReveal] = useState<{ family: FamilyId } | null>(null);
+  // The screen's address as the bar last showed it; null once a hash is read.
+  const written = useRef<string | null>(null);
 
   const { byAddress } = useRegistry();
   const { active } = useActivePointer();
   const { viewFor, recordView } = useViewMemory();
 
+  // A refused hash leaves the screen where it is and says why, naming the hash.
+  const openHash = useCallback((hash: string): boolean => {
+    const a = parseAddress(hash);
+    if ("refused" in a) {
+      setGoneAddress({ address: hash, cause: a.refused });
+      return false;
+    }
+    written.current = null;
+    setScreen(a);
+    return true;
+  }, []);
+
   // A mount effect, not a useState initializer: the static-export HTML and first client render must agree.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    const a = parseAddress(window.location.hash);
-    if (a) setScreen(a);
+    if (!openHash(window.location.hash)) written.current = formatAddress(FOLLOWING);
     setInitialized(true);
-  }, []);
+  }, [openHash]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // The writer below no-ops when the hash already matches, so this cannot loop against it.
   useEffect(() => {
-    const onHash = () => {
-      const a = parseAddress(window.location.hash);
-      if (a) setScreen(a);
-    };
+    const onHash = () => void openHash(window.location.hash);
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, []);
+  }, [openHash]);
 
-  const { subject, views } = screen;
+  const { subject, views, keys } = screen;
   const pinned = subject !== null && "path" in subject ? subject : null;
   const checkin = subject !== null && "draftId" in subject ? subject : null;
 
@@ -159,7 +196,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       active !== null &&
       root.campaignId === active.campaign_id &&
       root.cycleId !== active.cycle_id;
-    if (prevPointer !== null && forkOfPinned) setScreen((s) => ({ ...s, subject: null }));
+    // A followed run that moves is a new leaf: its keys go with the old one.
+    if (prevPointer !== null && (forkOfPinned || pinned === null)) {
+      setScreen((s) => ({ ...s, subject: forkOfPinned ? null : s.subject, keys: NO_KEYS }));
+    }
   }
 
   // Memoized: consumers key reads and chart `options` on its identity.
@@ -190,6 +230,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!initialized) return;
     const want = formatAddress(screen);
+    // A read hash is written back canonical; a refused one stays in the bar until the screen moves.
+    if (want === written.current) return;
+    written.current = want;
     // The default view carries no hash at all, never a bare `#/`.
     const bare = want === EMPTY_ADDRESS;
     const now = window.location.hash;
@@ -224,6 +267,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     resumedRef.current = resumed;
   });
 
+  // Read by `navigate` and `pickCandidate`, whose identities every picker holds.
+  const hereRef = useRef({ viewed, at });
+  useEffect(() => {
+    hereRef.current = { viewed, at };
+  });
+
   // The list screen closes on a subject switch; a check-in opens on its chat.
   const navigate = useCallback((to: ViewedSubject, opts: { resume?: boolean } = {}) => {
     const target =
@@ -236,8 +285,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         target !== null && "draftId" in target
           ? DEFAULT_VIEWS
           : withViews(s.views.filter((v) => v.family !== "campaigns")),
+      keys: keysAfter(s, hereRef.current.viewed?.address ?? null, target),
     }));
   }, []);
+
+  const setViewKeys = useCallback(
+    (patch: Partial<ViewKeys>) =>
+      setScreen((s) => {
+        const pinnedPick = s.subject !== null && "path" in s.subject ? s.subject.pick : null;
+        const unpicks = patch.round !== undefined && pinnedPick && pinnedPick.round !== patch.round;
+        return {
+          ...s,
+          subject: unpicks && s.subject !== null && "path" in s.subject ? { ...s.subject, pick: null } : s.subject,
+          keys: { ...s.keys, ...patch },
+        };
+      }),
+    [],
+  );
 
   const open = useCallback(
     (family: FamilyId, key?: string | null) =>
@@ -257,12 +321,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setScreen((s) => ({ ...s, views: withViews(s.views.filter((v) => v.family !== family)) })),
     [],
   );
-
-  // Read by `pickCandidate`, whose identity every picker holds.
-  const hereRef = useRef({ viewed, at });
-  useEffect(() => {
-    hereRef.current = { viewed, at };
-  });
 
   const pickCandidate = useCallback(
     (next: CandidatePick | null, path?: CyclePath) => {
@@ -288,8 +346,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!gone || encodeCyclePath(gone) !== address) return;
       // Memory would restore the dead address on reload; a reaped `.inner/` leaf's root campaign is still alive.
       recordView(pathRoot(gone).campaignId, { viewedPath: null, viewedPick: null });
-      setScreen((s) => ({ ...s, subject: null }));
-      setGoneAddress(address);
+      setScreen((s) => ({ ...s, subject: null, keys: NO_KEYS }));
+      setGoneAddress({ address, cause: "gone" });
     },
     [recordView],
   );
@@ -308,6 +366,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       pickCandidate,
       at,
       views,
+      keys,
+      setViewKeys,
       pinned: pinned !== null,
       navigate,
       open,
@@ -323,6 +383,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       pickCandidate,
       at,
       views,
+      keys,
+      setViewKeys,
       pinned,
       navigate,
       open,

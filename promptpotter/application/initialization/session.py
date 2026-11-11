@@ -35,23 +35,19 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ScorerSetup:
-    scorer: Scorer | None = None
-    display_metric: DisplayMetric = "accuracy"
-    partition: BankPartition | None = None
-    degradation_checks: tuple[StopRule, ...] = ()
+    """Built whole by `scoring_scope.py::scorer_setup`; `{}` judges declares none, never "keep"."""
+
+    scorer: Scorer
+    display_metric: DisplayMetric
+    partition: BankPartition
+    degradation_checks: tuple[StopRule, ...]
     # One per declared term, built once per run so every judge validation precedes spend.
-    judges: tuple[Evaluator, ...] = ()
+    judges: tuple[Evaluator, ...]
 
     def require_scorer(self) -> Scorer:
-        if self.scorer is None:
-            raise RuntimeError(
-                "session.state.scoring is unset — populate_session_scoring must run first."
-            )
         return self.scorer
 
     def require_partition(self) -> BankPartition:
-        if self.partition is None:
-            raise RuntimeError("session.state.scoring is unset — the bank was never split.")
         return self.partition
 
 
@@ -74,7 +70,8 @@ class LaunchState:
     # Read once at `run_optimization`'s start; every cycle its line closes reads this one.
     clock: LaunchClock | None = None
     resumed_from_round: int = 1
-    scoring: ScorerSetup = field(default_factory=ScorerSetup)
+    # Seated once, before any cell is read: by run init (`runner/open_cycle.py`) or a pass's opener.
+    scoring: ScorerSetup = field(init=False)
     source: RunSource | None = None
     # Seeded off the cycle's index at init; afterwards written only by `record_intervention`.
     human_intervened: bool = False
@@ -188,5 +185,5 @@ class Session:
         return PointContext(
             schema=self.pipeline_schema,
             framing=framing,
-            demo=self.state.scoring.require_partition().demo,
+            demo=self.state.scoring.partition.demo,
         )

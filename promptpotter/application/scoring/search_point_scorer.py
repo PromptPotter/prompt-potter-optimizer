@@ -188,7 +188,7 @@ class _ArchiveRecorder:
     entry: ArchiveEntry
 
     def sheet(self, results: Sequence[GradedCell]) -> CellSheet:
-        return CellSheet(self.session.state.scoring.require_scorer().id, tuple(results))
+        return CellSheet(self.session.state.scoring.scorer.id, tuple(results))
 
     def scores(self, results: Sequence[GradedCell]) -> ScoreSummary:
         return compute_composite_fitness(
@@ -300,7 +300,7 @@ def open_walk(
     Its sample records are written iff ``measured`` names a role a round records; a walk continuing
     one that holds *held* folds those rows into each record's running fold."""
     source = session.state.source
-    assert source is not None, "populate_session_scoring arms the run source before any scoring"
+    assert source is not None, "run init or a pass opener arms the run source before any scoring"
     store = session.store
     pipeline_schema = session.pipeline_schema
 

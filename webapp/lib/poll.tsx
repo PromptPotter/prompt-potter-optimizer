@@ -13,13 +13,25 @@ import { shownData, useRead } from "./hooks/useRead";
 import { reaskRead, type ReadFailure, type ReadResult } from "./read-cache";
 import { seedScoringMask } from "./scoring-mask";
 import { createModuleStore } from "./state/module-store";
-import { useMomentAt, useWorkspace } from "./workspace";
+import { useMomentAt, useWorkspace, type GoneAddress } from "./workspace";
+import type { AddressRefusal } from "./address";
 
 export const DASHBOARD_PENDING = "Waiting for this run’s dashboard…";
 
 // Whose read failed: the viewed cycle's, pinned or followed, or with no cycle in view the reads that
-// list and point at runs; `left` is the workspace just leaving a gone pin, whatever is read now.
-export type FailureOf = "pinned" | "followed" | "listing" | "left";
+// list and point at runs; a `GoneAddress` cause is the workspace's own notice, whatever is read now.
+export type FailureOf = "pinned" | "followed" | "listing" | GoneAddress["cause"];
+
+const REFUSED_ADDRESS: Record<AddressRefusal, Pick<Said, "label" | "detail">> = {
+  retired: {
+    label: "This link is from an earlier version",
+    detail: "Links of the #/c/… form no longer open: find its campaign in the list.",
+  },
+  malformed: {
+    label: "This link opens nothing",
+    detail: "Its address is not one this version reads.",
+  },
+};
 
 // The CONNECTION's own row, never the run's (that is the served `dash.said`): the one `Said` the
 // client makes, off the failed read itself. Only a transient failure is the server unreachable;
@@ -27,8 +39,11 @@ export type FailureOf = "pinned" | "followed" | "listing" | "left";
 // campaign is gone on the viewed cycle's read alone, and the run is returned to only off a pin
 // (`workspace.tsx::reportAddressGone`): a followed run gone stays in view until the pointer moves.
 export function connectionSaid(failure: ReadFailure | null, of: FailureOf): Said | null {
+  if (of === "retired" || of === "malformed") {
+    return { key: "address_refused", tone: "attention", value: null, sub: null, ...REFUSED_ADDRESS[of] };
+  }
   const gone = failure?.kind === "gone" && of !== "listing";
-  if (of === "left" || gone) {
+  if (of === "gone" || gone) {
     return {
       key: "address_gone",
       tone: "attention",

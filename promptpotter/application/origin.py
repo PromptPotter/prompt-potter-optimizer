@@ -7,12 +7,11 @@ from typing import TYPE_CHECKING, NamedTuple
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.loaders import sample_dataset
 from promptpotter.application.datasets.prompts import declared_origin_prompts
-from promptpotter.application.initialization.loop_start import populate_session_scoring
+from promptpotter.application.initialization.scoring_scope import scorer_setup
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import ReadArm
 from promptpotter.application.scoring.arm_states import (
     conclude,
-    is_transient_scoring_abort,
     measuring,
 )
 from promptpotter.application.scoring.closed_rounds import closed_round
@@ -27,7 +26,6 @@ from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import ScoredWalk, score_search_point
 from promptpotter.domain.arms import ArmSlot, Concluded, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
-from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import CampaignPhase
@@ -108,7 +106,7 @@ def try_inherit_fork_origin(
         session.store,
         session.hop,
         named.round,
-        session.state.scoring.require_scorer(),
+        session.state.scoring.scorer,
         # The fork's chain at its mint, its first record: the parent as cut, before any own close.
         moment=Moment(store.ledger(session.hop), 0),
     )
@@ -154,9 +152,7 @@ def try_inherit_fork_origin(
 def standing_origin(session: Session, resolved_origin: OptSearchPoint) -> ReadArm | None:
     """A line whose round 0 stands launches on it, never a second pass: its holes are the repair's
     to re-send, once (`repair.py::apply_correction`)."""
-    origin = closed_round(
-        session.store, session.hop, 0, session.state.scoring.require_scorer(), moment=None
-    )
+    origin = closed_round(session.store, session.hop, 0, session.state.scoring.scorer, moment=None)
     head = None if origin is None else origin.head
     if origin is None or origin.election is None or head is None:
         return None
@@ -253,8 +249,6 @@ async def establish_campaign_origin(
 
     scoring_set = sample_dataset(dataset, campaign_config.sp_budget_origin)
 
-    await session.backend_client.init_session(session.index_terms)
-
     listener.on_phase(CampaignPhase.ORIGIN, "enter", round=0)
 
     arm = measuring(
@@ -268,33 +262,25 @@ async def establish_campaign_origin(
     listener.on_arm(0, key, arm)
 
     try:
-        # A transient abort must not bank a corrupted floor: re-score once fresh. A pass that stays
-        # partial is graded by coverage (`origin_gate`), which is why nothing here reads `stopped`.
-        for attempt in range(2):
-            scored = await score_search_point(
-                sp,
-                scoring_set,
-                session,
-                label=MeasurementRole.ORIGIN,
-                measured=MeasuredPass(resolved_origin.id, MeasurementRole.ORIGIN),
-                force_fresh=attempt > 0,
-            )
-            if not is_transient_scoring_abort(scored.signal):
-                break
-            logger.warning(
-                "Origin scoring hit a transient transport abort — re-scoring once fresh."
-            )
+        # One walk: a partial pass is graded by coverage (`origin_gate`), and its holes are the
+        # resume's to re-send (`repair.py::rewalk_lost_origin`), so nothing here reads `stopped`.
+        scored = await score_search_point(
+            sp,
+            scoring_set,
+            session,
+            label=MeasurementRole.ORIGIN,
+            measured=MeasuredPass(resolved_origin.id, MeasurementRole.ORIGIN),
+        )
         sheet, scores = scored.sheet, scored.scores
         locked_scoring = lock_criterion(session, campaign_config, sheet, listener.ledger)
         if locked_scoring is not None:
             # Re-GRADED under the criterion these rows just anchored; nothing is re-measured.
-            populate_session_scoring(
+            session.state.scoring = scorer_setup(
                 session,
                 campaign_config.model_copy(update={"scoring": locked_scoring}),
-                source=RunSource.ORIGIN,
-                partition=session.state.scoring.require_partition(),
+                partition=session.state.scoring.partition,
             )
-            sheet = session.state.scoring.require_scorer().sheet(cell.facts for cell in sheet)
+            sheet = session.state.scoring.scorer.sheet(cell.facts for cell in sheet)
             scores = compute_composite_fitness(sheet, pipeline_schema)
         # Both what the ledger receives and round 0's arm — never re-derive either from these rows.
         state = conclude(arm, replace(scored, sheet=sheet, scores=scores), round_num=0)

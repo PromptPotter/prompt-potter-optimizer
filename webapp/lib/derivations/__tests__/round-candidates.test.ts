@@ -45,7 +45,7 @@ function l2Terminal() {
       summaryRound({ round: 4 }),
     ],
     // As served: the round that closed before measuring is not on the axis.
-    round_axis: { completed: [0, 1, 2, 3], live: null, position: 3 },
+    round_axis: { completed: [0, 1, 2, 3], live: null, position: 3, unfiled: null },
   });
 }
 
@@ -126,7 +126,10 @@ describe("roundCandidates — the in-flight round", () => {
       panel: { scored: 8, expected: 20 },
     }),
   });
-  const live = dashboard({ current_round: currentRound({ round: 2, candidates: [served] }) });
+  const live = dashboard({
+    current_round: currentRound({ round: 2, candidates: [served] }),
+    round_axis: { completed: [], live: 2, position: 2, unfiled: 2 },
+  });
   const row = roundCandidates(live).find((r) => r.source === "inflight");
 
   it("hands the served reading over whole, keyed by its position", () => {
@@ -138,7 +141,7 @@ describe("roundCandidates — the in-flight round", () => {
     const closed = dashboard({
       current_round: currentRound({ round: 2, candidates: [served] }),
       rounds: [summaryRound({ round: 2, candidates: [summaryCandidate()] })],
-      round_axis: { completed: [2], live: null, position: 2 },
+      round_axis: { completed: [2], live: null, position: 2, unfiled: null },
     });
     expect(roundCandidates(closed).map((r) => r.source)).toEqual(["history"]);
   });

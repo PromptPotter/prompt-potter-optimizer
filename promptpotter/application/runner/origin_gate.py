@@ -1,32 +1,116 @@
-"""``rescore`` is one force-fresh walk of the origin, which makes fix-rescore-watch a loop with no re-mint."""
+"""Round 0's one door (`open_origin_round`): a tripped gate halts, and fixing the backend then
+resuming re-measures the origin's lost cells (`repair.py::rewalk_lost_origin`) with no re-mint."""
 
 from __future__ import annotations
 
 import logging
-import sys
-from typing import TYPE_CHECKING, get_args
+from typing import TYPE_CHECKING
 
-from promptpotter.application.bench.node_context import rewalk_origin
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
-from promptpotter.application.optimizers.nodes import RoundContext
-from promptpotter.application.run_observers import declare_gate, declare_running
-from promptpotter.application.runner.operator_hold import hold_for_operator
-from promptpotter.application.runner.round import emit_origin_round
-from promptpotter.application.runner.termination import origin_gate_tripped
-from promptpotter.domain.phases import STOP_REASON_INFO, GateDecision, StopReason
+from promptpotter.application.bench.resume_and_fork.repair import rewalk_lost_origin
+from promptpotter.application.runner.bench import bench_selection
+from promptpotter.application.runner.campaign_result import bench_origin, declare_line_bench
+from promptpotter.application.runner.loop import LoopEnd, loop_end_on
+from promptpotter.application.runner.round import emit_origin_round, run_init
+from promptpotter.application.runner.termination import RUN_ENDS, origin_gate_tripped
+from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.run_records import BenchCheckpointKind
+from promptpotter.infrastructure.llm.spend_book import require_spend_book
+from promptpotter.infrastructure.llm.telemetry import at_round
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_callbacks import RunCallbacks
-    from promptpotter.domain.campaign_config import OriginGateMode
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.spend import SpendRollup
 
 logger = logging.getLogger(__name__)
 
 
-_DECISIONS: tuple[str, ...] = get_args(GateDecision)
+async def open_origin_round(
+    cycle: Cycle,
+    dataset: list[Sample],
+    cb: RunCallbacks,
+    *,
+    spend: SpendRollup,
+    diagnosing: bool,
+) -> LoopEnd | None:
+    """Round 0's one door: the members initialize, a re-measured origin re-walks its holes, and
+    until an L1 round closes every launch asks the gate, unless round 0 banked a pass. A tripped
+    gate halts the launch, holding nothing; resumed still unhealthy, the resume is the operator's
+    override. The gate decides before the bench spends, so a launch it halts runs no pass; an
+    origin it lets through is benched before its close (a replayed origin closed on the ledger
+    already). ``None`` proceeds into round 1. *spend* is the live rollup the bench pass counts its
+    own delta on."""
+    session = cycle.session
+    open_round: int | None = None
+    try:
+        run_init(cycle, cb)
+        if diagnosing or session.state.resumed_from_round > 1:
+            await bench_line_origin(cycle, cb, spend)
+            return None
+        open_round = 0
+        await rewalk_lost_origin(cycle, dataset, cb)
+        mode = cycle.config.optimization.origin_gate
+        gated = (
+            not origin_gate_passed(session)
+            and origin_gate_tripped(cycle.origin_round.health, mode) is not None
+        )
+        if not gated:
+            await bench_line_origin(cycle, cb, spend)
+        if cycle.origin_round.at_offset is None:
+            await emit_origin_round(cycle, session, cb)
+        open_round = None
+        if not gated:
+            return None
+        if session.store.campaigns.resumed_ending(session.hop) is not StopReason.ORIGIN_GATE:
+            health = cycle.origin_round.health
+            logger.error(
+                "Origin gate (%s): round 0 is %s (%s) — halted. %s",
+                mode,
+                health.grade,
+                health.last_error or "no error recorded",
+                STOP_REASON_INFO[StopReason.ORIGIN_GATE].next_step,
+            )
+            return LoopEnd(StopReason.ORIGIN_GATE)
+        # Resuming an origin the gate halted, still unhealthy, is the operator's override.
+        pass_origin_gate(cb, by="resume")
+        await bench_line_origin(cycle, cb, spend)
+    except RUN_ENDS as exc:
+        return loop_end_on(exc, cycle, session, round_num=0, open_round=open_round)
+    return None
+
+
+async def bench_line_origin(cycle: Cycle, cb: RunCallbacks, spend: SpendRollup) -> None:
+    """The origin's bench pass, its price set aside so the selection's pass still fits under the
+    search's ceiling, then the line's bench declared."""
+    session, config = cycle.session, cycle.config
+    origin = cycle.origin_round.head
+    assert origin is not None, "round 0 ends on its origin"
+    if config.bench_trigger != "manual" and session.state.scoring.partition.bench:
+        book = require_spend_book("the bench's set-aside")
+        cycle.bench_passes = await bench_origin(
+            session,
+            cycle.points.job(origin.individual),
+            origin_id=origin.individual.id,
+            spend=spend,
+            cb=cb,
+        )
+        if cycle.bench_passes is not None and book.binds("bench"):
+            book.set_aside(cycle.bench_passes.reserve_usd, cycle.bench_passes.reserve_tokens)
+        if (
+            cycle.bench_passes is not None
+            and config.bench_trigger == "each_round"
+            and len(cycle.rounds) > 1
+        ):
+            # The selection a resumed line stands on, graded where its line holds no pass:
+            # a re-enacting fork's floor, read today as the round it re-runs will be.
+            with at_round(cycle.rounds[-1].round):
+                cycle.bench_passes = await bench_selection(
+                    session, cycle.rounds, points=cycle.points, banked=cycle.bench_passes, cb=cb
+                )
+    declare_line_bench(session, config, cb, passes=cycle.bench_passes, selecting=True, ending=None)
 
 
 def pass_origin_gate(cb: RunCallbacks, *, by: str) -> None:
@@ -47,81 +131,3 @@ def origin_gate_passed(session: Session) -> bool:
     return any(
         d.kind == BenchCheckpointKind.ORIGIN_GATE_PASS for d in standing.decisions.get(0, ())
     )
-
-
-async def run_origin_gate(
-    cycle: Cycle,
-    dataset: list[Sample],
-    session: Session,
-    cb: RunCallbacks,
-    mode: OriginGateMode,
-) -> StopReason | None:
-    """``None`` proceeds into L1; a ``rescore`` re-emits round 0 and a still-unhealthy verdict waits again.
-    An origin that scored no cell has nothing to gate: it halts, and its resume re-measures it
-    (`repair.py::rewalk_lost_origin`), passing it on that resume if it is still unhealthy; an
-    edited origin is a new campaign or an operator-steered fork at round 0
-    (`OriginSource.FORK_SEED`)."""
-    while True:
-        grade = cycle.origin_round.health.grade
-        if cycle.origin_round.health.scored_cells == 0:
-            logger.error(
-                "Origin gate: round 0 scored no cell (%s) — halted. %s",
-                cycle.origin_round.health.last_error or "no error recorded",
-                STOP_REASON_INFO[StopReason.ORIGIN_GATE].next_step,
-            )
-            return StopReason.ORIGIN_GATE
-        logger.warning(
-            "Origin gate (%s): round-0 verdict is %s — holding before L1. Decide via "
-            "the webapp modal, the TTY prompt, or an `origin-gate` command (%s).",
-            mode,
-            grade,
-            "{" + ",".join(_DECISIONS) + "}",
-        )
-        if sys.stdin is not None and sys.stdin.isatty():
-            # ASCII-only: on a cp1252 console any other glyph raises UnicodeEncodeError and ends the run.
-            keys = " / ".join(f"{d[0]}={d}" for d in _DECISIONS)
-            print(
-                f"\n  [ORIGIN GATE: {grade}] type {keys} then Enter (or use the webapp):",
-                flush=True,
-            )
-        declare_gate(cb.ledger, "origin")
-
-        outcome = await hold_for_operator(
-            session, session.state.control.take_gate_decision, node="origin_gate", round_num=0
-        )
-        if outcome is None:
-            return StopReason.PAUSED
-        if outcome == "abort":
-            logger.warning("Origin gate: abort — ending cycle (origin_gate).")
-            return StopReason.ORIGIN_GATE
-        if outcome == "proceed":
-            logger.warning(
-                "Origin gate: proceed — entering L1 against a %s origin (operator override).",
-                grade,
-            )
-            pass_origin_gate(cb, by="proceed")
-            declare_running(cb.ledger)
-            return None
-
-        logger.warning("Origin gate: re-scoring the origin force-fresh.")
-        try:
-            await _rescore_and_reemit(cycle, dataset, session, cb)
-        except Exception:
-            logger.exception(
-                "Origin gate: re-score failed — staying at the gate. "
-                "Fix the backend and decide again."
-            )
-            continue
-        if origin_gate_tripped(cycle.origin_round.health, mode) is None:
-            new_grade = cycle.origin_round.health.grade
-            logger.warning("Origin gate: re-scored origin is %s — entering L1.", new_grade)
-            declare_running(cb.ledger)
-            return None
-
-
-async def _rescore_and_reemit(
-    cycle: Cycle, dataset: list[Sample], session: Session, cb: RunCallbacks
-) -> None:
-    ctx = RoundContext(cycle=cycle, round_num=0, callbacks=cb)
-    await rewalk_origin(ctx, cycle.origin_cells(dataset), force_fresh=True)
-    await emit_origin_round(cycle, session, cb)

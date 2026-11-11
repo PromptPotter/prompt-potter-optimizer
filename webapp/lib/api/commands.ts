@@ -70,7 +70,6 @@ export const commands = {
   "ingest-upload": ingestUpload,
   "open-dataset-draft": json("open-dataset-draft"),
   "open-origin-draft": json("open-origin-draft"),
-  "origin-gate": json("origin-gate"),
   "pause": json("pause"),
   "remove-api-key": json("remove-api-key"),
   "resolve-origin": json("resolve-origin"),

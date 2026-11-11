@@ -336,7 +336,7 @@ class _Cycle(NamedTuple):
         return None
 
 
-def _open_cycle(stores: Stores, campaign_id: str, cycle_dir: Path) -> _Cycle | None:
+def _graded_cycle(stores: Stores, campaign_id: str, cycle_dir: Path) -> _Cycle | None:
     graded_under = campaign_scorer(stores, campaign_id)
     if graded_under is None:
         return None
@@ -464,7 +464,7 @@ def subject_evidence(
             head = heads[row.key]
             report = head.point.concluded
             anchor = "" if report is None else report.sp_hash
-            cycle = _open_cycle(leaves[row.key], row.campaign_id, head.cycle_dir)
+            cycle = _graded_cycle(leaves[row.key], row.campaign_id, head.cycle_dir)
             if cycle is not None:
                 unranked += _campaign_edits(cycle, members[row.key], measurand, anchor_hash=anchor)
 
@@ -612,7 +612,7 @@ def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
     stores, cycle_dir = at.stores, at.cycle_dir
     dataset_name = at.campaign.dataset_name
     if spec.kind == "campaign":
-        cycle = _open_cycle(stores, spec.campaign_id, cycle_dir)
+        cycle = _graded_cycle(stores, spec.campaign_id, cycle_dir)
         origin = cycle.point(0) if cycle is not None else None
         if cycle is None or origin is None:
             return None
@@ -628,7 +628,7 @@ def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
             human_intervened=c0_index is not None and c0_index.human_intervened,
         )
 
-    cycle = _open_cycle(stores, spec.campaign_id, cycle_dir)
+    cycle = _graded_cycle(stores, spec.campaign_id, cycle_dir)
     if cycle is None:
         return None
     index = read_cycle_index(cycle_dir, moment=None)
@@ -726,7 +726,7 @@ def _winner_chain(
     """Each point reads its OWN cells: subsets move between rounds, so the head's would redraw earlier ones."""
     if head.chain is not None:
         return [_winner_chain_point(p, cell_channels(p.sheet), compiled) for p in head.chain]
-    cycle = _open_cycle(stores, spec.campaign_id, head.cycle_dir)
+    cycle = _graded_cycle(stores, spec.campaign_id, head.cycle_dir)
     crowns = cycle.walked.crowns if cycle is not None else {}
     at = head.point.round
     rounds = [r for r in sorted({0, *(r for r in crowns if r < at)}) if r != at]

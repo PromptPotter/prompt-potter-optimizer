@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { commands } from "@/lib/api";
 import type { HierarchyCourse, SubtreeCampaign, DisplayMetric } from "@/lib/api/types";
 import {
@@ -11,7 +11,7 @@ import { pathOfAddress, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useViewedLineage } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/state/view-memory";
-import { setCandidatesState, useCandidatesState, useMetrics } from "@/lib/state/candidates";
+import { useMetrics } from "@/lib/state/candidates";
 
 interface LineageCleanup {
   open: boolean;
@@ -25,7 +25,7 @@ interface LineageCleanup {
   confirm: () => void;
 }
 
-interface Lineage {
+interface CampaignForest {
   tree: SubtreeCampaign | null;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
@@ -34,7 +34,7 @@ interface Lineage {
   forkedFrom: ReadonlyMap<string, HierarchyCourse>;
   expanded: ReadonlySet<string>;
   onLaneActivate: (courseKey: string) => void;
-  // The only write path for `showForest`: store and view memory move together.
+  showForest: boolean;
   setShowForest: (open: boolean) => void;
   revealLane: (courseKey: string) => void;
   totalDescendants: number;
@@ -48,65 +48,53 @@ interface Lineage {
   deleteFailure: CommandFailure | null;
 }
 
-export function useLineage({
+// The campaign's forest: its lanes and `showForest` are view memory's alone (`CampaignView`).
+export function useCampaignForest({
   campaignId,
   cycleId,
   path,
-  electedMetric,
+  displayMetric,
 }: {
   campaignId: string | null;
   cycleId: string | null;
-  electedMetric: DisplayMetric;
+  displayMetric: DisplayMetric;
   path: CyclePath | null;
-}): Lineage {
+}): CampaignForest {
   const { tree, index } = useViewedLineage();
   const { viewFor, recordView } = useViewMemory();
-  const { expanded, expandedForCampaign, expandedForLane } = useCandidatesState();
-  const metric = primaryMetric(useMetrics(cycleId, electedMetric), electedMetric);
+  const { showForest, expandedLanes, expandedForLane } = viewFor(campaignId);
+  const metric = primaryMetric(useMetrics(cycleId, displayMetric), displayMetric);
 
   const viewedLaneKey = useMemo(() => courseAt(index, path)?.address ?? null, [index, path]);
-
-  if (campaignId !== expandedForCampaign) {
-    const remembered = viewFor(campaignId).expandedLanes;
-    setCandidatesState({
-      expanded: new Set([...remembered, ...(viewedLaneKey ? [viewedLaneKey] : [])]),
-      expandedForCampaign: campaignId,
-      expandedForLane: viewedLaneKey,
-      showForest: viewFor(campaignId).showForest,
-    });
-  } else if (viewedLaneKey && viewedLaneKey !== expandedForLane) {
-    setCandidatesState({
-      expanded: new Set(expanded).add(viewedLaneKey),
-      expandedForLane: viewedLaneKey,
-    });
-  }
+  // The viewed lane opens once per visit; the latch keeps a manual collapse from being undone.
+  const opening = viewedLaneKey !== null && viewedLaneKey !== expandedForLane ? viewedLaneKey : null;
+  const expanded = useMemo<ReadonlySet<string>>(
+    () => new Set(opening ? [...expandedLanes, opening] : expandedLanes),
+    [expandedLanes, opening],
+  );
+  useEffect(() => {
+    if (opening) recordView(campaignId, { expandedLanes: [...expanded], expandedForLane: opening });
+  }, [opening, expanded, campaignId, recordView]);
 
   const onLaneActivate = useCallback(
     (key: string) => {
       const next = new Set(expanded);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      setCandidatesState({ expanded: next });
       recordView(campaignId, { expandedLanes: [...next] });
     },
     [expanded, campaignId, recordView],
   );
 
   const setShowForest = useCallback(
-    (open: boolean) => {
-      setCandidatesState({ showForest: open });
-      recordView(campaignId, { showForest: open });
-    },
+    (open: boolean) => recordView(campaignId, { showForest: open }),
     [campaignId, recordView],
   );
 
   // Takes a LANE KEY (a course address); a raw cycle id silently never matches the layout.
   const revealLane = useCallback(
-    (courseKey: string) => {
-      const next = new Set(expanded).add(courseKey);
-      setCandidatesState({ showForest: true, expanded: next });
-      recordView(campaignId, { showForest: true, expandedLanes: [...next] });
-    },
+    (courseKey: string) =>
+      recordView(campaignId, { showForest: true, expandedLanes: [...new Set(expanded).add(courseKey)] }),
     [expanded, campaignId, recordView],
   );
 
@@ -163,6 +151,7 @@ export function useLineage({
     forkedFrom,
     expanded,
     onLaneActivate,
+    showForest,
     setShowForest,
     revealLane,
     totalDescendants: Math.max(index.courses.length - 1, 0),

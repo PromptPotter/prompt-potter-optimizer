@@ -1,14 +1,13 @@
 import type { APIRequestContext } from "@playwright/test";
 import type { HierarchyCourse, SubtreeEntry } from "@/lib/api/types";
-import { pathOfAddress, type CyclePath } from "@/lib/ids";
+import { encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
 import { test, expect, open, campaigns, DASHBOARD_VIEWS } from "../harness";
 
 const API = "/api/v1";
 
 type Found = { outer: CyclePath; named: HierarchyCourse[] };
 
-const hashOf = (path: CyclePath) =>
-  `#/c/${path.map((h) => `${h.campaignId}/${h.cycleId.replace(/^cycle_/, "")}`).join("/")}`;
+const hashOf = (path: CyclePath) => `#/${encodeCyclePath(path)}`;
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // The name the tree row draws for a cell (`ForestRows`), so the walk clicks what the operator reads.

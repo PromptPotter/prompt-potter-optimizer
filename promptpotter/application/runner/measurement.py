@@ -303,7 +303,7 @@ class ReferencePairs:
         return cls(
             path=(session.hop,),
             instrument_id=session.instrument_id,
-            scorer_id=session.state.scoring.require_scorer().id,
+            scorer_id=session.state.scoring.scorer.id,
             dataset_hash=session.bank.dataset_hash,
             declared=declared,
             names=names,

@@ -108,7 +108,7 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
       title={<CandidatesToolbar model={m} />}
     >
       <div className="fitness-body">
-        {m.pickedSet && <SampleSetControl rounds={m.history} overlap={m.overlap} unit={m.unit} />}
+        {m.pickedSet && <SampleSetControl rounds={m.history} coverage={m.coverage} overlap={m.overlap} unit={m.unit} />}
         {/* The dendrogram's x-alignment depends on sharing this box with the canvas. */}
         <div className="fitness-chart-wrap">
           <FitnessLegend model={m} />

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.domain.arm_reading import ArmElection, ArmReading, panel_counts, panel_cuts
-from promptpotter.domain.arms import Proposed, arm_name
+from promptpotter.domain.arms import arm_name
 from promptpotter.domain.dashboard_rows import (
     DashboardSample,
     LiveCandidate,
@@ -86,13 +86,10 @@ def build_candidate_rows(
             fit=None if election is None else election.fit.get(key),
         )
         rows.append(
-            LiveCandidate(
-                reading=reading,
-                prompts=arm.individual.prompts,
-                resolved_params=None if isinstance(arm, Proposed) else arm.resolved_params,
-                pipeline_overlay=arm.overlay,
+            LiveCandidate.in_flight(
+                reading,
+                arm,
                 samples=[sample_row(s) for s in buffer.samples[key]],
-                validation_failures=arm.validation_failures,
                 composite_fitness_formula_short=inline_short_formula_values(
                     short_formula_template, {} if fold is None else dict(fold.evaluators)
                 ),

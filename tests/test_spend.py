@@ -43,6 +43,7 @@ from factories import (
     jumping_clock,
     loop_session,
     minted_campaign,
+    minted_dataset,
     on_jumping_clock,
     pipeline_schema,
     pobb_knobs,
@@ -115,7 +116,7 @@ from promptpotter.application.optimizers.potter.race import CatchUpPool
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl, budget_stop
-from promptpotter.application.runner.campaign_result import line_run
+from promptpotter.application.runner.campaign_result import cycle_bench, line_run
 from promptpotter.application.runner.inner import spawn, spawn_context
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.termination import run_stop_reason
@@ -142,6 +143,7 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.arms import CutKind
+from promptpotter.domain.bench import BenchRefusal
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
@@ -2704,7 +2706,9 @@ def _account_stores(
         stores.grant.save(CouponGrant(face=face))
     if own_key is not None:
         stores.api_keys.put(own_key, SecretStr("sk-own"))
-    stores.campaigns.create_campaign(minted_campaign(_HELD_HOP, config=_budgeted(Budget())))
+    held = minted_campaign(_HELD_HOP, config=_budgeted(Budget()))
+    stores.campaigns.create_campaign(held)
+    minted_dataset(stores, held)
     stores.campaigns.mint_cycle(_HELD_HOP)
     if spent is not None:
         stores.charges.append(
@@ -3768,6 +3772,28 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     )
     assert ceiling_counts_now() == pytest.approx(ceiling_counts), (
         "a torn delete's rows metered beside its tombstone: the ceiling refuses at half its room"
+    )
+
+    # The slot door refuses a run or a pass on it: nothing it would spend past its tombstone
+    # reaches a sum, and no job of it holds a slot.
+    async def bench_pass() -> None:
+        async with paid_pass(
+            stores=stores, verb="bench", hop=root_hop, declared=Budget(usd=1.0), sends=()
+        ):
+            raise AssertionError("a pass on a deleted campaign was admitted")
+
+    with pytest.raises(ConflictError) as retired:
+        asyncio.run(bench_pass())
+    assert retired.value.code == "campaign_not_active", "a deleted campaign admitted a pass"
+    assert not JobRegistry.attach(stores.jobs_dir).list_running(), (
+        "a refused pass left its job holding a slot"
+    )
+    graded_under = _budgeted(Budget()).model_copy(
+        update={"scoring": {"per_sample": "label_match(predicted, ground_truth)"}}
+    )
+    served = cycle_bench(stores, torn_read, root_hop, graded_under).status
+    assert (served.can_run, served.refusal) == (False, BenchRefusal.NOT_ACTIVE), (
+        "the served bench offers a grade the pass's admission refuses"
     )
     # A campaign whose manifest is gone still deletes, and banks: nothing reads its rows as one.
     CampaignLayout(camp_dir).manifest.unlink()

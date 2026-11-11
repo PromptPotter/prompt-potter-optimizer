@@ -11,23 +11,19 @@ from typing import TYPE_CHECKING, assert_never
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.launcher.admission import (
-    RunStart,
-    admit_arms,
-    claim_cycle,
-    probe_backend,
-)
+from promptpotter.application.jobs.launcher.admission import RunStart, admit_arms, probe_backend
 from promptpotter.application.jobs.launcher.checkin import OpenedCheckin, open_checkin
 from promptpotter.application.jobs.launcher.launch import LaunchOutcome
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
     CyclePlan,
-    MintedCycle,
+    OpenedCycle,
     arm_plans,
     mint_arms,
     mint_framed_arms,
 )
-from promptpotter.application.jobs.quota import land_job, sends_on
+from promptpotter.application.jobs.quota import sends_on
+from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import draft_served
 from promptpotter.domain.campaign import ArmName
@@ -129,7 +125,7 @@ def _opened(source: ArmSource) -> tuple[Session, CampaignConfig, OpenedCheckin |
             assert_never(source)
 
 
-async def _mint(source: ArmSource, plans: list[CyclePlan]) -> list[MintedCycle]:
+async def _mint(source: ArmSource, plans: list[CyclePlan]) -> list[OpenedCycle]:
     match source:
         case DatasetArms(session=session):
             return await mint_framed_arms(session, plans)
@@ -174,17 +170,14 @@ class AdmittedHeadToHead(LaunchOutcome):
 
     async def minted(self) -> list[HeldArm]:
         """All arms minted, each job landed on its cycle; a failure stamps every minted cycle."""
-        stores, job_registry = self.plans[0].session.store, self.job_registry
-        minted: list[MintedCycle] = []
+        minted: list[OpenedCycle] = []
         try:
             minted = await _mint(self.source, self.plans)
-            for (job, held), cycle in zip(self.admitted, minted, strict=True):
-                land_job(stores, job_registry, job.job_id, cycle.session.hop, held.share)
-                if isinstance(job.holder, CampaignLaunch):
-                    claim_cycle(stores, job_registry, job, cycle.session.hop)
+            for start, (_, held), cycle in zip(self.starts, self.admitted, minted, strict=True):
+                start.land(cycle.hop, held)
         except BaseException as exc:
             for i, start in enumerate(self.starts):
-                start.release(exc, stamps=minted[i].session.hop if minted else None)
+                start.release(exc, stamps=minted[i].hop if minted else None)
             raise
         finally:
             if isinstance(self.source, CheckinArms):
@@ -193,7 +186,7 @@ class AdmittedHeadToHead(LaunchOutcome):
             "head-to-head %s: minted %s",
             self.request.head_to_head_id,
             ", ".join(
-                f"{arm.arm_key}={cycle.campaign_id}"
+                f"{arm.arm_key}={cycle.hop.campaign_id}"
                 for arm, cycle in zip(self.request.arms, minted, strict=True)
             ),
         )
@@ -243,7 +236,8 @@ async def admit_head_to_head(
         (effective_config(plan.declaration), plan.declaration.environment.connector)
         for plan in plans
     ]
-    # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
+    # Offloaded: the sweep and the wallet read scan every cycle ledger, off the event loop.
+    await asyncio.to_thread(sweep, session.store.projects_root)
     admitted = await asyncio.to_thread(
         admit_arms,
         [

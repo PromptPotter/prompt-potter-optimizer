@@ -184,12 +184,17 @@ class CyclePlan:
 
 
 @dataclass(frozen=True)
-class MintedCycle:
-    cycle_id: str
-    campaign_id: str
+class OpenedCycle:
+    """A cycle a run starts on, minted or resumed: its session bound to it, under the selection
+    every refusal was asked of."""
+
     cycle: CycleConfig
     session: Session
     optimizer: SelectedOptimizer
+
+    @property
+    def hop(self) -> CycleHop:
+        return self.session.hop
 
 
 def declare(
@@ -278,18 +283,6 @@ def resolve_cycle_plan(
     )
 
 
-class ConnectorMovedError(ConflictError):
-    code = "connector_moved"
-
-    def __init__(self, campaign: Campaign, *, bound: str) -> None:
-        super().__init__(
-            f"campaign {campaign.campaign_id} was minted on {campaign.connector}, and "
-            f"{campaign.dataset_name} now names {bound}, so nothing ran: its measurements are "
-            f"{campaign.connector}'s. Point {campaign.dataset_name} back at {campaign.connector}, "
-            "or start a fresh campaign on it; this one is preserved."
-        )
-
-
 class ConfigDriftError(ConflictError):
     code = "config_drift"
 
@@ -358,10 +351,9 @@ def _revision_moved(
 
 
 def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> CyclePlan:
-    """*session* is bound to the cycle the resume runs; the plan is that cycle's, configured, every
-    refusal asked of the selection it answers, first the connector *session* is bound to."""
-    if (bound := session.backend_client.connector.name) != campaign.connector:
-        raise ConnectorMovedError(campaign, bound=bound)
+    """*session* is bound to the cycle the resume runs, past the campaign's own refusals
+    (`admission.py::refuse_campaign`); the plan is that cycle's, configured, every refusal asked of
+    the selection it answers."""
     plan = resolve_cycle_plan(session, campaign.declaration, dataset)
     checked = plan
     if session.hop != campaign.root_hop:
@@ -611,14 +603,12 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     return session
 
 
-def mint(plan: CyclePlan, *, campaign_id: str, adopting: str | None) -> MintedCycle:
+def mint(plan: CyclePlan, *, campaign_id: str, adopting: str | None) -> OpenedCycle:
     """*adopting* is a draft whose ledger paid toward this cycle before it existed, moved in as its
     first lines."""
     # Never sweep the inner sandbox here: its key carries the campaign id, so only ANOTHER's dies.
     hop = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
-    return MintedCycle(
-        cycle_id=hop.cycle_id,
-        campaign_id=campaign_id,
+    return OpenedCycle(
         cycle=plan.cycle,
         session=_mint_campaign(plan, hop=hop, adopting=adopting),
         optimizer=plan.optimizer,
@@ -644,7 +634,7 @@ def _mint_all(
     *,
     adopting: str | None,
     stored: HeadToHeadRecord | None,
-) -> list[MintedCycle]:
+) -> list[OpenedCycle]:
     """Inside `_record_held`, whose *stored* record it is; the draft it is *adopting* lands on the
     first cycle alone. Arms join their head-to-head on the framed plans they mint: a record this act declares
     is its first arm's as minted, and every arm is held to the record and to the arms minted, and
@@ -663,7 +653,7 @@ def _mint_all(
     ]
 
 
-def mint_arms(plans: Sequence[CyclePlan], *, adopting: str | None) -> list[MintedCycle]:
+def mint_arms(plans: Sequence[CyclePlan], *, adopting: str | None) -> list[OpenedCycle]:
     """*plans* from ``arm_plans``, framed already: a check-in's arms frame nothing."""
     with _record_held(plans) as stored:
         minted = _mint_all(
@@ -675,7 +665,7 @@ def mint_arms(plans: Sequence[CyclePlan], *, adopting: str | None) -> list[Minte
     return minted
 
 
-async def mint_framed_arms(session: Session, plans: Sequence[CyclePlan]) -> list[MintedCycle]:
+async def mint_framed_arms(session: Session, plans: Sequence[CyclePlan]) -> list[OpenedCycle]:
     """*plans* from ``arm_plans``: a framing the dataset still owes is paid once and frames every arm."""
     campaign_ids = [fresh_campaign_id(session) for _ in plans]
     return await _mint_framed(session, plans, campaign_ids, task_text=None)
@@ -687,7 +677,7 @@ async def _mint_framed(
     campaign_ids: Sequence[str],
     *,
     task_text: str | None,
-) -> list[MintedCycle]:
+) -> list[OpenedCycle]:
     description = _description_to_decompose(session, plans[0].cycle.config, task_text)
     with _record_held(plans) as stored:
         if description is None:
@@ -719,7 +709,7 @@ async def mint_framed_cycle(
     campaign_id: str,
     task_text: str | None,
     origin_override: dict[str, NodePrompt] | None = None,
-) -> MintedCycle:
+) -> OpenedCycle:
     """An L4 inner cell mints through ``mint``, so cells never race to decompose."""
     assert isinstance(declaration.purpose, Optimize), "an arm is planned with its head-to-head"
     # Every refusal the mint owes, before the check-in below bills.
@@ -735,7 +725,7 @@ async def _mint_after_framing(
     *,
     campaign_ids: Sequence[str],
     stored: HeadToHeadRecord | None,
-) -> list[MintedCycle]:
+) -> list[OpenedCycle]:
     """The cycle id hashes the framing, so its call bills a draft ledger the first mint adopts or a refusal discards."""
     assert session.dataset_name, "a framing commits to the dataset the session opened"
     drafts = session.store.drafts

@@ -1,7 +1,6 @@
 // Seeds from the RESOLVED config: fork init layers it onto the dataset overlay (`entry.py`), so a sparse seed resets untouched params.
 
-import type { NodePrompt, ServedDashboard, RoundView } from "@/lib/api/types";
-import { liveCandidate } from "./live-candidates";
+import type { NodePrompt, ServedArm } from "@/lib/api/types";
 
 export interface CandidateSearchPoint {
   origin_prompts: Record<string, NodePrompt>;
@@ -29,36 +28,12 @@ function nodeConfigs(
   return out;
 }
 
-export interface ArmSearchpoint {
-  prompts: Record<string, NodePrompt> | null;
-  resolved_params: Record<string, unknown> | null;
+// One arm of a round, in flight or filed: both reads serve the one `ServedArm` shape.
+export function servedArm(arms: readonly ServedArm[], key: string | null): ServedArm | null {
+  if (!key) return null;
+  return arms.find((a) => a.reading.arm.key === key) ?? null;
 }
 
-// A proposal has resolved no config yet; every later state carries it.
-export function armSearchpoint(doc: RoundView, key: string): ArmSearchpoint | null {
-  const arm = doc.arms[key];
-  if (!arm) return null;
-  return {
-    prompts: arm.individual.prompts,
-    resolved_params: arm.state === "proposed" ? null : arm.resolved_params,
-  };
-}
-
-export function candidateSearchPoint(
-  doc: RoundView | null,
-  key: string,
-): CandidateSearchPoint | null {
-  if (!doc || !key) return null;
-  const entry = armSearchpoint(doc, key);
-  if (!entry) return null;
-  return searchPoint(entry.prompts, nodeConfigs(entry.resolved_params));
-}
-
-export function liveCandidateSearchPoint(
-  dash: ServedDashboard | null,
-  key: string | null,
-): CandidateSearchPoint | null {
-  const entry = liveCandidate(dash, key);
-  if (!entry) return null;
-  return searchPoint(entry.prompts, nodeConfigs(entry.resolved_params));
+export function armSearchPoint(arm: ServedArm | null): CandidateSearchPoint | null {
+  return arm ? searchPoint(arm.prompts, nodeConfigs(arm.resolved_params)) : null;
 }

@@ -1,4 +1,4 @@
-import { liveCandidate, roundOf } from "./live-candidates";
+import { roundOf } from "./live-candidates";
 import type {
   ServedDashboard,
   ArmName,
@@ -7,10 +7,9 @@ import type {
   HierarchyCandidate,
   NodePrompt,
   RunStanding,
-  RoundView,
+  ServedArm,
 } from "@/lib/api/types";
 import type { ArmRow, SelectedCandidate } from "@/lib/types";
-import { armSearchpoint, type ArmSearchpoint } from "./candidate-search-point";
 import { rowAt } from "./round-candidates";
 import { roundReading, type RoundReading } from "./round-reading";
 
@@ -96,46 +95,26 @@ export function searchpointText(cfg: ObserveConfig): string {
 }
 
 // A node asks for the prompt IT runs (absent = none); the whole searchpoint for every node's.
-function rowConfig(
-  row: ArmSearchpoint | undefined | null,
+export function armObserveConfig(
+  arm: ServedArm | null,
   label: string,
   nodeId?: string | null,
 ): ObserveConfig | null {
-  if (!row) return null;
-  const prompts = row.prompts ?? {};
+  if (!arm) return null;
+  const prompts = arm.prompts ?? {};
   const own = nodeId ? prompts[nodeId] : undefined;
   return {
     prompts: nodeId ? (own ? { [nodeId]: own } : {}) : prompts,
-    config: row.resolved_params ?? {},
+    config: arm.resolved_params ?? {},
     label,
   };
-}
-
-export function liveCandidateObserveConfig(
-  dash: ServedDashboard | null,
-  key: string | null,
-  display: string,
-  nodeId?: string | null,
-): ObserveConfig | null {
-  return rowConfig(liveCandidate(dash, key), display, nodeId);
-}
-
-export function candidateObserveConfig(
-  doc: RoundView | null,
-  key: string | null,
-  display: string,
-  nodeId?: string | null,
-): ObserveConfig | null {
-  if (!doc || !key) return null;
-  return rowConfig(armSearchpoint(doc, key), display, nodeId);
 }
 
 type ObserveTarget = Pick<ArmName, "key" | "round" | "label">;
 
 // Served `leading` is the arm the selector read the round off, so a held round still has one.
 function roundObserveTarget(dash: ServedDashboard | null, round: number): ObserveTarget | null {
-  if (!dash?.round_axis.completed.includes(round)) return null;
-  return dash.rounds.find((x) => x.round === round)?.leading ?? null;
+  return dash?.rounds.find((x) => x.round === round)?.leading ?? null;
 }
 
 export interface ObservePoint extends ObserveTarget {

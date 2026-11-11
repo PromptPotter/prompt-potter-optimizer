@@ -296,7 +296,7 @@ async def rewalk_lost_origin(cycle: Cycle, dataset: list[Sample], callbacks: Run
     if not holes and len(rows) >= head.expected_samples:
         return
     ctx = RoundContext(cycle=cycle, round_num=0, callbacks=callbacks)
-    await rewalk_origin(ctx, cycle.origin_cells(dataset), force_fresh=False)
+    await rewalk_origin(ctx, cycle.origin_cells(dataset))
     logger.warning(
         "Resume re-measured the origin's %d lost cell(s) and the %d its walk never sent; round 0 "
         "closes again on them.",

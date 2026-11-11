@@ -262,7 +262,7 @@ class ActiveSessionParams(ReadParams, read=ReadKind.ACTIVE_SESSION, route="/sess
     """The caller-tenant's run to follow: one running first, else its latest launch (a resume is
     one) from any entry point.
 
-    No active session is a steady state: it answers null ids, never a not-found.
+    No active session is a steady state: it answers a null `hop`, never a not-found.
     """
 
     def answer(self, caller: Caller) -> ActiveSessionResponse:

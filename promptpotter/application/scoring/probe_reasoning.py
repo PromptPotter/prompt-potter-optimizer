@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.application.initialization.loop_start import diagnostic_trace
+from promptpotter.application.initialization.scoring_scope import diagnostic_trace
 from promptpotter.application.jobs.coupon import keyed_client, provider_send
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.domain.pipeline_overlay import normalize_model_id

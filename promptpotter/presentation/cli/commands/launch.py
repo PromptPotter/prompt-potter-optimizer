@@ -6,26 +6,22 @@ import functools
 import logging
 import signal
 import sys
-import threading
 from collections.abc import Callable, Coroutine, Iterator, Sequence
-from typing import TYPE_CHECKING, Any, get_args
+from typing import TYPE_CHECKING, Any
 
 from promptpotter import connectors
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
-from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.views.render.phase import render_completion
 from promptpotter.config.first_run import ensure_api_key
-from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import (
     CancelPayload,
     CyclePayload,
-    OriginGateDecisionPayload,
     PauseCyclePayload,
 )
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
-from promptpotter.domain.phases import GateDecision, stop_reason_outcome
+from promptpotter.domain.phases import stop_reason_outcome
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.shared.errors import PotterError
 
@@ -44,8 +40,6 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 def prepare_launch() -> None:
     """Runs BEFORE the loop exists: a prompt or refusal here never meets a run's Ctrl+C handler."""
-    # A CLI-only install has no periodic sweep: a launch is where a dead producer's leavings are reclaimed.
-    sweep(default_projects_root())
     ensure_api_key()
 
 
@@ -155,36 +149,10 @@ def _ctrl_c(
         signal.signal(signal.SIGINT, previous)
 
 
-@contextlib.contextmanager
-def _terminal_inputs(session: Session) -> Iterator[None]:
-    loop, hop = asyncio.get_running_loop(), session.hop
-    pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
-    with ctrl_c_pauses(session.store, [pause]) as dispatch:
-
-        def read_decisions() -> None:
-            spelled: dict[str, GateDecision] = {
-                key: d for d in get_args(GateDecision) for key in (d, d[0])
-            }
-            with contextlib.suppress(OSError, ValueError, RuntimeError):
-                for line in sys.stdin:
-                    decision = spelled.get(line.strip().lower())
-                    if decision is not None:
-                        loop.call_soon_threadsafe(
-                            dispatch,
-                            OriginGateDecisionPayload(
-                                campaign_id=hop.campaign_id,
-                                cycle_id=hop.cycle_id,
-                                decision=decision,
-                            ),
-                        )
-
-        if sys.stdin is not None and sys.stdin.isatty():
-            threading.Thread(target=read_decisions, daemon=True, name="terminal-gate-input").start()
-        yield
-
-
 async def run_inline(held: HeldRun, *, mode: RunMode) -> CycleResult:
-    with _terminal_inputs(held.session):
+    hop = held.session.hop
+    pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
+    with ctrl_c_pauses(held.session.store, [pause]):
         result, _observers = await held.run_inline(
             mode=mode, readout_sink=functools.partial(print, flush=True)
         )

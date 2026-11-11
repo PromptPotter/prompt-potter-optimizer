@@ -338,7 +338,7 @@ def optimizer_node_configs(selected: SelectedOptimizer) -> list[tuple[str, NodeC
 
 def refuse_below_reasoning_floor(node_configs: Iterable[tuple[str, NodeCall]]) -> None:
     """Over every node a pass sends to: a run's (`jobs/mint.py::refuse_unrunnable`), or a
-    pipeline scored outside every run (`loop_start.py::arm_diagnostic_scoring`). An ABSENT
+    pipeline scored outside every run (`scoring_scope.py::arm_diagnostic_scoring`). An ABSENT
     ``max_tokens`` is the sanctioned default, never a violation."""
     refused: list[str] = []
     below_floor: list[str] = []

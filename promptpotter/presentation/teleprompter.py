@@ -23,10 +23,8 @@ else:
             with contextlib.suppress(ImportError):
                 getattr(_parked, "__file__", None)
 
-from promptpotter.application.account import local_stores
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import samples_from_dicts
-from promptpotter.application.embedded_run import open_session, run_campaign
+from promptpotter.application.embedded_run import enter, run_campaign
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.connectors.dspy_module import (
     PROGRAM_NODE,
@@ -121,21 +119,14 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             )
         program = DspyProgram(student=student, metric=self.metric, examples=list(trainset))
 
-        stores = local_stores(tenant=None)
+        # Landed first: the definition is written under the root as this code reads it.
+        stores = enter()
         self._write_definition(stores, items)
-        session = await open_session(self.dataset_name, stores=stores, program=program)
-        try:
-            # No overrides: the file this compile just wrote IS the projection of `loop` and `node`.
-            assert session.dataset is not None, "open_session resolves the dataset it names"
-            config = load_dataset_campaign_config(session.dataset)
-            session, result = await run_campaign(
-                session,
-                config,
-                budget=Budget(),
-                mode=RunMode(),
-            )
-        finally:
-            await session.backend_client.aclose()
+        # No config: the file this compile just wrote IS the projection of `loop` and `node`.
+        session, result = await run_campaign(
+            self.dataset_name, stores=stores, program=program, budget=Budget(), mode=RunMode()
+        )
+        await session.backend_client.aclose()
 
         if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
             return student

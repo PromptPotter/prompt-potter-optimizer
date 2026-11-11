@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import random
 from collections.abc import Mapping, Sequence
+from enum import StrEnum
 from typing import Annotated, Any, Literal, TypedDict, Unpack, assert_never
 
 from pydantic import Field
 
-from promptpotter.domain.bench import DatasetSplit
+from promptpotter.domain.bench import BenchRefusal, DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import CellSet, instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams
@@ -297,6 +298,21 @@ LIFECYCLE_STATUS_LABELS: Worded[LifecycleStatus, str] = Worded(
 type LifecycleFilter = Literal["active", "archived", "deleted", "all"]
 
 
+class CampaignRefusal(StrEnum):
+    """Why every run and pass on a campaign is refused, read off it and its dataset's definition
+    alone (`admission.py::campaign_refusal`): admission refuses with this code, and a served
+    can-run answer serves the same value (`BenchRefusal`)."""
+
+    NOT_ACTIVE = "campaign_not_active"
+    # Its dataset resolves to no definition naming a connector: gone, unoffered, or unreadable.
+    DEFINITION_UNREAD = "definition_unread"
+    # Its dataset's definition now names another connector than the one it was minted on.
+    CONNECTOR_MOVED = "connector_moved"
+
+
+assert {r.value for r in CampaignRefusal} <= {r.value for r in BenchRefusal}
+
+
 class CampaignEdit(TypedDict, total=False):
     label: str
     dataset_name: str
@@ -330,6 +346,11 @@ class Campaign(FrozenModel):
     def connector(self) -> str:
         """FROZEN at mint: a campaign outlives its dataset dir, so re-pointing a slug must not re-kind it."""
         return self.declaration.environment.connector
+
+    @property
+    def active(self) -> bool:
+        """An archived or deleted campaign (a torn delete among them) runs and scores nothing more."""
+        return self.lifecycle_status == "active"
 
     def edited(self, **changes: Unpack[CampaignEdit]) -> Campaign:
         return Campaign.model_validate({**self.model_dump(mode="json"), **changes})

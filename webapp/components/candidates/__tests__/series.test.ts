@@ -37,7 +37,7 @@ const ctx = (over: Partial<SeriesCtx> = {}): SeriesCtx => ({
   views: [],
   overlapBasis: null,
   unit: "sample",
-  electedMetric: "ability",
+  displayMetric: "ability",
   ...over,
 });
 
@@ -118,13 +118,13 @@ describe("what is on screen", () => {
 describe("the confidence band", () => {
   it("draws the served band only on the bar that produced it", () => {
     const anchors = (c: Partial<SeriesCtx>) => whiskerBands(ctx(c)).map((b) => b.anchor);
-    expect(anchors({ electedMetric: "ability" })).toEqual(["accuracy", "ability"]);
+    expect(anchors({ displayMetric: "ability" })).toEqual(["accuracy", "ability"]);
     const both: Partial<SeriesCtx> = {
-      electedMetric: "composite",
+      displayMetric: "composite",
       metrics: new Set(["accuracy", "composite"]),
     };
     expect(anchors(both)).toEqual(["accuracy"]);
-    expect(anchors({ electedMetric: "composite", metrics: new Set(["composite"]) })).toEqual([]);
+    expect(anchors({ displayMetric: "composite", metrics: new Set(["composite"]) })).toEqual([]);
     expect(anchors({ metrics: new Set(["ability"]) })).toEqual(["ability"]);
   });
 

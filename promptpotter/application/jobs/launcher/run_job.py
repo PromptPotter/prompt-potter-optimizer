@@ -15,10 +15,15 @@ from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import TypeAdapter, model_validator
 
-from promptpotter.application.initialization.wiring import bind_cycle_session, complete_registries
+from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.launcher.admission import RunStart, claim_cycle
-from promptpotter.application.jobs.mint import resolve_resume
+from promptpotter.application.jobs.launcher.admission import (
+    RunStart,
+    campaign_at,
+    claim_cycle,
+    refuse_campaign,
+)
+from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_observers import build_run_observers
@@ -27,22 +32,20 @@ from promptpotter.config.paths import READOUT_POINTER, user_data_root
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.spend import HeldBudget
+from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import open_append, write_text
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.jobs.mint import MintedCycle
+    from promptpotter.application.jobs.mint import OpenedCycle
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_observers import RunObservers
-    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.campaign_config import CycleConfig
     from promptpotter.domain.results import CycleResult
 
@@ -86,24 +89,21 @@ async def spawn_job(held: HeldRun, mode: RunMode) -> asyncio.Task[None]:
     """Returns only once the run's process holds the job and its claim (`run_job`): a spawner
     gone before that, its producer lock with it, would leave a job a reconciling read releases
     under its child. Answers the task that ends when the run's process exits."""
-    start, stores = held.start, held.session.store
-    log_path = CycleLayout(stores.campaigns.cycle_dir(held.session.hop)).job_log
+    start, stores, hop = held.start, held.session.store, held.session.hop
+    log_path = CycleLayout(stores.campaigns.cycle_dir(hop)).job_log
+    loop = asyncio.get_running_loop()
     try:
         spec = held.job_spec(mode)
         child = _start(spec, log_path)
+        if not await _adoption(loop, child, spec.job_id):
+            raise RuntimeError(
+                f"job {spec.job_id}'s process exited before taking the job over (log {log_path})"
+            )
     except BaseException as exc:
         # No process took the job (its spec unbuilt among them), so nothing else will ever hand its
         # slot back or stamp its cycle.
-        start.release(exc, stamps=held.session.hop)
+        start.release(exc, stamps=hop)
         raise
-
-    loop = asyncio.get_running_loop()
-    if not await _adoption(loop, child, spec.job_id):
-        refused = RuntimeError(
-            f"job {spec.job_id}'s process exited before taking the job over (log {log_path})"
-        )
-        start.release(refused, stamps=spec.hop)
-        raise refused
 
     exited = asyncio.Event()
 
@@ -191,15 +191,14 @@ async def run_held_job(
     readout_sink: Callable[[str], None] | None = None,
 ) -> tuple[CycleResult, RunObservers]:
     start.job_registry.mark_started(start.job_id)
+    # Unstamped until its observers stand: nothing of this launch reached the cycle before, whose
+    # own producer may still be running it.
+    stamps: CycleHop | None = None
     try:
         observers = build_run_observers(
             session=session, campaign_config=cycle.config, readout_sink=readout_sink
         )
-    except BaseException as exc:
-        # `hop=None`: nothing of this launch reached the cycle, whose own producer may still be running it.
-        start.release(exc)
-        raise
-    try:
+        stamps = session.hop
         _, result = await run_optimization(
             list(session.bank.samples),
             cycle,
@@ -212,7 +211,7 @@ async def run_held_job(
     except BaseException as exc:
         # An interrupt is the pause flag's SYNTHETIC one, its pause already declared; anything else
         # fired OUTSIDE the runner's try, so this stamps it.
-        start.release(exc, stamps=None if launch_interrupted(exc) else session.hop)
+        start.release(exc, stamps=None if launch_interrupted(exc) else stamps)
         raise
     start.release(result)
     return result, observers
@@ -221,9 +220,9 @@ async def run_held_job(
 @dataclass(frozen=True, slots=True)
 class HeldRun:
     """A launch past everything that can refuse it: its machine slot held and its ceiling admitted
-    (``launcher.admission``), its cycle on disk, a session bound to that cycle. Every way in to a
-    run arrives here by one of the three ``hold_*`` preambles, and what is left is the
-    run-invocation — the ONE thing an entry point owns: :meth:`detach` or :meth:`run_inline`."""
+    (``launcher.admission``), its cycle on disk, a session bound to that cycle. A launch arrives
+    here by ``launch.py::hold`` and an arm by its head-to-head's mint, and what is left is the
+    run-invocation, the ONE thing an entry point owns: :meth:`detach` or :meth:`run_inline`."""
 
     start: RunStart
     session: Session
@@ -232,18 +231,19 @@ class HeldRun:
     optimizer: SelectedOptimizer
 
     @classmethod
-    def of(cls, start: RunStart, minted: MintedCycle, budget: HeldBudget) -> HeldRun:
-        """For a preamble that MINTS the manifest: the config it reads back as, which a detached run rebuilds, not the one it was made from."""
-        session = minted.session
+    def of(cls, start: RunStart, opened: OpenedCycle, budget: HeldBudget) -> HeldRun:
+        """The config the cycle reads back as, which a detached run rebuilds, never the one a mint
+        was made from."""
+        session = opened.session
         stores, hop = session.store, session.hop
         campaign = stores.campaigns.load_campaign(hop.campaign_id)
-        assert campaign is not None, "a preamble minted or loaded it"
+        assert campaign is not None, "the hold minted or loaded it"
         return cls(
             start=start,
             session=session,
             cycle=cycle_config(stores, campaign, hop),
             budget=budget,
-            optimizer=minted.optimizer,
+            optimizer=opened.optimizer,
         )
 
     def job_spec(self, mode: RunMode) -> JobSpec:
@@ -283,14 +283,6 @@ class HeldRun:
         )
 
 
-async def open_held_cycle(
-    stores: Stores, campaign: Campaign, hop: CycleHop
-) -> tuple[Session, CycleConfig, SelectedOptimizer]:
-    bound = await bind_cycle_session(stores, campaign, hop)
-    plan = resolve_resume(bound, campaign, bound.bank.samples)
-    return plan.session, plan.cycle, plan.optimizer
-
-
 async def run_job(spec: JobSpec) -> StopOutcome | None:
     stores = build_stores(
         spec.identity,
@@ -308,10 +300,9 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     start = RunStart(stores, job_registry, adopted)
     _tell_spawner()
     try:
-        campaign = stores.campaigns.load_campaign(spec.hop.campaign_id)
-        if campaign is None:
-            raise NotFoundError(f"campaign not found: {spec.hop.campaign_id}")
-        session, cycle, optimizer = await open_held_cycle(stores, campaign, spec.hop)
+        # Asked again here, under the claim: the admitting process's answer is a handoff old.
+        refuse_campaign(stores, campaign := campaign_at(stores, spec.hop))
+        opened = await ExistingCycle(spec.hop, campaign, Budget()).open(stores)
     except BaseException as exc:
         logger.exception("job %s could not bind its session", spec.job_id)
         start.release(exc, stamps=spec.hop)
@@ -320,11 +311,11 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     try:
         result, _observers = await run_held_job(
             start,
-            session,
-            cycle,
+            opened.session,
+            opened.cycle,
             mode=spec.mode,
             budget=spec.budget,
-            optimizer=optimizer,
+            optimizer=opened.optimizer,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         return StopOutcome.PAUSED
