@@ -354,6 +354,7 @@ def folded[F: LedgerFold[Any, Any]](
     return made
 
 
+@runtime_checkable
 class Projected(Protocol):
     """A fold that writes (`projections/base.py::Projection`), fed after its index's folds."""
 
@@ -390,21 +391,28 @@ class Projecting:
 
 
 class LedgerIndex(_LedgerTail):
-    """ONE per ledger, holding every typed fold any roster named: a line is screened and validated once.
-    A fold no roster names holds a slot in its own ledger's index alone, seeded with a fork's parent at its cut.
-    Its projections are fed outside its lock, so one may view this index while it is fed."""
+    """ONE per ledger, holding every screened fold the roster declares: a line is screened and
+    validated once. A projection, or a fold the roster does not declare, holds a slot in its own
+    ledger's index alone, seeded with a fork's parent at its cut. Its projections are fed outside
+    its lock, so one may view this index while it is fed."""
 
     _registry: ClassVar[OrderedDict[Path, LedgerIndex]] = OrderedDict()
-    _screened: ClassVar[list[_Make]] = []
     # Every fold a reader declares (`readers`), whichever index it is read on.
     _readers: ClassVar[list[type[Any]]] = []
+    # The declared folds that write nothing: every index folds them together.
+    _screened: ClassVar[list[_Make]] = []
     _registry_lock: ClassVar[threading.Lock] = threading.Lock()
 
     @classmethod
-    def readers[*F](cls, *folds: *F) -> tuple[*F]:
+    def readers(cls, *folds: type[Any]) -> None:
         """The roster every reader of a ledger declares its folds on, a `Projection` by subclassing."""
-        cls._readers.extend(cast("tuple[type[Any], ...]", folds))
-        return folds
+        with cls._registry_lock:
+            cls._readers.extend(folds)
+            cls._screened.extend(
+                fold
+                for fold in folds
+                if not issubclass(fold, Projected) and fold not in cls._screened
+            )
 
     @classmethod
     def check_every_arm_read(cls) -> None:
@@ -528,9 +536,8 @@ class LedgerIndex(_LedgerTail):
                 self._drainer = None
 
     @classmethod
-    def of(cls, path: Path, roster: Sequence[_Make]) -> LedgerIndex:
+    def of(cls, path: Path) -> LedgerIndex:
         with cls._registry_lock:
-            cls._screened.extend(fold for fold in roster if fold not in cls._screened)
             return _registered(cls._registry, path, lambda: cls(path))
 
     def _reset(self) -> None:

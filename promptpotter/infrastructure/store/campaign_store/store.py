@@ -183,7 +183,7 @@ class CampaignStore:
         (and, at a mint or a stop, its `dashboard.json`), joining a run's in this process."""
         cycle_dir = CycleDir(self.cycle_dir(hop))
         ledger = CycleEventLog.open(cycle_dir)
-        with LedgerIndex.of(ledger.path, ()).projecting() as projecting:
+        with LedgerIndex.of(ledger.path).projecting() as projecting:
             projecting.add(CycleIndexProjection(cycle_dir))
             if dashboard:
                 projecting.add(DashboardCheckout(cycle_dir))
@@ -195,7 +195,16 @@ class CampaignStore:
         return read_file(path, model.model_validate_json, FileKind.MANIFEST)
 
     def load_campaign(self, campaign_id: str) -> Campaign | None:
-        return self._read_declared(self._manifest_path(campaign_id), Campaign)
+        """Its tombstone IS the delete: a delete torn after it reads deleted, whatever the manifest
+        says."""
+        campaign = self._read_declared(self._manifest_path(campaign_id), Campaign)
+        if (
+            campaign is None
+            or campaign.lifecycle_status == "deleted"
+            or not workspace_bank(self._base_dir).deleted(campaign_id)
+        ):
+            return campaign
+        return campaign.edited(lifecycle_status="deleted")
 
     def _campaigns_root(self) -> Path:
         return campaigns_root_dir_for(self._base_dir)
@@ -350,7 +359,6 @@ class CampaignStore:
         lifecycle: LifecycleFilter = "active",
     ) -> list[Campaign]:
         out: list[Campaign] = []
-        bank = workspace_bank(self._base_dir)
         for cid in self.list_campaign_ids():
             # A survey: one manifest this build cannot read must not hide the account's others.
             try:
@@ -360,9 +368,6 @@ class CampaignStore:
                 continue
             if campaign is None:
                 continue
-            # Its tombstone IS the delete: a delete torn after it lists deleted, whatever the manifest says.
-            if bank.deleted(cid) and campaign.lifecycle_status != "deleted":
-                campaign = campaign.edited(lifecycle_status="deleted")
             if dataset_name and campaign.dataset_name != dataset_name:
                 continue
             if lifecycle != "all" and campaign.lifecycle_status != lifecycle:

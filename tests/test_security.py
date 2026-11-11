@@ -87,7 +87,7 @@ from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import library
-from promptpotter.application.maintenance.landing import apply_landing, plan_landing
+from promptpotter.application.maintenance.landing import apply_landing, last_landing, plan_landing
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import running_prompt, select_optimizer
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
@@ -718,8 +718,8 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     for table in (app_visits.OUTSIDE_REQUESTS, app_visits._DIGESTS):
         visits.keep(table, stale)
     app_visits.mark_told(app_visits.VisitsDigest(day="2001-01-02", text="told", ring=False))
-    told = visits.kept(app_visits.OUTSIDE_REQUESTS)
-    assert [r.row["path"] for r in told] == [path for path, _ in kept], (
+    aged = visits.kept(app_visits.OUTSIDE_REQUESTS)
+    assert [r.row["path"] for r in aged] == [path for path, _ in kept], (
         "a request past retention outlived the day's telling"
     )
     assert [r.row["day"] for r in visits.kept(app_visits._DIGESTS)] == ["2001-01-02"], (
@@ -1705,6 +1705,10 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert not cache_only.refused, "a cache that does not load refused a landing"
     apply_landing(built_stores.projects_root, cache_only)
     assert not fold.exists(), "a landing kept a cache this build cannot read"
+    stamp = last_landing(built_stores.projects_root)
+    dropped = cache_only.said
+    assert [str(fold) in line for line in dropped] == [True], f"a cache dropped unsaid: {dropped}"
+    assert stamp is not None and stamp.said == dropped, "the stamp lost what the landing dropped"
     assert UserStore(campaigns.workspace).load() == user, "a landing dropped a survivor"
 
     # A landing stages a survivor a reshape moved, proves the tree as it would stand, and writes

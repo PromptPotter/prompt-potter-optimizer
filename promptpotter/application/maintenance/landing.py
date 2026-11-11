@@ -5,17 +5,23 @@ roll the code back once it has written: the old code would run on what it wrote.
 from __future__ import annotations
 
 import functools
-from contextlib import nullcontext
+import logging
+from collections import Counter
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
+
+from pydantic import ValidationError
 
 from promptpotter.application.initialization.wiring import complete_registries, read_treatment
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.migrate import MIGRATIONS
 from promptpotter.application.maintenance.reset import ResetPlan, plan_reset, resetting
+from promptpotter.application.notices import tell_landed
 from promptpotter.application.optimizer_manifest import checkin_manifest
 from promptpotter.config.paths import default_projects_root, jobs_dir, user_data_root
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.data_root import (
@@ -48,11 +54,29 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, PotterError
 from promptpotter.shared.hashing import stable_hash
 
+logger = logging.getLogger(__name__)
+
 
 class Unloadable(NamedTuple):
     path: Path
     found: Found
     why: str
+
+    @property
+    def said(self) -> str:
+        return f"{self.found.kind.fate.value} {self.found.kind.name} {self.path}: {self.why}"
+
+
+class Refused(NamedTuple):
+    """What refuses a landing, the paths that do and its remedy."""
+
+    why: str
+    paths: tuple[Path, ...]
+    remedy: str = ""
+
+
+# A refusal names its first few paths; `land-data --dry-run` lists every one.
+_NAMED = 3
 
 
 class Landing(NamedTuple):
@@ -72,23 +96,62 @@ class Landing(NamedTuple):
     unloadable: tuple[Unloadable, ...]
 
     @property
-    def refusal(self) -> str | None:
-        if any(one.found.kind.fate is Fate.SURVIVOR for one in self.unloadable):
-            return (
-                "a survivor does not load, and no migration maps it: the landed code owes one "
-                "(`maintenance/migrate.py::MIGRATIONS`)"
+    def refused(self) -> Refused | None:
+        if survivors := tuple(
+            one.path for one in self.unloadable if one.found.kind.fate is Fate.SURVIVOR
+        ):
+            return Refused(
+                "a survivor does not load, and no migration maps it",
+                survivors,
+                "the landed code owes one (`maintenance/migrate.py::MIGRATIONS`)",
             )
         if self.reset is not None and self.reset.refusal is not None:
-            return self.reset.refusal
+            return Refused(self.reset.refusal, ())
         if self.unknown:
-            return "a file no row names is in the way: `data_root.py::KINDS` owes it a row"
+            return Refused(
+                "a file no row names is in the way",
+                self.unknown,
+                "move it out of the data root; one this code writes owes a row in "
+                "`data_root.py::KINDS`",
+            )
         if self.unloadable:
-            return "a live run's file does not load: pause or stop it first"
+            return Refused(
+                "a live run's file does not load",
+                tuple(one.path for one in self.unloadable),
+                "pause or stop it first",
+            )
         return None
 
     @property
-    def refused(self) -> bool:
-        return self.refusal is not None
+    def refusal(self) -> str | None:
+        refused = self.refused
+        if refused is None:
+            return None
+        return f"{refused.why}: {refused.remedy}" if refused.remedy else refused.why
+
+    @property
+    def said(self) -> tuple[str, ...]:
+        """What applying it writes and drops, a line each: `land_at_entry` logs them, and the stamp
+        keeps them."""
+        return (
+            *(f"migrate {one.said}" for one in self.staged),
+            *(f"drop {one.said}" for one in (*self.caches, *self.runs)),
+            *(f"delete {one.why}, its spend banked" for one in self.torn),
+            *(() if self.reset is None else (f"reset {len(self.reset.drops):,} run file(s)",)),
+        )
+
+    @property
+    def tally(self) -> str:
+        """Its lines counted by what each did to which kind: one line, however large the landing."""
+        dropped = Counter(one.found.kind.name for one in (*self.caches, *self.runs))
+        return ", ".join(
+            (
+                *((f"migrated {len(self.staged)} file(s)",) if self.staged else ()),
+                *(f"dropped {n} {name}" for name, n in sorted(dropped.items())),
+                *((f"deleted {len(self.torn)} torn mint(s)",) if self.torn else ()),
+                *(() if self.reset is None else (f"reset {len(self.reset.drops):,} run file(s)",)),
+            )
+        )
 
 
 def _staged(projects_root: Path) -> dict[Path, Staged]:
@@ -234,14 +297,34 @@ def _live(unit: Path, found_at: dict[Path, Found | None]) -> bool:
     )
 
 
+def _refusal(data_root: Path, refused: Refused) -> ConflictError:
+    named = [path.relative_to(data_root).as_posix() for path in refused.paths[:_NAMED]]
+    more = len(refused.paths) - len(named)
+    said = f" ({', '.join(named)}{f', and {more} more' if more else ''})" if named else ""
+    remedy = f": {refused.remedy}" if refused.remedy else ""
+    return ConflictError(
+        f"refusing to land the data root {data_root}, having written nothing: {refused.why}"
+        f"{said}{remedy}. `land-data --dry-run` lists all that refuses it.",
+        code="data_root_unlanded",
+        details={"paths": named, "count": len(refused.paths)},
+    )
+
+
+class LandedStamp(FrozenModel):
+    """The root's last landing: the record schema it landed under, when, and what it wrote and
+    dropped (`Landing.said`)."""
+
+    key: str
+    at: str
+    said: tuple[str, ...]
+
+
 def apply_landing(projects_root: Path, landing: Landing) -> None:
     """A refused landing raises before a write, and so does a reset's own refusal, asked again.
-    The root is stamped with the record schema it landed under last."""
-    if landing.refused:
-        raise ConflictError(
-            "refusing to land: run `land-data --dry-run` for what refuses it",
-            code="data_root_unlanded",
-        )
+    The root is stamped with what it wrote and dropped (`Landing.said`) and the record schema it
+    landed under."""
+    if (refused := landing.refused) is not None:
+        raise _refusal(projects_root.parent, refused)
     with nullcontext() if landing.reset is None else resetting(landing.reset):
         for one in landing.staged:
             write_bytes(one.path, one.data)
@@ -256,7 +339,8 @@ def apply_landing(projects_root: Path, landing: Landing) -> None:
             CampaignStore(WorkspaceDir(mint.path.parent.parent)).delete_campaign(
                 mint.path.name, keep_results=False, changed_at=utcnow_iso()
             )
-    write_text(_stamp(projects_root), landing_key())
+    stamp = LandedStamp(key=landing_key(), at=utcnow_iso(), said=landing.said)
+    write_text(_stamp(projects_root), stamp.model_dump_json())
 
 
 @functools.cache
@@ -270,16 +354,39 @@ def _stamp(projects_root: Path) -> Path:
     return jobs_dir(projects_root) / LANDED_SCHEMA_FILE
 
 
+def last_landing(projects_root: Path) -> LandedStamp | None:
+    """``None`` where the root never landed, or under a stamp this build cannot read, which lands
+    it again."""
+    raw = read_text_optional(_stamp(projects_root))
+    try:
+        return LandedStamp.model_validate_json(raw) if raw.strip() else None
+    except ValidationError:
+        return None
+
+
+def holding_landing(projects_root: Path) -> AbstractContextManager[None]:
+    """The one hold a landing is planned and applied under, at every door that lands."""
+    return write_lock(_stamp(projects_root))
+
+
+def _landed(projects_root: Path) -> bool:
+    return (stamp := last_landing(projects_root)) is not None and stamp.key == landing_key()
+
+
 def land_at_entry(*, every_treatment: bool) -> None:
     """Every process's first step, before it reads the data root: its registries complete, then
-    the root lands under this code's record schema, once per schema. A landing that refuses stops
-    the process, having written nothing."""
+    the root lands under this code's record schema, once per schema. What it wrote and dropped is
+    said here, a line each on the process's log and one tally to the operator, for every entry
+    alike; the stamp keeps the lines. A landing that refuses raises, having written nothing."""
     complete_registries(every_treatment=every_treatment)
     projects_root = default_projects_root()
-    stamp = _stamp(projects_root)
-    if read_text_optional(stamp).strip() == landing_key():
+    if _landed(projects_root):
         return
-    with write_lock(stamp):
-        if read_text_optional(stamp).strip() == landing_key():
+    with holding_landing(projects_root):
+        if _landed(projects_root):
             return
-        apply_landing(projects_root, plan_landing(projects_root, reset=False))
+        landing = plan_landing(projects_root, reset=False)
+        apply_landing(projects_root, landing)
+    for one in landing.said:
+        logger.warning("landed: %s", one)
+    tell_landed(landing.tally)

@@ -1111,13 +1111,13 @@ class _HoldTrail:
         )
 
 
-_TRAIL_FOLDS = LedgerIndex.readers(_HoldTrail)
+LedgerIndex.readers(_HoldTrail)
 
 
 def unreported_on(ledger: CycleEventLog) -> Unreported:
     """``store/account_spend.py`` cannot see ``_OUT``; it asks the run's phase for liveness."""
     # The ledger's OWN lines only: walking a fork chain holds the parent's open sends twice.
-    trail = LedgerIndex.of(ledger.path, _TRAIL_FOLDS).view(_HoldTrail)
+    trail = LedgerIndex.of(ledger.path).view(_HoldTrail)
     left = [hold for hold_id, hold in trail.open.items() if hold_id not in _OUT]
     # A hold with no bound was admitted where no ceiling stood, and names no money to keep.
     money = [*left, *trail.unpriced]

@@ -214,7 +214,7 @@ def build_run_observers(
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
     hold_cycle(cycle_dir)
     ledger = CycleEventLog.open(cycle_dir)
-    projecting = LedgerIndex.of(ledger.path, ()).projecting()
+    projecting = LedgerIndex.of(ledger.path).projecting()
     try:
         prior = session.store.campaigns.last(session.hop, RunPhaseRecord)
         observers = _bind_observers(

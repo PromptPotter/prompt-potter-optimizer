@@ -287,6 +287,12 @@ def clone_cache() -> Path:
     return cache
 
 
+def long_path(p: Path) -> str:
+    # A cycle tree nests past Windows MAX_PATH=260 under a deep home; the prefix lifts it.
+    s = str(p.resolve())
+    return "\\\\?\\" + s if os.name == "nt" and not s.startswith("\\\\?\\") else s
+
+
 def queue_behind_siblings(label: str, *, exempt: bool = False) -> None:
     """One heavy job per clone at a time, every worktree's included: an OS lock, dropped when we exit."""
     if os.environ.get(_HELD):

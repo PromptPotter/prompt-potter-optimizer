@@ -202,7 +202,7 @@ def _spend_by_round(layout: CycleLayout) -> dict[int, SpendRollup]:
 
 def _p_best(layout: CycleLayout) -> dict[int, dict[str, list[float]]]:
     """The cycle's own standings: a fork's prefix is its parent's to report."""
-    return LedgerIndex.of(layout.ledger, ()).view(_PBestTrajectories)
+    return LedgerIndex.of(layout.ledger).view(_PBestTrajectories)
 
 
 def _spent(layout: CycleLayout) -> LedgerSpend:

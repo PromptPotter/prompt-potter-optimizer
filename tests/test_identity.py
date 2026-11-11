@@ -16,6 +16,7 @@ import json
 import random
 import re
 import sys
+import time
 import zipfile
 from collections.abc import Callable
 from dataclasses import replace
@@ -258,6 +259,7 @@ from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
 from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.identity import blocklist, grants
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.infrastructure.producer_lock import cycle_held, release, take
@@ -1733,6 +1735,39 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         .model
         == menu[-1]
     ), "a resolver's model proposal was dropped"
+
+    # A menu offers no model its Start refuses, and offers it again once a host prices it: the
+    # API's sweep re-asks an unpriced route, whichever process answered it.
+    def menu_now() -> list[str]:
+        laid = draft_pipeline(built_stores, knobbed, knob_plan.served)
+        return next(r for r in laid.rows["llm_only"] if r.key == "model").options
+
+    unhosted = menu[-1]
+    with monkeypatch.context() as aged:
+        # Every answer reads as past its time, so each read is the sweep's next tick.
+        aged.setattr(pricing, "_TTL_SECONDS", 0.0)
+        aged.setattr(pricing, "_OUTAGE_MEMO_S", 0.0)
+        pricing.refresh_route_answers()
+        offline.hosts[unhosted] = {"data": {"endpoints": []}}
+        assert pricing.route_priced(unhosted, "openrouter") is False
+        assert unhosted not in menu_now(), "a menu offered a model its Start refuses"
+        del offline.hosts[unhosted]
+        pricing.refresh_route_answers()
+        assert unhosted in menu_now(), "a model a host prices again stayed off every menu"
+    # ...and a route no host ever prices, a misspelt model, is re-asked for one day of its answer,
+    # never for good: a re-fetch answering the same keeps when it first answered.
+    misspelt = "vendor/misspelt-model"
+    offline.hosts[misspelt] = {"data": {"endpoints": []}}
+    clock = [time.time()]
+    with monkeypatch.context() as days:
+        days.setattr(time, "time", lambda: clock[0])
+        assert pricing.route_priced(misspelt, "openrouter") is False
+        for _ in range(2):
+            clock[0] += pricing._TTL_SECONDS / 2
+            pricing.refresh_route_answers()
+        assert pricing.remembered_priced(misspelt, "openrouter") is None, (
+            "the sweep kept re-asking a route no host prices past a day of its answer"
+        )
     # ...and only as that edit: a node's model moves spend, so the turn raises it and applies none.
     answer = CheckinOutput(task_intent="map", answer_format="a label", findings=[model_found])
 
@@ -2406,34 +2441,34 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert [acked(claimed), acked(folding[0])] == ["accepted"] * 2, (
         "the launch voided a pause filed under its own claim or hold"
     )
-    with LedgerIndex.of(wired_ledger.path, ()).projecting() as joiner:
+    with LedgerIndex.of(wired_ledger.path).projecting() as joiner:
         assert joiner.add(DashboardCheckout(root_dir)) is observers.dashboard, (
             "a second holder folded a dashboard beside the run's, each writing its own file"
         )
     # A store-door append during the run lands through the run's own `index.json` writer, at once.
     stores.campaigns.record_intervention(held_campaign.root_hop, kind="steered")
     manifest = CycleLayout(root_dir).manifest
-    assert LedgerIndex.of(wired_ledger.path, ()).pinned and "steered" in manifest.read_text(), (
+    assert LedgerIndex.of(wired_ledger.path).pinned and "steered" in manifest.read_text(), (
         "a store-door append let go of the run's projections, or left its index.json stale"
     )
     # A pause filed past the stop's declaration, while the run still holds, dies at its release
     # (B16), on an exit that skips the drain too (a raise in the close, `entry.py`'s `finally`).
     late = pause("late")
     observers.release()
-    assert not LedgerIndex.of(wired_ledger.path, ()).pinned and not cycle_held(root_dir), (
+    assert not LedgerIndex.of(wired_ledger.path).pinned and not cycle_held(root_dir), (
         "a released run kept its ledger's projections or its cycle"
     )
     assert acked(late) == "voided", "a pause filed before the release outlived its run"
     # Outside a run, the store door holds its one-shot only while its line lands.
     stores.campaigns.record_intervention(held_campaign.root_hop, kind="steered")
-    assert not LedgerIndex.of(wired_ledger.path, ()).pinned, (
+    assert not LedgerIndex.of(wired_ledger.path).pinned, (
         "a store-door append pinned its ledger's index past its own line"
     )
     # A build that raises past its projections' checkout lets go of them too.
     with monkeypatch.context() as broken, pytest.raises(OSError, match="no callbacks"):
         broken.setattr(RunCallbacks, "__init__", Mock(side_effect=OSError("no callbacks")))
         build_run_observers(session=opened, campaign_config=launched)
-    assert not LedgerIndex.of(wired_ledger.path, ()).pinned and not cycle_held(root_dir), (
+    assert not LedgerIndex.of(wired_ledger.path).pinned and not cycle_held(root_dir), (
         "a build that raised kept its ledger's projections or its cycle"
     )
     observers = build_run_observers(session=opened, campaign_config=launched)
@@ -2461,7 +2496,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                 ),
             )
         )
-    assert not LedgerIndex.of(wired_ledger.path, ()).pinned and not cycle_held(root_dir), (
+    assert not LedgerIndex.of(wired_ledger.path).pinned and not cycle_held(root_dir), (
         "a run whose exit unwound kept its ledger's projections or its cycle"
     )
     assert not drained.called, "a run that raised drained its dashboard on the way out"
@@ -2473,7 +2508,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             raise OSError("disk full")
 
     faulty = CycleEventLog.open(CycleDir(tmp_path / "campaigns" / "c" / "cycles" / "faulty"))
-    with LedgerIndex.of(faulty.path, ()).projecting() as held:
+    with LedgerIndex.of(faulty.path).projecting() as held:
         held.add(_Unwritable())
         offsets = [
             faulty.append(RoundWarningRecord(kind="layer_parse_failure", message=str(n)))

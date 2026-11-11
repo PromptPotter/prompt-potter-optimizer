@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from pathlib import Path
 
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.infrastructure.llm.pricing import refresh_route_answers
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.layout import (
     campaigns_root_dir_for,
@@ -86,12 +88,17 @@ def sweep(projects_root: Path) -> None:
 
 
 async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY_S) -> None:
+    """The reclaim, then the route answers every process's fetch wrote: this loop is their one
+    refresher (`pricing.refresh_route_answers`)."""
     sleep_for = 0.0
+    steps = (functools.partial(sweep, projects_root), refresh_route_answers)
     while True:
         await asyncio.sleep(sleep_for)
-        try:
-            await asyncio.to_thread(sweep, projects_root)
-        except Exception:
-            # A raising tick must not END the loop: all reaping would stop for the rest of the server's uptime.
-            logger.exception("periodic sweep tick failed; the loop continues")
+        for step in steps:
+            try:
+                await asyncio.to_thread(step)
+            except Exception:
+                # A raising step must not END the loop, nor skip the other: each would stop for the
+                # rest of the server's uptime.
+                logger.exception("periodic sweep step %s failed; the loop continues", step)
         sleep_for = interval_s

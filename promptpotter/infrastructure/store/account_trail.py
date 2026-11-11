@@ -98,7 +98,7 @@ class _Trail:
 
 # A roster is per PROCESS (`LedgerIndex._screened`): once a read names this one, every ledger that
 # process indexes keeps its run stops. The admin bot, the `trail` verb and a delete pay that.
-_TRAIL_FOLDS = LedgerIndex.readers(_Trail)
+LedgerIndex.readers(_Trail)
 
 
 def _where(campaign_id: str, cycle_id: str, inside: str) -> str:
@@ -109,7 +109,7 @@ def _cycle_lines(cycle_dir: Path, *, inside: str = "") -> list[TrailLine]:
     """``inside`` names the campaign whose inner sandbox holds the cycle."""
     campaign_id = cycle_dir.parent.parent.name
     where = _where(campaign_id, cycle_dir.name, inside)
-    lines, _ = LedgerIndex.of(CycleLayout(cycle_dir).ledger, _TRAIL_FOLDS).view(_Trail)
+    lines, _ = LedgerIndex.of(CycleLayout(cycle_dir).ledger).view(_Trail)
     return [
         line._replace(
             subject=f"{where}: {line.subject}" if line.subject else where,
@@ -143,9 +143,7 @@ def workspace_lines(stores: Stores) -> Iterator[TrailLine]:
     )
     for spelled, command in stores.commands.book().lines():
         yield _command_line(spelled, command.timestamp, command.kind, command.issued_by.id)
-    lines, _ = LedgerIndex.of(CycleEventLog.workspace_path(campaigns.workspace), _TRAIL_FOLDS).view(
-        _Trail
-    )
+    lines, _ = LedgerIndex.of(CycleEventLog.workspace_path(campaigns.workspace)).view(_Trail)
     yield from lines
     for campaign_dir in campaigns.iter_campaign_dirs():
         for cycle_dir in campaigns.campaign_cycle_dirs(campaign_dir.name):
@@ -183,7 +181,7 @@ def bank_trail(*, workspace: WorkspaceDir, cycle_dirs: list[Path], subject: Subj
     if not stops:
         return
     log = CycleEventLog.open_workspace(workspace)
-    _, banked = LedgerIndex.of(log.path, _TRAIL_FOLDS).view(_Trail)
+    _, banked = LedgerIndex.of(log.path).view(_Trail)
     if subject not in banked:
         log.append(
             TrailTombstoneRecord(

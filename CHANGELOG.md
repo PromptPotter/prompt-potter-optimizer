@@ -13,7 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Every process lands the data root at its entry**, once per record schema: the CLI, the API, the embedded surface and the admin bot, not `land-data` alone. Run data that does not load is dropped unasked; a survivor that does not load, or a file no row names, refuses the landing. A landing migrates the install packs' snippet tags, which no longer repeat their source and method.
+- **Every process lands the data root at its entry**, once per record schema: the CLI, the API, the embedded surface and the admin bot, not `land-data` alone. Run data and caches that do not load (a sign-in session among them) are dropped unasked, a line each on the process's log and one tally in the operator's notice, and the stamp keeps the last landing's lines, which `land-data` shows. A survivor that does not load, or a file no row names, refuses the landing, naming its first paths (`details.paths`, `count`) and the move. A landing migrates the install packs' snippet tags, which no longer repeat their source and method.
 - **Quota and ceiling refusals answer 409; only the request-rate throttle answers 429.** A client retrying on 429 retries what passes, never a spent ceiling; the webapp reads a 429 as throttled, and over MCP a throttle answers `-32029`, never `INVALID_PARAMS`.
 - **A Compare arm's bench and diagnostic sends on the box's key meet the run's coupon reserve**, and one no rate prices is refused unsent, as every other send is.
 - **A free-tier launch holds at most the tier's $0.03**, whatever its `start-run` budget or a `set-limits` asks.

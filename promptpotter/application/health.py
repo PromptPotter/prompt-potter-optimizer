@@ -17,7 +17,7 @@ from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.run_records import HealthRecord, HealthState
+from promptpotter.domain.run_records import HealthReader, HealthRecord, HealthState
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.identity.provider_config import CodeExchangeError
@@ -32,6 +32,7 @@ from promptpotter.shared.tls import tls_context
 class Reading(NamedTuple):
     state: HealthState
     said: str
+    by: HealthReader = "probe"
 
 
 class Probe(NamedTuple):
@@ -119,9 +120,6 @@ def telegram_refusal(status: int) -> str | None:
 
 
 _CHANNEL = "channel:telegram"
-# What the admin bot's poll was refused stands on its channel until a poll answers again: no probe
-# of Telegram sees a second poller, so while one stands no probe second-guesses it.
-_POLL_REFUSED = "refused: "
 
 
 def _operator_channel(token: str) -> Probe:
@@ -189,7 +187,7 @@ class _Standing:
         return dict(self._last)
 
 
-_HEALTH_FOLDS = LedgerIndex.readers(_Standing)
+LedgerIndex.readers(_Standing)
 
 
 def _box(projects_root: Path) -> WorkspaceDir:
@@ -200,7 +198,7 @@ def _box(projects_root: Path) -> WorkspaceDir:
 def standing(projects_root: Path) -> dict[str, HealthRecord]:
     """Each probe's last change; no record reads as held."""
     ledger = CycleEventLog.workspace_path(_box(projects_root))
-    return LedgerIndex.of(ledger, _HEALTH_FOLDS).view(_Standing)
+    return LedgerIndex.of(ledger).view(_Standing)
 
 
 def is_broken(projects_root: Path, name: str) -> bool:
@@ -224,14 +222,16 @@ def _recorded(
     change: HealthRecord | None = None
     match reading.state:
         case "held" | "broken" as state if state != was:
-            change = HealthRecord(probe=probe.name, state=state, said=reading.said)
+            change = HealthRecord(probe=probe.name, state=state, said=reading.said, by=reading.by)
             CycleEventLog.open_workspace(_box(projects_root)).append(change)
     return Checked(probe, reading, change)
 
 
 async def _read(probe: Probe, last: HealthRecord | None) -> Reading:
-    if last is not None and last.state == "broken" and last.said.startswith(_POLL_REFUSED):
-        return Reading("broken", last.said)
+    """What the admin bot's poll was refused stands on its channel until a poll answers again: no
+    probe of Telegram sees a second poller, so while one stands no probe second-guesses it."""
+    if last is not None and last.state == "broken" and last.by == "poll":
+        return Reading("broken", last.said, by="poll")
     return await probe.check()
 
 
@@ -248,8 +248,10 @@ async def check(projects_root: Path) -> list[Checked]:
 def poll_answered(projects_root: Path, token: str, refused: str | None) -> Checked:
     """The admin bot's poll is its channel's one reader, so what it was answered is the channel's
     standing: a refusal stands until a poll is answered, which holds the channel again."""
-    reading = (
-        Reading("held", "polled") if refused is None else Reading("broken", _POLL_REFUSED + refused)
+    reading = Reading(
+        "held" if refused is None else "broken",
+        "polled" if refused is None else f"refused: {refused}",
+        by="poll",
     )
     last = standing(projects_root).get(_CHANNEL)
     return _recorded(projects_root, _operator_channel(token), reading, last)

@@ -154,7 +154,7 @@ class WorkspaceBank(NamedTuple):
         return Subject(campaign_id, "") in self.subjects
 
 
-_SPEND_FOLDS = LedgerIndex.readers(_Spend, _Tombstones)
+LedgerIndex.readers(_Spend, _Tombstones)
 
 
 def _unreported_once_stopped(ledger: Path, held: PaidSpend) -> PaidSpend:
@@ -167,7 +167,7 @@ def _unreported_once_stopped(ledger: Path, held: PaidSpend) -> PaidSpend:
 def _summed(ledgers: Iterable[Path]) -> _Spent:
     total = _Spent(NOTHING_PAID, NOTHING_PAID)
     for ledger in ledgers:
-        spent, held = LedgerIndex.of(ledger, _SPEND_FOLDS).view(_Spend)
+        spent, held = LedgerIndex.of(ledger).view(_Spend)
         # Whether what is held is unreported moves with the run, not the file: asked per read.
         total = total.plus(spent, _unreported_once_stopped(ledger, held))
     return total
@@ -192,7 +192,7 @@ def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> PaidSpend:
 
 def workspace_bank(workspace: WorkspaceDir) -> WorkspaceBank:
     workspace_ledger = CycleEventLog.workspace_path(workspace)
-    return LedgerIndex.of(workspace_ledger, _SPEND_FOLDS).view(_Tombstones)
+    return LedgerIndex.of(workspace_ledger).view(_Tombstones)
 
 
 def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
@@ -264,17 +264,17 @@ class _Usage:
         return self._held
 
 
-_CHARGE_FOLDS = LedgerIndex.readers(_Charges, _Usage)
+LedgerIndex.readers(_Charges, _Usage)
 
 
 def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[UsageRow]:
-    rows = LedgerIndex.of(charges.path, _CHARGE_FOLDS).view(_Usage)
+    rows = LedgerIndex.of(charges.path).view(_Usage)
     return [row for row in rows if since <= row.ts < until]
 
 
 def account_bill(charges: ChargeBook) -> PaidSpend:
     """Every send the account made, a deleted campaign's and an L4 sandbox's included: no delete reaches a charge."""
-    billed, open_holds, unpriced = LedgerIndex.of(charges.path, _CHARGE_FOLDS).view(_Charges)
+    billed, open_holds, unpriced = LedgerIndex.of(charges.path).view(_Charges)
     attached: dict[str, bool] = {}
 
     def stopped(hold: HeldCharge) -> bool:
@@ -303,7 +303,7 @@ def bank_spend(
     if spent == NOTHING_PAID and all(m == NOTHING_METERED for m in metered.values()):
         return spent
     log = CycleEventLog.open_workspace(workspace)
-    if subject in LedgerIndex.of(log.path, _SPEND_FOLDS).view(_Tombstones).subjects:
+    if subject in LedgerIndex.of(log.path).view(_Tombstones).subjects:
         return spent
     by_payer: dict[KeySource, UserSpend] = {"host": spent.host, "user": spent.user}
     log.append(

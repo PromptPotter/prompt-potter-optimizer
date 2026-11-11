@@ -563,7 +563,7 @@ class DashboardCheckout:
 
     def __init__(self, cycle_dir: CycleDir) -> None:
         *self._prefix, own = ledger_chain(cycle_dir, moment=None)
-        self._index = LedgerIndex.of(own.path, ())
+        self._index = LedgerIndex.of(own.path)
         self._path = CycleLayout(Path(cycle_dir)).dashboard
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
@@ -625,12 +625,12 @@ def fold_at(cut: Cut) -> LiveDashboardState | None:
     """`None`: the cut holds no `RunWiringRecord` yet (a check-in still authoring its origin)."""
     *prefix, own = ledger_chain(cut.cycle, moment=None)
     until = None if cut.offset is None else cut.offset + 1
-    return LedgerIndex.of(own.path, ()).view(LiveDashboardProjection, until, seed=_seed(prefix))
+    return LedgerIndex.of(own.path).view(LiveDashboardProjection, until, seed=_seed(prefix))
 
 
 def _seed(prefix: list[LedgerSpan]) -> LiveDashboardProjection | None:
     seed: LiveDashboardProjection | None = None
     for span in prefix:
         assert span.until is not None, "a fork's parent is read to its cut"
-        seed = LedgerIndex.of(span.path, ()).prefix(LiveDashboardProjection, span.until, seed=seed)
+        seed = LedgerIndex.of(span.path).prefix(LiveDashboardProjection, span.until, seed=seed)
     return seed

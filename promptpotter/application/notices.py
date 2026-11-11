@@ -37,6 +37,15 @@ def check_and_tell() -> list[health.Checked]:
     return checked
 
 
+def tell_landed(tally: str) -> None:
+    """What a landing wrote and dropped, counted (`maintenance/landing.py::Landing.tally`): one
+    notice whatever its size, the stamp keeping each line."""
+    if tally:
+        notify_operator(
+            f"landed the data root: {tally}. `land-data --dry-run` lists each line.", ring=False
+        )
+
+
 def tell_poll(token: str, refused: str | None) -> None:
     """What the admin bot's poll was answered, told where it changes its channel's standing."""
     _tell(health.poll_answered(default_projects_root(), token, refused))

@@ -623,6 +623,8 @@ class LLMCallRecord(FrozenModel):
 AccountEvent = Literal["uploaded", "request_refused"]
 
 HealthState = Literal["held", "broken", "unverified"]
+# Who read a standing: its probe, or the admin bot's poll, whose refusal stands until a poll answers.
+HealthReader = Literal["probe", "poll"]
 
 
 class HealthRecord(FrozenModel):
@@ -632,6 +634,7 @@ class HealthRecord(FrozenModel):
     probe: str
     state: Literal["held", "broken"]
     said: str
+    by: HealthReader = "probe"
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

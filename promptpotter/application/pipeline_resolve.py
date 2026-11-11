@@ -818,9 +818,10 @@ def _rows(m: _Merge, folded: FoldedParams) -> dict[str, list[NodeConfigParam]]:
 
 
 def _admitted_menu(m: _Merge) -> list[str]:
-    """Never offers a model the Start would refuse: one no rate prices under a dollar ceiling,
-    or one the free tier does not list for a free account. A served read: it never fetches a price
-    list, and a model no known rate settles yet stays offered, as through an outage."""
+    """Offers no model the Start would refuse: one no rate prices under a dollar ceiling, or one
+    the free tier does not list for a free account. A served read never fetches a price list: a
+    route's answer is the last any process's fetch gave (`pricing.remembered_priced`), kept fresh by
+    the API's sweep, and a route none answered stays offered, as through an outage."""
     models = m.filtered.selectable_models()
     if m.free:
         models = [model for model in models if model in free_task_models()]

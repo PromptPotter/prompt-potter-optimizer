@@ -92,6 +92,20 @@ row it closes.
   and in the API's loop but never for MCP stdio or `embedded_run`; `embedded_run.__all__` hand-keeps four
   command wrappers. Action: the sweep moves under the one admission; the wrappers go. **Rides with:**
   startb 4. **Re-test:** `git grep -n "def compact_archive" -- promptpotter/application/embedded_run.py` is empty.
+- **The embedded `grade_bench` and `compact_archive` never land**: `application/embedded_run.py` hands each
+  its caller's `Stores`, so neither runs `maintenance/landing.py::land_at_entry`, which `open_session` runs;
+  the DSPy door writes under the root before it lands (`presentation/teleprompter.py::_write_definition`
+  before `open_session`). Action: each verb dispatches through the session's one door, which lands first.
+  **Rides with:** startb 4. **Re-test:**
+  `git grep -n "def grade_bench" -- promptpotter/application/embedded_run.py` is empty, and in
+  `presentation/teleprompter.py::PromptPotterOpt.acompile` no `_write_definition` call precedes
+  `open_session`'s landing.
+- **Launch and resume admit a deleted campaign**: `campaign_store/store.py::CampaignStore.load_campaign`
+  reads a torn delete as `deleted`, but `jobs/launcher/admission.py`, `jobs/quota.py` and
+  `launcher/run_job.py` refuse no lifecycle, and what it spends past its tombstone reaches no sum
+  (`account_spend.py` returns the bank alone). Action: admission refuses a campaign that is not `active`,
+  where it loads the campaign. **Rides with:** startb 2. **Re-test:** a launch on a tombstoned campaign
+  refuses.
 - **A taken name is read two ways** — `slug_exists` (the directory) against the definition's holders
   (`dataset.json`), and refused twice: `checkin.py:139` raises `LaunchError` beside
   `claim_own_definition`'s `SlugTakenError`. Action: one read of a tenant name's hold, one raiser, and
@@ -420,6 +434,12 @@ row it closes.
 - **`NodeConfigEditor`'s `schema` is a source prop two hosts fill from different reads**:
   `lib/types/connector.ts::NodeSchemaReading` is threaded through 11 files. Action: the editor reads
   `useConnector` at an identity prop. **Rides with:** webb 3. **Re-test:** `git grep -c "NodeSchemaReading" -- webapp`.
+- **Teaching prose in `title=` outlived its shipped lint**: `webapp/eslint.config.mjs::titleIsALabel`
+  counts a title's static characters only, so 8 hits stand (`AccountActivityTab`, `CleanupConfirmModal`,
+  `ForestCard`, `SampleSetControl` ×2, `ConnectorInspector`, `NodeConfigEditor`, `RemoteControl`), and an
+  instruction under 60 characters ("Click to toggle.", "Open its dashboard.") passes. Action: the lint
+  reads a template title's words too, and each hit says its prose through `ui/Term` or `ui/HoverCard`.
+  **Rides with:** webb 2. **Re-test:** `git grep -cE 'title=("[^"]{60,}|\{\`[^\`]{60,})' -- webapp/components`.
 
 ### batch/26 · money
 
@@ -860,6 +880,16 @@ row it closes.
   (`oidc`, `grants`, `accounts`); `projections/live_dashboard/` → one module; LLM wire types into
   `llm/base.py`. Close with `gate.py --only layering,help-imports,handler-tables,doc-claims,instruction-files`.
   **Rides with:** la 1-2.
+- **`Verb.needs_registries` carries two decisions**: a verb that declares it `False` (`trail`, `reindex`,
+  which GCs, `close-admission`, `offer-extras`, `pin-roster`) skips the landing with the registries, so it
+  reads and writes the data root unlanded (`cli/campaign_runner.py::main`). Action: every registry
+  completes at import, the flag goes, and every verb lands. **Rides with:** la 3. **Re-test:**
+  `git grep -n "needs_registries" -- promptpotter` is empty.
+- **The fold roster rests on side-effect imports**: `initialization/wiring.py` joins `health` and
+  `event_stream` to `LedgerIndex`'s roster by `noqa: F401` imports, and
+  `read_model.py::LedgerIndex.check_every_arm_read` runs only under `every_treatment=True`, so no CLI
+  process checks it. Action: the roster completes at import with the registries, and every entry checks
+  it. **Rides with:** la 3. **Re-test:** `git grep -n "joins the roster" -- promptpotter/application/initialization/wiring.py` is empty.
 
 ### batch/27 · lw
 
@@ -889,7 +919,8 @@ row it closes.
 - **Q3: one fault channel — a fault is a value.** A failed or skipped step is a log line at many sites
   (engine decisions narrated into `logger.warning`, `origin_listing.py::list_origins` skipping an origin
   silently, `campaign_store/store.py::CampaignStore.list_campaigns` and
-  `tenant_dataset_store.py::banks_sharing` logging an unreadable entry out of every list, `llm/heartbeat.py`
+  `tenant_dataset_store.py::banks_sharing` logging an unreadable entry out of every list,
+  `intelligence/earned_blocks.py::CampaignSurvey.faulted` written and never read, `llm/heartbeat.py`
   a failed beat); until this lands, `application/`'s `logger.(warning|error|exception)(`
   count may not rise. Owner: inside a run, a typed fault record through the one producer door, read by a
   projection; inside a read, a field of the row it failed, served as its `Said`; `logging` leaves
@@ -1041,6 +1072,15 @@ row it closes.
 - **`promptpotter/__init__.py:4` sets `OPENBLAS_NUM_THREADS` at import**, a fact of the process, not the
   package. Action: the unit and the process launcher set it. **Rides with:** box 1. **Re-test:**
   `git grep -n "OPENBLAS" -- promptpotter` is empty.
+- **`promptpotter/__init__.py` writes the data root at import**: `hold_private(user_data_root())` runs
+  before any process's landing. Action: the entry that lands holds the root private, as the unit and the
+  launcher set the process's environment. **Rides with:** box 1. **Re-test:**
+  `git grep -n "hold_private" -- promptpotter/__init__.py` is empty.
+- **The box runbook skips the move `site_records/` owes**: `deploy-linux/README.md` has no step that moves
+  it out before `update.sh`; only `CHANGELOG.md` and `cd8593459`'s body say it. `update.sh`'s dry-run
+  refuses and rolls back, so nothing is wiped. Action: a step that moves `site_records/` out before
+  `update.sh`. **Rides with:** box 1. **Re-test:**
+  `git grep -n "site_records" -- deploy-linux/README.md` names the move.
 
 ### batch/32 · ts-arch
 
@@ -1102,11 +1142,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   always skips. Action: the walk world carries an offline L4 leg, and the spec's skip becomes a
   failure. **Rides with:** rel 2. **Re-test:** `npx playwright test --project=walk e2e/walk/cells.spec.ts`
   passes 1, skips 0.
-- **A stale walk world past `MAX_PATH` fails the gate**: `scripts/gate.py::_walk_world` prunes another
-  key's world with a bare `shutil.rmtree`, and a world's `.runtime/.ledger.jsonl.lock` under the leg's
-  `data/` root runs past 260 characters from a desk checkout, so the check raises `WinError 145`
-  (batch/22's gate). Action: the gate spells its cache root in the long form `store/io.py` writes with.
-  **Rides with:** rel 2. **Re-test:** prune a built world from a desk checkout; the check runs.
 - **The dev loop still serializes on Vitest**: its pool fails a worker past its hard-coded 90 s start,
   which a host loaded from outside the gate lock still trips. **Rides with:** rel 2. **Re-test:** five
   builders plus one full gate, no reap.
@@ -1124,6 +1159,23 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after; `FileTree` mounts a 2 s
   `useActivePointer()` poll for one failure line; a `/hierarchy` 200 replaces every entry object
   `lib/hooks/useRegistry.ts::useRegistry` indexes. The anti-rot pass re-finds them. **Rides with:** rel 3.
+- **The landing stamp is unordered**: `maintenance/landing.py::LandedStamp` holds a schema hash, so a
+  process on older code (an earlier desk checkout, or two checkouts on one `PROMPTPOTTER_HOME`) lands
+  again and drops what newer code wrote, the paid archive's caches included, against the module's own
+  "nothing may roll the code back". Root: the stamp carries the commit or version it landed, and an
+  entry from code that does not descend from it refuses instead of dropping. **Rides with:** rel, once
+  the operator picks the ordering signal. **Re-test:** an entry from an older checkout on a root a newer
+  one landed refuses.
+- **`landing_key` misses a body change**: `store/data_root.py::_schema` keys a reader by `module::qualname`
+  and `landing.py::landing_key` keys migrations by name (`sorted(MIGRATIONS)`), so a reader's or a
+  migration's body change never lands again. **Rides with:** rel. **Re-test:** edit a migration's body;
+  `landing_key()` moves.
+- **Survivor migrations are unchained**: `maintenance/migrations/consent_by_principal.py` reads
+  `consent.jsonl` from disk, blind to the lines `consent_trail` stages into it in the same landing
+  (`landing.py::_staged`), so an owner-plus-delegate account last landed before v0.8.19 gets its
+  delegate's acceptance, and nothing runs it again. Root: each migration reads the root as staged so
+  far, as `JobRegistry.as_staged` does. **Rides with:** rel. **Re-test:** a landing over a pre-v0.8.19
+  consent trail keys each acceptance by its own principal.
 
 ## Held — no wave-4 chain yet
 
@@ -1156,6 +1208,8 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **Run data is stat'ed bare outside `store/io.py`**: `store/read_model.py::file_sig`, eight more
   `.stat()` sites and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger
   past `MAX_PATH` reads as absent. Root: the data root spelled once in its long form (`config/paths.py`),
-  so every derived path carries it. **Held:** box holds `config/paths.py` for `env_file_path` alone, and
-  the long form moves every derived path. **Re-test:** `git grep -lE "\.stat\(\)" -- promptpotter` names
-  no file outside `store/io.py`.
+  so every derived path carries it; `scripts/processes.py::long_path` (`a46a02722`, the gate's cache root
+  alone) is a second speller beside `store/io.py::_long_path`, and goes with it, or its definition says
+  why the gate spells before the venv exists. **Held:** box holds `config/paths.py` for `env_file_path`
+  alone, and the long form moves every derived path. **Re-test:** `git grep -lE "\.stat\(\)" -- promptpotter`
+  names no file outside `store/io.py`.

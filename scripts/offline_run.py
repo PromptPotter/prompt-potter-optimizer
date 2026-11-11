@@ -41,7 +41,13 @@ from offline_world import (
     draw,
     install_network,
 )
-from processes import REPO, RamBudget, end_children_with_this_process, queue_behind_siblings
+from processes import (
+    REPO,
+    RamBudget,
+    end_children_with_this_process,
+    long_path,
+    queue_behind_siblings,
+)
 
 import promptpotter
 from promptpotter.application import optimizers
@@ -197,12 +203,6 @@ WORDS = [
     "lemma", "case", "split", "exhaust", "enumerate", "count", "parity", "order", "strict",
     "commit", "label", "decide", "final", "answer", "stated", "facts", "closed", "open", "proven",
 ]  # fmt: skip
-
-
-def long_path(p: Path) -> str:
-    # A cycle tree nests past Windows MAX_PATH=260 under a deep home; the prefix lifts it.
-    s = str(p.resolve())
-    return "\\\\?\\" + s if os.name == "nt" and not s.startswith("\\\\?\\") else s
 
 
 _ROW_MARK = re.compile(r"\[#(\d+)\]")

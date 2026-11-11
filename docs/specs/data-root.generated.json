@@ -1,5 +1,5 @@
 {
-  "description": "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`.\n\nEvery SURVIVOR and CACHE row of `promptpotter/infrastructure/store/data_root.py`, by its patterns\nunder the data root: a diff in a SURVIVOR's shape is a box's file that must be rewritten before\n`deploy-linux/update.sh` lands the code that reads it; a CACHE file that stops loading is dropped by\n`update.sh <ref> --reset`.\n",
+  "description": "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`.\n\nEvery SURVIVOR and CACHE row of `promptpotter/infrastructure/store/data_root.py`, by its patterns\nunder the data root: a diff in a SURVIVOR's shape owes a migration\n(`promptpotter/application/maintenance/migrate.py::MIGRATIONS`) the landing runs before the code\nthat reads it does; a CACHE file that stops loading is dropped by the landing, which says so.\n",
   "kinds": {
     "account block pack": {
       "fate": "SURVIVOR",
@@ -2788,8 +2788,122 @@
         "type": "object"
       }
     },
+    "route ceilings": {
+      "fate": "CACHE",
+      "patterns": [
+        "route_ceilings/*.json"
+      ],
+      "shape": {
+        "$defs": {
+          "PriceTier": {
+            "properties": {
+              "from_input_tokens": {
+                "title": "From Input Tokens",
+                "type": "integer"
+              },
+              "input": {
+                "title": "Input",
+                "type": "number"
+              },
+              "output": {
+                "title": "Output",
+                "type": "number"
+              }
+            },
+            "required": [
+              "from_input_tokens",
+              "input",
+              "output"
+            ],
+            "title": "PriceTier",
+            "type": "object"
+          },
+          "RateCeiling": {
+            "properties": {
+              "max_output": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Output"
+              },
+              "per_request": {
+                "default": 0.0,
+                "title": "Per Request",
+                "type": "number"
+              },
+              "tiers": {
+                "items": {
+                  "$ref": "#/$defs/PriceTier"
+                },
+                "title": "Tiers",
+                "type": "array"
+              }
+            },
+            "required": [
+              "tiers"
+            ],
+            "title": "RateCeiling",
+            "type": "object"
+          }
+        },
+        "description": "What a fetch of a route's hosts answered, and when: no ceiling where no host prices it. It\nnames its route and hosts, which the one refresher reads back (`refresh_route_answers`), and\n*since*, its route's first answer of that fate, which a re-fetch answering the same keeps.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "number"
+          },
+          "ceiling": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RateCeiling"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hosts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hosts"
+          },
+          "route": {
+            "title": "Route",
+            "type": "string"
+          },
+          "since": {
+            "title": "Since",
+            "type": "number"
+          }
+        },
+        "required": [
+          "route",
+          "hosts",
+          "at",
+          "since",
+          "ceiling"
+        ],
+        "title": "RouteAnswer",
+        "type": "object"
+      }
+    },
     "session": {
-      "fate": "SURVIVOR",
+      "fate": "CACHE",
       "patterns": [
         "identity/sessions/*.json"
       ],

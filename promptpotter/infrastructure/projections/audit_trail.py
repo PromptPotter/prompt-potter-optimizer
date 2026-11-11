@@ -145,4 +145,4 @@ def _ran_by(cycle_dir: Path, round_num: int) -> Path:
 
 
 def round_audits(cycle_dir: Path, round_nums: list[int]) -> list[RoundAudit | None]:
-    return [LedgerIndex.of(_ran_by(cycle_dir, n), ()).view(RoundAudits).get(n) for n in round_nums]
+    return [LedgerIndex.of(_ran_by(cycle_dir, n)).view(RoundAudits).get(n) for n in round_nums]

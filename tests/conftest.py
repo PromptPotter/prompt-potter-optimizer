@@ -67,7 +67,6 @@ def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]
     monkeypatch.setattr(settings, "RATE_LIMITS", {})
     # The fetched price list lands in this journey's tree, never the checkout's cache.
     monkeypatch.setattr(pricing, "cache_path", lambda: tmp_path / "fetched_rates.json")
-    pricing.load_rates.cache_clear()
     world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
     restore = install_network(world)
     send_pacing.cache_clear()
@@ -78,6 +77,5 @@ def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]
     restore()
     send_pacing.cache_clear()
     wire_client.cache_clear()
-    pricing.load_rates.cache_clear()
     # A refused request reads as a provider error, which a journey can assert past unseen.
     assert not world.unrouted, f"a journey sent what the world does not answer: {world.unrouted}"

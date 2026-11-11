@@ -3406,6 +3406,15 @@
         "additionalProperties": false,
         "description": "On the box's own WORKSPACE ledger: a probe's state CHANGED. ``unverified`` never is one.",
         "properties": {
+          "by": {
+            "default": "probe",
+            "enum": [
+              "probe",
+              "poll"
+            ],
+            "title": "By",
+            "type": "string"
+          },
           "probe": {
             "title": "Probe",
             "type": "string"

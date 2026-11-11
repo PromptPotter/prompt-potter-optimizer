@@ -3,12 +3,15 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import Counter
+from contextlib import nullcontext
 
 from promptpotter.application.account import registered_or_default_identity
 from promptpotter.application.maintenance.landing import (
+    LandedStamp,
     Landing,
-    Unloadable,
     apply_landing,
+    holding_landing,
+    last_landing,
     plan_landing,
 )
 from promptpotter.application.maintenance.reset import ResetPlan, apply_reset, plan_reset
@@ -86,18 +89,12 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
     )
 
 
-def _unloadable(one: Unloadable) -> str:
-    return f"{one.found.kind.fate.value} {one.found.kind.name} {one.path}: {one.why}"
-
-
-def _render_landing(landing: Landing, *, written: bool) -> list[str]:
-    lines = [f"migrate {one.said}" for one in landing.staged]
-    lines += [f"drop {_unloadable(one)}" for one in (*landing.caches, *landing.runs)]
-    lines += [f"delete {one.why}, its spend banked" for one in landing.torn]
-    if landing.reset is not None:
-        lines.append(_render_summary(landing.reset))
+def _render_landing(landing: Landing, *, written: bool, last: LandedStamp | None) -> list[str]:
+    lines = [] if last is None else [f"last landed {last.at}", *(f"  {s}" for s in last.said)]
+    # A reset's line is among them: `reset --dry-run` breaks it down by kind.
+    lines += landing.said
     lines += [f"unknown {path}" for path in landing.unknown]
-    lines += [f"unloadable {_unloadable(one)}" for one in landing.unloadable]
+    lines += [f"unloadable {one.said}" for one in landing.unloadable]
     if landing.refusal is None:
         lines.append(f"{'landed' if written else 'would land'}: proven {landing.proven:,} file(s)")
     else:
@@ -107,23 +104,23 @@ def _render_landing(landing: Landing, *, written: bool) -> list[str]:
 
 async def cmd_land_data(args: argparse.Namespace) -> CommandResult:
     projects_root = default_projects_root()
-    landing = plan_landing(projects_root, reset=args.reset)
-    written = not (landing.refused or args.dry_run)
-    if written:
-        apply_landing(projects_root, landing)
+    last = last_landing(projects_root)
+    # A dry run writes nothing, its hold's lock file included.
+    with nullcontext() if args.dry_run else holding_landing(projects_root):
+        landing = plan_landing(projects_root, reset=args.reset)
+        written = not (landing.refused or args.dry_run)
+        if written:
+            apply_landing(projects_root, landing)
     return CommandResult(
         data={
             "written": written,
             "refusal": landing.refusal,
             "proven": landing.proven,
-            "migrated": [one.said for one in landing.staged],
-            "dropped_caches": [str(one.path) for one in landing.caches],
-            "dropped_runs": [_unloadable(one) for one in landing.runs],
-            "torn_mints": [str(one.path) for one in landing.torn],
-            "reset": None if landing.reset is None else len(landing.reset.drops),
+            "last_landing": None if last is None else last.model_dump(mode="json"),
+            "said": list(landing.said),
             "unknown": [str(path) for path in landing.unknown],
-            "unloadable": [_unloadable(one) for one in landing.unloadable],
+            "unloadable": [one.said for one in landing.unloadable],
         },
-        human="\n".join(_render_landing(landing, written=written)),
+        human="\n".join(_render_landing(landing, written=written, last=last)),
         exit_code=REFUSED if landing.refused else 0,
     )

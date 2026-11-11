@@ -48,6 +48,7 @@ from promptpotter.infrastructure.identity.paths import IDENTITY_DIR, DefaultClai
 from promptpotter.infrastructure.identity.provider_config import ProviderConfigBundle
 from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.infrastructure.llm.capabilities import CAPABILITIES_CACHE, CAPABILITY_FILE
+from promptpotter.infrastructure.llm.pricing import ROUTE_ANSWER, ROUTE_ANSWERS_DIR
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.command_log import COMMAND_LOG_FILE
@@ -127,7 +128,8 @@ class Fate(Enum):
     # Who an account is, what it holds, was charged and launched today, or who the host is: kept, and
     # one that does not load refuses a landing until a migration rewrites it.
     SURVIVOR = "SURVIVOR"
-    # Content-keyed and paid for: kept while it loads, and dropped by a landing once it does not.
+    # Kept while it loads, and dropped by a landing once it does not, which says so: what is
+    # content-keyed and paid for, or a sign-in its person makes again.
     CACHE = "CACHE"
     # Dropped by a reset; one that does not load refuses a landing not asked to reset.
     RUN = "RUN"
@@ -240,7 +242,7 @@ INSTALL_KINDS: tuple[Kind, ...] = (
         "session",
         _INSTALL,
         (_IDENTITY.sessions_dir / "*.json").as_posix(),
-        _SURVIVOR,
+        Fate.CACHE,
         TypeAdapter(SessionData),
     ),
     Kind(
@@ -258,6 +260,7 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     OPTIMIZER_SHADOW,
     CHECKIN_SHADOW,
     Kind("model rates", _INSTALL, "rates.json", Fate.CACHE, _WALKED),
+    Kind("route ceilings", _INSTALL, f"{ROUTE_ANSWERS_DIR}/*.json", Fate.CACHE, ROUTE_ANSWER),
     # Under the data root where the install cache is its `.cache` (an install with no checkout).
     Kind(
         "source facts",
@@ -279,7 +282,13 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("job", _INSTALL, f"{JOBS_DIR}/*.json", _SURVIVOR, JOB_ADAPTER),
     Kind("ended job", _INSTALL, f"{JOBS_DIR}/{ENDED_JOBS_DIR}/*.json", Fate.RUN, JOB_ADAPTER),
     Kind("landing", _INSTALL, f"{JOBS_DIR}/{LANDING_FILE}", Fate.MACHINE, _HELD),
-    Kind("landed schema", _INSTALL, f"{JOBS_DIR}/{LANDED_SCHEMA_FILE}", Fate.MACHINE, _HELD),
+    Kind(
+        "landed schema",
+        _INSTALL,
+        f"{JOBS_DIR}/{LANDED_SCHEMA_FILE}",
+        Fate.MACHINE,
+        Opaque("the landing's own stamp: one this build cannot read lands the root again"),
+    ),
     Kind("admission lock", _INSTALL, f"{JOBS_DIR}/{ADMISSION_LOCK}", Fate.MACHINE, _HELD),
     Kind("producer lock", _INSTALL, f"{JOBS_DIR}/{PRODUCERS_DIR}/*.lock", Fate.MACHINE, _HELD),
     Kind("machine slot", _INSTALL, f"{JOBS_DIR}/{MACHINE_DIR}/*/*.lock", Fate.MACHINE, _HELD),

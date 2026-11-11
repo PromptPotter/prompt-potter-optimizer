@@ -48,6 +48,7 @@ from processes import (
     close_job,
     end_children_with_this_process,
     git,
+    long_path,
     metered,
     open_job,
     queue_behind_siblings,
@@ -714,9 +715,10 @@ def _headings(path: Path) -> tuple[str, ...]:
     return tuple(h.replace("`", "") for h in _HEADING.findall(_unfenced(path)))
 
 
-def _link_target(rel: str, cited: str) -> str:
-    """Where *cited*, a link path written in the doc *rel*, lands: a repo-relative POSIX path, or
+def _link_target(rel: str, target: str) -> str:
+    """Where *target*, a link written in the doc *rel*, lands: a repo-relative POSIX path, or
     `../…` when it leaves the repo. No filesystem is read, so a checkout's name and OS never vote."""
+    cited = urllib.parse.unquote(target.partition("#")[0].partition("?")[0])
     if cited.startswith("/"):
         return posixpath.normpath(cited.lstrip("/") or ".")
     return posixpath.normpath(posixpath.join(posixpath.dirname(rel), cited)) if cited else rel
@@ -727,7 +729,7 @@ def _section_claims(rel: str, prose: str, tree: frozenset[str]) -> list[str]:
     name ending on a word boundary that matches any heading must match only one."""
     failures = []
     for target, name in _SECTION_CLAIM.findall(prose):
-        at = _link_target(rel, urllib.parse.unquote(target.partition("#")[0]))
+        at = _link_target(rel, target)
         if not at.endswith(".md") or at.startswith("../") or at not in tree:
             continue  # a sibling checkout's page, a section of no markdown file, or `_link_claims`'s
         path = REPO / at
@@ -774,17 +776,19 @@ def _link_claims(rel: str, prose: str, tree: frozenset[str]) -> list[str]:
     failures = []
     for inline, defined in _LINK.findall(prose):
         target = inline or defined
+        claim = f"  {rel}: `{target}`"
+        if target.startswith("file:"):
+            failures.append(f"{claim}: a `file:` link names one machine's disk")
+            continue
         if _SCHEME.match(target):
             continue
-        cited, _, anchor = target.partition("#")
-        cited = urllib.parse.unquote(cited.partition("?")[0])
-        claim = f"  {rel}: `{target}`"
-        if "\\" in cited:
-            failures.append(f"{claim}: a link path is spelled with `/`")
+        anchor = target.partition("#")[2]
+        at = _link_target(rel, target)
+        if "\\" in at:
+            failures.append(f"{claim}: spells its path with `\\`, where a link takes `/`")
             continue
-        at = _link_target(rel, cited)
-        if at.startswith("../"):
-            if at.split("/")[1] not in _SIBLING_CHECKOUTS:
+        if (leaves := at.split("/"))[0] == "..":
+            if len(leaves) < 2 or leaves[1] not in _SIBLING_CHECKOUTS:
                 failures.append(f"{claim} leaves the repo for no sibling checkout")
             continue
         if at != "." and at not in tree:
@@ -803,6 +807,12 @@ _LINK_PROOF = {
     "[defined]: gone.md": True,
     "[out by this repo's name](../prompt-potter-optimizer/CLAUDE.md)": True,
     "[backslash](docs\\architecture.md)": True,
+    "[root-relative](/CLAUDE.md)": False,
+    "[root-relative, gone](/gone.md)": True,
+    "[^1]: a footnote, never a link": False,
+    "[query](CLAUDE.md?plain=1#no-such-heading)": True,
+    "[parent](..)": True,
+    "[disk](file:///C:/CLAUDE.md)": True,
 }
 
 
@@ -1230,8 +1240,9 @@ def _optimizer_plugin(_: Selection) -> Outcome:
 # (`offline_run.py::data_root`), in a home of its own under the `walk-world` check's key, so a world is read only by a tree whose engine built it. One world
 # stands: building one removes every other entry of `walk-world/`, under the clone's lock, which
 # a walk's copy of its world takes too (`webapp/e2e/walk_world.py`), so no world goes while a tree
-# copies it; a tree whose world went builds its own again (`Check.kept` reads `builds`).
-_WALK_WORLDS = clone_cache() / "walk-world"
+# copies it; a tree whose world went builds its own again (`Check.kept` reads `builds`). Spelled
+# long, so its prune and its copy reach a ledger lock nested past MAX_PATH under a desk checkout.
+_WALK_WORLDS = Path(long_path(clone_cache() / "walk-world"))
 _WALK_WORLD = str(_WALK_WORLDS / "{key}" / "potter" / "data")
 
 

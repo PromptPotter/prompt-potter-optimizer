@@ -69,12 +69,13 @@ def main() -> None:
         # Appended to the ORIGINAL argv, so `resume`'s defaults populate without dropping the globals before the verb.
         args = parser.parse_args([*sys.argv[1:], "resume"])
 
-    # Named as a string like the handlers: `--help` loads no use case.
-    if args.command in _COMPLETING:
-        landing = importlib.import_module("promptpotter.application.maintenance.landing")
-        landing.land_at_entry(every_treatment=False)
     runner = asyncio.Runner()
     try:
+        # The landing's refusal is this one catch's to say, as a verb's is.
+        if args.command in _COMPLETING:
+            # Named as a string like the handlers: `--help` loads no use case.
+            landing = importlib.import_module("promptpotter.application.maintenance.landing")
+            landing.land_at_entry(every_treatment=False)
         # A launch verb's handler runs its preamble and THEN answers the coroutine: a preamble's
         # refusal is this one catch's to say, as the run's is.
         result = runner.run(_handler(args.command)(args))

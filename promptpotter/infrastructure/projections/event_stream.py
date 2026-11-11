@@ -24,7 +24,7 @@ class CycleLedgerTail:
         self._line_index = 0
 
     def _index(self) -> LedgerIndex:
-        return LedgerIndex.of(self._ledger_path, ())
+        return LedgerIndex.of(self._ledger_path)
 
     def snapshot_frame(self, body: dict[str, Any]) -> ProjectionEnvelope:
         """Picks up one PAST ``at_offset``, not at EOF: records land after the debounced dashboard fold."""

@@ -118,7 +118,7 @@ class _RayTail:
 def _read_curated(
     ledger: Path, *, encoded_path: str, depth: int, keep: int, bound: RayCursor | None
 ) -> tuple[list[_Raw], bool]:
-    tail = LedgerIndex.of(ledger, ()).view(_RayTail)[min(depth, 1)]
+    tail = LedgerIndex.of(ledger).view(_RayTail)[min(depth, 1)]
     if bound is not None:
         below = [r for r in tail.rows if (r.epoch, encoded_path, r.offset) < bound]
         if len(below) < keep and tail.total > len(tail.rows):

@@ -46,9 +46,9 @@ _DATA_ROOT_DESCRIPTION = f"""\
 {_REGENERATE}
 
 Every SURVIVOR and CACHE row of `promptpotter/infrastructure/store/data_root.py`, by its patterns
-under the data root: a diff in a SURVIVOR's shape is a box's file that must be rewritten before
-`deploy-linux/update.sh` lands the code that reads it; a CACHE file that stops loading is dropped by
-`update.sh <ref> --reset`.
+under the data root: a diff in a SURVIVOR's shape owes a migration
+(`promptpotter/application/maintenance/migrate.py::MIGRATIONS`) the landing runs before the code
+that reads it does; a CACHE file that stops loading is dropped by the landing, which says so.
 """
 
 

@@ -319,7 +319,7 @@ def held_on() -> Iterator[Callable[[CycleEventLog, Projected], object]]:
     """Holds each projection on its ledger's index until the test ends, so none is pinned past it."""
     with contextlib.ExitStack() as holds:
         yield lambda ledger, projection: holds.enter_context(
-            LedgerIndex.of(ledger.path, ()).projecting()
+            LedgerIndex.of(ledger.path).projecting()
         ).add(projection)
 
 
@@ -474,10 +474,8 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         }
     }
     (tmp_path / "rates.json").write_text(json.dumps(listed), encoding="utf-8")
-    with monkeypatch.context() as patched, contextlib.ExitStack() as unpatching:
+    with monkeypatch.context() as patched:
         patched.setattr(pricing, "BUNDLED_PATH", tmp_path / "rates.json")
-        pricing.load_rates.cache_clear()
-        unpatching.callback(pricing.load_rates.cache_clear)
         lookup, usd = pricing.lookup_rate, pricing.compute_usd
         for model, provider, rate in (
             ("deepseek-v4-flash", "deepseek", Rate(0.00000014, 0.00000028)),
@@ -3730,6 +3728,10 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert campaign_spend(stores.campaigns, "camp-2") == spent_before, (
         "a torn delete's rows counted beside its tombstone: the campaign's spend read twice"
     )
+    torn_read = stores.campaigns.load_campaign("camp-2")
+    assert torn_read is not None and torn_read.lifecycle_status == "deleted", (
+        "a torn delete's detail read the manifest's own status past its tombstone"
+    )
     assert ceiling_counts_now() == pytest.approx(ceiling_counts), (
         "a torn delete's rows metered beside its tombstone: the ceiling refuses at half its room"
     )
@@ -3933,7 +3935,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     faulted_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(faulted)))
     book = spend_book(1.0)
     with (
-        LedgerIndex.of(faulted_ledger.path, ()).projecting() as held,
+        LedgerIndex.of(faulted_ledger.path).projecting() as held,
         scoped(ledger=faulted_ledger),
         spending_under(book),
     ):
@@ -3956,7 +3958,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     # A book whose own fold cannot count a landed bill admits no send after it: its meter is short.
     short = spend_book(1.0)
     with (
-        LedgerIndex.of(faulted_ledger.path, ()).projecting() as held,
+        LedgerIndex.of(faulted_ledger.path).projecting() as held,
         scoped(ledger=faulted_ledger),
         spending_under(short),
     ):
@@ -3985,7 +3987,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         outer, nested = spend_book(1.0), spend_book(1.0)
         nested.enclosing = outer
         chain = CycleEventLog(Path(stores.base_dir) / folding / "ledger.jsonl")
-        with LedgerIndex.of(chain.path, ()).projecting() as held:
+        with LedgerIndex.of(chain.path).projecting() as held:
             held.add(nested if folding == "nested" else outer)
             chain.append(billed_call(0.1))
         for asking, book in (("root", outer), ("nested", nested)):

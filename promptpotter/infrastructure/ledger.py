@@ -88,7 +88,7 @@ class CycleEventLog:
         # (decisions.md § 0003), a bill per send, the start as the live marker, the priced key, the score.
         raw = RECORD_ADAPTER.dump_json(record, fallback=str)
         # The offset is the record's LINE, as the index counts it, another writer's lines included.
-        return LedgerIndex.of(self._path, ()).land(raw, append_line(self._path, raw), record)
+        return LedgerIndex.of(self._path).land(raw, append_line(self._path, raw), record)
 
     def iter(self) -> Iterator[tuple[int, CycleRecord]]:
         """This file's own records, each at its line: a fork's prefix is `ledger_chain`'s."""
@@ -106,4 +106,4 @@ class CycleEventLog:
     def next_offset(self) -> int:
         """Complete lines alone, as every reader counts them: a torn tail is no offset, and the next
         append cuts it away before it lands (`io.py::append_line`)."""
-        return LedgerIndex.of(self._path, ()).line_count()
+        return LedgerIndex.of(self._path).line_count()

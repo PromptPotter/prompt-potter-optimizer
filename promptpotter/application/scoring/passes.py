@@ -664,7 +664,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
         with (
             verb_ledger(stores, hop) as ledger,
             at_round(rounds[-1].round),
-            LedgerIndex.of(ledger.path, ()).projecting() as projecting,
+            LedgerIndex.of(ledger.path).projecting() as projecting,
         ):
             dashboard = projecting.add(dashboard)
             readout.open_readout(cycle_dir)

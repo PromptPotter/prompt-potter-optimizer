@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import json
 import logging
@@ -15,9 +16,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from pydantic import TypeAdapter, ValidationError
+
 from promptpotter.config.paths import user_data_root
-from promptpotter.infrastructure.store.io import read_json_optional, write_text
+from promptpotter.infrastructure.store.io import (
+    read_bytes_optional,
+    read_json_optional,
+    unlink_robust,
+    write_bytes,
+    write_text,
+)
 from promptpotter.shared.errors import ErrorCategory, SendRefusedError
+from promptpotter.shared.hashing import stable_hash
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +140,7 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
 
     stripped = _strip_upstream(raw)
     write_text(cache_path(), json.dumps({"models": stripped}, indent=0, separators=(",", ":")))
-    load_rates.cache_clear()
+    _rates_at.cache_clear()
     logger.info("spend: refreshed %d model rates → %s", len(stripped), cache_path())
     return True
 
@@ -193,15 +203,20 @@ def _as_tokens(raw: object) -> int | None:
         return None
 
 
-@functools.lru_cache(maxsize=1)
 def load_rates() -> RateTable:
-    bundled = _read_models(BUNDLED_PATH)
-    fetched = _read_models(cache_path())
+    """Kept by where it reads: a home set after the first read reads its own rates."""
+    return _rates_at(BUNDLED_PATH, cache_path())
+
+
+@functools.lru_cache(maxsize=1)
+def _rates_at(bundled_path: Path, fetched_path: Path) -> RateTable:
+    bundled = _read_models(bundled_path)
+    fetched = _read_models(fetched_path)
     if bundled is None and fetched is None:
         logger.warning(
             "spend: no rate table available (cache %s + bundle %s both missing)",
-            cache_path(),
-            BUNDLED_PATH,
+            fetched_path,
+            bundled_path,
         )
         return RateTable({})
     # The fetch lies OVER the floor: a row upstream never listed keeps the price the bundle gave it.
@@ -254,7 +269,25 @@ OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{model}/endpoint
 
 # OpenRouter's routing shortcuts: a different ORDER over the same hosts, so the same ceiling.
 _ROUTE_SORTS = frozenset({"nitro", "floor"})
-_ROUTE_MEMO: dict[str, tuple[float, RateCeiling | None]] = {}
+# Under the data root: one file per route a fetch answered, so every process reads what any
+# process priced, a served menu what a run's child process did.
+ROUTE_ANSWERS_DIR = "route_ceilings"
+
+
+@dataclass(frozen=True)
+class RouteAnswer:
+    """What a fetch of a route's hosts answered, and when: no ceiling where no host prices it. It
+    names its route and hosts, which the one refresher reads back (`refresh_route_answers`), and
+    *since*, its route's first answer of that fate, which a re-fetch answering the same keeps."""
+
+    route: str
+    hosts: tuple[str, ...] | None
+    at: float
+    since: float
+    ceiling: RateCeiling | None
+
+
+ROUTE_ANSWER = TypeAdapter(RouteAnswer)
 _OUTAGE_MEMO_S = 60.0
 _ROUTE_OUTAGE: dict[str, tuple[float, str]] = {}
 
@@ -271,9 +304,11 @@ async def rate_ceiling(
 ) -> RateCeiling | None:
     """Off the event loop only where a gateway's price list must be FETCHED."""
     key = _route_model(model) if provider.lower() == "openrouter" else None
-    if key is not None and _remembered(_memo_key(key, hosts)) is _MISS:
-        return await asyncio.to_thread(route_ceiling, model, provider, hosts=hosts)
-    return route_ceiling(model, provider, hosts=hosts)
+    if key is None:
+        return route_ceiling(model, provider, hosts=hosts)
+    if (hit := _remembered(_memo_key(key, hosts))) is not _MISS:
+        return cast("RateCeiling | None", hit)
+    return await asyncio.to_thread(route_ceiling, model, provider, hosts=hosts)
 
 
 def route_ceiling(
@@ -301,18 +336,61 @@ def route_priced(model: str, provider: str, *, hosts: tuple[str, ...] | None = N
 
 
 def remembered_priced(model: str, provider: str) -> bool | None:
-    """`route_priced` off what is already known, never a fetch: a served read answers from the memo
-    that run init and every send fill. ``None`` where only a fetch would answer, as for an outage."""
-    if provider.lower() == "openrouter":
-        key = _route_model(model)
-        if key is None:
-            return False
+    """`route_priced` off what is already known, never a fetch: the last answer any process's
+    fetch gave, which the API's sweep keeps fresh (`refresh_route_answers`). ``None`` for a route
+    no answer stands for, as through an outage, which the Start admits through."""
+    if provider.lower() != "openrouter":
+        return lookup_rate(model, provider) is not None
+    key = _route_model(model)
+    if key is None:
+        return False
+    answer = _route_answer(key)
+    return None if answer is None else answer.ceiling is not None
+
+
+def refresh_route_answers() -> None:
+    """Blocking, the API sweep's alone, one rule for both fates: an answer a day past its *since*
+    goes, which reads as no answer, offered, and fetched again by its route's next send; a younger
+    unpriced one past `_OUTAGE_MEMO_S` is fetched again, a host may price its route since. No row
+    outlives a day of its answer, and one row's failure ends that row alone."""
+    answers = user_data_root() / ROUTE_ANSWERS_DIR
+    for path in sorted(answers.glob("*.json")) if answers.is_dir() else ():
         try:
-            held = _remembered(_memo_key(key, None))
-        except PriceListUnreachableError:
-            return None
-        return None if held is _MISS else held is not None
-    return lookup_rate(model, provider) is not None
+            # An outage keeps the answer it had.
+            with contextlib.suppress(PriceListUnreachableError):
+                _refresh(path)
+        except OSError as exc:
+            logger.warning("spend: route answer %s left as it stood: %s", path.name, exc)
+
+
+def _refresh(path: Path) -> None:
+    if (answer := _read_answer(path)) is None:
+        return
+    if time.time() - answer.since >= _TTL_SECONDS:
+        unlink_robust(path)
+    elif answer.ceiling is None and time.time() - answer.at >= _OUTAGE_MEMO_S:
+        _openrouter_ceiling(answer.route, answer.hosts)
+
+
+def _route_answer_path(memo_key: str) -> Path:
+    # Named by its digest: a route or a host pin set may run past what a file name holds.
+    return user_data_root() / ROUTE_ANSWERS_DIR / f"{stable_hash(memo_key)}.json"
+
+
+def _route_answer(memo_key: str) -> RouteAnswer | None:
+    return _read_answer(_route_answer_path(memo_key))
+
+
+def _read_answer(path: Path) -> RouteAnswer | None:
+    """A row that does not load is the cache its row declares: dropped, and no answer."""
+    raw = read_bytes_optional(path)
+    if raw is None:
+        return None
+    try:
+        return ROUTE_ANSWER.validate_json(raw)
+    except ValidationError:
+        unlink_robust(path)
+        return None
 
 
 def _route_model(model: str) -> str | None:
@@ -330,12 +408,12 @@ def _memo_key(key: str, pinned: tuple[str, ...] | None) -> str:
 
 def _remembered(memo_key: str) -> RateCeiling | None | object:
     """``_MISS`` where only a fetch answers; a remembered outage raises."""
-    memo = _ROUTE_MEMO.get(memo_key)
+    answer = _route_answer(memo_key)
     # An unpriced answer is re-asked sooner: a host listing the model later prices it.
-    if memo is not None and time.time() - memo[0] < (
-        _TTL_SECONDS if memo[1] is not None else _OUTAGE_MEMO_S
+    if answer is not None and time.time() - answer.at < (
+        _TTL_SECONDS if answer.ceiling is not None else _OUTAGE_MEMO_S
     ):
-        return memo[1]
+        return answer.ceiling
     outage = _ROUTE_OUTAGE.get(memo_key)
     if outage is not None and time.time() - outage[0] < _OUTAGE_MEMO_S:
         raise PriceListUnreachableError(outage[1])
@@ -354,7 +432,11 @@ def _openrouter_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeili
     except PriceListUnreachableError as exc:
         _ROUTE_OUTAGE[memo_key] = (time.time(), str(exc))
         raise
-    _ROUTE_MEMO[memo_key] = (time.time(), ceiling)
+    now = time.time()
+    held = _route_answer(memo_key)
+    since = held.since if held is not None and (held.ceiling is None) == (ceiling is None) else now
+    answer = RouteAnswer(key, pinned, now, since, ceiling)
+    write_bytes(_route_answer_path(memo_key), ROUTE_ANSWER.dump_json(answer))
     return ceiling
 
 

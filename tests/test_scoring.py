@@ -3569,7 +3569,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         # does the next round's file, with no second warning.
         session = cycle.session
         round_files = session.store.campaigns.layout(session.hop)
-        with LedgerIndex.of(callbacks.ledger.path, ()).projecting() as checkout:
+        with LedgerIndex.of(callbacks.ledger.path).projecting() as checkout:
             checkout.add(RoundFileProjection(session.store, session.hop, session.state))
             with monkeypatch.context() as unwritable:
                 unwritable.setattr(closed_rounds, "write_json", Mock(side_effect=OSError("full")))

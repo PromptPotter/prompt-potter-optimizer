@@ -635,7 +635,7 @@ def _graded(
     spans: Iterable[LedgerSpan], kind: VerificationKind
 ) -> Iterator[VerificationGradedView]:
     for span in spans:
-        for view in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Verification, span.until):
+        for view in LedgerIndex.of(span.path).view(_Verification, span.until):
             if view.verification.kind == kind:
                 yield view
 
@@ -776,7 +776,7 @@ class _Timeline:
         )
 
 
-LEDGER_FOLDS = LedgerIndex.readers(
+LedgerIndex.readers(
     *map(
         _last,
         (
@@ -807,14 +807,14 @@ LEDGER_FOLDS = LedgerIndex.readers(
 
 
 def _view[V](ledger_path: Path, fold: Callable[[], LedgerFold[Any, V]]) -> V:
-    return LedgerIndex.of(ledger_path, LEDGER_FOLDS).view(fold)
+    return LedgerIndex.of(ledger_path).view(fold)
 
 
 def scan_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> R | None:
     """The last *record* the spans hold, a later span's over an earlier one's."""
     found: R | None = None
     for span in spans:
-        own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_last(record), span.until)
+        own = LedgerIndex.of(span.path).view(_last(record), span.until)
         found = found if own is None else cast("R", own)
     return found
 
@@ -822,7 +822,7 @@ def scan_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> R
 def scan_each_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> list[R | None]:
     """Each span's own last *record*, ``None`` where it holds none, the earliest span's first."""
     return [
-        cast("R | None", LedgerIndex.of(span.path, LEDGER_FOLDS).view(_last(record), span.until))
+        cast("R | None", LedgerIndex.of(span.path).view(_last(record), span.until))
         for span in spans
     ]
 
@@ -830,7 +830,7 @@ def scan_each_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R])
 def scan_resolved_run(spans: Iterable[LedgerSpan]) -> ResolvedRun:
     resolved = ResolvedRun()
     for span in spans:
-        own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_ResolvedRun, span.until)
+        own = LedgerIndex.of(span.path).view(_ResolvedRun, span.until)
         if own.experiment is not None:
             own = replace(own, experiment_cycle_id=CycleLayout.of_ledger(span.path).cycle_dir.name)
         resolved = resolved.then(own)
@@ -840,9 +840,7 @@ def scan_resolved_run(spans: Iterable[LedgerSpan]) -> ResolvedRun:
 def scan_left_comparison(spans: Iterable[LedgerSpan]) -> list[ComparisonExit]:
     """Every act that ran the line off its declared comparison, oldest first."""
     return [
-        act
-        for span in spans
-        for act in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_LeftComparison, span.until)
+        act for span in spans for act in LedgerIndex.of(span.path).view(_LeftComparison, span.until)
     ]
 
 
@@ -850,7 +848,7 @@ def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
     return [
         clock
         for span in spans
-        for clock in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_LaunchClocks, span.until)
+        for clock in LedgerIndex.of(span.path).view(_LaunchClocks, span.until)
     ]
 
 
@@ -907,13 +905,13 @@ PROGRESS_FOLDS = (_Progress,)
 
 
 def scan_cycle_facts(ledger_path: Path, until: int | None = None) -> CycleFacts:
-    return LedgerIndex.of(ledger_path, LEDGER_FOLDS).view(_CycleFacts, until)
+    return LedgerIndex.of(ledger_path).view(_CycleFacts, until)
 
 
 def scan_cell_formula(spans: Iterable[LedgerSpan]) -> str | None:
     formula: str | None = None
     for span in spans:
-        held = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_CycleFacts, span.until)
+        held = LedgerIndex.of(span.path).view(_CycleFacts, span.until)
         formula = held.formula or formula
     return formula
 
@@ -925,9 +923,7 @@ def scan_ledger_progress(ledger_path: Path) -> Progress:
 def scan_standing_rounds(spans: Iterable[LedgerSpan]) -> StandingRounds:
     standing = StandingRounds.none()
     for span in spans:
-        standing = standing.then(
-            LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Standing, span.until)
-        )
+        standing = standing.then(LedgerIndex.of(span.path).view(_Standing, span.until))
     return standing
 
 
@@ -1078,7 +1074,7 @@ def _launched[F: tuple[Any, ...]](
 
 
 def scan_ledger_answers(spans: Iterable[LedgerSpan]) -> frozenset[str]:
-    held = [LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Answers, span.until) for span in spans]
+    held = [LedgerIndex.of(span.path).view(_Answers, span.until) for span in spans]
     return held[0] if len(held) == 1 else frozenset().union(*held)
 
 
@@ -1090,7 +1086,7 @@ def scan_ledger_spend(spans: Iterable[LedgerSpan]) -> LedgerSpend:
     spend = SpendRollup()
     calls, worked_s = 0, 0.0
     for span in spans:
-        own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Spend, span.until)
+        own = LedgerIndex.of(span.path).view(_Spend, span.until)
         for held in own.by_round.values():
             spend.absorb(held)
         calls += own.calls
@@ -1107,7 +1103,7 @@ def scan_ledger_spend_by_round(spans: Iterable[LedgerSpan]) -> dict[int, SpendRo
     """Not clamped by a rewind: a round measured twice cost money both times."""
     by_round: dict[int, SpendRollup] = {}
     for span in spans:
-        own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Spend, span.until)
+        own = LedgerIndex.of(span.path).view(_Spend, span.until)
         for n, held in own.by_round.items():
             spend_slot(by_round, n, SpendRollup).absorb(held)
     return dict(sorted(by_round.items()))
