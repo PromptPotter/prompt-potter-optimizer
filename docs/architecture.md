@@ -223,11 +223,10 @@ the internal `.runtime/` (ledger, projection caches, OS lock files): repoint a c
 wrong cadence, never retire the other surface. Layout:
 [`operations/persistence-and-state.md`](operations/persistence-and-state.md) § Layout.
 
-### Tracing, Langfuse-shaped, lightweight by default
+### Tracing
 
-A trace is a fold of the ledger (`infrastructure/tracing/bridge.py::TracingProjection`), so every
-optimizer is traced and no member opens a span. **Fan-out only — the optimizer never reads it.**
-Sinks are off by default: [`../promptpotter/infrastructure/tracing/CLAUDE.md`](../promptpotter/infrastructure/tracing/CLAUDE.md).
+**The ledger is the trace**: every optimizer is traced and no member opens a span. No external sink
+ships; one returns as a projection on the ledger's roster, fan-out only — the optimizer never reads it.
 
 ### Measurement archive (the actual database)
 
@@ -272,7 +271,6 @@ A PR touching one states its case.
 - **Connectors** (`promptpotter/connectors/`) — the only place backend identity is named.
 - **`infrastructure/producer_lock.py` and `jobs/interlock.py`** — the OS locks are the only box
   facts that outlive a process; a heartbeat is the version with a window where the answer is wrong.
-- **Langfuse-shape events and `TracingProjection`** — the Tracing bucket's foundation.
 - **The roster's `source_digest`** (`optimizers/nodes.py`) — what an optimizer node is handed is L4 measurement identity,
   so its renderers, bundling and composition are hashed (AST-normalized). The reach walks by unit and
   stops at `source_scan.py::PLUMBING_MODULES` and at a refusal: what a `raise` reads is never walked,

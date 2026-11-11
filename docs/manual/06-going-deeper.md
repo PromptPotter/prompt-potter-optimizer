@@ -12,7 +12,7 @@ You've run a campaign. Here's where to look when you want to understand more.
 
 - [Persistence and state](../operations/persistence-and-state.md) — the `.promptpotter/` tree, resume, rewind and fork
 - [Backend integration](../operations/backend-integration.md) — the contract a backend must implement
-- [Observability](../operations/observability.md) — tracing, Langfuse and MLflow
+- [Observability](../operations/observability.md) — the ledger as the trace, wall clock, race stream
 - [Access model](../operations/access-model.md) — accounts, spend ceilings and security when hosted
 
 ## Methods — the statistics

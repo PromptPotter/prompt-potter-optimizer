@@ -27,7 +27,6 @@ from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.send_pacing import set_abort_check
 from promptpotter.infrastructure.llm.spend_book import bound_spend_book, filed
-from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -47,7 +46,6 @@ async def prepare_run(
     partition: BankPartition,
     observers: RunObservers,
     budget: HeldBudget,
-    langfuse_session_id: str | None,
 ) -> PreparedRun:
     cb = observers.callbacks
 
@@ -62,18 +60,7 @@ async def prepare_run(
     )
     session.state.held = budget
     # Declared before origin scoring; the record is the readout, the arming below the enforcement.
-    for failure in observers.tracing.start(
-        config_snapshot=campaign_config.model_dump(mode="json"),
-        langfuse_session_id=langfuse_session_id,
-    ):
-        emit_round_warning(kind="trace_sink_failed", message=failure)
-    declare_run_wiring(
-        session,
-        campaign_config,
-        cb.ledger,
-        selected=bound_optimizer(),
-        tracing=observers.tracing,
-    )
+    declare_run_wiring(session, campaign_config, cb.ledger, selected=bound_optimizer())
     # A fresh mint was admitted before its campaign existed: its ceiling is stored here.
     move_campaign_money(
         budget.standing,

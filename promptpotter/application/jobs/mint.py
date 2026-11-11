@@ -593,7 +593,7 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     # The name labels the bank its newest campaign declares, an L4 inner cell's as every other.
     session.store.tenant_datasets.relabel(session.measured_dataset, declaration.dataset_hash)
     ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
-    declare_run_wiring(session, plan.cycle.config, ledger, selected=plan.optimizer, tracing=None)
+    declare_run_wiring(session, plan.cycle.config, ledger, selected=plan.optimizer)
     save_active_pointer(session.store.base_dir, hop)
     logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
     return session

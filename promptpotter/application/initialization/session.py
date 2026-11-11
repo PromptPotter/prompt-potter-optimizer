@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.run_records import BackendRevision
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.domain.validators import StopRule
-    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 
 @dataclass(frozen=True)
@@ -112,7 +111,6 @@ class Session:
     pipeline_params: PipelineParams = field(default_factory=PipelineParams)
     # Per node, the `pipeline_params` keys hashed into identity and never sent to a backend.
     identity_keys: dict[str, frozenset[str]] = field(default_factory=dict)
-    langfuse: LangfuseLogger | None = None
     campaign_id: str = ""
     # Written by `bound` alone: a fork is a new session, never a moved field.
     cycle_id: str = ""

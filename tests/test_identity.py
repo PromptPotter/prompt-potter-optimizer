@@ -2317,9 +2317,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     for on_disk, served_drift in ((stale, drift), (held_campaign, None)):
         write_json(manifest_path, on_disk.model_dump(mode="json"))
-        declare_run_wiring(
-            opened, effective_config(declared), wired_ledger, selected=running, tracing=None
-        )
+        declare_run_wiring(opened, effective_config(declared), wired_ledger, selected=running)
         served = fold_at(root_cut)
         assert served is not None and served.defaults_drift == served_drift, (
             "a launch past moved bench defaults served no drift, or one on its own served one"

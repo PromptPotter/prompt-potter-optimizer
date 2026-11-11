@@ -44,7 +44,6 @@
 | **An agent framework, a managed agent service or a workflow builder** — LangGraph, CrewAI, the OpenAI Agents SDK, Bedrock Agents, n8n, Dify, or plain FastAPI | A `Connector` declaration; an HTTP backend's default wire is `POST /matches` and `GET /pipeline`, and the knobs your pipeline declares become what is tuned ([backend integration](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md)) |
 | **DSPy** | `PromptPotterOpt`, where you would reach for GEPA ([dspy-optimizer](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md)) |
 | **An agent in a sandbox** | Each candidate runs as a [Harbor](https://github.com/laude-institute/harbor) trial, graded by the task's own checker |
-| **Langfuse / MLflow** | Every round fans out as traces; the winner lands in MLflow's Prompt Registry ([observability](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/observability.md)) |
 | **OpenRouter, OpenAI, Anthropic, Groq** | Any of them, for your pipeline and for the optimizer |
 
 **What you get back:** `export.json` — the winning prompt and settings by field name, with the evidence behind them. We never load, host, route or hot-swap anything in your production path.

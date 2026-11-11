@@ -61,7 +61,7 @@ api = [
     "scalar-fastapi>=1.0.0",   # why kept: API doc UI on the FastAPI app
     "uvicorn[standard]>=0.27.0",  # why kept: ASGI server for the API
     "sse-starlette>=2.4.1",    # why kept: EventSourceResponse owns events:subscribe SSE framing + heartbeat + teardown on client-disconnect/server-shutdown (patches uvicorn handle_exit, so one Ctrl+C shuts down clean)
-    "cryptography>=50.0.0",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (the identity foundation, docs/decisions.md § 0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007, and now past GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle, fixed in 50.0.0). Held at 49 until `observability` moved off full mlflow, which required `cryptography<50`.
+    "cryptography>=50.0.0",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (the identity foundation, docs/decisions.md § 0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007, and now past GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle, fixed in 50.0.0).
 ]
 excel = [
     # why kept: .xlsx ingest (`application/datasets/tabular_ingest.py::_xlsx_records`). Lazy behind `shared/extras.py::require_extra`,
@@ -135,25 +135,6 @@ benchmarks = [
     # materialized to the tenant's `materialized/` so a run only needs it ONCE.
     "datasets>=2.14.0",
 ]
-observability = [
-    "langfuse>=2.0.0",  # why kept: the Langfuse cloud sink
-    "mlflow-skinny>=3.15.0",  # why kept: the client for the operator's own MLflow server —
-                        # rounds as runs, the winner as a prompt version — off until
-                        # settings.MLFLOW_TRACKING_URI names one.
-                        # Per §0 dormant-but-named — the import path stays
-                        # so setting it works without a code change.
-                        # Floor raised onto 3.15 to clear GHSA-7gwp-5pfp-969j (SSRF).
-                        # SKINNY, not full `mlflow`, and the distinction is load-bearing twice
-                        # over. `mlflow_server.py` calls only `MlflowClient` — tracking and the
-                        # prompt registry — which is exactly skinny's surface. Full mlflow
-                        # requires `cryptography<50`, and it was the ONLY thing pinning this repo
-                        # below the 50.0.0 that fixes GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher
-                        # oracle) — skinny declares no cryptography at all. It also drops the
-                        # `mlflow` distribution that carries GHSA-h7x2-h6g9-p789, an AI-Gateway
-                        # SSRF with NO upstream patch (3.16.0 still leaves `api_base` unvalidated
-                        # in `server/gateway_api.py::raw_proxy`) — unreachable for us either way,
-                        # because that is a bug in `mlflow server`, which we never run.
-]
 all = [
     # `benchmarks` is NOT folded in here, and that is the point of it being separate: `all` is
     # what a developer installs by default, so anything listed becomes attack surface nobody
@@ -170,8 +151,6 @@ all = [
     "cryptography>=50.0.0",
     "openpyxl>=3.1.0",
     "xlrd>=2.0.1",
-    "langfuse>=2.0.0",
-    "mlflow-skinny>=3.15.0",
 ]
 dev = [
     "pytest>=8.0.0",          # why kept: test runner
@@ -281,13 +260,9 @@ init_typed = true
 
 # Deps we never type-check through. `follow_imports = "skip"` (not just
 # ignore_missing_imports, a no-op when the package is installed + typed) stops
-# mypy expanding their bodies. The tree this was sized against is gone: `mlflow`
-# used to drag the SQLAlchemy dialects + alembic in (5488 nodes for 291 first-party
-# modules), and `mlflow-skinny` ships neither, so their two entries went with it.
+# mypy expanding their bodies.
 [[tool.mypy.overrides]]
 module = [
-    "langfuse.*",
-    "mlflow.*",
     "scalar_fastapi.*",
     "openpyxl.*",
     "xlrd.*",
@@ -295,8 +270,7 @@ module = [
     "dspy.*",
     "harbor.*",
     "IPython.*",
-    # Pure transitive (0 first-party imports) — pulled in by the skipped sinks /
-    # CLI rendering chains; nothing here is in our typed call surface.
+    # Pure transitive (0 first-party imports) — pulled in by the CLI rendering chains; nothing here is in our typed call surface.
     "rich.*",
     "markdown_it.*",
     "mdurl.*",
@@ -358,14 +332,6 @@ extend_exclude = [
 ]
 # `scripts/` is a directory of programs, not a package: one imports a sibling by its bare name.
 known_first_party = ["gate", "last_green", "offline_world", "processes"]
-
-# CI installs neither `observability` nor `all`, so deptry cannot read the
-# distribution's metadata and falls back to assuming the module is named after the
-# package — `mlflow_skinny`, which nothing imports. Stating the real module here is
-# what makes the check answer the same on a desk that HAS it installed and on a
-# runner that does not.
-[tool.deptry.package_module_name_map]
-mlflow-skinny = ["mlflow"]
 
 [tool.deptry.per_rule_ignores]
 # CLI/tool deps — invoked by command, not imported.

@@ -44,7 +44,6 @@ from promptpotter.infrastructure.store.layout import (
     sibling_kind,
 )
 from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
-from promptpotter.infrastructure.tracing.mlflow_server import register_export
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -172,9 +171,9 @@ def _fork_summary_from_index(fork_index: CycleIndex) -> ForkSummaryView:
 
 
 class RunArtifacts(Projection):
-    """The ONE writer of a cycle's ``log.md`` and ``review.md``, its campaign's ``log.md`` and the
-    registry's copy of its export: rendered off the ledger at each round close and once more at its
-    drainer's close, where the stop and the winner have landed; a fault is its ledger's warning."""
+    """The ONE writer of a cycle's ``log.md`` and ``review.md`` and its campaign's ``log.md``:
+    rendered off the ledger at each round close and once more at its drainer's close, where the
+    stop and the winner have landed; a fault is its ledger's warning."""
 
     def __init__(self, session: Session, config: CampaignConfig) -> None:
         self._session, self._config = session, config
@@ -184,29 +183,11 @@ class RunArtifacts(Projection):
 
     def drain(self) -> None:
         self._render()
-        self._publish()
 
     def _render(self) -> None:
         _render_cycle_log_md(self._session, self._config)
         _render_campaign_log_md(self._session)
         _render_review_md(self._session, self._config)
-
-    def _publish(self) -> None:
-        """Read back off disk, so the registry holds what ``export.json`` says and nothing newer."""
-        stores = self._session.store
-        final = stores.campaigns.load(self._session.hop, moment=None)
-        # A sandbox's winners are the recursion's measurements, a diagnostic cycle's an answer about
-        # the optimizer: neither is one the operator asked for.
-        if (
-            stores.projects_root != stores.shared_root
-            or final is None
-            or final.final is None
-            or final.final.mode == "diag"
-        ):
-            return
-        export = stores.campaigns.read_export(self._session.hop)
-        if export is not None:
-            register_export(export, tenant_id=stores.tenant_id)
 
 
 def _spend_by_round(layout: CycleLayout) -> dict[int, SpendRollup]:

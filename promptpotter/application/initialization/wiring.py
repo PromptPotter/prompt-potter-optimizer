@@ -52,7 +52,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     runnable_definition,
 )
 from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext
 
@@ -223,7 +222,6 @@ async def init_services(
     *,
     identity: IdentityContext,
     stores: Stores | None = None,
-    enable_tracing: bool = True,
     program: object | None = None,
     served: ServedPipeline | None = None,
 ) -> Session:
@@ -284,8 +282,6 @@ async def init_services(
         dataset_name=dataset_name,
         dataset=dataset,
         identity=identity,
-        # ``enable_tracing=False`` (L4 inner campaigns) drops the cloud sink.
-        langfuse=LangfuseLogger(enabled=enable_tracing),
     )
 
 

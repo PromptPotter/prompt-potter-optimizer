@@ -1116,7 +1116,7 @@ export interface ActivityItem {
   /** The arm the record is about, by its key; `label` renders it. */
   arm: string | null;
   /** The self-heal a round warning reports; null on every other item. */
-  healed: 'layer_parse_failure' | 'injection_budget_overrun' | 'trace_sink_failed' | 'derived_file_stale' | null;
+  healed: 'layer_parse_failure' | 'injection_budget_overrun' | 'derived_file_stale' | null;
 }
 
 /** A campaign as the subtree read serves it: every level under it. */
@@ -1571,7 +1571,6 @@ export interface LineageDivergence {
  * it. */
 export interface ServedDashboard {
   at_offset: number;
-  langfuse_trace_url: string | null;
   state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
   optimizer_step: string | null;
   state_since: string;
@@ -2496,7 +2495,7 @@ export interface RoundAudit {
 /** One optimizer-loop degradation the self-healing rails recovered from. */
 export interface LoopWarning {
   ts: string;
-  kind: 'layer_parse_failure' | 'injection_budget_overrun' | 'trace_sink_failed' | 'derived_file_stale';
+  kind: 'layer_parse_failure' | 'injection_budget_overrun' | 'derived_file_stale';
   severity: 'warning' | 'error';
   message: string;
   round: number | null;
@@ -6151,7 +6150,7 @@ export const VERIFY_STRATEGY_LABELS: Record<'random' | 'hard', string> = {
 export const LEAF_INFO: Record<Leaf, LeafInfo> = {
   "connector": { label: "Connector", description: "What the backend produced: node-I/O cache and per-sample arrays.", loop: false },
   "state": { label: "State", description: "Round checkouts, less their per-sample rows.", loop: true },
-  "trace": { label: "Trace", description: "Loop telemetry: locks, the Langfuse id map.", loop: true },
+  "trace": { label: "Trace", description: "Loop telemetry: locks and the job log.", loop: true },
   "history": { label: "History", description: "The loop's event spine: its ledger.", loop: true },
   "reports": { label: "Reports", description: "Readable output: manifest, reports, hard samples.", loop: true },
   "unclassified": { label: "Unclassified", description: "A file no data-root row names: no leaf claims it, and land-data refuses it.", loop: false },

@@ -313,7 +313,6 @@
                 "enum": [
                   "layer_parse_failure",
                   "injection_budget_overrun",
-                  "trace_sink_failed",
                   "derived_file_stale"
                 ],
                 "type": "string"
@@ -9680,7 +9679,6 @@
             "enum": [
               "layer_parse_failure",
               "injection_budget_overrun",
-              "trace_sink_failed",
               "derived_file_stale"
             ],
             "title": "Kind",
@@ -15831,17 +15829,6 @@
               }
             ],
             "description": "The call holding the walk and for how long (`held_call`); null until a call has run past `CALL_HOLDS_AFTER_S`, and where its cell is unknown."
-          },
-          "langfuse_trace_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Langfuse Trace Url"
           },
           "lookahead": {
             "$ref": "#/components/schemas/SampleLookahead"

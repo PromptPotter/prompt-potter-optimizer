@@ -55,8 +55,6 @@ from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjec
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.infrastructure.tracing.bridge import TracingProjection
-from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import instrument_depth
 
@@ -164,9 +162,8 @@ def declare_run_wiring(
     ledger: CycleEventLog,
     *,
     selected: SelectedOptimizer,
-    tracing: TracingProjection | None,
 ) -> None:
-    """The one writer of ``RunWiringRecord``; a mint passes no *tracing* — no launch has opened one."""
+    """The one writer of ``RunWiringRecord``."""
     campaign = session.store.campaigns.load_campaign(session.hop.campaign_id)
     assert campaign is not None, "a run is wired on a campaign its session is bound to"
     ledger.append(
@@ -177,10 +174,6 @@ def declare_run_wiring(
             max_cells_in_flight=session.backend_client.connector.max_cells_in_flight,
             measured_unit=session.backend_client.connector.measured_unit,
             measurement_node=selected.plan.measurement,
-            # Composed here: the Langfuse host is backend-only, so a browser cannot.
-            langfuse_trace_url=None
-            if tracing is None
-            else langfuse_trace_url(tracing.langfuse_trace_id()),
             run_limits=RunLimits(
                 budget=campaign_config.optimization.budget, optimizer=list(selected.limits)
             ),
@@ -203,7 +196,6 @@ class RunObservers:
     callbacks: RunCallbacks
     dashboard: DashboardCheckout
     readout: ReadoutProjection
-    tracing: TracingProjection
     projecting: Projecting
     _book_tokens: list[Token[SpendBook | None]] = field(default_factory=list)
 
@@ -308,11 +300,7 @@ def build_run_observers(
         forked_from.release()
         # A fork's config is already admitted; a first build waits for `prepare_run` to settle it.
         declare_run_wiring(
-            session,
-            campaign_config,
-            observers.callbacks.ledger,
-            selected=bound_optimizer(),
-            tracing=observers.tracing,
+            session, campaign_config, observers.callbacks.ledger, selected=bound_optimizer()
         )
     return observers
 
@@ -339,18 +327,12 @@ def _bind_observers(
         )
     dashboard.drain()
     readout.open_readout(cycle_dir)
-    tracing = (
-        TracingProjection.for_cycle(session.tenant_root, session.hop, langfuse=session.langfuse)
-        if forked_from is None
-        else forked_from.tracing
-    )
     # Each joins at the line the index stands at, past what the checkout folded.
     dashboard = projecting.add(dashboard)
     readout = projecting.add(readout)
     projecting.add(CycleIndexProjection(cycle_dir))
     projecting.add(RoundFileProjection(session.store, session.hop, session.state))
     projecting.add(RunArtifacts(session, campaign_config))
-    tracing = projecting.add(tracing)
     return RunObservers(
         store=session.store,
         hop=session.hop,
@@ -361,6 +343,5 @@ def _bind_observers(
         ),
         dashboard=dashboard,
         readout=readout,
-        tracing=tracing,
         projecting=projecting,
     )

@@ -529,7 +529,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     cycle_id: "cycle_0",
     // The pre-first-record offset the projection starts from.
     at_offset: -1,
-    langfuse_trace_url: null,
     state: "init",
     optimizer_step: null,
     state_since: "",

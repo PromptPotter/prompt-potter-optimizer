@@ -589,14 +589,6 @@ later arc deletes. **Rides with:** the chain each group names, by its "Was" name
   goes, in M10; `emit_*` land on `RunScope`'s ledger); `LedgerIndex` the one live fold with the writing projections on it; `DashboardCheckout` folds a second,
   eager dashboard on every append (0.88 s per potter leg), so the checkout writes the one `LedgerIndex`
   fold's value at `_AT_ONCE` and the debounce. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
-- **ET, inside U3: tracing translates the ledger twice.** `tracing/bridge.py::TracingProjection` re-encodes
-  records into a sink vocabulary, `tracing/langfuse_sink.py::LangfuseSink` re-encodes it again over
-  `tracing/langfuse_client.py::LangfuseLogger`. Action:
-  Langfuse and MLflow are each a writing projection on `LedgerIndex` over the typed records; the
-  translator and the fan-out go. [`architecture.md`](../architecture.md) §0.5 names
-  "Langfuse-shape events" as the tracing bucket's foundation; that line becomes the projections in the
-  same commit (operator, 2026-11-05). `tracing/bridge.py:111` runs each sink under `graceful`, so a
-  trace is silently partial; it goes with the translator. **Rides with:** DOOR-b. **Re-test:** `git grep -n "class TracingProjection" -- promptpotter`.
 - **U3: the ledger is narrated twice.** `views/readout.py::ReadoutProjection` (the readout log) and
   `domain/activity.py::ActivityFeed` (the chat) each word the same record kinds their own way, each with
   its own hold dedupe and arm labels, and the words already drift; `AnnouncedArms` has 15 references in 8
@@ -858,8 +850,7 @@ import-graph script before and after; close each wave with `gate.py --only layer
   (`cli/campaign_runner.py` + `parsers.py` + `commands/verbs.py` → `cli/main.py`; small read verbs →
   `commands/reads.py`, measure verbs → `commands/measure.py`; `handler-tables` names
   `campaign_runner._COMMANDS_PACKAGE`); `infrastructure/identity/` 12 →
-  3 (`oidc`, `grants`, `accounts`); `tracing/` 7 → 4 with `TracingProjection` building its own sinks
-  (drops `Session.langfuse`, a second door into tracing); `projections/live_dashboard/` → one module;
+  3 (`oidc`, `grants`, `accounts`); `projections/live_dashboard/` → one module;
   LLM wire types into `llm/base.py`.
 - **Wave B — `application/runner/` collapses:** `runner/` holds 23 `.py` files today
   (`git ls-tree -r --name-only HEAD promptpotter/application/runner | grep -c '\.py$'`); collapse them to

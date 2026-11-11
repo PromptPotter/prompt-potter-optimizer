@@ -1,22 +1,22 @@
 # MLflow interop — what is left between the two tools
 
-What exists is [`../operations/observability.md`](../operations/observability.md) § MLflow's. This page is
-the rest, in build order; a step that ships is deleted. MLflow is the operator's server and never our
-dependency beyond the client (reasons beside `mlflow-skinny` in `pyproject.toml`); no alias is set or
+Nothing ships today: the MLflow client and sink left with `infrastructure/tracing/`, and a sink returns as a
+projection on the ledger's roster ([`../architecture.md`](../architecture.md) § Tracing). This page is the
+rest, in build order; a step that ships is deleted. MLflow is the operator's server and never our
+dependency beyond the client (`mlflow-skinny`: full `mlflow` pins `cryptography<50`); no alias is set or
 moved, nothing here hosts, routes or swaps ([`roadmap.md`](roadmap.md) § What PromptPotter emits). Verify
 against a real `mlflow server` on a short path, never the offline run.
 
 ## 1. A campaign opts in
 
 *Where* is the box's (`MLFLOW_TRACKING_URI`); *whether* becomes the campaign's: one config field, off by
-default, set at launch or check-in from all five entry points, so the sandbox check in
-`application/runner/output.py::RunArtifacts` goes. **Closes when** a box with the server set mirrors
+default, set at launch or check-in from all five entry points; a sandbox cycle never registers. **Closes when** a box with the server set mirrors
 nothing until a campaign opts in, and an opted-in self-optimization run leaves only its own cycle there.
 
 ## 2. The model on the version, in MLflow's own field
 
 `register_prompt` takes a `model_config` (`PromptModelConfig`), which MLflow's UI renders; each prompt
-registers per node (`infrastructure/tracing/mlflow_server.py::register_export`), so that node's config goes
+registers per node, so that node's config goes
 there and `promptpotter.tuned_params` keeps every prompt-less node. **Closes when** a registered version
 shows the winning model for a one- and a two-node pipeline.
 

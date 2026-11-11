@@ -6,13 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **The Langfuse and MLflow sinks and the `observability` extra are gone** (`langfuse`, `mlflow-skinny` leave `pyproject.toml` and the `all` extra; `LANGFUSE_*` and `MLFLOW_TRACKING_URI` are no longer read). The cycle ledger is the trace; a sink returns as a ledger projection.
+
 ### Changed
 
 - **Quota and ceiling refusals answer 409; only the request-rate throttle answers 429.** A client retrying on 429 retries what passes, never a spent ceiling; the webapp reads a 429 as throttled, and over MCP a throttle answers `-32029`, never `INVALID_PARAMS`.
 - **A Compare arm's bench and diagnostic sends on the box's key meet the run's coupon reserve**, and one no rate prices is refused unsent, as every other send is.
 - **A free-tier launch holds at most the tier's $0.03**, whatever its `start-run` budget or a `set-limits` asks.
 - **A judge on a model off the free tier is refused**, as an optimizer node on one is.
-- **A run traced to Langfuse no longer creates a `ground_truth` dataset there**: its items were linked to no run.
 - **The embedded surface stops what it starts.** `embedded_run.py` exports `pause` (a running cycle, at its next round boundary) and `cancel` (a command by its id; `grade_bench` takes the `command_id` a host cancels it by), each dispatched as every other door's.
 - **A served config row says what it is.** Every `node_config_schema` row (`NodeConfigParam`: a campaign's, a draft's, a dataset's and an optimizer setup's) carries `role` (`provider`, `effort`, `answer_format`, `schema_family`), which the node editor keys its controls on in place of key names, and `editable`: false on a cost lever or a model for a campaign's row read by an account without `campaign.babysit`, which the editor then holds to `permitted`. A declaration's read is no steer, so none of its rows is held.
 - **PoBB's lock-in asks the election, and its ε cut reads each prior through the election's fit.** With `lock_in` on, an arm locks in where `elect_round_winner` would elect it now. `paired_p_best` goes, so the ε gate reads a prior warm through `candidate_abilities` on every cell it scored, capped by the discordant cells it shares with the arm, where it read the shared cells alone: capo-pobb's ε cuts move (the offline run cuts at q6, not q8, and round 4 cuts C2.5, not C2.6). A prior's caught-up cells are rows of its round reading, so the race, the election and the round's fold read one sheet.

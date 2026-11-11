@@ -41,7 +41,6 @@ def build_cycle_result(
     finished_at: str,
     spend: SpendRollup | None,
     bench: BenchScore,
-    langfuse_trace_id: str | None,
 ) -> CycleResult:
     picked = cycle.selection if cycle is not None else None
     picked_sp = cycle.selected_sp if cycle is not None else None
@@ -86,7 +85,6 @@ def build_cycle_result(
         spend=spend,
         error=cycle_error,
         bench=bench,
-        langfuse_trace_id=langfuse_trace_id,
     )
 
 
@@ -156,7 +154,6 @@ def close_cycle(
         # In-memory, never the debounced ``dashboard.json``.
         spend=observers.dashboard.live.state.spend,
         bench=bench,
-        langfuse_trace_id=observers.tracing.langfuse_trace_id(),
     )
     _finalize_run(
         session,

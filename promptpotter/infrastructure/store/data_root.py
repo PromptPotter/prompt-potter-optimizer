@@ -326,7 +326,7 @@ LEAF_INFO: Worded[Leaf, LeafInfo] = Worded(
             "Connector", "What the backend produced: node-I/O cache and per-sample arrays.", False
         ),
         Leaf.STATE: LeafInfo("State", "Round checkouts, less their per-sample rows.", True),
-        Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: locks, the Langfuse id map.", True),
+        Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: locks and the job log.", True),
         Leaf.HISTORY: LeafInfo("History", "The loop's event spine: its ledger.", True),
         Leaf.REPORTS: LeafInfo(
             "Reports", "Readable output: manifest, reports, hard samples.", True
@@ -375,7 +375,6 @@ def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
     def at(path: Path) -> str:
         return path.as_posix()
 
-    lf = at(cycle / "langfuse")
     return (
         *_declared_rows(where, cycle, layout),
         CampaignRow(f"{where} round", f"{at(layout.rounds)}/{ROUND_GLOB}", Leaf.STATE),
@@ -383,7 +382,6 @@ def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
         CampaignRow(f"{where} producer lock", at(layout.producer_lock), Leaf.TRACE),
         CampaignRow(f"{where} pass lock", at(layout.pass_lock), Leaf.TRACE),
         CampaignRow(f"{where} job log", at(layout.job_log), Leaf.TRACE),
-        CampaignRow(f"{where} langfuse state", f"{lf}/state.json", Leaf.TRACE, keepsake=True),
     )
 
 

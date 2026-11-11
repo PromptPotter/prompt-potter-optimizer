@@ -52,7 +52,6 @@ class InitExitView(FrozenModel):
     cycle_id_short: str
     samples: int
     bench_samples: int
-    obs_on: bool
     origin_samples: int = 0
     resumed_from_round: int = 1
     cached_rounds_count: int = 0

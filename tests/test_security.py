@@ -1495,7 +1495,6 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
             max_cells_in_flight=1,
             measured_unit="sample",
             measurement_node="l1_score",
-            langfuse_trace_url=None,
             run_limits=RunLimits(),
             defaults_drift=None,
             backend_revision=None,

@@ -60,11 +60,9 @@ def _render_init_enter(v: InitEnterView) -> str:
 
 
 def _render_init_exit(v: InitExitView) -> str:
-    obs = "ON" if v.obs_on else "OFF"
     out = [
         f"  {GREEN}✓{RESET} Initialized  origin={fmt_pct(v.origin_acc)}  "
-        f"cycle={v.cycle_id_short}  samples={v.samples}  bench={v.bench_samples} held out  "
-        f"obs={obs}"
+        f"cycle={v.cycle_id_short}  samples={v.samples}  bench={v.bench_samples} held out"
     ]
     parts: list[str] = []
     if v.task_context_keys:

@@ -254,7 +254,6 @@
                 "enum": [
                   "layer_parse_failure",
                   "injection_budget_overrun",
-                  "trace_sink_failed",
                   "derived_file_stale"
                 ],
                 "type": "string"
@@ -3597,10 +3596,6 @@
             "title": "Kind",
             "type": "string"
           },
-          "obs_on": {
-            "title": "Obs On",
-            "type": "boolean"
-          },
           "origin_acc": {
             "anyOf": [
               {
@@ -3636,8 +3631,7 @@
           "origin_acc",
           "cycle_id_short",
           "samples",
-          "bench_samples",
-          "obs_on"
+          "bench_samples"
         ],
         "title": "InitExitView",
         "type": "object"
@@ -7060,7 +7054,6 @@
             "enum": [
               "layer_parse_failure",
               "injection_budget_overrun",
-              "trace_sink_failed",
               "derived_file_stale"
             ],
             "title": "Kind",
@@ -7557,17 +7550,6 @@
           "elects_on": {
             "$ref": "#/components/schemas/DisplayMetric"
           },
-          "langfuse_trace_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Langfuse Trace Url"
-          },
           "max_cells_in_flight": {
             "title": "Max Cells In Flight",
             "type": "integer"
@@ -7609,7 +7591,6 @@
           "max_cells_in_flight",
           "measured_unit",
           "measurement_node",
-          "langfuse_trace_url",
           "run_limits",
           "defaults_drift",
           "backend_revision"

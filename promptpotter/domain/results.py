@@ -366,7 +366,6 @@ class CycleResult(StrictModel):
     stepped: bool = False
     started_at: str
     finished_at: str
-    langfuse_trace_id: str | None = None
     cycle_id: str | None = None
     resumed_from_round: int = 1
     # ``None`` only on an init-crash before any observer wired up.

@@ -505,7 +505,7 @@ reference read before designing any ecosystem expansion. The artifact and its re
 
 - **`to_dspy`** on the `[dspy]` extra beside `presentation/teleprompter.py`: applies the winner to a
   live program rather than emitting DSPy state.
-- **Langfuse write-back** to Prompt Management (the MLflow half exists — [`../operations/observability.md`](../operations/observability.md) § MLflow).
+- **Langfuse write-back** to Prompt Management (no sink ships: the ledger is the trace — [`../operations/observability.md`](../operations/observability.md)).
 - **A DSPy listing PR** pointing users at `PromptPotterOpt` beside `dspy.GEPA`.
 - MLflow as a second viewer: [`mlflow-interop.md`](mlflow-interop.md).
 

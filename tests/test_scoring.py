@@ -2276,7 +2276,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 max_cells_in_flight=1,
                 measured_unit="sample",
                 measurement_node="solve",
-                langfuse_trace_url=None,
                 run_limits=RunLimits(),
                 defaults_drift=None,
                 backend_revision=None,
@@ -2355,7 +2354,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             finished_at="",
             spend=None,
             bench=bench,
-            langfuse_trace_id=None,
         )
         assert result.result_round == bench.selected.round == 1, "the result names the round graded"
 

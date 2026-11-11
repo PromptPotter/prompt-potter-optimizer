@@ -93,8 +93,6 @@ class DashboardFacts(StrictModel):
     # ``-1`` until the first record lands; the SSE snapshot parks its tail one past it.
     at_offset: int = -1
 
-    langfuse_trace_url: str | None = None
-
     state: DashboardState = DashboardState.INIT
     optimizer_step: str | None = None
     state_since: str
@@ -219,7 +217,6 @@ class LiveDashboardState(DashboardFacts):
             "elects_on": wiring.elects_on,
             "max_cells_in_flight": wiring.max_cells_in_flight,
             "measured_unit": wiring.measured_unit,
-            "langfuse_trace_url": wiring.langfuse_trace_url,
             "run_limits": wiring.run_limits,
             "defaults_drift": wiring.defaults_drift,
             "backend_revision": wiring.backend_revision,

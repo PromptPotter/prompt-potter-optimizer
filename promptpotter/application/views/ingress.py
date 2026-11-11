@@ -28,7 +28,6 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import Budget, MeteredSpend
 from promptpotter.domain.wounds import collapse_reason
-from promptpotter.infrastructure.tracing.bridge import configured_sinks
 from promptpotter.shared.answer_text import truncate
 
 if TYPE_CHECKING:
@@ -90,9 +89,6 @@ def init_exit(ctx: ViewContext, *, cycle: Cycle, session: Session) -> InitExitVi
         samples=len(partition.search),
         bench_samples=len(partition.bench),
         origin_samples=len(cycle.origin_round.results),
-        obs_on=bool(
-            configured_sinks(session.tenant_root, session.campaign_id, langfuse=session.langfuse)
-        ),
         resumed_from_round=session.state.resumed_from_round,
         # Round 0 is built fresh by `Cycle.start`, so only later rounds count as cached.
         cached_rounds_count=sum(1 for rr in cycle.rounds if rr.round > 0),

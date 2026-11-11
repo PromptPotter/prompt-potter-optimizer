@@ -439,12 +439,10 @@ def _laid_arm(config: CampaignConfig, overrides: Overrides) -> CampaignConfig:
 
 async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
     ctx, spec = cell.ctx, cell.spec
-    # enable_tracing=False: cloud traces of an ephemeral measurement pile spans in process memory.
     session = await init_services(
         dataset_name=spec.inner_dataset,
         identity=ctx.identity,
         stores=store,
-        enable_tracing=False,
     )
     session.state.control = RunControl(
         commands=store.commands, enclosing=ctx.enclosing, acting=ctx.acting
@@ -528,12 +526,9 @@ async def _run_inner_campaign(
                 ),
             )
         finally:
-            # The optimizer LLM clients and the Langfuse SDK are process-SHARED: never shut one down.
+            # The optimizer LLM clients are process-SHARED: never shut one down.
             with contextlib.suppress(Exception):
                 await session.backend_client.aclose()
-            if session.langfuse is not None:
-                with contextlib.suppress(Exception):
-                    session.langfuse.reset()
     # Reported, never enforced: one origin pass sits inside its own error bar.
     origin_acc = (
         None

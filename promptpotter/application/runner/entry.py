@@ -330,7 +330,6 @@ async def run_optimization(
     *,
     session: Session,
     observers: RunObservers,
-    langfuse_session_id: str | None = None,
     mode: RunMode,
     budget: HeldBudget,
     optimizer: SelectedOptimizer,
@@ -384,7 +383,6 @@ async def run_optimization(
                     partition=partition,
                     observers=observers,
                     budget=budget,
-                    langfuse_session_id=langfuse_session_id,
                 )
             except RUN_STOPS as stop:
                 stop_reason, cycle_error = end_run_on(stop, session, where="in run prep")

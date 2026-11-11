@@ -139,11 +139,6 @@ class Settings(BaseSettings):
     DBLLMBENCH_DB_PASSWORD: SecretStr = SecretStr("")
     DBLLMBENCH_DB_TLS: bool = False
 
-    LANGFUSE_PUBLIC_KEY: SecretStr = SecretStr("")
-    LANGFUSE_SECRET_KEY: SecretStr = SecretStr("")
-    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
-    LANGFUSE_ENABLED: bool = True
-
     # Rejects binary/Office uploads at ingest: xlsx is a macro / zip-bomb / XXE vector.
     HARDENED_MODE: bool = False
 
@@ -198,9 +193,6 @@ class Settings(BaseSettings):
     MACHINE_RUN_CAPACITY: int = 3
 
     QUEUE_MAX_WAIT_S: float = 6 * 3600.0
-
-    # Unset: MLflow receives nothing. Set: that server takes each round as a run and each winner as a prompt version.
-    MLFLOW_TRACKING_URI: str = ""
 
     model_config = {"env_file": env_file_path(), "case_sensitive": True, "extra": "ignore"}
 

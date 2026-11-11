@@ -732,8 +732,6 @@ RoundWarningKind = Literal[
     "layer_parse_failure",
     # A state panel over its runaway backstop: the items past it never reach the LLM.
     "injection_budget_overrun",
-    # A configured trace sink that failed to open at the run's start: the run traces nothing to it.
-    "trace_sink_failed",
     # A projection that could not write its derived file: the line landed, the file is stale until its next write.
     "derived_file_stale",
 ]
@@ -1041,8 +1039,6 @@ class RunWiringRecord(FrozenModel):
     measured_unit: MeasuredUnit
     # The optimizer's gateway node: every scoring pass of the run, the origin's included, runs as it.
     measurement_node: str
-    # ``None`` when Langfuse is disabled, and on a mint's record: no launch has opened a trace.
-    langfuse_trace_url: str | None
     run_limits: RunLimits
     # `None` on a mint's record: nothing has moved since the declaration was made.
     defaults_drift: DefaultsDrift | None

@@ -1,6 +1,6 @@
 # Observability
 
-Every optimizer LLM call and escalation check is a trace folded from the ledger (`infrastructure/tracing/bridge.py::TracingProjection`) and fanned out to sinks: Langfuse (`tracing/langfuse_sink.py`) and MLflow (`tracing/mlflow_server.py`) when configured. Phase events (`domain/phases.py::CampaignPhase`, and each optimizer's own on `LlmNode.phase` — potter's `escalation/state.py::PotterPhase`) emit `enter`/`exit` pairs into the cycle ledger; each optimizer call carries its rendered prompt, output and token counts. No per-sample backend-match span exists: [`../specs/mlflow-interop.md`](../specs/mlflow-interop.md) owns that gap.
+The cycle ledger is the trace: no external sink receives it. Phase events (`domain/phases.py::CampaignPhase`, and each optimizer's own on `LlmNode.phase` — potter's `escalation/state.py::PotterPhase`) emit `enter`/`exit` pairs into the cycle ledger; each optimizer call carries its rendered prompt, output and token counts. No per-sample backend-match span exists: [`../specs/mlflow-interop.md`](../specs/mlflow-interop.md) owns that gap.
 
 ## The wall clock, and where the claim stops
 
@@ -18,14 +18,6 @@ An eliminator emits a `race_standing` per candidate naming its manifest `member`
 | Run readout | `readout.log` (and stdout for the CLI or a `readout_sink`) — one line per decision-grade reading |
 | Canonical replay | the ledger's `RaceStandingRecord`s |
 | Round digest | `log.md` § P(best) trajectory — derived sparkline |
-
-## Langfuse
-
-`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` in `.env`, plus `.[observability]`. Cycle = trace, round = span, each optimizer call = LLM observation. The id map is `cycles/{cycle_id}/langfuse/state.json`.
-
-## MLflow
-
-`MLFLOW_TRACKING_URI` names the operator's server; unset, MLflow receives nothing. The client is `mlflow-skinny` from `.[observability]`; credentials are MLflow's own variables. One server takes both halves (`infrastructure/tracing/mlflow_server.py`): **rounds as runs** — `MLflowSink` logs each closed round under experiment `{tenant_id}/{campaign_id}/{cycle_id}`; **the winner as a prompt version** — `register_export` (via `application/runner/output.py::RunArtifacts`, at its drainer's close) registers each finished cycle's `export.json` render as a version of `{tenant_id}.{dataset_name}`, one per cycle and prompt text. No alias is ever set or moved — promotion is the host's swap; the newest is `prompts:/<name>@latest`. Not registered: diagnostic cycles and every cycle inside an L4 sandbox. A failed write never fails the run: it is the cycle's `derived_file_stale` warning. Still to build: [`../specs/mlflow-interop.md`](../specs/mlflow-interop.md); a primary span convention precedes a third sink ([`../research/external-constraints.md`](../research/external-constraints.md) § TOOL).
 
 ## Display convention — `⚠ … ↳`
 

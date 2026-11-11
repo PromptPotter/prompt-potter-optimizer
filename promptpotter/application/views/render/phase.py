@@ -32,7 +32,6 @@ from promptpotter.domain.origin_panel import (
 from promptpotter.domain.phases import STOP_REASON_INFO, NextAct, StopOutcome, StopReason
 from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.ruler import PLATEAU_ROUNDS, LevelSeries
-from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -261,8 +260,6 @@ def render_completion(
         fields.append(f"Campaign     {campaign_dir.name}")
     if result.cycle_id:
         fields.append(f"Cycle ID     {result.cycle_id}")
-    if trace_url := langfuse_trace_url(result.langfuse_trace_id):
-        fields.append(f"Langfuse     {trace_url}")
 
     wrapped = [
         line
