@@ -43,7 +43,7 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, FiledStart
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import claim_own_definition, own_definition
@@ -67,8 +67,6 @@ class CheckinStart:
     # The queue's label alone (`DraftFile.dataset_name`); every decision reads the draft.
     dataset_name: str
     budget: Budget
-    # The `start-checkin` that filed it, which its job records for a reopen to follow.
-    command_id: str
 
     @property
     def hop(self) -> CycleHop:
@@ -80,7 +78,7 @@ class CheckinStart:
 
     @property
     def holder(self) -> CampaignLaunch:
-        return CampaignLaunch(self.dataset_name, FiledStart(self.claim.draft_id, self.command_id))
+        return CampaignLaunch(self.dataset_name, draft_id=self.claim.draft_id)
 
     def backend_type(self, stores: Stores) -> str:
         return draft_backend_type(stores, owned_draft(stores, self.claim.draft_id))

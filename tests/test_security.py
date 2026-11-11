@@ -81,6 +81,7 @@ from promptpotter.application.jobs.launcher.admission import (
     request_jobs,
     withdraw_queued,
 )
+from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.launch import Launched
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
@@ -1891,7 +1892,8 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     # A run that stopped on the retired `perfect_score` hit its target, its refusal unread as one:
     # its empty words are `job_refusal`'s too, and one migration stages the path.
     stopped_perfect = released_before(ending="perfect_score", refusal="")
-    # A live job, a survivor, wrote its unrefused refusal as the empty words.
+    # A live job, a survivor, wrote its unrefused refusal as the empty words, and its launch as
+    # every install wrote one.
     survivor = jobs.create(
         user_id="u",
         principal_id="u",
@@ -1901,7 +1903,12 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         stage=RunPhase.QUEUED,
     )
     live_file = jobs.job_file(survivor.job_id)
-    write_json(live_file, JOB_ADAPTER.dump_python(survivor, mode="json") | {"refusal": ""})
+    launch_as_written = {"dataset_name": "ds1", "draft_id": None, "kind": "campaign_launch"}
+    write_json(
+        live_file,
+        JOB_ADAPTER.dump_python(survivor, mode="json")
+        | {"refusal": "", "holder": launch_as_written},
+    )
     mapped = plan_landing(built_stores.projects_root, reset=False)
     assert not mapped.refused, f"a released job waited on a sweep: {mapped.refusal}"
     apply_landing(built_stores.projects_root, mapped)
@@ -1914,6 +1921,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert refused_words == ["over budget"] and landed_live and landed_live.refusal is None, (
         "a migrated job's refusal lost its words, or a live one read as refused"
     )
+    assert landed_live.holder == CampaignLaunch("ds1"), "a live launch lost what it launched"
     landed_perfect = jobs.get(stopped_perfect.stem)
     assert landed_perfect and landed_perfect.ending is StopReason.TARGET_HIT, (
         "a job that stopped on the retired ending no longer loads, or lost that it hit its target"
@@ -2624,6 +2632,31 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
         assert laid[0] != laid[1] and laid[2] == laid[0], (
             "a reset left the draft's own override in what Start launches"
         )
+
+    # A reopen of a draft its queued Start holds serves the stage its job stands at and the
+    # command that filed that Start, never one refused before it: the reopened page follows it.
+    full = JobRegistry(caller.stores.jobs_dir, capacity=lambda _live: 0)
+
+    async def started() -> tuple[CommandCall[Any], object]:
+        call = CommandCall(StartCheckinPayload(draft_id=draft["draft_id"]), uuid.uuid4().hex)
+        sent = await CommandDispatcher(caller.stores, job_registry=full).dispatch(call)
+        return call, sent.result
+
+    with pytest.raises(PayloadInvalidError):
+        await started()
+    monkeypatch.setattr(launching, "assert_origin_ready", lambda _draft, _pipeline: None)
+    start, queued_start = await started()
+    assert isinstance(queued_start, launcher_launch.Admitted), "guard: the Start was not queued"
+    reopened = await answered("draft", {"draft_id": draft["draft_id"]})
+    assert reopened["start"] == {"stage": "queued", "command_id": start.command_id}, (
+        "a reopen served another Start than the one holding its draft"
+    )
+    queued_start.withdraw(RuntimeError("left the queue"))
+    assert isinstance(queued_start.request, CheckinStart), "guard"
+    queued_start.request.claim.release()
+    assert (await answered("draft", {"draft_id": draft["draft_id"]}))["start"] is None, (
+        "a withdrawn Start still held its reopened draft"
+    )
 
     # A knob sent at its default is another act than the knob unsent: one key names one of them.
     halting = {"dataset_name": "no-such-dataset", "optimization": {"halt_at_accuracy": 0.9}}

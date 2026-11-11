@@ -56,13 +56,13 @@ from promptpotter.domain.hierarchy import (
     UnstartedCampaign,
     UnstartedFacts,
 )
-from promptpotter.domain.job import HeldStart
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     PairedReading,
     ReadingState,
     lift_versus,
 )
+from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import ScoringFormulaError
@@ -502,22 +502,21 @@ def campaign_entry(
     )
 
 
-def draft_starts(stores: Stores) -> dict[str, HeldStart]:
-    """This account's check-ins a Start holds, each as `HeldStart`: the listing serves its stage,
-    the reopen its stage and command."""
+def draft_starts(stores: Stores) -> dict[str, LaunchStage]:
+    """This account's check-ins a Start holds, at its stage: the listing and the reopen serve them."""
     jobs = JobRegistry.attach(stores.jobs_dir)
     return jobs.draft_starts(user_id=str(stores.identity.user_id))
 
 
 def unstarted_entry(
-    stores: Stores, draft: DraftFile, *, start: HeldStart | None
+    stores: Stores, draft: DraftFile, *, start: LaunchStage | None
 ) -> UnstartedCampaign:
     """An open check-in as a campaign: its spend is what the check-in cost, its lifecycle word
     the stage of a Start that holds it."""
     ledger = stores.drafts.ledger(draft.draft_id)
     spend_lifetime = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []).total)
     dataset = draft.dataset_name
-    lifecycle = "unstarted" if start is None else start.stage.value
+    lifecycle = "unstarted" if start is None else start.value
     return UnstartedCampaign(
         address=draft.draft_id,
         parent=None,

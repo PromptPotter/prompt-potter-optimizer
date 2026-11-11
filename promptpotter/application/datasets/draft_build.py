@@ -25,9 +25,11 @@ from promptpotter.application.pipeline_responses import CampaignPipelineResponse
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig
 from promptpotter.domain.checkin_draft import DraftFile, OriginResolution, SetupStep
+from promptpotter.domain.command_events import CommandRecord, draft_subject
+from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.draft_edit import EditDraftPatch
-from promptpotter.domain.job import HeldStart
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
     PipelineDependency,
@@ -37,7 +39,7 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import CAP_AXIS_INFO, Budget, CapAxis, money_text
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NoApiKeyError
 
@@ -161,6 +163,28 @@ async def read_draft_wire(stores: Stores, draft: DraftFile) -> DraftCampaignWire
     return draft_wire(stores, draft, await draft_served(stores, draft))
 
 
+class HeldStart(FrozenModel):
+    """The Start holding a check-in: its stage, and the command a reopen follows to its end."""
+
+    stage: LaunchStage = Field(
+        description="`queued` waits on a machine slot, `starting` is minting it."
+    )
+    command_id: str = Field(
+        description="The `start-checkin` command that filed it, whose reading says how it ends."
+    )
+
+    @classmethod
+    def of(cls, stores: Stores, draft_id: str, stage: LaunchStage) -> HeldStart:
+        """Its command is the last `start-checkin` filed on the draft: a Start's claim refuses every
+        command on the draft, a second Start among them, before it is filed, until its mint closes."""
+        filed = [
+            event.command_id
+            for event in stores.commands.book().subject_events(draft_subject(draft_id))
+            if isinstance(event, CommandRecord) and event.kind == CommandKind.START_CHECKIN
+        ]
+        return cls(stage=stage, command_id=filed[-1])
+
+
 class DraftReopenResponse(StrictModel):
     """A re-opened check-in: its draft and what the last resolver turn left."""
 
@@ -183,11 +207,12 @@ class DraftReopenResponse(StrictModel):
 async def reopen_draft(stores: Stores, draft_id: str) -> DraftReopenResponse:
     """404 once started or discarded."""
     draft = owned_draft(stores, draft_id)
+    stage = draft_starts(stores).get(draft_id)
     return DraftReopenResponse(
         draft=await read_draft_wire(stores, draft),
         resolution=load_resolution(stores, draft),
         resolution_pending=draft.resolution_pending(),
-        start=draft_starts(stores).get(draft_id),
+        start=None if stage is None else HeldStart.of(stores, draft_id, stage),
     )
 
 

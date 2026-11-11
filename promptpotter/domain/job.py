@@ -9,7 +9,6 @@ from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.strict_model import FrozenModel
 
 # The slot is held before the mint resolves the cycle it will name; `update_target` fills it in.
 UNRESOLVED_HOP = CycleHop(campaign_id="", cycle_id="")
@@ -23,38 +22,15 @@ assert SLOT_STAGES < _JOB_STAGES, "a slot stage no job can be in"
 
 
 @dataclass(frozen=True)
-class FiledStart:
-    """A check-in's Start as its job records it: the draft it mints from, and the `start-checkin`
-    command that filed it. The draft is served at the job's stage, beside that command
-    (`HeldStart`)."""
-
-    __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
-
-    draft_id: str
-    command_id: str
-
-
-@dataclass(frozen=True)
 class CampaignLaunch:
     """A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle."""
 
     __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     dataset_name: str
-    # Null for every launch but a check-in's Start.
-    start: FiledStart | None = None
+    # The check-in a Start mints from; null for every other launch. Its draft is served at its stage.
+    draft_id: str | None = None
     kind: Literal["campaign_launch"] = "campaign_launch"
-
-
-class HeldStart(FrozenModel):
-    """The Start holding a check-in: its stage, and the command a reopen follows to its end."""
-
-    stage: LaunchStage = Field(
-        description="`queued` waits on a machine slot, `starting` is minting it."
-    )
-    command_id: str = Field(
-        description="The `start-checkin` command that filed it, whose reading says how it ends."
-    )
 
 
 # Every paid verb that scores outside a run; each is its own rate bucket.

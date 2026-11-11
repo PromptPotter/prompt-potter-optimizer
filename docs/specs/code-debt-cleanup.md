@@ -178,13 +178,13 @@ row it closes.
   walks zero cells**, so the halt passes on an empty origin. Action: hand it the origin's cells through
   the `offline` fixture. **Rides with:** init 5. **Re-test:** the test's dataset is non-empty.
 
-### batch/25 · admit (on init's tip)
+### batch/25 · admit (on init-2's tip)
 
 - **`--diag` mints a sibling cycle** (`commands/launching.py::_diag_target`) and
   `potter/generation_only.py` drives its rounds a second way. Action: an unmeasured mode on `RunStart`
-  the round loop reads; both go. **Rides with:** admit 1. **Re-test:** `git grep -n "def cut_diag_sibling" -- promptpotter`.
+  the round loop reads; both go. **Rides with:** admit-2. **Re-test:** `git grep -n "def cut_diag_sibling" -- promptpotter`.
 - **A diag sibling never leaves the comparison**: `commands/launching.py::start_run` launches it with
-  `leaving=None`. Action: `--diag` as a mode, whose launch leaves. **Rides with:** admit 1. **Re-test:**
+  `leaving=None`. Action: `--diag` as a mode, whose launch leaves. **Rides with:** admit-2. **Re-test:**
   `git grep -n "leaving=None" -- promptpotter` is empty.
 - **Four admission doors and three job lifecycles still meet in one `HeldRun`.** `RunStart` owns the slot
   from admission to release, yet `jobs/launcher/launch.py::_hold` switches over three request types;
@@ -213,11 +213,11 @@ row it closes.
   reaches the root id, so admission prices plans whose ids are not final. Action: a purpose-free run spec
   feeds `resolve_cycle_plan`, `effective_config` and `shared_part`; the plan carries
   `Optimize | ArmSeat(head_to_head_id, arm_key)`, and the mint builds `Compare(Arm(…, replicate))` once.
-  **Rides with:** admit 2. **Re-test:** `git grep -n "replicate=1" -- promptpotter`.
+  **Rides with:** admit-2. **Re-test:** `git grep -n "replicate=1" -- promptpotter`.
 - **A mint takes no claim until `admission.py::claim_cycle`**, so the landing tells a live mint from a
   torn one by the job registry alone (`maintenance/landing.py:169`: `_live`, or a job holding spend in
   its workspace). Action: the mint claims its cycle before `adopt_ledger`, and the landing reads the
-  claim. **Rides with:** admit 2. **Re-test:** `git grep -n "_held_workspaces" -- promptpotter/application/maintenance/landing.py` is empty.
+  claim. **Rides with:** admit-2. **Re-test:** `git grep -n "_held_workspaces" -- promptpotter/application/maintenance/landing.py` is empty.
 - **The embedded launch is not a command**: `embedded_run.py::open_session`, `::run_head_to_head` and
   `::run_campaign` file no `CommandRecord`; `run_campaign` admits through `admission.py::slotless_share`
   and mints itself. Action: `run_campaign` opens its own session and files `mint-campaign` or `start-run`
@@ -252,7 +252,7 @@ row it closes.
   leaves the process that authenticated it"). Decided (2026-11-11): a queued launch is a job on disk.
   Action: the queued `LaunchRequest` rides the job file, which holds the principal's id, never a
   credential; `jobs/registry.py::claim_next`'s promoter re-checks admission and spawns it when the slot
-  frees; the link restates `jobs/CLAUDE.md`'s rule. **Rides with:** admit. **Re-test:**
+  frees; the link restates `jobs/CLAUDE.md`'s rule. **Rides with:** admit-2. **Re-test:**
   `resume --step-rounds 1` behind a running cycle; it starts when the slot frees.
 
 ### batch/25 · passb
@@ -361,6 +361,14 @@ row it closes.
   `hooks/useOriginEvidence.ts` build the pulse that re-asks a settled course's evidence. Action: the pulse
   goes, and the evidence read names its subject. **Rides with:** webb 3. **Re-test:**
   `git grep -n "pulse" -- webapp/lib/hooks/useEvidence.ts` is empty.
+- **A lift's name is composed twice**: `webapp/lib/derivations/paired-reading.ts::liftVersus` re-spells
+  `paired_reading.py::lift_versus`'s "vs {over} {words}" (the words are generated, the composition is
+  not), because the round read serves no label (`RoundView.scoreboard[].reading.vs_reference`). In
+  `components/files/RoundFileView.tsx` the lift column's name comes from the first scoreboard row's cell
+  set alone, and its hint reads "on the cells both measured" whatever that set is. Action: the reading
+  serves its lift's name, which `RoundFileView` and `shell/searchpoint/SearchpointDrillIn.tsx` read;
+  `liftVersus` and the hint's fixed wording go. **Rides with:** webb-4. **Re-test:**
+  `git grep -n "liftVersus" -- webapp` is empty.
 
 ### batch/26 · money
 

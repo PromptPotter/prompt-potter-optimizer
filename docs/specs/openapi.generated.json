@@ -2408,21 +2408,22 @@
             "title": "Dataset Name",
             "type": "string"
           },
+          "draft_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Id"
+          },
           "kind": {
             "const": "campaign_launch",
             "default": "campaign_launch",
             "title": "Kind",
             "type": "string"
-          },
-          "start": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/FiledStart"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -7109,26 +7110,6 @@
           "mtime"
         ],
         "title": "FileEntry",
-        "type": "object"
-      },
-      "FiledStart": {
-        "additionalProperties": false,
-        "description": "A check-in's Start as its job records it: the draft it mints from, and the `start-checkin`\ncommand that filed it. The draft is served at the job's stage, beside that command\n(`HeldStart`).",
-        "properties": {
-          "command_id": {
-            "title": "Command Id",
-            "type": "string"
-          },
-          "draft_id": {
-            "title": "Draft Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "draft_id",
-          "command_id"
-        ],
-        "title": "FiledStart",
         "type": "object"
       },
       "FilesResponse": {

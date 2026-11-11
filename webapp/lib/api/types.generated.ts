@@ -269,16 +269,8 @@ export interface MachineSlot {
 /** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */
 export interface CampaignLaunch {
   dataset_name: string;
-  start: FiledStart | null;
+  draft_id: string | null;
   kind: 'campaign_launch';
-}
-
-/** A check-in's Start as its job records it: the draft it mints from, and the
- * `start-checkin` command that filed it. The draft is served at the job's
- * stage, beside that command (`HeldStart`). */
-export interface FiledStart {
-  draft_id: string;
-  command_id: string;
 }
 
 /** A paid verb scoring outside any run: its hop is the cycle it scores, or none
