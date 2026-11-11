@@ -2966,15 +2966,6 @@
         "type": "object"
       }
     },
-    "site records": {
-      "fate": "SURVIVOR",
-      "patterns": [
-        "site_records/*.jsonl"
-      ],
-      "shape": {
-        "reader": "promptpotter.infrastructure.store.site_records::site_record"
-      }
-    },
     "source facts": {
       "fate": "CACHE",
       "patterns": [

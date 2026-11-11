@@ -14,8 +14,6 @@ from promptpotter.presentation.api.middleware.headers import served_build_file
 from promptpotter.presentation.api.middleware.oidc import OWNER_DEVICE_COOKIE_NAME
 from promptpotter.shared.errors import graceful
 
-_SITE_RECORDS = "/api/v1/site-records/"
-
 
 def _outside(host: str) -> bool:
     """A public address: loopback, the LAN and a test client's name are this side."""
@@ -32,9 +30,6 @@ def _kept(scope: Scope, status: int) -> bool:
         return False
     if cookie_parser(Headers(scope=scope).get("cookie", "")).get(OWNER_DEVICE_COOKIE_NAME):
         # The admin's own browser, signed out.
-        return False
-    if path.startswith(_SITE_RECORDS) and status < 400:
-        # The website's own sender, holding its token.
         return False
     # A page's own build files, fetched by every visit that loads it.
     return path != "/theme-init.js" and not served_build_file(path, status)

@@ -110,6 +110,20 @@ def _llm_key(provider: str, spec: ProviderSpec, key: str) -> Probe:
     return Probe(f"llm:{provider}", check, fix)
 
 
+def telegram_refusal(status: int) -> str | None:
+    """What a Telegram answer says that no retry changes; None where one may."""
+    if status in (401, 403, 404):
+        return f"Telegram refused the admin bot's token (HTTP {status})"
+    # Telegram holds a bot's messages for ONE reader: a webhook or a second poller takes them.
+    return "another poller or a webhook holds the bot" if status == 409 else None
+
+
+_CHANNEL = "channel:telegram"
+# What the admin bot's poll was refused stands on its channel until a poll answers again: no probe
+# of Telegram sees a second poller, so while one stands no probe second-guesses it.
+_POLL_REFUSED = "refused: "
+
+
 def _operator_channel(token: str) -> Probe:
     """The channel every other notice rides: dead, it says nothing, so its health is checked here."""
 
@@ -119,25 +133,22 @@ def _operator_channel(token: str) -> Probe:
                 base_url=f"https://api.telegram.org/bot{token}", timeout=10, verify=tls_context()
             ) as client:
                 me = await client.get("/getMe")
-                if me.status_code in (401, 404):
-                    return Reading(
-                        "broken", f"Telegram refused the admin bot's token (HTTP {me.status_code})"
-                    )
+                if (refused := telegram_refusal(me.status_code)) is not None:
+                    return Reading("broken", refused)
                 hook = await client.get("/getWebhookInfo")
         except httpx.HTTPError as exc:
             return Reading("unverified", f"unreachable: {type(exc).__name__}")
         if not (me.is_success and hook.is_success):
             return Reading("unverified", f"HTTP {me.status_code} / {hook.status_code}")
         if hook.json().get("result", {}).get("url"):
-            # Telegram holds a bot's messages for ONE reader: a webhook takes them from the poll.
-            return Reading("broken", "a webhook holds the admin bot, so commands never arrive")
+            return Reading("broken", "a webhook holds the bot, so commands never arrive")
         return Reading("held", f"@{me.json().get('result', {}).get('username', '?')}")
 
     fix = (
         "give the admin bot a bot of its own, and set its current token (@BotFather, /mybots, "
         "API Token) as ADMIN_BOT_TELEGRAM_TOKEN in the app's .env; restart the app and the admin bot"
     )
-    return Probe("channel:telegram", check, fix)
+    return Probe(_CHANNEL, check, fix)
 
 
 def probes() -> list[Probe]:
@@ -204,20 +215,44 @@ class Checked(NamedTuple):
     change: HealthRecord | None
 
 
+def _recorded(
+    projects_root: Path, probe: Probe, reading: Reading, last: HealthRecord | None
+) -> Checked:
+    """*reading* lands on the ledger where it changes *last*, its probe's standing; `unverified`
+    never does."""
+    was = last.state if last is not None else "held"
+    change: HealthRecord | None = None
+    match reading.state:
+        case "held" | "broken" as state if state != was:
+            change = HealthRecord(probe=probe.name, state=state, said=reading.said)
+            CycleEventLog.open_workspace(_box(projects_root)).append(change)
+    return Checked(probe, reading, change)
+
+
+async def _read(probe: Probe, last: HealthRecord | None) -> Reading:
+    if last is not None and last.state == "broken" and last.said.startswith(_POLL_REFUSED):
+        return Reading("broken", last.said)
+    return await probe.check()
+
+
 async def check(projects_root: Path) -> list[Checked]:
     roster = probes()
-    readings = await asyncio.gather(*(probe.check() for probe in roster))
     last = standing(projects_root)
-    checked = []
-    for probe, reading in zip(roster, readings, strict=True):
-        was = last[probe.name].state if probe.name in last else "held"
-        change: HealthRecord | None = None
-        match reading.state:
-            case "held" | "broken" as state if state != was:
-                change = HealthRecord(probe=probe.name, state=state, said=reading.said)
-                CycleEventLog.open_workspace(_box(projects_root)).append(change)
-        checked.append(Checked(probe, reading, change))
-    return checked
+    readings = await asyncio.gather(*(_read(probe, last.get(probe.name)) for probe in roster))
+    return [
+        _recorded(projects_root, probe, reading, last.get(probe.name))
+        for probe, reading in zip(roster, readings, strict=True)
+    ]
+
+
+def poll_answered(projects_root: Path, token: str, refused: str | None) -> Checked:
+    """The admin bot's poll is its channel's one reader, so what it was answered is the channel's
+    standing: a refusal stands until a poll is answered, which holds the channel again."""
+    reading = (
+        Reading("held", "polled") if refused is None else Reading("broken", _POLL_REFUSED + refused)
+    )
+    last = standing(projects_root).get(_CHANNEL)
+    return _recorded(projects_root, _operator_channel(token), reading, last)
 
 
 def notice(checked: Checked) -> str | None:

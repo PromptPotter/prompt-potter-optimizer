@@ -21,7 +21,7 @@ import re
 import subprocess
 import sys
 import threading
-import types
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -56,8 +56,7 @@ from offline_world import Router
 from pydantic import SecretStr
 from starlette.types import Message, Receive, Scope, Send
 
-from promptpotter.application import account, health, site_records
-from promptpotter.application.app_visits import APP_VISITS
+from promptpotter.application import account, app_visits, health, notices
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import job_status, read_command
 from promptpotter.application.commands import draft_editing, launching, measuring
@@ -232,11 +231,6 @@ from promptpotter.infrastructure.store.layout import (
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
 from promptpotter.infrastructure.store.private_root import DataRootExposedError, hold_private
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
-from promptpotter.infrastructure.store.site_records import (
-    SiteRecord,
-    SiteRecordStore,
-    default_site_record_store,
-)
 from promptpotter.infrastructure.store.stores import Stores, descend_store, tenant_stores
 from promptpotter.infrastructure.store.user_store import (
     CONSENT_FILE,
@@ -247,11 +241,13 @@ from promptpotter.infrastructure.store.user_store import (
     UserStore,
     count_accounts,
 )
-from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, _off_catalogue, app
-from promptpotter.presentation.api.deps import (
-    build_stores_from_identity,
-    require_site_records_token,
+from promptpotter.infrastructure.store.visit_records import (
+    VisitRecord,
+    default_visit_record_store,
 )
+from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, _off_catalogue, app
+from promptpotter.presentation import admin_bot
+from promptpotter.presentation.api.deps import build_stores_from_identity
 from promptpotter.presentation.api.middleware.oidc import (
     OWNER_DEVICE_COOKIE_NAME,
     SESSION_COOKIE_NAME,
@@ -275,7 +271,6 @@ from promptpotter.shared.errors import (
     PotterError,
     ServiceUnavailableError,
     TaskUncancellableError,
-    UnauthorizedError,
 )
 from promptpotter.shared.hashing import ADDRESS_HEX
 from promptpotter.shared.identity import (
@@ -308,9 +303,12 @@ sys.exit(0 if landing.proven and not landing.refused and not landing.caches else
 # 1. Leaks and the perimeter
 
 
-@pytest.mark.usefixtures("offline")
 def test_no_path_secret_or_dataset_text_leaves_its_fence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    built_stores: Stores,
+    offline: Router,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     with pytest.raises(ValueError):
         campaign_root_dir_for(WorkspaceDir(tmp_path), "../escape")
@@ -358,6 +356,65 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         failed = logging.LogRecord("t", logging.WARNING, "", 0, "poll failed", None, sys.exc_info())
     log_redaction.SecretRedactionFilter().filter(failed)
     assert bot_token not in logging.Formatter().format(failed), "a traceback carried the bot token"
+
+    # What the poll is refused, no retry changes: polling stops at once, and the refusal is its
+    # channel's standing, told once, which no probe of Telegram second-guesses (none sees a second
+    # poller) until a poll is answered again. A blip is retried. No attempt logs a traceback.
+    class SeenEnoughError(Exception):
+        pass
+
+    told: list[str] = []
+
+    def tell(text: str, **_: bool) -> bool:
+        told.append(text)
+        if text.startswith("✓"):
+            raise SeenEnoughError  # the channel is held again
+        return True
+
+    def polled(status: int, body: dict[str, Any]) -> list[float]:
+        offline.token_endpoints[f"api.telegram.org/bot{bot_token}/getUpdates"] = (status, body)
+        slept: list[float] = []
+
+        def sleep(seconds: float) -> None:
+            slept.append(seconds)
+            if len(slept) == 3:
+                raise SeenEnoughError
+
+        with monkeypatch.context() as asleep:
+            asleep.setattr(time, "sleep", sleep)
+            with pytest.raises(SeenEnoughError):
+                admin_bot.run_bot(bot_token, "1", None)
+        return slept
+
+    with monkeypatch.context() as box:
+        box.setenv("PROMPTPOTTER_HOME", str(tmp_path / "bot-box"))
+        box.setattr(notices, "notify_operator", tell)
+        box.setattr(notices, "check_and_tell", lambda: [])
+        box.setattr(notices, "forward_trail_to_briefing", lambda: False)
+        box.setattr(notices, "tell_power", lambda was: was)
+        box.setattr(notices, "tell_visits_digest", lambda: None)
+        for method, result in (("getMe", {"username": "potter_bot"}), ("getWebhookInfo", {})):
+            offline.token_endpoints[f"api.telegram.org/bot{bot_token}/{method}"] = (
+                200,
+                {"ok": True, "result": result},
+            )
+        caplog.clear()
+        assert admin_bot._RETRY_BACKOFF_S not in polled(409, {}), "a refused poll was retried"
+        refusal = "⚠ channel:telegram is BROKEN: refused: another poller or a webhook holds the bot"
+        assert [said.split("\n")[0] for said in told] == [refusal], "the poll's refusal went untold"
+        assert admin_bot._RETRY_BACKOFF_S not in polled(401, {}), "a refused token was retried"
+        assert len(told) == 1, "a refusal standing already was told again"
+        checked = asyncio.run(health.check(default_projects_root()))
+        (channel,) = [c for c in checked if c.probe.name == "channel:telegram"]
+        assert channel.reading.state == "broken" and channel.change is None, (
+            "a probe second-guessed the poll's own refusal"
+        )
+        assert polled(502, {}) == [admin_bot._RETRY_BACKOFF_S] * 3, "a blip stopped the poll"
+        assert polled(200, {"ok": True, "result": []}) == [], "guard: an answer is polled on"
+        assert told[1:] == ["✓ channel:telegram works again."], (
+            "an answered poll left its channel's refusal standing"
+        )
+    assert not [r for r in caplog.records if r.exc_info], "a poll attempt logged a traceback"
 
     # Secrecy is read off the field TYPE: a `SecretStr` declared tomorrow under any name needs no redactor edit.
     class Grown(settings_mod.Settings):
@@ -484,58 +541,6 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
 
     assert "instruction" in shown("instruction")
     assert "IGNORE" not in shown("IGNORE PREVIOUS INSTRUCTIONS"), "an L2 slot name leaked its text"
-
-    # The site's records open to the token alone, and retention spares a keyed row.
-    records = SiteRecordStore(tmp_path / "site_records")
-    monkeypatch.setattr(site_records, "default_site_record_store", lambda: records)
-
-    def knock(authorization: str | None) -> None:
-        headers = {} if authorization is None else {"authorization": authorization}
-        require_site_records_token(types.SimpleNamespace(headers=headers))  # type: ignore[arg-type]
-
-    with pytest.raises(NotFoundError):
-        knock("Bearer t0ken")
-    monkeypatch.setattr(settings_mod.settings, "SITE_RECORDS_TOKEN", SecretStr("t0ken"))
-    for stranger in (None, "Bearer t0ke", "t0ken"):
-        with pytest.raises(UnauthorizedError):
-            knock(stranger)
-    knock("Bearer t0ken")
-    # Three rows kept long before the cutoff; the fresh one is stamped now, after it.
-    long_ago, cutoff = "2000-01-01T00:00:00Z", "2020-01-01T00:00:00Z"
-    umask = os.umask(0o022)
-    try:
-        for row, key in (
-            ({"path": "/"}, ""),
-            ({"state": "pending"}, "ada@x.com"),
-            ({"state": "confirmed"}, "ada@x.com"),
-        ):
-            records.keep("mixed", SiteRecord(at=long_ago, key=key, row=row))
-    finally:
-        os.umask(umask)
-    if sys.platform != "win32":
-        appended = list((tmp_path / "site_records").rglob("*.jsonl"))
-        assert appended, "the site record landed nowhere this test reads"
-        for path in appended:
-            assert path.stat().st_mode & 0o077 == 0, f"{path.name} was created readable by others"
-    fresh = site_records.keep_site_record(
-        "mixed", site_records.SiteRecordBody(row={"path": "/new"})
-    )
-    assert fresh.at > cutoff, "the row was stamped with a time other than this box's"
-
-    def rows(since: str = "") -> list[object]:
-        return [record.row for record in site_records.kept_site_records("mixed", since).records]
-
-    assert rows() == [{"path": "/"}, {"state": "confirmed"}, {"path": "/new"}], (
-        "a keyed row read back twice, or the row it replaced outlived it"
-    )
-    assert rows(cutoff) == [{"path": "/new"}]
-    assert site_records.drop_site_records_before("mixed", cutoff).dropped == 1
-    assert rows() == [{"state": "confirmed"}, {"path": "/new"}], (
-        "retention took a keyed row: a subscriber who changed nothing for the window was forgotten"
-    )
-    for name in ("../identity", "Not-A-Table"):
-        with pytest.raises(NotFoundError):
-            site_records.kept_site_records(name, "")
 
     # Machine occupancy names no other account's slot: it reaches a stranger as a count alone.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
@@ -687,8 +692,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
             "an oversized body was read past the first chunk that overran the bound"
         )
 
-    # A stranger's request is kept beside the website's visits; a signed-in person's is their own
-    # trail's, and so is the admin's marked browser signed out. A query is kept only where nothing
+    # A stranger's request is kept; a signed-in person's is their own trail's, and so is the admin's marked browser signed out. A query is kept only where nothing
     # answered, so a served sign-in code never lands.
     async def answering(scope: Scope, _receive: Receive, send: Send) -> None:
         if scope["path"] == "/signed-in":
@@ -703,9 +707,23 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     outsider.get("/signed-in")
     outsider.get("/login", headers={"cookie": f"{OWNER_DEVICE_COOKIE_NAME}=1"})
     TestClient(OutsideVisitsMiddleware(answering)).get("/from-this-side")
-    kept = [(r.row["path"], r.row["query"]) for r in default_site_record_store().kept(APP_VISITS)]
+    visits = default_visit_record_store()
+    kept = [(r.row["path"], r.row["query"]) for r in visits.kept(app_visits.OUTSIDE_REQUESTS)]
     assert kept == [("/api/v1/auth/callback/google", ""), ("/.env", "probe=1")], (
         "an outside visit kept a served query, a signed-in request, the admin's browser, or this side"
+    )
+    # Every table ages out alike: telling a day drops what is past retention, a digest as surely
+    # as a request.
+    stale = VisitRecord(at="2000-01-01T00:00:00Z", row={"path": "/stale", "day": "2000-01-01"})
+    for table in (app_visits.OUTSIDE_REQUESTS, app_visits._DIGESTS):
+        visits.keep(table, stale)
+    app_visits.mark_told(app_visits.VisitsDigest(day="2001-01-02", text="told", ring=False))
+    told = visits.kept(app_visits.OUTSIDE_REQUESTS)
+    assert [r.row["path"] for r in told] == [path for path, _ in kept], (
+        "a request past retention outlived the day's telling"
+    )
+    assert [r.row["day"] for r in visits.kept(app_visits._DIGESTS)] == ["2001-01-02"], (
+        "a digest past retention outlived the day's telling"
     )
     asyncio.run(_open_sign_up_is_bounded(tmp_path / "perimeter", monkeypatch))
 

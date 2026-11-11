@@ -206,13 +206,13 @@ OIDC verification at the API trust boundary; tokens never pass it, and privilege
 deployment mutations ride an outbound operator-admin channel, never a Control-remote command —
 [`decisions.md`](decisions.md) § 0002 and § 0004.
 
-#### Site records — Persistence with an ingress of its own
+#### App visits — Persistence the app writes about its own perimeter
 
-Not a sixth kind: `/site-records/{table}` opens to one bearer token and appends outside every
-tenant, reaching no ledger and nothing the loop reads (`application/site_records.py`); the app's
-own record of who reached it from outside lands beside those rows, in-process
+Not a sixth kind: the app's record of who reached it from outside without a session lands
+in-process, outside every tenant, reaching no ledger and nothing the loop reads
 (`application/app_visits.py`) —
-[`operations/access-model.md`](operations/access-model.md) § The perimeter.
+[`operations/access-model.md`](operations/access-model.md) § The perimeter. The website's records
+are the site's own service, not the engine's.
 
 ### Everything material lives on disk, in human-readable form
 

@@ -90,7 +90,6 @@ from promptpotter.infrastructure.store.measurement_archive import (
     index_row,
 )
 from promptpotter.infrastructure.store.ruler_store import RULER_FILE
-from promptpotter.infrastructure.store.site_records import SITE_RECORDS_DIR, site_record
 from promptpotter.infrastructure.store.source_scan import SOURCE_FACTS_FILE, TREATMENT_DIGESTS_FILE
 from promptpotter.infrastructure.store.tenant_dataset_store import (
     BANKS_DIR,
@@ -110,6 +109,7 @@ from promptpotter.infrastructure.store.user_store import (
     ConsentLine,
     User,
 )
+from promptpotter.infrastructure.store.visit_records import VISIT_RECORDS_DIR, visit_record
 from promptpotter.infrastructure.store.wallet_store import (
     API_KEYS_FILE,
     CHARGES_FILE,
@@ -250,7 +250,8 @@ INSTALL_KINDS: tuple[Kind, ...] = (
         _SURVIVOR,
         TypeAdapter(DefaultClaim),
     ),
-    Kind("site records", _INSTALL, f"{SITE_RECORDS_DIR}/*.jsonl", _SURVIVOR, site_record),
+    # The app's perimeter log, 90 days deep: no account is in it, so a reset takes it.
+    Kind("app visits", _INSTALL, f"{VISIT_RECORDS_DIR}/*.jsonl", Fate.RUN, visit_record),
     Kind("install block pack", _INSTALL, _BLOCK_PACK, _SURVIVOR, TypeAdapter(BlockPack)),
     Kind("environment", _INSTALL, ".env", _SURVIVOR, Opaque("dotenv lines the settings read")),
     Kind("free tier", _INSTALL, "free_tier.yaml", _SURVIVOR, FREE_TIER_ADAPTER),

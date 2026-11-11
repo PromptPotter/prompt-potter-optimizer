@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 import inspect
 import re
 from typing import Annotated, Any, get_origin
@@ -22,7 +21,6 @@ from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import (
-    NotFoundError,
     PayloadInvalidError,
     ServiceUnavailableError,
     UnauthorizedError,
@@ -151,16 +149,6 @@ async def bounded_read(upload: UploadFile) -> bytes:
     """At most one byte past ``MAX_UPLOAD_BYTES``: the bytes' own bound (`UploadBytes`) refuses
     that byte, so this read holds no policy of its own."""
     return await upload.read(MAX_UPLOAD_BYTES + 1)
-
-
-def require_site_records_token(request: Request) -> None:
-    """Unset, the door does not exist. Set, it opens to the bearer of it and to no session."""
-    token = settings.SITE_RECORDS_TOKEN.get_secret_value().strip()
-    if not token:
-        raise NotFoundError("Not found")
-    sent = request.headers.get("authorization", "")
-    if not hmac.compare_digest(sent.encode(), f"Bearer {token}".encode()):
-        raise UnauthorizedError("site-records token required")
 
 
 def sent_idempotency_key(
