@@ -138,7 +138,7 @@ def _rewrote(out: str) -> Outcome:
         return 1, "named no output on a `wrote|unchanged` line, so nothing judged what it wrote."
     stale = [line[len("wrote ") :] for line in lines if line.startswith("wrote ")]
     return (
-        (1, f"{', '.join(stale)} stale — regenerated in place; re-run to confirm.")
+        (1, f"{', '.join(stale)} stale — regenerated in {REPO}; re-run to confirm.")
         if stale
         else (0, "")
     )
@@ -1542,12 +1542,12 @@ def _lanes(
 
 # The one remote ref a push proves.
 _PROVEN_REF = "refs/heads/main"
-# What a pushed tip's checkout borrows from the clone's main tree, as it reads that tree's venv
-# and greens: the web lane's packages, which a side worktree has none of.
+# What a checkout (a pushed tip, a commit's index) borrows from the clone's main tree, as it reads
+# that tree's venv and greens: the web lane's packages, which a side worktree has none of.
 _BORROWED = ("webapp/node_modules",)
 # The temp dir is the machine's: the clone's tag keeps one clone's sweep off another's checkouts.
-_TIP_CHECKOUT = f"pp-push-{digest(str(clone_root()).encode()).hex()[:8]}-"
-_TIP_NAME = re.compile(rf"{_TIP_CHECKOUT}[0-9a-f]+-(\d+)")
+_CHECKOUT = f"pp-tree-{digest(str(clone_root()).encode()).hex()[:8]}-"
+_CHECKOUT_NAME = re.compile(rf"{_CHECKOUT}[0-9a-f]+-(\d+)")
 
 
 def _link(link: Path, target: Path) -> None:
@@ -1566,10 +1566,10 @@ def _unlink_borrowed(tree: Path) -> None:
             os.unlink(link)
 
 
-def _sweep_tip_checkouts() -> None:
-    """A checkout whose pushing process is gone was hard-killed before its own cleanup."""
-    for tree in Path(tempfile.gettempdir()).glob(f"{_TIP_CHECKOUT}*"):
-        if (named := _TIP_NAME.fullmatch(tree.name)) and not alive(int(named[1])):
+def _sweep_checkouts() -> None:
+    """A checkout whose gate is gone was hard-killed before its own cleanup."""
+    for tree in Path(tempfile.gettempdir()).glob(f"{_CHECKOUT}*"):
+        if (named := _CHECKOUT_NAME.fullmatch(tree.name)) and not alive(int(named[1])):
             _unlink_borrowed(tree)
             shutil.rmtree(tree)
     code, out = git("worktree", "prune")
@@ -1578,13 +1578,18 @@ def _sweep_tip_checkouts() -> None:
 
 
 @contextlib.contextmanager
-def _tip_checkout(tip: str) -> Iterator[Path]:
-    tree = Path(tempfile.gettempdir()) / f"{_TIP_CHECKOUT}{tip[:12]}-{os.getpid()}"
-    code, out = git("worktree", "add", "--detach", str(tree), tip)
+def _checkout(commit: str, *, files: str | None = None) -> Iterator[Path]:
+    """*commit* in a throwaway worktree; with *files* (a tree object), its index and files are
+    that tree's, so `git diff --cached` there is the same change as here."""
+    tree = Path(tempfile.gettempdir()) / f"{_CHECKOUT}{commit[:12]}-{os.getpid()}"
+    lazy = ("--no-checkout",) if files else ()
+    code, out = git("worktree", "add", "--detach", *lazy, str(tree), commit)
     if code:
-        raise RuntimeError(f"git worktree add {tip}: {out}")
+        raise RuntimeError(f"git worktree add {commit}: {out}")
     lent = [rel for rel in _BORROWED if (clone_root() / rel).is_dir()]
     try:
+        if files and (laid := run(["git", "read-tree", "--reset", "-u", files], tree))[0]:
+            raise RuntimeError(f"git read-tree {files}: {laid[1]}")
         for rel in lent:
             _link(tree / rel, (clone_root() / rel).resolve())
         yield tree
@@ -1593,6 +1598,37 @@ def _tip_checkout(tip: str) -> Iterator[Path]:
         code, out = git("worktree", "remove", "-f", "-f", str(tree))
         if code:
             raise RuntimeError(f"git worktree remove {tree}: {out}")
+
+
+def _proven_in(commit: str, asked: Sequence[str], *, files: str | None = None) -> int:
+    """The tree a mode proves: the gate re-run on *asked* in *commit*'s own checkout (*files*, the
+    index's tree laid over it), its cwd and PYTHONPATH that tree's, so every check reads that tree
+    whether this gate re-execs into the pinned venv or borrows it (`_REEXEC` inherited)."""
+    with _checkout(commit, files=files) as tree:
+        argv = [sys.executable, "scripts/gate.py", *asked]
+        env = {**os.environ, "PYTHONPATH": str(tree)}
+        return subprocess.run(argv, cwd=tree, env=env, stdin=subprocess.DEVNULL).returncode
+
+
+def _tree_is_index() -> bool:
+    """Every file here is the index's: no unstaged edit or delete, and no untracked file."""
+    unstaged, _ = git("diff", "--quiet")
+    code, untracked = git("ls-files", "--others", "--exclude-standard")
+    return unstaged == 0 and code == 0 and not untracked.strip()
+
+
+def _prove_index() -> int:
+    """`--staged` where this tree holds what the commit leaves out: the same gate, in a checkout
+    of the index alone, so no check reads a file the commit does not carry."""
+    code, files = git("write-tree")
+    if code:
+        raise RuntimeError(f"git write-tree: {files}")
+    # The commit's index is read once, into that tree; past it no git call may write it.
+    os.environ.pop("GIT_INDEX_FILE", None)
+    _, head = git("rev-parse", "HEAD")
+    _sweep_checkouts()
+    print("gate[staged]: the tree holds unstaged work, so the index is checked in its own checkout")
+    return _proven_in(head.strip(), sys.argv[1:], files=files.strip())
 
 
 def _prove_tips(refs: str, checks: Sequence[Check]) -> int:
@@ -1607,13 +1643,11 @@ def _prove_tips(refs: str, checks: Sequence[Check]) -> int:
             f"gate[push]: the web lane reads {', '.join(missing)}, which is absent: `npm ci` there"
         )
         return 1
-    _sweep_tip_checkouts()
+    _sweep_checkouts()
     failed = 0
     for tip in tips:
         began = time.monotonic()
-        with _tip_checkout(tip) as tree:
-            argv = [sys.executable, "scripts/gate.py", "--only", ",".join(c.name for c in checks)]
-            rc = subprocess.run(argv, cwd=tree, stdin=subprocess.DEVNULL).returncode
+        rc = _proven_in(tip, ["--only", ",".join(c.name for c in checks)])
         verdict = "FAIL" if rc else "green"
         print(
             f"gate[push]: {tip[:12]} {verdict} in its own checkout, {time.monotonic() - began:.1f}s"
@@ -1816,6 +1850,8 @@ def main() -> int:
         return _prove_tips(sys.stdin.read(), checks)
     if any(c.kind == "py" for c in checks):
         _reexec_pinned()
+    if args.staged and checks and not _tree_is_index():
+        return _prove_index()
     label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)
     # One CI runner, one gate.
     light = all(c.light for c in checks)

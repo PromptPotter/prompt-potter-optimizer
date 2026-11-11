@@ -18,6 +18,7 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from promptpotter.application.cycle_reads import FEED_SUBJECT_HEADER, FEED_VERSIONS_HEADER
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.read_params import PARAMS_FOR_READ
 from promptpotter.config.paths import PACKAGE_ROOT
@@ -200,7 +201,11 @@ def _emit_read_routes() -> str:
         "// Each read's route (application/read_params.py::ReadParams.route): a URL fills it, never "
         "spells it.\n"
         f"export const READ_ROUTES = {{\n{body}\n}} as const;\n"
-        "export type ReadKind = keyof typeof READ_ROUTES;"
+        "export type ReadKind = keyof typeof READ_ROUTES;\n"
+        "// The feed subject a read names, and the versions its answer stood on\n"
+        "// (application/cycle_reads.py::FEED_SUBJECT_HEADER, ::FEED_VERSIONS_HEADER).\n"
+        f"export const FEED_SUBJECT_HEADER = {json.dumps(FEED_SUBJECT_HEADER)};\n"
+        f"export const FEED_VERSIONS_HEADER = {json.dumps(FEED_VERSIONS_HEADER)};"
     )
 
 

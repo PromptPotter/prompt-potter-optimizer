@@ -217,7 +217,7 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors import n8n
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector, cell_envelope_of
 from promptpotter.connectors.termnorm import termnorm_wire_adapter
-from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, lift_text, order_floor
+from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import (
     ArmSlot,
     Cut,
@@ -4549,22 +4549,12 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         "a rate's lift is priced in points per dollar, per candidate tested and in worked "
         "seconds per point"
     )
-    # The parent leg is the electing round's own reading of the pick, never a second differencing.
-    assert standing_now.vs_parent is None and at_c0.vs_parent is None
-    elected = run[3].election
-    assert elected is not None and first_line.lead.headline is not None
-    over_parent = {ArmKey(ids["C3.2"]): ArmFit(vs_reference=first_line.lead)}
-    judged = stands(
-        [
-            *run[:3],
-            run[3].model_copy(update={"election": elected.model_copy(update={"fit": over_parent})}),
-        ]
-    )
-    assert judged.vs_parent == first_line.lead
-    assert judged.climb is not None
-    assert judged.climb.vs_parent == lift_text(
-        first_line.lead.headline.estimate.value, first_line.lead.headline.measurand.unit
-    )
+    # Both legs come off one round reading: over C0 at round 1 they are one number.
+    assert at_c0.vs_parent is None
+    assert held.vs_parent == held.vs_origin and held.climb is not None
+    assert held.climb.vs_parent == held.climb.lift, "one pair read on two sheets at round 1"
+    assert standing_now.vs_parent is not None
+    assert standing_now.vs_parent == run[-1].overlap.vs_parent
 
     # A head-to-head pairs two optimizers only on one bench under one grader.
     h2h_stores = workspace(tmp_path / "h2h")

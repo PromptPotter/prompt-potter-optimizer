@@ -24,6 +24,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from promptpotter.application import health, notices
 from promptpotter.application.account import record_refusal
 from promptpotter.application.commands.dispatcher import command_answer
+from promptpotter.application.cycle_reads import FEED_SUBJECT_HEADER
 from promptpotter.application.datasets.startability import offer_faults
 from promptpotter.application.jobs.interlock import minted_producer
 from promptpotter.application.jobs.quota import RateLimitedError
@@ -431,14 +432,15 @@ def _too_large(scope: Scope) -> JSONResponse:
 app.add_middleware(BodyBoundMiddleware)
 
 # Credentialed, so never `*`: the methods the routes serve, and the headers a client sends beyond
-# the CORS-safelisted ones (the command key, and the validators a conditional read revalidates with).
+# the CORS-safelisted ones (the command key, the validators a conditional read revalidates with, and
+# the feed subject a read names).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
     # Starlette types `methods` optional; an `APIRoute` always sets it.
     allow_methods=sorted({method for route in _ROUTES for method in route.methods or ()}),
-    allow_headers=["Idempotency-Key", "If-Modified-Since", "If-None-Match"],
+    allow_headers=["Idempotency-Key", "If-Modified-Since", "If-None-Match", FEED_SUBJECT_HEADER],
 )
 
 # Tokens never appear past this boundary (decisions.md § 0002): downstream code sees only IdentityContext.

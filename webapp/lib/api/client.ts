@@ -1,4 +1,4 @@
-import type { ErrorEnvelope } from "@/lib/api/types";
+import { FEED_SUBJECT_HEADER, FEED_VERSIONS_HEADER, type ErrorEnvelope } from "@/lib/api/types";
 
 export const API = "/api/v1";
 
@@ -108,20 +108,29 @@ export async function jpost<T>(
   return (await r.json()) as T;
 }
 
-export type Conditional<T> =
-  | { kind: "ok"; data: T; validator: string | null }
-  // No validator on purpose: a caller storing a proxy-stripped `null` would go unconditional forever.
-  | { kind: "not_modified" };
+// Each feed subject a read's answer stood on, at its version (`FEED_VERSIONS_HEADER`).
+export type FeedVersions = Readonly<Record<string, string>>;
 
+// `stood` is absent where the read named no subject, or its server said none.
+export type Conditional<T> =
+  | { kind: "ok"; data: T; validator: string | null; stood?: FeedVersions }
+  // No validator on purpose: a caller storing a proxy-stripped `null` would go unconditional forever.
+  | { kind: "not_modified"; stood?: FeedVersions };
+
+// *subject* is the feed subject the read names, by prefix: its answer says the versions it stood on.
 export async function jgetIfNoneMatch<T>(
   url: string,
   validator?: string | null,
   signal?: AbortSignal,
+  subject?: string,
 ): Promise<Conditional<T>> {
   const headers: Record<string, string> = {};
   if (validator) headers["If-None-Match"] = validator;
+  if (subject !== undefined) headers[FEED_SUBJECT_HEADER] = subject;
   const r = await send(url, { headers, signal: signal ?? null });
-  if (r.status === 304) return { kind: "not_modified" };
+  const said = r.headers.get(FEED_VERSIONS_HEADER);
+  const stood = said === null ? {} : { stood: JSON.parse(said) as FeedVersions };
+  if (r.status === 304) return { kind: "not_modified", ...stood };
   if (!r.ok) throw await toApiError(r);
-  return { kind: "ok", data: (await r.json()) as T, validator: r.headers.get("ETag") };
+  return { kind: "ok", data: (await r.json()) as T, validator: r.headers.get("ETag"), ...stood };
 }

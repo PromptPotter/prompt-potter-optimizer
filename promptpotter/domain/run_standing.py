@@ -296,8 +296,10 @@ class RunStanding(FrozenModel):
         "the selection is the origin."
     )
     vs_parent: PairedReading | None = Field(
-        description="`selection` over its parent, as its electing round read it "
-        "(`ArmFit.vs_reference`). Null while the selection is the origin."
+        description="`selection` (`b`) over `parent` (`a`) on the origin panel, from the round "
+        "reading `vs_origin` comes from (`OverlapReading.vs_parent`); `vs_origin` itself where "
+        "the parent is C0. Null while the selection is the origin, or where that reading pairs "
+        "no such two."
     )
     rounds_closed: int = Field(
         description="Rounds closed AFTER the origin — the unit a rounds cap counts."
@@ -370,9 +372,9 @@ class RunStanding(FrozenModel):
         chosen = picked[-1]
         arms: dict[str, ArmName] = {arm.key: arm for arm in pick_line(rounds)}
         before = [individual for individual in picked if individual != chosen]
-        vs_origin = next(
+        vs_origin, overlap = next(
             (
-                reading
+                (reading, rr.overlap)
                 for rr in reversed(rounds)
                 if rr.round >= declared.round
                 for reading in (rr.overlap.lead, *rr.overlap.earlier)
@@ -380,7 +382,20 @@ class RunStanding(FrozenModel):
                 and reading.b is not None
                 and reading.b.address.individual_id == chosen
             ),
-            declared.overlap.lead,
+            (declared.overlap.lead, declared.overlap),
+        )
+        # Both legs read one sheet: where the parent is C0, the parent leg IS the origin leg.
+        over_parent = (before[-1], chosen) if before else None
+        vs_parent = next(
+            (
+                pair
+                for pair in (vs_origin, overlap.vs_parent)
+                if pair is not None
+                and pair.a is not None
+                and pair.b is not None
+                and (pair.a.address.individual_id, pair.b.address.individual_id) == over_parent
+            ),
+            None,
         )
         after_origin = [rr for rr in rounds if rr.round > 0]
         return cls(
@@ -394,7 +409,7 @@ class RunStanding(FrozenModel):
             if vs_origin.state is ReadingState.SAME_INDIVIDUAL
             else declared.arms[chosen].changes_description,
             vs_origin=vs_origin,
-            vs_parent=None if (fit := declared.fit(chosen)) is None else fit.vs_reference,
+            vs_parent=vs_parent,
             rounds_closed=closed_after_origin([rr.round for rr in rounds]),
             improved=sum(1 for rr in after_origin if rr.improved),
             advanced=sum(1 for rr in after_origin if rr.overlap.advance is RoundAdvance.ADVANCED),

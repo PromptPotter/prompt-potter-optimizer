@@ -105,9 +105,10 @@ class CommandCall[P: CommandPayload]:
 @dataclass(frozen=True, slots=True)
 class Replaying[P: CommandPayload]:
     """A retry's first act, answered off its end: never off the target it named, which that act
-    may have moved, minted or deleted since."""
+    may have moved, minted or deleted since. A launch's jobs read live, off *jobs*."""
 
     stores: Stores
+    jobs: JobRegistry
     payload: P
     end: CommandAckRecord
 
@@ -392,7 +393,8 @@ class CommandDispatcher:
     async def _replayed(
         self, payload: CommandPayload, accepted: CommandAcceptedBody, end: CommandAckRecord
     ) -> CommandOutcome[object, Any]:
-        result = await replay_of(payload.kind)(Replaying(self.stores, payload, end))
+        replaying = Replaying(self.stores, self.job_registry, payload, end)
+        result = await replay_of(payload.kind)(replaying)
         return CommandOutcome(payload=payload, accepted=accepted, result=result, ack=end.status)
 
     def _filed_on(self, payload: CommandPayload) -> tuple[CommandPayload, str | None]:

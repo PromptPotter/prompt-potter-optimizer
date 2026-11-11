@@ -10,9 +10,17 @@ const show = (family: FamilyId) => {
   if (v?.parentElement) v.parentElement.scrollTo({ left: v.offsetLeft - v.parentElement.offsetLeft });
 };
 
-// The columns the row shows, by one observer; null until it first answers, when every column shows.
-function useOnScreen(row: RefObject<HTMLDivElement | null>, columns: string): ReadonlySet<string> | null {
-  const [onScreen, setOnScreen] = useState<ReadonlySet<string> | null>(null);
+// The columns the row shows, by one observer that reveals what it sees: until it first answers, only
+// *shown*, the column the workspace scrolled to, so no other column reads even at mount. Null where
+// no observer exists, when every column shows.
+function useOnScreen(
+  row: RefObject<HTMLDivElement | null>,
+  columns: string,
+  shown: string | undefined,
+): ReadonlySet<string> | null {
+  const [onScreen, setOnScreen] = useState<ReadonlySet<string> | null>(() =>
+    typeof IntersectionObserver === "undefined" ? null : new Set(shown === undefined ? [] : [shown]),
+  );
   useEffect(() => {
     const el = row.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
@@ -43,7 +51,11 @@ export function Views() {
   const { views, reveal, close } = useWorkspace();
   const columns = openColumns(views).reverse();
   const row = useRef<HTMLDivElement>(null);
-  const onScreen = useOnScreen(row, columns.map((c) => c.family).join(" "));
+  const onScreen = useOnScreen(
+    row,
+    columns.map((c) => c.family).join(" "),
+    reveal?.family ?? columns[0]?.family,
+  );
   // Snapping holds the column it was on, so each `open` brings its view into view.
   useEffect(() => void (reveal && show(reveal.family)), [reveal]);
   return (

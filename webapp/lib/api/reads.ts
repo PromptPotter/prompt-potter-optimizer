@@ -1,4 +1,4 @@
-import { API, InvalidInputError, jget, jgetIfNoneMatch, jpost, send, toApiError } from "./client";
+import { API, InvalidInputError, jgetIfNoneMatch, jpost, send, toApiError } from "./client";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
 import { readThrough, type ReadDescriptor } from "../read-cache";
 import type {
@@ -71,7 +71,11 @@ function readUrl<K extends ReadKind>(
 function once<T>(name: string, url: string): ReadDescriptor<T> {
   return {
     id: `${name}${SEP}${url}`,
-    load: async (signal) => ({ kind: "ok", data: await jget<T>(url, signal), validator: null }),
+    // Asked unconditionally, it answers whole: an ETag it carries is never kept.
+    load: async (signal, _etag, subject) => {
+      const res = await jgetIfNoneMatch<T>(url, null, signal, subject);
+      return res.kind === "ok" ? { ...res, validator: null } : res;
+    },
   };
 }
 
@@ -79,7 +83,7 @@ function once<T>(name: string, url: string): ReadDescriptor<T> {
 function byEtag<T>(name: string, url: string): ReadDescriptor<T> {
   return {
     id: `${name}${SEP}${url}`,
-    load: (signal, etag) => jgetIfNoneMatch<T>(url, etag, signal),
+    load: (signal, etag, subject) => jgetIfNoneMatch<T>(url, etag, signal, subject),
   };
 }
 
@@ -470,8 +474,8 @@ export function subtreeRead(
     keep,
     // Its family spans the inner stores under it.
     subject: STORES,
-    load: async (signal, validator) => {
-      const res = await entry.load(signal, validator);
+    load: async (signal, validator, subject) => {
+      const res = await entry.load(signal, validator, subject);
       if (res.kind === "not_modified") return res;
       if (res.data.level !== "campaign") {
         // The address named a level this read does not serve: a verdict, never a retried outage.

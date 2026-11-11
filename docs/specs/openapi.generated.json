@@ -15132,7 +15132,7 @@
                 "type": "null"
               }
             ],
-            "description": "`selection` over its parent, as its electing round read it (`ArmFit.vs_reference`). Null while the selection is the origin."
+            "description": "`selection` (`b`) over `parent` (`a`) on the origin panel, from the round reading `vs_origin` comes from (`OverlapReading.vs_parent`); `vs_origin` itself where the parent is C0. Null while the selection is the origin, or where that reading pairs no such two."
           },
           "worked_s": {
             "anyOf": [

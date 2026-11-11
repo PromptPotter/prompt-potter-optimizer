@@ -703,8 +703,10 @@ export interface RunStanding {
    * reading of that pair. The state says why where there is none:
    * `same_individual` while the selection is the origin. */
   vs_origin: PairedReading;
-  /** `selection` over its parent, as its electing round read it
-   * (`ArmFit.vs_reference`). Null while the selection is the origin. */
+  /** `selection` (`b`) over `parent` (`a`) on the origin panel, from the round
+   * reading `vs_origin` comes from (`OverlapReading.vs_parent`); `vs_origin`
+   * itself where the parent is C0. Null while the selection is the origin, or
+   * where that reading pairs no such two. */
   vs_parent: PairedReading | null;
   /** Rounds closed AFTER the origin — the unit a rounds cap counts. */
   rounds_closed: number;
@@ -5405,6 +5407,10 @@ export const READ_ROUTES = {
   "workspace-storage": "/workspace/storage",
 } as const;
 export type ReadKind = keyof typeof READ_ROUTES;
+// The feed subject a read names, and the versions its answer stood on
+// (application/cycle_reads.py::FEED_SUBJECT_HEADER, ::FEED_VERSIONS_HEADER).
+export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
+export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

@@ -276,12 +276,12 @@ def check_launch_quotas(
 
 
 def campaigns_today(job_registry: JobRegistry, user_id: str) -> int:
-    """The daily quota's count: a launch admitted or still in flight; a refused or withdrawn one
-    spent nothing."""
+    """The daily quota's count: a launch admitted or still in flight (`JobRegistry.in_flight`); a
+    refused, withdrawn or orphaned one spent nothing."""
     return sum(
         1
         for job in job_registry.list_launched_today(user_id=user_id)
-        if job.admitted or not job.released
+        if job.admitted or job_registry.in_flight(job)
     )
 
 

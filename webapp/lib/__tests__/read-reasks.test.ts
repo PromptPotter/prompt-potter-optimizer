@@ -7,6 +7,7 @@ import {
   hierarchyRead,
   userSettingsRead,
 } from "@/lib/api/reads";
+import { FEED_SUBJECT_HEADER, FEED_VERSIONS_HEADER } from "@/lib/api/types";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { clearReadCache, subscribe, type ReadDescriptor } from "@/lib/read-cache";
 import { couponStatus, dash } from "@/lib/test-fixtures";
@@ -50,8 +51,12 @@ function nameOf(url: string): Name {
   throw new Error(`unrouted: ${url}`);
 }
 
+const SUBJECTS = ["account", "store:", "store:c1::root", "store:c2::root", "machine"] as const;
+
 describe("the feed re-asks exactly the reads whose subject moved, and no read asks on a clock", () => {
   let asked: Record<Name, number>;
+  // Each subject at the version the server reads it at: an answer says those its subject names.
+  let at: Record<string, string>;
   const mounted: (() => void)[] = [];
   const once = Object.fromEntries(NAMES.map((n) => [n, 1])) as Record<Name, number>;
 
@@ -61,12 +66,20 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
     clearReadCache(true);
     vi.useFakeTimers();
     asked = Object.fromEntries(NAMES.map((n) => [n, 0])) as Record<Name, number>;
-    vi.stubGlobal("fetch", async (url: string) => {
+    at = Object.fromEntries(SUBJECTS.map((s) => [s, "v1"]));
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
       const name = nameOf(url);
       asked[name] += 1;
-      if (name === "coupon") return Response.json(couponStatus());
-      if (name === "top" || name === "inner" || name === "other") return Response.json(dash({}));
-      return Response.json({ entries: [] });
+      const named = (init?.headers as Record<string, string> | undefined)?.[FEED_SUBJECT_HEADER];
+      const stood = Object.fromEntries(
+        Object.entries(at).filter(([subject]) => named !== undefined && subject.startsWith(named)),
+      );
+      const headers = named === undefined ? {} : { [FEED_VERSIONS_HEADER]: JSON.stringify(stood) };
+      if (name === "coupon") return Response.json(couponStatus(), { headers });
+      if (name === "top" || name === "inner" || name === "other") {
+        return Response.json(dash({}), { headers });
+      }
+      return Response.json({ entries: [] }, { headers });
     });
   });
   afterEach(() => {
@@ -96,17 +109,33 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
     ].map((read) => read as unknown as ReadDescriptor<unknown>);
     for (const read of reads) mounted.push(subscribe(() => read, () => {}));
     await settle();
-    // The hello: each subject at its version moves nothing, every read having asked on its mount.
-    for (const subject of ["account", "store:", "store:c1::root", "store:c2::root", "machine"]) {
-      feed().frame(subject, "v1");
-    }
+    // The hello: each subject at the version every read stood on moves nothing.
+    hello();
     await settle();
   };
+  const hello = () => {
+    for (const subject of SUBJECTS) feed().frame(subject, at[subject]!);
+  };
 
-  it("subscribes once, and a subject's first version re-asks nothing", async () => {
+  it("subscribes once, and a subject's first version re-asks nothing its reads stood on", async () => {
     await mount();
     expect(FakeFeed.opened).toHaveLength(1);
     expect(asked).toEqual(once);
+  });
+
+  it("re-asks on the hello a read whose answer stood before a move it names", async () => {
+    at["store:"] = "v0";
+    const reads = [hierarchyRead(), userSettingsRead()] as unknown as ReadDescriptor<unknown>[];
+    for (const read of reads) mounted.push(subscribe(() => read, () => {}));
+    await settle();
+    // The account's store moves after both answered, before the feed's first frame.
+    at["store:"] = "v1";
+    hello();
+    await settle();
+    expect([asked.hierarchy, asked.settings]).toEqual([2, 1]);
+    hello();
+    await settle();
+    expect([asked.hierarchy, asked.settings]).toEqual([2, 1]);
   });
 
   it("re-asks every read of the account's store on its move, a settled evidence and the settings not", async () => {

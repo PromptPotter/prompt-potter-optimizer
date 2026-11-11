@@ -1,4 +1,11 @@
-import { API, failureKind, failurePasses, type Conditional, type FailureKind } from "@/lib/api/client";
+import {
+  API,
+  failureKind,
+  failurePasses,
+  type Conditional,
+  type FailureKind,
+  type FeedVersions,
+} from "@/lib/api/client";
 import { operatorMessage } from "@/lib/api/errors";
 import { READ_ROUTES, type FeedFrame } from "@/lib/api/types";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
@@ -7,9 +14,11 @@ import { reportIncident } from "@/lib/diagnostics";
 export const READ_CACHE_MAX_KEYS = 64;
 export const GONE_CONFIRM_LIMIT = 3;
 
+// *subject* is the descriptor's: a loader sends it, and its answer says the versions it stood on.
 export type ReadLoad<T> = (
   signal: AbortSignal,
   validator: string | null,
+  subject?: string,
 ) => Promise<Conditional<T>>;
 
 export interface ReadFailure {
@@ -80,6 +89,10 @@ interface Slot {
   stopped: boolean;
   flight: Flight | null;
   result: ReadResult<unknown>;
+  // The feed versions its last answer stood on; null where none said them.
+  stood: FeedVersions | null;
+  // Each frame that came while it flew: its landing re-asks where it stood on another version.
+  owed: Map<string, string>;
 }
 
 const IDLE: ReadResult<never> = { status: "idle" };
@@ -144,6 +157,8 @@ function slotFor(read: AnyRead): Slot {
     stopped: false,
     flight: null,
     result: IDLE,
+    stood: null,
+    owed: new Map(),
   };
   slot.result = resultOf(slot);
   slots.set(read.id, slot);
@@ -198,7 +213,8 @@ async function fly(slot: Slot, read: AnyRead, flight: Flight): Promise<unknown> 
   const mine = () => slot.flight === flight && slots.get(slot.id) === slot;
   try {
     const signal = flight.abort.signal;
-    let res = await read.load(signal, slot.entry?.validator ?? null);
+    let res = await read.load(signal, slot.entry?.validator ?? null, read.subject);
+    if (mine()) slot.stood = res.stood ?? null;
     if (res.kind === "not_modified") {
       const held = slot.entry;
       if (held) {
@@ -206,8 +222,9 @@ async function fly(slot: Slot, read: AnyRead, flight: Flight): Promise<unknown> 
         return held.data;
       }
       // The body was dropped or cleared mid-flight, so the 304 describes nothing held.
-      res = await read.load(signal, null);
+      res = await read.load(signal, null, read.subject);
       if (res.kind === "not_modified") throw new Error(`304 to an unconditional read: ${slot.id}`);
+      if (mine()) slot.stood = res.stood ?? null;
     }
     if (mine()) land(slot, res.data, res.validator);
     return res.data;
@@ -221,12 +238,21 @@ async function fly(slot: Slot, read: AnyRead, flight: Flight): Promise<unknown> 
     if (mine()) fail(slot, e);
     throw e;
   } finally {
-    if (slot.flight === flight) slot.flight = null;
+    if (slot.flight === flight) {
+      slot.flight = null;
+      const owed = [...slot.owed];
+      slot.owed.clear();
+      if (slot.subs.size > 0 && owed.some(([subject, version]) => slot.stood?.[subject] !== version)) {
+        ask(slot, true);
+      }
+    }
   }
 }
 
 function start(slot: Slot, read: AnyRead): Flight {
   const flight: Flight = { promise: Promise.resolve(), abort: new AbortController(), waiters: 0 };
+  // Asked after every frame owed so far: its answer stands on them.
+  slot.owed.clear();
   slot.flight = flight;
   flight.promise = fly(slot, read, flight);
   // Subscribers read the slot, not the promise.
@@ -296,6 +322,7 @@ export function clearReadCache(signedIn: boolean): void {
       continue;
     }
     slot.entry = null;
+    slot.stood = null;
     slot.failure = null;
     slot.misses = 0;
     slot.stopped = false;
@@ -338,15 +365,18 @@ export function reaskRead(id: string): void {
 }
 
 // The server says what moved (`GET /feed`): each subject at its version, then each move. A frame is
-// a hint, never the body: it re-asks every mounted read whose subject it starts, and what the read
-// answers is what the cache keeps. A subject's first version moves nothing: a read asks on mount.
+// a hint, never the body: it re-asks every mounted read whose subject it starts and whose answer
+// stood on another version of it, and what the read answers is what the cache keeps. Compared with
+// the version each answer stood on, never the frame before: an answer read before the feed's first
+// frame misses no move between them.
 let feed: EventSource | null = null;
-const versions = new Map<string, string>();
 
-function moved(subject: string): void {
+function moved(subject: string, version: string): void {
   for (const slot of mounted()) {
     const named = descriptorOf(slot).subject;
-    if (named !== undefined && subject.startsWith(named)) ask(slot, true);
+    if (named === undefined || !subject.startsWith(named)) continue;
+    if (slot.flight) slot.owed.set(subject, version);
+    else if (slot.stood?.[subject] !== version) ask(slot, true);
   }
 }
 
@@ -363,9 +393,7 @@ function openFeed(): void {
       reportIncident(e, { surface: "feed" });
       return;
     }
-    const was = versions.get(frame.subject);
-    versions.set(frame.subject, frame.version);
-    if (was !== undefined && was !== frame.version) moved(frame.subject);
+    moved(frame.subject, frame.version);
   };
   // A dropped stream reconnects by itself, and its first frames say what moved meanwhile; a
   // refused one (a 401, a 5xx) is closed for good and reopened on the reconnect beat.
@@ -379,7 +407,6 @@ function openFeed(): void {
 function closeFeed(): void {
   feed?.close();
   feed = null;
-  versions.clear();
 }
 
 // `read` is the subscriber's newest descriptor: its subject counts, its effects run. The first

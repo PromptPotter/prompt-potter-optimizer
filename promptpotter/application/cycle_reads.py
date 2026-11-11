@@ -185,6 +185,13 @@ async def cycle_event_frames(cycle: ViewedCycle) -> AsyncIterator[str]:
         await asyncio.sleep(_TAIL_POLL_INTERVAL_S)
 
 
+# A read names its subject, by prefix, and answers the versions it stood on: taken before its body,
+# so a frame re-asks only the reads that stood on another (`webapp/lib/read-cache.ts`).
+FEED_SUBJECT_HEADER = "X-Feed-Subject"
+FEED_VERSIONS_HEADER = "X-Feed-Versions"
+_STORE = "store:"
+
+
 class FeedFrame(StrictModel):
     """One subject moved: re-ask every read that names it. A hint, never the body."""
 
@@ -193,19 +200,28 @@ class FeedFrame(StrictModel):
 
 
 def _store_subjects(stores: Stores) -> Iterator[tuple[str, Stores]]:
-    yield f"store:{encode_cycle_path(stores.inside)}", stores
+    yield f"{_STORE}{encode_cycle_path(stores.inside)}", stores
     for campaign_id in stores.campaigns.list_campaign_ids():
         for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign_id):
             if (inner := inner_sandbox_store(stores, campaign_id, cycle_dir.name)) is not None:
                 yield from _store_subjects(inner)
 
 
-def feed_versions(stores: Stores, jobs: JobRegistry) -> dict[str, str]:
-    """Each subject at its version: stats and the slots, never a fold."""
-    held = {subject: entries_version([store]) for subject, store in _store_subjects(stores)}
-    # What the account filed: an edit, a setting, a draft turn. A run's appends do not move it.
-    held["account"] = (file_sig(stores.commands.path), stores.drafts.version())
-    held["machine"] = (machine_status(jobs, identity=stores.identity).model_dump_json(),)
+def feed_versions(stores: Stores, jobs: JobRegistry, named: str = "") -> dict[str, str]:
+    """Each subject *named* covers, by prefix (every one by default), at its version: stats and
+    the slots, never a fold."""
+    held: dict[str, tuple[object, ...]] = {}
+    if named.startswith(_STORE) or _STORE.startswith(named):
+        held |= {
+            subject: entries_version([store])
+            for subject, store in _store_subjects(stores)
+            if subject.startswith(named)
+        }
+    if "account".startswith(named):
+        # What the account filed: an edit, a setting, a draft turn. A run's appends do not move it.
+        held["account"] = (file_sig(stores.commands.path), stores.drafts.version())
+    if "machine".startswith(named):
+        held["machine"] = (machine_status(jobs, identity=stores.identity).model_dump_json(),)
     return {
         subject: hashlib.sha256(repr(version).encode()).hexdigest()[:16]
         for subject, version in held.items()

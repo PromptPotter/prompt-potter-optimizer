@@ -2706,6 +2706,25 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
     await died
     registry.attach_task(running.job_id, died)
     assert read(running) == "failed", "a launch whose run died reads as still working"
+    # The daily quota counts a launch admitted or in flight, never one that spent nothing: any
+    # raise in the queue withdraws it, one before its admission refuses it, and a launch whose
+    # producer is gone counts no more before the sweep releases it than after.
+    slotted, waiting = launch(), launch()
+    assert waiting.queued and not slotted.queued
+    user_id = str(caller.stores.identity.user_id)
+    assert quota.campaigns_today(registry, user_id) == 2
+    for job, thrown, lapse in (
+        (waiting, RuntimeError("its wait raised"), "withdrawn"),
+        (slotted, PotterError("its probe failed"), "refused"),
+    ):
+        lapsed = registry.release(job.job_id, thrown)
+        assert lapsed is not None and lapsed.lapse == lapse, f"a {lapse} launch read {lapsed}"
+    spent = launch()
+    registry.mark_admitted(spent.job_id, Budget(usd=1.0))
+    registry.release(spent.job_id, StopReason.CONVERGED)
+    assert quota.campaigns_today(registry, user_id) == 1, (
+        "the daily quota counted a launch that spent nothing, or lost one that did"
+    )
 
     # A queued launch records the cycle its job already knows; once its job is reaped, a retry
     # under its key replays that launch, and its task reads the job's own ending, never a relaunch.

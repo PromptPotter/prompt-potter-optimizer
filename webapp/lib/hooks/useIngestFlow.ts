@@ -20,7 +20,7 @@ import type {
 import { draftRead } from "@/lib/api/reads";
 import { checkinThreadKey, useThreads } from "@/lib/chat/thread";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
-import { useMintedHop } from "@/lib/hooks/useMintedHop";
+import { useQueuedStart } from "@/lib/hooks/useQueuedStart";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import type { ReadFailure } from "@/lib/read-cache";
 import { dropCachedRead } from "@/lib/read-cache";
@@ -54,6 +54,15 @@ type IngestPhase =
 /** The check-in the workspace views: a draft id, `NEW_CHECKIN` before one is minted, null off one. */
 export type CheckinSubject = string | null;
 export const NEW_CHECKIN = "";
+
+// The draft in review as its read serves it, beside the last resolver turn's proposals.
+const review = (res: DraftReopenResponse): IngestPhase => ({
+  stage: "ready",
+  draft: res.draft,
+  resolution: res.resolution.last_resolution,
+  raised: res.resolution.raised,
+  degradedCause: res.resolution.degraded_cause,
+});
 
 const QUEUED_LINE = "Campaign queued — it is minted and starts when a machine slot frees.";
 const STARTING_LINE = "Campaign starting — it is being minted and opens in your list once it runs.";
@@ -111,8 +120,10 @@ export function useIngestFlow({
   const [draftId, setDraftId] = useState<string | null>(null);
   const [inputText, setInputText] = useState("");
   const [minting, setMinting] = useState(false);
-  // A queued Start's command, followed on the feed until a slot mints its campaign.
+  // A queued Start's command, followed on the feed until a slot mints its campaign or it ends.
   const [following, setFollowing] = useState<string | null>(null);
+  // How a queued Start ended unminted, beside Start as its own refusal would be.
+  const [unminted, setUnminted] = useState<CommandFailure | null>(null);
   // Every write rides a slot; a draft's edits are a queue on one, so overlapping blurs land in order.
   const opening = useCommand<"upload" | "dataset" | "origin">("checkin-open", { scope: subject });
   const resolving = useCommand<"resolve">("checkin-resolve", { scope: draftId });
@@ -137,6 +148,7 @@ export function useIngestFlow({
       setInputText("");
       setMinting(false);
       setFollowing(null);
+      setUnminted(null);
       setResets((n) => n + 1);
     }
   }
@@ -190,17 +202,24 @@ export function useIngestFlow({
     if (served) commitDraftUpdate(served.draft);
   }
 
-  const minted = useMintedHop(following);
+  const queued = useQueuedStart(following);
   useEffect(() => {
-    if (following === null || minted === null) return;
-    // The slot freed and minted it: the view moves onto the campaign, as an unqueued Start's does.
+    if (following === null || queued.stage === "waiting") return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFollowing(null);
-    setPhase({ stage: "idle" });
-    setDraftId(null);
-    onMint({ campaignId: minted.campaign_id, cycleId: minted.cycle_id });
+    if (queued.stage === "minted") {
+      // The slot freed and minted it: the view moves onto the campaign, as an unqueued Start's does.
+      setPhase({ stage: "idle" });
+      setDraftId(null);
+      onMint({ campaignId: queued.hop.campaign_id, cycleId: queued.hop.cycle_id });
+      return;
+    }
+    // Refused when its slot freed, or withdrawn: the draft is back in review, the refusal beside Start.
+    say(queued.said, "warn");
+    setUnminted({ kind: "refused", message: queued.said, errorId: null, code: null, details: null });
+    setPhase(served ? review(served) : { stage: "idle" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [following, minted]);
+  }, [following, queued]);
 
   const runCheckin = async (draft: DraftCampaignWire) => {
     const alive = begin();
@@ -342,13 +361,7 @@ export function useIngestFlow({
       return;
     }
     if (told) say("Finish the setup below, then Start.");
-    setPhase({
-      stage: "ready",
-      draft,
-      resolution: res.resolution.last_resolution,
-      raised: res.resolution.raised,
-      degradedCause: res.resolution.degraded_cause,
-    });
+    setPhase(review(res));
   };
 
   // A viewed draft this flow does not hold is read in: a deep link, a sidebar row, a reload.
@@ -441,6 +454,7 @@ export function useIngestFlow({
     if (phase.stage !== "ready" || !phase.draft.readiness.complete) return;
     const id = phase.draft.draft_id;
     const alive = begin();
+    setUnminted(null);
     setMinting(true);
     // The starting tap can be the blur that queued an edit: the queue drains before Start sends.
     let tail: Promise<unknown>;
@@ -482,6 +496,7 @@ export function useIngestFlow({
     if (draftId === id) {
       epoch.current += 1;
       setFollowing(null);
+      setUnminted(null);
       setPhase({ stage: "idle" });
       setDraftId(null);
       threadKey.current = checkinThreadKey(null);
@@ -528,7 +543,8 @@ export function useIngestFlow({
     busy,
     saving: pendingPatches > 0,
     awaitingContext,
-    failure: opening.failure ?? resolving.failure ?? writing.failure ?? starting.failure,
+    failure:
+      opening.failure ?? resolving.failure ?? writing.failure ?? starting.failure ?? unminted,
     readFailure: draftNow.status === "failed" ? draftNow.failure : null,
     attachFile,
     pickDataset,

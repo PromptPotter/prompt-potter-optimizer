@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -23,7 +24,12 @@ from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
 from promptpotter.application.caller import Caller
-from promptpotter.application.cycle_reads import FeedFrame
+from promptpotter.application.cycle_reads import (
+    FEED_SUBJECT_HEADER,
+    FEED_VERSIONS_HEADER,
+    FeedFrame,
+    feed_versions,
+)
 from promptpotter.application.hierarchy import entries_version, hierarchy_version
 from promptpotter.application.hierarchy_subtree import subtree_version
 from promptpotter.application.read_params import (
@@ -210,16 +216,33 @@ _FRAMED: dict[ReadKind, _Framing] = {
 
 def _endpoint(params: type[ReadParams], framing: _Framing | None) -> Callable[..., Any]:
     async def answer(
-        request: Request, background: BackgroundTasks, caller: Caller, read: ReadParams
+        request: Request,
+        response: Response,
+        background: BackgroundTasks,
+        caller: Caller,
+        read: ReadParams,
     ) -> object:
+        # Taken before the body, so the body stands on at least these.
+        named = request.headers.get(FEED_SUBJECT_HEADER)
+        stood = (
+            None
+            if named is None
+            else await off_loop(feed_versions, caller.stores, caller.jobs, named)
+        )
         if framing is None:
-            return await read.answered(caller)
-        return await off_loop(framing.respond, _Asked(request, background, caller), read)
+            answered: object = await read.answered(caller)
+        else:
+            answered = await off_loop(framing.respond, _Asked(request, background, caller), read)
+        if stood is not None:
+            framed = answered if isinstance(answered, Response) else response
+            framed.headers[FEED_VERSIONS_HEADER] = json.dumps(stood, separators=(",", ":"))
+        return answered
 
     keyword = inspect.Parameter.KEYWORD_ONLY
     answer.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
         [
             inspect.Parameter("request", keyword, annotation=Request),
+            inspect.Parameter("response", keyword, annotation=Response),
             inspect.Parameter("background", keyword, annotation=BackgroundTasks),
             inspect.Parameter("caller", keyword, annotation=CallerDep),
             inspect.Parameter("read", keyword, annotation=Annotated[params, read_input(params)]),

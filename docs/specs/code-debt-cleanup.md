@@ -238,12 +238,6 @@ row it closes.
   `git grep -n '"CommandDispatcher"' -- promptpotter/application/embedded_run.py` is empty, and in
   `presentation/teleprompter.py::PromptPotterOpt.acompile` no `_write_definition` call precedes
   `open_session`'s landing.
-- **Launch and resume admit a deleted campaign**: `campaign_store/store.py::CampaignStore.load_campaign`
-  reads a torn delete as `deleted`, but `jobs/launcher/admission.py`, `jobs/quota.py` and
-  `launcher/run_job.py` refuse no lifecycle, and what it spends past its tombstone reaches no sum
-  (`account_spend.py` returns the bank alone). Action: admission refuses a campaign that is not `active`,
-  where it loads the campaign. **Rides with:** init 1. **Re-test:** a launch on a tombstoned campaign
-  refuses.
 
 ### batch/25 · passb
 
@@ -276,6 +270,11 @@ row it closes.
   pause and releases the pass lock; `run_observers.py::_let_go` closes the projections and releases the
   cycle lock. Action: one producer-lock holder owns both its pause intake and its release. **Rides
   with:** passb 5. **Re-test:** `git grep -c "def _let_go" -- promptpotter` is 1.
+- **A paid pass hands its job back by hand, beside `RunStart.release`**:
+  `jobs/launcher/admission.py::paid_pass` calls `job_registry.release` itself on its raise and on its
+  return, so a pass's job ends by another door than every launch's. Action: the pass holds a `RunStart`
+  and releases through it. **Rides with:** passb 5. **Re-test:**
+  `git grep -cE "^\s+job_registry\.release\(" -- promptpotter/application/jobs/launcher/admission.py` is 0.
 
 ### batch/25 · webb
 
@@ -436,6 +435,13 @@ row it closes.
   ledgers. Action: the mint re-draws an id the bank holds as deleted. **Rides with:** money 5.
   **Re-test:** `git grep -n "token_hex(3)" -- promptpotter/application/runner/campaign_ids.py` names the
   draw with no `WorkspaceBank.deleted` read beside it.
+- **Launch and resume admit a deleted campaign**: `campaign_store/store.py::CampaignStore.load_campaign`
+  reads a torn delete as `deleted`, but no admission refuses a lifecycle, and what it spends past its
+  tombstone reaches no sum (`account_spend.py` returns the bank alone). Admission loads the campaign at
+  six sites (`admission.py::_campaign_ceiling`, `::campaign_sends`, `run_job.py:239,311`,
+  `quota.py:747,825`), and a launch's request carries the one the dispatcher loaded
+  (`DispatchedToCycle.campaign`), so no one site holds the refusal. Action: one load of a launch's or a pass's campaign, refusing one that is not `active`.
+  **Rides with:** money 5. **Re-test:** a launch, a resume and a pass on a tombstoned campaign refuse.
 - **`launch_contended` is retryable but answers 409** (`quota.py::_contended`). Decided (2026-11-10): it
   serves `retry_after`. **Rides with:** money 5. **Re-test:** `git grep -n "launch_contended" -- promptpotter`.
 - **`facts.spend_lifetime` is served and read by nothing** (`domain/hierarchy.py:121,132`) since the
@@ -1142,11 +1148,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   re-checks admission and spawns it when the slot frees. **Held:** the operator's answer, since it
   reverses that rule. **Re-test:** `resume --step-rounds 1` behind a running cycle; it starts when the
   slot frees.
-- **The vs-parent and vs-origin legs read different sheets**: at round 1 the parent is C0, yet the lead
-  line reads `+71.4 pts vs origin, +80.0 pts vs parent`: `ArmFit.vs_reference` pairs on the election's
-  sheet, `vs_origin` on the origin panel. Action: the parent leg reads the origin panel's pair, or names
-  its panel. **Held:** a decision, which panel the parent leg reads ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md)).
-  **Re-test:** at round 1, the two legs agree or name their panels.
 - **A cold server folds every ledger before the first page answers**: the first `GET /hierarchy?depth=1`
   waits on a full `LEDGER_FOLDS` pass (37 µs a line cold, 2026-11-07); the boot sweep no longer runs
   beside it. Root: pydantic validates each screened line on every cold start; a fold snapshot keyed by

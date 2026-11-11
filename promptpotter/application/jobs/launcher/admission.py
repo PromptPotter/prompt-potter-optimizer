@@ -90,7 +90,7 @@ type SharedRun[S] = Callable[[HeldBudget], Awaitable[tuple[S, CycleResult]]]
 @dataclass(frozen=True, slots=True)
 class RunStart:
     """A run's slot, from its admission to its one release: every launch, arm and slotless share
-    holds one, and nothing else hands its job back."""
+    holds one. A paid pass holds none yet, and releases its job by hand (`paid_pass`)."""
 
     stores: Stores
     job_registry: JobRegistry

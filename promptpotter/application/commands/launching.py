@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -214,9 +215,17 @@ def _launched_effect(ran: LaunchOutcome) -> CommandEffect:
     CommandKind.START_CHECKIN,
 )
 async def relaunched(replaying: Replaying[Any]) -> StartAnswer:
-    """Every launch kind's retry: what its first act's ack recorded, arm by arm where it asked a
-    head-to-head, watching no exit (another act owns them)."""
-    launches = _recorded_launches(replaying.end.effect)
+    """Every launch kind's retry: each job its first act's ack recorded, read live as
+    `read_command` reads them (the cycle a queued mint took since that ack included), as the ack
+    recorded them once a record is reaped; arm by arm where it asked a head-to-head, watching no
+    exit (another act owns them)."""
+    recorded = _recorded_launches(replaying.end.effect)
+    live = await asyncio.to_thread(
+        replaying.jobs.launched_by,
+        [launch.job_id for launch in recorded],
+        principal_id=acting_principal(replaying.stores.identity).id,
+    )
+    launches = recorded if live is None else [LaunchedJob.of(job) for job in live]
     match replaying.payload:
         case MintHeadToHeadPayload(head_to_head=request):
             return head_to_head_answer(request, launches)

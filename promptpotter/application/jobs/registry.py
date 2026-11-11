@@ -380,8 +380,12 @@ class JobRegistry:
         out.sort(key=lambda j: (j.created_at, j.job_id))
         return out
 
+    def in_flight(self, job: Job) -> bool:
+        """Unreleased, its producer alive: what every live listing reads, and the daily quota."""
+        return not job.released and not self._orphaned(job)
+
     def _live(self, wanted: Callable[[Job], bool], *, user_id: str | None) -> list[Job]:
-        return [j for j in self.list_all(user_id=user_id) if wanted(j) and not self._orphaned(j)]
+        return [j for j in self.list_all(user_id=user_id) if wanted(j) and self.in_flight(j)]
 
     def running_job_for(self, workspace: WorkspaceDir, hop: CycleHop) -> Job | None:
         """The RUN holding *hop*, however started: a scoring pass on it bills no ceiling of the cycle's."""
