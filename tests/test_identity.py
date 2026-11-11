@@ -1250,7 +1250,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     for name in ("twin", "solo", "miscarded"):
         with pytest.raises(SlugTakenError):
             write_own(name)
-        assert not tiered.tenant_datasets.slug_exists(name), f"a write landed over {name}"
+        assert not tiered.tenant_datasets.dataset_dir(name).exists(), f"a write landed over {name}"
     for name in ("mine", "mine", "carded"):
         write_own(name)
         assert resolve_dataset(tiered, name).tier == "yours", f"a re-write of {name} was refused"
@@ -3217,7 +3217,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
                     inline=Inline(),
                 )
             )
-        assert not built_stores.tenant_datasets.slug_exists(uploaded.slug), (
+        assert not built_stores.tenant_datasets.dataset_dir(uploaded.slug).exists(), (
             f"the {attempt} refused Start committed its dataset"
         )
     # A name the install gained since the draft claimed it is refused at Start, leaving nothing
@@ -3239,7 +3239,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
                 inline=Inline(),
             )
         )
-    assert not built_stores.tenant_datasets.slug_exists("email-tagging"), (
+    assert not built_stores.tenant_datasets.dataset_dir("email-tagging").exists(), (
         "a Start landed an account's definition over the install's"
     )
     assert built_stores.tenant_datasets.held_version("email-tagging") == held_before, (

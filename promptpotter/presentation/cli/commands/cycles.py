@@ -49,10 +49,9 @@ def cycles_human(
             continue
         for course in campaign.children:
             lines.append(_line(course, active=course.address == active))
-            lines.append("    " + " · ".join(said_text(r) for r in course.figures))
             if (climb := course.climb) is not None:
-                lines.append("    " + " · ".join(said_text(r) for r in climb.rates))
-                lines.append(f"    {said_text(climb.note)}")
+                lines.append(f"    {said_text(climb)}")
+            lines.append("    " + " · ".join(said_text(r) for r in course.figures))
             lines.extend(f"    {said_text(r)}" for r in course.lines)
             if (said := course.said) is not None:
                 lines.append(f"    {said.tone}: {said_text(said)}")

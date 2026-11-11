@@ -23,7 +23,7 @@ from promptpotter.application.commands.dispatcher import (
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.startability import offered_dataset
-from promptpotter.application.jobs.launcher.admission import release_slot, withdraw_queued
+from promptpotter.application.jobs.launcher.admission import withdraw_queued
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.head_to_head import (
     AdmittedHeadToHead,
@@ -37,6 +37,7 @@ from promptpotter.application.jobs.launcher.launch import (
     Admitted,
     Inline,
     Launched,
+    LaunchOutcome,
     admit,
     launch,
 )
@@ -197,7 +198,12 @@ def _launch_applier(
             raise RejectedError(refusal)
         return await run()
 
-    return Applier(_run, effect_fn=lambda ran: LaunchedEffect(launches=[ran.launch]))
+    return Applier(_run, effect_fn=_launched_effect)
+
+
+def _launched_effect(ran: LaunchOutcome) -> CommandEffect:
+    """Every launch kind's ack: each job its act launched or admitted."""
+    return LaunchedEffect(launches=ran.as_launches())
 
 
 @replays(
@@ -370,7 +376,7 @@ async def _launch_fork(
                 _leave_parent(dispatcher, cut)
         except BaseException as exc:
             if held is not None:
-                release_slot(job_registry, held.job_id, exc, stores=stores, hop=None)
+                held.start.release(exc)
             cut.withdraw(stores)
             raise
         return held
@@ -429,7 +435,7 @@ async def mint_head_to_head(
         )
         return await admitted.launched()
 
-    return Applier(_act, effect_fn=lambda ran: LaunchedEffect(launches=ran.launches))
+    return Applier(_act, effect_fn=_launched_effect)
 
 
 # A Start's answer: its admission, launched once its mint closes; or, answering a retry, the
@@ -464,18 +470,6 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
             holder=CampaignLaunch(source.opened.draft.dataset_name, draft_id=claim.draft_id),
         )
 
-    def _launches(answer: StartAnswer) -> CommandEffect:
-        match answer:
-            case Admitted(job=job):
-                launches = [LaunchedJob.of(job)]
-            case AdmittedHeadToHead(admitted=admitted):
-                launches = [LaunchedJob.of(job) for job, _ in admitted]
-            case Launched(launch=launch):
-                launches = [launch]
-            case HeadToHeadLaunched(launches=launched):
-                launches = list(launched)
-        return LaunchedEffect(launches=launches)
-
     def _withdraw(answer: StartAnswer, exc: BaseException) -> None:
         if isinstance(answer, Admitted | AdmittedHeadToHead):
             answer.withdraw(exc)
@@ -487,7 +481,16 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
         request = start.head_to_head
         return await _admit() if request is None else await _admit_arms(request)
 
-    return Applier(_run, effect_fn=_launches, ack="accepted", rides=_withdraw)
+    return Applier(_run, effect_fn=_launched_effect, ack="accepted", rides=_withdraw)
+
+
+async def launched(result: object) -> Launched | HeadToHeadLaunched:
+    """A launch kind's act carried past its ack: a Start's admission, minted and launched, as
+    every door that waits on the launch takes it."""
+    if isinstance(result, Admitted | AdmittedHeadToHead):
+        return await result.launched()
+    assert isinstance(result, Launched | HeadToHeadLaunched), "a launch kind answers its launch"
+    return result
 
 
 async def dispatch_start_checkin(
@@ -499,7 +502,4 @@ async def dispatch_start_checkin(
 ) -> Launched | HeadToHeadLaunched:
     """Acked at admission, before the mint moves the draft's ledger into the root cycle."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry, inline=inline)
-    answer = (await dispatcher.answer(start_checkin, call)).result
-    if isinstance(answer, Launched | HeadToHeadLaunched):
-        return answer
-    return await answer.launched()
+    return await launched((await dispatcher.answer(start_checkin, call)).result)

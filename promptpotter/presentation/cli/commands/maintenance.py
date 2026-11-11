@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.embedded_run import compact_archive
+from promptpotter.application.commands import archive_compaction
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.maintenance.archive_maintenance import (
     ArchiveInventory,
     ArchiveReport,
     inventory_measurement_archive,
 )
+from promptpotter.domain.command_kinds import CompactArchivePayload
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
+from promptpotter.shared.errors import PayloadInvalidError
 
 _MB = 1024 * 1024
 
@@ -78,7 +81,13 @@ async def cmd_compact_archive(args: argparse.Namespace) -> CommandResult:
             data=inventory.model_dump(mode="json"),
             human=_render_inventory(inventory, dataset=dataset),
         )
-    report = await compact_archive(stores, mode=mode, dataset=dataset, apply=apply)
+    payload = PayloadInvalidError.validating(
+        CompactArchivePayload, {"mode": mode, "dataset": dataset, "apply": apply}
+    )
+    sent = await CommandDispatcher(stores).answer(
+        archive_compaction.compact_archive, CommandCall(payload)
+    )
+    report = sent.result
     return CommandResult(
         data=report.model_dump(mode="json"), human=_render(mode, report, dataset=dataset)
     )

@@ -74,13 +74,13 @@ The loop-mint verbs. The flag set is `presentation/cli/commands/verbs.py` and wh
 
 ## 5b. Embedded launch entry (Python)
 
-Every name `application/embedded_run.py`'s `__all__` exports (`run_head_to_head` mints a head-to-head's arms in one act) — signatures there. What a host cannot read off a signature:
+Every name `application/embedded_run.py`'s `__all__` exports (`run_head_to_head` mints a head-to-head's arms in one act) — signatures there; every other verb (a gate decision, arms, `pause`, `cancel`, a bench grade, a compaction) is a command the host files as every door does: `CommandDispatcher(stores).dispatch(CommandCall(payload))`, or `.answer(handler, call)` to read its typed result. What a host cannot read off a signature:
 
 - **Two steps because every caller works between them**: the mint is the same `mint_framed_cycle` prologue `new` and the web mint run, so the cycle is resumable, forkable and diagnosable by the §5 verbs; the session `run_campaign` answers is bound to the cycle the run ended on, a fork included.
 - **`campaign_config` is what a MINT declares** — required on a fresh session, refused on one bound to a cycle.
 - **A run measures the session's bank and nothing else**; `rows` hands the host's samples in as it. `program` rides the backend client as `InProcessWorkload.program` (§1).
 - **`budget`** is `domain/spend.py::Budget`, admitted through the one admission every launch takes; `mode` is `domain/run_mode.py::RunMode`.
-- **`origin_gate` defaults to `strict` and a host has no TTY**: `run_campaign` blocks at round 0 until `submit_gate_decision` answers from another task, or the knob is off. Under `arm_gate` `review` / `author` every round blocks until `submit_arms` answers.
+- **`origin_gate` defaults to `strict` and a host has no TTY**: `run_campaign` blocks at round 0 until an `origin-gate` command answers from another task, or the knob is off. Under `arm_gate` `review` / `author` every round blocks until a `submit-arms` command answers.
 - The readout lands in the cycle's `readout.log` whatever the host passes; `readout_sink=print` shows it as written.
 
 Nothing on this path imports a server: `pip install promptpotter` is the engine, `[api]` adds the API and the dashboard. `with_optimization(load_dataset_campaign_config(path), {…})` (`application/datasets/authored.py`) shapes a dataset's `campaign` for one launch: a sparse `optimization` mapping merged before validation, so an unknown knob raises — the same call a web mint, a check-in and the terminal make.

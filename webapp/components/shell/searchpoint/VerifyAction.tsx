@@ -9,7 +9,6 @@ import {
   type CommandResponses,
 } from "@/lib/api/types";
 import { wordKeys } from "@/lib/api/words";
-import { VERIFY_PASS_POLL_MS } from "@/lib/cadence";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
 import { filled, unitCount } from "@/lib/format";
@@ -41,7 +40,7 @@ export function VerifyAction({
   path: CyclePath | null;
 }) {
   const cmd = useCommand<"verify-candidate">("verify-candidate");
-  const stop = useCommand<"cancel">("cancel", { revalidate: false });
+  const stop = useCommand<"cancel">("cancel");
   const [acting, setActing] = useState<string | null>(null);
   const [strategy, setStrategy] = useState<VerifyStrategy>("random");
   const [samples, setSamples] = useState("");
@@ -52,7 +51,7 @@ export function VerifyAction({
     setSaturated(null);
   }
   const sending = cmd.pending !== null;
-  const { readings, passes, unit } = useVerify(path, sending ? VERIFY_PASS_POLL_MS : null);
+  const { readings, passes, unit } = useVerify(path);
 
   if (!path || !candidate.label) return null;
 

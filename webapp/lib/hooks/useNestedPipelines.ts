@@ -2,7 +2,7 @@
 
 import { datasetPipelineRead, failureKind, operatorMessage } from "@/lib/api";
 import { reportIncident } from "@/lib/diagnostics";
-import { readThrough, type ReadDescriptor, type ReadResult } from "@/lib/read-cache";
+import { heldRead, readThrough, type ReadDescriptor, type ReadResult } from "@/lib/read-cache";
 import { useRead } from "./useRead";
 import type {
   DatasetPipelineResponse,
@@ -95,7 +95,7 @@ function nestedPipelinesRead(roots: NestedPipelineRef[]): ReadDescriptor<NestedP
           schema: resp.node_config_schema,
           reach: resp.reach,
           nestsNode: resp.nests[0]?.node ?? null,
-          read: { status: "ready", data: resp },
+          read: heldRead(resp),
         });
         const below = new Set(above).add(ref.dataset);
         queue.push(...resp.nests.map((r) => ({ ref: r, parent: key, depth: depth + 1, above: below })));

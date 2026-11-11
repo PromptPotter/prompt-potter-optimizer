@@ -141,7 +141,7 @@ def _render_hard_samples(view: HardSamplesView | None) -> list[str]:
 
 
 def _selection(standing: RunStanding | None) -> str:
-    return "nothing selected" if standing is None else standing.selection_line
+    return "nothing selected" if standing is None else standing.lead_line
 
 
 def _spent(spent: LedgerSpend) -> str:

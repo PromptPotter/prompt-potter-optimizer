@@ -10,7 +10,7 @@ import type {
 } from "@/lib/api/types";
 import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
 import { useCheckinDraft } from "@/lib/state/ingest-flow";
-import type { ReadResult } from "@/lib/read-cache";
+import { heldRead, type ReadResult } from "@/lib/read-cache";
 import { useWorkspace } from "@/lib/workspace";
 
 // The registered backends beside the one the viewed pipeline runs on.
@@ -50,7 +50,7 @@ export function useConnector(): ReadResult<CampaignPipelineResponse> {
   const served = useCampaignPipeline(draft ? null : (viewed?.leaf.campaignId ?? null), useLeafSubject());
   // A viewed check-in's draft (`resolve_pipeline_for_draft`) is a second transport of the same answer, never a second source.
   return useMemo(
-    () => (draft ? { status: "ready", data: draft.pipeline } : served),
+    () => (draft ? heldRead(draft.pipeline) : served),
     [draft, served],
   );
 }

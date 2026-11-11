@@ -1,17 +1,16 @@
 import { useCallback, useMemo } from "react";
 import { failurePasses } from "./api/client";
-import { dashboardRead, earlierStepsRead, onViewedPhaseChange, stepsRead } from "./api/reads";
-import { DASHBOARD_LIVE_POLL_MS, RECONNECT_POLL_MS } from "./cadence";
-import { phaseIs } from "./derivations/run-phase";
+import { dashboardRead, earlierStepsRead, stepsRead } from "./api/reads";
 import { encodeCyclePath, type CyclePath } from "./ids";
 import type {
   HierarchyStep,
   HierarchySteps,
   Said,
   ServedDashboard,
+  WarmingDashboard,
 } from "@/lib/api/types";
 import { shownData, useRead } from "./hooks/useRead";
-import { invalidateReads, type ReadFailure, type ReadResult } from "./read-cache";
+import { reaskRead, type ReadFailure, type ReadResult } from "./read-cache";
 import { seedScoringMask } from "./scoring-mask";
 import { createModuleStore } from "./state/module-store";
 import { useMomentAt, useWorkspace } from "./workspace";
@@ -62,22 +61,14 @@ interface DashboardPoll {
   isLive: boolean;
 }
 
-// A cycle's dashboard poll: every caller naming one unit and moment shares one read, at the most
-// eager caller's `intervalMs` (null reads once). Every caller of the viewed cycle's carries its
-// phase re-ask, so the read's change effect is that whoever subscribed last
-// (`read-cache.ts::descriptorOf`).
-export function useDashboard(path: CyclePath | null, intervalMs: number | null): DashboardPoll {
-  const { reportAddressGone, viewed } = useWorkspace();
+// A cycle's dashboard: every caller naming one unit and moment shares one read, re-asked when the
+// feed says its store moved.
+export function useDashboard(path: CyclePath | null): DashboardPoll {
+  const { reportAddressGone } = useWorkspace();
   const at = useMomentAt(path);
-  const unit = path ? encodeCyclePath(path) : null;
-  const isViewed = unit !== null && unit === viewed?.address;
-  const read = useRead(
+  const read = useRead<ServedDashboard, ServedDashboard | WarmingDashboard>(
     path
-      ? {
-          ...dashboardRead(path, at, intervalMs),
-          ...(isViewed ? { onChange: onViewedPhaseChange } : {}),
-          onGone: () => reportAddressGone(encodeCyclePath(path)),
-        }
+      ? { ...dashboardRead(path, at), onGone: () => reportAddressGone(encodeCyclePath(path)) }
       : null,
   );
   const gone = read.status === "failed" && read.failure.kind === "gone";
@@ -86,18 +77,11 @@ export function useDashboard(path: CyclePath | null, intervalMs: number | null):
   return useMemo(() => ({ read, dash, isLive }), [read, dash, isLive]);
 }
 
-// The viewed cycle's beat, for its dashboard and the steps beside it: a replayed moment, or a
-// lost read, polls slow, since a fold at a past offset is immutable.
-export function viewedIntervalMs(at: number | null, lost: boolean): number {
-  return at !== null || lost ? RECONNECT_POLL_MS : DASHBOARD_LIVE_POLL_MS;
-}
-
 // The viewed cycle's dashboard, and the one place its scoring mask is seeded from: keyed on the
-// address whose dashboard it read, so an inner run drilled into seeds its own criterion. A lost
-// read slows on the cache's own floor (`read-cache.ts::intervalOf`).
+// address whose dashboard it read, so an inner run drilled into seeds its own criterion.
 export function useViewedDashboard(): DashboardPoll {
-  const { viewed, at } = useWorkspace();
-  const poll = useDashboard(viewed?.path ?? null, viewedIntervalMs(at, false));
+  const { viewed } = useWorkspace();
+  const poll = useDashboard(viewed?.path ?? null);
   if (viewed !== null && poll.dash !== null) seedScoringMask(viewed.address, poll.dash);
   return poll;
 }
@@ -120,33 +104,29 @@ interface TimeRay {
   loadOlder: () => void;
 }
 
-// The viewed course's steps: a head window on its dashboard's beat, then pages asked one by one. A
-// settled run's steps move only on a resume, whose phase change re-asks them
-// (`reads.ts::onViewedPhaseChange`).
+// The viewed course's steps: a head window the feed moves, then pages asked one by one.
 export function useTimeRay(): TimeRay {
-  const { viewed, at } = useWorkspace();
+  const { viewed } = useWorkspace();
   const path = viewed?.path ?? null;
-  const { read: board, dash } = useViewedDashboard();
-  const lost = board.status === "failed" && board.failure.kind !== "gone";
-  const intervalMs = phaseIs(dash?.run_phase, "settled") ? null : viewedIntervalMs(at, lost);
   const unit = viewed?.address ?? null;
-  const head = useRead(path ? stepsRead(path, RAY_WINDOW, null, intervalMs) : null);
+  const head = useRead(path ? stepsRead(path, RAY_WINDOW, null) : null);
   const headWindow = shownData(head);
   const paged = paging.useStore();
   const own = paged.unit === unit && paged.anchor !== null ? paged : null;
-  const earlier = useRead(
-    path && own?.anchor ? earlierStepsRead(path, RAY_WINDOW, own.anchor, own.pages) : null,
-  );
+  const earlierAsk = path && own?.anchor ? earlierStepsRead(path, RAY_WINDOW, own.anchor, own.pages) : null;
+  const earlier = useRead(earlierAsk);
+  const earlierId = earlierAsk?.id ?? null;
   const earlierWindow = shownData(earlier);
   const cursor = own ? (earlierWindow?.cursor_prev ?? null) : (headWindow?.cursor_prev ?? null);
   const earlierStatus = earlier.status;
   const loadOlder = useCallback(() => {
     // The same pages asked again re-ask the read; one more page names a new one.
-    if (earlierStatus === "failed") invalidateReads("earlier-steps");
-    else if (earlierStatus === "loading" || cursor === null) return;
+    if (earlierStatus === "failed") {
+      if (earlierId !== null) reaskRead(earlierId);
+    } else if (earlierStatus === "loading" || cursor === null) return;
     else if (own) paging.set({ pages: own.pages + 1 });
     else paging.set({ unit, anchor: cursor, pages: 1 });
-  }, [earlierStatus, cursor, own, unit]);
+  }, [earlierStatus, earlierId, cursor, own, unit]);
 
   const earlierSteps = earlierWindow?.steps;
   const headSteps = headWindow?.steps;

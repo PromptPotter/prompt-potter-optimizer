@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Any, assert_never
 
 from promptpotter.application.jobs.launcher.admission import (
+    RunStart,
     refuse_as_busy,
-    release_slot,
     request_jobs,
 )
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, hold_checkin_start
@@ -21,7 +21,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import CampaignLaunch, Job
+from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import LaunchedJob
 from promptpotter.infrastructure.store.stores import Stores
@@ -40,54 +40,60 @@ class Inline:
     no_wait: bool = False
 
 
+class LaunchOutcome:
+    """What a launch kind's act answers in process; every door serves it as a `LaunchAnswer`."""
+
+    __slots__ = ()
+
+    def as_launches(self) -> list[LaunchedJob]:
+        """Each job it launched, as its ack records them."""
+        raise NotImplementedError
+
+
 @dataclass(frozen=True, slots=True)
-class Launched:
+class Launched(LaunchOutcome):
     """What the launch answers, as its ack records it; ``held`` is ``None`` where the run goes to
     its own process."""
 
     launch: LaunchedJob
     held: HeldRun | None
 
+    def as_launches(self) -> list[LaunchedJob]:
+        return [self.launch]
 
-async def _hold(
-    request: LaunchRequest, *, stores: Stores, job_registry: JobRegistry, job: Job
-) -> HeldRun:
+
+async def _hold(request: LaunchRequest, start: RunStart) -> HeldRun:
     match request:
         case FreshMint():
-            return await hold_fresh_mint(request, stores=stores, job_registry=job_registry, job=job)
+            return await hold_fresh_mint(request, start)
         case ExistingCycle():
-            return await hold_existing_cycle(
-                request, stores=stores, job_registry=job_registry, job=job
-            )
+            return await hold_existing_cycle(request, start)
         case CheckinStart():
-            return await hold_checkin_start(
-                request, stores=stores, job_registry=job_registry, job=job
-            )
+            return await hold_checkin_start(request, start)
         case _:
             assert_never(request)
 
 
 @dataclass(frozen=True, slots=True)
-class Admitted:
+class Admitted(LaunchOutcome):
     """A job holding its slot or its place in the queue; nothing of its cycle is written yet."""
 
-    job: Job
+    start: RunStart
     request: LaunchRequest
     mode: RunMode
-    stores: Stores
-    job_registry: JobRegistry
     inline: Inline | None
+
+    def as_launches(self) -> list[LaunchedJob]:
+        return [LaunchedJob.of(self.start.job)]
 
     def withdraw(self, exc: BaseException) -> None:
         """Its slot given back, where the act that admitted it raised before any run held it."""
-        logger.warning("admitted launch %s withdrawn unrun: %s", self.job.job_id, exc)
-        release_slot(self.job_registry, self.job.job_id, exc, stores=self.stores, hop=None)
+        logger.warning("admitted launch %s withdrawn unrun: %s", self.start.job_id, exc)
+        self.start.release(exc)
 
     async def held(self) -> HeldRun:
         """Its run held: past the queue, the money admission and the cycle's session."""
-        return await _hold(
-            self.request, stores=self.stores, job_registry=self.job_registry, job=self.job
-        )
+        return await _hold(self.request, self.start)
 
     async def launched(self) -> Launched:
         return await self.hand_over(self.held())
@@ -95,7 +101,7 @@ class Admitted:
     async def hand_over(self, holding: Coroutine[Any, Any, HeldRun]) -> Launched:
         """*holding* — `held`, or a held step that acts once the run is held (a fork's cut on its
         parent) — awaited where the run goes: inline, detached, or in the queue's own task."""
-        job = self.job
+        job = self.start.job
         if self.inline is not None:
             held = await holding
             return Launched(LaunchedJob.of(job, held.session.hop), held)
@@ -138,7 +144,7 @@ def admit(
             next((i for i, q in enumerate(order, 1) if q.job_id == job.job_id), 1),
             "?" if oldest is None else oldest.what,
         )
-    return Admitted(job, request, mode, stores, job_registry, inline)
+    return Admitted(RunStart(stores, job_registry, job), request, mode, inline)
 
 
 async def launch(

@@ -65,7 +65,7 @@ from promptpotter.application.bench.resume_and_fork.replayers import replay_deci
 from promptpotter.application.bench.resume_and_fork.resume import resume_with_divergence_check
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import parse_cycle_seed
-from promptpotter.application.cycle_reads import open_family_ray
+from promptpotter.application.cycle_reads import feed_versions, open_family_ray
 from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.hierarchy_subtree import (
     hierarchy_subtree,
@@ -1238,7 +1238,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     async def past_its_refusals(admitted: Admitted) -> Any:
         # The journey asks what the held fork does to its parent, not what holds it.
-        return SimpleNamespace(job_id=admitted.job.job_id, session=admitted.request)
+        return SimpleNamespace(start=admitted.start, session=admitted.request)
 
     monkeypatch.setattr(Admitted, "held", past_its_refusals)
     asyncio.run(
@@ -1390,6 +1390,8 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     ], "the campaign's bench is not its line's"
     # The bench chip grades archive rows, so a regrade at rest must answer the next ask with a body.
     validator = subtree_version(stores, listed.address)
+    feed_jobs = JobRegistry(tmp_path / "feed_jobs", capacity=lambda _live: 1)
+    fed = feed_versions(stores, feed_jobs)["store:"]
     filed(
         stores.archive,
         [archive_row("q_regraded", predicted="p")],
@@ -1397,6 +1399,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     assert subtree_version(stores, listed.address) != validator, (
         "an archive write left the subtree's validator standing: its BENCH chip goes stale behind a 304"
+    )
+    assert feed_versions(stores, feed_jobs)["store:"] != fed, (
+        "the feed left the store standing on an archive write: no browser re-asks the BENCH chip"
     )
     picked = line_course.facts.standing.selection
     assert picked is not None, "guard"

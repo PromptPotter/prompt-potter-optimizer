@@ -12,7 +12,7 @@ export function BenchGradeAction() {
   const status = useViewedCourse()?.facts.bench?.status ?? null;
   const scope = viewed?.address ?? null;
   const cmd = useCommand<"grade-bench">("grade-bench", { scope });
-  const stop = useCommand<"cancel">("cancel", { revalidate: false, scope });
+  const stop = useCommand<"cancel">("cancel", { scope });
   const [acting, setActing] = useState<string | null>(null);
   if (!viewed || !status?.offered) return null;
   const grading = cmd.pending !== null || status.refusal === "in_flight";

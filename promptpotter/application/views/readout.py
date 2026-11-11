@@ -578,6 +578,10 @@ class ReadoutProjection(Projection):
             )
         self._write("")
         self._write(_node_top(f"ROUND {rn} SUMMARY{elapsed_label}"))
+        standing = round_result.run_standing
+        if (climb := standing.climb) is not None:
+            self._write(_node_line(climb.line))
+            self._write(_node_line(f"  {standing.score_line}"))
         table = render_progress_table([self._closed[n] for n in sorted(self._closed)], series)
         for line in table.split("\n"):
             self._write(line)
@@ -614,11 +618,9 @@ class ReadoutProjection(Projection):
                     self._write(line)
         for fact in (f for f in round_result.optimizer_facts if f.kind == "stat"):
             self._write(_node_line(f"{fact.label}: {fact.text}"))
-        if (climb := round_result.run_standing.climb) is not None:
-            self._write(_node_line(f"climb vs origin: {climb.line}"))
         for line in render_patience_status(
             round_result.overlap.advance,
-            round_result.run_standing.rounds_without_advance,
+            standing.rounds_without_advance,
             self.patience,
         ).split("\n"):
             self._write(line)

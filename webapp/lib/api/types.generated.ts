@@ -314,7 +314,9 @@ export interface MachineRefusal {
 }
 
 /** A command read afresh off the account's log: where it stands, in the words of
- * its task status, at the address the dispatcher resolved and filed it on. */
+ * its task status, at the address the dispatcher resolved and filed it on; a
+ * launch's jobs, each at the cycle it holds now (``None`` for a command
+ * launching none). */
 export interface CommandReading {
   command_id: string;
   kind: string;
@@ -323,6 +325,16 @@ export interface CommandReading {
   said: string;
   created_at: string;
   last_updated_at: string;
+  launches: LaunchedJob[] | null;
+}
+
+/** What a launch answers of one job it launched: the job, the cycle it holds or
+ * will (``None`` where a queued mint names none yet) and the words every
+ * surface names it by. */
+export interface LaunchedJob {
+  job_id: string;
+  hop: CycleHop | null;
+  what: string;
 }
 
 /** The optimizers this install can run, the default first: one per manifest the
@@ -622,8 +634,12 @@ export interface HierarchyCourse {
   span: HierarchySpan;
   level: 'course';
   facts: CourseFacts;
-  /** Null until the lift vs origin is read. */
-  climb: CourseClimb | null;
+  /** The lead line (`RunStanding.climb`): the selection's lift vs origin and vs
+   * parent, then per search dollar, per candidate tested and in worked time
+   * per unit. Its detail is what they all read in: the measurand and, under
+   * an ability election, that rounds are won on θ. Null until the lift vs
+   * origin is read. */
+  climb: Said | null;
   /** The run's pinned line from what no clock reads (`run_said`): a producer's row
    * is its dashboard's alone. Null where nothing needs the operator. */
   said: Said | null;
@@ -687,6 +703,9 @@ export interface RunStanding {
    * reading of that pair. The state says why where there is none:
    * `same_individual` while the selection is the origin. */
   vs_origin: PairedReading;
+  /** `selection` over its parent, as its electing round read it
+   * (`ArmFit.vs_reference`). Null while the selection is the origin. */
+  vs_parent: PairedReading | null;
   /** Rounds closed AFTER the origin — the unit a rounds cap counts. */
   rounds_closed: number;
   /** Of those, how many PROMOTED an arm. A bare point estimate (lift > 0, no
@@ -1022,16 +1041,6 @@ export interface OwnLevel {
   n: number;
 }
 
-/** What the lift vs origin cost, and the one caveat it and its rates share. */
-export interface CourseClimb {
-  /** Per search dollar, per candidate tested and in worked time per unit of lift,
-   * in that order; each sub names only its own denominator. */
-  rates: Figure[];
-  /** What the lift and every rate read in: the measurand and, under an ability
-   * election, that rounds are won on θ. Said once, under the rates. */
-  note: Said;
-}
-
 /** An open check-in, listed as a campaign: no Start has minted it, so it has no
  * cycle, course, line or run. Its `address` is the draft id Start mints from
  * and `discard-draft` deletes. */
@@ -1185,8 +1194,12 @@ export interface SubtreeCourse {
   span: HierarchySpan;
   level: 'course';
   facts: SubtreeCourseFacts;
-  /** Null until the lift vs origin is read. */
-  climb: CourseClimb | null;
+  /** The lead line (`RunStanding.climb`): the selection's lift vs origin and vs
+   * parent, then per search dollar, per candidate tested and in worked time
+   * per unit. Its detail is what they all read in: the measurand and, under
+   * an ability election, that rounds are won on θ. Null until the lift vs
+   * origin is read. */
+  climb: Said | null;
   /** The run's pinned line from what no clock reads (`run_said`): a producer's row
    * is its dashboard's alone. Null where nothing needs the operator. */
   said: Said | null;
@@ -4563,25 +4576,11 @@ export interface OriginEntry {
   created_at: string;
 }
 
-/** What a Start answers: the job holding its slot, and the cycle it minted. */
-export interface StartCheckinResponse {
-  job_id: string;
-  /** Null while the job is queued: the campaign is minted once it holds a slot. */
-  hop: CycleHop | null;
-}
-
-/** What a head-to-head's act answers, and its retry under the same key: each
- * arm's job and the root cycle it minted. Arms never queue, so every hop is
- * resolved. */
-export interface HeadToHeadStarted {
-  head_to_head_id: string;
-  arms: ArmStarted[];
-}
-
-export interface ArmStarted {
-  arm_key: string;
-  job_id: string;
-  hop: CycleHop;
+/** One subject moved: re-ask every read that names it. A hint, never the body. */
+export interface FeedFrame {
+  /** `account`, `machine`, or `store:` and a store's hops. */
+  subject: string;
+  version: string;
 }
 
 /** What a command whose applied form answers nothing returns: the record it
@@ -4593,6 +4592,14 @@ export interface CommandAcceptedBody {
    * `draft:<id>` for a draft, else its campaign or cycle as a subject spells
    * it (`campaign:<id>`, `course:<id>/<cycle>`, `;in=` its sandbox chain). */
   subject: string;
+}
+
+/** What every door answers of a launch, a retry under its key included: the
+ * command it filed, which its task and its `cancel` name, and each job it
+ * launched, in launch order (a head-to-head's in its arms' order). */
+export interface LaunchAnswer {
+  command_id: string;
+  launches: LaunchedJob[];
 }
 
 /** The pass is the fact, the reading a cache of one grading of it; ``reading`` is
@@ -5333,11 +5340,11 @@ export interface CommandResponses {
   "delete-cycle": CommandAcceptedBody;
   "discard-draft": CommandAcceptedBody;
   "edit-draft-campaign": DraftCampaignWire;
-  "fork-cycle": CommandAcceptedBody;
+  "fork-cycle": LaunchAnswer;
   "grade-bench": BenchScore;
-  "head-to-head": HeadToHeadStarted;
+  "head-to-head": LaunchAnswer;
   "ingest-upload": DraftCampaignWire;
-  "mint-campaign": CommandAcceptedBody;
+  "mint-campaign": LaunchAnswer;
   "open-dataset-draft": DraftCampaignWire;
   "open-origin-draft": DraftCampaignWire;
   "origin-gate": CommandAcceptedBody;
@@ -5351,12 +5358,53 @@ export interface CommandResponses {
   "set-sample-lookahead": CommandAcceptedBody;
   "set-user-settings": UserSettings;
   "skip-searchpoint": CommandAcceptedBody;
-  "start-checkin": StartCheckinResponse | HeadToHeadStarted;
-  "start-run": CommandAcceptedBody;
+  "start-checkin": LaunchAnswer;
+  "start-run": LaunchAnswer;
   "submit-arms": CommandAcceptedBody;
   "unarchive-campaign": CommandAcceptedBody;
   "verify-candidate": VerificationGradedView | VerifySaturated;
 }
+
+// Each read's route (application/read_params.py::ReadParams.route): a URL fills it, never spells it.
+export const READ_ROUTES = {
+  "active-session": "/sessions/active",
+  "activity": "/auth/activity",
+  "backend-health": "/backends/{backend_id}/health",
+  "backends": "/backends",
+  "campaign-pipeline": "/campaigns/{campaign_id}/pipeline",
+  "campaign-storage": "/campaigns/{campaign_id}/storage",
+  "command": "/commands/{command_id}",
+  "config-map": "/campaigns/{campaign_id}/config-map",
+  "coupon": "/auth/coupon",
+  "cycle-dashboard": "/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard",
+  "cycle-events": "/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe",
+  "cycle-export": "/campaigns/{campaign_id}/cycles/{cycle_id}/export",
+  "cycle-file": "/campaigns/{campaign_id}/cycles/{cycle_id}/file",
+  "cycle-files": "/campaigns/{campaign_id}/cycles/{cycle_id}/files",
+  "cycle-round": "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
+  "cycle-round-audit": "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}/audit",
+  "dataset-cell": "/datasets/{name:path}/cells/{answer}",
+  "dataset-cells": "/datasets/{name:path}/cells",
+  "dataset-pipeline": "/datasets/{name:path}/pipeline",
+  "datasets": "/datasets",
+  "draft": "/drafts/{draft_id}",
+  "evidence": "/evidence",
+  "feed": "/feed",
+  "fork-preview": "/campaigns/{campaign_id}/fork-preview",
+  "head-to-head-price": "/head-to-head/price",
+  "hierarchy": "/hierarchy",
+  "hierarchy-steps": "/hierarchy/{address:path}/@",
+  "hierarchy-subtree": "/hierarchy/{address:path}",
+  "library": "/library",
+  "machine-status": "/machine-status",
+  "me": "/auth/me",
+  "optimizers": "/optimizers",
+  "origins": "/origins",
+  "quota-status": "/auth/quota-status",
+  "user-settings": "/auth/user-settings",
+  "workspace-storage": "/workspace/storage",
+} as const;
+export type ReadKind = keyof typeof READ_ROUTES;
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

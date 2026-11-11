@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
-from pydantic import Field, JsonValue
+from pydantic import JsonValue
 
 from promptpotter.application.datasets.authored import with_optimization
 from promptpotter.application.datasets.draft_campaign import owned_draft
@@ -14,12 +14,8 @@ from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.free_tier import free_fence
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.coupon import Send
-from promptpotter.application.jobs.launcher.admission import (
-    admit_and_hold,
-    release_slot,
-)
+from promptpotter.application.jobs.launcher.admission import RunStart, admit_and_hold
 from promptpotter.application.jobs.launcher.mint_and_start import (
-    LaunchError,
     assert_origin_ready,
     commit_upload_definition,
     land_and_claim,
@@ -50,27 +46,15 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.dataset_access import claim_own_definition, tenant_dataset
+from promptpotter.infrastructure.store.dataset_access import claim_own_definition, own_definition
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.job import Job
 
 logger = logging.getLogger(__name__)
-
-
-class StartCheckinResponse(StrictModel):
-    """What a Start answers: the job holding its slot, and the cycle it minted."""
-
-    job_id: str
-    hop: CycleHop | None = Field(
-        description="Null while the job is queued: the campaign is minted once it holds a slot."
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,15 +112,14 @@ def _land_draft(
             else None
         )
     source = upload_source(draft, basis)
-    # The writer's own claim, asked before the mint's refusals: a held name is refused as itself.
-    claim_own_definition(stores, draft.slug, new=False)
-    datasets = stores.tenant_datasets
-    if datasets.slug_exists(draft.slug) and definition_source(
-        tenant_dataset(draft.slug, datasets.dataset_dir(draft.slug))
-    ) != Source.of(source):
-        raise LaunchError(
-            f"slug collision at start: {draft.slug!r} already exists in this tenant's collection"
-        )
+    # The writer's own claim, asked before the mint's refusals: a held name is refused as itself,
+    # and one the account holds is new to this upload unless its own earlier landing wrote it.
+    own = own_definition(stores, draft.slug)
+    claim_own_definition(
+        stores,
+        draft.slug,
+        new=own is not None and definition_source(own) != Source.of(source),
+    )
     rows = cut_bank(stores, source)
     for overlay in overlays:
         config = with_optimization(pipeline.config, overlay)
@@ -201,22 +184,20 @@ async def _commit_checkin(stores: Stores, request: CheckinStart) -> MintedCycle:
     return minted
 
 
-async def hold_checkin_start(
-    request: CheckinStart, *, stores: Stores, job_registry: JobRegistry, job: Job
-) -> HeldRun:
+async def hold_checkin_start(request: CheckinStart, start: RunStart) -> HeldRun:
     """Nothing before the slot is HELD touches the draft, and the claim ends with this Start however it ends."""
     hop: CycleHop | None = None
     try:
-        held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
-        minted = await _commit_checkin(stores, request)
+        held = await admit_and_hold(request, start)
+        minted = await _commit_checkin(start.stores, request)
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
-        land_and_claim(stores, job_registry, job.job_id, hop, held)
+        land_and_claim(start, hop, held)
         logger.info(
-            "start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id
+            "start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, start.job_id
         )
-        return HeldRun.of(job_registry, job.job_id, minted, held)
+        return HeldRun.of(start, minted, held)
     except BaseException as exc:
-        release_slot(job_registry, job.job_id, exc, stores=stores, hop=hop)
+        start.release(exc, stamps=hop)
         raise
     finally:
         request.claim.release()

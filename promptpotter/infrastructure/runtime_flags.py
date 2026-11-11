@@ -3,9 +3,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import (
     GateKind,
     LaunchStage,
@@ -17,7 +15,6 @@ from promptpotter.domain.phases import (
     RunState,
 )
 from promptpotter.domain.run_records import RunPhaseRecord, StandingBudgetRecord
-from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.producer_lock import cycle_held, held, pass_held
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -27,15 +24,9 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_progress,
 )
 from promptpotter.infrastructure.store.command_log import Controls
-from promptpotter.infrastructure.store.layout import (
-    CampaignLayout,
-    CycleLayout,
-    campaign_cycles_dir,
-)
+from promptpotter.infrastructure.store.io import newest_mtime_ns
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerSpan
-
-if TYPE_CHECKING:
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 def effective_lookahead(requested: int, ceiling: int) -> int:
@@ -183,47 +174,18 @@ def producer_attached(cycle_dir: Path) -> bool:
     return derive_run_state(cycle_dir, Controls()).producer.attached
 
 
-def _mtime_ns(path: Path) -> int | None:
-    try:
-        return path.stat().st_mtime_ns
-    except OSError:
-        return None
-
-
 def run_state_stamps(cycle_dir: Path) -> tuple[int | None, ...]:
     """What moves `derive_run_state`, in ns: the files it reads and two edges no write marks."""
     layout = CycleLayout(cycle_dir)
     edge = _beat_stale_after(cycle_dir)
     claim = scan_launch_claim(layout.ledger)
     return (
-        _mtime_ns(layout.cycle_dir),
+        newest_mtime_ns(layout.cycle_dir),
         # The producer lock: a directory's mtime sees a child's create AND unlink.
-        _mtime_ns(layout.runtime),
-        _mtime_ns(layout.ledger),
+        newest_mtime_ns(layout.runtime),
+        newest_mtime_ns(layout.ledger),
         # A pass that dies writes nothing: past this edge its served mark reads its process gone.
         None if edge is None or time.time() < edge else int(edge * 1e9),
         # A live claim ends with its process, which no write marks: it never 304s.
         time.time_ns() if claim is not None and held(Path(claim.claimant_lock)) else None,
     )
-
-
-def run_phase_validator_epoch(stores: Stores, hop: CycleHop) -> float | None:
-    """Stats only, no parse: this is the 2 s poll's 304 path."""
-    campaign = CampaignLayout(stores.campaigns.campaign_root_dir(hop.campaign_id))
-    cycles = campaign_cycles_dir(campaign.campaign_dir)
-    # The campaign's metered spend is served too: every cycle's ledger, and a deleted one's tombstone.
-    siblings = (
-        [CycleLayout(sibling).ledger for sibling in cycles.iterdir()] if cycles.is_dir() else []
-    )
-    tombstones = CycleEventLog.workspace_path(stores.campaigns.workspace)
-    stamps = [
-        stamp
-        for stamp in (
-            *run_state_stamps(stores.campaigns.cycle_dir(hop)),
-            # A filed control moves its own cycle's reads, never the log's other subjects'.
-            stores.commands.book().stamp(stores.subject(hop)),
-            *map(_mtime_ns, (campaign.manifest, cycles, *siblings, tombstones)),
-        )
-        if stamp is not None
-    ]
-    return max(stamps) / 1e9 if stamps else None

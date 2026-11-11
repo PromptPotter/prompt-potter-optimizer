@@ -1194,3 +1194,4 @@ class ReadKind(StrEnum):
     DATASET_CELLS = "dataset-cells"
     DATASET_CELL = "dataset-cell"
     ORIGINS = "origins"
+    FEED = "feed"

@@ -41,7 +41,6 @@ from promptpotter.domain.hierarchy import (
     CANDIDATE_STANDING_INFO,
     CampaignFacts,
     CandidateStanding,
-    CourseClimb,
     CourseFacts,
     CourseKind,
     CourseSpawn,
@@ -148,19 +147,16 @@ def _lift_row(key: FigureKey, label: str, pair: PairedReading, against: str) -> 
     )
 
 
-def _course_climb(facts: CourseFacts) -> CourseClimb | None:
+def _course_climb(facts: CourseFacts) -> Said | None:
     climb = None if facts.standing is None else facts.standing.climb
     if climb is None:
         return None
     theta = ["rounds are won on θ"] if facts.elects_on == "ability" else []
-    return CourseClimb(
-        rates=[
-            _figure(rate.key, rate.label, "—" if rate.value is None else rate.value, rate.sub)
-            for rate in climb.rates
-        ],
-        note=Said(
-            key="climb_note", tone="quiet", label=" · ".join([f"lift in {climb.measurand}", *theta])
-        ),
+    return Said(
+        key="climb",
+        tone="quiet",
+        label=climb.line,
+        detail=" · ".join([f"lift in {climb.measurand}", *theta]),
     )
 
 

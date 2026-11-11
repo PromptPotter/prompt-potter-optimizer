@@ -113,33 +113,15 @@ export type Conditional<T> =
   // No validator on purpose: a caller storing a proxy-stripped `null` would go unconditional forever.
   | { kind: "not_modified" };
 
-async function jgetWithValidator<T>(
+export async function jgetIfNoneMatch<T>(
   url: string,
-  requestHeader: "If-Modified-Since" | "If-None-Match",
-  responseHeader: "Last-Modified" | "ETag",
   validator?: string | null,
   signal?: AbortSignal,
 ): Promise<Conditional<T>> {
   const headers: Record<string, string> = {};
-  if (validator) headers[requestHeader] = validator;
+  if (validator) headers["If-None-Match"] = validator;
   const r = await send(url, { headers, signal: signal ?? null });
   if (r.status === 304) return { kind: "not_modified" };
   if (!r.ok) throw await toApiError(r);
-  return { kind: "ok", data: (await r.json()) as T, validator: r.headers.get(responseHeader) };
-}
-
-export function jgetIfModified<T>(
-  url: string,
-  validator?: string | null,
-  signal?: AbortSignal,
-): Promise<Conditional<T>> {
-  return jgetWithValidator<T>(url, "If-Modified-Since", "Last-Modified", validator, signal);
-}
-
-export function jgetIfNoneMatch<T>(
-  url: string,
-  validator?: string | null,
-  signal?: AbortSignal,
-): Promise<Conditional<T>> {
-  return jgetWithValidator<T>(url, "If-None-Match", "ETag", validator, signal);
+  return { kind: "ok", data: (await r.json()) as T, validator: r.headers.get("ETag") };
 }

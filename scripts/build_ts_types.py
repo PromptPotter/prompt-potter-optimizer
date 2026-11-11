@@ -19,6 +19,7 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from promptpotter.application.initialization.wiring import complete_registries
+from promptpotter.application.read_params import PARAMS_FOR_READ
 from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.domain.campaign import LifecycleFilter
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
@@ -190,6 +191,17 @@ def _emit_lifecycle_filter() -> str:
     members = " | ".join(repr(m) for m in typing.get_args(LifecycleFilter.__value__))
     note = "`GET /hierarchy?lifecycle=` (domain/campaign.py::LifecycleFilter); absent = 'active'."
     return f"// {note}\nexport type LifecycleFilter = {members};"
+
+
+def _emit_read_routes() -> str:
+    rows = sorted((kind.value, model.route) for kind, model in PARAMS_FOR_READ.items())
+    body = "\n".join(f"  {json.dumps(kind)}: {json.dumps(route)}," for kind, route in rows)
+    return (
+        "// Each read's route (application/read_params.py::ReadParams.route): a URL fills it, never "
+        "spells it.\n"
+        f"export const READ_ROUTES = {{\n{body}\n}} as const;\n"
+        "export type ReadKind = keyof typeof READ_ROUTES;"
+    )
 
 
 def _emit_command_contract() -> str:
@@ -517,6 +529,7 @@ def main() -> int:
     blocks.append(_emit_lifecycle_filter())
     blocks.append(_emit_tones())
     blocks.append(command_contract)
+    blocks.append(_emit_read_routes())
     blocks.append(word_tables)
     blocks.append(_emit_served_words())
     blocks.append(_emit_live_windows())

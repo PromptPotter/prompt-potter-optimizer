@@ -10,7 +10,7 @@ const lensOfRead = (id: string) => new URL(id.split("\x1f")[1]!, "http://x").sea
 
 // The campaign tree the viewed address asks for under `state`, keyed off the mask alone.
 function treeFor(state: MaskState, address: string) {
-  return subtreeRead("a", treeMaskOf(state, address, lensOf(state.mask, []), null), null, null);
+  return subtreeRead("a", treeMaskOf(state, address, lensOf(state.mask, []), null), null);
 }
 
 describe("the viewed tree under an open mask panel", () => {

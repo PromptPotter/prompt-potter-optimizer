@@ -9,7 +9,7 @@ import { useShowCandidates } from "@/lib/prefs/tree";
 
 export function AccountPreferencesTab() {
   const read = useRead(userSettingsRead());
-  const cmd = useCommand<"user-settings">("preferences", { revalidate: ["user-settings"] });
+  const cmd = useCommand<"user-settings">("preferences");
 
   const toggle = (next: boolean) =>
     void cmd.run("user-settings", () => patchUserSettings({ demo_mode_enabled: next }));

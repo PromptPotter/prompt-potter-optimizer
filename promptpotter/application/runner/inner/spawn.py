@@ -9,7 +9,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.launcher.admission import inner_share
+from promptpotter.application.jobs.launcher.admission import slotless_share
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     declare,
@@ -43,6 +43,7 @@ from promptpotter.domain.arms import Cut, Measured
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import InnerRun
 from promptpotter.domain.l4.inner_facts import SeriesGap, series_reason_head
 from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
@@ -58,6 +59,7 @@ from promptpotter.domain.phases import REFUSAL_STOPS, StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import SpawnedBy
+from promptpotter.domain.spend import Budget
 from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts
 from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.store.io import write_text
@@ -510,11 +512,14 @@ async def _run_inner_campaign(
         observers = build_run_observers(session=session, campaign_config=config)
         try:
             # Each send is admitted by its own book AND the ROOT's; its share bounds every checkpoint.
-            _, result = await inner_share(
+            _, result = await slotless_share(
                 config,
                 stores=session.store,
-                dataset_name=cell.spec.inner_dataset,
+                holder=InnerRun(cell.spec.inner_dataset),
                 hop=session.hop,
+                requested=Budget(),
+                step_rounds=None,
+                sends=(),
                 run=lambda held: run_optimization(
                     opened.train_data,
                     opened.cycle,

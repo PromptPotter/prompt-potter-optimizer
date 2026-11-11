@@ -154,7 +154,7 @@ function PermissionsSection({ capabilities }: { capabilities: string[] }) {
 
 function SessionSection({ me }: { me: MeResponse }) {
   // Nothing polls the session; the navigation below is the read-back.
-  const cmd = useCommand<"logout">("account-session", { revalidate: false });
+  const cmd = useCommand<"logout">("account-session");
   const signOut = () =>
     void cmd.run("logout", postLogout, () => {
       window.location.href = "/login";

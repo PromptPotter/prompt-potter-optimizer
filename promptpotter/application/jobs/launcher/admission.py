@@ -5,6 +5,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn, assert_never
 
 from promptpotter import connectors
@@ -86,43 +87,62 @@ logger = logging.getLogger(__name__)
 type SharedRun[S] = Callable[[HeldBudget], Awaitable[tuple[S, CycleResult]]]
 
 
-def release_slot(
-    job_registry: JobRegistry,
-    job_id: str,
-    exc: BaseException,
-    *,
-    stores: Stores,
-    hop: CycleHop | None,
-) -> None:
-    """The cycle's stop is the job's release's reading of *exc*: a refused one is ``NOT_ADMITTED``."""
-    job = job_registry.release(job_id, exc)
-    stop_reason = StopReason.NOT_ADMITTED if job is None or job.ending is None else job.ending
-    # Best-effort — it must never mask *exc*.
-    try:
-        if hop is None:
-            if job is not None and job.hop != UNRESOLVED_HOP:
-                stores.campaigns.release_claim(job.hop, job_id=job_id, detail=str(exc))
-            return
-        stores.campaigns.declare_stop(
-            hop,
-            RunPhaseRecord.stop(
-                stop_reason,
-                cause=(
-                    PauseCause.CANCELLED
-                    if isinstance(exc, asyncio.CancelledError)
-                    else PauseCause.INTERRUPT
+@dataclass(frozen=True, slots=True)
+class RunStart:
+    """A run's slot, from its admission to its one release: every launch, arm and slotless share
+    holds one, and nothing else hands its job back."""
+
+    stores: Stores
+    job_registry: JobRegistry
+    job: Job
+
+    @property
+    def job_id(self) -> str:
+        return self.job.job_id
+
+    def release(
+        self, ended: CycleResult | BaseException | None = None, *, stamps: CycleHop | None = None
+    ) -> None:
+        """A raise is the cycle's stop on *stamps* (a refused one ``NOT_ADMITTED``), and off a
+        cycle the claim goes; a result is what the run returned; nothing, a pass that returned."""
+        match ended:
+            case BaseException():
+                self._fail(ended, stamps)
+            case None:
+                self.job_registry.release(self.job_id)
+            case _:
+                self.job_registry.release(self.job_id, ended.stop_reason, stepped=ended.stepped)
+
+    def _fail(self, exc: BaseException, stamps: CycleHop | None) -> None:
+        job = self.job_registry.release(self.job_id, exc)
+        stop_reason = StopReason.NOT_ADMITTED if job is None or job.ending is None else job.ending
+        stores = self.stores
+        # Best-effort — it must never mask *exc*.
+        try:
+            if stamps is None:
+                if job is not None and job.hop != UNRESOLVED_HOP:
+                    stores.campaigns.release_claim(job.hop, job_id=self.job_id, detail=str(exc))
+                return
+            stores.campaigns.declare_stop(
+                stamps,
+                RunPhaseRecord.stop(
+                    stop_reason,
+                    cause=(
+                        PauseCause.CANCELLED
+                        if isinstance(exc, asyncio.CancelledError)
+                        else PauseCause.INTERRUPT
+                    ),
+                    detail="the launch was interrupted before it held a run",
                 ),
-                detail="the launch was interrupted before it held a run",
-            ),
-            error=(
-                None
-                if stop_reason_outcome(stop_reason) is StopOutcome.PAUSED
-                else ErrorRecord.raised(exc, kind="launch_failed", stop_reason=stop_reason)
-            ),
-        )
-        stores.void_inbox(hop)
-    except Exception:
-        logger.exception("failed to record launch stop for job %s", job_id)
+                error=(
+                    None
+                    if stop_reason_outcome(stop_reason) is StopOutcome.PAUSED
+                    else ErrorRecord.raised(exc, kind="launch_failed", stop_reason=stop_reason)
+                ),
+            )
+            stores.void_inbox(stamps)
+        except Exception:
+            logger.exception("failed to record launch stop for job %s", self.job_id)
 
 
 async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingExtraError | None:
@@ -239,10 +259,9 @@ def withdraw_queued(stores: Stores, job_registry: JobRegistry, job_id: str) -> b
     return True
 
 
-async def admit_and_hold(
-    request: LaunchRequest, *, stores: Stores, job_registry: JobRegistry, job: Job
-) -> HeldBudget:
+async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
     """The request's config is resolved IN here, after the queue wait, so the budget admitted is the one the run starts under."""
+    stores, job_registry, job = start.stores, start.job_registry, start.job
     # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
     hop = None if request.hop == UNRESOLVED_HOP else request.hop
     if job.queued:
@@ -355,7 +374,7 @@ def admit_arms(
     holder: CampaignLaunch | EmbeddedRun,
 ) -> list[tuple[Job, HeldBudget]]:
     """Every arm's job and share, each at its budget and sends, or none, under one gate. An
-    embedded host holds no slot (`embedded_share`)."""
+    embedded host holds no slot (`slotless_share`)."""
     with job_registry.admission_gate():
         jobs: list[Job] = []
         try:
@@ -379,7 +398,7 @@ def admit_arms(
         except BaseException as exc:
             # Inside the gate, so no admission between reads the arms a refusal takes back.
             for refused in jobs:
-                release_slot(job_registry, refused.job_id, exc, stores=stores, hop=None)
+                RunStart(stores, job_registry, refused).release(exc)
             raise
     return admitted
 
@@ -447,26 +466,36 @@ def open_spend_book(
     )
 
 
-async def embedded_share[S](
+async def slotless_share[S](
     config: CampaignConfig,
     *,
     stores: Stores,
-    dataset_name: str,
+    holder: EmbeddedRun | InnerRun,
     hop: CycleHop | None,
     requested: Budget,
     step_rounds: int | None,
     sends: tuple[Send, ...],
     run: SharedRun[S],
 ) -> tuple[S, CycleResult]:
-    """A launch's admission with no slot, taken BEFORE anything paid: the job, then its hold, then
-    *run* under it, whose result the job's release records."""
+    """A run's admission with no slot, taken BEFORE anything paid: the job, then its hold, then
+    *run* under it, whose result the job's release records. An inner run's share is of what the
+    enclosing run's book has left at its spawn."""
+    enclosing: Budget | None = None
+    if isinstance(holder, InnerRun):
+        if (book := bound_spend_book()) is None:
+            raise RuntimeError("an inner run spawns only under its enclosing run's book")
+        enclosing = book.money_left()
     job_registry = JobRegistry.attach(stores.jobs_dir)
-    job = job_registry.create(
-        user_id=str(stores.identity.user_id),
-        principal_id=acting_principal(stores.identity).id,
-        workspace=stores.campaigns.workspace,
-        hop=UNRESOLVED_HOP if hop is None else hop,
-        holder=EmbeddedRun(dataset_name),
+    start = RunStart(
+        stores,
+        job_registry,
+        job_registry.create(
+            user_id=str(stores.identity.user_id),
+            principal_id=acting_principal(stores.identity).id,
+            workspace=stores.campaigns.workspace,
+            hop=UNRESOLVED_HOP if hop is None else hop,
+            holder=holder,
+        ),
     )
     try:
         declared, asked = declare_run_budget(
@@ -478,57 +507,18 @@ async def embedded_share[S](
             asked,
             stores=stores,
             job_registry=job_registry,
-            job=job,
+            job=start.job,
             hop=hop,
             step_rounds=step_rounds,
             sends=sends,
+            enclosing=enclosing,
         )
-        job_registry.mark_started(job.job_id)
+        job_registry.mark_started(start.job_id)
         ran = await run(held)
     except BaseException as exc:
-        job_registry.release(job.job_id, exc)
+        start.release(exc)
         raise
-    job_registry.release(job.job_id, ran[1].stop_reason, stepped=ran[1].stepped)
-    return ran
-
-
-async def inner_share[S](
-    config: CampaignConfig, *, stores: Stores, dataset_name: str, hop: CycleHop, run: SharedRun[S]
-) -> tuple[S, CycleResult]:
-    """An L4 inner campaign's share, of what the enclosing run's book has left at its spawn, and
-    *run* under it, whose result the job's release records."""
-    enclosing = bound_spend_book()
-    if enclosing is None:
-        raise RuntimeError("an inner run spawns only under its enclosing run's book")
-    job_registry = JobRegistry.attach(stores.jobs_dir)
-    job = job_registry.create(
-        user_id=str(stores.identity.user_id),
-        principal_id=acting_principal(stores.identity).id,
-        workspace=stores.campaigns.workspace,
-        hop=hop,
-        holder=InnerRun(dataset_name),
-    )
-    try:
-        declared, asked = declare_run_budget(
-            config.optimization.budget, stores=stores, hop=hop, requested=Budget()
-        )
-        held = admit_and_share(
-            declared,
-            asked,
-            stores=stores,
-            job_registry=job_registry,
-            job=job,
-            hop=hop,
-            step_rounds=None,
-            sends=(),
-            enclosing=enclosing.money_left(),
-        )
-        job_registry.mark_started(job.job_id)
-        ran = await run(held)
-    except BaseException as exc:
-        job_registry.release(job.job_id, exc)
-        raise
-    job_registry.release(job.job_id, ran[1].stop_reason, stepped=ran[1].stepped)
+    start.release(ran[1])
     return ran
 
 

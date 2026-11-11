@@ -18,7 +18,7 @@ import functools
 import inspect
 import json
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from typing import Any, cast, get_origin
 from urllib.parse import quote, unquote
@@ -42,8 +42,7 @@ from promptpotter.application.commands.dispatcher import (
     command_answer,
     kept_answer,
 )
-from promptpotter.application.jobs.launcher.head_to_head import AdmittedHeadToHead
-from promptpotter.application.jobs.launcher.launch import Admitted
+from promptpotter.application.commands.launching import launched
 from promptpotter.application.jobs.quota import refuse_request_rate
 from promptpotter.application.read_params import (
     PARAMS_FOR_READ,
@@ -61,6 +60,7 @@ from promptpotter.domain.command_kinds import (
     ReadKind,
 )
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
+from promptpotter.domain.run_records import LaunchAnswer
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import (
     ConflictError,
@@ -234,12 +234,6 @@ class HostTask(FrozenModel):
         )
 
 
-async def _launched(result: object) -> None:
-    """An admission's launch, awaited, so the jobs its command names are launched."""
-    if isinstance(result, Admitted | AdmittedHeadToHead):
-        await result.launched()
-
-
 @dataclass(frozen=True, slots=True)
 class HostAnswer:
     """What a tool call answers: a JSON value, or the task tracking it."""
@@ -363,7 +357,7 @@ class HostSession:
         self.caller = caller
         # Each act this session opened, held to its end so it is never collected mid-act: what a
         # result waits on in this process. Its status and its answer are its command's, on the log.
-        self._acting: dict[str, asyncio.Task[str]] = {}
+        self._acting: dict[str, asyncio.Task[object]] = {}
 
     async def answer[A](self, request: HostRequest[A]) -> A:
         refuse_request_rate(self.caller.stores.identity, read=request.reads)
@@ -379,29 +373,23 @@ class HostSession:
         if tool.as_task:
             return HostAnswer(task=HostTask.of(await self._open(sent)))
         outcome = await self._dispatcher().dispatch(sent)
-        return HostAnswer(_jsonable(outcome.accepted if tool.answers() is None else outcome.result))
+        return HostAnswer(_jsonable(outcome.answer))
 
     async def _open(self, sent: CommandCall[CommandPayload]) -> CommandReading:
         """Its act runs on past the answer; the task answered is the command it filed, or the
-        first act's where the call was a retry. Refused before its filing, the call is refused."""
+        first act's where the call was a retry. A refusal before its filing is the call's answer,
+        and a launch's before its admission too: a launch's task opens on its admitted jobs."""
+        opened = await self._dispatcher().open(sent)
+        command_id = opened.accepted.command_id
+        act: Coroutine[Any, Any, object] = opened.act
+        if command_answer(sent.kind) is LaunchAnswer:
+            act = launched((await opened.act).result)
+        acting = asyncio.create_task(act)
+        self._acting[command_id] = acting
+        acting.add_done_callback(functools.partial(self._settled, command_id))
+        return await self._read(command_id)
 
-        async def _act() -> str:
-            outcome = await self._dispatcher().dispatch(sent)
-            await _launched(outcome.result)
-            return outcome.accepted.command_id
-
-        acting = asyncio.create_task(_act())
-        self._acting[sent.command_id] = acting
-        acting.add_done_callback(functools.partial(self._settled, sent.command_id))
-        log = self.caller.stores.commands
-        while await _off_loop(lambda: log.book().filing(sent.command_id) is None):
-            if acting.done():
-                # Answered as a retry of the first act, or refused before any filing.
-                return await self._read(await acting)
-            await asyncio.sleep(_FILED_POLL_S)
-        return await self._read(sent.command_id)
-
-    def _settled(self, command_id: str, acting: asyncio.Task[str]) -> None:
+    def _settled(self, command_id: str, acting: asyncio.Task[object]) -> None:
         """Its act ended: what it raised is on its command's end, taken here."""
         self._acting.pop(command_id, None)
         if not acting.cancelled():
@@ -431,6 +419,9 @@ class HostSession:
         if tool.answers() is None:
             accepted = CommandAcceptedBody(command_id=task_id, subject=read.subject)
             return tool.name, HostAnswer(_jsonable(accepted))
+        if read.launches is not None:
+            answer = LaunchAnswer(command_id=task_id, launches=read.launches)
+            return tool.name, HostAnswer(_jsonable(answer))
         assert owned.end is not None, "a terminal command has ended"
         assert isinstance(tool.kind, CommandKind), "a task is a command's"
         return tool.name, HostAnswer(_jsonable(kept_answer(tool.kind, owned.end)))
@@ -472,10 +463,8 @@ class HostSession:
         return template.compile_prompt(consultation_instruction=instruction)
 
 
-# How often a task's result re-reads its command where no act of this process runs it, and how
-# often an opening reads for its filing.
+# How often a task's result re-reads its command where no act of this process runs it.
 _SETTLE_POLL_S = 2.0
-_FILED_POLL_S = 0.05
 
 
 # Prompts: what a host is told to do, seeded from the bench's own check-in text.

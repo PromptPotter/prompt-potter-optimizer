@@ -99,7 +99,7 @@ logger = logging.getLogger(__name__)
 
 class QuotaExceededError(PotterError):
     """A user-scoped limit refused a request — 409, a state a retry does not change, as against
-    ``LaunchError``'s 422 for a malformed or unowned one. Only the throttle passes, so only it serves
+    ``PayloadInvalidError``'s 422 for a malformed or unowned request. Only the throttle passes, so only it serves
     429 (`RateLimitedError`). Both map to one HTTP response through the ``PotterError`` seam."""
 
     http_status = 409
@@ -114,7 +114,7 @@ _rate_buckets: dict[str, tuple[float, float]] = {}  # bucket key → (tokens, la
 _rate_lock = threading.Lock()
 
 # Sized above a person opening every tab in a row, each mount firing its reads at once
-# (`e2e/cold/first-run.spec.ts`'s tab sweep is the probe), then two tabs of `webapp/lib/cadence.ts`'s polls.
+# (`e2e/cold/first-run.spec.ts`'s tab sweep is the probe), then two tabs re-asking what the feed moved.
 _READ_BURST = 300.0
 _READ_PER_S = 20.0
 
@@ -168,7 +168,7 @@ def _slot_meter(stores: Stores, holder: JobHolder, hop: CycleHop) -> _Meter | No
             )
         case ScoringPass(verb=verb):
             return _verb_meter(stores, verb)
-        # Neither asks the slot door: an embedded run is a declared exemption (`embedded_share`).
+        # Neither asks the slot door: an embedded run is a declared exemption (`slotless_share`).
         case EmbeddedRun() | InnerRun():
             return None
         case _:
@@ -263,16 +263,26 @@ def check_launch_quotas(
         )
 
     if _new_campaign(stores, hop):
-        today = job_registry.list_launched_today(user_id=user.user_id)
-        if len(today) + launches > user.max_campaigns_per_day:
+        today = campaigns_today(job_registry, user.user_id)
+        if today + launches > user.max_campaigns_per_day:
             raise QuotaExceededError(
                 code="quota_exceeded",
                 message=(
                     f"Daily campaigns ceiling reached "
-                    f"({len(today)}/{user.max_campaigns_per_day} today{asking}); "
+                    f"({today}/{user.max_campaigns_per_day} today{asking}); "
                     f"resets at UTC midnight."
                 ),
             )
+
+
+def campaigns_today(job_registry: JobRegistry, user_id: str) -> int:
+    """The daily quota's count: a launch admitted or still in flight; a refused or withdrawn one
+    spent nothing."""
+    return sum(
+        1
+        for job in job_registry.list_launched_today(user_id=user_id)
+        if job.admitted or not job.released
+    )
 
 
 def overrun(face: Budget, spent: UserSpend) -> Budget:
@@ -472,7 +482,7 @@ def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
         max_concurrent_cycles_writable=concurrent_cycles_writable(stores),
         ceiling=ceiling,
         bound=SlotBound.MACHINE if user.max_concurrent_cycles > ceiling else None,
-        campaigns_today=len(job_registry.list_launched_today(user_id=user.user_id)),
+        campaigns_today=campaigns_today(job_registry, user.user_id),
         max_campaigns_per_day=user.max_campaigns_per_day,
     )
 

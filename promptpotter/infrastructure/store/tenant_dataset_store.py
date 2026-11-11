@@ -91,12 +91,6 @@ class TenantDatasetStore:
             out.append(name)
         return out
 
-    def slug_exists(self, slug: str) -> bool:
-        try:
-            return self.dataset_dir(slug).is_dir()
-        except ValueError:
-            return False
-
     def _labels_path(self) -> Path:
         return self._base_dir / BANKS_DIR / LABELS_FILE
 

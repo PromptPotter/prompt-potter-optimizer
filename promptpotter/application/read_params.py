@@ -38,6 +38,7 @@ from promptpotter.application.cycle_reads import (
     ViewedCycle,
     cycle_event_frames,
     export_cycle,
+    feed_frames,
     open_family_ray,
     round_audit,
     served_round,
@@ -428,7 +429,7 @@ class CycleDashboardParams(
 
     The ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one
     ``campaign::cycle`` hop at a time. A cycle with no declared wiring answers ``warming_up``, an
-    absent one is not found; over HTTP it honours ``If-Modified-Since`` with a 304. ``at`` is an
+    absent one is not found; over HTTP it honours ``If-None-Match`` with a 304. ``at`` is an
     offset in the LEAF cycle's own ledger, the moment a hierarchy step's ``facts.offset``
     carries: the state as of that line.
     """
@@ -518,6 +519,13 @@ class CycleEventsParams(
 
     def answer(self, caller: Caller) -> AsyncIterator[str]:
         return cycle_event_frames(self.viewed(caller.stores))
+
+
+class FeedParams(ReadParams, read=ReadKind.FEED, route="/feed"):
+    """What moved, over SSE: a ``FeedFrame`` hints a re-ask; each read's body is the truth."""
+
+    def answer(self, caller: Caller) -> AsyncIterator[str]:
+        return feed_frames(caller.stores, caller.jobs)
 
 
 class CycleFilesParams(

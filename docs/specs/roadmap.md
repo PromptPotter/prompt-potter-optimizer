@@ -15,12 +15,14 @@ header, then the operator asked about a release.
 1. **batch/21** — the docs trim and the ledger: w0, t-dev, t-docs, t-claude, t-skills.
 2. **batch/22** — tracing goes; every record kind is read by a roster fold; the landing at every
    process entry: stream, stream-b, land, reads, weba, visits.
-3. **batch/23** — one launch answer, one change feed, one narration: startb, feed, narr.
+3. **batch/23** — one launch answer at every door and `RunStart` owning the slot; one change feed, no
+   read on a clock; the climb on the selection, vs parent too, as the lead line: startb, feed, narr-c.
 4. **batch/24** — one stop door, the connector declares itself, the doors: stopb, conn, doors, tv.
 5. **batch/25** — run init as one module, one pass verb, served arm rows: init, passb, webb. The
    decision window opens.
 6. **batch/26** — every re-key: money, rk-opt and stream-rk on its tip (`RunCallbacks` and the
-   `declare_*` doors), rk-run, addr; then rk-dec; then rn-conn. The window closes.
+   `declare_*` doors), then narr (one narration, the typed phase act) on stream-rk's; rk-run, addr;
+   then rk-dec; then rn-conn. The window closes.
 7. **batch/27** — records and layout: rec, la, lw; md if the operator says so.
 8. **batch/28** — lb, then faults on its tip.
 9. **batch/29** — lite (LiteLLM out of core), xconn, mkey, then mcp on mkey's tip.

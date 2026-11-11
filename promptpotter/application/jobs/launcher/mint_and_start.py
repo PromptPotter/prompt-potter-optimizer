@@ -15,10 +15,10 @@ from promptpotter.application.datasets.origin_readiness import FieldGap, origin_
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.launcher.admission import (
+    RunStart,
     admit_and_hold,
     campaign_sends,
     claim_cycle,
-    release_slot,
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun, open_held_cycle
 from promptpotter.application.jobs.mint import (
@@ -27,16 +27,16 @@ from promptpotter.application.jobs.mint import (
     mint_framed_cycle,
 )
 from promptpotter.application.jobs.quota import land_job, sends_on
-from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import cycle_config, draft_declared
 from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, Job
+from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
+    own_definition,
     resolve_dataset,
     runnable_definition,
 )
@@ -47,10 +47,6 @@ if TYPE_CHECKING:
     from promptpotter.application.pipeline_resolve import DraftPipeline
 
 logger = logging.getLogger(__name__)
-
-
-class LaunchError(PayloadInvalidError):
-    """A mint-time failure: missing dataset, malformed config."""
 
 
 class OriginIncompleteError(PayloadInvalidError):
@@ -139,11 +135,10 @@ class ExistingCycle:
         return campaign_sends(stores, self.hop)
 
 
-def land_and_claim(
-    stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, held: HeldBudget
-) -> None:
+def land_and_claim(start: RunStart, hop: CycleHop, held: HeldBudget) -> None:
     """A job onto the cycle its hold just minted, the claim taken off the job as it stands now:
     promoted out of the queue, its stage the one the cycle reads."""
+    stores, job_registry, job_id = start.stores, start.job_registry, start.job_id
     land_job(stores, job_registry, job_id, hop, held.share)
     promoted = job_registry.get(job_id)
     if promoted is None:
@@ -151,15 +146,13 @@ def land_and_claim(
     claim_cycle(stores, job_registry, promoted, hop)
 
 
-async def hold_fresh_mint(
-    request: FreshMint, *, stores: Stores, job_registry: JobRegistry, job: Job
-) -> HeldRun:
+async def hold_fresh_mint(request: FreshMint, start: RunStart) -> HeldRun:
     """Admit, then session, then mint: nothing is written before admission, so a refusal leaves none."""
-    dataset_name = request.dataset_name
+    dataset_name, stores = request.dataset_name, start.stores
     # Bound only after the mint, so the failure path knows whether a cycle exists to stamp.
     hop: CycleHop | None = None
     try:
-        held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
+        held = await admit_and_hold(request, start)
 
         _t0 = time.perf_counter()
         session = await init_services(
@@ -177,17 +170,17 @@ async def hold_fresh_mint(
             task_text=request.task_text,
         )
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
-        land_and_claim(stores, job_registry, job.job_id, hop, held)
+        land_and_claim(start, hop, held)
         logger.info(
             "mint: minted %s/%s for user %s (job %s)",
             minted.campaign_id,
             minted.cycle_id,
             stores.identity.user_id,
-            job.job_id,
+            start.job_id,
         )
-        return HeldRun.of(job_registry, job.job_id, minted, held)
+        return HeldRun.of(start, minted, held)
     except BaseException as exc:
-        release_slot(job_registry, job.job_id, exc, stores=stores, hop=hop)
+        start.release(exc, stamps=hop)
         raise
 
 
@@ -215,26 +208,18 @@ def commit_upload_definition(
 
 def persist_origin_candidate_library(stores: Stores, slug: str, draft: DraftFile) -> None:
     """Tenant datasets only: a reopened repo benchmark is not ours to mutate."""
-    if draft.candidate_library and stores.tenant_datasets.slug_exists(slug):
+    if draft.candidate_library and own_definition(stores, slug) is not None:
         stores.tenant_datasets.write_candidate_library(slug, draft.candidate_library)
 
 
-async def hold_existing_cycle(
-    request: ExistingCycle, *, stores: Stores, job_registry: JobRegistry, job: Job
-) -> HeldRun:
-    campaign, hop = request.campaign, request.hop
+async def hold_existing_cycle(request: ExistingCycle, start: RunStart) -> HeldRun:
     try:
-        held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
-        session, cycle, optimizer = await open_held_cycle(stores, campaign, hop)
+        held = await admit_and_hold(request, start)
+        session, cycle, optimizer = await open_held_cycle(
+            start.stores, request.campaign, request.hop
+        )
     except BaseException as exc:
-        # `hop=None`: a refusal stamps nothing on the cycle, so it stays as resumable as it was.
-        release_slot(job_registry, job.job_id, exc, stores=stores, hop=None)
+        # Unstamped: a refusal writes nothing on the cycle, so it stays as resumable as it was.
+        start.release(exc)
         raise
-    return HeldRun(
-        job_registry=job_registry,
-        job_id=job.job_id,
-        session=session,
-        cycle=cycle,
-        budget=held,
-        optimizer=optimizer,
-    )
+    return HeldRun(start, session, cycle, held, optimizer)

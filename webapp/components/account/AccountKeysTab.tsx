@@ -23,7 +23,7 @@ export function AccountKeysTab() {
 type KeyVerb = "save-key" | "remove-key";
 
 export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
-  const cmd = useCommand<KeyVerb>("account-keys", { revalidate: ["coupon"] });
+  const cmd = useCommand<KeyVerb>("account-keys");
   const busy = cmd.pending !== null;
 
   const save = (provider: string, secret: string) =>

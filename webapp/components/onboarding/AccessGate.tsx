@@ -7,7 +7,7 @@ import { Button, Dialog } from "@/components/ui";
 
 export function AccessGate() {
   const { status, me } = useAuth();
-  const cmd = useCommand<"logout">("access-gate", { revalidate: false });
+  const cmd = useCommand<"logout">("access-gate");
 
   const open = status === "authed" && !!me && me.access_state === "blocked";
 

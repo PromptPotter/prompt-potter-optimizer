@@ -4,18 +4,16 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import { AuthProvider, useAuth } from "@/lib/state/auth";
-import { READ_BEAT_MS, RECONNECT_POLL_MS } from "@/lib/cadence";
+import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { clearIncidents } from "@/lib/diagnostics";
 import { useRead } from "@/lib/hooks/useRead";
-import { GONE_CONFIRM_LIMIT, clearReadCache, type ReadDescriptor } from "@/lib/read-cache";
+import { GONE_CONFIRM_LIMIT, clearReadCache, reaskRead, type ReadDescriptor } from "@/lib/read-cache";
 
 const wrapper = ({ children }: { children: ReactNode }) =>
   createElement(AuthProvider, null, children);
 
-const beat = () => act(() => vi.advanceTimersByTimeAsync(READ_BEAT_MS));
-// A missed address is re-asked on the cache's reconnect beat, whatever the read's own cadence.
+// A missed address is re-asked on the cache's reconnect beat.
 const reconnect = () => act(() => vi.advanceTimersByTimeAsync(RECONNECT_POLL_MS));
-const everyBeat = () => READ_BEAT_MS;
 
 describe("useRead — an address that stops existing", () => {
   beforeEach(() => {
@@ -41,7 +39,6 @@ describe("useRead — an address that stops existing", () => {
         calls += 1;
         throw new ApiError(404, "/gone");
       },
-      cadence: everyBeat,
       ...more,
     };
     return { read, calls: () => calls };
@@ -75,13 +72,14 @@ describe("useRead — an address that stops existing", () => {
     expect(onGone).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps polling a read whose ordinary empty answer is a 404", async () => {
+  it("answers a read whose ordinary empty answer is a 404, and never retries it", async () => {
     const onGone = vi.fn();
     const { read, calls } = gone({ expects: "gone", onGone });
-    renderHook(() => useRead(read), { wrapper });
+    const { result } = renderHook(() => useRead(read), { wrapper });
     await act(() => vi.advanceTimersByTimeAsync(0));
-    for (let i = 0; i < GONE_CONFIRM_LIMIT + 1; i++) await beat();
-    expect(calls()).toBe(GONE_CONFIRM_LIMIT + 2);
+    for (let i = 0; i < GONE_CONFIRM_LIMIT + 1; i++) await reconnect();
+    expect(calls()).toBe(1);
+    expect(result.current).toEqual({ status: "ready", data: null });
     expect(onGone).not.toHaveBeenCalled();
   });
 
@@ -95,13 +93,14 @@ describe("useRead — an address that stops existing", () => {
         if (calls === GONE_CONFIRM_LIMIT) return { kind: "ok", data: "here", validator: null };
         throw new ApiError(404, "/flaky");
       },
-      cadence: everyBeat,
       onGone,
     };
     renderHook(() => useRead(read), { wrapper });
     await act(() => vi.advanceTimersByTimeAsync(0));
-    // Misses reconnect on the slow beat; the answer polls on the read's own.
-    for (let i = 0; i < GONE_CONFIRM_LIMIT; i++) await reconnect();
+    // Misses reconnect on the slow beat; the answer rests until its subject moves.
+    for (let i = 1; i < GONE_CONFIRM_LIMIT; i++) await reconnect();
+    act(() => reaskRead(read.id));
+    await reconnect();
     // Two misses, an answer, two misses: never the limit running.
     expect(calls).toBe(GONE_CONFIRM_LIMIT + 2);
     expect(onGone).not.toHaveBeenCalled();

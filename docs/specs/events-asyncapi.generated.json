@@ -7499,6 +7499,17 @@
             "$ref": "#/components/schemas/PairedReading",
             "description": "`selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap reading of that pair. The state says why where there is none: `same_individual` while the selection is the origin."
           },
+          "vs_parent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairedReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`selection` over its parent, as its electing round read it (`ArmFit.vs_reference`). Null while the selection is the origin."
+          },
           "worked_s": {
             "anyOf": [
               {
@@ -7519,6 +7530,7 @@
           "parent",
           "changes",
           "vs_origin",
+          "vs_parent",
           "rounds_closed",
           "improved",
           "advanced",

@@ -88,7 +88,7 @@ export function PromptFieldsEditor({
   const { viewed, checkin } = useWorkspace();
   const campaignId = viewed?.root.campaignId ?? null;
   const experiment = campaignId ?? checkin?.draftId ?? null;
-  const bank = useCommand<"bank-snippet">("prompt-snippets", { revalidate: ["library"], scope: experiment });
+  const bank = useCommand<"bank-snippet">("prompt-snippets", { scope: experiment });
   const sent = useRef(new Set<string>());
   // Typed since the last bank, by field: framed until the served library holds it, and never in
   // another field.

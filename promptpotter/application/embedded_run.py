@@ -7,15 +7,10 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
-from promptpotter.application.commands import archive_compaction, measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.launcher.admission import (
-    embedded_share,
-    probe_backend,
-    release_slot,
-)
+from promptpotter.application.jobs.launcher.admission import probe_backend, slotless_share
 from promptpotter.application.jobs.launcher.head_to_head import DatasetArms, admit_head_to_head
 from promptpotter.application.jobs.launcher.run_job import run_held_job
 from promptpotter.application.jobs.mint import (
@@ -34,15 +29,6 @@ from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.campaign_config import effective_config
-from promptpotter.domain.command_kinds import (
-    CancelPayload,
-    CompactArchivePayload,
-    GradeBenchPayload,
-    OriginGateDecisionPayload,
-    PauseCyclePayload,
-    SubmitArmsPayload,
-    SubmittedArm,
-)
 from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.results import CycleResult
 from promptpotter.domain.sample import Bank
@@ -53,31 +39,24 @@ from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.domain.bench import BenchScore
     from promptpotter.domain.campaign import RunDeclaration
     from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
     from promptpotter.domain.command_kinds import HeadToHeadRequest
-    from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.domain.phases import GateDecision
     from promptpotter.domain.run_mode import RunMode
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.spend import Budget
     from promptpotter.infrastructure.store.stores import Stores
 
 # This module IS the embedded surface: a capability it does not name is one a host cannot find.
+# Every verb but the run is a command the host files through the dispatcher, as every door does.
 __all__ = [
-    "cancel",
-    "compact_archive",
-    "grade_bench",
+    "CommandCall",
+    "CommandDispatcher",
     "open_session",
-    "pause",
     "reindex_measurement_archive",
     "run_campaign",
     "run_head_to_head",
-    "submit_arms",
-    "submit_gate_decision",
 ]
 
 
@@ -109,82 +88,6 @@ async def open_session(
     bank = Bank.of(rows)
     stores.tenant_datasets.put_bank(bank)
     return replace(session, bank=bank)
-
-
-async def submit_gate_decision(stores: Stores, hop: CycleHop, decision: GateDecision) -> None:
-    """Answer a cycle holding at its origin gate.
-
-    Raises ``ConflictError`` where it is not holding: an early decision is refused, never kept.
-    """
-    await CommandDispatcher(stores).dispatch(
-        CommandCall(
-            OriginGateDecisionPayload(
-                campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, decision=decision
-            )
-        )
-    )
-
-
-async def submit_arms(
-    stores: Stores, hop: CycleHop, arms: Sequence[SubmittedArm], keep: Sequence[int] = ()
-) -> None:
-    """Answer a cycle holding for a round's arms: *arms* of the host's own, drafts kept by index.
-
-    Raises ``ConflictError`` where it is not holding, or where *keep* names no draft of the hold.
-    """
-    await CommandDispatcher(stores).dispatch(
-        CommandCall(
-            SubmitArmsPayload(
-                campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, arms=list(arms), keep=list(keep)
-            )
-        )
-    )
-
-
-async def pause(stores: Stores, hop: CycleHop, *, reason: str = "") -> None:
-    """Pause a running cycle at its next round boundary, as every other door's `pause`.
-
-    Raises ``ConflictError`` where no run holds it.
-    """
-    await CommandDispatcher(stores).dispatch(
-        CommandCall(
-            PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason=reason)
-        )
-    )
-
-
-async def cancel(stores: Stores, command_id: str) -> None:
-    """Stop a command still acting, by the id it was filed under (``grade_bench``'s
-    *command_id*); one that ended is left as it ended."""
-    await CommandDispatcher(stores).dispatch(
-        CommandCall(CancelPayload(command_id=command_id), f"cancel:{command_id}")
-    )
-
-
-async def grade_bench(
-    stores: Stores, campaign_id: str, *, command_id: str | None = None
-) -> BenchScore:
-    """Raises ``ConflictError`` where the served ``BenchStatus.refusal`` stands. *command_id* names
-    the pass for a ``cancel`` sent from another task."""
-    payload = GradeBenchPayload(campaign_id=campaign_id)
-    call = (
-        CommandCall(payload) if command_id is None else CommandCall(payload, command_id=command_id)
-    )
-    sent = await CommandDispatcher(stores).answer(measuring.grade_bench, call)
-    return sent.result
-
-
-async def compact_archive(
-    stores: Stores, *, mode: str, dataset: str | None = None, apply: bool = False
-) -> ArchiveReport:
-    """Raises what the dispatcher refuses the browser's and the terminal's compaction on."""
-    payload = PayloadInvalidError.validating(
-        CompactArchivePayload, {"mode": mode, "dataset": dataset, "apply": apply}
-    )
-    sent = await CommandDispatcher(stores).answer(
-        archive_compaction.compact_archive, CommandCall(payload)
-    )
-    return sent.result
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,10 +177,10 @@ async def run_campaign(
         )
 
     # Admitted BEFORE the mint, whose framing call is paid: a refusal leaves nothing written.
-    return await embedded_share(
+    return await slotless_share(
         campaign_config,
         stores=session.store,
-        dataset_name=session.measured_dataset,
+        holder=EmbeddedRun(session.measured_dataset),
         hop=session.hop if session.cycle_id else None,
         requested=budget,
         step_rounds=step_rounds,
@@ -319,8 +222,7 @@ async def run_head_to_head(
         held = arm.held
         try:
             result, _observers = await run_held_job(
-                job_registry,
-                held.job_id,
+                held.start,
                 held.session,
                 held.cycle,
                 mode=mode,
@@ -331,9 +233,7 @@ async def run_head_to_head(
         except BaseException as exc:
             # The arms not yet run hold their shares, and no other process would hand them back.
             for rest in arms[i + 1 :]:
-                release_slot(
-                    job_registry, rest.held.job_id, exc, stores=stores, hop=rest.held.session.hop
-                )
+                rest.held.start.release(exc, stamps=rest.held.session.hop)
             raise
         ran.append((arm.arm_key, held.session, result))
     return ran

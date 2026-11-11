@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Activity, useEffect, useRef, useState, type RefObject } from "react";
 import { Button, IconClose } from "@/components/ui";
 import type { FamilyId } from "@/lib/address";
 import { useWorkspace } from "@/lib/workspace";
@@ -10,19 +10,48 @@ const show = (family: FamilyId) => {
   if (v?.parentElement) v.parentElement.scrollTo({ left: v.offsetLeft - v.parentElement.offsetLeft });
 };
 
+// The columns the row shows, by one observer; null until it first answers, when every column shows.
+function useOnScreen(row: RefObject<HTMLDivElement | null>, columns: string): ReadonlySet<string> | null {
+  const [onScreen, setOnScreen] = useState<ReadonlySet<string> | null>(null);
+  useEffect(() => {
+    const el = row.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      (entries) =>
+        setOnScreen((prev) => {
+          const next = new Set(prev);
+          for (const { target, isIntersecting } of entries) {
+            const { family } = (target as HTMLElement).dataset;
+            if (family === undefined) continue;
+            if (isIntersecting) next.add(family);
+            else next.delete(family);
+          }
+          return next;
+        }),
+      { root: el },
+    );
+    for (const column of el.children) io.observe(column);
+    return () => io.disconnect();
+  }, [row, columns]);
+  return onScreen;
+}
+
 // Every open view is a column and its own scroller, newest first: a phone swipes between them, a wide
-// screen shows as many as fit. Past one, each column heads with its name and its close.
+// screen shows as many as fit. Past one, each column heads with its name and its close. A column off
+// screen keeps its state and reads nothing (`<Activity>`); swiped into, it re-asks what moved meanwhile.
 export function Views() {
   const { views, reveal, close } = useWorkspace();
   const columns = openColumns(views).reverse();
+  const row = useRef<HTMLDivElement>(null);
+  const onScreen = useOnScreen(row, columns.map((c) => c.family).join(" "));
   // Snapping holds the column it was on, so each `open` brings its view into view.
   useEffect(() => void (reveal && show(reveal.family)), [reveal]);
   return (
-    <div className="views">
+    <div className="views" ref={row}>
       {columns.map(({ family, key }) => {
         const { label, pane } = FAMILIES[family];
         return (
-          <div key={family} id={`view-${family}`} className="view">
+          <div key={family} id={`view-${family}`} data-family={family} className="view">
             {columns.length > 1 && (
               <div className="view-head">
                 <span>{label}</span>
@@ -31,13 +60,15 @@ export function Views() {
                 </Button>
               </div>
             )}
-            {family === "chat" ? (
-              pane!(key)
-            ) : (
-              <div className="content">
-                <div className="box-grid">{pane!(key)}</div>
-              </div>
-            )}
+            <Activity mode={onScreen === null || onScreen.has(family) ? "visible" : "hidden"}>
+              {family === "chat" ? (
+                pane!(key)
+              ) : (
+                <div className="content">
+                  <div className="box-grid">{pane!(key)}</div>
+                </div>
+              )}
+            </Activity>
           </div>
         );
       })}

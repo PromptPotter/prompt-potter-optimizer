@@ -53,14 +53,10 @@ import promptpotter
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.measuring import grade_bench
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.loaders import definition_source
-from promptpotter.application.embedded_run import (
-    grade_bench,
-    open_session,
-    run_campaign,
-    run_head_to_head,
-)
+from promptpotter.application.embedded_run import open_session, run_campaign, run_head_to_head
 from promptpotter.application.evidence.head_to_head import GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.initialization.wiring import complete_registries
@@ -92,6 +88,7 @@ from promptpotter.domain.command_events import WORKSPACE_SUBJECT, CommandRecord,
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     ForkCyclePayload,
+    GradeBenchPayload,
     HeadToHeadRequest,
     PauseCyclePayload,
 )
@@ -794,7 +791,8 @@ async def banked(
             raise SystemExit(f"offline run: a manual launch of {name} sent bench cells")
         if bench.status.state != "not_asked" or not bench.status.can_grade:
             raise SystemExit(f"offline run: a manual launch of {name} serves {bench}")
-        bench = await grade_bench(stores, session.hop.campaign_id)
+        call = CommandCall(GradeBenchPayload(campaign_id=session.hop.campaign_id))
+        bench = (await CommandDispatcher(stores).answer(grade_bench, call)).result
     decisions = extract(cycle, bench)
     decisions["harness"] = {
         "stop_reason": str(result.stop_reason),

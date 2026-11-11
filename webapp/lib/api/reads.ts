@@ -1,13 +1,6 @@
-import { API, InvalidInputError, jget, jgetIfModified, jgetIfNoneMatch, jpost, send, toApiError } from "./client";
+import { API, InvalidInputError, jget, jgetIfNoneMatch, jpost, send, toApiError } from "./client";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
-import {
-  ACTIVE_POINTER_POLL_MS,
-  CONNECTOR_HEALTH_POLL_MS,
-  DRAFT_POLL_MS,
-  MACHINE_STATUS_POLL_MS,
-  REGISTRY_POLL_MS,
-} from "../cadence";
-import { invalidateReads, readThrough, type CadenceState, type ReadDescriptor } from "../read-cache";
+import { readThrough, type ReadDescriptor } from "../read-cache";
 import type {
   ActiveSessionResponse,
   ActivityResponse,
@@ -27,6 +20,7 @@ import type {
   DraftReopenResponse,
   Cell,
   CellsResponse,
+  CommandReading,
   FileContentResponse,
   FilesResponse,
   ForkPreviewResponse,
@@ -52,8 +46,27 @@ import type {
   WorkspaceStorageResponse,
 } from "./types";
 
+import { READ_ROUTES, type ReadKind } from "./types";
+
 const SEP = "\x1f";
 const enc = encodeURIComponent;
+
+// The `{slot}` names a served route declares (`{name:path}` names `name`).
+type SlotsOf<R extends string> = R extends `${string}{${infer S}}${infer Rest}`
+  ? (S extends `${infer N}:path` ? N : S) | SlotsOf<Rest>
+  : never;
+
+// A read's URL: its served route with each slot filled, then its query; a slot it lacks fails to compile.
+function readUrl<K extends ReadKind>(
+  kind: K,
+  slots: Record<SlotsOf<(typeof READ_ROUTES)[K]>, string>,
+  query: URLSearchParams = new URLSearchParams(),
+): string {
+  const filled: Record<string, string> = slots;
+  const route = READ_ROUTES[kind].replace(/\{(\w+)(?::path)?\}/g, (_, slot: string) => enc(filled[slot]!));
+  const q = query.toString();
+  return `${API}${route}${q ? `?${q}` : ""}`;
+}
 
 function once<T>(name: string, url: string): ReadDescriptor<T> {
   return {
@@ -70,12 +83,21 @@ function byEtag<T>(name: string, url: string): ReadDescriptor<T> {
   };
 }
 
-// The interval whatever the read's state; null reads once.
-const every = (ms: number | null) => () => ms;
+// The feed's subjects (`FeedFrame.subject`), matched by prefix: what the account filed (`account`),
+// a store's campaigns, cycles and ledgers (`store:` and the hops above it; bare, every store), the
+// machine's slots. A read naming none reads once.
+const ACCOUNT = "account";
+const STORES = "store:";
+const MACHINE = "machine";
+
+// The store holding the path's leaf cycle: an inner run's moves are its sandbox's.
+function storeOf(path: CyclePath): string {
+  return `${STORES}${encodeCyclePath(path.slice(0, -1))}`;
+}
 
 // The tenant's LATEST launch, not the live set.
 export function activeRead(): ReadDescriptor<ActiveSessionResponse> {
-  return { ...once("active", `${API}/sessions/active`), auth: true, cadence: every(ACTIVE_POINTER_POLL_MS) };
+  return { ...once("active", readUrl("active-session", {})), auth: true, subject: STORES };
 }
 
 export function healthRead(): ReadDescriptor<HealthResponse> {
@@ -83,60 +105,54 @@ export function healthRead(): ReadDescriptor<HealthResponse> {
 }
 
 export function meRead(): ReadDescriptor<MeResponse> {
-  return once("me", `${API}/auth/me`);
+  return { ...once<MeResponse>("me", readUrl("me", {})), subject: ACCOUNT };
 }
 
 export function userSettingsRead(): ReadDescriptor<UserSettings> {
-  return once("user-settings", `${API}/auth/user-settings`);
+  return { ...once<UserSettings>("user-settings", readUrl("user-settings", {})), subject: ACCOUNT };
 }
 
 export function quotaRead(): ReadDescriptor<QuotaStatus> {
-  return { ...once<QuotaStatus>("quota", `${API}/auth/quota-status`), auth: true };
+  return { ...once<QuotaStatus>("quota", readUrl("quota-status", {})), auth: true, subject: STORES };
 }
 
-// The account's money: the host's allowance, what each wallet paid, and the keys it holds. No
-// poll: a moved bill on the listing re-asks it (`hierarchyRead`), as does a write naming it.
+// The account's money: the host's allowance, what each wallet paid, and the keys it holds; every
+// ledger's spend moves it.
 export function couponRead(): ReadDescriptor<CouponStatus> {
-  return { ...once<CouponStatus>("coupon", `${API}/auth/coupon`), auth: true };
+  return { ...once<CouponStatus>("coupon", readUrl("coupon", {})), auth: true, subject: STORES };
 }
 
-// The served fields the draft's cadence reads.
-type DraftStage = Pick<DraftReopenResponse, "start"> & {
-  draft: Pick<DraftReopenResponse["draft"], "raw_task_description">;
-};
-
-// The draft's cadence off the served stage the flow shows (`useIngestFlow`'s `land`). A draft past
-// its task and before Start is in review — a refused resolver turn's included — and re-reads
-// Start's refusal, which tracks the wallet. One awaiting its task, a held Start (the listing
-// follows it) and a write in flight on it rest: the write's answer re-asks it. A lost reopen is
-// re-asked on the cache's own beat.
-export function draftCadence({ body, writing }: CadenceState<DraftStage>): number | null {
-  if (writing || body === null) return null;
-  const review = body.start === null && body.draft.raw_task_description !== null;
-  return review ? DRAFT_POLL_MS : null;
-}
-
+// Start's refusal tracks the wallet, which every ledger moves.
 export function draftRead(draftId: string): ReadDescriptor<DraftReopenResponse> {
-  return { ...once<DraftReopenResponse>("draft", `${API}/drafts/${enc(draftId)}`), cadence: draftCadence };
+  return { ...once<DraftReopenResponse>("draft", readUrl("draft", { draft_id: draftId })), subject: STORES };
+}
+
+// A command as every door reads it: a queued launch's job names its cycle once a slot mints it, and
+// the minted run's appends move its store.
+export function commandRead(commandId: string): ReadDescriptor<CommandReading> {
+  return { ...once<CommandReading>("command", readUrl("command", { command_id: commandId })), auth: true, subject: STORES };
 }
 
 export function activityRead(
   window: ActivityWindow,
   groupBy: ActivityGroupBy,
 ): ReadDescriptor<ActivityResponse> {
-  return once("activity", `${API}/auth/activity?window=${enc(window)}&group_by=${enc(groupBy)}`);
+  return {
+    ...once<ActivityResponse>("activity", readUrl("activity", {}, new URLSearchParams({ window, group_by: groupBy }))),
+    subject: STORES,
+  };
 }
 
 export function datasetIndexRead(): ReadDescriptor<DatasetIndexResponse> {
-  return { ...once<DatasetIndexResponse>("datasets", `${API}/datasets`), auth: true };
+  return { ...once<DatasetIndexResponse>("datasets", readUrl("datasets", {})), auth: true, subject: ACCOUNT };
 }
 
 export function originsRead(): ReadDescriptor<OriginListResponse> {
-  return { ...once<OriginListResponse>("origins", `${API}/origins`), auth: true };
+  return { ...once<OriginListResponse>("origins", readUrl("origins", {})), auth: true, subject: STORES };
 }
 
 export function optimizerRosterRead(): ReadDescriptor<OptimizerRoster> {
-  return once("optimizer-roster", `${API}/optimizers`);
+  return once("optimizer-roster", readUrl("optimizers", {}));
 }
 
 // `at` takes the `Subject.parse` grammar (absent = campaign root); the server refuses a mask there.
@@ -144,47 +160,55 @@ export function campaignPipelineRead(
   campaignId: string,
   at: string | null,
 ): ReadDescriptor<CampaignPipelineResponse> {
-  const q = at ? `?at=${enc(at)}` : "";
-  return byEtag("campaign-pipeline", `${API}/campaigns/${enc(campaignId)}/pipeline${q}`);
+  const q = new URLSearchParams(at ? { at } : {});
+  // A filed edit moves it; a run's appends do not.
+  return { ...byEtag("campaign-pipeline", readUrl("campaign-pipeline", { campaign_id: campaignId }, q)), subject: ACCOUNT };
 }
 
 // One-shot: topology is bound into the cycle identity hash and never changes mid-loop.
 export function datasetPipelineRead(name: string): ReadDescriptor<DatasetPipelineResponse> {
-  return once("dataset-pipeline", `${API}/datasets/${enc(name)}/pipeline`);
+  return once("dataset-pipeline", readUrl("dataset-pipeline", { name }));
 }
 
 export function backendsRead(): ReadDescriptor<BackendResponse[]> {
-  return { ...once<BackendResponse[]>("backends", `${API}/backends`), auth: true };
+  return { ...once<BackendResponse[]>("backends", readUrl("backends", {})), auth: true };
 }
 
 export function backendHealthRead(backendId: string): ReadDescriptor<BackendHealthResponse> {
   return {
-    ...once<BackendHealthResponse>("backend-health", `${API}/backends/${enc(backendId)}/health`),
+    ...once<BackendHealthResponse>("backend-health", readUrl("backend-health", { backend_id: backendId })),
     auth: true,
-    cadence: every(CONNECTOR_HEALTH_POLL_MS),
+    subject: MACHINE,
   };
 }
 
 export function machineStatusRead(): ReadDescriptor<MachineStatusResponse> {
   return {
-    ...once<MachineStatusResponse>("machine-status", `${API}/machine-status`),
+    ...once<MachineStatusResponse>("machine-status", readUrl("machine-status", {})),
     auth: true,
-    cadence: every(MACHINE_STATUS_POLL_MS),
+    subject: MACHINE,
   };
 }
 
-export function cyclePathUrl(path: CyclePath, suffix: string): string {
+type CycleKind = Extract<ReadKind, `cycle-${string}`>;
+
+// A cycle read: the ROOT hop in the route, the hops under it as `descend`.
+export function cyclePathUrl<K extends CycleKind>(
+  kind: K,
+  path: CyclePath,
+  slots: Omit<Record<SlotsOf<(typeof READ_ROUTES)[K]>, string>, "campaign_id" | "cycle_id">,
+  query: Record<string, string> = {},
+): string {
   const root = pathRoot(path);
-  const base = `${API}/campaigns/${enc(root.campaignId)}/cycles/${enc(root.cycleId)}${suffix}`;
+  const params = new URLSearchParams(query);
   const descend = encodeDescend(path);
-  if (!descend) return base;
-  const sep = suffix.includes("?") ? "&" : "?";
-  return `${base}${sep}descend=${enc(descend)}`;
+  if (descend) params.set("descend", descend);
+  return readUrl(kind, { ...slots, campaign_id: root.campaignId, cycle_id: root.cycleId } as Record<SlotsOf<(typeof READ_ROUTES)[K]>, string>, params);
 }
 
 // One reading of the cycle per tier, serialized by the server for every surface.
 export function exportUrl(path: CyclePath, tier: ExportTier): string {
-  return cyclePathUrl(path, `/export?tier=${enc(tier)}`);
+  return cyclePathUrl("cycle-export", path, {}, { tier });
 }
 
 export async function exportText(path: CyclePath, tier: ExportTier): Promise<string> {
@@ -199,7 +223,7 @@ export function cycleFileRead(
   scope: string,
   filePath: string,
 ): ReadDescriptor<FileContentResponse> {
-  return once("file", cyclePathUrl(path, `/file?scope=${enc(scope)}&path=${enc(filePath)}`));
+  return once("file", cyclePathUrl("cycle-file", path, {}, { scope, path: filePath }));
 }
 
 export function roundRead(
@@ -207,16 +231,16 @@ export function roundRead(
   round: number,
   at: number | null = null,
 ): ReadDescriptor<RoundView> {
-  return once("round", cyclePathUrl(path, `/rounds/${round}${at == null ? "" : `?at=${at}`}`));
+  return once("round", cyclePathUrl("cycle-round", path, { round_num: String(round) }, at == null ? {} : { at: String(at) }));
 }
 
 export function roundAuditRead(path: CyclePath, round: number): ReadDescriptor<RoundAudit | null> {
-  return once("round-audit", cyclePathUrl(path, `/rounds/${round}/audit`));
+  return once("round-audit", cyclePathUrl("cycle-round-audit", path, { round_num: String(round) }));
 }
 
 export function filesRead(campaignId: string, cycleId: string): ReadDescriptor<FilesResponse> {
   // The ROOT hop's files: a drilled-in leaf's live under its `.inner/`.
-  return once("files", cyclePathUrl([{ campaignId, cycleId }], "/files"));
+  return once("files", cyclePathUrl("cycle-files", [{ campaignId, cycleId }], {}));
 }
 
 export interface CellsFilter {
@@ -235,7 +259,6 @@ export function cellsRead(
   filter: CellsFilter = {},
   // The server replays the CYCLE scope alone and refuses `at` elsewhere.
   at: number | null,
-  intervalMs: number | null,
 ): ReadDescriptor<CellsResponse | null> {
   const root = pathRoot(path);
   const descend = encodeDescend(path);
@@ -251,79 +274,58 @@ export function cellsRead(
   if (filter.status) params.set("status", filter.status);
   if (at != null && scope === "cycle") params.set("at", String(at));
   return {
-    ...byEtag<CellsResponse | null>("cells", `${API}/datasets/${enc(name)}/cells?${params.toString()}`),
+    ...byEtag<CellsResponse | null>("cells", readUrl("dataset-cells", { name }, params)),
     // A 404 is an honest empty, answered null: no pooled slice exists before the first round closes.
     expects: "gone",
-    cadence: every(intervalMs),
+    subject: STORES,
     // A re-ranked, re-scoped or replayed slice still in flight dims this one rather than blanking.
     keep: `cells${SEP}${name}${SEP}${encodeCyclePath(path)}${SEP}${JSON.stringify(filter)}`,
   };
 }
 
 export function cellRead(name: string, answer: string): ReadDescriptor<Cell> {
-  return once("cell", `${API}/datasets/${enc(name)}/cells/${enc(answer)}`);
+  return once("cell", readUrl("dataset-cell", { name, answer }));
 }
 
 type DashboardBody = ServedDashboard | WarmingDashboard;
 
-// `at` is a leaf-cycle ledger offset (`StepFacts.offset`); one file, so it validates on `Last-Modified`.
-export function dashboardRead(
-  path: CyclePath,
-  at: number | null,
-  intervalMs: number | null,
-): ReadDescriptor<ServedDashboard, DashboardBody> {
-  const url = cyclePathUrl(path, at == null ? "/dashboard" : `/dashboard?at=${at}`);
+// `at` is a leaf-cycle ledger offset (`StepFacts.offset`).
+export function dashboardRead(path: CyclePath, at: number | null): ReadDescriptor<ServedDashboard, DashboardBody> {
+  const url = cyclePathUrl("cycle-dashboard", path, {}, at == null ? {} : { at: String(at) });
   return {
-    id: `dashboard${SEP}${url}`,
-    load: (signal, validator) => jgetIfModified<DashboardBody>(url, validator, signal),
+    ...byEtag<DashboardBody>("dashboard", url),
     auth: true,
     // A warming cycle has no dashboard yet.
     accept: (body): body is ServedDashboard => !("warming_up" in body),
     // Moving the viewed moment keeps the unit's last snapshot rather than blanking the page.
     keep: `dashboard${SEP}${encodeCyclePath(path)}`,
-    // A lost read reconnects on the cache's own beat.
-    cadence: every(intervalMs),
+    subject: storeOf(path),
   };
-}
-
-// The viewed cycle's phase change re-asks every mounted read: `run_phase` also rides `/hierarchy`
-// and `/hierarchy/{address}`. Another cycle's dashboard carries none (`poll.tsx::useDashboard`).
-export function onViewedPhaseChange(prev: ServedDashboard, next: ServedDashboard): void {
-  if (prev.run_phase !== next.run_phase) invalidateReads();
 }
 
 // Every lifecycle: an address resolves whether or not the sidebar's filter lists it.
 export function hierarchyRead(): ReadDescriptor<HierarchyResponse> {
   return {
-    ...byEtag<HierarchyResponse>("hierarchy", `${API}/hierarchy?depth=1&lifecycle=all`),
+    ...byEtag<HierarchyResponse>("hierarchy", readUrl("hierarchy", {}, new URLSearchParams({ depth: "1", lifecycle: "all" }))),
     auth: true,
-    cadence: every(REGISTRY_POLL_MS),
-    // A moved bill re-asks the account's money.
-    onChange: (prev, next) => {
-      if (billOf(prev) !== billOf(next)) invalidateReads("coupon");
-    },
+    subject: STORES,
   };
 }
 
-// Every entry's lifetime bill, an open check-in's included.
-function billOf(body: HierarchyResponse): string {
-  return body.entries.map((e) => e.facts.spend_lifetime.billed_usd).join(",");
-}
-
 export function campaignStorageRead(campaignId: string): ReadDescriptor<LeafBytes> {
-  return once("campaign-storage", `${API}/campaigns/${enc(campaignId)}/storage`);
+  return once("campaign-storage", readUrl("campaign-storage", { campaign_id: campaignId }));
 }
 
 export function workspaceStorageRead(): ReadDescriptor<WorkspaceStorageResponse> {
-  return once("workspace-storage", `${API}/workspace/storage`);
+  return once("workspace-storage", readUrl("workspace-storage", {}));
 }
 
 export function libraryRead(): ReadDescriptor<LibraryResponse> {
-  return once("library", `${API}/library`);
+  return { ...once<LibraryResponse>("library", readUrl("library", {})), subject: ACCOUNT };
 }
 
 export function configMapRead(campaignId: string): ReadDescriptor<ConfigMapResponse> {
-  return once("config-map", `${API}/campaigns/${enc(campaignId)}/config-map`);
+  return { ...once<ConfigMapResponse>("config-map", readUrl("config-map", { campaign_id: campaignId })), subject: ACCOUNT };
 }
 
 // A read despite the POST: its subject is an overlay that exists nowhere on disk yet.
@@ -331,7 +333,7 @@ export function forkPreviewRead(
   campaignId: string,
   pipelineOverlay: Record<string, unknown>,
 ): ReadDescriptor<ForkPreviewResponse> {
-  const url = `${API}/campaigns/${enc(campaignId)}/fork-preview`;
+  const url = readUrl("fork-preview", { campaign_id: campaignId });
   return {
     id: `fork-preview${SEP}${url}${SEP}${JSON.stringify(pipelineOverlay)}`,
     load: async (signal) => ({
@@ -396,6 +398,7 @@ export function maskedSubject(
 }
 
 // Subjects are sorted into the id, so one selection is one read whatever order it was picked in.
+// Built whole on each ask, so only a live measured course (`live`) is moved by the feed.
 export function evidenceRead(
   subjects: readonly string[],
   opts: {
@@ -405,18 +408,18 @@ export function evidenceRead(
     metric?: string;
     grid?: string;
   },
-  intervalMs: number | null,
+  live: boolean,
 ): ReadDescriptor<Evidence> {
   const named = [...subjects].sort().map((s) => `subject=${enc(s)}`);
-  const qs = [...named];
-  if (opts.ranking) qs.push("ranking=true");
-  if (opts.winnerChain) qs.push("winner_chain=true");
-  if (opts.config) qs.push("config=true");
-  if (opts.metric) qs.push(`metric=${enc(opts.metric)}`);
-  if (opts.grid) qs.push(`grid=${enc(opts.grid)}`);
+  const qs = new URLSearchParams(named.join("&"));
+  if (opts.ranking) qs.set("ranking", "true");
+  if (opts.winnerChain) qs.set("winner_chain", "true");
+  if (opts.config) qs.set("config", "true");
+  if (opts.metric) qs.set("metric", opts.metric);
+  if (opts.grid) qs.set("grid", opts.grid);
   return {
-    ...byEtag<Evidence>("evidence", `${API}/evidence?${qs.join("&")}`),
-    cadence: every(intervalMs),
+    ...byEtag<Evidence>("evidence", readUrl("evidence", {}, qs)),
+    ...(live ? { subject: STORES } : {}),
     // A refused metric or grid keeps the same subjects' last reading.
     keep: `evidence${SEP}${named.join("&")}`,
   };
@@ -441,7 +444,6 @@ export function subtreeRead(
   address: string,
   mask: SubtreeMask | "seeding" | null,
   moment: SubtreeMoment | null,
-  intervalMs: number | null,
 ): ReadDescriptor<SubtreeCampaign> {
   const keep = `subtree${SEP}${address}`;
   if (mask === "seeding") {
@@ -460,15 +462,14 @@ export function subtreeRead(
     params.set("at", String(moment.at));
     params.set("at_cycle", encodeCyclePath(moment.cycle));
   }
-  const q = params.toString();
-  const entry = byEtag<SubtreeEntry>("subtree", `${API}/hierarchy/${enc(address)}${q ? `?${q}` : ""}`);
+  const entry = byEtag<SubtreeEntry>("subtree", readUrl("hierarchy-subtree", { address }, params));
   return {
     id: entry.id,
     auth: true,
     // A mask or moment re-keys the read; the campaign's last tree stands meanwhile.
     keep,
-    // A lost tree is re-asked on the cache's own beat.
-    cadence: every(intervalMs),
+    // Its family spans the inner stores under it.
+    subject: STORES,
     load: async (signal, validator) => {
       const res = await entry.load(signal, validator);
       if (res.kind === "not_modified") return res;
@@ -482,22 +483,14 @@ export function subtreeRead(
 }
 
 // A course's steps, windowed newest-first, delivered oldest-first; `before` is a prior `cursor_prev`.
-// `intervalMs` is the head window's (`poll.tsx::useTimeRay`); a page never moves and reads once.
-export function stepsRead(
-  path: CyclePath,
-  limit: number,
-  before: string | null,
-  intervalMs: number | null,
-): ReadDescriptor<HierarchySteps> {
+// The head window moves with the course's family; a page never moves and reads once.
+export function stepsRead(path: CyclePath, limit: number, before: string | null): ReadDescriptor<HierarchySteps> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (before) params.set("before", before);
   return {
-    ...byEtag<HierarchySteps>(
-      "steps",
-      `${API}/hierarchy/${enc(encodeCyclePath(path))}/@?${params.toString()}`,
-    ),
+    ...byEtag<HierarchySteps>("steps", readUrl("hierarchy-steps", { address: encodeCyclePath(path) }, params)),
     auth: true,
-    cadence: every(intervalMs),
+    ...(before === null ? { subject: STORES } : {}),
   };
 }
 
@@ -519,7 +512,7 @@ export function earlierStepsRead(
       let steps: HierarchySteps["steps"] = [];
       let cursor: string | null = anchor;
       for (let page = 0; page < pages && cursor !== null; page++) {
-        const window: HierarchySteps = await readThrough(stepsRead(path, limit, cursor, null), signal);
+        const window: HierarchySteps = await readThrough(stepsRead(path, limit, cursor), signal);
         steps = [...window.steps, ...steps];
         cursor = window.cursor_prev;
       }

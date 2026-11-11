@@ -13,7 +13,7 @@ const wrapper = ({ children }: { children: ReactNode }) =>
 
 const settle = () => act(() => vi.advanceTimersByTimeAsync(0));
 
-describe("useCommand — a write's answer re-asks the reads it names, and no other", () => {
+describe("useCommand — a write re-asks no read: the feed says what it moved", () => {
   const asked = { coupon: 0, hierarchy: 0 };
   const mounted: (() => void)[] = [];
 
@@ -30,7 +30,6 @@ describe("useCommand — a write's answer re-asks the reads it names, and no oth
       const read: ReadDescriptor<number> = {
         id: `${name}\x1f/${name}`,
         load: async () => ({ kind: "ok", data: (asked[name] += 1), validator: null }),
-        cadence: () => null,
       };
       mounted.push(subscribe(() => read as unknown as ReadDescriptor<unknown>, () => {}));
     }
@@ -46,21 +45,18 @@ describe("useCommand — a write's answer re-asks the reads it names, and no oth
 
   const sends: [string, () => Promise<string>][] = [
     ["landed", async () => "ok"],
-    // The sends before a refused one may have moved what the write names.
     ["refused", async () => Promise.reject(new ApiError(409, "/write"))],
   ];
   for (const [answered, send] of sends) {
-    it(`re-asks exactly the named reads once ${answered}`, async () => {
+    it(`re-asks nothing ${answered}`, async () => {
       await settle();
       expect(asked).toEqual({ coupon: 1, hierarchy: 1 });
-      const { result } = renderHook(() => useCommand<"write">("test", { revalidate: ["coupon"] }), {
-        wrapper,
-      });
+      const { result } = renderHook(() => useCommand<"write">("test"), { wrapper });
       await act(async () => {
         await result.current.run("write", send);
       });
       await settle();
-      expect(asked).toEqual({ coupon: 2, hierarchy: 1 });
+      expect(asked).toEqual({ coupon: 1, hierarchy: 1 });
     });
   }
 });

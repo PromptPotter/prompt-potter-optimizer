@@ -45,11 +45,15 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 def _run_mode(args: argparse.Namespace, *, fork_on_divergence: bool) -> RunMode:
-    return RunMode(
-        from_round=args.resume_from_round,
-        no_divergence_check=args.no_divergence_check,
-        fork_on_divergence=fork_on_divergence,
-        diag=args.diag,
+    """`--from`'s bound is `RunMode.from_round`'s, refused as every door refuses a payload."""
+    return PayloadInvalidError.validating(
+        RunMode,
+        {
+            "from_round": args.resume_from_round,
+            "no_divergence_check": args.no_divergence_check,
+            "fork_on_divergence": fork_on_divergence,
+            "diag": args.diag,
+        },
     )
 
 
@@ -171,11 +175,10 @@ async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> Hel
 async def _pivot_to_fresh(
     args: argparse.Namespace, ctx: SessionCtx, drift: ConfigDriftError
 ) -> CommandResult:
-    print()
-    print(str(drift))
-    print()
     answer = confirm_tty(
-        f"Start a fresh campaign on `{drift.dataset_name}` instead?", default_no=True
+        f"Start a fresh campaign on `{drift.dataset_name}` instead?",
+        default_no=True,
+        context=str(drift),
     )
     if answer is None:
         raise drift
@@ -201,9 +204,6 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
     ctx = load_session(stores, cycle_target(stores, args.campaign, args.cycle))
 
-    resume_from_round: int | None = args.resume_from_round
-    if resume_from_round is not None and resume_from_round < 0:
-        raise PayloadInvalidError(f"--from must be >= 0, got {resume_from_round}")
     rewinding = args.rewind_to_round is not None
     steering = bool(args.steer)
     if rewinding and steering:
@@ -227,7 +227,7 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     logger.info(
         "Resuming cycle %s%s",
         ctx.cycle_id,
-        "" if resume_from_round is None else f" from after round {resume_from_round}",
+        "" if args.resume_from_round is None else f" from after round {args.resume_from_round}",
     )
     log_startup_summary(
         session,

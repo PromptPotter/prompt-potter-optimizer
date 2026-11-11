@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
-import { READ_BEAT_MS, RECONNECT_POLL_MS } from "@/lib/cadence";
+import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import {
   READ_CACHE_MAX_KEYS,
-  beginWrite,
   clearReadCache,
-  invalidateReads,
+  reaskRead,
   readName,
   readResult,
   readThrough,
@@ -159,48 +158,18 @@ describe("read cache — subscribers", () => {
     expect(readResult(read)).toEqual({ status: "ready", data: 7 });
   });
 
-  it("polls on wall-clock multiples of the most eager subscriber's cadence", async () => {
-    let calls = 0;
-    const load: ReadLoad<number> = async () => ({ kind: "ok", data: ++calls, validator: null });
-    watch(at("a\x1fu", load, { cadence: () => 4 * READ_BEAT_MS }));
-    watch(at("a\x1fu", load, { cadence: () => 2 * READ_BEAT_MS }));
-    await settle();
-    expect(calls).toBe(1);
-    // 12 000 is the next multiple of the 2-beat cadence after mounting at 10 000.
-    await vi.advanceTimersByTimeAsync(2 * READ_BEAT_MS);
-    expect(calls).toBe(2);
-    await vi.advanceTimersByTimeAsync(2 * READ_BEAT_MS);
-    expect(calls).toBe(3);
-  });
-
-  it("reads the cadence off the read's own state, and stops beating when none polls", async () => {
-    let calls = 0;
-    const load: ReadLoad<{ settled: boolean }> = async () => ({
-      kind: "ok",
-      data: { settled: ++calls >= 2 },
-      validator: null,
-    });
-    watch(at("t\x1fu", load, { cadence: (s) => (s.body?.settled ? null : READ_BEAT_MS) }));
-    await settle();
-    await vi.advanceTimersByTimeAsync(READ_BEAT_MS);
-    expect(calls).toBe(2);
-    await vi.advanceTimersByTimeAsync(3 * READ_BEAT_MS);
-    expect(calls).toBe(2);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("re-asks a mounted read on an invalidation of its name, and no other", async () => {
+  it("re-asks a mounted read by its id, and no other, and asks nothing on a clock", async () => {
     let quota = 0;
     let cycles = 0;
     watch(at("quota\x1fu", async () => ({ kind: "ok", data: ++quota, validator: null })));
     watch(at("cycles\x1fu", async () => ({ kind: "ok", data: ++cycles, validator: null })));
     await settle();
-    invalidateReads("quota");
+    reaskRead("quota\x1fu");
     await settle();
     expect([quota, cycles]).toEqual([2, 1]);
-    invalidateReads();
-    await settle();
-    expect([quota, cycles]).toEqual([3, 2]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect([quota, cycles]).toEqual([2, 1]);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("re-asks in a fresh flight that never deletes another caller's", async () => {
@@ -208,7 +177,7 @@ describe("read cache — subscribers", () => {
     const read = at("draft\x1fu", load);
     const theirs = readThrough(read, live());
     watch(read);
-    invalidateReads("draft");
+    reaskRead(read.id);
     expect(lands).toHaveLength(2);
     lands[1]!(2);
     lands[0]!(1);
@@ -236,38 +205,14 @@ describe("read cache — subscribers", () => {
       held: true,
     });
     watch(pending);
-    invalidateReads();
+    reaskRead(pending.id);
     await settle();
     expect(asked).toBe(0);
     expect(readResult(pending)).toEqual({ status: "loading", kept: "one" });
   });
 
-  it("times a read on a write that revalidates it while it is unanswered, and rests it on the answer", async () => {
-    const asked = { moved: 0, other: 0 };
-    const count = (k: keyof typeof asked): ReadLoad<number> =>
-      async () => ({ kind: "ok", data: ++asked[k], validator: null });
-    const onWrite = { cadence: (s: { writing: boolean }) => (s.writing ? 2 * READ_BEAT_MS : null) };
-    watch(at("draft\x1fu", count("moved"), onWrite));
-    watch(at("dashboard\x1fu", count("other"), onWrite));
-    await settle();
-    await vi.advanceTimersByTimeAsync(6 * READ_BEAT_MS);
-    expect(asked).toEqual({ moved: 1, other: 1 });
-
-    const answered = beginWrite(["draft"]);
-    await vi.advanceTimersByTimeAsync(4 * READ_BEAT_MS);
-    expect(asked).toEqual({ moved: 3, other: 1 });
-    answered();
-    await vi.advanceTimersByTimeAsync(6 * READ_BEAT_MS);
-    expect(asked).toEqual({ moved: 3, other: 1 });
-
-    const everything = beginWrite(null);
-    await vi.advanceTimersByTimeAsync(2 * READ_BEAT_MS);
-    everything();
-    expect(asked).toEqual({ moved: 4, other: 2 });
-  });
-
-  it("re-asks a read lost to the network or throttled on the slow beat, and rests one the server refused", async () => {
-    const asked = { lost: 0, denied: 0, empty: 0, slow: 0, fast: 0, throttled: 0, capped: 0 };
+  it("re-asks a read lost to the network or throttled on the reconnect beat, and rests one the server refused", async () => {
+    const asked = { lost: 0, denied: 0, empty: 0, throttled: 0, capped: 0 };
     // The request-rate throttle passes; a spend cap, a 409, would answer the same again.
     const throttled = at("t\x1fu", async () => {
       asked.throttled += 1;
@@ -277,54 +222,34 @@ describe("read cache — subscribers", () => {
       asked.capped += 1;
       throw new ApiError(409, "/c", "spend_cap");
     });
-    // A read polled faster than the reconnect beat backs off to it while it fails.
-    const fast = at(
-      "f\x1fu",
-      async () => {
-        asked.fast += 1;
-        throw new Error("offline");
-      },
-      { cadence: () => READ_BEAT_MS },
-    );
     const lost = at("l\x1fu", async () => {
       if (++asked.lost === 1) throw new Error("offline");
       return { kind: "ok", data: asked.lost, validator: null };
     });
-    // A read slower than the reconnect beat is never asked faster for having failed.
-    const slow = at(
-      "s\x1fu",
-      async () => {
-        asked.slow += 1;
-        throw new Error("offline");
-      },
-      { cadence: () => 12 * RECONNECT_POLL_MS },
-    );
     const denied = at("d\x1fu", async () => {
       asked.denied += 1;
       throw new ApiError(403, "/d");
     });
-    // A 404 is this one's empty answer, so its own cadence stands.
+    // A 404 is this one's empty answer: answered, never retried.
     const empty = at(
       "e\x1fu",
       async () => {
         asked.empty += 1;
         throw new ApiError(404, "/e");
       },
-      { expects: "gone", cadence: () => 2 * READ_BEAT_MS },
+      { expects: "gone" },
     );
     watch(lost);
     watch(denied);
     watch(empty);
-    watch(slow);
-    watch(fast);
     watch(throttled);
     watch(capped);
     await settle();
-    expect(asked).toEqual({ lost: 1, denied: 1, empty: 1, slow: 1, fast: 1, throttled: 1, capped: 1 });
+    expect(asked).toEqual({ lost: 1, denied: 1, empty: 1, throttled: 1, capped: 1 });
 
     await vi.advanceTimersByTimeAsync(RECONNECT_POLL_MS);
     expect(readResult(lost)).toEqual({ status: "ready", data: 2 });
-    expect(asked).toEqual({ lost: 2, denied: 1, empty: 3, slow: 1, fast: 2, throttled: 2, capped: 1 });
+    expect(asked).toEqual({ lost: 2, denied: 1, empty: 1, throttled: 2, capped: 1 });
   });
 
   it("shows a held read subscribed again the key's newest body, not the one it was made under", async () => {
@@ -353,22 +278,6 @@ describe("read cache — subscribers", () => {
     expect(readResult(read)).toEqual({ status: "loading", kept: null });
   });
 
-  it("runs a change effect once per landed change, however many subscribe", async () => {
-    let n = 0;
-    const onChange = vi.fn();
-    const read = at("c\x1fu", async () => ({ kind: "ok", data: ++n, validator: null }), {
-      onChange,
-    });
-    watch(read);
-    watch(read);
-    await settle();
-    expect(onChange).not.toHaveBeenCalled();
-    invalidateReads("c");
-    await settle();
-    expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith(1, 2);
-  });
-
   it("clears what a subscriber kept on an identity flip, and re-asks it", async () => {
     let n = 0;
     const read = at("me\x1fu", async () => ({ kind: "ok", data: ++n, validator: null }), {
@@ -394,65 +303,5 @@ describe("read cache — subscribers", () => {
     await settle();
     expect(asked).toEqual({ open: 2, gated: 1 });
     expect(readResult(gated)).toEqual({ status: "loading", kept: null });
-  });
-
-  it("stops the beat under a hidden tab, and re-asks on return what a poll, a validator or a failure leaves", async () => {
-    const page = { hidden: false, onVisibility: () => {} };
-    const on: Record<string, () => void> = {};
-    vi.stubGlobal("document", {
-      get hidden() {
-        return page.hidden;
-      },
-      addEventListener: (_: string, handler: () => void) => (page.onVisibility = handler),
-    });
-    vi.stubGlobal("window", { addEventListener: (name: string, handler: () => void) => (on[name] = handler) });
-    const asked = { polled: 0, validated: 0, bare: 0, lost: 0, denied: 0, empty: 0, revoked: 0 };
-    const count = (k: keyof typeof asked, validator: string | null): ReadLoad<number> =>
-      async () => ({ kind: "ok", data: ++asked[k], validator });
-    const refusing = (k: keyof typeof asked, status: number): ReadLoad<number | null> =>
-      async () => {
-        asked[k] += 1;
-        throw new ApiError(status, `/${k}`);
-      };
-    // A one-shot read whose first ask fails (the network was down): a return asks it at once.
-    const lostRead = at("l\x1fu", async () => {
-      if (++asked.lost === 1) throw new Error("offline");
-      return { kind: "ok", data: asked.lost, validator: null };
-    });
-    watch(at("p\x1fu", count("polled", null), { cadence: () => READ_BEAT_MS }));
-    watch(at("v\x1fu", count("validated", 'W/"a"')));
-    watch(at("b\x1fu", count("bare", null)));
-    watch(lostRead);
-    // A refusal the server would repeat, and a one-shot read's expected empty answer: neither is
-    // asked again for a return or a reconnect.
-    watch(at("d\x1fu", refusing("denied", 403)));
-    watch(at("e\x1fu", refusing("empty", 404), { expects: "gone" }));
-    // Answered with a validator, then refused (access revoked): its held validator buys no re-ask.
-    watch(
-      at("r\x1fu", async () => {
-        if (++asked.revoked === 1) return { kind: "ok", data: 1, validator: 'W/"r"' };
-        throw new ApiError(403, "/r");
-      }),
-    );
-    await settle();
-    invalidateReads("r");
-    await settle();
-    expect(asked).toEqual({ polled: 1, validated: 1, bare: 1, lost: 1, denied: 1, empty: 1, revoked: 2 });
-    expect(readResult(lostRead).status).toBe("failed");
-
-    page.hidden = true;
-    page.onVisibility();
-    expect(vi.getTimerCount()).toBe(0);
-    await vi.advanceTimersByTimeAsync(5 * READ_BEAT_MS);
-    page.hidden = false;
-    page.onVisibility();
-    await settle();
-    expect(asked).toEqual({ polled: 2, validated: 2, bare: 1, lost: 2, denied: 1, empty: 1, revoked: 2 });
-    expect(readResult(lostRead)).toEqual({ status: "ready", data: 2 });
-
-    // Reconnecting re-asks the same way; a failure answered since is not re-asked again.
-    on.online!();
-    await settle();
-    expect(asked).toEqual({ polled: 3, validated: 3, bare: 1, lost: 2, denied: 1, empty: 1, revoked: 2 });
   });
 });

@@ -17,8 +17,9 @@ order of [`../specs/roadmap.md`](../specs/roadmap.md), whether run by a person o
 - **An arc owns its files.** Arcs that run together touch disjoint files, or name the one they share;
   arcs whose files overlap run as a chain, each link off the previous tip.
 - **A brief names its changes; everything else equals main**: the wire, the optimizer treatment digests
-  and decisions ([`offline-run.md`](offline-run.md)), the served responses, the read cadences. A named
-  change whose root needs a mechanism outside the owned files is cut and filed as a row, never built in.
+  and decisions ([`offline-run.md`](offline-run.md)), the served responses, the feed subject each read
+  names. A named change whose root needs a mechanism outside the owned files is cut and filed as a row,
+  never built in.
 
 ## Landing
 

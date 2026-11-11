@@ -1,8 +1,6 @@
 import { cellsRead } from "../api/reads";
 import type { CellStatus, CellsResponse, HardSampleOrder, HardSamplesScope } from "@/lib/api/types";
-import { CELLS_LIVE_POLL_MS } from "../cadence";
 import type { CyclePath } from "../ids";
-import { useViewedDashboard } from "../poll";
 import type { ReadResult } from "../read-cache";
 import { createModuleStore } from "../state/module-store";
 import { useMomentAt, useWorkspace } from "../workspace";
@@ -48,9 +46,6 @@ export function useCells(preset: CellsPreset | null, status?: CellStatus): Cells
   const path = preset?.path ?? viewedPath;
   const datasetName = preset?.datasetName ?? leafDatasetName;
   const at = useMomentAt(path);
-  // The dashboard's liveness is the VIEWED unit's; a preset on another one does not poll.
-  const { isLive } = useViewedDashboard();
-  const intervalMs = preset?.path === undefined && isLive ? CELLS_LIVE_POLL_MS : null;
   const read = useRead(
     preset !== null && path && datasetName
       ? cellsRead(
@@ -60,7 +55,6 @@ export function useCells(preset: CellsPreset | null, status?: CellStatus): Cells
           rankedBy,
           { candidateId: preset.candidateId, round: preset.round, status },
           at,
-          intervalMs,
         )
       : null,
   );

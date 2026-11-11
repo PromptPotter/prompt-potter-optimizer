@@ -15,8 +15,7 @@ export function ArchiveCompactionControl() {
   const [mode, setMode] = useState<Mode>("compact");
   const [preview, setPreview] = useState<ArchiveReport | null>(null);
   const [done, setDone] = useState<ArchiveReport | null>(null);
-  // Two slots because `revalidate` is per-slot: a dry run reaches nothing a poll reads.
-  const dry = useCommand<Mode>("archive-preview", { revalidate: false });
+  const dry = useCommand<Mode>("archive-preview");
   const commit = useCommand<Mode>("archive-apply");
   const busy = dry.pending !== null || commit.pending !== null;
 

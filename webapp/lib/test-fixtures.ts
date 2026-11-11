@@ -221,6 +221,7 @@ export function runStanding(
       ...unreadOverlap().lead,
       state: round === 0 ? "same_individual" : "not_held",
     },
+    vs_parent: null,
     rounds_closed: round,
     improved: 0,
     advanced: 0,

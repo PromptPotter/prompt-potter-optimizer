@@ -12,12 +12,13 @@ from promptpotter.application.datasets.authored import load_dataset_campaign_con
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
+    RunStart,
     admit_arms,
     claim_cycle,
     probe_backend,
-    release_slot,
 )
 from promptpotter.application.jobs.launcher.checkin import OpenedCheckin, open_checkin
+from promptpotter.application.jobs.launcher.launch import LaunchOutcome
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
     CyclePlan,
@@ -64,13 +65,16 @@ class HeadToHeadStarted(StrictModel):
 
 
 @dataclass(frozen=True, slots=True)
-class HeadToHeadLaunched:
+class HeadToHeadLaunched(LaunchOutcome):
     """``launches`` is what its ack records, arm by arm; ``exits`` end as each arm's process does,
     and a replay watches none, since another act owns them."""
 
     started: HeadToHeadStarted
     launches: list[LaunchedJob]
     exits: list[asyncio.Task[None]]
+
+    def as_launches(self) -> list[LaunchedJob]:
+        return self.launches
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +149,7 @@ class HeldArm:
 
 
 @dataclass(frozen=True, slots=True)
-class AdmittedHeadToHead:
+class AdmittedHeadToHead(LaunchOutcome):
     """Every arm planned and admitted; nothing of any arm's cycle is written yet."""
 
     source: ArmSource
@@ -154,12 +158,19 @@ class AdmittedHeadToHead:
     admitted: list[tuple[Job, HeldBudget]]
     job_registry: JobRegistry
 
+    def as_launches(self) -> list[LaunchedJob]:
+        return [LaunchedJob.of(job) for job, _ in self.admitted]
+
+    @property
+    def starts(self) -> list[RunStart]:
+        stores = self.plans[0].session.store
+        return [RunStart(stores, self.job_registry, job) for job, _ in self.admitted]
+
     def withdraw(self, exc: BaseException) -> None:
         """Every arm's slot given back, where the act that admitted them raised before any minted."""
-        stores = self.plans[0].session.store
-        for job, _ in self.admitted:
-            logger.warning("admitted arm %s withdrawn unrun: %s", job.job_id, exc)
-            release_slot(self.job_registry, job.job_id, exc, stores=stores, hop=None)
+        for start in self.starts:
+            logger.warning("admitted arm %s withdrawn unrun: %s", start.job_id, exc)
+            start.release(exc)
 
     async def minted(self) -> list[HeldArm]:
         """All arms minted, each job landed on its cycle; a failure stamps every minted cycle."""
@@ -172,9 +183,8 @@ class AdmittedHeadToHead:
                 if isinstance(job.holder, CampaignLaunch):
                     claim_cycle(stores, job_registry, job, cycle.session.hop)
         except BaseException as exc:
-            for i, (job, _) in enumerate(self.admitted):
-                stamped = minted[i].session.hop if minted else None
-                release_slot(job_registry, job.job_id, exc, stores=stores, hop=stamped)
+            for i, start in enumerate(self.starts):
+                start.release(exc, stamps=minted[i].session.hop if minted else None)
             raise
         finally:
             if isinstance(self.source, CheckinArms):
@@ -188,9 +198,9 @@ class AdmittedHeadToHead:
             ),
         )
         return [
-            HeldArm(arm.arm_key, HeldRun.of(job_registry, job.job_id, cycle, held))
-            for arm, (job, held), cycle in zip(
-                self.request.arms, self.admitted, minted, strict=True
+            HeldArm(arm.arm_key, HeldRun.of(start, cycle, held))
+            for arm, start, (_, held), cycle in zip(
+                self.request.arms, self.starts, self.admitted, minted, strict=True
             )
         ]
 
@@ -204,14 +214,7 @@ class AdmittedHeadToHead:
                 exits.append(await arm.held.detach(mode=RunMode()))
             except BaseException as exc:
                 for rest in arms[i + 1 :]:
-                    session = rest.held.session
-                    release_slot(
-                        self.job_registry,
-                        rest.held.job_id,
-                        exc,
-                        stores=session.store,
-                        hop=session.hop,
-                    )
+                    rest.held.start.release(exc, stamps=rest.held.session.hop)
                 raise
         launches = [
             LaunchedJob.of(job, arm.held.session.hop)

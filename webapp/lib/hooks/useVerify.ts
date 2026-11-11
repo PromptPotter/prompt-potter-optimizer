@@ -13,9 +13,8 @@ interface VerifyState {
 export function useVerify(
   path: CyclePath | null,
   // Set only while a pass is awaited: nothing else moves another cycle's dashboard read.
-  intervalMs: number | null,
 ): VerifyState {
-  const { dash } = useDashboard(path, intervalMs);
+  const { dash } = useDashboard(path);
   const rounds = dash?.rounds;
   const marks = dash?.verification;
   const unit = dash?.measured_unit ?? null;

@@ -25,7 +25,7 @@ export function Sidebar() {
 
   const { status, openAuthPrompt } = useAuth();
   // Nothing polls the session; the navigation below is the read-back.
-  const logout = useCommand<"logout">("sidebar-session", { revalidate: false });
+  const logout = useCommand<"logout">("sidebar-session");
   const handleSignOut = () =>
     void logout.run("logout", postLogout, () => {
       window.location.href = "/login/";

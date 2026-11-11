@@ -38,6 +38,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     dataset_not_found,
     install_dataset,
     is_dataset_dir,
+    own_definition,
     resolve_dataset,
     runnable_definition,
 )
@@ -62,7 +63,7 @@ def offered(stores: Stores, name: str) -> bool:
         offer is None
         or name in offer
         or is_host(stores.identity)
-        or stores.tenant_datasets.slug_exists(name)
+        or own_definition(stores, name) is not None
     )
 
 

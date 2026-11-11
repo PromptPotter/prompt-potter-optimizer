@@ -11,7 +11,7 @@ from promptpotter.application.jobs.launcher.admission import PassStoppedError
 from promptpotter.domain.command_events import CommandAckRecord, CommandRecord
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.phases import STOP_REASON_INFO, StopCategory, StopOutcome, StopReason
-from promptpotter.domain.run_records import LaunchedEffect
+from promptpotter.domain.run_records import LaunchedEffect, LaunchedJob
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal
@@ -79,7 +79,8 @@ def _held(stores: Stores, job: Job) -> bool:
 
 class CommandReading(FrozenModel):
     """A command read afresh off the account's log: where it stands, in the words of its task
-    status, at the address the dispatcher resolved and filed it on."""
+    status, at the address the dispatcher resolved and filed it on; a launch's jobs, each at the
+    cycle it holds now (``None`` for a command launching none)."""
 
     command_id: str
     kind: str
@@ -88,6 +89,7 @@ class CommandReading(FrozenModel):
     said: str
     created_at: str
     last_updated_at: str
+    launches: list[LaunchedJob] | None
 
 
 class OwnedCommand(FrozenModel):
@@ -122,7 +124,8 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
     filed, end = owned.filed, owned.end
     updated = filed.timestamp if end is None else end.timestamp
     status: TaskStatus
-    if (launched := launched_jobs(jobs, owned)) is not None:
+    launched = launched_jobs(jobs, owned)
+    if launched is not None:
         read = [
             (
                 *job_status(job, held=_held(stores, job)),
@@ -162,4 +165,5 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
         said=said,
         created_at=filed.timestamp,
         last_updated_at=updated,
+        launches=None if launched is None else [LaunchedJob.of(job) for job in launched],
     )

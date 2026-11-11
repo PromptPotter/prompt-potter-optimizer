@@ -20,6 +20,7 @@ import type {
 import { draftRead } from "@/lib/api/reads";
 import { checkinThreadKey, useThreads } from "@/lib/chat/thread";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
+import { useMintedHop } from "@/lib/hooks/useMintedHop";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import type { ReadFailure } from "@/lib/read-cache";
 import { dropCachedRead } from "@/lib/read-cache";
@@ -53,11 +54,6 @@ type IngestPhase =
 /** The check-in the workspace views: a draft id, `NEW_CHECKIN` before one is minted, null off one. */
 export type CheckinSubject = string | null;
 export const NEW_CHECKIN = "";
-
-const DRAFT_READS = ["draft", "hierarchy"] as const;
-// A resolver turn is a paid call charged to the account: it moves the listing, whose moved bill
-// re-asks the coupon (`reads.ts::hierarchyRead`), and the activity.
-const RESOLVE_READS = [...DRAFT_READS, "activity"] as const;
 
 const QUEUED_LINE = "Campaign queued — it is minted and starts when a machine slot frees.";
 const STARTING_LINE = "Campaign starting — it is being minted and opens in your list once it runs.";
@@ -115,12 +111,12 @@ export function useIngestFlow({
   const [draftId, setDraftId] = useState<string | null>(null);
   const [inputText, setInputText] = useState("");
   const [minting, setMinting] = useState(false);
+  // A queued Start's command, followed on the feed until a slot mints its campaign.
+  const [following, setFollowing] = useState<string | null>(null);
   // Every write rides a slot; a draft's edits are a queue on one, so overlapping blurs land in order.
   const opening = useCommand<"upload" | "dataset" | "origin">("checkin-open", { scope: subject });
-  // An answered write re-asks the draft read, so a tick in the air before it never lands over it. An
-  // edit moves the draft and its listing, a resolver turn those and the account's charges.
-  const resolving = useCommand<"resolve">("checkin-resolve", { scope: draftId, revalidate: RESOLVE_READS });
-  const writing = useCommand<"edit" | "library">("checkin-edit", { scope: draftId, revalidate: DRAFT_READS });
+  const resolving = useCommand<"resolve">("checkin-resolve", { scope: draftId });
+  const writing = useCommand<"edit" | "library">("checkin-edit", { scope: draftId });
   const starting = useCommand<"start">("checkin-start", { scope: draftId });
   // A counter, not a boolean: the first queued edit to land must not clear a sibling's flag.
   const [pendingPatches, setPendingPatches] = useState(0);
@@ -140,6 +136,7 @@ export function useIngestFlow({
       setDraftId(null);
       setInputText("");
       setMinting(false);
+      setFollowing(null);
       setResets((n) => n + 1);
     }
   }
@@ -184,7 +181,7 @@ export function useIngestFlow({
       p.stage === "ready" && p.draft.draft_id === updated.draft_id ? { ...p, draft: updated } : p,
     );
 
-  // The held draft's one read, its cadence its own served stage (`draftRead`). Held across stages, so no kept body re-lands.
+  // The held draft's one read (`draftRead`), held across stages, so no kept body re-lands.
   const draftNow = useRead(draftId !== null ? draftRead(draftId) : null);
   const served = readyData(draftNow);
   const [landedServed, setLandedServed] = useState(served);
@@ -192,6 +189,18 @@ export function useIngestFlow({
     setLandedServed(served);
     if (served) commitDraftUpdate(served.draft);
   }
+
+  const minted = useMintedHop(following);
+  useEffect(() => {
+    if (following === null || minted === null) return;
+    // The slot freed and minted it: the view moves onto the campaign, as an unqueued Start's does.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFollowing(null);
+    setPhase({ stage: "idle" });
+    setDraftId(null);
+    onMint({ campaignId: minted.campaign_id, cycleId: minted.cycle_id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [following, minted]);
 
   const runCheckin = async (draft: DraftCampaignWire) => {
     const alive = begin();
@@ -447,33 +456,32 @@ export function useIngestFlow({
       setMinting(false);
       return;
     }
-    const started = r.value;
-    // A head-to-head never queues: each arm holds its own cycle, and the view opens on the first.
-    if ("arms" in started) {
-      const [first] = started.arms;
+    // One launch answer: a head-to-head's arms never queue, and the view opens on the first job.
+    const [first] = r.value.launches;
+    if (first === undefined) {
       setMinting(false);
-      setPhase({ stage: "idle" });
-      setDraftId(null);
-      if (first) onMint({ campaignId: first.hop.campaign_id, cycleId: first.hop.cycle_id });
       return;
     }
+    const hop = first.hop;
     // No hop is the start's own answer that it queued: the draft stays the subject until a slot frees.
-    if (started.hop === null) {
+    if (hop === null) {
       say(QUEUED_LINE);
       setMinting(false);
       setPhase({ stage: "queued" });
+      setFollowing(r.value.command_id);
       return;
     }
     setMinting(false);
     setPhase({ stage: "idle" });
     setDraftId(null);
-    onMint({ campaignId: started.hop.campaign_id, cycleId: started.hop.cycle_id });
+    onMint({ campaignId: hop.campaign_id, cycleId: hop.cycle_id });
   };
 
   const discarded = (id: string) => {
     threads.clear(checkinThreadKey(id));
     if (draftId === id) {
       epoch.current += 1;
+      setFollowing(null);
       setPhase({ stage: "idle" });
       setDraftId(null);
       threadKey.current = checkinThreadKey(null);

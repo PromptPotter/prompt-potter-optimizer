@@ -398,25 +398,17 @@ class _RunEntry(_HierarchyEntry):
     span: HierarchySpan
 
 
-class CourseClimb(FrozenModel):
-    """What the lift vs origin cost, and the one caveat it and its rates share."""
-
-    rates: list[Figure] = Field(
-        description="Per search dollar, per candidate tested and in worked time per unit of "
-        "lift, in that order; each sub names only its own denominator."
-    )
-    note: Said = Field(
-        description="What the lift and every rate read in: the measurand and, under an ability "
-        "election, that rounds are won on θ. Said once, under the rates."
-    )
-
-
 class HierarchyCourse(_RunEntry):
     """A course — one cycle's run, root, fork, diag or inner — as the listing serves it."""
 
     level: Literal["course"] = "course"
     facts: CourseFacts
-    climb: CourseClimb | None = Field(description="Null until the lift vs origin is read.")
+    climb: Said | None = Field(
+        description="The lead line (`RunStanding.climb`): the selection's lift vs origin and vs "
+        "parent, then per search dollar, per candidate tested and in worked time per unit. Its "
+        "detail is what they all read in: the measurand and, under an ability election, that "
+        "rounds are won on θ. Null until the lift vs origin is read."
+    )
     said: Said | None = Field(
         description="The run's pinned line from what no clock reads (`run_said`): a producer's "
         "row is its dashboard's alone. Null where nothing needs the operator."

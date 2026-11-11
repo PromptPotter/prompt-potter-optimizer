@@ -1398,32 +1398,6 @@
         "title": "ArmSlot",
         "type": "object"
       },
-      "ArmStarted": {
-        "additionalProperties": false,
-        "properties": {
-          "arm_key": {
-            "maxLength": 64,
-            "minLength": 1,
-            "pattern": "^[A-Za-z0-9_-]+$",
-            "title": "Arm Key",
-            "type": "string"
-          },
-          "hop": {
-            "$ref": "#/components/schemas/CycleHop"
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "arm_key",
-          "job_id",
-          "hop"
-        ],
-        "title": "ArmStarted",
-        "type": "object"
-      },
       "BackendHealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3755,7 +3729,7 @@
       },
       "CommandReading": {
         "additionalProperties": false,
-        "description": "A command read afresh off the account's log: where it stands, in the words of its task\nstatus, at the address the dispatcher resolved and filed it on.",
+        "description": "A command read afresh off the account's log: where it stands, in the words of its task\nstatus, at the address the dispatcher resolved and filed it on; a launch's jobs, each at the\ncycle it holds now (``None`` for a command launching none).",
         "properties": {
           "command_id": {
             "title": "Command Id",
@@ -3772,6 +3746,20 @@
           "last_updated_at": {
             "title": "Last Updated At",
             "type": "string"
+          },
+          "launches": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LaunchedJob"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launches"
           },
           "said": {
             "title": "Said",
@@ -3792,7 +3780,8 @@
           "status",
           "said",
           "created_at",
-          "last_updated_at"
+          "last_updated_at",
+          "launches"
         ],
         "title": "CommandReading",
         "type": "object"
@@ -4475,30 +4464,6 @@
           "routes"
         ],
         "title": "CouponStatus",
-        "type": "object"
-      },
-      "CourseClimb": {
-        "additionalProperties": false,
-        "description": "What the lift vs origin cost, and the one caveat it and its rates share.",
-        "properties": {
-          "note": {
-            "$ref": "#/components/schemas/Said",
-            "description": "What the lift and every rate read in: the measurand and, under an ability election, that rounds are won on θ. Said once, under the rates."
-          },
-          "rates": {
-            "description": "Per search dollar, per candidate tested and in worked time per unit of lift, in that order; each sub names only its own denominator.",
-            "items": {
-              "$ref": "#/components/schemas/Figure"
-            },
-            "title": "Rates",
-            "type": "array"
-          }
-        },
-        "required": [
-          "rates",
-          "note"
-        ],
-        "title": "CourseClimb",
         "type": "object"
       },
       "CourseFacts": {
@@ -6905,6 +6870,27 @@
         "title": "FactorReading",
         "type": "object"
       },
+      "FeedFrame": {
+        "additionalProperties": false,
+        "description": "One subject moved: re-ask every read that names it. A hint, never the body.",
+        "properties": {
+          "subject": {
+            "description": "`account`, `machine`, or `store:` and a store's hops.",
+            "title": "Subject",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "version"
+        ],
+        "title": "FeedFrame",
+        "type": "object"
+      },
       "FieldGap": {
         "additionalProperties": false,
         "description": "One origin field that still blocks mint — also the ``422 origin_incomplete`` body's ``details.gaps``.",
@@ -8093,32 +8079,6 @@
         "title": "HeadToHeadRow",
         "type": "object"
       },
-      "HeadToHeadStarted": {
-        "additionalProperties": false,
-        "description": "What a head-to-head's act answers, and its retry under the same key: each arm's job and\nthe root cycle it minted. Arms never queue, so every hop is resolved.",
-        "properties": {
-          "arms": {
-            "items": {
-              "$ref": "#/components/schemas/ArmStarted"
-            },
-            "title": "Arms",
-            "type": "array"
-          },
-          "head_to_head_id": {
-            "maxLength": 64,
-            "minLength": 1,
-            "pattern": "^[A-Za-z0-9_-]+$",
-            "title": "Head To Head Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "head_to_head_id",
-          "arms"
-        ],
-        "title": "HeadToHeadStarted",
-        "type": "object"
-      },
       "HealthReading": {
         "additionalProperties": false,
         "description": "A graded cause in words, read off the facts its round stamped (`results_health.py::health_reading`).",
@@ -8367,13 +8327,13 @@
           "climb": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CourseClimb"
+                "$ref": "#/components/schemas/Said"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Null until the lift vs origin is read."
+            "description": "The lead line (`RunStanding.climb`): the selection's lift vs origin and vs parent, then per search dollar, per candidate tested and in worked time per unit. Its detail is what they all read in: the measurand and, under an ability election, that rounds are won on θ. Null until the lift vs origin is read."
           },
           "facts": {
             "$ref": "#/components/schemas/CourseFacts"
@@ -8927,6 +8887,60 @@
           "knob"
         ],
         "title": "KnobRef",
+        "type": "object"
+      },
+      "LaunchAnswer": {
+        "additionalProperties": false,
+        "description": "What every door answers of a launch, a retry under its key included: the command it filed,\nwhich its task and its `cancel` name, and each job it launched, in launch order (a\nhead-to-head's in its arms' order).",
+        "properties": {
+          "command_id": {
+            "title": "Command Id",
+            "type": "string"
+          },
+          "launches": {
+            "items": {
+              "$ref": "#/components/schemas/LaunchedJob"
+            },
+            "title": "Launches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "command_id",
+          "launches"
+        ],
+        "title": "LaunchAnswer",
+        "type": "object"
+      },
+      "LaunchedJob": {
+        "additionalProperties": false,
+        "description": "What a launch answers of one job it launched: the job, the cycle it holds or will (``None``\nwhere a queued mint names none yet) and the words every surface names it by.",
+        "properties": {
+          "hop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CycleHop"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "hop",
+          "what"
+        ],
+        "title": "LaunchedJob",
         "type": "object"
       },
       "Leaf": {
@@ -15109,6 +15123,17 @@
             "$ref": "#/components/schemas/PairedReading",
             "description": "`selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap reading of that pair. The state says why where there is none: `same_individual` while the selection is the origin."
           },
+          "vs_parent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairedReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`selection` over its parent, as its electing round read it (`ArmFit.vs_reference`). Null while the selection is the origin."
+          },
           "worked_s": {
             "anyOf": [
               {
@@ -15129,6 +15154,7 @@
           "parent",
           "changes",
           "vs_origin",
+          "vs_parent",
           "rounds_closed",
           "improved",
           "advanced",
@@ -16586,33 +16612,6 @@
         "title": "StartCheckinPayload",
         "type": "object"
       },
-      "StartCheckinResponse": {
-        "additionalProperties": false,
-        "description": "What a Start answers: the job holding its slot, and the cycle it minted.",
-        "properties": {
-          "hop": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CycleHop"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null while the job is queued: the campaign is minted once it holds a slot."
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "job_id",
-          "hop"
-        ],
-        "title": "StartCheckinResponse",
-        "type": "object"
-      },
       "StartRunPayload": {
         "additionalProperties": false,
         "description": "A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it\ntakes (``mode``).",
@@ -17441,13 +17440,13 @@
           "climb": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CourseClimb"
+                "$ref": "#/components/schemas/Said"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Null until the lift vs origin is read."
+            "description": "The lead line (`RunStanding.climb`): the selection's lift vs origin and vs parent, then per search dollar, per candidate tested and in worked time per unit. Its detail is what they all read in: the measurand and, under an ability election, that rounds are won on θ. Null until the lift vs origin is read."
           },
           "facts": {
             "$ref": "#/components/schemas/SubtreeCourseFacts"
@@ -19276,7 +19275,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard": {
       "get": {
-        "description": "Live telemetry for the viewed cycle: the fold of its own ledger chain.\n\nThe ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one\n``campaign::cycle`` hop at a time. A cycle with no declared wiring answers ``warming_up``, an\nabsent one is not found; over HTTP it honours ``If-Modified-Since`` with a 304. ``at`` is an\noffset in the LEAF cycle's own ledger, the moment a hierarchy step's ``facts.offset``\ncarries: the state as of that line.",
+        "description": "Live telemetry for the viewed cycle: the fold of its own ledger chain.\n\nThe ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one\n``campaign::cycle`` hop at a time. A cycle with no declared wiring answers ``warming_up``, an\nabsent one is not found; over HTTP it honours ``If-None-Match`` with a 304. ``at`` is an\noffset in the LEAF cycle's own ledger, the moment a hierarchy step's ``facts.offset``\ncarries: the state as of that line.",
         "operationId": "cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
         "parameters": [
           {
@@ -20045,7 +20044,7 @@
     },
     "/api/v1/commands/accept-terms": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "accept_terms_api_v1_commands_accept_terms_post",
         "parameters": [
           {
@@ -20118,7 +20117,7 @@
     },
     "/api/v1/commands/archive-campaign": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "archive_campaign_api_v1_commands_archive_campaign_post",
         "parameters": [
           {
@@ -20191,7 +20190,7 @@
     },
     "/api/v1/commands/bank-snippet": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "bank_snippet_api_v1_commands_bank_snippet_post",
         "parameters": [
           {
@@ -20264,7 +20263,7 @@
     },
     "/api/v1/commands/cancel": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "cancel_api_v1_commands_cancel_post",
         "parameters": [
           {
@@ -20337,7 +20336,7 @@
     },
     "/api/v1/commands/cancel-queued": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "cancel_queued_api_v1_commands_cancel_queued_post",
         "parameters": [
           {
@@ -20410,7 +20409,7 @@
     },
     "/api/v1/commands/cleanup-empty-cycles": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "cleanup_empty_cycles_api_v1_commands_cleanup_empty_cycles_post",
         "parameters": [
           {
@@ -20483,7 +20482,7 @@
     },
     "/api/v1/commands/compact-archive": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "compact_archive_api_v1_commands_compact_archive_post",
         "parameters": [
           {
@@ -20556,7 +20555,7 @@
     },
     "/api/v1/commands/delete-campaign": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "delete_campaign_api_v1_commands_delete_campaign_post",
         "parameters": [
           {
@@ -20629,7 +20628,7 @@
     },
     "/api/v1/commands/delete-cycle": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "delete_cycle_api_v1_commands_delete_cycle_post",
         "parameters": [
           {
@@ -20702,7 +20701,7 @@
     },
     "/api/v1/commands/discard-draft": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "discard_draft_api_v1_commands_discard_draft_post",
         "parameters": [
           {
@@ -20775,7 +20774,7 @@
     },
     "/api/v1/commands/edit-draft-campaign": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "edit_draft_campaign_api_v1_commands_edit_draft_campaign_post",
         "parameters": [
           {
@@ -20848,7 +20847,7 @@
     },
     "/api/v1/commands/fork-cycle": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "fork_cycle_api_v1_commands_fork_cycle_post",
         "parameters": [
           {
@@ -20892,11 +20891,11 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                  "$ref": "#/components/schemas/LaunchAnswer"
                 }
               }
             },
@@ -20921,7 +20920,7 @@
     },
     "/api/v1/commands/grade-bench": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "grade_bench_api_v1_commands_grade_bench_post",
         "parameters": [
           {
@@ -20994,9 +20993,27 @@
     },
     "/api/v1/commands/head-to-head": {
       "post": {
-        "description": "Mint and detach every arm, or none; a retry under the same key answers the same arms.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "head_to_head_api_v1_commands_head_to_head_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -21024,7 +21041,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HeadToHeadStarted"
+                  "$ref": "#/components/schemas/LaunchAnswer"
                 }
               }
             },
@@ -21104,7 +21121,7 @@
     },
     "/api/v1/commands/mint-campaign": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "mint_campaign_api_v1_commands_mint_campaign_post",
         "parameters": [
           {
@@ -21148,11 +21165,11 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                  "$ref": "#/components/schemas/LaunchAnswer"
                 }
               }
             },
@@ -21177,7 +21194,7 @@
     },
     "/api/v1/commands/open-dataset-draft": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "open_dataset_draft_api_v1_commands_open_dataset_draft_post",
         "parameters": [
           {
@@ -21250,7 +21267,7 @@
     },
     "/api/v1/commands/open-origin-draft": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "open_origin_draft_api_v1_commands_open_origin_draft_post",
         "parameters": [
           {
@@ -21323,7 +21340,7 @@
     },
     "/api/v1/commands/origin-gate": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "origin_gate_api_v1_commands_origin_gate_post",
         "parameters": [
           {
@@ -21396,7 +21413,7 @@
     },
     "/api/v1/commands/pause": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "pause_api_v1_commands_pause_post",
         "parameters": [
           {
@@ -21469,7 +21486,7 @@
     },
     "/api/v1/commands/remove-api-key": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "remove_api_key_api_v1_commands_remove_api_key_post",
         "parameters": [
           {
@@ -21542,7 +21559,7 @@
     },
     "/api/v1/commands/rename-campaign": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "rename_campaign_api_v1_commands_rename_campaign_post",
         "parameters": [
           {
@@ -21615,7 +21632,7 @@
     },
     "/api/v1/commands/resolve-origin": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "resolve_origin_api_v1_commands_resolve_origin_post",
         "parameters": [
           {
@@ -21688,7 +21705,7 @@
     },
     "/api/v1/commands/set-api-key": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "set_api_key_api_v1_commands_set_api_key_post",
         "parameters": [
           {
@@ -21761,7 +21778,7 @@
     },
     "/api/v1/commands/set-concurrent-cycles": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "set_concurrent_cycles_api_v1_commands_set_concurrent_cycles_post",
         "parameters": [
           {
@@ -21834,7 +21851,7 @@
     },
     "/api/v1/commands/set-limits": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "set_limits_api_v1_commands_set_limits_post",
         "parameters": [
           {
@@ -21907,7 +21924,7 @@
     },
     "/api/v1/commands/set-sample-lookahead": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "set_sample_lookahead_api_v1_commands_set_sample_lookahead_post",
         "parameters": [
           {
@@ -21980,7 +21997,7 @@
     },
     "/api/v1/commands/set-user-settings": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "set_user_settings_api_v1_commands_set_user_settings_post",
         "parameters": [
           {
@@ -22053,7 +22070,7 @@
     },
     "/api/v1/commands/skip-searchpoint": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "skip_searchpoint_api_v1_commands_skip_searchpoint_post",
         "parameters": [
           {
@@ -22126,9 +22143,27 @@
     },
     "/api/v1/commands/start-checkin": {
       "post": {
-        "description": "Mint the draft's campaign and root cycle, close the draft and detach the loop; with\n`head_to_head`, one campaign per arm, each detached.\n\nAn incomplete origin answers 422 and the draft stays open.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "start_checkin_api_v1_commands_start_checkin_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -22156,15 +22191,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/StartCheckinResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/HeadToHeadStarted"
-                    }
-                  ],
-                  "title": "Response Start Checkin Api V1 Commands Start Checkin Post"
+                  "$ref": "#/components/schemas/LaunchAnswer"
                 }
               }
             },
@@ -22189,7 +22216,7 @@
     },
     "/api/v1/commands/start-run": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "start_run_api_v1_commands_start_run_post",
         "parameters": [
           {
@@ -22233,11 +22260,11 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                  "$ref": "#/components/schemas/LaunchAnswer"
                 }
               }
             },
@@ -22262,7 +22289,7 @@
     },
     "/api/v1/commands/submit-arms": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "submit_arms_api_v1_commands_submit_arms_post",
         "parameters": [
           {
@@ -22335,7 +22362,7 @@
     },
     "/api/v1/commands/unarchive-campaign": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "unarchive_campaign_api_v1_commands_unarchive_campaign_post",
         "parameters": [
           {
@@ -22408,7 +22435,7 @@
     },
     "/api/v1/commands/verify-candidate": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
         "operationId": "verify_candidate_api_v1_commands_verify_candidate_post",
         "parameters": [
           {
@@ -23063,6 +23090,31 @@
           }
         },
         "summary": "Evidence",
+        "tags": [
+          "Reads"
+        ]
+      }
+    },
+    "/api/v1/feed": {
+      "get": {
+        "description": "What moved, over SSE: a ``FeedFrame`` hints a re-ask; each read's body is the truth.",
+        "operationId": "feed_api_v1_feed_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Feed",
         "tags": [
           "Reads"
         ]

@@ -331,6 +331,16 @@ def _holders(stores: Stores, name: str) -> list[ResolvedDataset]:
     return [dataset for dataset in tiers if is_dataset_dir(dataset.directory)]
 
 
+def own_definition(stores: Stores, slug: str) -> ResolvedDataset | None:
+    """THE read of a name the account holds: its definition, where its own tier is the first
+    holding *slug*; ``None`` for a name it does not hold, or no name at all."""
+    try:
+        held = _holders(stores, slug)
+    except ValueError:
+        return None
+    return held[0] if held and held[0].tier == "yours" else None
+
+
 def claim_own_definition(stores: Stores, slug: str, *, new: bool) -> None:
     """THE claim on the name of an account's definition: refused where the install or research
     tier holds it, since the account's would shadow theirs. A re-write of a name the account holds

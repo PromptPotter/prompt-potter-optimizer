@@ -19,6 +19,8 @@ test.describe("dashboard", () => {
   });
 
   test("the chronology is its own region and is readable", async ({ page }) => {
+    // A column off screen reads nothing (`shell/Views.tsx`): swipe to it, as an operator would.
+    await page.locator("#view-timeline").scrollIntoViewIfNeeded();
     // `TimeRay` waits on three reads, which lag well past 15s after the account spec.
     await expect(page.getByRole("region", { name: /Time-ray/ })).toBeVisible({ timeout: 60_000 });
   });
@@ -28,6 +30,7 @@ test.describe("dashboard", () => {
   });
 
   test("the round charts draw, and survive a poll", async ({ page }) => {
+    await page.locator("#view-spend").scrollIntoViewIfNeeded();
     // Sit through a poll: the spend map arrives on the wire, not at mount.
     await expect(page.getByText(/Spend by round/)).toBeVisible();
     await page.waitForTimeout(6000);

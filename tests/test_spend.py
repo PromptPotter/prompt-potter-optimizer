@@ -86,10 +86,11 @@ from promptpotter.application.jobs.coupon import (
 )
 from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
+    RunStart,
     admit_and_share,
-    embedded_share,
     open_spend_book,
     paid_pass,
+    slotless_share,
 )
 from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadStarted
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
@@ -967,9 +968,10 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     hop = CycleHop(campaign_id="ds__000001", cycle_id="cycle_root")
     mode = RunMode(from_round=2, diag=True)
     launched_config = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
+    held_job = spawned.get(held.job_id)
+    assert held_job is not None
     launched = HeldRun(
-        job_registry=spawned,
-        job_id=held.job_id,
+        start=RunStart(stores, spawned, held_job),
         session=loop_session(stores, pipeline_schema([]), [], hop=hop),
         cycle=CycleConfig.laid(launched_config, []),
         budget=held,
@@ -1702,10 +1704,10 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         return None, cycle_result([], None, [])
 
     async def embedded() -> None:
-        await embedded_share(
+        await slotless_share(
             _budgeted(Budget(usd=1.0)),
             stores=built_stores,
-            dataset_name="ds1",
+            holder=EmbeddedRun("ds1"),
             hop=fork_c,
             requested=Budget(),
             step_rounds=None,
@@ -3484,7 +3486,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         """The arm's own process, run and exited: its slot handed back, nothing spent."""
         spec = held.job_spec(mode)
         detached.append(spec)
-        held.job_registry.release(spec.job_id, StopReason.CONVERGED)
+        held.start.job_registry.release(spec.job_id, StopReason.CONVERGED)
         return asyncio.create_task(asyncio.sleep(0))
 
     monkeypatch.setattr(run_job_mod, "spawn_job", ran_elsewhere)
@@ -3568,8 +3570,11 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     # A retry under the act's key, at the REST door, answers the arms its act minted.
     registry = JobRegistry.attach(stores.jobs_dir)
     funded = asked("duel-2", pair, Budget(usd=50.0, rounds=1))
+    route = next(r for r in commands_api.commands_router.routes if r.name == "head-to-head")  # type: ignore[attr-defined]
     answers = [
-        asyncio.run(commands_api.mint_head_to_head(registry, stores, funded, "duel-2-once"))
+        asyncio.run(
+            route.endpoint(job_registry=registry, stores=stores, payload=funded, key="duel-2-once")  # type: ignore[attr-defined]
+        )
         for _ in range(2)
     ]
     assert answers[0] == answers[1], "a retry under the act's key answered other arms"

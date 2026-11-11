@@ -1,9 +1,8 @@
 import { useEffect, useRef } from "react";
 import { evidenceRead } from "@/lib/api/reads";
 import type { Evidence } from "@/lib/api/types";
-import { LIVE_EVIDENCE_MS } from "@/lib/cadence";
 import { useRead } from "@/lib/hooks/useRead";
-import { invalidateReads, type ReadResult } from "@/lib/read-cache";
+import { reaskRead, type ReadResult } from "@/lib/read-cache";
 
 export type EvidenceAsk = Parameters<typeof evidenceRead>[1];
 
@@ -20,17 +19,17 @@ export function useEvidence(
   pulse: EvidencePulse,
   ask: EvidenceAsk = {},
 ): ReadResult<Evidence> {
-  const read = useRead(
-    subjects.length > 0 ? evidenceRead(subjects, ask, pulse.live ? LIVE_EVIDENCE_MS : null) : null,
-  );
+  const asked = subjects.length > 0 ? evidenceRead(subjects, ask, pulse.live) : null;
+  const read = useRead(asked);
+  const id = asked?.id ?? null;
 
-  // A move re-asks at once rather than on the slow beat; the mount's own first read is not a move.
+  // A settled course's move re-asks it; the mount's own first read is not a move.
   const seenRef = useRef(pulse.moved);
   useEffect(() => {
     if (seenRef.current === pulse.moved) return;
     seenRef.current = pulse.moved;
-    invalidateReads("evidence");
-  }, [pulse.moved]);
+    if (id !== null) reaskRead(id);
+  }, [pulse.moved, id]);
 
   return read;
 }

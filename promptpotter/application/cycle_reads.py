@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+import hashlib
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import Field
 
 from promptpotter.application import optimizers
+from promptpotter.application.hierarchy import entries_version
 from promptpotter.application.hierarchy_subtree import subtree_course
+from promptpotter.application.jobs.machine_status import machine_status
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.scoring.closed_rounds import campaign_scorer, closed_round
 from promptpotter.application.served_dashboard import WarmingDashboard, served_dashboard
 from promptpotter.application.views.render.export import ExportFiles, Provenance, export_files
@@ -16,7 +20,7 @@ from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.arm_reading import ArmReading, ScoreboardRow
 from promptpotter.domain.arms import ArmState
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
 from promptpotter.domain.export import ExportTier
 from promptpotter.domain.hierarchy import HierarchySteps
 from promptpotter.domain.paired_reading import ArmKey
@@ -25,7 +29,6 @@ from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.audit_trail import round_audits
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
-from promptpotter.infrastructure.runtime_flags import run_phase_validator_epoch
 from promptpotter.infrastructure.store.family_ray_queries import (
     RayCursor,
     build_family_ray,
@@ -37,11 +40,12 @@ from promptpotter.infrastructure.store.lineage_queries import (
     FamilyCourse,
     iter_family_courses,
 )
-from promptpotter.infrastructure.store.read_model import Moment
-from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
+from promptpotter.infrastructure.store.read_model import Moment, file_sig
+from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 _TAIL_POLL_INTERVAL_S = 0.5
+_FEED_TICK_S = 2.0
 
 
 @dataclass(frozen=True)
@@ -56,11 +60,6 @@ class ViewedCycle:
     @property
     def hop(self) -> CycleHop:
         return self.path[-1]
-
-    @property
-    def dashboard_changed_at(self) -> float | None:
-        """Covers the DERIVED phase: an mtime alone would 304 a dead producer at ``running``."""
-        return run_phase_validator_epoch(self.stores, self.path[-1])
 
     def moment(self, at: int | None) -> Moment | None:
         return None if at is None else Moment(CycleLayout(self.dir).ledger, at)
@@ -184,6 +183,44 @@ async def cycle_event_frames(cycle: ViewedCycle) -> AsyncIterator[str]:
         for envelope in await asyncio.to_thread(tail.read_new):
             yield envelope.model_dump_json()
         await asyncio.sleep(_TAIL_POLL_INTERVAL_S)
+
+
+class FeedFrame(StrictModel):
+    """One subject moved: re-ask every read that names it. A hint, never the body."""
+
+    subject: str = Field(description="`account`, `machine`, or `store:` and a store's hops.")
+    version: str
+
+
+def _store_subjects(stores: Stores) -> Iterator[tuple[str, Stores]]:
+    yield f"store:{encode_cycle_path(stores.inside)}", stores
+    for campaign_id in stores.campaigns.list_campaign_ids():
+        for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign_id):
+            if (inner := inner_sandbox_store(stores, campaign_id, cycle_dir.name)) is not None:
+                yield from _store_subjects(inner)
+
+
+def feed_versions(stores: Stores, jobs: JobRegistry) -> dict[str, str]:
+    """Each subject at its version: stats and the slots, never a fold."""
+    held = {subject: entries_version([store]) for subject, store in _store_subjects(stores)}
+    # What the account filed: an edit, a setting, a draft turn. A run's appends do not move it.
+    held["account"] = (file_sig(stores.commands.path), stores.drafts.version())
+    held["machine"] = (machine_status(jobs, identity=stores.identity).model_dump_json(),)
+    return {
+        subject: hashlib.sha256(repr(version).encode()).hexdigest()[:16]
+        for subject, version in held.items()
+    }
+
+
+async def feed_frames(stores: Stores, jobs: JobRegistry) -> AsyncIterator[str]:
+    """Every subject once, then each move: the server writes every ledger, so it says what moved."""
+    sent: dict[str, str] = {}
+    while True:
+        for subject, version in (await asyncio.to_thread(feed_versions, stores, jobs)).items():
+            if sent.get(subject) != version:
+                sent[subject] = version
+                yield FeedFrame(subject=subject, version=version).model_dump_json()
+        await asyncio.sleep(_FEED_TICK_S)
 
 
 @dataclass(frozen=True)

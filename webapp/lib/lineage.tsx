@@ -3,12 +3,11 @@
 import { useMemo } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api/reads";
 import type { Said, SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
-import { LINEAGE_POLL_MS, MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
-import { courseAt, indexLineage, phaseIs, type LineageIndex } from "@/lib/derivations";
+import { MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
+import { courseAt, indexLineage, type LineageIndex } from "@/lib/derivations";
 import { lensOf, useMaskState, type MaskState } from "@/lib/scoring-mask";
 import { useCellTerms } from "@/lib/hooks/useConnector";
 import { shownData, useRead } from "@/lib/hooks/useRead";
-import { useRegistry } from "@/lib/hooks/useRegistry";
 import type { ReadResult } from "@/lib/read-cache";
 import { useSelection } from "@/lib/state/selection";
 import { createModuleStore } from "@/lib/state/module-store";
@@ -107,21 +106,9 @@ function useViewedTreeKey(maskState: MaskState): TreeKey {
 }
 
 // No `onGone`: the dashboard read owns that verdict, and this reader may be another campaign's row.
-// A campaign the listing has every course settled in reads once, re-asked only by an invalidation.
 function useTree(key: TreeKey | null): CampaignTree {
-  const { started } = useRegistry();
   const address = key?.address ?? null;
-  const rests = started.some(
-    (e) =>
-      e.address === address &&
-      e.children.length > 0 &&
-      e.children.every((c) => phaseIs(c.state.status.run_phase, "settled")),
-  );
-  return useRead(
-    key && address
-      ? subtreeRead(address, key.mask, key.moment, rests ? null : LINEAGE_POLL_MS)
-      : null,
-  );
+  return useRead(key && address ? subtreeRead(address, key.mask, key.moment) : null);
 }
 
 interface ViewedLineage {

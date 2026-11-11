@@ -1,22 +1,9 @@
-// Every poll interval is a multiple of the beat.
-export const READ_BEAT_MS = 1000;
+// No read is asked on a clock: the server's feed says what moved (`read-cache.ts`). These are the
+// clocks left: a failed read's retry and the browser's own timings.
 
-export const DASHBOARD_LIVE_POLL_MS = 2000;
-// A failed read that recovers re-asks no faster than this (nor than its own cadence); the session
-// probe retries on it; a replayed moment's dashboard and the steps beside a lost or replayed one
-// poll on it too.
+// A failed read that passes re-asks on it, a refused feed reopens on it, and the session probe
+// retries on it.
 export const RECONNECT_POLL_MS = 5000;
-// Matches the dashboard's live beat, so a CLI-minted cycle is followed without the registry's lag.
-export const ACTIVE_POINTER_POLL_MS = 2000;
-export const REGISTRY_POLL_MS = 10000;
-export const LINEAGE_POLL_MS = 5000;
-export const CELLS_LIVE_POLL_MS = 8000;
-export const CONNECTOR_HEALTH_POLL_MS = 5000;
-export const MACHINE_STATUS_POLL_MS = 5000;
-export const LIVE_EVIDENCE_MS = 30000;
-// A ready draft re-reads its `launch_refusal`, which sums every ledger the account owns: slowly.
-export const DRAFT_POLL_MS = 60_000;
-export const VERIFY_PASS_POLL_MS = 5000;
 
 export const ELAPSED_TICK_MS = 1000;
 export const MASK_LENS_DEBOUNCE_MS = 250;

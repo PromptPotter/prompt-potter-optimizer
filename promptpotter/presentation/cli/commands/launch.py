@@ -204,10 +204,13 @@ def cycle_result_command(session: Session, cycle_result: CycleResult) -> Command
     )
 
 
-def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
-    """``None`` = stdin is no TTY: the caller picks its non-interactive default."""
+def confirm_tty(prompt: str, *, default_no: bool = True, context: str = "") -> bool | None:
+    """``None`` = stdin is no TTY: the caller picks its non-interactive default. *context* is
+    said only to the person the prompt asks."""
     if not sys.stdin.isatty():
         return None
+    if context:
+        print(f"\n{context}\n")
     suffix = " [y/N]: " if default_no else " [Y/n]: "
     try:
         raw = input(prompt + suffix).strip().lower()

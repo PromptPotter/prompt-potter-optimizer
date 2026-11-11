@@ -14,8 +14,6 @@ import inspect
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import PurePosixPath
 from typing import Annotated, Any, cast
 
@@ -25,7 +23,8 @@ from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
 from promptpotter.application.caller import Caller
-from promptpotter.application.hierarchy import hierarchy_version
+from promptpotter.application.cycle_reads import FeedFrame
+from promptpotter.application.hierarchy import entries_version, hierarchy_version
 from promptpotter.application.hierarchy_subtree import subtree_version
 from promptpotter.application.read_params import (
     PARAMS_FOR_READ,
@@ -35,6 +34,7 @@ from promptpotter.application.read_params import (
     CycleExportParams,
     DatasetCellsParams,
     EvidenceParams,
+    FeedParams,
     HierarchyParams,
     HierarchyStepsParams,
     HierarchySubtreeParams,
@@ -52,20 +52,6 @@ reads_router = APIRouter(tags=["Reads"])
 
 # A restart may serve new code over unchanged inputs, so no ETag outlives its process.
 _PROCESS = os.urandom(8).hex()
-
-
-def _http_date(epoch_seconds: float) -> str:
-    return format_datetime(datetime.fromtimestamp(int(epoch_seconds), tz=UTC), usegmt=True)
-
-
-def _seen_at_or_after(if_modified_since: str | None, mtime_epoch: float) -> bool:
-    if not if_modified_since:
-        return False
-    try:
-        client_dt = parsedate_to_datetime(if_modified_since)
-    except (TypeError, ValueError):
-        return False
-    return int(client_dt.timestamp()) >= int(mtime_epoch)
 
 
 def _weak(digest: str) -> str:
@@ -147,12 +133,9 @@ def _subtree(asked: _Asked, read: HierarchySubtreeParams) -> Response:
 
 def _dashboard(asked: _Asked, read: CycleDashboardParams) -> Response:
     cycle = read.viewed(asked.caller.stores)
-    headers: dict[str, str] = {}
-    if (mtime_epoch := cycle.dashboard_changed_at) is not None:
-        headers["Last-Modified"] = _http_date(mtime_epoch)
-        if _seen_at_or_after(asked.request.headers.get("if-modified-since"), mtime_epoch):
-            return Response(status_code=304, headers=headers)
-    return _model_json(read.served(cycle), headers=headers)
+    # The leaf store's version, which its feed frame names: it covers the derived phase's edges.
+    version = entries_version([cycle.stores])
+    return _conditional(asked.request, (version, read), lambda: read.served(cycle))
 
 
 _EXPORT_MEDIA = {".txt": "text/plain", ".json": "application/json", ".zip": "application/zip"}
@@ -169,7 +152,7 @@ def _export(asked: _Asked, read: CycleExportParams) -> Response:
     )
 
 
-def _events(asked: _Asked, read: CycleEventsParams) -> Response:
+def _events(asked: _Asked, read: CycleEventsParams | FeedParams) -> Response:
     # LF is the contract (the default is CRLF); X-Accel-Buffering is the header sse-starlette omits.
     frames = read.answer(asked.caller)
     return EventSourceResponse(frames, sep="\n", headers={"X-Accel-Buffering": "no"})
@@ -215,6 +198,9 @@ _FRAMED: dict[ReadKind, _Framing] = {
     ReadKind.CYCLE_EVENTS: _Framing(
         _events,
         {"response_class": EventSourceResponse, "response_model": ProjectionEnvelope},
+    ),
+    ReadKind.FEED: _Framing(
+        _events, {"response_class": EventSourceResponse, "response_model": FeedFrame}
     ),
     ReadKind.EVIDENCE: _Framing(_evidence),
     ReadKind.CAMPAIGN_PIPELINE: _Framing(_pipeline),

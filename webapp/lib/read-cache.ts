@@ -1,6 +1,7 @@
-import { failureKind, failurePasses, type Conditional, type FailureKind } from "@/lib/api/client";
+import { API, failureKind, failurePasses, type Conditional, type FailureKind } from "@/lib/api/client";
 import { operatorMessage } from "@/lib/api/errors";
-import { READ_BEAT_MS, RECONNECT_POLL_MS } from "@/lib/cadence";
+import { READ_ROUTES, type FeedFrame } from "@/lib/api/types";
+import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { reportIncident } from "@/lib/diagnostics";
 
 export const READ_CACHE_MAX_KEYS = 64;
@@ -22,12 +23,9 @@ export type ReadResult<T> =
   | { status: "ready"; data: T }
   | { status: "failed"; failure: ReadFailure; kept: T | null };
 
-// What a read's cadence is a function of: its own accepted body, and whether a write the browser
-// sent that revalidates this read is still unanswered (it may be moving it). A failed read's
-// cadence is the cache's own (`intervalOf`).
-export interface CadenceState<T> {
-  body: T | null;
-  writing: boolean;
+// The one ready result: a cached body's, or a body another transport of the same answer holds.
+export function heldRead<T>(data: T): ReadResult<T> {
+  return { status: "ready", data };
 }
 
 // A read names everything that varies per read; the cache runs each once per id.
@@ -39,18 +37,17 @@ export interface ReadDescriptor<T, B = T> {
   // The key is not known yet: the read shows its keep body as `loading` and asks nothing.
   held?: true;
   // A 404 is this read's ordinary empty answer: it lands as a null body, answered like any other —
-  // no incident, no gone verdict, and the poll goes on.
+  // no incident, no gone verdict.
   expects?: null extends B ? "gone" : never;
-  // Milliseconds between re-asks; null (or absent) reads once, re-asked only by an invalidation.
-  cadence?: (state: CadenceState<T>) => number | null;
+  // The feed subject whose move re-asks it, by prefix (`FeedFrame.subject`: `store:` and the hops
+  // above the store it reads, or `machine`); absent, it reads once.
+  subject?: string;
   // While this stays the same, a re-keyed read shows the last body the key landed as `kept`.
   keep?: string;
   // A body that is not the answer yet (a warming dashboard): the read stays `loading` on it.
   accept?: (body: B) => body is B & T;
-  // After `GONE_CONFIRM_LIMIT` straight 404s: the poll stops and this runs, once per id.
+  // After `GONE_CONFIRM_LIMIT` straight 404s: the retry stops and this runs, once per id.
   onGone?: () => void;
-  // A landed body replaced an accepted one; once per id, whoever subscribed.
-  onChange?: (prev: T, next: T) => void;
 }
 
 // The cache stores bodies untyped; each descriptor types its own id's.
@@ -82,8 +79,6 @@ interface Slot {
   misses: number;
   stopped: boolean;
   flight: Flight | null;
-  interval: number | null;
-  due: number;
   result: ReadResult<unknown>;
 }
 
@@ -110,16 +105,14 @@ function resultOf(slot: Slot): ReadResult<unknown> {
   const own = accepted(read, slot);
   const kept = own?.data ?? (read.keep !== undefined ? (keeps.get(read.keep) ?? null) : null);
   if (slot.failure) return { status: "failed", failure: slot.failure, kept };
-  if (own) return { status: "ready", data: own.data };
+  if (own) return heldRead(own.data);
   return { status: "loading", kept };
 }
 
 function changed(slot: Slot): void {
   slot.result = resultOf(slot);
   for (const sub of slot.subs) sub.notify();
-  // The cadence is a function of the state that just moved.
-  retime(slot);
-  syncBeat();
+  syncRetry();
 }
 
 // *spare* is the slot being handed out: idle only until its caller subscribes or flies it.
@@ -150,8 +143,6 @@ function slotFor(read: AnyRead): Slot {
     misses: 0,
     stopped: false,
     flight: null,
-    interval: null,
-    due: 0,
     result: IDLE,
   };
   slot.result = resultOf(slot);
@@ -175,16 +166,13 @@ function remember(read: AnyRead, data: unknown): void {
 
 function land(slot: Slot, data: unknown, validator: string | null): void {
   const read = descriptorOf(slot);
-  const prev = accepted(read, slot);
   const same = slot.entry?.data === data && slot.failure === null;
   slot.entry = { data, validator };
   slot.failure = null;
   slot.misses = 0;
   if (same) return;
-  const now = accepted(read, slot);
   changed(slot);
-  if (now) remember(read, data);
-  if (now && prev && prev.data !== data) read.onChange?.(prev.data, data);
+  if (accepted(read, slot)) remember(read, data);
 }
 
 function fail(slot: Slot, e: unknown): void {
@@ -295,10 +283,12 @@ export function dropCachedRead(id: string): void {
   changed(slot);
 }
 
-// An identity flip: every body, kept body, verdict and flight belongs to the last identity. A
-// mounted read is re-asked under the new one; signed out, an auth read is left to `useRead`'s gate.
+// An identity flip: every body, kept body, verdict, flight and feed version belongs to the last
+// identity. A mounted read is re-asked under the new one; signed out, an auth read is left to
+// `useRead`'s gate.
 export function clearReadCache(signedIn: boolean): void {
   keeps.clear();
+  closeFeed();
   for (const slot of [...slots.values()]) {
     supersede(slot);
     if (slot.subs.size === 0) {
@@ -312,133 +302,90 @@ export function clearReadCache(signedIn: boolean): void {
     changed(slot);
     if (signedIn || !descriptorOf(slot).auth) ask(slot, false);
   }
-}
-
-let beat: ReturnType<typeof setInterval> | null = null;
-let listening = false;
-// Each unanswered write, by the read names it revalidates; null names every read.
-const writes = new Set<{ reads: ReadonlySet<string> | null }>();
-
-function writingOn(slot: Slot): boolean {
-  const name = readName(slot.id);
-  for (const write of writes) if (write.reads === null || write.reads.has(name)) return true;
-  return false;
-}
-
-function nextDue(now: number, intervalMs: number): number {
-  return (Math.floor(now / intervalMs) + 1) * intervalMs;
-}
-
-function hidden(): boolean {
-  return typeof document !== "undefined" && document.hidden;
-}
-
-// The fastest any subscriber asks: a read is polled once per id, at the most eager cadence. A
-// failed read is the cache's (a read's expected 404 is its answer, not a failure): a failure that
-// passes (`failurePasses`), and a 404 until `GONE_CONFIRM_LIMIT` confirms it, re-asks no faster
-// than the reconnect beat nor than the read's own cadence; a refusal the server would repeat rests
-// until a change re-asks it.
-function intervalOf(slot: Slot): number | null {
-  if (slot.stopped || slot.subs.size === 0) return null;
-  const read = descriptorOf(slot);
-  const failed = slot.failure?.kind ?? null;
-  if (failed !== null && failed !== "gone" && !failurePasses(failed)) return null;
-  const own = accepted(read, slot);
-  const state: CadenceState<unknown> = { body: own?.data ?? null, writing: writingOn(slot) };
-  let fastest: number | null = null;
-  for (const sub of slot.subs) {
-    const ms = sub.read().cadence?.(state) ?? null;
-    if (ms !== null && (fastest === null || ms < fastest)) fastest = ms;
-  }
-  if (failed === null) return fastest;
-  return fastest === null ? RECONNECT_POLL_MS : Math.max(fastest, RECONNECT_POLL_MS);
-}
-
-// Due on the next wall-clock multiple of a new interval, so reads of one cadence share a beat.
-function retime(slot: Slot): void {
-  const ms = intervalOf(slot);
-  if (ms === slot.interval) return;
-  slot.interval = ms;
-  if (ms !== null) slot.due = nextDue(Date.now(), ms);
-}
-
-function onBeat(): void {
-  const now = Date.now();
-  for (const slot of slots.values()) {
-    // A subscriber's newest descriptor may name another cadence without anything landing.
-    retime(slot);
-    const ms = slot.interval;
-    if (ms === null || now < slot.due) continue;
-    slot.due = nextDue(now, ms);
-    ask(slot, false);
-  }
+  if (mounted().length > 0) openFeed();
 }
 
 function mounted(): Slot[] {
   return [...slots.values()].filter((slot) => slot.subs.size > 0 && !slot.stopped);
 }
 
-// A change re-asks every mounted read it names, or every one, hidden tab or not: none may stand stale.
-export function invalidateReads(name?: string): void {
-  for (const slot of mounted()) {
-    if (name === undefined || readName(slot.id) === name) ask(slot, true);
+// A failure that passes (`failurePasses`), and a 404 until `GONE_CONFIRM_LIMIT` confirms it, is
+// re-asked on the reconnect beat; a refusal the server would repeat rests until its subject moves.
+function retrying(slot: Slot): boolean {
+  const failed = slot.failure?.kind ?? null;
+  return failed !== null && (failed === "gone" || failurePasses(failed));
+}
+
+let retry: ReturnType<typeof setInterval> | null = null;
+
+function syncRetry(): void {
+  const wanted = mounted().some(retrying);
+  if (wanted && retry === null) {
+    retry = setInterval(() => {
+      for (const slot of mounted()) if (retrying(slot)) ask(slot, false);
+    }, RECONNECT_POLL_MS);
+  }
+  if (!wanted && retry !== null) {
+    clearInterval(retry);
+    retry = null;
   }
 }
 
-// On return or reconnect, a polled read (a recovering one included) is re-asked at once rather
-// than on its beat, and an answered one-shot read where a validator makes that free and
-// identity-stable; a refused read rests either way.
-function revalidateReads(): void {
-  if (hidden()) return;
+// The operator's retry of a mounted read: asked again now, whatever its subject.
+export function reaskRead(id: string): void {
+  const slot = slots.get(id);
+  if (slot && slot.subs.size > 0) ask(slot, true);
+}
+
+// The server says what moved (`GET /feed`): each subject at its version, then each move. A frame is
+// a hint, never the body: it re-asks every mounted read whose subject it starts, and what the read
+// answers is what the cache keeps. A subject's first version moves nothing: a read asks on mount.
+let feed: EventSource | null = null;
+const versions = new Map<string, string>();
+
+function moved(subject: string): void {
   for (const slot of mounted()) {
-    if (intervalOf(slot) !== null || (slot.failure === null && slot.entry?.validator != null)) {
-      ask(slot, true);
+    const named = descriptorOf(slot).subject;
+    if (named !== undefined && subject.startsWith(named)) ask(slot, true);
+  }
+}
+
+function openFeed(): void {
+  if (feed !== null || typeof EventSource === "undefined") return;
+  const es = new EventSource(`${API}${READ_ROUTES.feed}`, { withCredentials: true });
+  feed = es;
+  es.onmessage = (ev: MessageEvent<string>) => {
+    let frame: FeedFrame;
+    try {
+      frame = JSON.parse(ev.data) as FeedFrame;
+    } catch (e) {
+      // The server serializes every frame, so one that does not parse is an incident, not noise.
+      reportIncident(e, { surface: "feed" });
+      return;
     }
-  }
-}
-
-// A write the browser sent, in flight on the reads it revalidates (`reads`, by name; null is every
-// read): until it is answered, their cadences see `writing`. The answer's own re-ask is the
-// writer's (`useCommand`); a cadence may rest meanwhile (`reads.ts::draftCadence`).
-export function beginWrite(reads: readonly string[] | null): () => void {
-  const write = { reads: reads === null ? null : new Set(reads) };
-  writes.add(write);
-  retimeAll();
-  return () => {
-    if (!writes.delete(write)) return;
-    retimeAll();
+    const was = versions.get(frame.subject);
+    versions.set(frame.subject, frame.version);
+    if (was !== undefined && was !== frame.version) moved(frame.subject);
+  };
+  // A dropped stream reconnects by itself, and its first frames say what moved meanwhile; a
+  // refused one (a 401, a 5xx) is closed for good and reopened on the reconnect beat.
+  es.onerror = () => {
+    if (es.readyState !== EventSource.CLOSED || feed !== es) return;
+    feed = null;
+    setTimeout(openFeed, RECONNECT_POLL_MS);
   };
 }
 
-function retimeAll(): void {
-  for (const slot of slots.values()) retime(slot);
-  syncBeat();
+function closeFeed(): void {
+  feed?.close();
+  feed = null;
+  versions.clear();
 }
 
-function syncBeat(): void {
-  const wanted = !hidden() && [...slots.values()].some((slot) => intervalOf(slot) !== null);
-  if (wanted && beat === null) beat = setInterval(onBeat, READ_BEAT_MS);
-  if (!wanted && beat !== null) {
-    clearInterval(beat);
-    beat = null;
-  }
-}
-
-function listen(): void {
-  if (listening || typeof document === "undefined") return;
-  listening = true;
-  document.addEventListener("visibilitychange", () => {
-    syncBeat();
-    revalidateReads();
-  });
-  window.addEventListener("focus", revalidateReads);
-  window.addEventListener("online", revalidateReads);
-}
-
-// `read` is the subscriber's newest descriptor: its cadence counts, its effects run. The first
+// `read` is the subscriber's newest descriptor: its subject counts, its effects run. The first
 // subscriber of an id asks; the others share its flight and body.
 export function subscribe(read: () => AnyRead, notify: () => void): () => void {
-  listen();
+  openFeed();
   const slot = slotFor(read());
   const sub: Sub = { read, notify };
   const first = slot.subs.size === 0;
@@ -448,13 +395,11 @@ export function subscribe(read: () => AnyRead, notify: () => void): () => void {
     slot.misses = 0;
     ask(slot, false);
   }
-  retime(slot);
-  syncBeat();
+  syncRetry();
   return () => {
     slot.subs.delete(sub);
     if (slot.subs.size === 0) supersede(slot);
-    retime(slot);
-    syncBeat();
+    syncRetry();
     evict();
   };
 }

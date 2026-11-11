@@ -300,17 +300,6 @@ class CommandBook:
         held = self._state.inboxes.get(self._spelled(subject))
         return (None if held is None else held[1].at(self._line)) or Controls()
 
-    def stamp(self, subject: Subject) -> int | None:
-        """The subject's last event, in ns: a filed control re-validates its cycle's reads."""
-        spelled, state = self._spelled(subject), self._state
-        last = None if (held := state.events.get(spelled)) is None else held.at(self._line)
-        for draft in reversed(list(state.drafts_onto.get(spelled, ()))):
-            if last is not None:
-                break
-            if state.landed[draft][0] <= self._line:
-                last = state.events.get(draft, _Versions()).at(self._line)
-        return None if last is None else int((epoch_seconds(last.timestamp) or 0.0) * 1e9)
-
     def untaken(self, subject: Subject, *, before: float | None = None) -> list[str]:
         """The loop commands on *subject* accepted and never taken, less an ``auto`` look-ahead,
         which is a mode, filed before epoch *before* where given: what a run boundary voids."""

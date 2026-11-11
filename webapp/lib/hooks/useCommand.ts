@@ -4,7 +4,6 @@ import { useRef, useState } from "react";
 import { ApiError, commandMessage, failureKind, type FailureKind } from "@/lib/api";
 import { useAuthGate } from "@/lib/state/auth";
 import { reportIncident } from "@/lib/diagnostics";
-import { beginWrite, invalidateReads } from "@/lib/read-cache";
 
 export interface CommandFailure {
   kind: FailureKind;
@@ -32,17 +31,11 @@ const isAbort = (e: unknown) =>
 export function useCommand<V extends string>(
   surface: string,
   opts: {
-    /**
-     * The reads, by name, the write moves: in flight it is `writing` on them, answered (landed or
-     * refused) it re-asks them. Absent is every read; `false` none: its caller reads back what it
-     * moves (consent re-probes the session, a logout navigates), or it moves nothing (a preview).
-     */
-    revalidate?: false | readonly string[];
     /** The subject's identity; a change clears `failure`. */
     scope?: string | null;
   } = {},
 ): CommandSlot<V> {
-  const { revalidate = null, scope = null } = opts;
+  const { scope = null } = opts;
   const { onAuthError } = useAuthGate();
   const [pending, setPending] = useState<V | null>(null);
   const [failure, setFailure] = useState<CommandSlot<V>["failure"]>(null);
@@ -63,26 +56,16 @@ export function useCommand<V extends string>(
     inFlight.current = true;
     setPending(verb);
     setFailure(null);
-    // Until answered, the reads it names see `writing`: the draft rests under its own write, whose
-    // answer re-asks it.
-    const answered = revalidate === false ? () => {} : beginWrite(revalidate);
-    const reask = () => {
-      if (revalidate === null) invalidateReads();
-      else if (revalidate !== false) for (const name of revalidate) invalidateReads(name);
-    };
+    // What the write moved, the feed says: the dispatcher files it on the account's log.
     try {
       const value = await send();
       then?.(value);
-      reask();
       return { ok: true, value };
     } catch (e) {
       if (isAbort(e)) return { ok: false, failure: null };
       onAuthError(e);
       reportIncident(e, { surface: `${surface}:${verb}` });
       const kind = failureKind(e);
-      // Whatever refused it, the sends before the refused one may have moved what the write
-      // names (a paid turn books each it started), and the client cannot tell which ran.
-      reask();
       const api = e instanceof ApiError ? e : null;
       const f: CommandFailure = {
         kind,
@@ -94,7 +77,6 @@ export function useCommand<V extends string>(
       setFailure({ ...f, verb });
       return { ok: false, failure: f };
     } finally {
-      answered();
       inFlight.current = false;
       setPending(null);
     }

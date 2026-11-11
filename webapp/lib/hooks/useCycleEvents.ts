@@ -36,7 +36,7 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
     if (!p || addressGone) return;
     // A frame queued across a reconnect would paint and linger: this feed never re-validates.
     const expectedCycleId = pathLeaf(p).cycleId;
-    const es = new EventSource(cyclePathUrl(p, "/events:subscribe"), {
+    const es = new EventSource(cyclePathUrl("cycle-events", p, {}), {
       withCredentials: true,
     });
 

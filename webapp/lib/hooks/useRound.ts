@@ -46,7 +46,7 @@ const NO_ROWS: ArmRow[] = [];
 
 export function useRound(path: CyclePath | null, round: number | null): Round {
   // Another cycle's round reads its dashboard once; the viewed one rides the viewed poll.
-  const { dash } = useDashboard(path, null);
+  const { dash } = useDashboard(path);
   const unfiled = isRoundUnfiled(dash, round);
   const at = useMomentAt(path);
   const read = useRead(path && round != null && !unfiled ? roundRead(path, round, at) : null);

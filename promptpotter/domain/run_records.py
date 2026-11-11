@@ -710,6 +710,15 @@ class LaunchedEffect(FrozenModel):
     launches: list[LaunchedJob]
 
 
+class LaunchAnswer(FrozenModel):
+    """What every door answers of a launch, a retry under its key included: the command it filed,
+    which its task and its `cancel` name, and each job it launched, in launch order (a
+    head-to-head's in its arms' order)."""
+
+    command_id: str
+    launches: list[LaunchedJob]
+
+
 class VerifySaturated(FrozenModel):
     """A verify that bought nothing: every sample of the candidate's search split was already
     measured for its config: its answer, kept on its end as a graded one is."""

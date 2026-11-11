@@ -10,7 +10,7 @@ import { Button, Dialog, FailureLine } from "@/components/ui";
 export function ConsentGate() {
   const { status, me, refresh } = useAuth();
   const [checked, setChecked] = useState(false);
-  const cmd = useCommand<"accept-terms">("consent-gate", { revalidate: false });
+  const cmd = useCommand<"accept-terms">("consent-gate");
 
   const open =
     status === "authed" &&

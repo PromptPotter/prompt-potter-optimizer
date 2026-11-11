@@ -3,6 +3,7 @@ import type { DraftPatch } from "@/lib/api/types";
 import { BRAND } from "@/lib/brand";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData, useRead } from "@/lib/hooks/useRead";
+import { heldRead } from "@/lib/read-cache";
 import { useWorkspace } from "@/lib/workspace";
 import { ReadState, SegmentedControl } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
@@ -61,7 +62,7 @@ export function OptimizerSetupSection({ onApply }: { onApply: (patch: DraftPatch
         <PipelineFlow
           layer={{
             view: setup.view,
-            read: { status: "ready", data: setup },
+            read: heldRead(setup),
             connector: BRAND.provider.name,
             reach: setup.reach,
             scope: "optimizer",

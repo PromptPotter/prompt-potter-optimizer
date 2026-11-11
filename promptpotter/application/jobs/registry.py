@@ -239,9 +239,10 @@ class JobRegistry:
     def claimant_lock(self) -> Path:
         return this_producer_lock(self._dir)
 
-    def adopt(self, job_id: str) -> bool:
+    def adopt(self, job_id: str) -> Job | None:
+        """The job as this process adopted it; ``None`` where it was released first."""
         adopted = {"producer_id": this_producer(self._dir), "code_revision": CODE_REVISION}
-        return self._stamp(job_id, lambda job: None if job.released else adopted) is not None
+        return self._stamp(job_id, lambda job: None if job.released else adopted)
 
     def landing(self) -> str | None:
         return self._gate.landing()
@@ -266,8 +267,9 @@ class JobRegistry:
         self, job_id: str, ended: StopReason | BaseException | None = None, *, stepped: bool = False
     ) -> Job | None:
         """Stamps what ended the job, the one reading of it, which the cycle's declared stop takes
-        (`admission.py::release_slot`): the `StopReason` its run returned (*stepped* where it
-        paused at its round allowance); a raise before its admission refused it, and an interrupt
+        (`admission.py::RunStart.release`): the `StopReason` its run returned (*stepped* where it
+        paused at its round allowance); any raise in the queue withdrew it, one before its admission
+        refused it, and an interrupt
         or a raise after it is the stop it reads as (`run_stop_reason`); nothing at all is a
         scoring pass that returned."""
         with self.admission_gate():
@@ -277,6 +279,8 @@ class JobRegistry:
             match ended:
                 case StopReason():
                     stamped = self._end(job_id, ending=ended, stepped=stepped)
+                case BaseException() if job.queued:
+                    stamped = self._end(job_id, lapse="withdrawn")
                 case BaseException() if not job.admitted and not launch_interrupted(ended):
                     refused = ended if isinstance(ended, PotterError) else PotterError(str(ended))
                     stamped = self._end(job_id, lapse="refused", refusal=Refusal.of(refused))

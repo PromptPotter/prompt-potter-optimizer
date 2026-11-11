@@ -183,24 +183,6 @@ def declared_selection[R: RoundOutcome](rounds: Sequence[R]) -> R:
     )
 
 
-def _selection_name(selection: ArmName | None) -> str:
-    return (
-        "nothing selected" if selection is None else f"{selection.label} (round {selection.round})"
-    )
-
-
-def _selection_line(selection: ArmName | None, pair: PairedReading) -> str:
-    name = _selection_name(selection)
-    if selection is None:
-        return name
-    if pair.headline is None or pair.coverage is None:
-        return f"{name} — {READING_STATE_INFO[pair.state].sentence}"
-    return (
-        f"{name} — origin {pair.headline.rate_a:.1%} → {pair.headline.rate_b:.1%} "
-        f"on {pair.coverage.scored} origin-panel cells"
-    )
-
-
 class LineOutlay(NamedTuple):
     """What the campaign's line had paid when a round closed: the denominators of its climb."""
 
@@ -222,14 +204,19 @@ class ClimbRate(NamedTuple):
 
 
 class Climb(NamedTuple):
+    """What the selection gained over C0, priced by what the line paid, and over its parent."""
+
+    candidate: str
     lift: str
+    vs_parent: str | None
     measurand: str
     rates: list[ClimbRate]
 
     @property
     def line(self) -> str:
-        """Every rate, an absent one as `—` with its reason, as the cycles listing prints it."""
-        return f"{self.lift}: " + " · ".join(
+        """The lead line: who, both lifts, every rate (an absent one as `—` with its reason)."""
+        parent = "" if self.vs_parent is None else f", {self.vs_parent} vs parent"
+        return f"{self.candidate}: {self.lift} vs origin{parent} · " + " · ".join(
             f"— {rate.per} ({rate.sub})" if rate.value is None else f"{rate.value} {rate.per}"
             for rate in self.rates
         )
@@ -239,16 +226,20 @@ def _per_unit_time(seconds: float) -> str:
     return f"{seconds:.1f}s" if seconds < 10 else duration_words(seconds)
 
 
-def _climb(pair: PairedReading, candidates: int, outlay: LineOutlay) -> Climb | None:
+def _climb(standing: RunStanding) -> Climb | None:
+    pair, candidates = standing.vs_origin, standing.candidates
     if (headline := pair.headline) is None:
         return None
     lift, unit = headline.estimate.value, headline.measurand.unit
     fmt = UNIT_FORMATS[unit]
     gained = fmt.scale * lift
-    cost = LiftCost.of(pair, outlay.search_usd)
-    usd, worked = outlay.search_usd, outlay.worked_s
+    usd, worked = standing.search_usd, standing.worked_s
+    cost = LiftCost.of(pair, usd)
+    over = None if standing.vs_parent is None else standing.vs_parent.headline
     return Climb(
+        candidate=standing.selection_name,
         lift=lift_text(lift, unit),
+        vs_parent=None if over is None else lift_text(over.estimate.value, over.measurand.unit),
         measurand=headline.measurand.key,
         rates=[
             ClimbRate(
@@ -304,6 +295,10 @@ class RunStanding(FrozenModel):
         "reading of that pair. The state says why where there is none: `same_individual` while "
         "the selection is the origin."
     )
+    vs_parent: PairedReading | None = Field(
+        description="`selection` over its parent, as its electing round read it "
+        "(`ArmFit.vs_reference`). Null while the selection is the origin."
+    )
     rounds_closed: int = Field(
         description="Rounds closed AFTER the origin — the unit a rounds cap counts."
     )
@@ -336,19 +331,31 @@ class RunStanding(FrozenModel):
     @property
     def selection_name(self) -> str:
         """Who the selection is, without its rates: a figure beside the lift that carries them."""
-        return _selection_name(self.selection)
+        pick = self.selection
+        return "nothing selected" if pick is None else f"{pick.label} (round {pick.round})"
 
     @property
-    def selection_line(self) -> str:
-        """The ONE text reading of the selection: who, and both rates on the origin panel — or
-        the reason there is no pair. Never the selection's rate alone."""
-        return _selection_line(self.selection, self.vs_origin)
+    def score_line(self) -> str:
+        """Both rates on the origin panel, or why there is no pair: the line beneath the climb."""
+        pair = self.vs_origin
+        if pair.headline is None or pair.coverage is None:
+            return READING_STATE_INFO[pair.state].sentence
+        return (
+            f"origin {pair.headline.rate_a:.1%} → {pair.headline.rate_b:.1%} "
+            f"on {pair.coverage.scored} origin-panel cells"
+        )
+
+    @property
+    def lead_line(self) -> str:
+        """The ONE text reading of the standing: the climb, else who; then `score_line`."""
+        lead = self.selection_name if (climb := self.climb) is None else climb.line
+        return lead if self.selection is None else f"{lead} — {self.score_line}"
 
     @property
     def climb(self) -> Climb | None:
-        """`vs_origin`'s lift — a bare point estimate — per search dollar, per candidate tested
-        and in worked time per unit; ``None`` where there is no pair."""
-        return _climb(self.vs_origin, self.candidates, self.outlay)
+        """The selection's lift over C0 — a bare point estimate — per search dollar, per
+        candidate tested and in worked time per unit, and over its parent; ``None`` with no pair."""
+        return _climb(self)
 
     @classmethod
     def after(
@@ -387,6 +394,7 @@ class RunStanding(FrozenModel):
             if vs_origin.state is ReadingState.SAME_INDIVIDUAL
             else declared.arms[chosen].changes_description,
             vs_origin=vs_origin,
+            vs_parent=None if (fit := declared.fit(chosen)) is None else fit.vs_reference,
             rounds_closed=closed_after_origin([rr.round for rr in rounds]),
             improved=sum(1 for rr in after_origin if rr.improved),
             advanced=sum(1 for rr in after_origin if rr.overlap.advance is RoundAdvance.ADVANCED),

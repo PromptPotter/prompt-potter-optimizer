@@ -5,87 +5,68 @@ import {
   dashboardRead,
   evidenceRead,
   hierarchyRead,
-  onViewedPhaseChange,
+  userSettingsRead,
 } from "@/lib/api/reads";
-import type { HierarchyResponse, RunPhase, UnstartedCampaign } from "@/lib/api/types";
-import { DASHBOARD_LIVE_POLL_MS, RECONNECT_POLL_MS, REGISTRY_POLL_MS } from "@/lib/cadence";
-import { viewedIntervalMs } from "@/lib/poll";
-import { clearReadCache, invalidateReads, subscribe, type ReadDescriptor } from "@/lib/read-cache";
-import {
-  couponStatus,
-  dash,
-  hierarchyState,
-  lifetimeSpend,
-  subtreeCampaign,
-  subtreeCourse,
-} from "@/lib/test-fixtures";
+import { RECONNECT_POLL_MS } from "@/lib/cadence";
+import { clearReadCache, subscribe, type ReadDescriptor } from "@/lib/read-cache";
+import { couponStatus, dash } from "@/lib/test-fixtures";
 
-const viewed = [{ campaignId: "c1", cycleId: "root" }];
-const another = [{ campaignId: "c2", cycleId: "root" }];
-
-// The viewed root beside a sibling fork, another campaign's course, and an open check-in.
-function listing({
-  rootTokens = 100,
-  rootPhase = "terminal",
-  forkTokens = 100,
-  otherTokens = 100,
-  checkinUsd = 0,
-}: { rootTokens?: number; rootPhase?: RunPhase; forkTokens?: number; otherTokens?: number; checkinUsd?: number } = {}): HierarchyResponse {
-  const course = (address: string, tokens: number, mint: "root" | "fork" = "root") =>
-    subtreeCourse({ address }, { mint, spend: { ...subtreeCourse({ address }).facts.spend, metered_tokens: tokens } });
-  const root = {
-    ...course("c1::root", rootTokens),
-    state: hierarchyState({ status: { run_phase: rootPhase, stop_reason: null, mark: "unknown" } }),
-  };
-  const checkin: UnstartedCampaign = {
-    address: "d1",
-    parent: null,
-    label: "d1",
-    tags: [],
-    figures: [],
-    lines: [],
-    level: "unstarted",
-    span: { opened_at: "", last_at: "" },
-    facts: { spend_lifetime: lifetimeSpend({ billed_usd: checkinUsd }) },
-  };
-  return {
-    entries: [
-      checkin,
-      subtreeCampaign({ address: "c1", children: [root, course("c1::fork", forkTokens, "fork")] }),
-      subtreeCampaign({ address: "c2", children: [course("c2::root", otherTokens)] }),
-    ],
-  };
+// The browser's `EventSource`, driven by the test: the server's frames, a drop, a refusal.
+class FakeFeed {
+  static CLOSED = 2;
+  static opened: FakeFeed[] = [];
+  readyState = 1;
+  onmessage: ((ev: MessageEvent<string>) => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor(readonly url: string) {
+    FakeFeed.opened.push(this);
+  }
+  close(): void {
+    this.readyState = FakeFeed.CLOSED;
+  }
+  frame(subject: string, version: string): void {
+    this.onmessage?.({ data: JSON.stringify({ subject, version }) } as MessageEvent<string>);
+  }
 }
 
-const SETTLED = dash({ run_phase: "terminal" });
+const top = [{ campaignId: "c1", cycleId: "root" }];
+const inner = [...top, { campaignId: "i1", cycleId: "x" }];
+const otherInner = [{ campaignId: "c2", cycleId: "root" }, { campaignId: "i2", cycleId: "y" }];
 
-const NAMES = ["hierarchy", "dashboard", "evidence", "cells", "coupon"] as const;
+const NAMES = ["hierarchy", "top", "inner", "other", "evidence", "settled", "cells", "coupon", "settings"] as const;
 type Name = (typeof NAMES)[number];
 
-describe("a read re-asks on its caller's interval, and on a change the body it reads off shows", () => {
-  let served = listing();
-  let board = SETTLED;
-  let anotherBoard = SETTLED;
+function nameOf(url: string): Name {
+  const path = new URL(url, "http://x").pathname;
+  if (path.endsWith("/hierarchy")) return "hierarchy";
+  if (path.endsWith("/dashboard")) {
+    const descend = new URL(url, "http://x").searchParams.get("descend");
+    return descend === null ? "top" : descend.startsWith("i1") ? "inner" : "other";
+  }
+  if (path.endsWith("/evidence")) return url.includes("live") ? "evidence" : "settled";
+  if (path.includes("/cells")) return "cells";
+  if (path.endsWith("/auth/coupon")) return "coupon";
+  if (path.endsWith("/auth/user-settings")) return "settings";
+  throw new Error(`unrouted: ${url}`);
+}
+
+describe("the feed re-asks exactly the reads whose subject moved, and no read asks on a clock", () => {
   let asked: Record<Name, number>;
   const mounted: (() => void)[] = [];
+  const once = Object.fromEntries(NAMES.map((n) => [n, 1])) as Record<Name, number>;
 
   beforeEach(() => {
+    FakeFeed.opened = [];
+    vi.stubGlobal("EventSource", FakeFeed);
     clearReadCache(true);
     vi.useFakeTimers();
-    vi.setSystemTime(10_000);
-    served = listing();
-    board = SETTLED;
-    anotherBoard = SETTLED;
-    asked = { hierarchy: 0, dashboard: 0, evidence: 0, cells: 0, coupon: 0 };
+    asked = Object.fromEntries(NAMES.map((n) => [n, 0])) as Record<Name, number>;
     vi.stubGlobal("fetch", async (url: string) => {
-      const path = new URL(url, "http://x").pathname;
-      const name = NAMES.find((n) => path.includes(n === "coupon" ? "/auth/coupon" : `/${n}`));
-      if (name === undefined) throw new Error(`unrouted: ${url}`);
+      const name = nameOf(url);
       asked[name] += 1;
-      if (name === "hierarchy") return Response.json(served);
-      if (name === "dashboard") return Response.json(path.includes("/c2/") ? anotherBoard : board);
       if (name === "coupon") return Response.json(couponStatus());
-      return Response.json({});
+      if (name === "top" || name === "inner" || name === "other") return Response.json(dash({}));
+      return Response.json({ entries: [] });
     });
   });
   afterEach(() => {
@@ -95,71 +76,79 @@ describe("a read re-asks on its caller's interval, and on a change the body it r
     vi.useRealTimers();
   });
 
-  // The listing, the viewed cycle's dashboard at `dashboardMs` as `useDashboard` reads it, and
-  // three reads asked once.
-  const mount = async (dashboardMs: number | null = null) => {
+  const settle = () => vi.advanceTimersByTimeAsync(0);
+  const feed = (): FakeFeed => {
+    const last = FakeFeed.opened.at(-1);
+    if (!last) throw new Error("no feed opened");
+    return last;
+  };
+  const mount = async () => {
     const reads: ReadDescriptor<unknown>[] = [
       hierarchyRead(),
-      { ...dashboardRead(viewed, null, dashboardMs), onChange: onViewedPhaseChange },
-      evidenceRead(["campaign:c1"], {}, null),
-      cellsRead("ds", viewed, "campaign", null, {}, null, null),
+      dashboardRead(top, null),
+      dashboardRead(inner, null),
+      dashboardRead(otherInner, null),
+      evidenceRead(["campaign:live"], {}, true),
+      evidenceRead(["campaign:done"], {}, false),
+      cellsRead("ds", top, "campaign", null, {}, null),
       couponRead(),
+      userSettingsRead(),
     ].map((read) => read as unknown as ReadDescriptor<unknown>);
     for (const read of reads) mounted.push(subscribe(() => read, () => {}));
     await settle();
+    // The hello: each subject at its version moves nothing, every read having asked on its mount.
+    for (const subject of ["account", "store:", "store:c1::root", "store:c2::root", "machine"]) {
+      feed().frame(subject, "v1");
+    }
+    await settle();
   };
-  const settle = () => vi.advanceTimersByTimeAsync(0);
-  const beat = () => vi.advanceTimersByTimeAsync(REGISTRY_POLL_MS);
-  const once = { hierarchy: 1, dashboard: 1, evidence: 1, cells: 1, coupon: 1 };
 
-  it("re-asks the account's money once on a moved bill, an open check-in's included", async () => {
+  it("subscribes once, and a subject's first version re-asks nothing", async () => {
     await mount();
+    expect(FakeFeed.opened).toHaveLength(1);
     expect(asked).toEqual(once);
-    served = listing({ checkinUsd: 0.25 });
-    await beat();
-    await beat();
-    expect(asked).toEqual({ ...once, hierarchy: 3, coupon: 2 });
   });
 
-  it("re-asks nothing on the listing's tokens, rounds or phase", async () => {
+  it("re-asks every read of the account's store on its move, a settled evidence and the settings not", async () => {
     await mount();
-    served = listing({ rootTokens: 250, forkTokens: 250, otherTokens: 250, rootPhase: "running" });
-    await beat();
-    expect(asked).toEqual({ ...once, hierarchy: 2 });
+    feed().frame("store:", "v2");
+    await settle();
+    expect(asked).toEqual({ ...once, hierarchy: 2, top: 2, evidence: 2, cells: 2, coupon: 2 });
   });
 
-  it("re-asks every mounted read on a dashboard's phase change", async () => {
+  it("re-asks an inner run's dashboard on its own sandbox's move alone", async () => {
     await mount();
-    board = dash({ run_phase: "running" });
-    invalidateReads("dashboard");
+    feed().frame("store:c1::root", "v2");
     await settle();
-    await settle();
-    expect(asked).toEqual({ hierarchy: 2, dashboard: 3, evidence: 2, cells: 2, coupon: 2 });
+    expect(asked).toEqual({ ...once, hierarchy: 2, top: 2, inner: 2, evidence: 2, cells: 2, coupon: 2 });
   });
 
-  it("re-asks nothing on another cycle's phase change", async () => {
+  it("re-asks the account's own reads on what it filed, and nothing a run moves", async () => {
     await mount();
-    const read = dashboardRead(another, null, null) as unknown as ReadDescriptor<unknown>;
-    mounted.push(subscribe(() => read, () => {}));
+    feed().frame("account", "v2");
     await settle();
-    anotherBoard = dash({ run_phase: "running" });
-    invalidateReads("dashboard");
-    await settle();
-    await settle();
-    expect(asked).toEqual({ ...once, dashboard: 4 });
+    expect(asked).toEqual({ ...once, settings: 2 });
   });
 
-  it("beats the viewed cycle slow on a replayed moment or a lost read", () => {
-    expect([viewedIntervalMs(null, false), viewedIntervalMs(7, false), viewedIntervalMs(null, true)]).toEqual([
-      DASHBOARD_LIVE_POLL_MS,
-      RECONNECT_POLL_MS,
-      RECONNECT_POLL_MS,
-    ]);
+  it("is a hint, never the body: a repeated or replayed version re-asks nothing", async () => {
+    await mount();
+    feed().frame("store:", "v1");
+    feed().frame("account", "v1");
+    await settle();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(asked).toEqual(once);
   });
 
-  it("polls a settled dashboard at the interval its caller names", async () => {
-    await mount(DASHBOARD_LIVE_POLL_MS);
-    await vi.advanceTimersByTimeAsync(DASHBOARD_LIVE_POLL_MS);
-    expect(asked).toEqual({ ...once, dashboard: 2 });
+  it("reopens a refused feed on the reconnect beat, and its hello moves only what moved meanwhile", async () => {
+    await mount();
+    const refused = feed();
+    refused.close();
+    refused.onerror?.();
+    await vi.advanceTimersByTimeAsync(RECONNECT_POLL_MS);
+    expect(FakeFeed.opened).toHaveLength(2);
+    feed().frame("account", "v1");
+    feed().frame("store:", "v3");
+    await settle();
+    expect(asked).toEqual({ ...once, hierarchy: 2, top: 2, evidence: 2, cells: 2, coupon: 2 });
   });
 });
