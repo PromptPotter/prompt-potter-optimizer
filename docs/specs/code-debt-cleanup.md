@@ -17,140 +17,6 @@ Each row sits under the wave-4 chain that closes it ([`roadmap.md`](roadmap.md) 
 (wave 4)); `chain N` is that chain's link N. A chain re-tests its rows in its census and deletes each
 row it closes.
 
-### batch/22 · stream
-
-- **Tracing-sink faults are swallowed by `graceful`** (nr.X2): a sink fault is entered, not reported.
-  **Rides with:** stream 1 (the package goes). **Re-test:** `git grep -c "graceful(" -- promptpotter/infrastructure/tracing`.
-- **U3: the ledger read stack.** Three fold protocols, and `live_dashboard/projection.py::DashboardCheckout`
-  writes a `dashboard.json` only `scripts/offline_run.py` reads, folding a second, eager dashboard on
-  every append. Action: `RunScope`'s ledger is the one producer door (`RunCallbacks` goes);
-  `LedgerIndex` the one live fold with the writing projections on it; the checkout writes that fold's
-  value at `_AT_ONCE` and the debounce. **Rides with:** stream 2. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
-- **The mint's wiring reads its own commit back**: `run_observers.py::declare_run_wiring` loads
-  `campaign.json` for `defaults_drift`, so `jobs/mint.py::_mint_campaign` cannot write the campaign
-  last. Action: the caller hands the `Campaign` it declares. **Rides with:** stream 2. **Re-test:**
-  `git grep -n "load_campaign(" -- promptpotter/application/run_observers.py` is empty.
-- **`export.json` is a derived file written outside the projection roster**:
-  `campaign_store/store.py::CampaignStore.bank_final` and `::restate_export_bench` write it under
-  `graceful("Export artifact write failed")`, so a failed write is entered, not reported, and
-  `RunArtifacts` publishes whatever the file last held. Action: a `RunArtifacts` output folded off
-  `CycleFinalRecord` and the line's bench record; the store keeps no writer. **Rides with:** stream 3.
-  **Re-test:** `git grep -n 'graceful("Export artifact' -- promptpotter`.
-- **`RunArtifacts` renders off a live `Session`**: `runner/output.py::RunArtifacts` reaches
-  `session.state.scoring.require_scorer()` and `session.dataset`. Action: it takes the scorer and dataset
-  off the ledger, as `closed_rounds.py::campaign_scorer` does. **Rides with:** stream 3. **Re-test:**
-  `git grep -n "session.state" -- promptpotter/application/runner/output.py`.
-- **One fold vocabulary**: a `Projection` on `read_model.py::LedgerIndex`; `LedgerFold.feed`, the tracing
-  sinks' `on_*` and the `RunCallbacks` doors go. **Rides with:** stream 4.
-- **A `derived_file_stale` warning names the projection's class, never the file it could not write**:
-  `read_model.py::LedgerIndex.shielded` has only the `Projected` protocol, which carries no path. Action:
-  `Projected` declares what it derives, and the warning names that. **Rides with:** stream 4.
-  **Re-test:** a `dashboard.json` write fault's warning detail names `dashboard.json`.
-- **Every dashboard read deep-copies the whole fold**: `LiveDashboardProjection.value`
-  (`model_copy(deep=True)`), 1.145 of 1.307 s at 16 rounds; the listing pays it per course to read
-  `run_limits`. Action: the fold's state is frozen and copy-on-write, and `run_limits` is its own small
-  fold. **Rides with:** stream 4.
-
-### batch/22 · land
-
-- **Nothing lands the data root off the box** — `maintenance/landing.py` runs from `land-data` alone,
-  which `deploy-linux/update.sh` calls, so a checkout that pulls a reshape runs on files the build
-  refuses. Action: the landing runs at every process entry, keyed on the record schema, one mechanism
-  with `update.sh`'s. Sites: `presentation/cli/campaign_runner.py` and `main.py`, the `_sources`
-  registries, `jobs/interlock.py`, `application/embedded_run.py` and `presentation/admin_bot.py`.
-  **Rides with:** land 1. **Re-test:** check out a commit that moves a `Fate.RUN` shape; `new <dataset>` refuses nothing.
-- **`--reset` couples two decisions** — `landing.py::Landing.refusal`: unloadable run data and files no
-  row names are both "in the way". Action: the landing drops unloadable `Fate.RUN` data by itself;
-  unknown files refuse on their own; `_sources` and its builder move into the checkout. **Rides with:**
-  land 2. **Re-test:** `land-data --dry-run` on a desk holding both.
-- **A crashed write's `.tmp` under `datasets/` classifies SURVIVOR** (bl5.B5). Action: the atomic-write
-  row comes first in `KINDS`. **Rides with:** land 2.
-- **A file row with no shape type-checks**: `store/data_root.py::Kind.shape` and `CampaignRow.shape`
-  default to `None`, so a row is proven by presence alone and its reader walks a `dict`. Action: `shape`
-  is required on every row, and every reader goes through `store/read_model.py::read_file` with it.
-  **Rides with:** land 2. **Re-test:** `git grep -n "shape: Shape = None" -- promptpotter/infrastructure/store/data_root.py` is empty.
-- **A `store/data_root.py::CAMPAIGN_ROWS` row that nothing writes is never detected.** Action: a test
-  walks a finished offline-run campaign and asserts every row's glob matches a file or names why it may
-  be absent. **Rides with:** land 2. **Re-test:** the test exists and fails when a row's glob is misspelled.
-- **A landing proves an install-shadowed manifest by its shape, not its reader**: a knob or roster
-  fault in an optimizer shadow, or a parse fault in the check-in (`optimizer_manifest.py::_parse`),
-  passes `land-data --dry-run` and stops only the API boot (`wiring.py::complete_registries`). Action:
-  the landing proves each shadow through its own reader, refused with its path as a survivor that does
-  not load. **Rides with:** land 2. **Re-test:** a shadow `checkin/pipeline.yaml` with
-  `optimizer.param_keys: 5` under `land-data --dry-run`.
-- **The packs copy each snippet's arXiv id and method into its `tags`**, so Tags repeats Source and
-  Method. Action: a code fix where the library reads a pack (`application/library.py:119`): `tags` holds
-  neither. The box holds no `block_packs/` (read 2026-11-10), so nothing migrates. **Rides with:** land 2.
-  **Re-test:** a served snippet's `tags` name neither its `source` nor its `method`.
-- **An unreadable file's remedy sends the operator to hand-deletion** — `shared/errors.py` `JOB`,
-  `LedgerUnreadableError` and `MANIFEST` name hand fixes, though `job_ending` maps the job and the
-  landing drops run data. Action: one remedy, the landing's. **Rides with:** land 3. **Re-test:**
-  `git grep -n "No migration exists" -- promptpotter/shared/errors.py`.
-- **The `resume.py` and `closed_rounds.py` refusals spell `resume` flags** in their text. Action: each
-  names its `NextAct`. **Rides with:** land 3. **Re-test:**
-  `git grep -n "\-\-fork-on-divergence\|\-\-from" -- promptpotter/application/bench/resume_and_fork/resume.py promptpotter/application/scoring/closed_rounds.py`.
-- **A mint torn after `adopt_ledger` leaves a directory with no manifest**: no verb lists it, and the
-  draft's billed ledger sits inside it. Action: `cycles` reports it and `reset` sweeps it. **Rides
-  with:** land 4. **Re-test:** kill a mint between `adopt_ledger` and `create_campaign`: `cycles` lists
-  the directory.
-
-### batch/22 · reads
-
-- **A whole-file read is refused in three ways outside `read_file`** — `infrastructure/identity/session.py`
-  deletes a session file that does not validate, `store/layout.py::read_sandbox_owner` swallows an
-  unusable owner into `None`, and `store/measurement_archive.py` reads archive files raw. Action: each
-  refuses once as a `FileKind` through `read_file`, or is named a cache read. **Rides with:** reads 1.
-  **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
-  surveys and caches.
-- **Expired session files are deleted only when presented again**: `infrastructure/identity/session.py::OIDCSessionStore.read`
-  unlinks an expired file and nothing sweeps `identity/sessions/`, so a person who never returns keeps
-  their email and user id on disk. Action: the sweep drops expired sessions. **Rides with:** reads 1.
-  **Re-test:** `git grep -n "is_expired" -- promptpotter` names a caller outside `read`.
-- **A cross-campaign survey crashes on one unreadable campaign**: `intelligence/earned_blocks.py::mine_earned_blocks`
-  and `initialization/loop_start.py`'s `_campaigns_on_origin` and `_banked_instruments` each run their
-  own `list_campaigns(lifecycle="all")` after origin scoring is paid. Action: one survey door serves an
-  unreadable campaign as a faulted row, and run init takes one survey, handed to all three readers.
-  **Rides with:** reads 2. **Re-test:** the three `list_campaigns(` calls in those two files are one,
-  and a desk tree holding one pre-reshape campaign runs `new` to round 1.
-- **A survey fails on one bad entry**: `tenant_dataset_store.py::banks_sharing` fails the whole survey;
-  the catches in `llm/heartbeat.py`, `campaign_store/store.py::CampaignStore.list_campaigns` and
-  `user_store.py::read_accounts` are held by no test, and `list_campaigns` swallows a
-  `FileUnreadableError` into a log, so the campaign vanishes from every list. Action: a survey serves a
-  bad row with its fault, and a test holds each catch. **Rides with:** reads 2. **Re-test:** a tenant
-  tree with one unreadable dataset lists the rest.
-- **A tombstoned campaign lists as deleted whatever its manifest says**:
-  `campaign_store/store.py::CampaignStore.list_campaigns` reads the manifest's lifecycle, so a torn
-  delete's campaign lists `active` until the delete is retried. Action: the lifecycle reads
-  `WorkspaceBank.deleted`; the keepsake's `_set_lifecycle("deleted")` becomes its projection. **Rides
-  with:** reads 2. **Re-test:** a campaign whose delete died after its tombstone lists `deleted`.
-- **`GET /datasets/{name}/cells` with a malformed name answers 500** (`layout.py:31` raises from
-  `validate_dataset_name`). Action: the name is validated where the params parse
-  (`read_params.py::DatasetCellsParams.name`). **Rides with:** reads 3.
-- **The pipeline read blocks on OpenRouter's price list**: up to 30 s per model on a blackholed gateway
-  (`pipeline_resolve.py::_admitted_menu` → `llm/pricing.py::route_priced`). Action: a served read
-  answers from the memo; the sweep and run init refresh it. **Rides with:** reads 3.
-- **The lineage subtree's donor search is quadratic, per read**: `application/hierarchy_subtree.py::_descent`.
-  Action: "closer to" is folded once per candidate on the ledger. **Rides with:** reads 4.
-- **Run data past `MAX_PATH` is read only where `store/io.py` reads it**: `store/read_model.py::file_sig`
-  and `store/io.py::complete_lines` / `holds_mark` read bare, so a ledger past 260 characters reads as
-  absent and a deep L4 store lists no course. Root: the data root spelled once in its long form
-  (`config/paths.py`), so every derived path carries it. **Rides with:** reads 4.
-
-### batch/22 · weba
-
-- **The seed-once latch** hand-built at each `git grep -n -i "seeded" -- webapp/components webapp/lib`
-  site; `STORAGE_KEYS` mixes hook and non-hook keys and `side-panel:*` has no `promptpotter.` prefix.
-  Action: one hook. **Rides with:** weba 1. **Re-test:** one latch.
-- **`TrajectorySeriesView::SeriesHoverPopup` is a hand-built popover** beside `ui/Popover`. **Rides
-  with:** weba 3.
-- **Hand-built controls beside the primitives**: `Criterion::DialRow` commits on pointerup/keyup/blur
-  beside `CommitInput`; raw `<select>` in several surfaces with no `ui/` select. **Rides with:** weba 4.
-  **Re-test:** `git grep -nE "<select" -- webapp/components`.
-- **Teaching prose in `title=` across many surfaces**: the `FitnessLegend` hint, the candidates toolbar
-  (`CandidatesToolbar.tsx:171,185`), the dendrogram `<title>`, `CompareOriginAction`, `RoundVerdict`,
-  `NodeDetail`, `OptimizerCard`. Action: a lint rule holds it. **Rides with:** weba 4.
-  **Re-test:** `git grep -cE 'title=("[^"]{60,}|\{\`[^\`]{60,})' -- webapp/components`.
-
 ### batch/23 · startb
 
 - **One word per thing.** "Arm" is the round's; a head-to-head's arms become `RunStart`s; a host task is
@@ -198,6 +64,10 @@ row it closes.
   feeds `resolve_cycle_plan`, `effective_config` and `shared_part`; the plan carries
   `Optimize | ArmSeat(head_to_head_id, arm_key)`, and the mint builds `Compare(Arm(…, replicate))` once.
   **Rides with:** startb 2. **Re-test:** `git grep -n "replicate=1" -- promptpotter`.
+- **A mint takes no claim until `admission.py::claim_cycle`**, so the landing tells a live mint from a
+  torn one by the job registry alone (`maintenance/landing.py:169`: `_live`, or a job holding spend in
+  its workspace). Action: the mint claims its cycle before `adopt_ledger`, and the landing reads the
+  claim. **Rides with:** startb 2. **Re-test:** `git grep -n "_held_workspaces" -- promptpotter/application/maintenance/landing.py` is empty.
 - **A queued launch dies with the asking process** — the queue wait runs in the caller
   (`jobs/launcher/launch.py`). Action: the queued job on disk is promoted by whoever frees the slot.
   **Rides with:** startb 3. **Re-test:** `resume --step-rounds 1` behind a running cycle; it starts when
@@ -334,10 +204,16 @@ row it closes.
   Root: the destroyer takes `claim_launch` on each cycle under `JobRegistry.admission_gate`, in
   `application/commands/workspace_edits.py::campaign_lifecycle`, never `infrastructure/`. **Rides with:**
   stopb 4. **Re-test:** `git grep -n "claim_launch" -- promptpotter/application/commands/workspace_edits.py` names the destroyer's claim.
-- **A landing waits on every live producer on another commit, whether or not the ledger shape moved**
-  (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action: key it on a
-  digest of the `CycleRecord` schema the code writes. **Rides with:** stopb 4. **Re-test:** a landing
-  that moves no record shape refuses while a run is live.
+- **A tombstoned keepsake writes its lifecycle twice**: `CampaignStore.delete_campaign`'s
+  `_set_lifecycle(campaign_id, "deleted", …)` repeats what `list_campaigns` serves off
+  `WorkspaceBank.deleted`. Action: the second write goes. **Rides with:** stopb 4. **Re-test:**
+  `git grep -n '_set_lifecycle(campaign_id, "deleted"' -- promptpotter` is empty.
+- **A landing waits on every live producer on another commit, whether or not the ledger shape moved**,
+  and on nothing else (`jobs/registry.py::JobRegistry.close_for_landing` reads the jobs holding spend):
+  a server or read verb on other code holds no job, so `jobs/interlock.py` guards nothing against it,
+  and a busy box may never land. Action: key it on a digest of the `CycleRecord` schema the code writes,
+  held by every live process. **Rides with:** stopb 4. **Re-test:** a landing that moves no record shape
+  refuses while a run is live.
 
 ### batch/24 · conn
 
@@ -420,6 +296,9 @@ row it closes.
 - **A resume takes up to 72 s to be applied**, and each resume prints a fresh `✓ Initialized`. Action:
   attribute the wait by phase; a resume does not re-initialize. **Rides with:** init 1. **Re-test:** time
   `start-run` → its `applied` ack on a paused cycle.
+- **Earned blocks re-survey every round**: `bench/node_context.py:461` calls `earned_blocks_for`, which
+  builds its own `CampaignSurvey` (`intelligence/earned_blocks.py:148`). Action: run init hands it the
+  one survey. **Rides with:** init 1. **Re-test:** `git grep -c "CampaignSurvey(" -- promptpotter` is 1.
 - **Round 0 has two doors**: `origin.py::establish_campaign_origin` walks it before the cycle exists, and
   `bench/node_context.py::rewalk_origin` again for the gate and the repair; `origin.py::lock_criterion`
   changes the scorer's id, which keys the difficulty ruler. Action: round 0 is seated unmeasured,
@@ -471,6 +350,11 @@ row it closes.
 - **The held-out verb has three names**: `verify`, `bench`, `grade-bench` and "Grade on bench"; `bench`
   also collides with `application/bench/`. Action: "held-out" at all five doors. **Rides with:** passb 2.
   **Re-test:** `git grep -n "grade_bench" -- promptpotter webapp scripts` is empty.
+- **`restate_export_bench` rewrites `export.json` outside the roster**: `campaign_store/store.py::restate_export_bench`
+  (called from `scoring/passes.py:715`) patches the file after a later held-out pass. Action: the pass's
+  `RunArtifacts` drain re-renders the export off the ledger's newest bench reading
+  (`ledger_scan.py::scan_closed_bench`), so `write_export` has one caller. **Rides with:** passb 2.
+  **Re-test:** `git grep -c "restate_export_bench" -- promptpotter` is 0.
 - **A stopped paid pass exits 1 at the CLI, a noise-floor stop 130**:
   `presentation/cli/campaign_runner.py::main` maps `PassStoppedError` to exit 1, while
   `cli/commands/noise_floor.py::cmd_noise_floor` catches it itself. Action: `campaign_runner.py` answers
@@ -521,6 +405,10 @@ row it closes.
   written together by `hooks/useLineage.ts`, whose name collides with `lib/lineage.tsx`. Decided: view
   memory alone owns both; the hook is renamed. **Rides with:** webb 2. **Re-test:**
   `git grep -nE "showForest|expandedLanes" -- webapp/lib`.
+- **A channel's seed is a store latch written in render**: `compare/ChannelCard.tsx:35`'s
+  `view.select(seed)` sets `lib/state/compare-selection.ts::ChannelView.seeded` during render. Action: the
+  pick reads `picked ?? seed` until the operator picks; the flag and the render-phase write go. **Rides
+  with:** webb 2. **Re-test:** `git grep -n "seeded" -- webapp/lib/state/compare-selection.ts webapp/components/compare/ChannelCard.tsx` is empty.
 - **"Measured in N/M rounds" is counted in the browser** (`sample-set.ts::roundsCoveringSample`), and
   `fullyCovered` counts rounds with any selection. Action: served per-sample coverage. **Rides with:**
   webb 3. **Re-test:** `git grep -n "roundsCoveringSample\|fullyCovered" -- webapp`.
@@ -568,6 +456,11 @@ row it closes.
   (the fold, `jobs/quota.py::declare_run_budget`, `llm/spend_book.py`). Action: a cycle's fold reads its
   line's root ledger; `armed_run_limits` goes. **Rides with:** money 2. **Re-test:**
   `git grep -n "armed_run_limits" -- promptpotter` is empty.
+- **The listing folds the whole dashboard for `run_limits`**: `served_dashboard.py::binding_run_limits`
+  takes one field off `fold_at`. Action: `run_limits` is its own small fold in `live_dashboard/projection.py`
+  (the last `RunWiringRecord.run_limits`, each later `StandingBudgetRecord` laid over, seeded across a
+  fork's prefix), and the row above's root-ledger read lands on it. **Rides with:** money 2. **Re-test:**
+  `git grep -n -A6 "def binding_run_limits" -- promptpotter | grep -c fold_at` is 0.
 - **A reserved cell's bill is on no ledger** (`Connector.holds_own_sends` writes no hold), so
   `infrastructure/llm/spend_book.py::unreported_on` can re-teach a book its sends but never the cell.
   Action: a hold record per reserved cell. **Rides with:** money 2. **Re-test:**
@@ -586,6 +479,11 @@ row it closes.
   read its `off_coupon_usd`.
 - **`LifetimeSpend` carries no token count**, so the coupon's token side shows left / face, never used.
   **Rides with:** money 3. **Re-test:** the Host allowance section with a token-bound grant.
+- **The dashboard fold deep-copies a spend rollup per token record**: `live_dashboard/projection.py::_handle_token_usage`
+  copies `SpendRollup` (`model_copy(deep=True)`) to stay copy-on-write, because
+  `domain/spend.py::SpendRollup.bank` mutates in place. Action: a non-mutating `SpendRollup.banked(record)`
+  the fold assigns. **Rides with:** money 3. **Re-test:**
+  `git grep -c "deep=True" -- promptpotter/infrastructure/projections/live_dashboard` is 0.
 - **The free tier's budget is both a config default and an admission bound**: `free_tier.yaml`
   `campaign.optimization.budget.usd` is laid by `application/free_tier.py::with_free_tier_layer` and read
   by `application/free_tier.py::tier_ceiling`. Action: one owner. **Rides with:** money 4. **Re-test:**
@@ -726,6 +624,24 @@ row it closes.
   formula unchanged it equals today's fit. **Rides with:** rk-opt 5. **Re-test:**
   `git grep -ln "ab_replay" -- tests` names a test that edits the formula and re-grades.
 
+### batch/26 · stream-rk
+
+- **U3: the ledger read stack.** `RunCallbacks` is a second producer door beside `RunScope`'s ledger,
+  and `live_dashboard/projection.py::DashboardCheckout` writes a `dashboard.json` only
+  `scripts/offline_run.py` reads, folding a second, eager dashboard on every append. Action: the ledger
+  is the one producer door (`RunCallbacks` goes); the checkout writes the `LedgerIndex` fold's value at
+  `_AT_ONCE` and the debounce. **Rides with:** stream-rk 1: `optimizers/potter/generation_only.py` holds
+  `ctx.callbacks`, a hashed unit, so the cut moves potter and capo-pobb. **Re-test:**
+  `git grep -c "RunCallbacks" -- promptpotter` is 0.
+- **The mint's wiring reads its own commit back**: `run_observers.py::declare_run_wiring` loads
+  `campaign.json` for `defaults_drift`, so `jobs/mint.py::_mint_campaign` cannot write the campaign
+  last. Action: the caller hands the `Campaign` it declares. **Rides with:** stream-rk 1. **Re-test:**
+  `git grep -n "load_campaign(" -- promptpotter/application/run_observers.py` is empty.
+- **`RunArtifacts` renders off a live `Session`**: `runner/output.py` reaches `session.state.scoring`
+  and its partition's `demo`. Action: it takes the scorer and partition off the ledger
+  (`PartitionRecord`, the declared formula), as `closed_rounds.py::campaign_scorer` does. **Rides
+  with:** stream-rk 1. **Re-test:** `git grep -n "session.state" -- promptpotter/application/runner/output.py` is empty.
+
 ### batch/26 · rk-run
 
 - **RS: one running set — which nodes a run reaches.** A which-nodes question reads the running set (the
@@ -857,6 +773,9 @@ row it closes.
   outer campaign's, and `useLeafDatasetName` reads a pipeline for a tag the tree holds. Action: the
   viewed dataset is the served subtree tag everywhere; the hook goes. **Rides with:** addr 3.
   **Re-test:** open an L4 inner run; the masthead and chat name one dataset.
+- **The lineage subtree sorts every candidate per candidate**: `application/hierarchy_subtree.py::_earlier`,
+  O(n² log n) per read. Action: "closer to" is folded once per candidate on the ledger. **Rides with:**
+  addr 3. **Re-test:** `git grep -n "def _earlier" -- promptpotter/application/hierarchy_subtree.py` is empty.
 
 ### batch/26 · rk-dec
 
@@ -948,6 +867,9 @@ row it closes.
   with:** lw 1. **Re-test:** `git grep -n "shownData\|read-cache" -- webapp/lib/derivations ':!*__tests__*'` is empty.
 - **`lib/hooks/useRegistry.ts` and `lib/workspace.tsx` import `derivations/hierarchy` past the barrel** to
   dodge a cycle (barrel → search-point → poll → workspace). **Rides with:** lw 1.
+- **`hooks/useLocalStorage.ts::STORAGE_KEYS` mixes hook and non-hook keys**, and `sidePanelKey`'s
+  `side-panel:*` has no `promptpotter.` prefix. Action: one key table, every key prefixed. **Rides with:**
+  lw 1. **Re-test:** `` git grep -n '`side-panel:' -- webapp/lib `` is empty.
 
 ### batch/28 · lb
 
@@ -960,8 +882,9 @@ row it closes.
 
 - **Q3: one fault channel — a fault is a value.** A failed or skipped step is a log line at many sites
   (engine decisions narrated into `logger.warning`, `origin_listing.py::list_origins` skipping an origin
-  silently, `campaign_store/store.py::CampaignStore.bank_final` swallowing a failed export under
-  `shared/errors.py::graceful`); until this lands, `application/`'s `logger.(warning|error|exception)(`
+  silently, `campaign_store/store.py::CampaignStore.list_campaigns` and
+  `tenant_dataset_store.py::banks_sharing` logging an unreadable entry out of every list, `llm/heartbeat.py`
+  a failed beat); until this lands, `application/`'s `logger.(warning|error|exception)(`
   count may not rise. Owner: inside a run, a typed fault record through the one producer door, read by a
   projection; inside a read, a field of the row it failed, served as its `Said`; `logging` leaves
   `application/` and `domain/`, banned at the gate as `gate.py::_IMPORTS_OPTIMIZER` bans an optimizer
@@ -1078,6 +1001,9 @@ row it closes.
   user's CLI reads the checkout's `.env` through `config/paths.py::env_file_path`, so they drift. One
   file serves both; which one is the operator's (read access for the login user, or SELinux under
   `$HOME`). **Rides with:** box 1.
+- **`promptpotter/__init__.py:4` sets `OPENBLAS_NUM_THREADS` at import**, a fact of the process, not the
+  package. Action: the unit and the process launcher set it. **Rides with:** box 1. **Re-test:**
+  `git grep -n "OPENBLAS" -- promptpotter` is empty.
 
 ### batch/32 · ts-arch
 
@@ -1130,6 +1056,20 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **The gate's `py` lane and "needs the pinned venv" are one flag**: `scripts/gate.py::_reexec_pinned`
   keys on `kind == "py"`. Action: one fact for the venv need, apart from the lane. **Rides with:** rel 2.
   **Re-test:** `python scripts/gate.py --py` lists `walk-world`.
+- **The pinned venv is keyed on the raw `uv.lock`**: `scripts/gate.py::_install_digest` hashes the lock's
+  bytes, so a worktree whose lock moved only outside the pinned extras (batch/22's mlflow exit) is
+  refused a venv that `uv export --frozen` proves identical. Action: hash the resolved pinned set.
+  **Rides with:** rel 2. **Re-test:** a lock edit outside `_PINNED_EXTRAS` leaves the digest unmoved.
+- **The walk world has no outer/inner run, so the seat-cell drill never runs**: `scripts/gate.py::_walk_world`
+  builds `offline_run.py --optimizer=potter --straight` alone, so `webapp/e2e/walk/cells.spec.ts:41`
+  always skips. Action: the walk world carries an offline L4 leg, and the spec's skip becomes a
+  failure. **Rides with:** rel 2. **Re-test:** `npx playwright test --project=walk e2e/walk/cells.spec.ts`
+  passes 1, skips 0.
+- **A stale walk world past `MAX_PATH` fails the gate**: `scripts/gate.py::_walk_world` prunes another
+  key's world with a bare `shutil.rmtree`, and a world's `.runtime/.ledger.jsonl.lock` under the leg's
+  `data/` root runs past 260 characters from a desk checkout, so the check raises `WinError 145`
+  (batch/22's gate). Action: the gate spells its cache root in the long form `store/io.py` writes with.
+  **Rides with:** rel 2. **Re-test:** prune a built world from a desk checkout; the check runs.
 - **The dev loop still serializes on Vitest**: its pool fails a worker past its hard-coded 90 s start,
   which a host loaded from outside the gate lock still trips. **Rides with:** rel 2. **Re-test:** five
   builders plus one full gate, no reap.
@@ -1164,3 +1104,21 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   node as `NodeCall` and keeps the dict it validated. Action: keep the typed carrier. **Held:** of
   `launching.py`, startb holds only the release lines and init only the diag; no chain holds
   `_typed_steer`. **Re-test:** read `_typed_steer`'s return.
+- **A `derived_file_stale` warning names the projection's class, never the file it could not write**:
+  `read_model.py::LedgerIndex.shielded` has only the `Projected` protocol, which carries no path. Action:
+  a `derives` ClassVar on each `Projected`, which the warning names. **Held:** the derivers sit across
+  narr, money, rec and no chain: `views/readout.py::ReadoutProjection`, `projections/cycle_index.py::CycleIndexProjection`,
+  `scoring/closed_rounds.py::RoundFileProjection`, `llm/spend_book.py::SpendBook`, with
+  `domain/run_records.py::stale_file_warning`. **Re-test:** a `dashboard.json` write fault's warning
+  detail names `dashboard.json`.
+- **Three data-root rows are proven by presence alone** (`store/data_root.py::_WALKED`): `rates.json`, the
+  model capability override and the capabilities cache, whose readers (`llm/pricing.py`,
+  `llm/capabilities.py`) walk a raw dict. Action: a model per file, named by its row. **Held:** lite holds
+  `pricing.py` for LiteLLM's exit alone, and no chain holds `capabilities.py`. **Re-test:**
+  `git grep -c "_WALKED" -- promptpotter/infrastructure/store/data_root.py` is 0.
+- **Run data is stat'ed bare outside `store/io.py`**: `store/read_model.py::file_sig`, eight more
+  `.stat()` sites and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger
+  past `MAX_PATH` reads as absent. Root: the data root spelled once in its long form (`config/paths.py`),
+  so every derived path carries it. **Held:** box holds `config/paths.py` for `env_file_path` alone, and
+  the long form moves every derived path. **Re-test:** `git grep -lE "\.stat\(\)" -- promptpotter` names
+  no file outside `store/io.py`.

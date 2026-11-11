@@ -9,9 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Removed
 
 - **The Langfuse and MLflow sinks and the `observability` extra are gone** (`langfuse`, `mlflow-skinny` leave `pyproject.toml` and the `all` extra; `LANGFUSE_*` and `MLFLOW_TRACKING_URI` are no longer read). The cycle ledger is the trace; a sink returns as a ledger projection.
+- **`/site-records/{table}` and `SITE_RECORDS_TOKEN` are gone**: the website's records live in the site's own service. The app's visit log is run data now; its old `site_records/` files are not migrated, so move them out of the data root before the landing.
 
 ### Changed
 
+- **Every process lands the data root at its entry**, once per record schema: the CLI, the API, the embedded surface and the admin bot, not `land-data` alone. Run data that does not load is dropped unasked; a survivor that does not load, or a file no row names, refuses the landing. A landing migrates the install packs' snippet tags, which no longer repeat their source and method.
 - **Quota and ceiling refusals answer 409; only the request-rate throttle answers 429.** A client retrying on 429 retries what passes, never a spent ceiling; the webapp reads a 429 as throttled, and over MCP a throttle answers `-32029`, never `INVALID_PARAMS`.
 - **A Compare arm's bench and diagnostic sends on the box's key meet the run's coupon reserve**, and one no rate prices is refused unsent, as every other send is.
 - **A free-tier launch holds at most the tier's $0.03**, whatever its `start-run` budget or a `set-limits` asks.

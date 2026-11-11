@@ -14,13 +14,14 @@ start off the landing below it, main moves on the operator's word, and the end i
 header, then the operator asked about a release.
 
 1. **batch/21** — the docs trim and the ledger: w0, t-dev, t-docs, t-claude, t-skills.
-2. **batch/22** — tracing and the `declare_*` doors go; the landing at every process entry: stream,
-   land, reads, weba.
+2. **batch/22** — tracing goes; every record kind is read by a roster fold; the landing at every
+   process entry: stream, stream-b, land, reads, weba, visits.
 3. **batch/23** — one launch answer, one change feed, one narration: startb, feed, narr.
 4. **batch/24** — one stop door, the connector declares itself, the doors: stopb, conn, doors, tv.
 5. **batch/25** — run init as one module, one pass verb, served arm rows: init, passb, webb. The
    decision window opens.
-6. **batch/26** — every re-key: money, rk-opt, rk-run, addr; then rk-dec; then rn-conn. The window closes.
+6. **batch/26** — every re-key: money, rk-opt and stream-rk on its tip, rk-run, addr; then rk-dec; then
+   rn-conn. The window closes.
 7. **batch/27** — records and layout: rec, la, lw; md if the operator says so.
 8. **batch/28** — lb, then faults on its tip.
 9. **batch/29** — lite (LiteLLM out of core), xconn, mcp.
@@ -313,9 +314,9 @@ Langfuse write-back to Prompt Management; a DSPy listing PR; MLflow as a second 
 ### MLflow interop
 
 MLflow is the operator's server, never our dependency beyond the client; nothing here hosts, routes or
-swaps. What exists is [`../operations/observability.md`](../operations/observability.md)'s, and stream
-(batch/22) deletes the mirror with `infrastructure/tracing/`, so each step below builds on tracing's
-return as a ledger projection. Verify against a real `mlflow server`, never the offline run. In order:
+swaps. batch/22 deleted the mirror with `infrastructure/tracing/`: the ledger is the trace
+([`../operations/observability.md`](../operations/observability.md)), so each step below builds on a
+sink's return as a ledger projection. Verify against a real `mlflow server`, never the offline run. In order:
 (1) a campaign opts in, one config field off by default at all five entry points; (2) the winning model
 in `register_prompt`'s `model_config`; (3) a campaign that starts from a registry prompt, fetched once at
 mint and pinned in the seed (`CycleSeed.origin_prompts`, a new `OriginSource` member), whose winner
