@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from promptpotter.application.jobs.registry import JobRegistry
@@ -89,11 +90,11 @@ def sweep(projects_root: Path) -> None:
 
 async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY_S) -> None:
     """The reclaim, then the route answers every process's fetch wrote: this loop is their one
-    refresher (`pricing.refresh_route_answers`). Never at boot: every read derives what a dead
-    producer left, so no first page waits on it."""
-    steps = (functools.partial(sweep, projects_root), refresh_route_answers)
+    refresher (`pricing.refresh_route_answers`). At boot the answers alone, so a restart serves no
+    day-old one; the reclaim waits a tick: every read derives what a dead producer left, so no first
+    page waits on it."""
+    steps: tuple[Callable[[], None], ...] = (refresh_route_answers,)
     while True:
-        await asyncio.sleep(interval_s)
         for step in steps:
             try:
                 await asyncio.to_thread(step)
@@ -101,3 +102,5 @@ async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY
                 # A raising step must not END the loop, nor skip the other: each would stop for the
                 # rest of the server's uptime.
                 logger.exception("periodic sweep step %s failed; the loop continues", step)
+        await asyncio.sleep(interval_s)
+        steps = (functools.partial(sweep, projects_root), refresh_route_answers)

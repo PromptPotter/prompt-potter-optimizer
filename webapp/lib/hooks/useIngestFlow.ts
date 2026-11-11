@@ -49,7 +49,7 @@ type IngestPhase =
       degradedCause: string | null;
     }
   // The served `DraftReopenResponse.start`: a Start holds the draft, queued on a slot or minting it.
-  | { stage: NonNullable<DraftReopenResponse["start"]> };
+  | { stage: NonNullable<DraftReopenResponse["start"]>["stage"] };
 
 /** The check-in the workspace views: a draft id, `NEW_CHECKIN` before one is minted, null off one. */
 export type CheckinSubject = string | null;
@@ -344,8 +344,10 @@ export function useIngestFlow({
   const land = (res: DraftReopenResponse, told: boolean) => {
     const draft = res.draft;
     if (res.start !== null) {
-      if (told) say(res.start === "queued" ? QUEUED_LINE : STARTING_LINE);
-      setPhase({ stage: res.start });
+      if (told) say(res.start.stage === "queued" ? QUEUED_LINE : STARTING_LINE);
+      setPhase({ stage: res.start.stage });
+      // Followed as the tab that tapped Start follows it, until it mints or ends.
+      setFollowing(res.start.command_id);
       return;
     }
     if (draft.raw_task_description === null) {

@@ -31,6 +31,7 @@ from promptpotter.domain.job import (
     JOB_ADAPTER,
     UNRESOLVED_HOP,
     CampaignLaunch,
+    HeldStart,
     Job,
     JobHolder,
     JobLapse,
@@ -38,7 +39,7 @@ from promptpotter.domain.job import (
     ScoringPass,
     SlotHolder,
 )
-from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
+from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import open_text_robust, unlink_robust, write_json
@@ -426,15 +427,15 @@ class JobRegistry:
             if j.launched_on(today) and isinstance(j.holder, CampaignLaunch)
         ]
 
-    def draft_starts(self, *, user_id: str) -> dict[str, LaunchStage]:
-        """Each check-in a live Start holds, at its stage."""
-        starts: dict[str, LaunchStage] = {}
+    def draft_starts(self, *, user_id: str) -> dict[str, HeldStart]:
+        """Each check-in a live Start holds, at its stage, beside the command that filed it."""
+        starts: dict[str, HeldStart] = {}
         for job in self._live(lambda j: not j.released, user_id=user_id):
-            if not isinstance(job.holder, CampaignLaunch) or job.holder.draft_id is None:
+            if not isinstance(job.holder, CampaignLaunch) or (filed := job.holder.start) is None:
                 continue
             match job.stage:
                 case RunPhase.QUEUED | RunPhase.STARTING as stage:
-                    starts[job.holder.draft_id] = stage
+                    starts[filed.draft_id] = HeldStart(stage=stage, command_id=filed.command_id)
         return starts
 
     def reap_orphans(self) -> None:

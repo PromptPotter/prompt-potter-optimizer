@@ -26,8 +26,8 @@ from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig
 from promptpotter.domain.checkin_draft import DraftFile, OriginResolution, SetupStep
 from promptpotter.domain.draft_edit import EditDraftPatch
+from promptpotter.domain.job import HeldStart
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
     PipelineDependency,
@@ -173,10 +173,10 @@ class DraftReopenResponse(StrictModel):
         "(`checkin_draft.py::DraftFile.resolution_pending`): the one case a reopen sends `resolve-origin`, so a "
         "revisit never re-buys a turn or re-proposes over authored prompts."
     )
-    start: LaunchStage | None = Field(
-        description="The stage of the Start that holds it: `queued` waits on a machine slot, "
-        "`starting` is minting it. Set, a reopen offers no second Start; its listing's lifecycle "
-        "tag says the same."
+    start: HeldStart | None = Field(
+        description="The Start that holds it, at its stage, beside the command a reopen follows "
+        "until it mints or ends. Set, a reopen offers no second Start; its listing's lifecycle tag "
+        "says the same."
     )
 
 

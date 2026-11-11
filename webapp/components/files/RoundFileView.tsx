@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Badge, CardFrame, DataTable, FailureLine, Term, type Column } from "@/components/ui";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { PairedLift } from "@/components/shell/PairedLift";
-import type { PairedReading, ScoreboardRow } from "@/lib/api/types";
+import type { CellSet, PairedReading, ScoreboardRow } from "@/lib/api/types";
+import { liftVersus } from "@/lib/derivations";
 import { fmtLiftBand, fmtPct1, fmtSigned, fmtUnit } from "@/lib/format";
 import { failureOf, readyData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
@@ -18,7 +19,7 @@ function ArmLift({ reading }: { reading: PairedReading | null }) {
   );
 }
 
-function scoreboardColumns(wonOnTheta: boolean): Column<ScoreboardRow>[] {
+function scoreboardColumns(wonOnTheta: boolean, cells: CellSet | null | undefined): Column<ScoreboardRow>[] {
   return [
     { id: "rank", label: "#", width: "3rem", cell: (r) => r.rank },
     {
@@ -63,7 +64,7 @@ function scoreboardColumns(wonOnTheta: boolean): Column<ScoreboardRow>[] {
       id: "lift",
       label: (
         <Term content="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">
-          Lift vs parent
+          Lift {liftVersus("parent", cells)}
         </Term>
       ),
       width: "minmax(0, 2fr)",
@@ -130,7 +131,11 @@ export function RoundFileView({
       {doc && doc.scoreboard.length > 0 && (
         <CardFrame title={<span>Scoreboard</span>} actions={<Badge>{doc.scoreboard.length}</Badge>}>
           <DataTable
-            columns={scoreboardColumns(election?.elects_on === "ability")}
+            columns={scoreboardColumns(
+              election?.elects_on === "ability",
+              // The column's sheet, as its readings name it: every arm's is the round's one.
+              doc.scoreboard.find((r) => r.reading.vs_reference?.cell_set)?.reading.vs_reference?.cell_set,
+            )}
             rows={doc.scoreboard}
             getRowId={(r) => r.reading.arm.key}
             ariaLabel={`Round ${round} scoreboard`}

@@ -1604,6 +1604,15 @@ def _proven_in(commit: str, asked: Sequence[str], *, files: str | None = None) -
     """The tree a mode proves: the gate re-run on *asked* in *commit*'s own checkout (*files*, the
     index's tree laid over it), its cwd and PYTHONPATH that tree's, so every check reads that tree
     whether this gate re-execs into the pinned venv or borrows it (`_REEXEC` inherited)."""
+    # A hook inherits the repo git located for it: in a linked worktree `GIT_DIR`, and a commit's
+    # `GIT_INDEX_FILE`, would aim every git call in the checkout at the committing worktree's own
+    # index. Git's own list of them, dropped: the checkout's `.git` names its repo.
+    code, local = git("rev-parse", "--local-env-vars")
+    if code:
+        raise RuntimeError(f"git rev-parse --local-env-vars: {local}")
+    for var in local.split():
+        os.environ.pop(var, None)
+    _sweep_checkouts()
     with _checkout(commit, files=files) as tree:
         argv = [sys.executable, "scripts/gate.py", *asked]
         env = {**os.environ, "PYTHONPATH": str(tree)}
@@ -1620,13 +1629,11 @@ def _tree_is_index() -> bool:
 def _prove_index() -> int:
     """`--staged` where this tree holds what the commit leaves out: the same gate, in a checkout
     of the index alone, so no check reads a file the commit does not carry."""
+    # The commit's index is read once, into a tree; past it no git call reads or writes it.
     code, files = git("write-tree")
     if code:
         raise RuntimeError(f"git write-tree: {files}")
-    # The commit's index is read once, into that tree; past it no git call may write it.
-    os.environ.pop("GIT_INDEX_FILE", None)
     _, head = git("rev-parse", "HEAD")
-    _sweep_checkouts()
     print("gate[staged]: the tree holds unstaged work, so the index is checked in its own checkout")
     return _proven_in(head.strip(), sys.argv[1:], files=files.strip())
 
@@ -1643,7 +1650,6 @@ def _prove_tips(refs: str, checks: Sequence[Check]) -> int:
             f"gate[push]: the web lane reads {', '.join(missing)}, which is absent: `npm ci` there"
         )
         return 1
-    _sweep_checkouts()
     failed = 0
     for tip in tips:
         began = time.monotonic()

@@ -269,8 +269,16 @@ export interface MachineSlot {
 /** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */
 export interface CampaignLaunch {
   dataset_name: string;
-  draft_id: string | null;
+  start: FiledStart | null;
   kind: 'campaign_launch';
+}
+
+/** A check-in's Start as its job records it: the draft it mints from, and the
+ * `start-checkin` command that filed it. The draft is served at the job's
+ * stage, beside that command (`HeldStart`). */
+export interface FiledStart {
+  draft_id: string;
+  command_id: string;
 }
 
 /** A paid verb scoring outside any run: its hop is the cycle it scores, or none
@@ -3323,10 +3331,10 @@ export interface DraftReopenResponse {
    * sends `resolve-origin`, so a revisit never re-buys a turn or re-proposes
    * over authored prompts. */
   resolution_pending: boolean;
-  /** The stage of the Start that holds it: `queued` waits on a machine slot,
-   * `starting` is minting it. Set, a reopen offers no second Start; its
+  /** The Start that holds it, at its stage, beside the command a reopen follows
+   * until it mints or ends. Set, a reopen offers no second Start; its
    * listing's lifecycle tag says the same. */
-  start: 'queued' | 'starting' | null;
+  start: HeldStart | null;
 }
 
 /** A check-in's draft as every check-in route answers it; Start mints its
@@ -4211,6 +4219,15 @@ export interface LibraryFile {
   filename: string;
   /** The file's bytes, base64. */
   blob: unknown;
+}
+
+/** The Start holding a check-in: its stage, and the command a reopen follows to
+ * its end. */
+export interface HeldStart {
+  /** `queued` waits on a machine slot, `starting` is minting it. */
+  stage: 'queued' | 'starting';
+  /** The `start-checkin` command that filed it, whose reading says how it ends. */
+  command_id: string;
 }
 
 /** What `POST /commands/fork-cycle` would decide about this steer, asked without
@@ -5469,6 +5486,9 @@ export type ExportTier = 'chat' | 'report' | 'notebook' | 'deploy' | 'package';
 // promptpotter.domain.origin_panel::RoundAdvance
 export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
 
+// promptpotter.domain.paired_reading::CellSetName
+export type CellSetName = 'origin_panel' | 'reference_cells' | 'bench_split' | 'measured_by_both';
+
 // promptpotter.domain.phases::StopReason
 export type StopReason = 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
 
@@ -5972,6 +5992,14 @@ export const ROUND_ADVANCE_INFO: Record<RoundAdvance, RoundAdvanceInfo> = {
   "unread": { label: "unread", sentence: "An arm was promoted, and the origin-panel reading owed on it was not taken: the round neither advances the line nor counts as a stall." },
 };
 
+// Mirror of domain/paired_reading.py::CELL_SET_NAME_WORDS, in display order.
+export const CELL_SET_NAME_WORDS: Record<CellSetName, string> = {
+  "origin_panel": "on the origin panel",
+  "reference_cells": "on the round's cells",
+  "bench_split": "on the bench",
+  "measured_by_both": "on the cells both measured",
+};
+
 // Mirror of domain/paired_reading.py::LIFT_SIDE_TONE, in display order.
 export const LIFT_SIDE_TONE: Record<'above' | 'below' | 'spans', Tone> = {
   "above": "success",
@@ -6229,6 +6257,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable"]],
   [EXPORT_TIER_INFO, ["chat", "report", "notebook", "deploy", "package"]],
   [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "held", "unread"]],
+  [CELL_SET_NAME_WORDS, ["origin_panel", "reference_cells", "bench_split", "measured_by_both"]],
   [LIFT_SIDE_TONE, ["above", "below", "spans"]],
   [READING_STATE_INFO, ["read", "not_asked", "pending", "not_held", "no_holdout", "held_elsewhere", "pass_stopped", "past_tolerance", "member_unscoreable", "under_two_cells", "no_selection", "same_individual", "run_failed", "scope_differs", "measurand_differs", "dataset_differs", "cell_set_differs", "instrument_differs"]],
   [DASHBOARD_STATE_PAUSE_WORDS, ["init", "origin", "proposing", "scoring", "between_samples", "between_candidates", "optimizer_step", "bench", "stopped"]],

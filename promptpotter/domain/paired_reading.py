@@ -273,6 +273,24 @@ class CellSetName(StrEnum):
     MEASURED_BY_BOTH = "measured_by_both"
 
 
+# The sheet a pair was read on, as a lift's name says it: one pair read on two sheets is two lifts,
+# never one name (`lift_versus`).
+CELL_SET_NAME_WORDS: Worded[CellSetName, str] = Worded(
+    {
+        CellSetName.ORIGIN_PANEL: "on the origin panel",
+        CellSetName.REFERENCE_CELLS: "on the round's cells",
+        CellSetName.BENCH_SPLIT: "on the bench",
+        CellSetName.MEASURED_BY_BOTH: "on the cells both measured",
+    }
+)
+assert CELL_SET_NAME_WORDS.keys() == set(CellSetName)
+
+
+def lift_versus(over: str, cells: CellSet | None) -> str:
+    """A lift's one name: whom it is over, and the sheet it was read on where it was read."""
+    return f"vs {over}" if cells is None else f"vs {over} {CELL_SET_NAME_WORDS[cells.name]}"
+
+
 class CellSetBasis(StrEnum):
     # Named before either member was measured on it.
     DECLARED = "declared"

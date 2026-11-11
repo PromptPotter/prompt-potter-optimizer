@@ -18,7 +18,7 @@ from promptpotter.domain.bench import (
     BenchReading,
     BenchScore,
 )
-from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey
+from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, lift_versus
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import health_reading
@@ -450,8 +450,18 @@ def _render_variants_table(round_data: RoundResult, *, scored: bool) -> list[str
         return []
     parts: list[str] = ["**Variants**", ""]
     if scored:
+        # The column's sheet, as its readings name it: every arm's is the round's one.
+        sheet = next(
+            (
+                fit.vs_reference.cell_set
+                for key in panel
+                if (fit := round_data.fit(key)) is not None and fit.vs_reference is not None
+            ),
+            None,
+        )
         parts.append(
-            "| variant | composite_fitness | acc | θ | lift vs parent | won | evidence | changes |"
+            f"| variant | composite_fitness | acc | θ | lift {lift_versus('parent', sheet)} | won "
+            "| evidence | changes |"
         )
         parts.append("|---|---|---|---|---|---|---|---|")
     else:

@@ -17,6 +17,7 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
     ReadingState,
     RoundArm,
+    lift_versus,
 )
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.strict_model import FrozenModel
@@ -204,19 +205,23 @@ class ClimbRate(NamedTuple):
 
 
 class Climb(NamedTuple):
-    """What the selection gained over C0, priced by what the line paid, and over its parent."""
+    """What the selection gained over C0, priced by what the line paid, and over its parent; each
+    lift's name (`lift_versus`) says the sheet its own reading was read on."""
 
     candidate: str
     lift: str
+    over_origin: str
     vs_parent: str | None
+    over_parent: str | None
     measurand: str
     rates: list[ClimbRate]
 
     @property
     def line(self) -> str:
-        """The lead line: who, both lifts, every rate (an absent one as `—` with its reason)."""
-        parent = "" if self.vs_parent is None else f", {self.vs_parent} vs parent"
-        return f"{self.candidate}: {self.lift} vs origin{parent} · " + " · ".join(
+        """The lead line: who, both lifts as named, every rate (an absent one as `—` with its
+        reason)."""
+        parent = "" if self.vs_parent is None else f", {self.vs_parent} {self.over_parent}"
+        return f"{self.candidate}: {self.lift} {self.over_origin}{parent} · " + " · ".join(
             f"— {rate.per} ({rate.sub})" if rate.value is None else f"{rate.value} {rate.per}"
             for rate in self.rates
         )
@@ -235,11 +240,16 @@ def _climb(standing: RunStanding) -> Climb | None:
     gained = fmt.scale * lift
     usd, worked = standing.search_usd, standing.worked_s
     cost = LiftCost.of(pair, usd)
-    over = None if standing.vs_parent is None else standing.vs_parent.headline
+    parent = standing.vs_parent
+    over = None if parent is None else parent.headline
     return Climb(
         candidate=standing.selection_name,
         lift=lift_text(lift, unit),
+        over_origin=lift_versus("origin", pair.cell_set),
         vs_parent=None if over is None else lift_text(over.estimate.value, over.measurand.unit),
+        over_parent=(
+            None if parent is None or over is None else lift_versus("parent", parent.cell_set)
+        ),
         measurand=headline.measurand.key,
         rates=[
             ClimbRate(

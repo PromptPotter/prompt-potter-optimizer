@@ -58,10 +58,6 @@ row it closes.
   and a busy box may never land. Action: key it on a digest of the `CycleRecord` schema the code writes,
   held by every live process. **Rides with:** stopb 4. **Re-test:** a landing that moves no record shape
   refuses while a run is live.
-- **The sweep runs at two doors only**: `cli/commands/launch.py::prepare_launch` and
-  `jobs/reaper.py::periodic_sweep` run it; MCP stdio and `embedded_run` never do. Action: the sweep goes
-  under the one admission, proven against the offline run's killed legs. **Rides with:** stopb 3.
-  **Re-test:** `git grep -n "sweep(" -- promptpotter/presentation` is empty.
 
 ### batch/24 · conn
 
@@ -92,10 +88,6 @@ row it closes.
   `runner/inner/tasks.py::parse_resolved` re-parses at each reader. Action: each connector declares its
   experiment model; the workload carries it parsed. **Rides with:** conn 2. **Re-test:**
   `git grep -n "parse_resolved(" -- promptpotter`.
-- **A per-cell criterion naming a term no cell carries compiles** (`authored.py::scorer_of`) and refuses
-  per cell at the run, though the draft holds its backend's terms (`compiler.py::campaign_terms`).
-  Action: the check-in compiles it against them. **Rides with:** conn 3. **Re-test:** a scoring edit
-  `correct - no_such_term` is refused.
 - **Resuming a campaign takes its connector from today's dataset file**: `jobs/launcher/mint_and_start.py`
   (`ExistingCycle.backend_type`) and `wiring.py::bind_cycle_session` read the definition again, while
   the sends read `Campaign.connector`. Action: `init_services` takes the campaign's Connector; a
@@ -176,12 +168,6 @@ row it closes.
 - **Core computes TermNorm's term index for every connector**, pushed by two calls (`Session.index_terms`,
   `loop_start.py`, `origin.py`). Action: one call where the session opens, handing the connector's
   session the bank. **Rides with:** init 3. **Re-test:** `git grep -n "index_terms" -- promptpotter`.
-- **`--diag` mints a sibling cycle** (`commands/launching.py::_diag_target`) and
-  `potter/generation_only.py` drives its rounds a second way. Action: an unmeasured mode on `RunStart`
-  the round loop reads; both go. **Rides with:** init 4. **Re-test:** `git grep -n "def cut_diag_sibling" -- promptpotter`.
-- **A diag sibling never leaves the comparison**: `commands/launching.py::start_run` launches it with
-  `leaving=None`. Action: `--diag` as a mode, whose launch leaves. **Rides with:** init 4. **Re-test:**
-  `git grep -n "leaving=None" -- promptpotter` is empty.
 - **The test builders replay production by hand**: `tests/factories.py::seat` builds a cycle as run init
   does, and `tests/factories.py::close_round` replays the runner's append order. Action: they call
   `open_cycle` and the mint. **Rides with:** init 5. **Re-test:** `git grep -c "def seat(" -- tests/factories.py`.
@@ -191,6 +177,15 @@ row it closes.
 - **`tests/test_archive.py::test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launch_reads_the_pass`
   walks zero cells**, so the halt passes on an empty origin. Action: hand it the origin's cells through
   the `offline` fixture. **Rides with:** init 5. **Re-test:** the test's dataset is non-empty.
+
+### batch/25 · admit (on init's tip)
+
+- **`--diag` mints a sibling cycle** (`commands/launching.py::_diag_target`) and
+  `potter/generation_only.py` drives its rounds a second way. Action: an unmeasured mode on `RunStart`
+  the round loop reads; both go. **Rides with:** admit 1. **Re-test:** `git grep -n "def cut_diag_sibling" -- promptpotter`.
+- **A diag sibling never leaves the comparison**: `commands/launching.py::start_run` launches it with
+  `leaving=None`. Action: `--diag` as a mode, whose launch leaves. **Rides with:** admit 1. **Re-test:**
+  `git grep -n "leaving=None" -- promptpotter` is empty.
 - **Four admission doors and three job lifecycles still meet in one `HeldRun`.** `RunStart` owns the slot
   from admission to release, yet `jobs/launcher/launch.py::_hold` switches over three request types;
   `embedded_run.py::run_campaign` and `runner/inner/spawn.py::_open_seat` mint or resume their own way
@@ -198,46 +193,67 @@ row it closes.
   `run_job.py::open_held_cycle` and `mint.py::resolve_resume`. What varies, and stays: what starts, its
   admission and how it runs. Action: the running process builds its `HeldRun` by one drift-checked
   `open_cycle(hop)`, which binds `RunScope`; a fork is `open_cycle` under a carried admission. The two
-  `run_records.py::RunWiringRecord` writes stay. **Rides with:** init 1. **Re-test:**
+  `run_records.py::RunWiringRecord` writes stay. **Rides with:** admit 2. **Re-test:**
   `git grep -n "def open_held_cycle" -- promptpotter` is empty.
 - **A start's release is still hand-rolled at each start site**: `admission.py::RunStart.release` is the
   one release, but 15 `except BaseException: … release(exc)` blocks across `jobs/launcher/`,
   `commands/launching.py` and `embedded_run.py` call it by hand. Action: the one `open_cycle` lifecycle
-  owns the start's release; a context manager is the patch, not the root. **Rides with:** init 1.
+  owns the start's release; a context manager is the patch, not the root. **Rides with:** admit 2.
   **Re-test:** `git grep -c "release(exc" -- promptpotter/application` falls from 15.
 - **A fork's cut lands before its admission**: `commands/launching.py` cuts the child
   (`cut_operator_fork`) before `_launch_fork` admits on the request's own hop, so a refusal leaves the
   parent's inert `FORK_CUT` line; `ExistingCycle` needs `cut.child`. Action: admit on the parent's hop and
-  land on the child's. **Rides with:** init 1. **Re-test:** `git grep -n "cut_operator_fork(\|admit(" -- promptpotter/application/commands/launching.py`
+  land on the child's. **Rides with:** admit 2. **Re-test:** `git grep -n "cut_operator_fork(\|admit(" -- promptpotter/application/commands/launching.py`
   lists the cut before the admission.
 - **A head-to-head arm holds outside its release**: `jobs/launcher/head_to_head.py` builds `HeldRun.of`
   and claims after its try. Action: `mint_and_start.py::land_and_claim` inside the arm's release.
-  **Rides with:** init 1. **Re-test:** `git grep -c "claim_cycle(" -- promptpotter/application/jobs/launcher/head_to_head.py` is 0.
+  **Rides with:** admit 2. **Re-test:** `git grep -c "claim_cycle(" -- promptpotter/application/jobs/launcher/head_to_head.py` is 0.
 - **An arm is planned on a replicate it does not have yet**: `command_kinds.py::HeadToHeadRequest.purpose`
   declares replicate 1 and `jobs/mint.py::_numbered` overwrites it under the record hold; the placeholder
   reaches the root id, so admission prices plans whose ids are not final. Action: a purpose-free run spec
   feeds `resolve_cycle_plan`, `effective_config` and `shared_part`; the plan carries
   `Optimize | ArmSeat(head_to_head_id, arm_key)`, and the mint builds `Compare(Arm(…, replicate))` once.
-  **Rides with:** init 1. **Re-test:** `git grep -n "replicate=1" -- promptpotter`.
+  **Rides with:** admit 2. **Re-test:** `git grep -n "replicate=1" -- promptpotter`.
 - **A mint takes no claim until `admission.py::claim_cycle`**, so the landing tells a live mint from a
   torn one by the job registry alone (`maintenance/landing.py:169`: `_live`, or a job holding spend in
   its workspace). Action: the mint claims its cycle before `adopt_ledger`, and the landing reads the
-  claim. **Rides with:** init 1. **Re-test:** `git grep -n "_held_workspaces" -- promptpotter/application/maintenance/landing.py` is empty.
+  claim. **Rides with:** admit 2. **Re-test:** `git grep -n "_held_workspaces" -- promptpotter/application/maintenance/landing.py` is empty.
 - **The embedded launch is not a command**: `embedded_run.py::open_session`, `::run_head_to_head` and
   `::run_campaign` file no `CommandRecord`; `run_campaign` admits through `admission.py::slotless_share`
   and mints itself. Action: `run_campaign` opens its own session and files `mint-campaign` or `start-run`
   with an `EmbeddedRun` holder; `scripts/offline_run.py`'s legs and `presentation/teleprompter.py` take
   that one verb, and `connectors/dspy_module.py:351`'s refusal text stops naming `open_session`.
-  **Rides with:** init 1. **Re-test:** `git grep -n "def open_session" -- promptpotter` is empty.
+  **Rides with:** admit 2. **Re-test:** `git grep -n "def open_session" -- promptpotter` is empty.
 - **A host's command lands only behind a session**: `application/embedded_run.py`'s `__all__` exports
   `CommandDispatcher` bare, so a verb a host files on its own `Stores` (a bench grade, a compaction) never
   runs `maintenance/landing.py::land_at_entry`, which only `open_session` runs; the DSPy door writes under
   the root before it lands (`presentation/teleprompter.py::_write_definition` before `open_session`).
   Action: the embedded door lands once wherever a host enters it, first, and files through it.
-  **Rides with:** init 1. **Re-test:**
+  **Rides with:** admit 2. **Re-test:**
   `git grep -n '"CommandDispatcher"' -- promptpotter/application/embedded_run.py` is empty, and in
   `presentation/teleprompter.py::PromptPotterOpt.acompile` no `_write_definition` call precedes
   `open_session`'s landing.
+- **Launch and resume admit a deleted campaign**: `campaign_store/store.py::CampaignStore.load_campaign`
+  reads a torn delete as `deleted`, but no admission refuses a lifecycle, and what it spends past its
+  tombstone reaches no sum (`account_spend.py` returns the bank alone). Admission loads the campaign at
+  six sites (`admission.py::_campaign_ceiling`, `::campaign_sends`, `run_job.py:239,311`,
+  `quota.py:747,825`), and a launch's request carries the one the dispatcher loaded
+  (`DispatchedToCycle.campaign`), so no one site holds the refusal. Action: one load of a launch's or a
+  pass's campaign, refusing one that is not `active`. The six sites sit in `jobs/launcher/**` and
+  `jobs/quota.py`'s tombstone hunk, and `commands/launching.py` hands admission the dispatcher's
+  campaign. **Rides with:** admit 2. **Re-test:** a launch, a resume and a pass on a tombstoned campaign
+  refuse.
+- **The sweep runs at two doors only**: `cli/commands/launch.py::prepare_launch` and
+  `jobs/reaper.py::periodic_sweep` run it; MCP stdio and `embedded_run` never do. Action: the sweep goes
+  under the one admission, proven against the offline run's killed legs. **Rides with:** admit 3.
+  **Re-test:** `git grep -n "sweep(" -- promptpotter/presentation` is empty.
+- **A queued launch dies with the asking process**: the queue wait runs in the caller
+  (`jobs/launcher/launch.py`), and `jobs/CLAUDE.md` holds the reverse rule ("a queued job's intent never
+  leaves the process that authenticated it"). Decided (2026-11-11): a queued launch is a job on disk.
+  Action: the queued `LaunchRequest` rides the job file, which holds the principal's id, never a
+  credential; `jobs/registry.py::claim_next`'s promoter re-checks admission and spawns it when the slot
+  frees; the link restates `jobs/CLAUDE.md`'s rule. **Rides with:** admit. **Re-test:**
+  `resume --step-rounds 1` behind a running cycle; it starts when the slot frees.
 
 ### batch/25 · passb
 
@@ -435,13 +451,6 @@ row it closes.
   ledgers. Action: the mint re-draws an id the bank holds as deleted. **Rides with:** money 5.
   **Re-test:** `git grep -n "token_hex(3)" -- promptpotter/application/runner/campaign_ids.py` names the
   draw with no `WorkspaceBank.deleted` read beside it.
-- **Launch and resume admit a deleted campaign**: `campaign_store/store.py::CampaignStore.load_campaign`
-  reads a torn delete as `deleted`, but no admission refuses a lifecycle, and what it spends past its
-  tombstone reaches no sum (`account_spend.py` returns the bank alone). Admission loads the campaign at
-  six sites (`admission.py::_campaign_ceiling`, `::campaign_sends`, `run_job.py:239,311`,
-  `quota.py:747,825`), and a launch's request carries the one the dispatcher loaded
-  (`DispatchedToCycle.campaign`), so no one site holds the refusal. Action: one load of a launch's or a pass's campaign, refusing one that is not `active`.
-  **Rides with:** money 5. **Re-test:** a launch, a resume and a pass on a tombstoned campaign refuse.
 - **`launch_contended` is retryable but answers 409** (`quota.py::_contended`). Decided (2026-11-10): it
   serves `retry_after`. **Rides with:** money 5. **Re-test:** `git grep -n "launch_contended" -- promptpotter`.
 - **`facts.spend_lifetime` is served and read by nothing** (`domain/hierarchy.py:121,132`) since the
@@ -727,6 +736,11 @@ row it closes.
   `application/knobs.py::config_map` selects for itself beside `pipeline_resolve.py::_Merge`'s. Action:
   a check-in plans its cycles off the draft before landing, and a campaign's cycle config carries its
   selection. **Rides with:** rk-run 1. **Re-test:** `git grep -n "select_optimizer(" -- promptpotter/application/knobs.py`.
+- **A per-cell criterion naming a term no cell carries compiles** (`authored.py::scorer_of`) and refuses
+  per cell at the run, though the draft holds its backend's terms (`compiler.py::campaign_terms`).
+  Action: the check-in compiles it against them. The compiler is a hashed unit, so the refusal moves
+  digests and lands in the re-key window. **Rides with:** rk-run. **Re-test:** a scoring edit
+  `correct - no_such_term` is refused.
 
 ### batch/26 · addr
 
@@ -1124,9 +1138,9 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **The landing stamp is unordered**: `maintenance/landing.py::LandedStamp` holds a schema hash, so a
   process on older code (an earlier desk checkout, or two checkouts on one `PROMPTPOTTER_HOME`) lands
   again and drops what newer code wrote, the paid archive's caches included, against the module's own
-  "nothing may roll the code back". Root: the stamp carries the commit or version it landed, and an
-  entry from code that does not descend from it refuses instead of dropping. **Rides with:** rel, once
-  the operator picks the ordering signal. **Re-test:** an entry from an older checkout on a root a newer
+  "nothing may roll the code back". Decided (2026-11-11): the ordering signal is the package version.
+  Root: the stamp carries the package version that landed, and an entry from an older version refuses
+  instead of dropping. **Rides with:** rel. **Re-test:** an entry from an older version on a root a newer
   one landed refuses.
 - **`landing_key` misses a body change**: `store/data_root.py::_schema` keys a reader by `module::qualname`
   and `landing.py::landing_key` keys migrations by name (`sorted(MIGRATIONS)`), so a reader's or a
@@ -1141,13 +1155,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ## Held — no wave-4 chain yet
 
-- **A queued launch dies with the asking process**: the queue wait runs in the caller
-  (`jobs/launcher/launch.py`), and `jobs/CLAUDE.md` holds the reverse rule ("a queued job's intent never
-  leaves the process that authenticated it"). Action: the queued `LaunchRequest` rides the job file as a
-  `JobSpec`-like model holding the principal's id, never a credential, and `claim_next`'s promoter
-  re-checks admission and spawns it when the slot frees. **Held:** the operator's answer, since it
-  reverses that rule. **Re-test:** `resume --step-rounds 1` behind a running cycle; it starts when the
-  slot frees.
 - **A cold server folds every ledger before the first page answers**: the first `GET /hierarchy?depth=1`
   waits on a full `LEDGER_FOLDS` pass (37 µs a line cold, 2026-11-07); the boot sweep no longer runs
   beside it. Root: pydantic validates each screened line on every cold start; a fold snapshot keyed by

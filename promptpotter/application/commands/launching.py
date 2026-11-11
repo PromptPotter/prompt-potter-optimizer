@@ -68,7 +68,7 @@ from promptpotter.domain.command_kinds import (
     StartCheckinPayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, InnerRun, Job
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, FiledStart, InnerRun, Job
 from promptpotter.domain.phases import INNER_PAUSE_REFUSAL
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineSchema, narrowing_of
@@ -462,7 +462,12 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
         served = await draft_served(stores, draft)
         assert_origin_ready(draft, draft_pipeline(stores, draft, served))
         return admit(
-            CheckinStart(claim=claim, dataset_name=draft.dataset_name, budget=start.budget),
+            CheckinStart(
+                claim=claim,
+                dataset_name=draft.dataset_name,
+                budget=start.budget,
+                command_id=dispatched.command_id,
+            ),
             RunMode(diag=start.diag),
             stores=stores,
             job_registry=dispatcher.job_registry,
@@ -476,7 +481,10 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
             source,
             request,
             job_registry=dispatcher.job_registry,
-            holder=CampaignLaunch(source.opened.draft.dataset_name, draft_id=claim.draft_id),
+            holder=CampaignLaunch(
+                source.opened.draft.dataset_name,
+                FiledStart(claim.draft_id, dispatched.command_id),
+            ),
         )
 
     def _withdraw(answer: StartAnswer, exc: BaseException) -> None:

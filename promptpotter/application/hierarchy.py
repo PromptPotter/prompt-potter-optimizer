@@ -56,8 +56,13 @@ from promptpotter.domain.hierarchy import (
     UnstartedCampaign,
     UnstartedFacts,
 )
-from promptpotter.domain.paired_reading import READING_STATE_INFO, PairedReading, ReadingState
-from promptpotter.domain.phases import LaunchStage
+from promptpotter.domain.job import HeldStart
+from promptpotter.domain.paired_reading import (
+    READING_STATE_INFO,
+    PairedReading,
+    ReadingState,
+    lift_versus,
+)
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import ScoringFormulaError
@@ -132,8 +137,8 @@ def _lifetime_row(spent: LifetimeSpend) -> Figure:
     )
 
 
-def _lift_row(key: FigureKey, label: str, pair: PairedReading, against: str) -> Figure:
-    lift = pair.headline
+def _lift_row(key: FigureKey, pair: PairedReading, over: str) -> Figure:
+    lift, label = pair.headline, f"Lift {lift_versus(over, pair.cell_set)}"
     if lift is None or pair.coverage is None:
         info = READING_STATE_INFO[pair.state]
         return _figure(key, label, info.label, info.sentence)
@@ -143,7 +148,7 @@ def _lift_row(key: FigureKey, label: str, pair: PairedReading, against: str) -> 
         label,
         lift_band_text(lift.estimate, unit),
         f"{1 - pair.spec.alpha:.0%} band · "
-        f"{against} {level_text(lift.rate_a, unit)} → {level_text(lift.rate_b, unit)}",
+        f"{over} {level_text(lift.rate_a, unit)} → {level_text(lift.rate_b, unit)}",
     )
 
 
@@ -202,10 +207,10 @@ def _course_figures(
     rows.append(_rounds_row(facts.rounds_closed, cap))
     if (standing := facts.standing) is None:
         unread = PairedReading.unread(ReadingState.PENDING)
-        return [*rows, _lift_row("lift", "Lift vs origin", unread, "origin")]
+        return [*rows, _lift_row("lift", unread, "origin")]
     rows.append(_figure("candidates", "Candidates", str(standing.candidates)))
     rows.append(_figure("selection", "Leader", standing.selection_name))
-    rows.append(_lift_row("lift", "Lift vs origin", standing.vs_origin, "origin"))
+    rows.append(_lift_row("lift", standing.vs_origin, "origin"))
     if (lives := standing.lives) is not None:
         rows.append(_figure("lives", "Lives", lives.bar, lives.label))
     return rows
@@ -258,7 +263,7 @@ def candidate_figures(reading: ArmReading) -> list[Figure]:
             )
         )
     if reading.vs_reference is not None:
-        rows.append(_lift_row("lift", "Lift vs parent", reading.vs_reference, "parent"))
+        rows.append(_lift_row("lift", reading.vs_reference, "parent"))
     return rows
 
 
@@ -497,21 +502,22 @@ def campaign_entry(
     )
 
 
-def draft_starts(stores: Stores) -> dict[str, LaunchStage]:
-    """This account's check-ins a Start holds, at its stage: the listing and the reopen serve them."""
+def draft_starts(stores: Stores) -> dict[str, HeldStart]:
+    """This account's check-ins a Start holds, each as `HeldStart`: the listing serves its stage,
+    the reopen its stage and command."""
     jobs = JobRegistry.attach(stores.jobs_dir)
     return jobs.draft_starts(user_id=str(stores.identity.user_id))
 
 
 def unstarted_entry(
-    stores: Stores, draft: DraftFile, *, start: LaunchStage | None
+    stores: Stores, draft: DraftFile, *, start: HeldStart | None
 ) -> UnstartedCampaign:
     """An open check-in as a campaign: its spend is what the check-in cost, its lifecycle word
     the stage of a Start that holds it."""
     ledger = stores.drafts.ledger(draft.draft_id)
     spend_lifetime = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []).total)
     dataset = draft.dataset_name
-    lifecycle = "unstarted" if start is None else start.value
+    lifecycle = "unstarted" if start is None else start.stage.value
     return UnstartedCampaign(
         address=draft.draft_id,
         parent=None,

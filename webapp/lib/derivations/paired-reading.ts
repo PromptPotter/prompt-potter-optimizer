@@ -1,5 +1,17 @@
-import { READING_STATE_INFO, type MeasuredLift, type PairedReading } from "@/lib/api/types";
+import {
+  CELL_SET_NAME_WORDS,
+  READING_STATE_INFO,
+  type CellSet,
+  type MeasuredLift,
+  type PairedReading,
+} from "@/lib/api/types";
 import { fmtLift, fmtUnit } from "@/lib/format";
+
+// A lift's one name, as the server words it (`paired_reading.py::lift_versus`): whom it is over and
+// the sheet its reading was read on, so one pair read on two sheets never shares a name.
+export function liftVersus(over: string, cells: CellSet | null | undefined): string {
+  return cells == null ? `vs ${over}` : `vs ${over} ${CELL_SET_NAME_WORDS[cells.name]}`;
+}
 
 type PairRead =
   | { read: true; lift: MeasuredLift; cells: number }

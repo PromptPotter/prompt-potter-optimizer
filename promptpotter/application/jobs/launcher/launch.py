@@ -21,7 +21,6 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import LaunchedJob
 from promptpotter.infrastructure.store.stores import Stores
@@ -130,7 +129,7 @@ def admit(
     (job,) = request_jobs(
         stores=stores,
         job_registry=job_registry,
-        holder=CampaignLaunch(request.dataset_name, draft_id=request.draft_id),
+        holder=request.holder,
         hop=request.hop,
     )
     if inline is not None and job.queued:

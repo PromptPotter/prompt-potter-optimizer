@@ -32,7 +32,7 @@ from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch
 from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
@@ -91,8 +91,8 @@ class FreshMint:
         return self.dataset.name
 
     @property
-    def draft_id(self) -> None:
-        return None
+    def holder(self) -> CampaignLaunch:
+        return CampaignLaunch(self.dataset_name)
 
     def backend_type(self, _stores: Stores) -> str:
         return runnable_definition(self.dataset).backend_type
@@ -122,8 +122,8 @@ class ExistingCycle:
         return self.campaign.dataset_name
 
     @property
-    def draft_id(self) -> None:
-        return None
+    def holder(self) -> CampaignLaunch:
+        return CampaignLaunch(self.dataset_name)
 
     def backend_type(self, stores: Stores) -> str:
         return runnable_definition(resolve_dataset(stores, self.dataset_name)).backend_type

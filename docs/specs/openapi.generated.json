@@ -2408,22 +2408,21 @@
             "title": "Dataset Name",
             "type": "string"
           },
-          "draft_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Draft Id"
-          },
           "kind": {
             "const": "campaign_launch",
             "default": "campaign_launch",
             "title": "Kind",
             "type": "string"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FiledStart"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -5783,18 +5782,13 @@
           "start": {
             "anyOf": [
               {
-                "enum": [
-                  "queued",
-                  "starting"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/HeldStart"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The stage of the Start that holds it: `queued` waits on a machine slot, `starting` is minting it. Set, a reopen offers no second Start; its listing's lifecycle tag says the same.",
-            "title": "Start"
+            "description": "The Start that holds it, at its stage, beside the command a reopen follows until it mints or ends. Set, a reopen offers no second Start; its listing's lifecycle tag says the same."
           }
         },
         "required": [
@@ -7117,6 +7111,26 @@
         "title": "FileEntry",
         "type": "object"
       },
+      "FiledStart": {
+        "additionalProperties": false,
+        "description": "A check-in's Start as its job records it: the draft it mints from, and the `start-checkin`\ncommand that filed it. The draft is served at the job's stage, beside that command\n(`HeldStart`).",
+        "properties": {
+          "command_id": {
+            "title": "Command Id",
+            "type": "string"
+          },
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_id",
+          "command_id"
+        ],
+        "title": "FiledStart",
+        "type": "object"
+      },
       "FilesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -8146,6 +8160,32 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HeldStart": {
+        "additionalProperties": false,
+        "description": "The Start holding a check-in: its stage, and the command a reopen follows to its end.",
+        "properties": {
+          "command_id": {
+            "description": "The `start-checkin` command that filed it, whose reading says how it ends.",
+            "title": "Command Id",
+            "type": "string"
+          },
+          "stage": {
+            "description": "`queued` waits on a machine slot, `starting` is minting it.",
+            "enum": [
+              "queued",
+              "starting"
+            ],
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage",
+          "command_id"
+        ],
+        "title": "HeldStart",
         "type": "object"
       },
       "HierarchyCampaign": {

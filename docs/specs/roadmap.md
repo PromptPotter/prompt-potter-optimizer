@@ -18,7 +18,7 @@ header, then the operator asked about a release.
 3. **batch/23** — one launch answer at every door and `RunStart` owning the slot; one change feed, no
    read on a clock; the climb on the selection, vs parent too, as the lead line: startb, feed, narr-c.
 4. **batch/24** — one stop door, the connector declares itself, the doors: stopb, conn, doors, tv.
-5. **batch/25** — run init as one module, one pass verb, served arm rows: init, passb, webb. The
+5. **batch/25** — run init as one module, one pass verb, served arm rows: init, admit on its tip, passb, webb. The
    decision window opens.
 6. **batch/26** — every re-key: money, rk-opt and stream-rk on its tip (`RunCallbacks` and the
    `declare_*` doors), then narr (one narration, the typed phase act) on stream-rk's; rk-run, addr;
