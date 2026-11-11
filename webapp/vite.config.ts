@@ -103,11 +103,12 @@ export default defineConfig(({ command, mode }) => {
       outDir: path.join(WEBAPP, "out"),
       emptyOutDir: true,
       sourcemap: true,
-      // Every page FastAPI's `StaticFiles(html=True)` serves: `/`, `/login/`, and its miss page.
+      // Every page FastAPI's `StaticFiles(html=True)` serves: `/`, `/login/`, `/stage/`, and its miss page.
       rolldownOptions: {
         input: [
           path.join(APP, "index.html"),
           path.join(APP, "login", "index.html"),
+          path.join(APP, "stage", "index.html"),
           path.join(APP, "404.html"),
         ],
       },

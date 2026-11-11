@@ -11,7 +11,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 from promptpotter.domain.job import JOB_ADAPTER
-from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
+from promptpotter.domain.run_records import (
+    SpendHoldRecord,
+    StandingBudgetRecord,
+    TokenUsageRecord,
+)
 from promptpotter.domain.spend import (
     CEILING_METER_LABELS,
     CYCLE_AXES,
@@ -40,14 +44,14 @@ from promptpotter.infrastructure.llm.telemetry import (
     rate_priced_usd,
 )
 from promptpotter.infrastructure.projections.base import Projection
-from promptpotter.infrastructure.runtime_flags import standing_budget
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_share
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_share, scan_last
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     HOLD_TRAIL,
     HeldSends,
     HoldTrailRecord,
     LedgerIndex,
+    LedgerSpan,
     RecordClasses,
 )
 from promptpotter.infrastructure.store.wallet_store import (
@@ -71,6 +75,13 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
+
+
+def standing_budget(cycle_dir: Path) -> StandingBudgetRecord:
+    """Read live by the book at each send, and by the store for every other reader."""
+    # No record stands no axis, which the empty record says.
+    held = scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], StandingBudgetRecord)
+    return held or StandingBudgetRecord()
 
 
 @dataclass(frozen=True)

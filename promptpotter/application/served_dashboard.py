@@ -45,13 +45,13 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
     WaitingOn,
 )
-from promptpotter.infrastructure.runtime_flags import (
-    effective_lookahead,
-    requested_lookahead,
-)
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     VerifyLedger,
     scan_ledger_verify,
+)
+from promptpotter.infrastructure.store.command_log import (
+    effective_lookahead,
+    requested_lookahead,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores

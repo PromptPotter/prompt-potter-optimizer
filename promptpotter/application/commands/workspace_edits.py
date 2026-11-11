@@ -13,6 +13,7 @@ from promptpotter.application.datasets.ingest import (
     ingest_draft,
 )
 from promptpotter.application.jobs.coupon import AccountKey, put_account_key, remove_account_key
+from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.domain.command_kinds import (
     ArchiveCampaignPayload,
@@ -40,31 +41,42 @@ if TYPE_CHECKING:
         SetCampaignLabelPayload,
         SetUserSettingsPayload,
     )
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 async def campaign_lifecycle(dispatched: Dispatched[LifecyclePayload]) -> Applier[object]:
-    stores, payload = dispatched.dispatcher.stores, dispatched.payload
+    dispatcher, payload = dispatched.dispatcher, dispatched.payload
+    stores = dispatcher.stores
 
     async def _apply() -> None:
-        changed_at = utcnow_iso()
-        campaigns = stores.campaigns
-        campaign_id, reason = payload.campaign_id, payload.reason
-        if isinstance(payload, ArchiveCampaignPayload):
-            campaigns.archive_campaign(campaign_id, changed_at=changed_at, reason=reason)
-        elif isinstance(payload, UnarchiveCampaignPayload):
-            campaigns.unarchive_campaign(campaign_id, changed_at=changed_at, reason=reason)
-        elif isinstance(payload, DeleteCampaignPayload):
-            campaigns.delete_campaign(
-                campaign_id,
-                keep_results=payload.keep_results,
-                changed_at=changed_at,
-                reason=reason,
-                inner_sandbox_root=inner_sandboxes_dir(stores.shared_root),
-            )
-        else:
-            assert_never(payload)
+        if isinstance(payload, UnarchiveCampaignPayload):
+            # It destroys nothing, so it takes no destroyer's guard.
+            _lifecycle(stores, payload)
+            return
+        with destroying(stores, dispatcher.job_registry, payload.campaign_id):
+            _lifecycle(stores, payload)
 
     return Applier.silent(_apply)
+
+
+def _lifecycle(stores: Stores, payload: LifecyclePayload) -> None:
+    changed_at = utcnow_iso()
+    campaigns = stores.campaigns
+    campaign_id, reason = payload.campaign_id, payload.reason
+    if isinstance(payload, ArchiveCampaignPayload):
+        campaigns.archive_campaign(campaign_id, changed_at=changed_at, reason=reason)
+    elif isinstance(payload, UnarchiveCampaignPayload):
+        campaigns.unarchive_campaign(campaign_id, changed_at=changed_at, reason=reason)
+    elif isinstance(payload, DeleteCampaignPayload):
+        campaigns.delete_campaign(
+            campaign_id,
+            keep_results=payload.keep_results,
+            changed_at=changed_at,
+            reason=reason,
+            inner_sandbox_root=inner_sandboxes_dir(stores.shared_root),
+        )
+    else:
+        assert_never(payload)
 
 
 async def set_campaign_label(dispatched: Dispatched[SetCampaignLabelPayload]) -> Applier[object]:

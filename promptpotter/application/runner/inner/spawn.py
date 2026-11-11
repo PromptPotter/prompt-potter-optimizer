@@ -12,6 +12,7 @@ from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import slotless_share
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
+    ConnectorMovedError,
     declare,
     mint,
     resolve_cycle_plan,
@@ -68,7 +69,6 @@ from promptpotter.infrastructure.store.layout import (
     dataset_id_prefix,
     sandbox_owner_path,
 )
-from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.errors import (
     CellSendRefusedError,
@@ -377,10 +377,9 @@ def _continue_inner_campaign(
     bound = session.bound(hop, purpose=campaign.declaration.purpose)
     try:
         plan = resolve_resume(bound, campaign, train_data)
-    except ConfigDriftError as drift:
-        raise CellUnscoreableError(str(drift), spent={}) from drift
+    except (ConfigDriftError, ConnectorMovedError) as refused:
+        raise CellUnscoreableError(str(refused), spent={}) from refused
 
-    save_active_pointer(session.store.base_dir, hop)
     logger.info(
         "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
         campaign.campaign_id,

@@ -29,7 +29,7 @@ type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
 type IngestPhase =
   | { stage: "idle" }
   | { stage: "uploading" }
-  // A draft this flow did not hold, waiting on its read's first answer.
+  // A draft waiting on its read's first answer: one this flow did not hold, or one it just opened.
   | { stage: "reopening" }
   | { stage: "awaiting-context"; draft: DraftCampaignWire }
   | { stage: "checkin"; model: string }
@@ -221,11 +221,12 @@ export function useIngestFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [following, queued]);
 
-  const runCheckin = async (draft: DraftCampaignWire) => {
+  // The server decides whether a turn is bought (`resolver_not_owed`): only a re-run forces one.
+  const runCheckin = async (draft: DraftCampaignWire, rerun = false) => {
     const alive = begin();
     setPhase({ stage: "checkin", model: "the check-in model" });
     const r = await resolving.run("resolve", () =>
-      commands["resolve-origin"]({ draft_id: draft.draft_id }),
+      commands["resolve-origin"]({ draft_id: draft.draft_id, rerun }),
     );
     if (!alive()) return;
     // A refused turn lands in review on the draft as it stood; its failure prints beside Start.
@@ -244,18 +245,16 @@ export function useIngestFlow({
     });
   };
 
+  // A fresh draft lands as a reopened one does: its read's `resolution_pending` decides a turn.
   const advance = (draft: DraftCampaignWire) => {
     hold(draft.draft_id);
     setInputText("");
-    if (draft.raw_task_description !== null) {
-      say(`Parsed ${draft.n_samples} rows — task already on file. Checking the setup…`);
-      void runCheckin(draft);
-      return;
-    }
     say(
-      `Parsed ${draft.n_samples} rows. Describe the task — what should the model do with each row? The more you give me, the better I set up the prompt and pipeline. Or let me propose it from the rows.`,
+      draft.raw_task_description !== null
+        ? `Parsed ${draft.n_samples} rows — task already on file.`
+        : `Parsed ${draft.n_samples} rows. Describe the task — what should the model do with each row? The more you give me, the better I set up the prompt and pipeline. Or let me propose it from the rows.`,
     );
-    setPhase({ stage: "awaiting-context", draft });
+    setPhase({ stage: "reopening" });
   };
 
   const ingestAndResolve = async (file: File, slug?: string, chipId?: string) => {
@@ -350,13 +349,14 @@ export function useIngestFlow({
       setFollowing(res.start.command_id);
       return;
     }
+    // No task on file: asked for first, as `resolution_pending` serves; an empty Send is the ask.
     if (draft.raw_task_description === null) {
       if (told)
         say("Describe the task — what should the model do with each row? Send when ready.");
       setPhase({ stage: "awaiting-context", draft });
       return;
     }
-    // The resolver runs only where no turn ever set it up: never re-bought, never over edits.
+    // The one unasked turn: the served rule (`DraftFile.resolution_pending`), never re-bought.
     if (res.resolution_pending) {
       if (told) say("Picking up where the setup left off.");
       void runCheckin(draft);
@@ -413,7 +413,7 @@ export function useIngestFlow({
   const submitContext = async () => {
     if (phase.stage !== "awaiting-context") return;
     const text = inputText.trim();
-    // Without one, the resolver proposes the task from the rows, as `new <file>` lets it.
+    // Without one, the owed turn proposes the task from the rows: the one command `new <file>` sends.
     if (!text) return runCheckin(phase.draft);
     const id = phase.draft.draft_id;
     setInputText("");
@@ -447,9 +447,10 @@ export function useIngestFlow({
       say(`Candidate library built from “${column}” — ${updated.candidate_library_size} targets.`);
   };
 
+  // Asked by the operator: the one turn bought whether or not the draft owes one.
   const rerunCheckin = () => {
     if (phase.stage !== "ready" || busy) return;
-    void runCheckin(phase.draft);
+    void runCheckin(phase.draft, true);
   };
 
   const startFromReady = async (limits: StartCheckinOptions) => {

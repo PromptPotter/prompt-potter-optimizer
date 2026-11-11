@@ -283,6 +283,7 @@ from promptpotter.infrastructure.store.wallet_store import BilledCharge, CouponG
 from promptpotter.presentation.api.routers import commands as commands_api
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.errors import (
+    BudgetUnenforceableError,
     CellHaltedError,
     CellInfrastructureError,
     CellSendRefusedError,
@@ -2671,7 +2672,9 @@ _WEB = "https://accounts.google.com"
 _FACE = Budget.amount(settings.HOST_COUPON.usd or 0.0, settings.HOST_COUPON.tokens or 0)
 _HELD_HOP = CycleHop(campaign_id="camp", cycle_id="cycle_x")
 # A backend's cells, which go out on the box's keys whatever the account holds.
-_CELLS = (BackendCells("termnorm", "host"),)
+_CELLS = (BackendCells("termnorm", "host", priced=True),)
+# Cells no rate bounds: a dollar ceiling on them is refused at the mint.
+_UNPRICED_CELLS = (BackendCells("n8n", "host", priced=False),)
 _OWN_ONLY = (ProviderSend("openrouter", "user"),)
 
 
@@ -2874,6 +2877,22 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             None,
         ),
         ("launch", _WEB, None, _OWN_ONLY, None, None, _SPENT_THE_COUPON, _UNBOUNDED, (0, 0)),
+        # A provider no key pays is refused first, on any account, before anything is held.
+        (
+            "launch",
+            None,
+            None,
+            (*_CELLS, ProviderSend("groq", None)),
+            None,
+            None,
+            None,
+            NoApiKeyError,
+            None,
+        ),
+        # Cells no rate bounds: refused under the run's dollar cap or the coupon's, never in tokens.
+        ("launch", None, None, _UNPRICED_CELLS, 10.0, None, None, BudgetUnenforceableError, None),
+        ("launch", _WEB, None, _UNPRICED_CELLS, None, None, None, BudgetUnenforceableError, None),
+        ("launch", None, None, _UNPRICED_CELLS, None, None, None, _UNBOUNDED, _UNBOUNDED),
         # An own key frees its provider's sends, never a backend's cells.
         (
             "launch",
@@ -2920,7 +2939,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         if running is not None:
             _running(registry, **cast("dict[str, Any]", running))
         if isinstance(admits, type):
-            with pytest.raises(admits):
+            with pytest.raises(admits) as refused:
                 if door == "launch":
                     admit_launch(
                         declared=Budget() if declared is None else Budget(usd=declared),
@@ -2933,6 +2952,10 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
                     )
                 else:
                     asyncio.run(_paid_door(door, stores))
+            # The refusal names the ceiling that binds: only the run's own is the run's to drop.
+            if isinstance(refused.value, BudgetUnenforceableError):
+                binds = refused.value.details["binds"]
+                assert binds == ("allowance" if issuer else "run"), f"door {n}: names {binds}"
             continue
         knocked, reserve = admit_launch(
             declared=Budget() if declared is None else Budget(usd=declared),
@@ -3012,8 +3035,9 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     fresh = _account_stores(tmp_path / "fresh", issuer=_WEB, user=user, spent=None)
     with monkeypatch.context() as patched:
         patched.setattr(settings, "GROQ_API_KEY", SecretStr(""))
-        with pytest.raises(NoApiKeyError):
-            provider_send(fresh.api_keys.load(), "groq")
+        assert provider_send(fresh.api_keys.load(), "groq").payer is None, (
+            "a provider no key holds read as paid"
+        )
 
     # In flight, the reserve binds only a send on the box's key; one on the account's own goes on.
     book = spend_book(None, usd_reserve=0.05)
@@ -3356,6 +3380,11 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     hold_moved(forker, fork, Budget(usd=0.8))
     forker.grant.save(CouponGrant(face=Budget(usd=1.0)))
     allowance = account_of(forker)
+    # A changed ceiling is admitted as a launch is: dollars its cells cannot be held to refuse.
+    with pytest.raises(BudgetUnenforceableError):
+        change_budget(
+            Budget(usd=5.0), stores=forker, job_registry=registry, hop=fork, sends=_UNPRICED_CELLS
+        )
     change_budget(Budget(usd=5.0), stores=forker, job_registry=registry, hop=fork, sends=_CELLS)
     caps, raised = forker.campaigns.read_campaign_ceiling(fork), registry.get(job.job_id)
     _, relaunched = admit_launch(
@@ -3530,7 +3559,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             "--arm",
             "capo=capo",
             "--arm",
-            "capo-b3=capo,nodes.blocks.max_blocks=3",
+            "capo-b3=capo,nodes.blocks.config.max_blocks=3",
             "--max-usd",
             "50",
             "--max-rounds",

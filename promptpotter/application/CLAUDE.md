@@ -11,12 +11,12 @@
 
 ## Conventions
 
-- **A check-in's config is `pipeline_resolve.py::draft_config`'s, an optimizer resolves through `optimizer_manifest.py::select_optimizer`**: never derive beside them.
+- **A check-in's config is `pipeline_resolve.py::DraftPipeline`'s `config`, an optimizer resolves through `optimizer_manifest.py::select_optimizer`**: never derive beside them.
 - Optimizer LLM calls go through `bench/llm_call.py::llm_call`, never `chat()`. <!-- probe: git grep -cE "\.chat\(" -- promptpotter/application/optimizers/*.py == 0 --> A stop rule's verdict flows by return value (`QueryLoopResult.stop_signal`), never an exception.
 - **An await that can outlast `RUN_FRESH_S` and writes nothing heartbeats** (`infrastructure/llm/heartbeat.py`), or it is served `wedged`.
 - **A run's ambient state is ONE frozen `shared/run_scope.py::RunScope`**, bound once; a verb scoring outside a run takes it through `loop_start.py::arm_diagnostic_scoring`, and a move inside a run goes through `rescope`, never a second ContextVar.
 - **A served read (a GET) is a `ReadKind` row plus its `read_params.py::ReadParams` model**; `api/routers/reads.py` mounts it, so no route is written. Address it by the id of the entity it is a fact ABOUT, resolve it here, never in the router, serve the provenance a client would otherwise diff, and give it its row in [`webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) § Display-data sources.
-- **`commands/dispatcher.py` is the sole filer of a `CommandRecord`** <!-- probe: git grep -cE "CommandRecord\(" -- promptpotter/application/*.py == 2 --> **and imports no handler** <!-- probe: git grep -cE "^from promptpotter\.application\.commands\." -- promptpotter/application/commands/dispatcher.py == 0 -->: a `CommandKind` row names its `module:handler`, imported at dispatch.
+- **`commands/dispatcher.py` is the sole filer of a `CommandRecord`** <!-- probe: git grep -cE "CommandRecord\(" -- promptpotter/application/*.py == 1 --> **and imports no handler** <!-- probe: git grep -cE "^from promptpotter\.application\.commands\." -- promptpotter/application/commands/dispatcher.py == 0 -->: a `CommandKind` row names its `module:handler`, imported at dispatch.
 - **Every ingress edits an origin through an `EditDraftPatch`, applied in `datasets/draft_patch.py`**, never in `api/routers/`. A projection reading the draft's connector or criterion lives in `datasets/draft_campaign.py`, never in `jobs/launcher/` (an import cycle through `pipeline_resolve`). A draft is kept only once its response is built.
 - **A schemaless pipeline (no `backend_type`, no nodes) is a typed 422**, never a 500, which reads as `transient` and the webapp retries.
 

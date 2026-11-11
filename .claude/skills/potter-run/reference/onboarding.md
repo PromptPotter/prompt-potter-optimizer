@@ -10,12 +10,13 @@ blocks mint until query + ground_truth + framing are CONFIRMED and every active 
 → the picker → mint. The CLI rides the same seam:
 
 ```bash
-python -m promptpotter new <file.csv> --set task_description='what the prompt does'
+python -m promptpotter new <file.csv> --set raw_task_description='what the prompt does'
 ```
 
-Omit `--set` to let the resolver propose the framing and ask; `--set optimizer=capo` and
-`--set nodes.<node>.<knob>=V` are the picker's answers. A run stopping short of a complete origin keeps
-its check-in; Discard is `discard-draft <draft_id>`.
+Omit `--set` to let the resolver propose the framing and ask; `--set` takes `EditDraftPatch`'s own
+dotted paths: `--set config.optimization.optimizer=capo` and
+`--set config.optimization.nodes.<node>.config.<knob>=V` are the picker's answers. A run stopping short
+of a complete origin keeps its check-in; Discard is `discard-draft <draft_id>`.
 
 ## Fast path — Claude-simulated check-in
 
@@ -42,4 +43,4 @@ When the operator says the data is ready **and it loads cleanly**, author the or
 ## First-run smoke
 
 If `{name}` has never produced a measurement, one round (it mints, so the autonomy mode decides):
-`python -m promptpotter new {name} --max-rounds 1 --set nodes.l1_generate.n_variants=3 --set nodes.adaptive_queue.sp_budget_round=5 --set nodes.escalation.l1_patience=1`.
+`python -m promptpotter new {name} --max-rounds 1 --set config.optimization.nodes.l1_generate.config.n_variants=3 --set config.optimization.nodes.adaptive_queue.config.sp_budget_round=5 --set config.optimization.nodes.escalation.config.l1_patience=1`.

@@ -119,8 +119,3 @@ class EditDraftPatch(StrictModel):
         description="Parse the candidate library from a file: one entry per line, or the first "
         "column of a CSV/Excel.",
     )
-
-
-SETTABLE_SCALARS: frozenset[str] = frozenset(
-    name for name, f in EditDraftPatch.model_fields.items() if f.annotation == (str | None)
-)

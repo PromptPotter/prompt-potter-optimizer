@@ -323,11 +323,24 @@ def spend_book(
     )
 
 
+def fake_connector(name: str = "fake", **declared: Any) -> Connector:
+    """A `/matches` connector at the offline world's backend, host-paid and priced as TermNorm's."""
+    return Connector(
+        name,
+        termnorm_wire_adapter,
+        **{
+            "endpoint": lambda: f"http://{FakeBackend.AT}",
+            "cell_envelope_s": cell_envelope_of(600.0),
+            "cell_payer": "host",
+            "sent_spend_bound": None,
+            "cells_priced": True,
+            **declared,
+        },
+    )
+
+
 def backend_client(jobs_dir: Path, **declared: Any) -> BackendClient:
-    declared.setdefault("endpoint", lambda: f"http://{FakeBackend.AT}")
-    declared.setdefault("cell_envelope_s", cell_envelope_of(600.0))
-    connector = Connector("fake", termnorm_wire_adapter, **declared)
-    return BackendClient(connector, workload=PROBE_WORKLOAD, jobs_dir=jobs_dir)
+    return BackendClient(fake_connector(**declared), workload=PROBE_WORKLOAD, jobs_dir=jobs_dir)
 
 
 def workspace(root: Path, identity: IdentityContext | None = None) -> Stores:

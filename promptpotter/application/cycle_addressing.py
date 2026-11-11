@@ -20,9 +20,11 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign import Campaign
 
 
-def active_pointer(stores: Stores, *, inside: CyclePath = ()) -> CycleHop | None:
-    """``None`` where nothing was launched or the workspace was cleared — a steady state. Liveness is
-    the entry's ``run_phase``; a pointer outliving its cycle dir names nothing."""
+def latest_launch(stores: Stores, *, inside: CyclePath = ()) -> CycleHop | None:
+    """The cycle the latest run held (a mint's, a fork's or a resume's: the pointer moves where
+    `run_observers.py::build_run_observers` holds it), and so what a verb naming no cycle acts on.
+    ``None`` where nothing ran or the workspace was cleared — a steady state; a pointer outliving
+    its cycle dir names nothing."""
     stores = descend_store(stores, inside)
     hop = read_active_pointer(stores.base_dir)
     if hop is None or not stores.campaigns.cycle_dir(hop).is_dir():
@@ -30,22 +32,39 @@ def active_pointer(stores: Stores, *, inside: CyclePath = ()) -> CycleHop | None
     return hop
 
 
+def followed_cycle(stores: Stores) -> CycleHop | None:
+    """What a follower shows (the stage, an unpinned webapp): a cycle a run holds, the latest
+    launch's first, else the latest launch. A verb naming no cycle acts on `latest_launch`, never
+    on this."""
+    launched = latest_launch(stores)
+    running = stores.campaigns.run_held_cycles()
+    if not running or launched in running:
+        return launched
+    # Of runs the pointer names none of, the newest campaign's.
+    return max(running, key=lambda hop: _created_at(stores, hop))
+
+
+def _created_at(stores: Stores, hop: CycleHop) -> str:
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    return "" if campaign is None else campaign.created_at
+
+
 class ActiveSessionResponse(StrictModel):
-    """The tenant's latest launch — not the set of live runs, which is `state.attached` on `/hierarchy`."""
+    """The run to follow (`followed_cycle`): a running one first, else the latest launch."""
 
     tenant_id: str = Field(
         description="Tenant the pointer belongs to — the caller's own, always known"
     )
     campaign_id: str | None = Field(
-        description="Campaign of the latest launch; null when no session is active."
+        description="Campaign of the run to follow; null when no session is active."
     )
     cycle_id: str | None = Field(
-        description="Cycle of the latest launch; null when no session is active."
+        description="Cycle of the run to follow; null when no session is active."
     )
 
 
 def active_session(stores: Stores) -> ActiveSessionResponse:
-    hop = active_pointer(stores)
+    hop = followed_cycle(stores)
     return ActiveSessionResponse(
         tenant_id=stores.tenant_id,
         campaign_id=None if hop is None else hop.campaign_id,
@@ -107,8 +126,8 @@ def resolve_course(stores: Stores, subject: Subject) -> Subject:
 
 
 def cycle_target(stores: Stores, campaign: str, cycle: str) -> CycleHop:
-    """A terminal's named cycle: a named campaign (an id prefix) never takes the pointer's cycle,
-    and a cycle named alone is the active campaign's; each a prefix of its id."""
+    """A terminal's named cycle: a named campaign (an id prefix) never takes the latest launch's
+    cycle, and a cycle named alone is the latest launch's campaign's; each a prefix of its id."""
     if campaign:
         matches = _campaign_matches(stores, campaign)
         if not matches:
@@ -117,7 +136,7 @@ def cycle_target(stores: Stores, campaign: str, cycle: str) -> CycleHop:
         return CycleHop(
             campaign_id=campaign_id, cycle_id=resolve_cycle_id(stores, campaign_id, cycle or None)
         )
-    hop = active_pointer(stores)
+    hop = latest_launch(stores)
     if hop is None or not (cycle or hop.cycle_id):
         raise NotFoundError(
             "No active cycle — name its campaign and cycle, or start one with `mint-campaign`."

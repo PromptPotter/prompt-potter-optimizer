@@ -7,23 +7,29 @@ from __future__ import annotations
 import functools
 import logging
 from collections import Counter
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 from pydantic import ValidationError
 
 from promptpotter.application.initialization.wiring import complete_registries, read_treatment
+from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.migrate import MIGRATIONS
-from promptpotter.application.maintenance.reset import ResetPlan, plan_reset, resetting
+from promptpotter.application.maintenance.reset import (
+    ResetPlan,
+    holder_in_reach,
+    live_jobs,
+    plan_reset,
+    resetting,
+)
 from promptpotter.application.notices import tell_landed
 from promptpotter.application.optimizer_manifest import checkin_manifest
 from promptpotter.config.paths import default_projects_root, jobs_dir, user_data_root
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.data_root import (
     CHECKIN_SHADOW,
     KINDS,
@@ -50,8 +56,9 @@ from promptpotter.infrastructure.store.io import (
     write_text,
 )
 from promptpotter.infrastructure.store.layout import INNER_SANDBOXES_DIR, CampaignLayout
+from promptpotter.infrastructure.store.stores import tenant_stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, PotterError
+from promptpotter.shared.errors import ConflictError, CycleBusyError, PotterError
 from promptpotter.shared.hashing import stable_hash
 
 logger = logging.getLogger(__name__)
@@ -94,6 +101,9 @@ class Landing(NamedTuple):
     # What refuses the landing: a file no row names, a survivor that does not load, a live run's.
     unknown: tuple[Path, ...]
     unloadable: tuple[Unloadable, ...]
+    # What the act found a run or a pass took since the plan, so it kept (`apply_landing`): the
+    # stamp then names no key, and the next entry lands the root again.
+    kept: tuple[Unloadable, ...]
 
     @property
     def refused(self) -> Refused | None:
@@ -131,12 +141,13 @@ class Landing(NamedTuple):
 
     @property
     def said(self) -> tuple[str, ...]:
-        """What applying it writes and drops, a line each: `land_at_entry` logs them, and the stamp
-        keeps them."""
+        """What applying it writes, drops and keeps, a line each: `land_at_entry` logs the applied
+        landing's, and the stamp keeps them."""
         return (
             *(f"migrate {one.said}" for one in self.staged),
             *(f"drop {one.said}" for one in (*self.caches, *self.runs)),
             *(f"delete {one.why}, its spend banked" for one in self.torn),
+            *(f"kept {one.why}" for one in self.kept),
             *(() if self.reset is None else (f"reset {len(self.reset.drops):,} run file(s)",)),
         )
 
@@ -149,6 +160,7 @@ class Landing(NamedTuple):
                 *((f"migrated {len(self.staged)} file(s)",) if self.staged else ()),
                 *(f"dropped {n} {name}" for name, n in sorted(dropped.items())),
                 *((f"deleted {len(self.torn)} torn mint(s)",) if self.torn else ()),
+                *((f"kept {len(self.kept)} a run or a pass holds",) if self.kept else ()),
                 *(() if self.reset is None else (f"reset {len(self.reset.drops):,} run file(s)",)),
             )
         )
@@ -198,6 +210,16 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
         if path not in gone and found is not None and path not in why_at:
             held = staged.get(path)
             why_at[path] = unloadable_why(path, found, staged=None if held is None else held.data)
+    # A job file that does not load refuses the landing as a survivor: no run is asked about then.
+    jobs = (
+        ()
+        if survivor_refuses
+        else live_jobs(
+            JobRegistry.as_staged(
+                jobs_dir(projects_root), {p: one.data for p, one in staged.items()}
+            )
+        )
+    )
     runs: dict[Path, Unloadable] = {}
     unloadable: list[Unloadable] = []
     for path, why in why_at.items():
@@ -207,7 +229,7 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
         unit = data_root / run_unit(
             PurePosixPath(path.relative_to(data_root).as_posix()), found.kind
         )
-        if _live(unit, found_at):
+        if holder_in_reach(jobs, (unit,), _locks(data_root, unit)) is not None:
             unloadable.append(Unloadable(path, found, why))
         else:
             runs.setdefault(unit, Unloadable(unit, found, f"{path}: {why}"))
@@ -226,11 +248,13 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
         ):
             manifestless.setdefault(unit, found)
     torn: list[Unloadable] = []
-    spending = _held_workspaces(projects_root, staged) if manifestless else set()
     for unit, found in manifestless.items():
         why = f"{unit}: a mint torn before its manifest"
-        if _live(unit, found_at) or unit.parent.parent.resolve() in spending:
-            unloadable.append(Unloadable(unit, found, f"{why}, while a run holds its workspace"))
+        # Any run in its workspace may be that mint in flight, whatever cycle it names.
+        if (
+            holder := holder_in_reach(jobs, (unit.parent.parent,), _locks(data_root, unit))
+        ) is not None:
+            unloadable.append(Unloadable(unit, found, f"{why}, while {holder} holds its workspace"))
         else:
             torn.append(Unloadable(unit, found, why))
     caches: list[Unloadable] = []
@@ -258,6 +282,7 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
         proven,
         tuple(unknown),
         tuple(unloadable),
+        kept=(),
     )
 
 
@@ -278,23 +303,15 @@ def _shadow_why(path: Path, found: Found) -> str | None:
     return None
 
 
-def _held_workspaces(projects_root: Path, staged: dict[Path, Staged]) -> set[Path]:
-    """Where a job holds spend: a mint in flight there has no manifest yet, and no producer lock."""
-    jobs = JobRegistry.as_staged(
-        jobs_dir(projects_root), {p: one.data for p, one in staged.items()}
-    )
-    return {Path(job.workspace).resolve() for job in jobs.list_holding_spend()}
-
-
-def _live(unit: Path, found_at: dict[Path, Found | None]) -> bool:
-    """A producer holds a cycle of the run: its files are its own, never the landing's to drop."""
-    return any(
-        found is not None
+def _locks(data_root: Path, unit: Path) -> list[Path]:
+    """The producer locks under the run *unit* as it stands now: a producer holding one owns the
+    run's files, never the landing's to drop."""
+    return [
+        path
+        for path, _st in (iter_files(unit) if unit.is_dir() else ())
+        if (found := classify(PurePosixPath(path.relative_to(data_root).as_posix()))) is not None
         and found.kind in PRODUCER_LOCKS
-        and path.is_relative_to(unit)
-        and producer_lock.held(path)
-        for path, found in found_at.items()
-    )
+    ]
 
 
 def _refusal(data_root: Path, refused: Refused) -> ConflictError:
@@ -311,36 +328,65 @@ def _refusal(data_root: Path, refused: Refused) -> ConflictError:
 
 
 class LandedStamp(FrozenModel):
-    """The root's last landing: the record schema it landed under, when, and what it wrote and
-    dropped (`Landing.said`)."""
+    """The root's last landing: the record schema it landed under (``None`` where it kept what a
+    run or a pass took, so the next entry lands it again), when, and what it wrote, dropped and
+    kept (`Landing.said`)."""
 
-    key: str
+    key: str | None
     at: str
     said: tuple[str, ...]
 
 
-def apply_landing(projects_root: Path, landing: Landing) -> None:
+def apply_landing(projects_root: Path, landing: Landing) -> Landing:
     """A refused landing raises before a write, and so does a reset's own refusal, asked again.
-    The root is stamped with what it wrote and dropped (`Landing.said`) and the record schema it
-    landed under."""
+    Every wipe asks again at its act, under the admission gate: a run or a mint a run or a pass
+    took since the plan is kept. Returns the landing as applied, and stamps the root with what it
+    did (`Landing.said`)."""
     if (refused := landing.refused) is not None:
         raise _refusal(projects_root.parent, refused)
-    with nullcontext() if landing.reset is None else resetting(landing.reset):
+    data_root = projects_root.parent
+    # ONE registry: its gate is reentrant per instance, and every guard below retakes it.
+    registry = JobRegistry.as_staged(
+        jobs_dir(projects_root), {one.path: one.data for one in landing.staged}
+    )
+    runs: list[Unloadable] = []
+    torn: list[Unloadable] = []
+    kept: list[Unloadable] = []
+    with registry.admission_gate() if landing.reset is None else resetting(landing.reset, registry):
         for one in landing.staged:
             write_bytes(one.path, one.data)
         for cache in landing.caches:
             unlink_robust(cache.path)
+        jobs = live_jobs(registry)
         for run in landing.runs:
+            if (
+                held := holder_in_reach(jobs, (run.path,), _locks(data_root, run.path))
+            ) is not None:
+                kept.append(run._replace(why=f"{run.path}: {held} holds it"))
+                continue
             if run.path.is_dir():
                 rmtree_robust(run.path)
             else:
                 unlink_robust(run.path)
+            runs.append(run)
         for mint in landing.torn:
-            CampaignStore(WorkspaceDir(mint.path.parent.parent)).delete_campaign(
-                mint.path.name, keep_results=False, changed_at=utcnow_iso()
-            )
-    stamp = LandedStamp(key=landing_key(), at=utcnow_iso(), said=landing.said)
+            stores = tenant_stores(projects_root, WorkspaceDir(mint.path.parent.parent))
+            try:
+                with destroying(stores, registry, mint.path.name):
+                    stores.campaigns.delete_campaign(
+                        mint.path.name, keep_results=False, changed_at=utcnow_iso()
+                    )
+            except CycleBusyError as busy:
+                scoring = busy.details["status"] == RunPhase.SCORING.value
+                kept.append(
+                    mint._replace(why=f"{mint.path}: {'a pass' if scoring else 'a run'} holds it")
+                )
+                continue
+            torn.append(mint)
+    applied = landing._replace(runs=tuple(runs), torn=tuple(torn), kept=tuple(kept))
+    stamp = LandedStamp(key=None if kept else landing_key(), at=utcnow_iso(), said=applied.said)
     write_text(_stamp(projects_root), stamp.model_dump_json())
+    return applied
 
 
 @functools.cache
@@ -385,8 +431,7 @@ def land_at_entry(*, every_treatment: bool) -> None:
     with holding_landing(projects_root):
         if _landed(projects_root):
             return
-        landing = plan_landing(projects_root, reset=False)
-        apply_landing(projects_root, landing)
+        landing = apply_landing(projects_root, plan_landing(projects_root, reset=False))
     for one in landing.said:
         logger.warning("landed: %s", one)
     tell_landed(landing.tally)

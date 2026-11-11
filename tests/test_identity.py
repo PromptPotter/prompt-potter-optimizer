@@ -8,6 +8,7 @@ scored on text it was never meant to carry.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import copy
@@ -32,6 +33,7 @@ from factories import (
     PARENT,
     PROMPT_INFO,
     arm_state,
+    backend_client,
     inner_cells,
     loop_session,
     minted_campaign,
@@ -61,7 +63,7 @@ from promptpotter.application.bench.task_context import (
     campaign_framing,
     checkin_template,
 )
-from promptpotter.application.commands import launching
+from promptpotter.application.commands import launching, origin_resolving
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.datasets import (
@@ -95,9 +97,13 @@ from promptpotter.application.initialization.loop_start import verb_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.launch import Inline
-from promptpotter.application.jobs.launcher.mint_and_start import commit_upload_definition
+from promptpotter.application.jobs.launcher.mint_and_start import (
+    OriginIncompleteError,
+    commit_upload_definition,
+)
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
+    ConnectorMovedError,
     CyclePlan,
     arm_plans,
     declare,
@@ -145,7 +151,7 @@ from promptpotter.application.pipeline_resolve import (
     cycle_config,
     dataset_pipeline,
     defaults_drift,
-    draft_config,
+    draft_declared,
     draft_pipeline,
     draft_served,
     experiment_outside_run,
@@ -199,6 +205,7 @@ from promptpotter.domain.command_kinds import (
     ForkSeed,
     HeadToHeadRequest,
     PauseCyclePayload,
+    ResolveOriginPayload,
     StartCheckinPayload,
     SubmittedArm,
 )
@@ -285,8 +292,10 @@ from promptpotter.infrastructure.store.io import rmtree_robust, write_json, writ
 from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
+from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli import campaign_runner
+from promptpotter.presentation.cli.commands import new as cli_new
 from promptpotter.shared.clock import iso_z
 from promptpotter.shared.errors import (
     LANDING_REMEDY,
@@ -1536,19 +1545,19 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         headers=[],
     ).patch(config={"optimization": {"optimizer": "capo"}})
     picked = draft.patch(config={**draft.config, "exclude_nodes": ["rerank", "web_search"]})
-    chosen = draft_config(built_stores, picked, schema)
+    chosen = draft_declared(built_stores, picked)
     assert schema.active_steps_excluding(chosen.exclude_nodes) == ["llm_only"], (
         "the excluded complement runs another chain than was picked"
     )
     assert chosen.optimization.optimizer == "capo", "the draft's optimizer did not reach the mint"
     assert chosen.scoring == pinned, "a pinned criterion lost its anchors under another edit"
-    assert draft_config(built_stores, draft, schema).exclude_nodes == [], (
+    assert draft_declared(built_stores, draft).exclude_nodes == [], (
         "an untouched chain excluded a node"
     )
 
     def planned(on: DraftFile, **patch: Any) -> CampaignConfig:
         plan = asyncio.run(plan_draft_patch(built_stores, on, EditDraftPatch.model_validate(patch)))
-        return draft_config(built_stores, apply_draft_patch(on, plan), schema)
+        return draft_declared(built_stores, apply_draft_patch(on, plan))
 
     # A check-in picks the criterion as the server reads it; sent back, a pinned formula's own
     # dials move nothing, and a matcher pick keeps the composite.
@@ -1783,6 +1792,38 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert [c.payload.patch for c in turn.resolution.raised] == [proposal.patch], (
         "a resolver turn dropped the model edit it may not apply"
     )
+    # An empty answer buys a turn only where one is owed, decided by the server at every door: a
+    # draft holding no task and authored prompts buys none from the browser's empty Send or from a
+    # `new <file>` naming no task, and only the operator's re-run buys one over it.
+    turns: list[object] = []
+
+    async def counted(**_: object) -> tuple[CheckinOutput, int]:
+        turns.append(None)
+        return answer, 0
+
+    monkeypatch.setattr(origin_resolve, "run_checkin", counted)
+    authored = owned_draft(built_stores, landed.draft_id).patch(
+        column_query="q", column_ground_truth="a", origin_prompts={"llm_only": {"persona": "Map."}}
+    )
+    built_stores.drafts.write_draft(authored)
+    with pytest.raises(ConflictError) as unowed:
+        asyncio.run(
+            CommandDispatcher(built_stores).dispatch(
+                CommandCall(ResolveOriginPayload(draft_id=authored.draft_id))
+            )
+        )
+    assert unowed.value.code == origin_resolving.RESOLVER_NOT_OWED
+    with pytest.raises(OriginIncompleteError):
+        asyncio.run(
+            cli_new._hold_checkin(argparse.Namespace(), built_stores, authored.draft_id, None)
+        )
+    assert not turns, "an empty answer bought a turn the draft does not owe"
+    asyncio.run(
+        CommandDispatcher(built_stores).dispatch(
+            CommandCall(ResolveOriginPayload(draft_id=authored.draft_id, rerun=True))
+        )
+    )
+    assert len(turns) == 1, "the operator's re-run bought no turn"
     # An edit lays over the draft's config depth first, keeping the node's other knobs; a scoring
     # edit names only what one takes, and its criterion compiles before it is kept.
     capped = asyncio.run(
@@ -2122,6 +2163,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         stores,
         pipeline_schema([solve], name="decl"),
         rows_30,
+        # Bound as run init binds it: to the connector the definition names.
+        client=backend_client(
+            stores.jobs_dir,
+            name="termnorm",
+            max_cells_in_flight=1,
+            cancel_stops_billing=True,
+            holds_own_sends=True,
+        ),
         dataset=resolve_dataset(stores, "decl"),
     )
     door = _connector_config()
@@ -2323,6 +2372,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     opened = opened.bound(held_campaign.root_hop, purpose=Optimize())
     opened.record_resolved_run()
     resolve_resume(opened, held_campaign, rows_30)
+    assert read_active_pointer(stores.base_dir) != held_campaign.root_hop, (
+        "a resume moved the latest launch before its run held the cycle"
+    )
     wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
     root_cut = Cut(
         cycle=CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)),
@@ -2361,6 +2413,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         stores,
         opened.pipeline_schema,
         rows_30[:-1],
+        client=opened.backend_client,
         dataset=opened.dataset,
         hop=held_campaign.root_hop,
     )
@@ -2372,6 +2425,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         resolve_resume(
             replace(opened, candidate_library=("an unlisted label",)), held_campaign, rows_30
         )
+    # A resume runs on the connector its campaign was minted on: one bound to another is refused,
+    # at the one resume door every entry point reaches.
+    minted = held_campaign.declaration
+    on_n8n = minted.model_copy(
+        update={"environment": minted.environment.model_copy(update={"connector": "n8n"})}
+    )
+    with pytest.raises(ConnectorMovedError):
+        resolve_resume(opened, held_campaign.model_copy(update={"declaration": on_n8n}), rows_30)
     # A steering seed is its fork's declared delta, never a waiver of the root's own drift.
     steered_hop = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_steered")
     stores.campaigns.mint_cycle(steered_hop)
@@ -2437,6 +2498,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     with monkeypatch.context() as filing:
         filing.setattr(run_observers, "bind_account", lambda _: folding.append(pause("fold")))
         observers = build_run_observers(session=opened, campaign_config=launched)
+    assert read_active_pointer(stores.base_dir) == opened.hop, (
+        "a run held its cycle, and the latest launch names another"
+    )
     release(claimant)
     assert [acked(claimed), acked(folding[0])] == ["accepted"] * 2, (
         "the launch voided a pause filed under its own claim or hold"

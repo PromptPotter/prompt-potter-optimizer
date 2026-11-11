@@ -57,15 +57,17 @@ from pydantic import SecretStr
 from starlette.types import Message, Receive, Scope, Send
 
 from promptpotter.application import account, app_visits, health, notices
+from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import job_status, read_command
-from promptpotter.application.commands import draft_editing, launching, measuring
+from promptpotter.application.commands import cycle_cleanup, draft_editing, launching, measuring
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import launch_cancels
-from promptpotter.application.cycle_addressing import cycle_target
+from promptpotter.application.cycle_addressing import cycle_target, followed_cycle
 from promptpotter.application.cycle_files import FileScope, read_cycle_file
 from promptpotter.application.datasets.draft_campaign import new_draft, owned_draft
 from promptpotter.application.datasets.ingest import ingest_draft
+from promptpotter.application.hierarchy_subtree import hierarchy_subtree, subtree_version
 from promptpotter.application.host_surface import (
     CallTool,
     HostSession,
@@ -77,7 +79,9 @@ from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.launcher import launch as launcher_launch
 from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
+    destroying,
     paid_pass,
+    refuse_taken_cycle,
     request_jobs,
     withdraw_queued,
 )
@@ -123,6 +127,7 @@ from promptpotter.domain.command_kinds import (
     BankSnippetPayload,
     CancelPayload,
     CancelQueuedRunPayload,
+    CleanupEmptyCyclesPayload,
     CommandKind,
     CommandPayload,
     DeleteCampaignPayload,
@@ -142,13 +147,15 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.draft_edit import EditDraftPatch
+from promptpotter.domain.hierarchy import SubtreeCampaign
 from promptpotter.domain.job import JOB_ADAPTER, CampaignLaunch, Job, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
     INNER_PAUSE_REFUSAL,
     PRODUCER_STATE_INFO,
     RUN_PHASE_INFO,
+    PauseCause,
     ProducerState,
     RunPhase,
     StopReason,
@@ -165,6 +172,9 @@ from promptpotter.domain.prompt_block import (
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
 from promptpotter.domain.run_records import (
+    ForkDirection,
+    ForkSpec,
+    ForkTrigger,
     LaunchedEffect,
     LaunchedJob,
     RunPhaseRecord,
@@ -1485,10 +1495,10 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
             is derive_run_state(cycle_dir, asked).producer.attached
         )
 
-    def delete_refused() -> None:
-        assert campaigns.attached_cycle_ids(hop.campaign_id) == [hop.cycle_id], (
-            "a delete or archive was let past a cycle its producer still holds"
-        )
+    def delete_refused(jobs: JobRegistry) -> None:
+        # Every destroyer's guard, asked of each of the campaign's cycles under the admission gate.
+        with pytest.raises(CycleBusyError), destroying(built_stores, jobs, hop.campaign_id):
+            pytest.fail("a destroyer passed a taken cycle")
 
     # A launch holds its cycle from the moment it is accepted; a full box queues it.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
@@ -1501,7 +1511,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert (claimed.run_phase, claimed.producer.state) == (RunPhase.QUEUED, ProducerState.CLAIMED)
     assert claimed.producer.attached and not claimed.resumable
     assert not claimed.pause_refusal, "a claimed launch refused the pause its run will take"
-    delete_refused()
+    delete_refused(registry)
     with pytest.raises(CycleBusyError):
         request_jobs(
             stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
@@ -1514,9 +1524,15 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert withdraw_queued(built_stores, registry, job.job_id), "a queued launch stayed queued"
     assert not built_stores.run_state(hop).producer.attached, "a withdrawn launch held its cycle"
     attached_alike()
-    assert campaigns.attached_cycle_ids(hop.campaign_id) == [], (
-        "a withdrawn launch refused a delete"
+    refuse_taken_cycle(built_stores, registry, hop)
+    # A pass registers under the gate and holds its cycle only later: the delete sees it between.
+    passes = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    (scoring,) = request_jobs(
+        stores=built_stores, job_registry=passes, holder=ScoringPass("bench"), hop=hop
     )
+    assert not built_stores.run_state(hop).producer.attached
+    delete_refused(passes)
+    passes.release(scoring.job_id)
 
     # Silence never reaps a producer that still holds its cycle.
     running = CycleEventLog.open(CycleDir(cycle_dir))
@@ -1569,11 +1585,78 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert renamed.human is not None and renamed.human.startswith(SANDBOX_CAMPAIGN), (
         "a terminal's act by an id prefix said the prefix as what it acted on"
     )
+    # A runs while B, launched last, was paused by Ctrl+C: a follower shows A, and a verb naming
+    # no cycle (`resume`) acts on B, never on the run that holds A.
+    launched_last = CycleHop(campaign_id="ended__20260102-000000", cycle_id="cycle-0")
+    campaigns.mint_cycle(launched_last)
+    stored_campaign(built_stores, minted_campaign(launched_last))
+    campaigns.append(
+        launched_last, RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT)
+    )
+    save_active_pointer(built_stores.base_dir, launched_last)
+    assert followed_cycle(built_stores) == hop, "a door followed a later launch past a running run"
+    assert cycle_target(built_stores, "", "") == launched_last, (
+        "a resume naming no cycle targeted the running run, not the paused latest launch"
+    )
     # A cycle named alone is the active campaign's, by an id prefix as under a named campaign.
     save_active_pointer(built_stores.base_dir, hop)
     assert cycle_target(built_stores, "", hop.cycle_id[:3]) == hop, (
         "a cycle prefix named without its campaign was taken as a full id"
     )
+    # A pass registered on a stub, not yet holding it, refuses the stub's delete.
+    stub = CycleHop(campaign_id=hop.campaign_id, cycle_id=f"{hop.cycle_id}_fork_1")
+    campaigns.mint_cycle(stub)
+    stub_delete = DeleteCyclePayload(campaign_id=hop.campaign_id, cycle_id=stub.cycle_id)
+    (stub_pass,) = request_jobs(
+        stores=built_stores, job_registry=passes, holder=ScoringPass("bench"), hop=stub
+    )
+    with pytest.raises(CycleBusyError):
+        await CommandDispatcher(built_stores, passes).dispatch(CommandCall(stub_delete))
+    assert campaigns.cycle_dir(stub).is_dir(), "a stub a pass registered on was deleted"
+    passes.release(stub_pass.job_id)
+    await CommandDispatcher(built_stores, passes).dispatch(CommandCall(stub_delete))
+    assert not campaigns.cycle_dir(stub).is_dir(), "a stub no one holds survived its delete"
+    # A fork stub a pass holds is neither counted nor swept: the served count is the sweep's list.
+    fork = CycleHop(campaign_id=hop.campaign_id, cycle_id=f"{hop.cycle_id}_fork_r1")
+    campaigns.mint_fork_cycle(
+        fork,
+        cycle_dir,
+        ForkSpec(
+            trigger=ForkTrigger.OPERATOR_REWIND,
+            reason="",
+            issued_by=SYSTEM_PRINCIPAL,
+            from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
+        ),
+        cut=CycleEventLog.open(CycleDir(cycle_dir)).next_offset,
+        cut_round=0,
+    )
+    family = Subject(hop.campaign_id).address
+    sweep = CleanupEmptyCyclesPayload(campaign_id=hop.campaign_id, cycle_id=fork.cycle_id)
+
+    def counted() -> int:
+        tree = hierarchy_subtree(built_stores, family, None, None, moment=None)
+        assert isinstance(tree, SubtreeCampaign)
+        return tree.facts.deletable_stubs
+
+    assert counted() == 1
+    (fork_pass,) = request_jobs(
+        stores=built_stores, job_registry=passes, holder=ScoringPass("bench"), hop=fork
+    )
+    held_at = subtree_version(built_stores, family)
+    assert counted() == 0, "the tree counted a stub a pass holds as deletable"
+    await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep))
+    # Each act asks again: a sweep whose list predates the pass, and a refused fork's withdraw.
+    with monkeypatch.context() as patched:
+        patched.setattr(cycle_cleanup, "deletable_stubs", lambda *_: [fork])
+        await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep))
+    ForkCut(parent=hop, child=fork, direction=ForkDirection.OFFSHOOT).withdraw(built_stores, passes)
+    assert campaigns.cycle_dir(fork).is_dir(), "a destroyer's act deleted a stub a pass holds"
+    passes.release(fork_pass.job_id)
+    assert subtree_version(built_stores, family) != held_at, (
+        "a pass's release left the count it moves answered unread"
+    )
+    await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep))
+    assert not campaigns.cycle_dir(fork).is_dir(), "the sweep kept a stub no one holds"
     score = cycle_result([0.4], 0.3, []).bench
 
     async def _graded(_: object) -> Applier[Any]:
@@ -1592,7 +1675,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert built_stores.mark_producer_vanished(hop) is False
     with pytest.raises(ConflictError):
         hold_cycle(cycle_dir)
-    delete_refused()
+    delete_refused(registry)
     standing = campaigns.load(hop, moment=None)
     assert standing is not None and standing.finished_at is None
     # A fresh heartbeat with no lock held is still dead, and a pause it accepted before it died
@@ -1608,6 +1691,16 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         ProducerState.SILENT,
         False,
     ), "a dead producer's accepted pause read as a clean pause"
+    # A pause its producer declares between the reaper's read and its lock leaves the cycle paused.
+    with monkeypatch.context() as patched:
+        patched.setattr(Stores, "run_state", lambda _stores, _hop: gone)
+        campaigns.append(hop, RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.COMMAND))
+        assert built_stores.mark_producer_vanished(hop) is False
+    raced = campaigns.last(hop, RunPhaseRecord)
+    assert raced is not None and raced.run_phase is RunPhase.PAUSED, (
+        "a pause landed after the reaper's read was ended vanished"
+    )
+    campaigns.append(hop, RunPhaseRecord(run_phase=RunPhase.RUNNING))
     assert sweep_dead_cycles(built_stores.projects_root) == 1
     swept = campaigns.load(hop, moment=None)
     assert swept is not None and swept.stop_reason is StopReason.PRODUCER_VANISHED
@@ -1617,7 +1710,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     hold_cycle(cycle_dir)
     finishing = built_stores.run_state(hop)
     assert (finishing.run_phase, finishing.producer.attached) == (RunPhase.TERMINAL, True)
-    delete_refused()
+    delete_refused(registry)
     release_cycle(cycle_dir)
     ended = built_stores.run_state(hop)
     assert (ended.run_phase, ended.producer.state) == (RunPhase.TERMINAL, ProducerState.ABSENT)
@@ -1683,6 +1776,26 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         apply_reset(live)
     release_cycle(cycle_dir)
     assert campaigns.iter_campaign_dirs(), "a refused reset dropped a campaign"
+
+    # Every wipe that reads no ledger asks again at its act: a run started since its plan.
+    since_jobs = JobRegistry(built_stores.jobs_dir, capacity=lambda _live: 1)
+
+    def started_since(on: CycleHop) -> Job:
+        return since_jobs.create(
+            user_id="u",
+            principal_id="u",
+            workspace=campaigns.workspace,
+            hop=on,
+            holder=ScoringPass("bench"),
+        )
+
+    planned = plan_reset(built_stores.projects_root, tenant_id=None, staged={})
+    assert planned.refusal is None
+    since = started_since(hop)
+    with pytest.raises(ConflictError):
+        apply_reset(planned)
+    assert campaigns.iter_campaign_dirs(), "a reset dropped a run started since its plan"
+    since_jobs.release(since.job_id)
     launched = len(registry.list_launched_today())
     apply_reset(plan_reset(built_stores.projects_root, tenant_id=None, staged={}))
     assert not campaigns.iter_campaign_dirs() and not draft_dirs(campaigns.workspace)
@@ -1814,7 +1927,17 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert {one.path for one in landed.runs} == {events, retired}, (
         "run data no reader takes was kept"
     )
-    apply_landing(built_stores.projects_root, landed)
+    since = started_since(kept_hop)
+    held_runs = apply_landing(built_stores.projects_root, landed)
+    on_disk = await asyncio.to_thread(lambda: events.exists() and retired.exists())
+    assert on_disk and not held_runs.runs, (
+        "a landing dropped the files of a run started since its plan"
+    )
+    unlanded = last_landing(built_stores.projects_root)
+    assert sum(line.startswith("kept ") for line in held_runs.said) == 2, held_runs.said
+    assert unlanded is not None and unlanded.key is None, "a landing that kept a run read landed"
+    since_jobs.release(since.job_id)
+    apply_landing(built_stores.projects_root, plan_landing(built_stores.projects_root, reset=False))
     assert not events.exists(), "a landing kept run data this build cannot read"
     landed_pack = BlockPack.model_validate_json(pack.read_bytes())
     assert [s.tags for s in landed_pack.snippets] == [("expert",)], "a pack lost a tag of its own"
@@ -1855,7 +1978,18 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert spent != NOTHING_PAID
     cleared = plan_landing(built_stores.projects_root, reset=False)
     assert [one.path for one in cleared.torn] == [torn_dir], "a torn mint was left unlisted"
-    apply_landing(built_stores.projects_root, cleared)
+    # A pass registered since the plan keeps its mint, said kept, and the next entry lands again.
+    (scoring_torn,) = request_jobs(
+        stores=built_stores, job_registry=holders, holder=ScoringPass("bench"), hop=torn_hop
+    )
+    kept_torn = apply_landing(built_stores.projects_root, cleared)
+    unlanded = last_landing(built_stores.projects_root)
+    assert torn_dir.is_dir() and kept_torn.said == (f"kept {torn_dir}: a pass holds it",), (
+        f"a mint a pass holds was deleted, or said deleted: {kept_torn.said}"
+    )
+    assert unlanded is not None and unlanded.key is None and unlanded.said == kept_torn.said
+    holders.release(scoring_torn.job_id)
+    apply_landing(built_stores.projects_root, plan_landing(built_stores.projects_root, reset=False))
     assert not torn_dir.exists() and campaign_spend(campaigns, torn_hop.campaign_id) == spent, (
         "a torn mint was kept, or its spend left the account's bill with it"
     )
@@ -1910,7 +2044,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         | {"refusal": "", "holder": launch_as_written},
     )
     mapped = plan_landing(built_stores.projects_root, reset=False)
-    assert not mapped.refused, f"a released job waited on a sweep: {mapped.refusal}"
+    assert not mapped.refused, f"the landing refused the old jobs: {mapped.refusal}"
     apply_landing(built_stores.projects_root, mapped)
     landed_jobs = {path: jobs.get(path.stem) for path in old_jobs}
     assert {path: job and job.lapse for path, job in landed_jobs.items()} == old_jobs, (

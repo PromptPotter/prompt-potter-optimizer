@@ -22,7 +22,6 @@ from promptpotter.infrastructure.identity.provider_config import (
 )
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
 from promptpotter.infrastructure.outbound import forward_new_account_to_crm, notify_operator
-from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import count_accounts
 from promptpotter.presentation.api.deps import (
     build_stores_from_identity,
@@ -35,11 +34,7 @@ from promptpotter.presentation.api.middleware.oidc import (
 from promptpotter.shared.errors import (
     NotFoundError,
 )
-from promptpotter.shared.identity import (
-    AccessState,
-    IdentityContext,
-    display_name,
-)
+from promptpotter.shared.identity import AccessState, IdentityContext, display_name
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +170,6 @@ async def callback(
     try:
         identity = await client.exchange_code(code=code, nonce=nonce)
     except (CodeExchangeError, IDTokenInvalidError) as exc:
-        logger.warning("OIDC sign-in through %s refused: %s", provider, exc)
         # Nobody signed in yet, so the refusal is the box's own to keep.
         box = build_stores_from_identity(account.registered_or_default_identity())
         account.record_refusal(box, subject=f"sign-in through {provider}: {exc}")
@@ -183,7 +177,7 @@ async def callback(
         broken = health.is_broken(default_projects_root(), health.signin_probe(provider))
         return _redirect_with_error("signin_unavailable" if broken else "code_exchange_failed")
 
-    device = _device(request)
+    device = device_of(request.headers.get("sec-ch-ua-mobile"), request.headers.get("user-agent"))
     signed = account.sign_in_oidc(bundle, identity, device=device)
     for ring in signed.rings:
         background.add_task(notify_operator, ring, ring=True)
@@ -215,10 +209,6 @@ async def logout(request: Request) -> JSONResponse:
     response = JSONResponse({"ok": True})
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return response
-
-
-def _device(request: Request) -> Device | None:
-    return device_of(request.headers.get("sec-ch-ua-mobile"), request.headers.get("user-agent"))
 
 
 def _announce_new_account(
@@ -258,11 +248,3 @@ def _announce(
         access_state=identity.access_state,
         device=device,
     )
-
-
-def arrive(request: Request, background: BackgroundTasks, stores: Stores) -> None:
-    """`me`'s arrival: opened at sign-in as a rule; here for an open box, which has none, and for a
-    session that outlived its files."""
-    device = _device(request)
-    if account.arrive(stores, device=device).opened:
-        _announce(background, stores.identity, device)

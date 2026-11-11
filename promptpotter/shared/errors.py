@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -249,13 +249,43 @@ class NoApiKeyError(SendRefusedError):
 
 
 class LaunchRefusalReason(enum.StrEnum):
-    """Why a launch is refused whole: `NO_KEY` is `NoApiKeyError`'s, the rest
-    `HostAllowanceExhaustedError`'s."""
+    """Why a launch is refused whole: `NO_KEY` is `NoApiKeyError`'s, `UNPRICED`
+    `BudgetUnenforceableError`'s, the rest `HostAllowanceExhaustedError`'s."""
 
     USED_UP = "used_up"
     HELD = "held"
     OVER_DECLARED = "over_declared"
     NO_KEY = "no_key"
+    UNPRICED = "unpriced"
+
+
+class BudgetUnenforceableError(SendRefusedError):
+    """Refused at the mint, so nothing is sent: a dollar ceiling binds a backend whose connector
+    bounds no cell's dollars (`Connector.cells_priced`). *binds* names that ceiling, and only the
+    run's own is one the run can drop."""
+
+    http_status = 422
+    code = "budget_unenforceable"
+
+    def __init__(self, *, backend: str, binds: Literal["run", "allowance"]) -> None:
+        remedy = (
+            "Drop the dollar cap and bound the run in tokens (`budget: {usd: null, tokens: N}`), "
+            "or run it on a backend that prices its cells."
+            if binds == "run"
+            else "Run it on a backend that prices its cells, or ask the host to run it: the "
+            "host's own runs draw no allowance."
+        )
+        ceiling = "the run's dollar ceiling" if binds == "run" else "the host's allowance"
+        super().__init__(
+            f"No rate bounds what a {backend} cell may cost, so {ceiling} cannot be enforced on "
+            f"it and nothing was sent. {remedy}",
+            category=ErrorCategory.NO_RATE,
+        )
+        self.details = {
+            "backend": backend,
+            "reason": LaunchRefusalReason.UNPRICED,
+            "binds": binds,
+        }
 
 
 class HostAllowanceExhaustedError(SendRefusedError):

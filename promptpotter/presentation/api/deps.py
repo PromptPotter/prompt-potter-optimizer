@@ -87,7 +87,8 @@ def open_caller(
     jobs: JobRegistryDep,
 ) -> Caller:
     """A session mount's gate: the request drawn on its rate first (`_drawn`, solved before the
-    stores), then its caller on the request's one `StoresDep`."""
+    stores), then its caller on the request's one `StoresDep`. It reads only: an account opens at
+    sign-in or at its first act (`account_of`), never at a read."""
     configured = tuple(require_identity_bundle(request).config.configured)
     return Caller(stores, jobs, configured)
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import time
 from pathlib import Path
 
@@ -14,7 +13,7 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
 )
-from promptpotter.domain.run_records import RunPhaseRecord, StandingBudgetRecord
+from promptpotter.domain.run_records import RunPhaseRecord
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.producer_lock import cycle_held, held, pass_held
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -27,25 +26,6 @@ from promptpotter.infrastructure.store.command_log import Controls
 from promptpotter.infrastructure.store.io import newest_mtime_ns
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerSpan
-
-
-def effective_lookahead(requested: int, ceiling: int) -> int:
-    """The one clamp: the command records the request UNCLAMPED, the ceiling being the backend's."""
-    return max(1, min(requested, ceiling))
-
-
-def requested_lookahead(controls: Controls) -> int:
-    ask = controls.lookahead
-    if ask is None:
-        return 1
-    return sys.maxsize if ask.auto else ask.cells
-
-
-def standing_budget(cycle_dir: Path) -> StandingBudgetRecord:
-    # No record stands no axis, which the empty record says.
-    held = scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], StandingBudgetRecord)
-    return held or StandingBudgetRecord()
-
 
 # `RUN_FRESH_S` bounds ANY ledger append (a heartbeat is one); the other two, the last NON-heartbeat one.
 RUN_FRESH_S = 30.0
@@ -167,6 +147,16 @@ def derive_run_state(cycle_dir: Path, inbox: Controls) -> RunState:
             at=asked.at,
         )
     )
+
+
+def run_owed(cycle_dir: Path) -> bool:
+    """`SILENT`'s fact without its lock read: the run declared RUNNING, no live launch claiming it.
+    Read under the producer lock, where `derive_run_state` would see its reader's own hold."""
+    ledger = CycleLayout(cycle_dir).ledger
+    last = scan_last([LedgerSpan(ledger)], RunPhaseRecord)
+    claim = scan_launch_claim(ledger)
+    live_claim = claim is not None and held(Path(claim.claimant_lock))
+    return last is not None and last.run_phase is RunPhase.RUNNING and not live_claim
 
 
 def producer_attached(cycle_dir: Path) -> bool:

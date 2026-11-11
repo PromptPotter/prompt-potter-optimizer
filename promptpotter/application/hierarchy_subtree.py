@@ -30,6 +30,8 @@ from promptpotter.application.hierarchy import (
     entries_version,
     superseded_tag,
 )
+from promptpotter.application.jobs.launcher.admission import deletable_stubs
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.mask.tree_lens import lensed, read_samples
 from promptpotter.domain.arm_reading import (
     ARM_VERDICT_LABELS,
@@ -56,6 +58,7 @@ from promptpotter.domain.hierarchy import (
     SubtreeCourseFacts,
     entries_under,
 )
+from promptpotter.domain.job import ScoringPass
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.results import Election
@@ -399,7 +402,11 @@ class _Build:
                 "children": [self._course(course, courses) for course in courses],
                 "facts": SubtreeCampaignFacts(
                     **_fields(entry.facts),
-                    deletable_stubs=len(stores.campaigns.deletable_stubs(campaign.root_hop)),
+                    deletable_stubs=len(
+                        deletable_stubs(
+                            stores, JobRegistry.attach(stores.jobs_dir), campaign.root_hop
+                        )
+                    ),
                 ),
             }
         )
@@ -739,9 +746,18 @@ def subtree_moment(
 
 
 def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
-    """Every store the TOP campaign's family spans: the body is built from all of them."""
+    """Every store the TOP campaign's family spans: the body is built from all of them. A pass
+    moves no file of theirs, so the passes on them are read too: a held stub is no deletable one."""
     top = (owned_campaign(stores, _top_campaign(Subject.parse_address(address))).root_hop,)
-    return entries_version(c.store for c in iter_family_courses(stores, top))
+    held = [c.store for c in iter_family_courses(stores, top)]
+    workspaces = {str(s.campaigns.workspace) for s in held}
+    passes = sorted(
+        (job.workspace, job.campaign_id, job.cycle_id)
+        for jobs_dir in {s.jobs_dir for s in held}
+        for job in JobRegistry.attach(jobs_dir).list_running()
+        if isinstance(job.holder, ScoringPass) and job.workspace in workspaces
+    )
+    return (*entries_version(held), *passes)
 
 
 def subtree_course(stores: Stores, path: CyclePath) -> SubtreeCourse:

@@ -23,7 +23,7 @@ from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.export import PromptExport, parse_prompt_export
-from promptpotter.domain.phases import ErrorRecord, LaunchStage, StopReason
+from promptpotter.domain.phases import LaunchStage, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.run_records import (
     ComparisonExit,
@@ -32,7 +32,6 @@ from promptpotter.domain.run_records import (
     CycleMintedRecord,
     CycleRecord,
     CycleSeedRecord,
-    CycleSupersededRecord,
     ForkDirection,
     ForkGradedRecord,
     ForkSpec,
@@ -55,18 +54,15 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.spend import NOTHING_METERED, Budget, CeilingMeter
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.value_tree import ValueLeaf
-from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
+from promptpotter.infrastructure.llm.spend_book import standing_budget
+from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
 from promptpotter.infrastructure.projections.cycle_index import (
     CycleIndexProjection,
     read_cycle_index,
 )
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
-from promptpotter.infrastructure.runtime_flags import (
-    producer_attached,
-    run_state_stamps,
-    standing_budget,
-)
+from promptpotter.infrastructure.runtime_flags import run_state_stamps
 from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs, workspace_bank
 from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -178,14 +174,14 @@ class CampaignStore:
     def ledger(self, hop: CycleHop) -> Path:
         return self.layout(hop).ledger
 
-    def append(self, hop: CycleHop, *records: CycleRecord, dashboard: bool = False) -> int:
+    def append(self, hop: CycleHop, *records: CycleRecord) -> int:
         """The one append door: each record lands under a one-shot hold of the cycle's `index.json`
-        (and, at a mint or a stop, its `dashboard.json`), joining a run's in this process."""
+        (and, for a run phase, its `dashboard.json`), joining a run's in this process."""
         cycle_dir = CycleDir(self.cycle_dir(hop))
         ledger = CycleEventLog.open(cycle_dir)
         with LedgerIndex.of(ledger.path).projecting() as projecting:
             projecting.add(CycleIndexProjection(cycle_dir))
-            if dashboard:
+            if any(isinstance(record, RunPhaseRecord) for record in records):
                 projecting.add(DashboardCheckout(cycle_dir))
             return [ledger.append(record) for record in records][-1]
 
@@ -375,22 +371,17 @@ class CampaignStore:
             out.append(campaign)
         return out
 
-    def attached_cycle_ids(self, campaign_id: str) -> list[str]:
-        cycles_dir = campaign_cycles_dir(self.campaign_root_dir(campaign_id))
-        if not cycles_dir.is_dir():
-            return []
-        attached: list[str] = []
-        for cdir in sorted(p for p in cycles_dir.iterdir() if p.is_dir()):
-            if producer_attached(cdir):
-                attached.append(cdir.name)
-        return attached
+    def run_held_cycles(self) -> list[CycleHop]:
+        """Each cycle a run's process holds (its producer lock, no pass's): lock probes alone, no
+        ledger read, since a follower polls it."""
+        return [
+            CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name)
+            for cycle_dir in self._cycle_dirs()
+            if cycle_held(cycle_dir) and not pass_held(cycle_dir)
+        ]
 
-    def _guard_and_release(self, campaign_id: str, verb: str) -> None:
-        if live := self.attached_cycle_ids(campaign_id):
-            raise ConflictError(
-                f"refusing to {verb} {campaign_id}: cycle {live[0]} has a live producer "
-                "— pause or stop it first"
-            )
+    def _release_pointer(self, campaign_id: str) -> None:
+        """No cycle of *campaign_id* is taken: its command asked under `admission.py::destroying`."""
         active = read_active_pointer(self._base_dir)
         if active is not None and active.campaign_id == campaign_id:
             clear_active_pointer(self._base_dir)
@@ -408,7 +399,7 @@ class CampaignStore:
     def archive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
         if self.load_campaign(campaign_id) is None:
             return False
-        self._guard_and_release(campaign_id, "archive")
+        self._release_pointer(campaign_id)
         self._set_lifecycle(campaign_id, "archived", changed_at, reason)
         return True
 
@@ -458,8 +449,7 @@ class CampaignStore:
         # A keepsake is its manifest marked deleted, so one this build cannot read refuses before the bank.
         # With no manifest nothing marks it deleted, and its rows would count beside the bank.
         keepsake = keep_results and self.load_campaign(campaign_id) is not None
-        self._guard_and_release(campaign_id, "delete")
-        # After the guard: a tombstone beside a refused delete's rows counts the money twice.
+        self._release_pointer(campaign_id)
         self._campaign_metered_bank(campaign_id)
         # Before the tree goes, keyed by owner: a retry of a delete torn anywhere finds them all.
         if inner_sandbox_root is not None and inner_sandbox_root.is_dir():
@@ -507,7 +497,7 @@ class CampaignStore:
 
     def mint_cycle(self, hop: CycleHop) -> None:
         if scan_cycle_facts(self.ledger(hop)).minted is None:
-            self.append(hop, CycleMintedRecord(), dashboard=True)
+            self.append(hop, CycleMintedRecord())
 
     def mint_fork_cycle(
         self, child: CycleHop, parent_dir: Path, spec: ForkSpec, *, cut: int, cut_round: int
@@ -601,11 +591,6 @@ class CampaignStore:
             self.layout(hop).export, lambda raw: parse_prompt_export(raw.decode()), FileKind.EXPORT
         )
 
-    def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> bool:
-        # The relation always lands; the ending only where none stands, or it replaces why it ended.
-        self.append(hop, CycleSupersededRecord(successor_cycle_id=successor_cycle_id))
-        return self.declare_ended(hop, StopReason.REBASED)
-
     def line(self, hop: CycleHop, *, moment: Moment | None = None) -> list[CycleHop]:
         """The supersede chain from *hop*; *moment* walks it as it stood then."""
         out = [hop]
@@ -634,12 +619,6 @@ class CampaignStore:
         until = None if moment is None else moment.span(ledger).until
         return scan_cycle_facts(ledger, until).superseded_by
 
-    def declare_stop(
-        self, hop: CycleHop, stop: RunPhaseRecord, *, error: ErrorRecord | None = None
-    ) -> None:
-        # Error first, so no reader finds the ending without it.
-        self.append(hop, *([] if error is None else [error]), stop, dashboard=True)
-
     def claim_launch(
         self,
         hop: CycleHop,
@@ -661,21 +640,6 @@ class CampaignStore:
         if claim is not None and claim.job_id == job_id:
             self.append(hop, LaunchReleasedRecord(job_id=job_id, detail=detail))
 
-    def declare_ended(self, hop: CycleHop, reason: StopReason) -> bool:
-        """Ends a minted cycle no producer holds on *reason*, where it has not ended."""
-        lock = self.layout(hop).producer_lock
-        # A held cycle's producer declares its own stop; asked first, so no caller waits out a live hold.
-        if producer_lock.held(lock) or not producer_lock.take(lock):
-            return False
-        try:
-            facts = scan_cycle_facts(self.ledger(hop))
-            if facts.minted is None or facts.ended is not None:
-                return False
-            self.declare_stop(hop, RunPhaseRecord.stop(reason))
-            return True
-        finally:
-            producer_lock.release(lock)
-
     def enumerate_cycles(self) -> list[tuple[CycleHop, CycleIndex]]:
         """Every cycle of every campaign in this store whose ledger folds to an index."""
         return _indexed(self._cycle_dirs())
@@ -685,11 +649,11 @@ class CampaignStore:
         return _indexed(self.campaign_cycle_dirs(campaign_id))
 
     def _stub_deletion_blocked(self, hop: CycleHop) -> str | None:
+        """What makes *hop* no stub; whether a run or a pass holds it is asked of each delete under
+        the admission gate (`admission.py::destroying`)."""
         cycle_dir = self.cycle_dir(hop)
         if self.load(hop, moment=None) is None:
             return "not on disk"
-        if producer_attached(cycle_dir):
-            return "a producer holds it — pause it or let it end first"
         if root_cycle_id(hop.cycle_id) == hop.cycle_id:
             return "family root — deletion is for sibling stubs only"
         # Its OWN ledger, not the chain: a rebase fork stands on parent rounds it never closed.
@@ -703,8 +667,9 @@ class CampaignStore:
                 return f"has descendant {other.name}"
         return None
 
-    def deletable_stubs(self, hop: CycleHop) -> list[CycleHop]:
-        """What ``cleanup-empty-cycles`` at *hop* deletes: its root's stub forks, never the active cycle."""
+    def stub_forks(self, hop: CycleHop) -> list[CycleHop]:
+        """*hop*'s root's stub forks, never the active cycle; which of them a run or a pass holds
+        is the application's to ask (`admission.py::deletable_stubs`)."""
         root_id = root_cycle_id(hop.cycle_id)
         active = read_active_pointer(self._base_dir)
         stubs: list[CycleHop] = []

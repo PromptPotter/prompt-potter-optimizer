@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.arms import Proposed
@@ -30,18 +31,16 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.run_standing import line_reference
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
-from promptpotter.infrastructure.store.session_pointer import (
-    cleanup_stub_fork_if_empty,
-    save_active_pointer,
-)
+from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import owned_campaign
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, PayloadInvalidError
+from promptpotter.shared.errors import ConflictError, CycleBusyError, PayloadInvalidError
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import acting_principal
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
+    from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -177,20 +176,21 @@ class ForkCut:
     direction: ForkDirection
 
     def take(self, stores: Stores) -> str:
-        save_active_pointer(stores.campaigns.workspace, self.child)
         # An offshoot's parent keeps running, hence the DIRECTION.
-        if self.direction is ForkDirection.SUPERSEDE and stores.campaigns.mark_superseded(
-            self.parent, self.child.cycle_id
-        ):
-            stores.void_inbox(self.parent)
+        if self.direction is ForkDirection.SUPERSEDE:
+            stores.mark_superseded(self.parent, self.child.cycle_id)
         return self.child.cycle_id
 
-    def withdraw(self, stores: Stores) -> None:
+    def withdraw(self, stores: Stores, job_registry: JobRegistry) -> None:
         # Best-effort: it must never mask the refusal its caller re-raises.
+        child = self.child
         try:
-            deleted, reason = cleanup_stub_fork_if_empty(
-                campaign_store=stores.campaigns, hop=self.child
-            )
+            with destroying(stores, job_registry, child.campaign_id, cycle_id=child.cycle_id):
+                deleted, reason = cleanup_stub_fork_if_empty(
+                    campaign_store=stores.campaigns, hop=child
+                )
+        except CycleBusyError as held:
+            deleted, reason = False, str(held)
         except Exception:
             logger.exception("fork %s: refused, and its cut could not be deleted", self.child)
             return

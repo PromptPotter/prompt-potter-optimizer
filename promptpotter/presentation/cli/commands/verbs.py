@@ -36,6 +36,10 @@ from promptpotter.presentation.cli.parsers import (
     Verb,
 )
 
+# The grammar `new.py::_set_body` walks: a `--set`, and each knob of an `--arm` after its optimizer.
+SET_GRAMMAR = "PATH=VALUE"
+ARM_GRAMMAR = f"KEY=OPTIMIZER[,{SET_GRAMMAR}…]"
+
 
 def _rescore_count_arg(raw: str) -> RescoreCount:
     try:
@@ -85,6 +89,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             "optimization": "`--set KNOB=VALUE`, folded per knob",
             "campaign_config": "`--config FILE`'s `campaign` section",
             "head_to_head": "the `head-to-head` verb mints one; a FILE form launches one campaign",
+            "rerun": "a FILE form buys only the turn its draft owes; the browser's re-run forces one",
         },
         help="Mint a fresh campaign from a dataset NAME or a raw FILE (CSV). A "
         "name uses an authored datasets/<name>/; a file is ingested → "
@@ -125,12 +130,14 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 dest="sets",
                 action="append",
                 default=[],
-                metavar="FIELD=VALUE",
-                help="Repeatable. Both forms take the campaign knobs — `--set optimizer=capo`, "
-                "`--set nodes.<node>.<knob>=VALUE`; a launch's bound is `--max-*`'s. "
-                "The file form also "
-                "confirms an origin field, e.g. `--set task_description='map names to codes'` or "
-                "`--set column.query=input`, applied before the resolver runs.",
+                metavar=SET_GRAMMAR,
+                help="Repeatable. PATH is a check-in edit's own dotted path (`EditDraftPatch`). "
+                "Both forms take the campaign knobs — `--set config.optimization.optimizer=capo`, "
+                "`--set config.optimization.nodes.<node>.config.<knob>=VALUE`; a launch's bound "
+                "is `--max-*`'s. The file form also confirms an origin field or the criterion, "
+                "e.g. `--set raw_task_description='map names to codes'`, "
+                "`--set column_query=input` or `--set config.scoring.matcher=exact`, applied "
+                "before the resolver runs.",
             ),
             Arg(
                 "--diag",
@@ -170,10 +177,11 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 dest="arms",
                 action="append",
                 required=True,
-                metavar="KEY=OPTIMIZER[,KNOB=VALUE…]",
+                metavar=ARM_GRAMMAR,
                 help="Repeatable, one per arm: its key, the optimizer it runs, and that "
-                "optimizer's knobs in `new --set`'s spelling — `--arm capo=capo "
-                "--arm capo-b5=capo,nodes.<node>.max_blocks=5`; an arm on an earlier arm's "
+                "optimizer's knobs by their dotted path under `new --set`'s "
+                "`config.optimization` — `--arm capo=capo "
+                "--arm capo-b5=capo,nodes.<node>.config.max_blocks=5`; an arm on an earlier arm's "
                 "treatment, this act's or a standing one's, is its next replicate, on its own seed. No `halt_at_accuracy`: every arm runs the budget below to its end.",
             ),
             *BUDGET_AXES,

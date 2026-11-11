@@ -3,7 +3,6 @@ import { Badge, Button, CopyButton, Icon, Said, VendorLogo } from "@/components/
 import { familyOfGlance, openColumns } from "@/components/shell/families";
 import { Figure, FigureRow, ViewDoor } from "@/components/shell/FigureRow";
 import type { FamilyId } from "@/lib/address";
-import { StageFigures } from "@/components/shell/masthead/StageFigures";
 import { CriterionLine } from "@/components/shell/scoring/Criterion";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import type { HierarchyCampaign, Figure as FigureType } from "@/lib/api/types";
@@ -15,7 +14,6 @@ import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf, type CyclePath } from "@/lib/ids";
 import { useViewedCourse } from "@/lib/lineage";
 import { useViewedDashboard } from "@/lib/poll";
-import { useStageView } from "@/lib/prefs/stage";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import { TERMS } from "@/lib/terms";
 import { useViewedListing, useWorkspace } from "@/lib/workspace";
@@ -29,15 +27,8 @@ export function RunMasthead() {
   const { running } = useRegistry();
   const listing = useViewedListing();
   const dataset = tagValue(listing, "dataset");
-  const [stage] = useStageView();
   return (
-    <header
-      className={cx(
-        "run-header",
-        listing === null && viewedPath === null && "is-bare",
-        stage && viewedPath !== null && "is-stage",
-      )}
-    >
+    <header className={cx("run-header", listing === null && viewedPath === null && "is-bare")}>
       <div className="run-header-inner">
         <div className="run-title">
           <Button
@@ -64,7 +55,7 @@ export function RunMasthead() {
             <Button
               className="figure-btn"
               onClick={() => navigate(null)}
-              aria-label="Follow the latest launch instead of this pinned run"
+              aria-label="Follow your run instead of this pinned one"
             >
               Follow
             </Button>
@@ -72,8 +63,6 @@ export function RunMasthead() {
         </div>
         {viewedPath === null ? (
           <SubjectDoors />
-        ) : stage ? (
-          <StageFigures />
         ) : (
           <RunFacts path={viewedPath} campaign={listing?.level === "campaign" ? listing : null} />
         )}

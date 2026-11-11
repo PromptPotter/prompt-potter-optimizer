@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.cycle_addressing import active_pointer
+from promptpotter.application.cycle_addressing import latest_launch
 from promptpotter.domain.cycle_paths import Subject
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
 from promptpotter.presentation.cli.commands.result import CommandResult, said_text
@@ -30,7 +30,7 @@ def _line(course: HierarchyCourse, *, active: bool) -> str:
             if state.admission.offers
             else f"  ({state.admission.refusal})"
         )
-        + ("  <- active pointer" if active else "")
+        + ("  <- latest launch" if active else "")
     )
 
 
@@ -41,7 +41,7 @@ def cycles_human(
     caller: Caller,
 ) -> CommandResult:
     inside = params.inside
-    hop = active_pointer(caller.stores, inside=inside)
+    hop = latest_launch(caller.stores, inside=inside)
     active = None if hop is None else Subject.of((*inside, hop)).address
     lines: list[str] = []
     for campaign in listing.entries:

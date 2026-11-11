@@ -32,7 +32,6 @@ from promptpotter.domain.command_kinds import (
     CyclePayload,
     DraftPayload,
     LinePayload,
-    PauseCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject, decode_cycle_path
 from promptpotter.domain.run_records import LaunchAnswer, NoEffect
@@ -55,7 +54,6 @@ from promptpotter.shared.named_rows import imported, returned
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import Inline
     from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.phases import RunState
 
 
 class RejectedError(Exception):
@@ -334,9 +332,6 @@ class CommandDispatcher:
             self._attached = JobRegistry.attach(self.stores.jobs_dir)
         return self._attached
 
-    def run_state(self, hop: CycleHop) -> RunState:
-        return self.stores.run_state(hop)
-
     async def _applier(self, dispatched: Dispatched[Any]) -> Applier[Any]:
         return await handler_of(dispatched.payload.kind)(dispatched)
 
@@ -553,25 +548,4 @@ class CommandDispatcher:
 
         return CommandOutcome(
             payload=call.payload, accepted=accepted, result=applied[0], ack=applier.ack
-        )
-
-    def pause_superseded(self, parent: CycleHop, by: CycleHop) -> None:
-        """Filed on the parent, the fork's own command filed beside it."""
-        command_id = str(uuid.uuid4())
-        payload, act_digest = PauseCyclePayload(
-            campaign_id=parent.campaign_id,
-            cycle_id=parent.cycle_id,
-            reason=f"superseded by fork {by.cycle_id}",
-        ).recorded()
-        self.stores.commands.append(
-            CommandRecord(
-                command_id=command_id,
-                kind=CommandKind.PAUSE,
-                payload=payload,
-                idempotency_key=command_id,
-                act_digest=act_digest,
-                issued_by=acting_principal(self.stores.identity),
-                subject=subject_key(self.stores.subject(parent)),
-            ),
-            CommandAckRecord(command_id=command_id, status="accepted"),
         )

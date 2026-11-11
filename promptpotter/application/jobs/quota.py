@@ -20,11 +20,13 @@ from promptpotter.application.jobs.coupon import (
     AccountKey,
     AccountWallet,
     BackendCells,
+    ProviderSend,
     Send,
     bind_account,
     paying_key,
     provider_send,
     read_coupon,
+    unpaid,
 )
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -80,11 +82,12 @@ from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import (
-    HostAllowanceExhaustedError,
+    BudgetUnenforceableError,
     LaunchRefusalReason,
     NotFoundError,
     PayloadInvalidError,
     PotterError,
+    SendRefusedError,
 )
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
@@ -344,12 +347,12 @@ def account_wallet(stores: Stores) -> AccountWallet:
 
 def sends_on(stores: Stores, config: CampaignConfig, connector: str) -> tuple[Send, ...]:
     """What a run declaring *config* on *connector* sends, and who pays each: the connector's
-    cells, then each provider its `model_calls` name, per `paying_key`.
-    Raises ``NoApiKeyError`` for a provider no key pays."""
+    cells as it declares them, then each provider its `model_calls` name, per `paying_key`."""
     keys = stores.api_keys.load()
     calls = model_calls(select_optimizer(config.optimization), config)
+    declared = connectors.CONNECTORS.get(connector)
     return (
-        BackendCells(connector, connectors.CONNECTORS.get(connector).cell_payer),
+        BackendCells(connector, declared.cell_payer, declared.cells_priced),
         *(provider_send(keys, provider) for provider in dict.fromkeys(c.provider for c in calls)),
     )
 
@@ -367,6 +370,7 @@ LAUNCH_REFUSAL_LABELS: Worded[LaunchRefusalReason, str] = Worded(
         LaunchRefusalReason.HELD: "Allowance held",
         LaunchRefusalReason.OVER_DECLARED: "Ceiling past the allowance",
         LaunchRefusalReason.NO_KEY: "No key for a provider",
+        LaunchRefusalReason.UNPRICED: "No rate bounds the cells",
     }
 )
 assert LAUNCH_REFUSAL_LABELS.keys() == set(LaunchRefusalReason)
@@ -508,16 +512,16 @@ def admit_launch(
         excluding_job_id=job_id,
         excluding_campaign=None if hop is None else hop.campaign_id,
     )
-    admitted = _admitted(stores, declared, sends)
-    if not any(draws_coupon(send.payer) for send in sends):
-        return admitted, _nothing_on(wallet.coupon.face)
-    if wallet.contended:
-        raise _contended("what this account has left")
     refusal = launch_refusal(
         wallet, declared, sends, stores=stores, refusing=job_registry.get(job_id)
     )
     if refusal is not None:
         raise refusal
+    admitted = _admitted(stores, declared, sends)
+    if not any(draws_coupon(send.payer) for send in sends):
+        return admitted, _nothing_on(wallet.coupon.face)
+    if wallet.contended:
+        raise _contended("what this account has left")
     spent = wallet.coupon.spent
     if bill_is_floor(spent.unpriced_tokens) and wallet.headroom.usd is not None:
         logger.warning(
@@ -535,10 +539,34 @@ def _admitted(stores: Stores, declared: Budget, sends: tuple[Send, ...]) -> Budg
     on a run any of whose *sends* draws the coupon, so neither a `start-run` budget nor a
     `set-limits` lifts it. An axis the run leaves undeclared stays unnamed, so the reserve takes
     it for no ceiling; declaring nothing reads the cap alone."""
-    bound = tier_ceiling(stores) if any(draws_coupon(send.payer) for send in sends) else None
+    bound = _tier_bound(stores, sends)
     if bound is None:
         return declared
     return declared.over(Budget(usd=_lowest(declared.usd, bound)))
+
+
+def _tier_bound(stores: Stores, sends: tuple[Send, ...]) -> float | None:
+    """The free tier's dollar ceiling on a run any of whose *sends* draws the coupon."""
+    return tier_ceiling(stores) if any(draws_coupon(send.payer) for send in sends) else None
+
+
+def _unenforceable(
+    stores: Stores, sends: tuple[Send, ...], *, usd: float | None, room: Budget
+) -> BudgetUnenforceableError | None:
+    """THE unenforceable test, of a launch and of a set-limits, as `SpendBook.refuse_unpriced`
+    would refuse at round 0: cells no rate bounds under a dollar ceiling, the run's own *usd* or
+    the account's allowance (the free tier's cap, or the coupon's dollar *room* on a send that
+    draws it). The allowance is named where it binds, since no run can drop it."""
+    tier = _tier_bound(stores, sends)
+    for send in sends:
+        if not isinstance(send, BackendCells) or send.priced:
+            continue
+        allowance = tier is not None or (draws_coupon(send.payer) and room.usd is not None)
+        if allowance or usd is not None:
+            return BudgetUnenforceableError(
+                backend=send.backend, binds="allowance" if allowance else "run"
+            )
+    return None
 
 
 def launch_refusal(
@@ -548,17 +576,23 @@ def launch_refusal(
     *,
     stores: Stores,
     refusing: Job | None,
-) -> HostAllowanceExhaustedError | None:
-    """THE coupon's answer to a launch declaring *declared* and sending *sends*: ``admit_launch``
-    raises it and a check-in serves it. A run drawing no coupon, or a contended read, refuses
-    nothing here; the refusal names the first send that draws it."""
+) -> SendRefusedError | None:
+    """THE answer to a launch declaring *declared* and sending *sends*: ``admit_launch`` raises it
+    and a check-in serves it. A provider no key pays, then cells no rate bounds under a dollar
+    ceiling, then the coupon, which a run drawing none of, or a contended read, refuses nothing;
+    each refusal names the first send it binds."""
+    for send in sends:
+        if isinstance(send, ProviderSend) and send.payer is None:
+            return unpaid(send.provider)
+    room, admitted = wallet.headroom, _admitted(stores, declared, sends)
+    if (unpriced := _unenforceable(stores, sends, usd=declared.usd, room=room)) is not None:
+        return unpriced
     drawing = next((send for send in sends if draws_coupon(send.payer)), None)
     if drawing is None or wallet.contended:
         return None
     what = "this launch" if refusing is None else refusing.what
     if wallet.launch_room_gone:
         return wallet.refused(drawing, what=what)
-    room, admitted = wallet.headroom, _admitted(stores, declared, sends)
     # What the run itself declares: a delegate's cap past the coupon is held by the reserve.
     asked = None if declared.usd is None else admitted.usd
     if room.usd is not None and asked is not None and asked > room.usd:
@@ -902,6 +936,11 @@ def _clamped(
         raise _contended("this campaign's ceiling")
     bound = _admitted(stores, Budget(), sends).usd
     room = wallet.headroom
+    # A dollar ceiling its cells cannot be held to is refused as a launch under it is.
+    if requested.usd is not None and (
+        unpriced := _unenforceable(stores, sends, usd=requested.usd, room=room)
+    ):
+        raise unpriced
     # A campaign ceiling is the operator's: past the coupon only where none of its sends draws it.
     clamp = (
         room.over(Budget(usd=_lowest(room.usd, bound)))

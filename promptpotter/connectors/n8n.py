@@ -125,6 +125,10 @@ CONNECTOR = Connector(
     name="n8n",
     wire_adapter=n8n_wire_adapter,
     cell_envelope_s=cell_envelope_of(_CELL_ENVELOPE_S),
+    cell_payer="host",
+    # The workflow serves no node's `spend_bound`, so no dollar ceiling holds its cells.
+    sent_spend_bound=None,
+    cells_priced=False,
     cell_path="",
     read_reply=_harness_reply,
     round_trip_is_latency=True,

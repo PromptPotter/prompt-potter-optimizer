@@ -173,7 +173,7 @@ class SubtreeCampaignFacts(CampaignFacts):
 
     deletable_stubs: int = Field(
         description="How many cycles `cleanup-empty-cycles` deletes here now "
-        "(`CampaignStore.deletable_stubs`, the command's own list)."
+        "(`admission.py::deletable_stubs`, the command's own list: no held stub counts)."
     )
 
 

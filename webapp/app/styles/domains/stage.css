@@ -1,0 +1,13 @@
+/* The stage view (`/stage/`) is read across a room, phone first: its type scales with the screen, past the token ramp. */
+.stage-screen{--stage-lead:max(var(--text-2xl),min(9cqi,22svh));--stage-figure:max(var(--text-lg),min(5cqi,8svh));--stage-label:max(var(--text-xs),1.8svh);container-type:inline-size;display:flex;flex-direction:column;justify-content:center;min-block-size:100svh;padding:var(--space-16);background:var(--color-background-primary)}
+.stage{display:flex;flex-direction:column;justify-content:center;gap:var(--space-16)}
+.stage-name{margin:0;font-size:var(--stage-label);font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-text-secondary);overflow-wrap:anywhere}
+/* Its values wrap, so a narrow screen stacks the figures and breaks the lead rather than overrun. */
+.stage .figure-row{margin:0;padding:0;border:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:var(--space-16)}
+.stage .figure-value{white-space:normal;font-size:var(--stage-figure);font-weight:700;line-height:1.1;letter-spacing:-0.02em}
+.stage .figure dt{font-size:var(--stage-label)}
+.stage-climb .figure-value{font-size:var(--stage-lead);letter-spacing:-0.03em}
+/* Notes quieter than data: the stage keeps each figure's sub, and the climb's caveat, small and secondary. */
+.stage .figure-sub{font-size:var(--stage-label)}
+.stage-climb .said{margin-top:var(--space-8);font-size:var(--stage-label)}
+@media (min-width:880px){.stage-screen{padding:var(--space-24) 6vw}.stage{gap:var(--space-24)}}

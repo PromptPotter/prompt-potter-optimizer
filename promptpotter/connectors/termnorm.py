@@ -139,6 +139,10 @@ CONNECTOR = Connector(
     name="termnorm",
     wire_adapter=termnorm_wire_adapter,
     cell_envelope_s=cell_envelope_of(_CELL_ENVELOPE_S),
+    cell_payer="host",
+    # Each node serves its `spend_bound` on the pipeline answer.
+    sent_spend_bound=None,
+    cells_priced=True,
     session_factory=TermNormSession,
     serves_uploads=True,
     expected_revision=_EXPECTED_REVISION,

@@ -41,7 +41,6 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import CAP_AXIS_INFO, Budget, CapAxis, money_text
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import NoApiKeyError
 
 
 class DraftDependency(PipelineDependency):
@@ -193,9 +192,11 @@ class DraftReopenResponse(StrictModel):
         description="What the last resolver turn left, as `resolve-origin` answered it."
     )
     resolution_pending: bool = Field(
-        description="Its task is on file but no resolver turn ever set it up "
-        "(`checkin_draft.py::DraftFile.resolution_pending`): the one case a reopen sends `resolve-origin`, so a "
-        "revisit never re-buys a turn or re-proposes over authored prompts."
+        description="Its task is on file and no resolver turn ever set it up "
+        "(`checkin_draft.py::DraftFile.resolution_pending`): the one case a surface sends "
+        "`resolve-origin` unasked, so a revisit never re-buys a turn or re-proposes over authored "
+        "prompts. With no task on file a surface asks for one first; an empty answer sends "
+        "`resolve-origin`, refused `resolver_not_owed` where no turn is owed."
     )
     start: HeldStart | None = Field(
         description="The Start that holds it, at its stage, beside the command a reopen follows "
@@ -252,11 +253,7 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
 
 def _launch(stores: Stores, draft: DraftFile, declared: Budget) -> tuple[Refusal | None, Budget]:
     """``admit_launch``'s refusal of this Start, then the most it may declare."""
-    wallet = account_wallet(stores)
-    try:
-        sends = draft_sends(stores, draft)
-    except NoApiKeyError as unpaid:
-        return Refusal.of(unpaid), wallet.headroom
+    wallet, sends = account_wallet(stores), draft_sends(stores, draft)
     refused = launch_refusal(wallet, declared, sends, stores=stores, refusing=None)
     return (None if refused is None else Refusal.of(refused)), launch_bound(wallet, sends)
 

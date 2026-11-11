@@ -75,7 +75,7 @@ Python 3.13+ and an [OpenRouter key](https://openrouter.ai/keys) — the optimiz
 
 ```bash
 pip install "promptpotter[all]"
-python -m promptpotter new tickets.csv --set task_description="classify support tickets by urgency"
+python -m promptpotter new tickets.csv --set raw_task_description="classify support tickets by urgency"
 python -m promptpotter resume
 ```
 

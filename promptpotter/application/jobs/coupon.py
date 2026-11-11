@@ -101,17 +101,18 @@ def read_coupon(stores: Stores, paid: PaidSpend | None = None) -> Coupon:
 
 
 class ProviderSend(NamedTuple):
-    """A send this process makes on *provider*, paid per `paying_key`."""
+    """A send this process makes on *provider*, paid per `paying_key`; ``None`` where no key pays."""
 
     provider: str
-    payer: KeySource
+    payer: KeySource | None
 
 
 class BackendCells(NamedTuple):
-    """A backend's cells, paid by what its connector declares whatever keys the account holds."""
+    """A backend's cells, paid and priced as its connector declares whatever keys the account holds."""
 
     backend: str
     payer: KeySource
+    priced: bool
 
 
 type Send = ProviderSend | BackendCells
@@ -128,9 +129,12 @@ def paying_key(keys: Mapping[str, HeldKey], provider: str) -> ProviderKey | None
 
 def provider_send(keys: Mapping[str, HeldKey], provider: str) -> ProviderSend:
     key = paying_key(keys, provider)
-    if key is None:
-        raise NoApiKeyError(provider=provider, key=host_key_attr(provider))
-    return ProviderSend(provider, key.paid_by)
+    return ProviderSend(provider, None if key is None else key.paid_by)
+
+
+def unpaid(provider: str) -> NoApiKeyError:
+    """THE refusal of a send on *provider* that no key pays."""
+    return NoApiKeyError(provider=provider, key=host_key_attr(provider))
 
 
 class AllowanceState(StrEnum):
@@ -295,7 +299,7 @@ def keyed_client(provider: str) -> LLMClientBase:
         ) from None
     key = paying_key(stores.api_keys.load(), provider)
     if key is None:
-        raise NoApiKeyError(provider=provider, key=host_key_attr(provider))
+        raise unpaid(provider)
     if draws_coupon(key.paid_by) and (coupon := read_coupon(stores)).exhausted:
         raise AccountWallet(coupon, coupon.left).refused(
             ProviderSend(provider, key.paid_by), what="this account"

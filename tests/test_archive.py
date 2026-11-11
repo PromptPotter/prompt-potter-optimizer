@@ -1357,7 +1357,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert producer is not None
     with probe_lock(lock) as seen:
         assert seen, "a reader's probe missed the producer holding the cycle"
-    store.mark_superseded(displaced, fork_hop.cycle_id)
+    stores.mark_superseded(displaced, fork_hop.cycle_id)
     producer.release()
     assert ended(displaced) is None, "a supersede ended its parent under the producer running it"
     lock.touch()
@@ -1365,7 +1365,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         assert not producer_lock.held(lock), (
             "a reader's probe in flight read as a producer, so a supersede would skip its stop"
         )
-    store.mark_superseded(displaced, fork_hop.cycle_id)
+    stores.mark_superseded(displaced, fork_hop.cycle_id)
     assert ended(displaced) is StopReason.REBASED, "a superseded parent no producer holds runs on"
     [listed] = list_hierarchy(
         stores,

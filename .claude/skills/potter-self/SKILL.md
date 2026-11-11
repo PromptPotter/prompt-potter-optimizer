@@ -114,9 +114,9 @@ re-prescribed in prose). A new `{{slot}}` is an `@signal` renderer
 
 ## Authored mode — you are the proposer
 
-`--set arm_gate=author`: every round holds for arms you submit (`review`: the generator drafts, you keep
-drafts by index and/or add arms); answer with `submit-arms --arms arms.yaml`. An arm edits the round's
-parent, one per hypothesis, a combined arm only beside its parts. Before an arm earns a cell:
+`--set config.optimization.arm_gate=author`: every round holds for arms you submit (`review`: the generator
+drafts, you keep drafts by index and/or add arms); answer with `submit-arms --arms arms.yaml`. An arm edits
+the round's parent, one per hypothesis, a combined arm only beside its parts. Before an arm earns a cell:
 
 1. **The lever is in the node's sight**: its `possible` set in `dispatch/layout.py` and its rendered prompt in a banked round.
 2. **The lever binds**: an axis the inner solver never reaches, or one the inner

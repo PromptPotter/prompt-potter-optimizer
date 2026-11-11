@@ -112,6 +112,16 @@ class Connector:
     cell_envelope_s: CellEnvelopeSeconds
     """Bounds the SUM of one cell's awaits; reaching it is ``ErrorCategory.HALTED``, never a zero."""
 
+    cell_payer: KeySource
+    """Whose wallet a cell's sends draw, whatever keys the account holds: ``"host"`` draws the
+    host's coupon."""
+
+    sent_spend_bound: SentSpendBound | None
+    """The bound THIS process sends the backend; ``None`` reads the served node's ``spend_bound``."""
+
+    cells_priced: bool
+    """A cell's dollars are bounded before it is sent; ``False`` refuses a dollar ceiling at the mint."""
+
     cell_path: str = "/matches"
     """Appended to ``base_url()`` for a ``remote_http`` cell's POST; ``""`` posts to the endpoint itself."""
 
@@ -154,13 +164,6 @@ class Connector:
 
     holds_own_sends: bool = False
     """Each paid send is admitted and billed where it is made; ``False``: the cell is ONE send."""
-
-    cell_payer: KeySource = "host"
-    """Whose wallet a cell's sends draw: every built-in backend sends on the box's keys, whatever
-    keys the account holds, so its cells draw the host's coupon."""
-
-    sent_spend_bound: SentSpendBound | None = None
-    """The bound THIS process sends the backend; answering ``None`` leaves no spend ceiling to hold."""
 
     model_names_provider: bool = False
     """Model strings are litellm's ``provider/model``, priced as ``pricing.py::inline_route`` splits."""

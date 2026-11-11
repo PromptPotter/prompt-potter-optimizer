@@ -27,7 +27,7 @@ from promptpotter.application.jobs.mint import (
     mint_framed_cycle,
 )
 from promptpotter.application.jobs.quota import land_job, sends_on
-from promptpotter.application.pipeline_resolve import cycle_config, draft_declared
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.checkin_draft import DraftFile
@@ -37,7 +37,6 @@ from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     own_definition,
-    resolve_dataset,
     runnable_definition,
 )
 from promptpotter.infrastructure.store.stores import Stores
@@ -125,8 +124,8 @@ class ExistingCycle:
     def holder(self) -> CampaignLaunch:
         return CampaignLaunch(self.dataset_name)
 
-    def backend_type(self, stores: Stores) -> str:
-        return runnable_definition(resolve_dataset(stores, self.dataset_name)).backend_type
+    def backend_type(self, _stores: Stores) -> str:
+        return self.campaign.connector
 
     def declared_budget(self, stores: Stores) -> Budget:
         return cycle_config(stores, self.campaign, self.hop).config.optimization.budget
@@ -192,13 +191,12 @@ def commit_upload_definition(
     pipeline: DraftPipeline,
 ) -> None:
     """Called once the cut *source* names passed every mint refusal: a refused Start takes no slug.
-    Writes the two halves its check-in read: the definition *pipeline* laid, and the campaign
-    half (no free tier's layer, which a Start lays per account)."""
+    Writes the two halves its check-in read off *pipeline*."""
     stores.write_own_definition(
         draft.slug,
         source=source,
         pipeline=pipeline.local,
-        campaign=draft_declared(stores, draft).model_dump(mode="json", exclude_defaults=True),
+        campaign=pipeline.campaign.model_dump(mode="json", exclude_defaults=True),
         description=draft.confirmed_task(),
         framing=draft_task_context(draft),
         origin=draft.committed_prompts(pipeline.chain),

@@ -854,7 +854,16 @@ class EditDraftCampaignPayload(DraftPayload, kind=CommandKind.EDIT_DRAFT_CAMPAIG
 
 
 class ResolveOriginPayload(DraftPayload, kind=CommandKind.RESOLVE_ORIGIN):
-    """One resolver turn over the draft's open gaps; what it proposes waits on a click."""
+    """One resolver turn over the draft's open gaps; what it proposes waits on a click. The turn
+    is bought only where one is owed (no turn ever set the draft up, and its prompts are not
+    authored), whichever door sends it: any other is refused `resolver_not_owed`, unless it is the
+    operator's re-run."""
+
+    rerun: bool = Field(
+        default=False,
+        description="The operator asked for this turn again (the check-in's re-run): bought "
+        "whether or not one is owed. An answer that names no task sends it without.",
+    )
 
 
 class ArmRequest(StrictModel):

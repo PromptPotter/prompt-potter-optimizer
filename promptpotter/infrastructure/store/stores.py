@@ -9,9 +9,12 @@ from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject, WorkspaceDir
-from promptpotter.domain.phases import ProducerState, RunState, StopReason
+from promptpotter.domain.phases import ErrorRecord, ProducerState, RunState, StopReason
+from promptpotter.domain.run_records import CycleSupersededRecord, RunPhaseRecord
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure import producer_lock
+from promptpotter.infrastructure.runtime_flags import derive_run_state, run_owed
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls
 from promptpotter.infrastructure.store.dataset_access import (
@@ -101,19 +104,50 @@ class Stores:
         state = derive_run_state(self.campaigns.cycle_dir(hop), self.inbox(hop))
         return state._replace(inner=self.inner)
 
-    def void_inbox(self, hop: CycleHop) -> None:
-        """A run boundary: what the cycle's loop was asked and never took stands no more."""
-        self.commands.void(self.subject(hop), f"run boundary of {hop.cycle_id}")
+    def void_inbox(self, hop: CycleHop, *, before: float | None = None) -> None:
+        """A run boundary: what the cycle's loop was asked and never took stands no more, filed
+        before epoch *before* where given (a launch's cut-off is its live claim's)."""
+        detail = "run boundary" if before is None else "the launch"
+        self.commands.void(self.subject(hop), f"{detail} of {hop.cycle_id}", before=before)
+
+    def declare_stop(
+        self, hop: CycleHop, stop: RunPhaseRecord, *, error: ErrorRecord | None = None
+    ) -> None:
+        """THE stop of a cycle, its run's own included: its ending, then its run boundary."""
+        # Error first, so no reader finds the ending without it.
+        self.campaigns.append(hop, *([] if error is None else [error]), stop)
+        self.void_inbox(hop)
+
+    def declare_ended(self, hop: CycleHop, reason: StopReason) -> bool:
+        """Ends a minted cycle no producer holds on *reason*, where it has not ended; a vanished
+        producer's only where its run is still owed, read under the lock (a pause since stands)."""
+        layout = self.campaigns.layout(hop)
+        lock = layout.producer_lock
+        # A held cycle's producer declares its own stop; asked first, so no caller waits out a live hold.
+        if producer_lock.held(lock) or not producer_lock.take(lock):
+            return False
+        try:
+            facts = scan_cycle_facts(layout.ledger)
+            if facts.minted is None or facts.ended is not None:
+                return False
+            if reason is StopReason.PRODUCER_VANISHED and not run_owed(layout.cycle_dir):
+                return False
+            self.declare_stop(hop, RunPhaseRecord.stop(reason))
+            return True
+        finally:
+            producer_lock.release(lock)
+
+    def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> bool:
+        # The relation always lands; the ending only where none stands, or it replaces why it ended.
+        self.campaigns.append(hop, CycleSupersededRecord(successor_cycle_id=successor_cycle_id))
+        return self.declare_ended(hop, StopReason.REBASED)
 
     def mark_producer_vanished(self, hop: CycleHop) -> bool:
         """A cycle whose producer went with its run owed (`ProducerState.SILENT`) ends
         PRODUCER_VANISHED, at its run boundary."""
-        if self.run_state(hop).producer.state is not ProducerState.SILENT:
-            return False
-        if not self.campaigns.declare_ended(hop, StopReason.PRODUCER_VANISHED):
-            return False
-        self.void_inbox(hop)
-        return True
+        return self.run_state(hop).producer.state is ProducerState.SILENT and self.declare_ended(
+            hop, StopReason.PRODUCER_VANISHED
+        )
 
     def write_own_definition(
         self,

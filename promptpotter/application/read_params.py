@@ -259,7 +259,8 @@ class ActivityParams(ReadParams, read=ReadKind.ACTIVITY, route="/auth/activity")
 
 
 class ActiveSessionParams(ReadParams, read=ReadKind.ACTIVE_SESSION, route="/sessions/active"):
-    """The caller-tenant's active-session pointer: its latest launch from any entry point.
+    """The caller-tenant's run to follow: one running first, else its latest launch (a resume is
+    one) from any entry point.
 
     No active session is a steady state: it answers null ids, never a not-found.
     """

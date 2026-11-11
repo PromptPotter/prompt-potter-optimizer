@@ -50,7 +50,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     emit_sample_scored,
     emit_sample_started,
 )
-from promptpotter.infrastructure.runtime_flags import effective_lookahead
+from promptpotter.infrastructure.store.command_log import effective_lookahead
 from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,

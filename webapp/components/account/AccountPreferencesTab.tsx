@@ -4,7 +4,6 @@ import { patchUserSettings, userSettingsRead } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
-import { useStageView } from "@/lib/prefs/stage";
 import { useShowCandidates } from "@/lib/prefs/tree";
 
 export function AccountPreferencesTab() {
@@ -44,13 +43,17 @@ export function AccountPreferencesTab() {
   );
 }
 
+// `/stage/`, with its slash: the page is `app/stage/index.html`, and `StaticFiles` redirects the bare path.
 function StageViewSection() {
-  const [on, setOn] = useStageView();
   return (
     <AccountSection
       title="Stage view"
-      lede="For showing a run across a room: the header grows to half the screen and leads with the lift over the origin, then what that lift cost per search dollar, per candidate tested and in worked time per unit of lift. Kept on this device only."
-      aside={<Switch label="Show the stage view" checked={on} onChange={() => setOn(!on)} />}
+      lede="For showing a run across a room, on a phone or a TV: a full screen that follows your running campaign, else your latest launch, and leads with the lift over the origin, then what that lift cost per search dollar, per candidate tested and in worked time per unit of lift, then the live round."
+      aside={
+        <a className="note-empty-link" href="/stage/" target="_blank" rel="noopener">
+          Open the stage view
+        </a>
+      }
     />
   );
 }

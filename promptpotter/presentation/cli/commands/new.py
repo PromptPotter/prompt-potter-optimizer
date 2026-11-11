@@ -9,9 +9,10 @@ import re
 import shlex
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, get_args, get_origin
 
 import yaml
+from pydantic import BaseModel
 
 from promptpotter.application.commands import (
     draft_editing,
@@ -27,7 +28,7 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.loaders import no_dataset_hint
-from promptpotter.application.datasets.origin_readiness import CHECKLIST_FIELDS, origin_readiness
+from promptpotter.application.datasets.origin_readiness import checklist_field, origin_readiness
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
 from promptpotter.config.logging import setup_logging
@@ -42,7 +43,7 @@ from promptpotter.domain.command_kinds import (
     ResolveOriginPayload,
     StartCheckinPayload,
 )
-from promptpotter.domain.draft_edit import SETTABLE_SCALARS, EditDraftPatch, OptimizationOverrides
+from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES
@@ -57,10 +58,11 @@ from promptpotter.presentation.cli.commands.launch import (
     run_inline,
 )
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.verbs import VERBS
+from promptpotter.presentation.cli.commands.verbs import ARM_GRAMMAR, SET_GRAMMAR, VERBS
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import budget_from_args, build_parser
 from promptpotter.shared.errors import (
+    ConflictError,
     DatasetAccessError,
     PayloadInvalidError,
     PotterError,
@@ -78,27 +80,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-_NODES = "nodes"
-# A check-in's criterion, by `EditDraftPatch.config.scoring`'s keys: the server folds each in.
-_SCORING = "scoring"
-_SET_SCORING = (f"{_SCORING}.matcher", f"{_SCORING}.dials")
-_SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {_NODES}
-
-# A checklist field is set by the name the check-in spells it, never its patch key.
-_PATCH_KEY_OF: dict[str, str] = {
-    field: ".".join(row.patch_path) for field, row in CHECKLIST_FIELDS.items()
-}
-_SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(_PATCH_KEY_OF.values())) | set(_PATCH_KEY_OF)
 _KNOB_COMMA = re.compile(r",(?=[\w.]+=)")
-
-
-def _settable() -> str:
-    return ", ".join(
-        [
-            *sorted(_SET_FIELDS | _SET_KNOBS | set(_SET_SCORING)),
-            f"{_NODES}.<node>.<knob>",
-        ]
-    )
+# A dataset name confirms no check-in field: its `--set` lays the campaign knobs alone.
+_KNOBS = "config.optimization"
 
 
 def _checkin_line(step: str, detail: str) -> None:
@@ -111,53 +95,75 @@ def _value(raw: str) -> Any:
     return raw if isinstance(value, bool) and raw.lower() not in ("true", "false") else value
 
 
+def _members(annotation: object) -> tuple[Any, ...]:
+    return tuple(m for m in (get_args(annotation) or (annotation,)) if m is not type(None))
+
+
+def _laid(into: object, annotation: object, rest: list[str], raw: str, path: str) -> Any:
+    """*raw* laid at *rest* under a field typed *annotation*: a model by its fields, a mapping by
+    any key, ``Any`` as it comes; at the leaf a field that takes a string keeps the word."""
+    members = _members(annotation) if get_origin(annotation) is not dict else (annotation,)
+    if not rest:
+        return raw if str in members else _value(raw)
+    for member in members:
+        if isinstance(member, type) and issubclass(member, BaseModel):
+            return _lay(into if isinstance(into, dict) else {}, member, rest, raw, path)
+        if get_origin(member) is dict or member is Any:
+            value_type = get_args(member)[1] if member is not Any else Any
+            key, *more = rest
+            out = into if isinstance(into, dict) else {}
+            out[key] = _laid(out.get(key), value_type, more, raw, path)
+            return out
+    raise PayloadInvalidError(f"{path!r} reaches past a field that takes a value.")
+
+
+def _lay(
+    body: dict[str, Any], model: type[BaseModel], path: list[str], raw: str, whole: str
+) -> Any:
+    head, *rest = path
+    info = model.model_fields.get(head)
+    if info is None:
+        raise PayloadInvalidError(
+            f"{whole!r} names no field of {model.__name__}: {head!r} is not one of "
+            f"{', '.join(model.model_fields)}."
+        )
+    body[head] = _laid(body.get(head), info.annotation, rest, raw, whole)
+    return body
+
+
+def _set_body(model: type[BaseModel], sets: Sequence[str]) -> dict[str, Any]:
+    """Each ``PATH=VALUE`` laid by *model*'s own dotted paths; every bound is the model's."""
+    body: dict[str, Any] = {}
+    for item in sets:
+        path, sep, raw = item.partition("=")
+        if not sep:
+            raise PayloadInvalidError(f"expected {SET_GRAMMAR}, got {item!r}.")
+        _lay(body, model, path.strip().split("."), raw.strip(), path.strip())
+    return body
+
+
 def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
     """Shape only: every bound is the patch model's and ``plan_draft_patch``'s, as for the browser."""
-    patch_raw: dict[str, Any] = {}
-    config: dict[str, Any] = {}
-    knobs: dict[str, Any] = {}
-    for item in sets:
-        if "=" not in item:
-            raise PayloadInvalidError(f"--set expects FIELD=VALUE, got {item!r}.")
-        field, raw = (part.strip() for part in item.split("=", 1))
-        if field in _SET_SCORING:
-            config.setdefault(_SCORING, {})[field.split(".", 1)[1]] = raw
-        elif field in _SET_KNOBS:
-            knobs[field] = raw
-        elif field.startswith(f"{_NODES}.") and field.count(".") == 2:
-            _, node, knob = field.split(".")
-            knobs.setdefault(_NODES, {}).setdefault(node, {"config": {}})["config"][knob] = _value(
-                raw
-            )
-        elif field in _SET_FIELDS:
-            patch_raw[_PATCH_KEY_OF.get(field, field)] = raw
-        else:
-            raise PayloadInvalidError(
-                f"--set field {field!r} is not settable. One of: {_settable()}."
-            )
-    if knobs:
-        config["optimization"] = knobs
-    if config:
-        patch_raw["config"] = config
-    return PayloadInvalidError.validating(EditDraftPatch, patch_raw)
+    return PayloadInvalidError.validating(EditDraftPatch, _set_body(EditDraftPatch, sets))
 
 
 def _set_knobs(sets: list[str]) -> dict[str, Any]:
-    if not sets:
-        return {}
-    patch = _sets_to_patch(sets)
-    spelled = {model: cli for cli, model in _PATCH_KEY_OF.items()}
-    config = (
-        {} if patch.config is None else patch.config.model_dump(mode="json", exclude_unset=True)
-    )
-    stray = sorted(spelled.get(f, f) for f in patch.model_fields_set - {"config"})
-    if stray := [*stray, *sorted(set(config) - {"optimization"})]:
+    if stray := [s.partition("=")[0] for s in sets if not s.startswith(f"{_KNOBS}.")]:
         raise PayloadInvalidError(
             f"--set {', '.join(stray)} confirms a check-in field, which a dataset name "
-            f"does not have. On a name: {', '.join(sorted(_SET_KNOBS))}, "
-            f"{_NODES}.<node>.<knob>."
+            f"does not have. On a name: {_KNOBS}.<knob>."
         )
-    return dict(config["optimization"])
+    patch = _sets_to_patch(sets)
+    if patch.config is None:
+        return {}
+    return dict(patch.config.model_dump(mode="json", exclude_unset=True)["optimization"])
+
+
+def _gap_path(field: str) -> tuple[str, ...]:
+    """The patch path `--set` confirms *field* by: a gap names a checklist row (`FieldGap.of`)."""
+    row = checklist_field(field)
+    assert row is not None, field
+    return row.patch_path
 
 
 def _draft_kept(draft_id: str) -> str:
@@ -179,9 +185,9 @@ def _raise_incomplete(
         lines += [f"  - {q.prompt}".rstrip() for q in questions]
     lines += [
         "",
-        "Confirm a field and re-run, e.g.:",
-        "  promptpotter new <file> --set task_description='what the prompt does' "
-        "--set column.query=<header> --set column.ground_truth=<header>",
+        "Confirm the open fields and re-run:",
+        "  promptpotter new <file> "
+        + " ".join(f"--set {'.'.join(_gap_path(g.field))}=<value>" for g in gaps),
     ]
     refused = OriginIncompleteError(tuple(gaps))
     refused.add_note("\n".join(lines))
@@ -222,21 +228,27 @@ async def _hold_checkin(
             draft_editing.edit_draft_campaign,
             CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch)),
         )
-    draft = owned_draft(stores, draft_id)
-    # A turn writes no field the pipeline reads, so one read serves both readiness checks.
-    served = await draft_served(stores, draft)
-
     last_turn: OriginResolution | None = None
-    if not origin_readiness(draft, draft_pipeline(stores, draft, served)).complete:
-        _checkin_line("origin resolver", "running AI check-in")
-        # One turn: a residual gap surfaces below with --set instructions, not more LLM turns.
+    # A `new <file>` sends the one command an empty Send does: the server buys the turn only where
+    # one is owed. One turn: a residual gap surfaces below with --set instructions.
+    _checkin_line("origin resolver", "asking for the AI check-in")
+    try:
         turn = await CommandDispatcher(stores).answer(
             origin_resolving.resolve_origin, CommandCall(ResolveOriginPayload(draft_id=draft_id))
         )
+    except ConflictError as refused:
+        if refused.code != origin_resolving.RESOLVER_NOT_OWED:
+            raise
+        _checkin_line(
+            "origin resolver", "no turn owed: one already ran, or the prompts are authored"
+        )
+    else:
         last_turn = turn.result.resolution
-        draft = owned_draft(stores, draft_id)
+    draft = owned_draft(stores, draft_id)
 
-    readiness = origin_readiness(draft, draft_pipeline(stores, draft, served))
+    readiness = origin_readiness(
+        draft, draft_pipeline(stores, draft, await draft_served(stores, draft))
+    )
     if not readiness.complete:
         _raise_incomplete(readiness.gaps, last_turn, draft_id)
 
@@ -334,10 +346,13 @@ async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline
 def _arm_request(raw: str) -> dict[str, Any]:
     arm_key, sep, spec = raw.partition("=")
     if not sep or not spec:
-        raise PayloadInvalidError(f"--arm takes KEY=OPTIMIZER[,KNOB=VALUE…], got {raw!r}")
+        raise PayloadInvalidError(f"--arm takes {ARM_GRAMMAR}, got {raw!r}")
     # A comma opens a knob only where `name=` follows it: a value may hold one.
     optimizer, *knobs = _KNOB_COMMA.split(spec)
-    return {"arm_key": arm_key, "optimization": _set_knobs([f"optimizer={optimizer}", *knobs])}
+    return {
+        "arm_key": arm_key,
+        "optimization": _set_body(OptimizationOverrides, [f"optimizer={optimizer}", *knobs]),
+    }
 
 
 def _head_to_head_payload(args: argparse.Namespace) -> MintHeadToHeadPayload:
@@ -371,10 +386,10 @@ def _arm_spec(arm: ArmRequest) -> str:
     sets = [
         *(
             f"{field}={getattr(knobs, field)}"
-            for field in sorted(_SET_KNOBS & knobs.model_fields_set - {"optimizer"})
+            for field in sorted(knobs.model_fields_set - {"optimizer", "nodes"})
         ),
         *(
-            f"{_NODES}.{node}.{knob}={_spelled(value)}"
+            f"nodes.{node}.config.{knob}={_spelled(value)}"
             for node, overlay in knobs.nodes.items()
             for knob, value in overlay.config.items()
         ),
@@ -428,7 +443,7 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     with ctrl_c_pauses(stores, pauses):
         await asyncio.gather(*launched.exits)
     ended = [
-        f"  {arm.arm_key}: {arm.hop.campaign_id} — {dispatcher.run_state(arm.hop).run_phase.value}"
+        f"  {arm.arm_key}: {arm.hop.campaign_id} — {dispatcher.stores.run_state(arm.hop).run_phase.value}"
         for arm in started.arms
     ]
     subjects = " ".join(f"--subject campaign:{arm.hop.campaign_id}" for arm in started.arms)

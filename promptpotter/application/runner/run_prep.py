@@ -78,7 +78,9 @@ async def prepare_run(
         cell := await cell_bound(session, session.pipeline_params)
     ) is not None:
         # After the scorer, which the stop this raises is finalized with.
-        book.refuse_unpriced(cell, filed(CELL).kind, NEXT_CELL, "host")
+        book.refuse_unpriced(
+            cell, filed(CELL).kind, NEXT_CELL, session.backend_client.connector.cell_payer
+        )
     origin = await establish_campaign_origin(
         session,
         dataset,

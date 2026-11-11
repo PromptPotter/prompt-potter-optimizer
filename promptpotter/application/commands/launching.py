@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -81,6 +82,7 @@ from promptpotter.domain.run_records import (
     OriginSource,
 )
 from promptpotter.shared.errors import (
+    ConflictError,
     LedgerUnreadableError,
     NotFoundError,
     PayloadInvalidError,
@@ -195,7 +197,9 @@ def _launch_applier(
     (`relaunched`) before *refused_on*'s start refusal is asked."""
 
     async def _run() -> Launched:
-        if refused_on is not None and (refusal := dispatcher.run_state(refused_on).start_refusal):
+        if refused_on is not None and (
+            refusal := dispatcher.stores.run_state(refused_on).start_refusal
+        ):
             raise RejectedError(refusal)
         return await run()
 
@@ -362,14 +366,15 @@ async def _launch_fork(
 ) -> Launched:
     """Its parent untouched until the fork's run is held: a refused fork deletes its cut and
     leaves its parent's line, inbox, pointer and comparison as they stood. An operator's fork
-    then leaves its parent and the comparison by *leaving*; a diag sibling (``None``) neither."""
+    then leaves its parent and the comparison by *leaving*; a diag sibling (``None``) neither.
+    The parent is left BEFORE the cut is taken, so a fork that fails names no parent superseded."""
     stores, job_registry = dispatcher.stores, dispatcher.job_registry
     try:
         admitted = admit(
             request, mode, stores=stores, job_registry=job_registry, inline=dispatcher.inline
         )
     except BaseException:
-        cut.withdraw(stores)
+        cut.withdraw(stores, job_registry)
         raise
 
     async def _held_fork() -> HeldRun:
@@ -379,29 +384,33 @@ async def _launch_fork(
             if leaving is not None:
                 # It spends the arm's ceiling and moves its parent, so the campaign leaves.
                 stores.campaigns.leave_comparison(cut.child, leaving)
+                await _leave_parent(dispatcher, cut)
             cut.take(stores)
-            if leaving is not None:
-                # Last: no withdraw of the cut undoes it.
-                _leave_parent(dispatcher, cut)
         except BaseException as exc:
             if held is not None:
                 held.start.release(exc)
-            cut.withdraw(stores)
+            cut.withdraw(stores, job_registry)
             raise
         return held
 
     return await admitted.hand_over(_held_fork())
 
 
-def _leave_parent(dispatcher: CommandDispatcher, cut: ForkCut) -> None:
+async def _leave_parent(dispatcher: CommandDispatcher, cut: ForkCut) -> None:
     """On the fork's own authority over its parent: the parent's launch still queued is withdrawn,
-    otherwise its run paused; a parent no pause reaches is left as it stands."""
+    otherwise its run paused; a parent no pause reaches is left as it stands, its refusal the
+    pause's own outcome, filed on the parent's log."""
     stores, parent = dispatcher.stores, cut.parent
     claim = stores.campaigns.launch_claim(parent)
     if claim is not None and withdraw_queued(stores, dispatcher.job_registry, claim.job_id):
         return
-    if not dispatcher.run_state(parent).pause_refusal:
-        dispatcher.pause_superseded(parent, cut.child)
+    pause = PauseCyclePayload(
+        campaign_id=parent.campaign_id,
+        cycle_id=parent.cycle_id,
+        reason=f"superseded by fork {cut.child.cycle_id}",
+    )
+    with contextlib.suppress(ConflictError):
+        await dispatcher.dispatch(CommandCall(pause))
 
 
 async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[Launched]:

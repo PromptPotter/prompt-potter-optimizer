@@ -143,7 +143,7 @@
       },
       "ActiveSessionResponse": {
         "additionalProperties": false,
-        "description": "The tenant's latest launch — not the set of live runs, which is `state.attached` on `/hierarchy`.",
+        "description": "The run to follow (`followed_cycle`): a running one first, else the latest launch.",
         "properties": {
           "campaign_id": {
             "anyOf": [
@@ -154,7 +154,7 @@
                 "type": "null"
               }
             ],
-            "description": "Campaign of the latest launch; null when no session is active.",
+            "description": "Campaign of the run to follow; null when no session is active.",
             "title": "Campaign Id"
           },
           "cycle_id": {
@@ -166,7 +166,7 @@
                 "type": "null"
               }
             ],
-            "description": "Cycle of the latest launch; null when no session is active.",
+            "description": "Cycle of the run to follow; null when no session is active.",
             "title": "Cycle Id"
           },
           "tenant_id": {
@@ -5776,7 +5776,7 @@
             "description": "What the last resolver turn left, as `resolve-origin` answered it."
           },
           "resolution_pending": {
-            "description": "Its task is on file but no resolver turn ever set it up (`checkin_draft.py::DraftFile.resolution_pending`): the one case a reopen sends `resolve-origin`, so a revisit never re-buys a turn or re-proposes over authored prompts.",
+            "description": "Its task is on file and no resolver turn ever set it up (`checkin_draft.py::DraftFile.resolution_pending`): the one case a surface sends `resolve-origin` unasked, so a revisit never re-buys a turn or re-proposes over authored prompts. With no task on file a surface asks for one first; an empty answer sends `resolve-origin`, refused `resolver_not_owed` where no turn is owed.",
             "title": "Resolution Pending",
             "type": "boolean"
           },
@@ -14508,7 +14508,7 @@
       },
       "ResolveOriginPayload": {
         "additionalProperties": false,
-        "description": "One resolver turn over the draft's open gaps; what it proposes waits on a click.",
+        "description": "One resolver turn over the draft's open gaps; what it proposes waits on a click. The turn\nis bought only where one is owed (no turn ever set the draft up, and its prompts are not\nauthored), whichever door sends it: any other is refused `resolver_not_owed`, unless it is the\noperator's re-run.",
         "properties": {
           "draft_id": {
             "maxLength": 128,
@@ -14516,6 +14516,12 @@
             "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Draft Id",
             "type": "string"
+          },
+          "rerun": {
+            "default": false,
+            "description": "The operator asked for this turn again (the check-in's re-run): bought whether or not one is owed. An answer that names no task sends it without.",
+            "title": "Rerun",
+            "type": "boolean"
           }
         },
         "required": [
@@ -17370,7 +17376,7 @@
         "description": "What only the subtree read knows: it scans every sibling's ledger.",
         "properties": {
           "deletable_stubs": {
-            "description": "How many cycles `cleanup-empty-cycles` deletes here now (`CampaignStore.deletable_stubs`, the command's own list).",
+            "description": "How many cycles `cleanup-empty-cycles` deletes here now (`admission.py::deletable_stubs`, the command's own list: no held stub counts).",
             "title": "Deletable Stubs",
             "type": "integer"
           },
@@ -23675,7 +23681,7 @@
     },
     "/api/v1/sessions/active": {
       "get": {
-        "description": "The caller-tenant's active-session pointer: its latest launch from any entry point.\n\nNo active session is a steady state: it answers null ids, never a not-found.",
+        "description": "The caller-tenant's run to follow: one running first, else its latest launch (a resume is\none) from any entry point.\n\nNo active session is a steady state: it answers null ids, never a not-found.",
         "operationId": "active_session_api_v1_sessions_active_get",
         "responses": {
           "200": {

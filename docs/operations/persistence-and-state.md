@@ -30,7 +30,7 @@ A step's offset is the line index in its course's own ledger. A fork is stored a
 
 ## Active session pointer
 
-`.workspace/active_session.json` is the latest launch (`new`, a browser Start, a fork): the terminal's default target and what an unpinned webapp follows, never "what is running" (each course's `state` on `GET /hierarchy`). `--campaign` / `--cycle` override it for one command.
+`.workspace/active_session.json` is the latest launch: the cycle the latest run held (`new`, a browser Start, a fork, a resume, from any door), written where the run takes its producer lock, so a launch refused before its run holds moves nothing. It is what a verb naming no cycle acts on (`cycle_addressing.py::latest_launch`); `--campaign` / `--cycle` override it for one command. What a follower shows (`/sessions/active`: `/stage/`, an unpinned webapp) is `followed_cycle`: a cycle a run holds, the pointer's first, else the pointer.
 
 ## Verbs
 

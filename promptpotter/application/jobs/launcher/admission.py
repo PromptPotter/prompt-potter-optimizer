@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn, assert_never
 
@@ -123,7 +123,7 @@ class RunStart:
                 if job is not None and job.hop != UNRESOLVED_HOP:
                     stores.campaigns.release_claim(job.hop, job_id=self.job_id, detail=str(exc))
                 return
-            stores.campaigns.declare_stop(
+            stores.declare_stop(
                 stamps,
                 RunPhaseRecord.stop(
                     stop_reason,
@@ -140,7 +140,6 @@ class RunStart:
                     else ErrorRecord.raised(exc, kind="launch_failed", stop_reason=stop_reason)
                 ),
             )
-            stores.void_inbox(stamps)
         except Exception:
             logger.exception("failed to record launch stop for job %s", self.job_id)
 
@@ -178,7 +177,7 @@ def request_jobs(
                 launches=count,
             )
         if hop != UNRESOLVED_HOP:
-            _refuse_taken_cycle(stores, job_registry, hop)
+            refuse_taken_cycle(stores, job_registry, hop)
         if count > 1 and not job_registry.has_room(count):
             raise _machine_busy(job_registry)
         jobs = [
@@ -197,8 +196,44 @@ def request_jobs(
         return jobs
 
 
-def _refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> None:
-    """ONE check for launches and passes alike: a run attached, or a pass scoring it."""
+@contextmanager
+def destroying(
+    stores: Stores, job_registry: JobRegistry, campaign_id: str, *, cycle_id: str | None = None
+) -> Iterator[None]:
+    """THE guard of every destroyer (a campaign's archive or delete, a stub's, a refused fork's
+    cut, a landing's torn mint): under the admission gate, no cycle it destroys is taken, so no
+    launch or pass is admitted between the check and the act. *cycle_id* ``None`` destroys every
+    cycle of *campaign_id*, listed under the gate."""
+    with job_registry.admission_gate():
+        cycle_ids = (
+            [d.name for d in stores.campaigns.campaign_cycle_dirs(campaign_id)]
+            if cycle_id is None
+            else [cycle_id]
+        )
+        for one in cycle_ids:
+            refuse_taken_cycle(
+                stores, job_registry, CycleHop(campaign_id=campaign_id, cycle_id=one)
+            )
+        yield
+
+
+def deletable_stubs(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> list[CycleHop]:
+    """What `cleanup-empty-cycles` at *hop* deletes now, the count `/hierarchy` serves and the list
+    the command walks alike: its root's stub forks (`CampaignStore.stub_forks`) that no run or pass
+    holds (`refuse_taken_cycle`). The act asks again, under the gate (`destroying`)."""
+    free: list[CycleHop] = []
+    for stub in stores.campaigns.stub_forks(hop):
+        try:
+            refuse_taken_cycle(stores, job_registry, stub)
+        except CycleBusyError:
+            continue
+        free.append(stub)
+    return free
+
+
+def refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> None:
+    """ONE check for launches, passes and destroyers alike, asked under the admission gate: a run
+    attached, or a pass scoring it."""
     run = stores.run_state(hop)
     # The pass first: it registers before it holds the cycle, and holding reads as attached.
     if (holder := job_registry.pass_on(stores.campaigns.workspace, hop)) is not None:

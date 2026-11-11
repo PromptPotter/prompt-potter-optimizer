@@ -38,6 +38,7 @@ from factories import (
     close_round,
     delta_ruler,
     election_knobs,
+    fake_connector,
     filed,
     filed_under,
     inner_sandbox,
@@ -63,7 +64,7 @@ from factories import (
     walking_cycle,
     workspace,
 )
-from offline_world import FakeBackend, FakeHarness, Router
+from offline_world import FakeHarness, Router
 from pydantic import SecretStr, ValidationError
 
 from promptpotter import connectors
@@ -215,8 +216,7 @@ from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.config.paths import optimizers_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors import n8n
-from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector, cell_envelope_of
-from promptpotter.connectors.termnorm import termnorm_wire_adapter
+from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import (
     ArmSlot,
@@ -866,13 +866,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
 
     def connector_refuses(**declared: Any) -> bool:
         return table_refuses(
-            probe=Connector(
-                "probe",
-                termnorm_wire_adapter,
-                endpoint=lambda: "http://probe",
-                cell_envelope_s=cell_envelope_of(600.0),
-                **declared,
-            )
+            probe=fake_connector("probe", endpoint=lambda: "http://probe", **declared)
         )
 
     def package_evaluator_refuses(name: str) -> bool:
@@ -887,13 +881,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
 
     # The campaign's doors are run init's own: a connector reporting `rounds` as L4's does, a
     # pipeline mapping `env_reward`.
-    reporting = Connector(
-        "reporting",
-        termnorm_wire_adapter,
-        endpoint=lambda: f"http://{FakeBackend.AT}",
-        cell_envelope_s=cell_envelope_of(600.0),
-        reported_keys=("rounds",),
-    )
+    reporting = fake_connector("reporting", reported_keys=("rounds",))
     observed = PipelineNode(
         name="llm_only",
         tunes_llm=False,
@@ -3886,7 +3874,7 @@ def _evidence_campaign(
             ((s.id, cell) for cell, s in zip(walked, partition.search, strict=False)),
         )
     if rebased:
-        stores.campaigns.mark_superseded(root, hop.cycle_id)
+        stores.mark_superseded(root, hop.cycle_id)
     if graded:
         key, pick = (
             ArmKey(f"{cid}:selected"),

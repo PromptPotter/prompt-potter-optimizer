@@ -577,21 +577,18 @@ def resolved_output_schemas(
     return out
 
 
-def draft_config(stores: Stores, draft: DraftFile, declared: PipelineSchema) -> CampaignConfig:
-    """What Start declares and every read before it shows, over *declared*: the draft's chain
-    (`DraftPipeline.declared`). A free account's takes the tier's layer last, bound to each node's model."""
-    config = draft_declared(stores, draft)
+def _fenced(
+    stores: Stores, draft: DraftFile, config: CampaignConfig, declared: PipelineSchema | None
+) -> CampaignConfig:
+    """*config* as this account runs it, over *declared* (the draft's chain): a free account's
+    takes the tier's layer last, bound to each node's model."""
     fence = free_fence(stores, draft_backend_type(stores, draft))
     return config if fence is None else with_free_tier_layer(config, declared, fence)
 
 
 def draft_budget(stores: Stores, draft: DraftFile) -> Budget:
     """The ceiling a Start admits: no node bears on it, so it reads no pipeline."""
-    config = draft_declared(stores, draft)
-    fence = free_fence(stores, draft_backend_type(stores, draft))
-    if fence is not None:
-        config = with_free_tier_layer(config, None, fence)
-    return config.optimization.budget
+    return _fenced(stores, draft, draft_declared(stores, draft), None).optimization.budget
 
 
 def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
@@ -676,14 +673,16 @@ class _CampaignMerge(_Merge):
 
 @dataclass(frozen=True)
 class _DraftMerge(_Merge):
-    # The definition the check-in lays over the served pipeline, which an upload's Start writes.
+    # The two halves an upload's Start writes (`DraftPipeline`).
     local: dict[str, Any]
+    campaign: CampaignConfig
 
 
 def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> _DraftMerge:
     local = _draft_local(stores, draft)
     declared = parse_pipeline_response(served.over(local))
-    cfg = draft_config(stores, draft, declared)
+    campaign = draft_declared(stores, draft)
+    cfg = _fenced(stores, draft, campaign, declared)
     active, filtered = _resolve_active_schema(
         declared,
         exclude=list(cfg.exclude_nodes),
@@ -709,6 +708,7 @@ def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> _D
         free=_task_fenced(fence),
         steer_bound=False,
         local=local,
+        campaign=campaign,
     )
 
 
@@ -887,9 +887,9 @@ def resolve_pipeline_for_draft(
 @dataclass(frozen=True)
 class DraftPipeline:
     """The draft's pipeline before Start commits any of it: what its nodes run with, their rows,
-    the chain they run in, the chain as declared before the draft narrowed it, its config (the
-    campaign half), the definition it lays (an upload's Start writes it), and the backend that
-    serves it."""
+    the chain they run in, the chain as declared before the draft narrowed it, its config as this
+    account runs it, the two halves an upload's Start writes (`local`, the definition it lays;
+    `campaign`, its campaign half before the free tier's layer), and the backend that serves it."""
 
     params: PipelineParams
     rows: dict[str, list[NodeConfigParam]]
@@ -897,6 +897,7 @@ class DraftPipeline:
     declared: PipelineSchema
     config: CampaignConfig
     local: dict[str, Any]
+    campaign: CampaignConfig
     backend_type: str
 
     @functools.cached_property
@@ -921,6 +922,7 @@ def draft_pipeline(stores: Stores, draft: DraftFile, served: ServedPipeline) -> 
         m.declared,
         m.cfg,
         m.local,
+        m.campaign,
         served.connector,
     )
 

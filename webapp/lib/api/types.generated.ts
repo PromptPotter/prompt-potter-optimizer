@@ -191,14 +191,14 @@ export interface ActivityBucket {
   series_requests: Record<string, number>;
 }
 
-/** The tenant's latest launch — not the set of live runs, which is
- * `state.attached` on `/hierarchy`. */
+/** The run to follow (`followed_cycle`): a running one first, else the latest
+ * launch. */
 export interface ActiveSessionResponse {
   /** Tenant the pointer belongs to — the caller's own, always known */
   tenant_id: string;
-  /** Campaign of the latest launch; null when no session is active. */
+  /** Campaign of the run to follow; null when no session is active. */
   campaign_id: string | null;
-  /** Cycle of the latest launch; null when no session is active. */
+  /** Cycle of the run to follow; null when no session is active. */
   cycle_id: string | null;
 }
 
@@ -1171,7 +1171,8 @@ export interface SubtreeCampaignFacts {
   /** What the root course runs with; null where its pipeline did not resolve. */
   runs_with: CampaignRunsWith | null;
   /** How many cycles `cleanup-empty-cycles` deletes here now
-   * (`CampaignStore.deletable_stubs`, the command's own list). */
+   * (`admission.py::deletable_stubs`, the command's own list: no held stub
+   * counts). */
   deletable_stubs: number;
 }
 
@@ -3318,10 +3319,12 @@ export interface DraftReopenResponse {
   draft: DraftCampaignWire;
   /** What the last resolver turn left, as `resolve-origin` answered it. */
   resolution: OriginResolution;
-  /** Its task is on file but no resolver turn ever set it up
-   * (`checkin_draft.py::DraftFile.resolution_pending`): the one case a reopen
-   * sends `resolve-origin`, so a revisit never re-buys a turn or re-proposes
-   * over authored prompts. */
+  /** Its task is on file and no resolver turn ever set it up
+   * (`checkin_draft.py::DraftFile.resolution_pending`): the one case a
+   * surface sends `resolve-origin` unasked, so a revisit never re-buys a turn
+   * or re-proposes over authored prompts. With no task on file a surface asks
+   * for one first; an empty answer sends `resolve-origin`, refused
+   * `resolver_not_owed` where no turn is owed. */
   resolution_pending: boolean;
   /** The Start that holds it, at its stage, beside the command a reopen follows
    * until it mints or ends. Set, a reopen offers no second Start; its
@@ -5132,9 +5135,14 @@ export interface SetCampaignLabelPayload {
 }
 
 /** One resolver turn over the draft's open gaps; what it proposes waits on a
- * click. */
+ * click. The turn is bought only where one is owed (no turn ever set the
+ * draft up, and its prompts are not authored), whichever door sends it: any
+ * other is refused `resolver_not_owed`, unless it is the operator's re-run. */
 export interface ResolveOriginPayload {
   draft_id: string;
+  /** The operator asked for this turn again (the check-in's re-run): bought whether
+   * or not one is owed. An answer that names no task sends it without. */
+  rerun: boolean;
 }
 
 /** Hold the caller's own key for a provider: its sends there go out on it, past
@@ -5437,7 +5445,7 @@ export type ReadingState = 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_h
 export type SlotBound = 'throttle' | 'machine';
 
 // promptpotter.shared.errors::LaunchRefusalReason
-export type LaunchRefusalReason = 'used_up' | 'held' | 'over_declared' | 'no_key';
+export type LaunchRefusalReason = 'used_up' | 'held' | 'over_declared' | 'no_key' | 'unpriced';
 
 // promptpotter.shared.account_tabs::AccountTab
 export type AccountTab = 'profile' | 'usage' | 'keys' | 'activity' | 'preferences' | 'storage' | 'about';
@@ -5751,6 +5759,7 @@ export const LAUNCH_REFUSAL_LABELS: Record<LaunchRefusalReason, string> = {
   "held": "Allowance held",
   "over_declared": "Ceiling past the allowance",
   "no_key": "No key for a provider",
+  "unpriced": "No rate bounds the cells",
 };
 
 // Mirror of application/knobs.py::COUPLING_SEVERITY_INFO, in display order.
@@ -6222,7 +6231,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [SUBJECT_KIND_LABELS, ["campaign", "course", "candidate"]],
   [ACTIVITY_WINDOW_INFO, ["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"]],
   [SLOT_BOUND_WORDS, ["throttle", "machine"]],
-  [LAUNCH_REFUSAL_LABELS, ["used_up", "held", "over_declared", "no_key"]],
+  [LAUNCH_REFUSAL_LABELS, ["used_up", "held", "over_declared", "no_key", "unpriced"]],
   [COUPLING_SEVERITY_INFO, ["collision", "inert", "info"]],
   [SCORE_LENS_LABELS, ["score:accuracy"]],
   [ABORT_LENS_LABELS, ["abort:epsilon_off", "abort:lock_in_off", "abort:all_off"]],

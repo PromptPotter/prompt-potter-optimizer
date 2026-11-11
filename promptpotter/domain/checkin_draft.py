@@ -82,14 +82,16 @@ class DraftFile(FrozenModel):
         """The dataset it runs on: the one it was cut from, or an upload's, minted under its slug."""
         return self.basis.dataset if isinstance(self.basis, DatasetBasis) else self.slug
 
+    def resolver_owed(self) -> bool:
+        """No turn ever set this draft up, so a revisit never re-buys one, and an origin's or the
+        operator's authored prompts are never re-proposed over."""
+        return not self.resolver_ran and not self.authored_prompts()
+
     def resolution_pending(self) -> bool:
-        """The task is on file and no resolver turn ever set it up: a reopen resolves, while an
-        origin's or the operator's authored prompts are never re-proposed over."""
-        return (
-            self.raw_task_description is not None
-            and not self.resolver_ran
-            and not self.authored_prompts()
-        )
+        """THE unasked resolver turn, every door's: a task on file, the turn owed. With no task on
+        file a door asks for one first, and an empty answer (the browser's empty Send, a `new
+        <file>` naming none) sends `resolve-origin`, which buys the turn only where it is owed."""
+        return self.raw_task_description is not None and self.resolver_owed()
 
     def confirmed_task(self) -> str:
         """The task a Start commits: the gate refuses every Start before one is confirmed."""

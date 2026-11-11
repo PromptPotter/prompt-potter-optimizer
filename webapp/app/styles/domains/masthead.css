@@ -22,20 +22,6 @@
 .figure-door:focus-visible{outline:2px solid var(--color-accent);outline-offset:-2px}
 .figure-door.is-lit{color:var(--color-accent)}
 
-/* The stage view is read across a room: its type scales with the screen, past the token ramp. */
-.run-header.is-stage{--stage-lead:max(var(--text-3xl),min(5.5cqi,22svh));--stage-figure:max(var(--text-lg),min(3.5cqi,7svh));--stage-label:max(var(--text-xs),1.6svh);display:flex;flex-direction:column;min-block-size:50svh}
-.run-header.is-stage .run-header-inner{flex:1}
-.stage{container-type:inline-size;flex:1;display:flex;flex-direction:column;justify-content:center;gap:var(--space-24);padding-block:var(--space-16)}
-/* Its values wrap, so a narrow screen stacks the climb and breaks the lead rather than overrun. */
-.run-header .stage .figure-row{margin:0;display:grid;grid-auto-flow:row;grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr));overflow:visible;gap:var(--space-16)}
-.run-header .stage .figure-value{white-space:normal}
-.stage .figure dt{font-size:var(--stage-label)}
-.stage > .figure-row .figure-value{font-size:var(--stage-lead);font-weight:700;line-height:1.1;letter-spacing:-0.03em}
-.stage-climb .figure-value{font-size:var(--stage-figure);line-height:1.1}
-/* Notes quieter than data: the stage keeps each figure's sub, and the climb's caveat, small and secondary. */
-.run-header .stage .figure-sub{display:-webkit-box;font-size:var(--stage-label)}
-.stage-climb .said{margin-top:var(--space-12);font-size:var(--stage-label)}
-
 /* A wide screen's sidebar names the bare workspace. */
 @media not all and (max-width:880px){.run-header.is-bare{display:none}}
 

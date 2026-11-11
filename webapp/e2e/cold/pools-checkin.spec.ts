@@ -6,7 +6,7 @@ import { promptField } from "@/lib/prompt-fields";
 import { test, expect, open, command, datasetNames, drafts, passConsent, type Draft } from "../harness";
 import { COLD_HOME } from "../world";
 
-// The check-in writes the overlay `--set nodes.{node}.config.{knob}` writes, so reading the draft's
+// The check-in writes the overlay `--set config.optimization.nodes.{node}.config.{knob}` writes, so reading the draft's
 // `config.optimization.nodes` back is reading the terminal's draft.
 
 const PACK = "e2e";

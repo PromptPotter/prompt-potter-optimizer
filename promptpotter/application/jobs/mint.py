@@ -86,7 +86,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     runnable_definition,
 )
 from promptpotter.infrastructure.store.io import validate_path_component
-from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 
@@ -279,6 +278,18 @@ def resolve_cycle_plan(
     )
 
 
+class ConnectorMovedError(ConflictError):
+    code = "connector_moved"
+
+    def __init__(self, campaign: Campaign, *, bound: str) -> None:
+        super().__init__(
+            f"campaign {campaign.campaign_id} was minted on {campaign.connector}, and "
+            f"{campaign.dataset_name} now names {bound}, so nothing ran: its measurements are "
+            f"{campaign.connector}'s. Point {campaign.dataset_name} back at {campaign.connector}, "
+            "or start a fresh campaign on it; this one is preserved."
+        )
+
+
 class ConfigDriftError(ConflictError):
     code = "config_drift"
 
@@ -348,7 +359,9 @@ def _revision_moved(
 
 def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> CyclePlan:
     """*session* is bound to the cycle the resume runs; the plan is that cycle's, configured, every
-    refusal asked of the selection it answers."""
+    refusal asked of the selection it answers, first the connector *session* is bound to."""
+    if (bound := session.backend_client.connector.name) != campaign.connector:
+        raise ConnectorMovedError(campaign, bound=bound)
     plan = resolve_cycle_plan(session, campaign.declaration, dataset)
     checked = plan
     if session.hop != campaign.root_hop:
@@ -594,7 +607,6 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     session.store.tenant_datasets.relabel(session.measured_dataset, declaration.dataset_hash)
     ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
     declare_run_wiring(session, plan.cycle.config, ledger, selected=plan.optimizer)
-    save_active_pointer(session.store.base_dir, hop)
     logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
     return session
 

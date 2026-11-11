@@ -17,15 +17,20 @@ header, then the operator asked about a release.
    process entry: stream, stream-b, land, reads, weba, visits.
 3. **batch/23** — one launch answer at every door and `RunStart` owning the slot; one change feed, no
    read on a clock; the climb on the selection, vs parent too, as the lead line: startb, feed, narr-c.
-4. **batch/24** — one stop door, the connector declares itself, the doors: stopb, conn, doors, tv.
-5. **batch/25** — run init as one module, one pass verb, served arm rows: init, admit on its tip, passb, webb. The
-   decision window opens.
+4. **batch/24** — one stop door that voids the inbox; each connector declares its payer, bound and
+   pricing, and a resume runs on the campaign's; one resolver rule, `--set` on the patch's own paths,
+   no read opens an account; the stage view as its own route, following the running campaign: stopb,
+   conn-2, doors, tv. tv's exhibit (link 3) rides tv-2 (batch/29).
+5. **batch/25** — run init as one module, one admission for every launch, one pass verb, served arm
+   rows: init-2, admit on its tip, passb, webb-3. The decision window opens.
 6. **batch/26** — every re-key: money, rk-opt and stream-rk on its tip (`RunCallbacks` and the
    `declare_*` doors), then narr (one narration, the typed phase act) on stream-rk's; rk-run, addr;
-   then rk-dec; then rn-conn. The window closes.
+   then payer (who pays a connector's send) and rk-dec beside it, on the assembled tip, rk-run's
+   included; then rn-conn. The window closes.
 7. **batch/27** — records and layout: rec, la, lw; md if the operator says so.
 8. **batch/28** — lb, then faults on its tip.
-9. **batch/29** — lite (LiteLLM out of core), xconn, mkey, then mcp on mkey's tip.
+9. **batch/29** — lite (LiteLLM out of core), xconn, mkey, then mcp on mkey's tip; tv-2 (the host's
+   exhibit, read-only to followers) beside them under one access review.
 10. **batch/30** — ws, forks, the block picker's census.
 11. **batch/31** — tune, small, pick, box (the operator runs it).
 12. **batch/32** — ts-arch, ts-score, ts-spend; then ren; then rel and `gate.py --release`.
@@ -36,7 +41,7 @@ check-in, their lift and n kept, the origin field's snippet ids served, the prov
 **Rules.** No paid run between batch/25's start and batch/26's push. From batch/22 the landing drops
 unloadable run data itself; a survivor reshape ships its migration in its landing; the live box asks.
 A short window defers from the end (pending tracks, ren, faults, the ts private-reach link, lb, la, lw),
-never w0, the trim, stream, startb, stopb, land, init, money, rk-opt, rk-run or rel.
+never w0, the trim, stream, startb, stopb, land, init-2, admit, money, rk-opt, rk-run, payer or rel.
 
 **Forks left to the operator** (taste and policy; a chain leaves each as it stands): whether `log.md`
 and `review.md` go (md) · whether the visits analytics move to the site repo · what "calls held equal"

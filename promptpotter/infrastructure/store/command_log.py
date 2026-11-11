@@ -7,6 +7,7 @@ one line and no later line moves what it reads."""
 
 from __future__ import annotations
 
+import sys
 from bisect import bisect_right
 from collections.abc import Iterator
 from pathlib import Path
@@ -69,6 +70,18 @@ class Controls(NamedTuple):
     lookahead: LookaheadAsk | None = None
     gate_decisions: tuple[tuple[str, str], ...] = ()
     submissions: tuple[tuple[str, SubmitArmsPayload], ...] = ()
+
+
+def requested_lookahead(controls: Controls) -> int:
+    ask = controls.lookahead
+    if ask is None:
+        return 1
+    return sys.maxsize if ask.auto else ask.cells
+
+
+def effective_lookahead(requested: int, ceiling: int) -> int:
+    """The one clamp: the command records the request UNCLAMPED, the ceiling being the backend's."""
+    return max(1, min(requested, ceiling))
 
 
 LOOP_KINDS = frozenset(

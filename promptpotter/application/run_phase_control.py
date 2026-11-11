@@ -11,8 +11,7 @@ from promptpotter.domain.phases import (
     PauseCause,
     StopReason,
 )
-from promptpotter.infrastructure.runtime_flags import requested_lookahead
-from promptpotter.infrastructure.store.command_log import CommandLog, Controls
+from promptpotter.infrastructure.store.command_log import CommandLog, Controls, requested_lookahead
 
 if TYPE_CHECKING:
     from promptpotter.domain.command_kinds import SubmitArmsPayload

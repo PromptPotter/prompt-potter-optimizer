@@ -74,7 +74,8 @@ export function useCampaign(address: string | null): HierarchyCampaign | null {
   return address === null ? null : campaignAt(byAddress, address);
 }
 
-// The latest launch's cycle, under the served names: both ids, or none.
+// The followed run's cycle (`cycle_addressing.py::followed_cycle`), under the served names: both
+// ids, or none.
 export type ActiveCycle = { [K in "campaign_id" | "cycle_id"]: NonNullable<ActiveSessionResponse[K]> };
 
 interface ActivePointer {

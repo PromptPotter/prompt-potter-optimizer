@@ -32,7 +32,7 @@ A key is ABSENT when the backend reported nothing; a present key holds its decla
 
 ### What a backend owes a campaign under a spend ceiling — required
 
-A ceiling is enforced before a cell is SENT, at the most the cell may cost; without these, every cell is refused. A backend whose limits are all ones we send derives the bound in its connector.
+A ceiling is enforced before a cell is SENT, at the most the cell may cost; without these, every cell is refused. A backend whose limits are all ones we send derives the bound in its connector. A connector whose cells no rate bounds declares `cells_priced=False` (n8n): a launch under a dollar ceiling, the run's or the host's allowance, is refused at the mint, `budget_unenforceable`.
 
 - **`/pipeline` serves `spend_bound` on every node that can bill** — `{kind: "llm", attempts, input_bytes, max_tokens}` plus `hosts` where `allow_fallbacks: false`; `{kind: "web", queries, usd_per_query}`. COUNTS the backend enforces, never prices: PromptPotter prices them at the dearest host.
 - **Every billed attempt is reported** in `step_tokens`, a failed one too (`data.step_tokens` on the error envelope); none reported holds the cell at its whole bound. A backend that retries on its own owes `unreported_attempts`.

@@ -51,6 +51,7 @@ from promptpotter.infrastructure.producer_lock import (
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
+from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import instrument_depth
@@ -93,13 +94,12 @@ def declare_run_stop(
         token_cap=budget.tokens,
         share=Budget() if held is None else held.allotment.only(MONEY_AXES),
     )
-    ledger = observers.callbacks.ledger
     if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
         stop = RunPhaseRecord.stop(stop_reason, spend=spend)
     else:
         cause, detail = session.state.control.take_pause() or (interrupted_by, "")
         stop = RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend)
-    ledger.append(stop)
+    session.store.declare_stop(session.hop, stop)
 
 
 def declare_run_wiring(
@@ -231,11 +231,9 @@ def build_run_observers(
         bind_account(session.store)
         # A launch is a run boundary; the run a gate held resumes, what it was asked standing.
         if prior is None or prior.run_phase is not RunPhase.GATE:
-            session.store.commands.void(
-                session.store.subject(session.hop),
-                f"the launch of {session.hop.cycle_id}",
-                before=held_since,
-            )
+            session.store.void_inbox(session.hop, before=held_since)
+        # The latest launch is the latest run held: a mint, a fork or a resume, from every door.
+        save_active_pointer(session.store.base_dir, session.hop)
     except BaseException:
         _let_go(projecting, cycle_dir)
         raise

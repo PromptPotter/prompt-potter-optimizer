@@ -470,10 +470,12 @@ CONNECTOR = Connector(
     execution="in_process",
     wire_adapter=dbllmbench_wire_adapter,
     cell_envelope_s=cell_envelope_of(_CELL_ENVELOPE_S),
+    cell_payer="host",
+    sent_spend_bound=_sent_spend_bound,
+    cells_priced=True,
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
     preflight=_preflight,
-    sent_spend_bound=_sent_spend_bound,
     # Every cell queries the same database, so the ceiling is this machine's.
     max_cells_in_flight=2,
     cells_hold_the_machine=True,

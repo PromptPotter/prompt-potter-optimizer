@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.store.data_root import PRODUCER_LOCKS, Fate, Kind, classify
 from promptpotter.infrastructure.store.draft_store import DraftStore
@@ -20,8 +21,12 @@ from promptpotter.infrastructure.store.io import (
     unlink_robust,
 )
 from promptpotter.infrastructure.store.layout import (
+    campaign_root_dir_for,
+    campaigns_root_dir_for,
     draft_claim_path,
+    draft_dir_for,
     draft_dirs,
+    drafts_root_dir_for,
     in_inner_sandbox,
     inner_sandboxes_dir,
     read_sandbox_owner,
@@ -73,21 +78,51 @@ def _drop(path: Path, size: int, data_root: Path) -> Drop | None:
     return Drop(path, size, found.kind) if found.kind.fate is Fate.RUN else None
 
 
-def _live(
-    projects_root: Path,
-    roots: tuple[Path, ...],
-    drops: tuple[Drop, ...],
-    staged: Mapping[Path, bytes],
+def live_jobs(registry: JobRegistry) -> tuple[Job, ...]:
+    """Every job whose run may yet write: each that holds spend, and each queued on its claim."""
+    return (*registry.list_holding_spend(), *registry.list_queued())
+
+
+def _reaches(job: Job, root: Path) -> bool:
+    """What a live job's run may write under *root*: its workspace's own files (the account's
+    log, its ledger) and its campaign, its draft too; a mint in flight names no campaign yet, so
+    all of its workspace."""
+    workspace = WorkspaceDir(Path(job.workspace).resolve())
+    if workspace.is_relative_to(root) or (
+        job.hop == UNRESOLVED_HOP and root.is_relative_to(workspace)
+    ):
+        return True
+    if not root.is_relative_to(workspace):
+        return False
+    owned = [campaign_root_dir_for(workspace, job.campaign_id)]
+    if isinstance(job.holder, CampaignLaunch) and job.holder.draft_id is not None:
+        owned.append(draft_dir_for(workspace, job.holder.draft_id))
+    if any(root.is_relative_to(one) or one.is_relative_to(root) for one in owned):
+        return True
+    others = (campaigns_root_dir_for(workspace), drafts_root_dir_for(workspace))
+    return not any(root.is_relative_to(one) for one in others)
+
+
+def holder_in_reach(
+    jobs: Iterable[Job], roots: Iterable[Path], locks: Iterable[Path]
 ) -> str | None:
-    """`delete-campaign`'s guard over every cycle the reset reaches, and every run a job holds there."""
-    for drop in drops:
-        if drop.kind in PRODUCER_LOCKS and producer_lock.held(drop.path):
-            return f"{drop.path.parent} has a live producer — pause or stop it first"
+    """THE guard of the wipes that read no ledger (a reset's drops, a landing's run wipe), asked
+    at the plan and again at the act under the admission gate: who holds one of *locks* (producer
+    locks), or a live job whose run reaches a root (`_reaches`)."""
+    for lock in locks:
+        if producer_lock.held(lock):
+            return f"a live producer of {lock.parent}"
     resolved = [root.resolve() for root in roots]
-    for job in JobRegistry.as_staged(jobs_dir(projects_root), staged).list_holding_spend():
-        if any(Path(job.workspace).resolve().is_relative_to(root) for root in resolved):
-            return f"{job.what} ({job.job_id}) holds spend — pause or stop it first"
+    for job in jobs:
+        if any(_reaches(job, root) for root in resolved):
+            return f"{job.what} ({job.job_id})"
     return None
+
+
+def _live(roots: tuple[Path, ...], drops: tuple[Drop, ...], registry: JobRegistry) -> str | None:
+    locks = (drop.path for drop in drops if drop.kind in PRODUCER_LOCKS)
+    held = holder_in_reach(live_jobs(registry), roots, locks)
+    return None if held is None else f"{held} is live in reach — pause or stop it first"
 
 
 def _claimed(workspaces: tuple[WorkspaceDir, ...]) -> str | None:
@@ -125,21 +160,23 @@ def plan_reset(
             else:
                 drops.append(drop)
     held = tuple(sorted(drops, key=lambda d: d.path))
+    registry = JobRegistry.as_staged(jobs_dir(projects_root), staged)
     return ResetPlan(
         projects_root,
         roots,
         workspaces,
         held,
         kept,
-        _claimed(workspaces) or _live(projects_root, roots, held, staged),
+        _claimed(workspaces) or _live(roots, held, registry),
         staged,
     )
 
 
 @contextmanager
-def resetting(plan: ResetPlan) -> Iterator[None]:
-    """The plan's drops go as the block ends, once every draft's claim is held and no run is live in
-    reach; a refusal or a raise inside the block drops nothing."""
+def resetting(plan: ResetPlan, registry: JobRegistry) -> Iterator[None]:
+    """The plan's drops go as the block ends, once every draft's claim is held and, under
+    *registry*'s admission gate (the jobs read as the plan's staged files leave them), no run is
+    live in reach; a refusal or a raise inside the block drops nothing."""
     if plan.refusal is not None:
         raise ConflictError(f"refusing to reset: {plan.refusal}")
     with ExitStack() as held:
@@ -148,7 +185,9 @@ def resetting(plan: ResetPlan) -> Iterator[None]:
             for draft in draft_dirs(workspace):
                 held.enter_context(DraftStore(workspace).hold(draft.name))
                 claims.add(draft_claim_path(workspace, draft.name))
-        if (live := _live(plan.projects_root, plan.roots, plan.drops, plan.staged)) is not None:
+        # After the claims, as a Start takes them: its draft's claim, then the gate.
+        held.enter_context(registry.admission_gate())
+        if (live := _live(plan.roots, plan.drops, registry)) is not None:
             raise ConflictError(f"refusing to reset: {live}")
         yield
         for drop in plan.drops:
@@ -166,5 +205,5 @@ def resetting(plan: ResetPlan) -> Iterator[None]:
 
 def apply_reset(plan: ResetPlan) -> None:
     """Reads no ledger: a reset follows a reshape this build cannot read, and the account's charges hold its spend."""
-    with resetting(plan):
+    with resetting(plan, JobRegistry.as_staged(jobs_dir(plan.projects_root), plan.staged)):
         return

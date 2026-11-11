@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, BackgroundTasks, Request, Response
+from fastapi import APIRouter, Request, Response
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
@@ -51,7 +51,6 @@ from promptpotter.application.read_params import (
 from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.presentation.api.deps import CallerDep, read_input
-from promptpotter.presentation.api.routers.auth import arrive
 from promptpotter.shared.named_rows import returned
 
 reads_router = APIRouter(tags=["Reads"])
@@ -113,12 +112,10 @@ class _Asked:
     """What a framed row reads of its request beside its params."""
 
     request: Request
-    background: BackgroundTasks
     caller: Caller
 
 
 def _me(asked: _Asked, read: MeParams) -> Response:
-    arrive(asked.request, asked.background, asked.caller.stores)
     return _model_json(read.answer(asked.caller))
 
 
@@ -216,11 +213,7 @@ _FRAMED: dict[ReadKind, _Framing] = {
 
 def _endpoint(params: type[ReadParams], framing: _Framing | None) -> Callable[..., Any]:
     async def answer(
-        request: Request,
-        response: Response,
-        background: BackgroundTasks,
-        caller: Caller,
-        read: ReadParams,
+        request: Request, response: Response, caller: Caller, read: ReadParams
     ) -> object:
         # Taken before the body, so the body stands on at least these.
         named = request.headers.get(FEED_SUBJECT_HEADER)
@@ -232,7 +225,7 @@ def _endpoint(params: type[ReadParams], framing: _Framing | None) -> Callable[..
         if framing is None:
             answered: object = await read.answered(caller)
         else:
-            answered = await off_loop(framing.respond, _Asked(request, background, caller), read)
+            answered = await off_loop(framing.respond, _Asked(request, caller), read)
         if stood is not None:
             framed = answered if isinstance(answered, Response) else response
             framed.headers[FEED_VERSIONS_HEADER] = json.dumps(stood, separators=(",", ":"))
@@ -243,7 +236,6 @@ def _endpoint(params: type[ReadParams], framing: _Framing | None) -> Callable[..
         [
             inspect.Parameter("request", keyword, annotation=Request),
             inspect.Parameter("response", keyword, annotation=Response),
-            inspect.Parameter("background", keyword, annotation=BackgroundTasks),
             inspect.Parameter("caller", keyword, annotation=CallerDep),
             inspect.Parameter("read", keyword, annotation=Annotated[params, read_input(params)]),
         ]

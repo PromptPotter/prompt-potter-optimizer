@@ -110,7 +110,7 @@ async def cmd_land_data(args: argparse.Namespace) -> CommandResult:
         landing = plan_landing(projects_root, reset=args.reset)
         written = not (landing.refused or args.dry_run)
         if written:
-            apply_landing(projects_root, landing)
+            landing = apply_landing(projects_root, landing)
     return CommandResult(
         data={
             "written": written,

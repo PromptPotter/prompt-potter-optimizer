@@ -81,7 +81,7 @@ test.describe("the view axis", () => {
   test("the pinned cycle is named on screen and can be released", async ({ page, rich }) => {
     await open(page, rich.addr);
     await expect(page.getByText(`ID: ${rich.cycleId}`)).toBeVisible();
-    await page.getByRole("button", { name: /Follow the latest launch/ }).click();
+    await page.getByRole("button", { name: /Follow your run/ }).click();
     await expect.poll(() => new URL(page.url()).hash).not.toContain(rich.id);
   });
 });

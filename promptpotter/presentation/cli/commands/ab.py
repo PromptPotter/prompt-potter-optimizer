@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.ab_replay import ab_replay_cycle
 from promptpotter.application.cycle_addressing import (
-    active_pointer,
+    latest_launch,
     named_campaign,
     resolve_cycle_id,
 )
@@ -31,7 +31,7 @@ def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
             cycle_id = resolve_cycle_id(stores, root.campaign_id, args.cycle)
             return CycleHop(campaign_id=root.campaign_id, cycle_id=cycle_id)
         return root
-    hop = active_pointer(stores)
+    hop = latest_launch(stores)
     if hop is None:
         refusal = NotFoundError("No active campaign: pass --campaign, or start one.")
         refusal.add_note(no_dataset_hint(stores))
