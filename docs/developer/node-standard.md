@@ -28,11 +28,11 @@ Shown as JSON, the wire form; authored as YAML.
 }
 ```
 
-`pipelines` composes named sequences from the node pool; a node may appear in several. Prompts and schemas are referenced by `(family, version)` from each node's `config` against `resolved_prompts` / `resolved_schemas`; an optimizer manifest takes `resolved_schemas` from its generated sibling `resolved_schemas.json` (`scripts/build_optimizer_schemas.py`).
+A node may appear in several `pipelines`. An optimizer manifest takes `resolved_schemas` from its generated sibling `resolved_schemas.json` (`scripts/build_optimizer_schemas.py`).
 
 ## The shape, and what PromptPotter reads of it
 
-The parser builds `PipelineSchema` / `PipelineNode` / `ObservationMapping` (`domain/pipeline_schema.py`). **Read the required set, the types and the defaults off those models.** `PipelineNode` is built from `type`, `node_role`, `config` and `optimizer`; `description`, `runtime`, `short_circuit` and `input_schema` are the backend's self-description for a human reader (`description` rides the served `view`). A key PP does not use still belongs in the file — "required" means *a connector must publish it*.
+**Read the required set, the types and the defaults off `domain/pipeline_schema.py`'s models.** `description`, `runtime`, `short_circuit` and `input_schema` are the backend's self-description for a human reader; a key PP does not use still belongs in the file — "required" means *a connector must publish it*.
 
 What the models cannot state:
 
@@ -50,7 +50,7 @@ What the models cannot state:
 Opt-in; a deterministic node declares none.
 
 - **Exit point** — a node producing candidates writes its `pipeline_key`; its cells are filed under the node-chain prefix that produced them.
-- **Stop rules** — a `StopRule` returns a `StopSignal` whose `WalkStop` is `broken`, `eliminated` or `locked_in` (`domain/validators.py`); a verdict flows by return value, never an exception. The bench's `application/scoring/classification.py::DegradationCheck` stops a walk `broken` on a deprecated-sample rate or on the first row `classify_result()` marks fatal.
+- **Stop rules** — a verdict flows by return value (`domain/validators.py`), never an exception. The bench's `application/scoring/classification.py::DegradationCheck` stops a walk `broken` on a deprecated-sample rate or on the first row `classify_result()` marks fatal.
 - **Warnings** — per-sample warnings pin to the configuration that produced them and reach the optimizer through `evidence_health` / `diagnostics`, never selecting samples.
 
 LLM nodes additionally:
@@ -58,7 +58,7 @@ LLM nodes additionally:
 - **Prompt exposure** — `prompt_info.fields` (`domain/pipeline_schema.py::NodePromptInfo`, required) names the target prompt's parts in render order, and that order sits inside the archive key.
 - **Shots are part of the target prompt, carried by key and rendered last.** `shots` name demo-pool rows (`DatasetSplit.demo`) by `Sample.key`; `OptSearchPoint.scored_prompts(schema, framing, demo=)` resolves them after the fields. The individual never carries a row's text; the export carries the resolved block. A demo row is never scored and never reaches a panel or the bench set. Editors: `l1_generate`'s `shots` slot (`k_max`, `validators/l1_strict.py::l1_shots_in_demo_pool`); an `algorithm` member without a model call (`optimizers/capo/members.py::FewShot`, `cross_shots`).
 - **Optimizer-discoverable parameters** — declared accepted values become search axes, hardcoded on neither side.
-- **Self-healing** — a `ValidationFailure` at parse time, a `RuntimeFailure` mid-run: [`self-healing-internals.md`](self-healing-internals.md) § The wounds, mapped to the two axes.
+- **Self-healing** — a `ValidationFailure` at parse time (`bench/children.py::overlay_failures`), a `RuntimeFailure` mid-run (`application/scoring/arm_states.py::read_breakage`).
 
 ## Optimizer node types
 
@@ -80,7 +80,7 @@ An `llm` node's role is its position: before the measurement it PROPOSES, after 
 
 ## How the prediction is read
 
-`predicted` is the head of the terminal ranker's output, not a fixed key: `terminal_ranking(result, schema)` (`promptpotter/application/scoring/classification.py`) walks the schema in reverse for the last node with `node_role ∈ {ranker, candidate_source}` that wrote its `pipeline_key`, and `sample_measurement.py` takes the head (`extract_item_label`). The pipeline SHAPE decides the source, never the key name; one with no terminal ranker emits no prediction (every sample `NO_RESULT`), and init warns.
+`predicted` is the head of the last `ranker` or `candidate_source` node's output that wrote its `pipeline_key` (`application/scoring/classification.py::terminal_ranking`): the pipeline SHAPE decides the source, never the key name. One with no terminal ranker emits no prediction (every sample `NO_RESULT`), and init warns.
 
 ## Strict parsing
 

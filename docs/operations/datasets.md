@@ -6,8 +6,8 @@ The measurement roster, the admission bar and the order of use are [`../research
 
 A focus dataset for L1 optimizer prompt evolution:
 
-1. **Origin in band** — `gpt-oss-20b @ low` scores 15–40% at origin: below is a floor effect, above leaves no headroom over PoBB noise.
-1b. **Origin clears its CONSTANT-ANSWER floor** — a stub emitting the commonest label, read off the `answer_distribution` panel; `domain/scoring.py::is_answer_collapsed` withholds θ from a collapsed candidate.
+1. **Origin in band** — the band, and how far to trust it, is [`../research/benchmarks.md`](../research/benchmarks.md) § The admission bar's.
+1b. **Origin clears its CONSTANT-ANSWER floor** — a stub emitting the commonest label, read off the `answer_distribution` panel.
 2. **Reachable ceiling** of 50–75% under strong prompt engineering.
 3. **N ≥ 400, preferably 800+**; smaller N needs per-subtask stratification.
 4. **Multiple distinct subtask categories** — each an independent L1 lever.
@@ -29,7 +29,7 @@ A trialed dataset outside its band is recorded rejected in benchmarks.md with th
 
 ### What a cell costs
 
-A containerized agent episode costs 14–48× an `llm_only` call. Latency is `domain/scoring.py::MeasuredCell.cost_s`, which survives a cache replay; the tail is the host's more than the model's — a wall-clock claim pins `route_order` and names the host. An episode's spend is bounded per send (`connectors/harbor.py::_sent_spend_bound`), its clock by `Connector.cell_envelope_s`.
+A containerized agent episode costs 14–48× an `llm_only` call. Latency survives a cache replay; the tail is the host's more than the model's — a wall-clock claim pins `route_order` and names the host.
 
 ## The model a dataset runs
 
@@ -46,7 +46,7 @@ A containerized agent episode costs 14–48× an `llm_only` call. Latency is `do
 
 ### The agent model on a Harbor dataset
 
-The candidate prompt reaches the agent only as an injected `SKILL.md`. Operator decisions: **two delivery modes, and a result names its mode** — *advanced* (default; the agent must open the skill, so read `skill_opened` before the score) and *primitive* (the skill injected into context; cheap, fast models do not open a skill, so SealQA at `max_turns: 4` is primitive-mode). **Rank by speed** (`step_phases.agent_execution`, never total cell time), then headroom, then cost (ceiling 3× `gpt-oss-20b`); banned on cost: `google/gemini-3.5-flash`, `qwen/qwen3.6-27b`. **Pin one host per model via `route_order`, and probe hosts first** — one model's hosts differed tenfold in throughput. A harbor agent's effort rides its gateway's `reasoning` body (`infrastructure/llm/openai_compat.py::gateway_body`); its cells are keyed by their sender (`connectors/harbor.py::_AGENT_SENDER`).
+The candidate prompt reaches the agent only as an injected `SKILL.md`. Operator decisions: **two delivery modes, and a result names its mode** — *advanced* (default; the agent must open the skill, so read `skill_opened` before the score) and *primitive* (the skill injected into context; cheap, fast models do not open a skill, so SealQA at `max_turns: 4` is primitive-mode). **Rank by speed** (`step_phases.agent_execution`, never total cell time), then headroom, then cost (ceiling 3× `gpt-oss-20b`); banned on cost: `google/gemini-3.5-flash`, `qwen/qwen3.6-27b`. **Pin one host per model via `route_order`, and probe hosts first** — one model's hosts differed tenfold in throughput.
 
 ### Pick the model for what the run does
 
@@ -61,4 +61,4 @@ A new dataset is a tenant definition (`.promptpotter/projects/{tenant}/datasets/
 1. **Research the canonical protocol first** — the author-recommended split and evaluation protocol, every claim cited; for a private task the operator names the slice reserved as test.
 2. **Record it in `README.md`** — a **Data** section quoting the protocol with citations, sample counts and any sister training set. A multi-turn task is ONE cell with a fixed SEMANTIC step schema, never a turn index ([`../specs/roadmap.md`](../specs/roadmap.md) § Judged and turn-structured scoring; [`../../promptpotter/application/scoring/judges/CLAUDE.md`](../../promptpotter/application/scoring/judges/CLAUDE.md) § The step schema).
 3. **The operator confirms the cut before any wire.** Never invent a split; a canonical test set consumed as an optimization pool is not leaderboard-comparable, and the operator accepts that; any deviation is stated in `README.md`.
-4. **Then wire** `dataset.yaml` (WHOLE — [`../../promptpotter/assets/datasets/CLAUDE.md`](../../promptpotter/assets/datasets/CLAUDE.md) § A dataset file is a partial; its `card:` is what the listing calls it, exactly a plain-text `title` and `summary`, and any other shape refuses the run, `dataset_access.py::runnable_definition`), `task.md`, `origin.yaml`, `README.md`. Without `origin.yaml`, `resolve_origin_opt_search_point` falls to an empty origin and the solver is never told the matcher's grammar (`matchers.py::MATCHERS` `note`). A node graded on several fields names them in `config.answer_fields`, scores with `fields_match(predicted, ground_truth)`, and gives each `rows` item an object `ground_truth` ([`../concepts/structured-output.md`](../concepts/structured-output.md) § Several graded fields).
+4. **Then wire** `dataset.yaml` (WHOLE — [`../../promptpotter/assets/datasets/CLAUDE.md`](../../promptpotter/assets/datasets/CLAUDE.md) § A dataset file is a partial; its `card:` is what the listing calls it, exactly a plain-text `title` and `summary`, and any other shape refuses the run), `task.md`, `origin.yaml`, `README.md`. Without `origin.yaml` the origin is empty and the solver is never told the matcher's grammar. A node graded on several fields names them in `config.answer_fields`, scores with `fields_match(predicted, ground_truth)`, and gives each `rows` item an object `ground_truth` ([`../research/structured-output.md`](../research/structured-output.md) § Several graded fields).

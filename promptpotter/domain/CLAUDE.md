@@ -1,20 +1,18 @@
 # domain/ — frozen models + pure types
 
-No I/O, no async; the import ban is `scripts/gate.py::_LAYERING`.
-
-## Backbone primitives
+No I/O, no async (`scripts/gate.py::_LAYERING`). Every model inherits `StrictModel` / `FrozenModel`; a lax one says why on itself.
 
 - **A target prompt has no class**: field order is the node's (`NodePromptInfo.fields`), never a shared constant.
-- **`OptSearchPoint.loci()` is the one roster of its parts; a child is made by `derive` / `edited` alone** <!-- probe: git grep -cE "OptSearchPoint\(" -- promptpotter/*.py <= 5 --> — its `id` is its content, never stored.
-- **`ForkSpec.keep_rounds` names the act**: unset is `operator_steered`, set is `operator_rewind`; `cut_fork` is its one writer. <!-- probe: git grep -cE "ForkSpec\(" -- promptpotter/*.py <= 2 -->
-- **`AbilityReading.comparable_to` is the only test for differencing two θ**, `AbilityReading.minus` the one difference <!-- probe: git grep -cE "\.theta - " -- promptpotter/*.py <= 1 -->; a cell the `DeltaRuler` does not carry enters no θ (`ThetaCaveat.UNMEASURED_DELTA`).
-- **`CycleHop` is the `(campaign, cycle)` address**, exposed as a property (`Campaign.root_hop`, `Session.hop`, `Job.hop`), never re-paired from two `str`s.
-- **`pipeline_params` is the typed carrier `pipeline_params.py::PipelineParams`**: `steps` beside each node typed once as `pipeline_params.py::NodeCall`, parsed off the laid document it dumps back to (hashed and wired), the reserved key spelled once (`STEPS_KEY`); built only by reading that document (`with_nodes` refuses a key of the wrong type located, then reads it), so whatever it builds reads back and no node takes a field's name (`RESERVED_NODE_NAMES`, refused by `PipelineSchema`); `NodeCall.laid_keys` keeps the laid key order; `pipeline_params.py::apply_node_overlay` is its one node fold; a node's engine call keys are the fields of that one base model (a target node's laid numbers kept as laid, its backend's keys beside them, `NodeCall.laid_keys` the whole), which an llm node's `NodeConfig` extends; its fields are the one spelling of the call-key rosters, and `split_rendered_prompt` the one split of a config from its render. <!-- probe: git grep -cE "== .steps." -- promptpotter/*.py == 0 -->
+- **A child `OptSearchPoint` is made by `derive` / `edited` alone**; `loci()` is the one roster of its parts and its `id` is its content, never stored. <!-- probe: git grep -cE "OptSearchPoint\(" -- promptpotter/*.py <= 5 -->
+- **`ForkSpec.keep_rounds` names the act** (unset `operator_steered`, set `operator_rewind`); `cut_fork` is its one writer. <!-- probe: git grep -cE "ForkSpec\(" -- promptpotter/*.py <= 2 -->
+- **Two θ are differenced only through `AbilityReading.comparable_to` / `.minus`** <!-- probe: git grep -cE "\.theta - " -- promptpotter/*.py <= 1 -->; a cell the `DeltaRuler` does not carry enters no θ.
+- **`CycleHop` is the `(campaign, cycle)` address** (`Session.hop`, `Job.hop`), never re-paired from two `str`s.
+- **`pipeline_params.py::PipelineParams` is built only by reading the laid document it dumps back to**, so whatever it builds reads back; `STEPS_KEY`, `NodeCall`'s fields and `apply_node_overlay` are the one spelling of the key, the call-key rosters and the node fold. <!-- probe: git grep -cE "== .steps." -- promptpotter/*.py == 0 -->
 - **The estimator digest hashes `l4/proxies`**, so only what decides a cell's number lives there.
-- **`spend.py::TokenAccount` IS the carrier** — never hand-convert it at a call site.
-- **`deprecated` is domain language for the fatal-warning sample lifecycle only** (`is_deprecated`, `deprecated_samples`, `CellFold.deprecated`, `retry_of_deprecated_cache`) — never a back-compat shim.
-- **Every model inherits `StrictModel` / `FrozenModel`**; a lax one says why on itself (`complexity_ledger.py` row `models_lax`).
+- **`spend.py::TokenAccount` IS the carrier**: never hand-convert it at a call site.
+- **`deprecated` names the fatal-warning sample lifecycle only** (`is_deprecated`, `CellFold.deprecated`), never a back-compat shim: do not delete it as one.
+- **A command kind is ONE `command_kinds.py::CommandKind` row** (here because the lazy CLI `--help` and a ledger fold cannot import the dispatcher): its payload model declares the kind, the row names `handler`, `capability` and `press`; spec, TS types and `BrowserKind` are generated, and a kind the browser presses takes its sender in `webapp/lib/api/commands.ts::commands`.
 
 ## Tolerance is scoped by what a payload is FOR
 
-`extra="forbid"` reaches every model nested in a `RoundStatement`, `CampaignConfig` and `Campaign`, so **renaming a field wipes run data**. What a file written before the rename meets: **reporting** (`round_diagnostics.py`) — every field defaults; **scoring** (`ArmState`, `StopSignal`, `OptSearchPoint`) — required, since a tolerant read hands back a silently defaulted winner; **ledger** (`CycleRecord` arms) — never tolerant, a line no arm accepts is `shared/errors.py::LedgerUnreadableError`.
+`extra="forbid"` reaches every model nested in a `RoundStatement`, `CampaignConfig` and `Campaign`, so **renaming a field wipes run data**. A file written before the rename meets: **reporting** (`round_diagnostics.py`), every field defaulted; **scoring** (`ArmState`, `StopSignal`, `OptSearchPoint`), required, since a tolerant read hands back a silently defaulted winner; **ledger** (`CycleRecord` arms), never tolerant (`LedgerUnreadableError`).

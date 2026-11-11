@@ -15,11 +15,11 @@ Each trust boundary, its kind and where it is enforced, by symbol. The decisions
 
 **Host-admin acts only through the operator-admin channel** (`presentation/admin_bot.py` — the blocklist, `/grant`, `/revoke`, `/spend`, `/trail`), outbound-only. **No `/commands/{kind}` verb is admin-only**; `HOST_ADMIN_EMAIL` → `default_claim.py::claim_default` answers only which tenant the terminal resolves, and cross-tenant reads (`jobs/install_spend.py::read_install_spend`) are never an inbound route.
 
-`set-sample-lookahead` spends the box's shared key, so it sits at `campaign.lookahead`, its own rung in `CAMPAIGN_CAP_BY_NAME`, withheld without withholding the run; the overshoot sample steers no measurement. Browser-only — [`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § Sample look-ahead; a nested address arms each layer by naming it (`domain/command_kinds.py::CyclePayload.inner_refusal`).
+`set-sample-lookahead` spends the box's shared key, so it sits at its own rung, `campaign.lookahead` ([`../decisions.md`](../decisions.md) § 0005), withheld without withholding the run. Browser-only — [`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § Sample look-ahead.
 
 ## owner ↔ delegate — authorization
 
-One definition, `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, from which `DELEGABLE_CAPABILITIES` derives; `OWNER_COMMAND_CAPABILITIES` adds `ACCOUNT_KEYS_CAP`, the account's own provider keys (`set-api-key`, `remove-api-key`), which no grant carries. An `active` user holds the full owner set, a `blocked` one (`shared/identity.py::AccessState`) none (`identity/bundle.py::_session_capabilities`); the local operator the full set from `default_identity`; a delegate an attenuated subset of its delegator's RESOLVED set, so blocking the delegator blocks it, clamped at read by `infrastructure/identity/grants.py::resolve_effective_capabilities` under `identity/bundle.py::_delegated_identity`. Enforced at `require_capability` in the dispatcher's `_applier` (`application/commands/dispatcher.py`); the one-level rule and no account as its own delegate at `grants.py::grant_principal`, each grant and revoke under the file's write lock.
+One definition, `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, from which the delegable set derives; the owner set adds the account's own provider keys, which no grant carries. An `active` user holds the full owner set, a `blocked` one none; the local operator the full set; a delegate an attenuated subset of its delegator's RESOLVED set, so blocking the delegator blocks it, clamped at read (`infrastructure/identity/grants.py::resolve_effective_capabilities`). Enforced at `require_capability` in the dispatcher; the one-level rule and no account as its own delegate at `grants.py::grant_principal`.
 
 ## user ↔ user — tenancy
 
@@ -34,7 +34,7 @@ One definition, `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, from which `DELEGABL
 - A run is a separate OS process from the API (`jobs/launcher/run_job.py::spawn_job` hands the identity and held ceiling over stdin), a child of the API's unit — same OS user, `.env`, keys and hardening.
 - Terminal and server hold the same machine slot (`jobs/launcher/admission.py::admit_and_hold`), a machine-wide OS lock released only by proving its producer's lock gone (`jobs/interlock.py`).
 - The hardened unit (`deploy-linux/install-service.sh`) bounds the API and its runs (`KillMode=process`); a set `DATA_DIR` keeps the service from rewriting its own source, venv and `.env`; the bot's secrets ride `BOT_ENV_FILE`.
-- Every tenant-controlled path is inert: the scoring formula AST-allowlisted (`application/scoring/formula/compiler.py`), YAML `safe_load`ed, slugs regex-validated, the provider registry closed. The launch seam: `jobs/launcher/launch.py::launch`, `jobs/launcher/head_to_head.py::admit_head_to_head`, `application/embedded_run.py`.
+- Every tenant-controlled path is inert: the scoring formula AST-allowlisted (`application/scoring/formula/compiler.py`), YAML `safe_load`ed, slugs regex-validated, the provider registry closed.
 
 ## The perimeter
 

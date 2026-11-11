@@ -76,4 +76,4 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 - Install `[all]` if you haven't: `pip install -e ".[all]"`.
 - Or install just the extra the message names.
 
-Next: [Going deeper](06-going-deeper.md).
+Next: the reference folders, indexed in [`../README.md`](../README.md).

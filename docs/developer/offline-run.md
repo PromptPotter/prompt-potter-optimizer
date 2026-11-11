@@ -5,12 +5,11 @@
 ## Running it
 
 ```bash
-PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline_run.py
-PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline_run.py --optimizer capo
-.venv/Scripts/python.exe scripts/offline_run.py --digests
+PROMPTPOTTER_HOME=.scratch/offline-home python scripts/offline_run.py                    # --optimizer capo: one
+python scripts/offline_run.py --digests
 ```
 
-`--rounds` and `--rows` size it; `--bench-trigger manual` fails on a bench cell sent by the launch, then asks for the pass as an operator does (`application/embedded_run.py::grade_bench`). `--straight` runs each optimizer's straight run alone, no nested leg: potter's is the webapp's walk world (`scripts/gate.py::_walk_world`). It refuses an interpreter whose `promptpotter` is another tree's, naming the `PYTHONPATH` that pins its own.
+`--help` lists the sizing and leg flags. `--straight` (each optimizer's straight run, no nested leg) is the webapp's walk world (`scripts/gate.py::_walk_world`). It refuses an interpreter whose `promptpotter` is another tree's.
 
 **The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments and then `--controlled`, each in its own home of the clone's (`processes.py::clone_cache`) — whenever a file the engine runs from changed since it was last green; the pre-push hook runs it on a tip pushed to main (`gate.py --push`, in a throwaway worktree on the clone's venv, `gate.py::_tip_checkout`); pre-commit and `--changed` leave it out. A failed leg fails it; a `MOVED` never does. Each optimizer's workspace is kept green on its own, keyed by content on what that optimizer reaches (`scripts/last_green.py::OFFLINE_RUN_READS` less other optimizers' packages, `scripts/offline_run.py::unreached`); a green optimizer under the same arguments prints `unchanged since green`; another home or `--against` reruns all.
 
@@ -24,14 +23,13 @@ PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline
 
 ## What lands where
 
-One workspace per optimizer, `<home>/<optimizer>/`, because the archive and the δ ruler pool across a workspace's campaigns. Each campaign is a child process, as many as free memory holds (`scripts/processes.py::RamBudget`, `OFFLINE_RUN_CHILDREN_MAX`).
+One workspace per optimizer, `<home>/<optimizer>/`, because the archive and the δ ruler pool across a workspace's campaigns.
 
 | Path | What it is |
 |---|---|
 | `data/projects/default/campaigns/<id>/cycles/<cycle>/` | the campaign tree a real run writes, in its own data root beside everything below (`scripts/offline_run.py::data_root`), since every process lands its root at entry; browse it with `PROMPTPOTTER_HOME=<home>/<optimizer>/data` on the server |
 | `requests/NNNN_<node>_<k>.json` | every optimizer LLM request as sent, in arrival order, beside the fake's answer |
 | `decisions.json` | every decision the run made, canonical (ids mapped to labels, timestamps and hashes dropped); `harness` adds the stop reason, unrouted URLs and call counts |
-| `run.log` | the child's stdout and stderr |
 | `resumed/` | the same campaign paused at the first fresh cell measured past a banked walk, round 2 on, and ended on a session rebuilt from disk: the resume replays the walk, its reads included, and runs no proposer (`scripts/offline_run.py::BOUNDARY_RESUMED` pause at the round boundary instead); the round it paused in is read off its ledger (`scripts/offline_run.py::paused_at`) |
 | `diverged/` | the first optimizer's campaign resumed with `--fork-on-divergence` under an edited proposer prompt, then forked twice more (the multi-course sidebar fixture) |
 | `rebased/` | potter's campaign resumed with `--from 1` under an L2 proposing the same config-changing fork at every fire; fails unless the line forks and ends on a stop other than `REBASED` within its budget |

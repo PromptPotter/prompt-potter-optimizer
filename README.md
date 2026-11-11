@@ -97,7 +97,7 @@ Already in DSPy? `from promptpotter.presentation.teleprompter import PromptPotte
 
 | | |
 |---|---|
-| **Webapp** | The chat-first browser control plane — [app.promptpotter.com](https://app.promptpotter.com) hosted, `http://localhost:8001/` local ([spec](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/host-assistant.md)). |
+| **Webapp** | The chat-first browser control plane — [app.promptpotter.com](https://app.promptpotter.com) hosted, `http://localhost:8001/` local ([roadmap](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/roadmap.md#host-assistant)). |
 | **`/potter-run`** | Claude Code skill — an agent launches, supervises and diagnoses a campaign from your editor. |
 | **CLI** | `python -m promptpotter new <name>` / `resume`. |
 | **REST API** | Every control verb the webapp issues, for when another system drives the campaign. |
@@ -124,7 +124,7 @@ git clone https://github.com/PromptPotter/prompt-potter-optimizer && cd prompt-p
 python scripts/gate.py          # every check CI runs; the first run builds .venv from uv.lock
 ```
 
-The optimizer is itself a pipeline of nodes, so it can be pointed at its own optimizer prompts ([self-optimization, L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/l4-outer-loop.md)), and every optimizer runs end to end at zero spend ([`offline-run.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/offline-run.md)). Start at **[the developer guide](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/README.md)**, then [`CONTRIBUTING.md`](CONTRIBUTING.md).
+The optimizer is itself a pipeline of nodes, so it can be pointed at its own optimizer prompts ([self-optimization, L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/l4.md)), and every optimizer runs end to end at zero spend ([`offline-run.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/offline-run.md)). Start at **[the developer guide](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/README.md#developer--seams-no-single-file-shows)**, then [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Limitations
 

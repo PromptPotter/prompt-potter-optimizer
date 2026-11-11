@@ -1,6 +1,6 @@
 pipeline:
   # Each outer cell runs an inner campaign on a cheap proxy benchmark, configured in `panel:`
-  # below; docs/specs/l4-outer-loop.md.
+  # below; docs/concepts/l4.md.
   description: >-
     Self-optimization: evolves the optimizer's own prompts, scored by the inner campaigns they run.
 

@@ -10,7 +10,7 @@ This is **Arc 1: curated activity + loop control** — the chat renders a curate
 layer over the live cycle event stream and surfaces in-thread decision buttons
 that fire the existing `/commands/{kind}` verbs. The free-form "talk to an
 assistant" host is open —
-`docs/specs/host-assistant.md` § The webapp's host.
+[`docs/specs/roadmap.md`](../../../docs/specs/roadmap.md) § Host assistant.
 
 ## Keep — the reusable core
 

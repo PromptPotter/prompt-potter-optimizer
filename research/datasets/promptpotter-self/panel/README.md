@@ -1,8 +1,8 @@
 # PromptPotter-self — Optimizer-of-the-Optimizer
 
 A self-referential dataset: outer PromptPotter optimizes the **optimizer prompts** that drive the
-inner PromptPotter cycle. Connector boundary: `promptpotter/application/runner/inner/connector.py`. Spec:
-[`../../docs/specs/l4-outer-loop.md`](../../../../../docs/specs/l4-outer-loop.md).
+inner PromptPotter cycle. Connector boundary: `promptpotter/application/runner/inner/connector.py`. What is true of L4:
+[`docs/concepts/l4.md`](../../../../docs/concepts/l4.md).
 
 Each outer "sample" is one entry in `dataset.yaml::panel`: it mints and runs a full inner campaign on
 `justlogic/d234`. Each inner run reports a vector of proxy measurements
@@ -12,7 +12,7 @@ re-anchors **one** of them — `held_out_lift`, read on rows the inner search ne
 holding authority over the ordering. The rationale lives on `OuterSampleProxies`.
 
 **What remains** — owned by
-[`../../docs/specs/l4-outer-loop.md`](../../../../../docs/specs/l4-outer-loop.md) § Open.
+[`docs/specs/roadmap.md`](../../../../docs/specs/roadmap.md) § L4 closure.
 
 **The panel geometry, its per-cell cost and why it is 6 cells** — owned by `dataset.yaml::panel`, whose
 figures come off the banked cycle ledgers. Do not re-derive a cost from the knob values: the factors

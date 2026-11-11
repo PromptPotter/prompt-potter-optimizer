@@ -107,7 +107,7 @@ export function descriptionSubtree(keys: readonly string[], path: string): strin
   return path === "" ? [...keys] : keys.filter((k) => k === key || k.startsWith(`${key}.`));
 }
 
-// `valuesSeed` is read in `values` mode only: search-space rows are served (`frontend-surface-contract.md::I9`).
+// `valuesSeed` is read in `values` mode only: search-space rows are served (`webapp/CLAUDE.md` I9).
 export function configRows(
   schema: Record<string, NodeConfigParam[]> | null,
   valuesSeed: Record<string, unknown>,

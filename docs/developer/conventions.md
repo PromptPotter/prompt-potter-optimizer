@@ -4,13 +4,13 @@ Rules not derivable from the code. Root [`CLAUDE.md`](../../CLAUDE.md) holds the
 
 ## Code style
 
-- **`logging` in library code; `print()` only where a human reads it** — the CLI, terminal views, the server banner, first-run setup, the origin gate, the maintenance verbs. In a live run every readout line goes through `ReadoutProjection._write`, the one funnel to the cycle's `readout.log`.
+- **`logging` in library code; `print()` only where a human reads it** (the CLI, terminal views, the server banner, first-run setup, the origin gate). In a live run every readout line goes through `ReadoutProjection._write`.
 - **Direct field access** — `dict[key]` for a guaranteed field, never `.get(key, fallback)`.
 
 ## Prose in the source
 
 - **None by default: no docstring, no `#`.** A line survives if the reader would otherwise have to open another file to learn the fact; a rule binding a set of symbols goes to the layer's `CLAUDE.md` or `docs/`. What survives is one present-tense line: a prohibition, a trap, a sentinel's absence semantics, a tiebreak, a security asymmetry. An `__init__.py` gets none. **Past tense is a smell** — history is git's. The webapp (`.ts`, `.tsx`, `.css`) is in scope: a component header says what it IS, never what it replaced.
-- **A `CLAUDE.md` is billed to every session beneath it**: rules binding a set of symbols only; mechanism goes to the module docstring, an incident to the commit body. Caps: gate `instruction-files`.
+- **A `CLAUDE.md` is billed to every session beneath it**: rules binding a set of symbols only; mechanism goes to the module docstring, an incident to the commit body.
 - **Three carve-outs are product surfaces a generator reads**: docstrings of every type a route's `response_model` reaches (→ TS JSDoc via `scripts/build_ts_types.py`; the first paragraph ships, so it ends a sentence), FastAPI route docstrings (a read route's is its `ReadParams` model's, set where `api/routers/reads.py` mounts it), and Pydantic/enum class docstrings (→ OpenAPI). Optimizer response models in `dispatch/schemas.py` strip their class docstring; their `Field(description=)` is prompt text — regenerate via `scripts/build_optimizer_schemas.py`.
 
 ## Naming
@@ -24,7 +24,7 @@ Rules not derivable from the code. Root [`CLAUDE.md`](../../CLAUDE.md) holds the
 - **Where a return-value contract must let an exception escape, use `graceful()`** (`shared/errors.py`).
 - **Absent is not zero.** A failed or missing measurement is ABSENT (`None`, an absent channel), never `0.0`; a real 0.0 is a measurement. Counts, rates and money are honest zeros. Render the state, never the number's truthiness.
 - **Ask the typed predicate, never a hand-authored set of names.** A literal set of dataset / node / stop-reason names silently skips what it failed to list: ask `stop_reason_outcome` (`domain/phases.py`), the resolved definition's `backend_type`, or the registry; a curated subset is pinned by an `assert subset <= derived`.
-- **Schema field order IS generation order.** Reasoning fields go above the fields they justify; a `description=` is prompt, measured like any prompt edit ([`../concepts/structured-output.md`](../concepts/structured-output.md)).
+- **Schema field order IS generation order.** Reasoning fields go above the fields they justify; a `description=` is prompt, measured like any prompt edit ([`../research/structured-output.md`](../research/structured-output.md)).
 - **A parameter that changes what a number MEANS takes no default** (`open_walk` / `score_search_point` take `measured`).
 - **A query module reads a persisted document through its MODEL**, never as a dict; a dict walk survives only in a cross-cycle survey (`read_json_tolerant`).
 - **String-keyed *call* dispatch is a defect** — a `match` with literal calls, a registration decorator (`@signal`), or an enum-keyed dict with an import-time completeness assert. String-keyed *data* is fine.

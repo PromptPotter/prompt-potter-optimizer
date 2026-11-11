@@ -4,7 +4,7 @@ You changed a scoring formula, a PoBB setting or the engine after the measuremen
 
 ## The vocabulary
 
-The **record** is the realized lineage — a tree. A mask splits it: **invariant** — every measured `(candidate, sample)` result, each node's own value, any subtree off the diverging path; **divergent** — the lineage *structure* downstream of a choice the change would have made differently; the node's value is real, only its *position* is counterfactual, rendered dimmed. Say "divergence point", never "decision point" or "fork point" ("fork" is `ForkSpec`'s). One fold, `find_divergences(record, verdict)`, asks a verdict at each step; the first flip on a branch is a divergence, past which nothing was measured. Nothing is persisted: the criterion rides the request, an applied one `CycleSeed.config_overrides`.
+The **record** is the realized lineage — a tree. A mask splits it: **invariant** — every measured `(candidate, sample)` result, each node's own value, any subtree off the diverging path; **divergent** — the lineage *structure* downstream of a choice the change would have made differently; the node's value is real, only its *position* is counterfactual, rendered dimmed. Say "divergence point", never "decision point" or "fork point" ("fork" is `ForkSpec`'s). One fold asks a verdict at each step; the first flip on a branch is a divergence, past which nothing was measured. Nothing is persisted: the criterion rides the request, an applied one the fork's seed.
 
 ## Asking it
 
@@ -14,11 +14,11 @@ The **record** is the realized lineage — a tree. A mask splits it: **invariant
 | **A PoBB gate switched off** | `?lens=abort:<gate>_off` for any `EliminationGate` member, or `all_off` | No — the continuation was never measured |
 | **A changed engine or scorer** | `python -m promptpotter ab [--campaign <id>]` | Where a `round_winner` flips, yes |
 
-**A lens is scored the way the run is.** `score:F` is the cycle's own scoring block with `per_cell = F` (`mask/load.py::lens_overrides`, the `ConfigOverrides` a fork applying it carries), run over each arm's rows (`Scorer.sheet`, `fold_cells`) — a `lens_value` is what a fresh run under `F` reports, never `F` over a round's means ([`persistence-and-state.md`](persistence-and-state.md) § Changing the composite formula); a parent carried across a fork edge is re-graded under the child's scorer.
+**A lens is scored the way the run is.** `score:F` is the cycle's own scoring block with `per_cell = F` (the overrides a fork applying it carries), run over each arm's rows — a `lens_value` is what a fresh run under `F` reports, never `F` over a round's means ([`persistence-and-state.md`](persistence-and-state.md) § Changing the composite formula); a parent carried across a fork edge is re-graded under the child's scorer.
 
 **The lens re-ranks the RECORD; `ab` re-runs the ELECTION.** The lens orders by `scoreboard_rank_key`; the election ranks θ-lift over the parent, which under another formula needs a re-fit against a re-calibrated ruler — `ab`'s job. Both stop at the first departure. `?samples=<id,…>` composes with a `score:` lens and re-scores the arms and the parent (`RoundResult.reference_rows`) alike.
 
-**The compare channel.** `GET /evidence` carries the same segments on a subject (`subject=course:<c>/<cy>;lens=score:<F>;samples=3,7`), the mask part of the subject KEY. `application/mask/divergence.py::masked_election` decides one round; `scenario_spine` walks the chain and ends on the round the two part, served as one `Said` line (`application/evidence/subjects.py::scenario_said`); θ is not re-fitted, so the parting round is a boundary, not a verdict.
+**The compare channel.** `GET /evidence` carries the same segments on a subject (`subject=course:<c>/<cy>;lens=score:<F>;samples=3,7`), the mask part of the subject KEY. One masked election decides each round, and the walk ends on the round the two part, served as one line; θ is not re-fitted, so the parting round is a boundary, not a verdict.
 
 ### Applying one — the preview IS the fork point
 

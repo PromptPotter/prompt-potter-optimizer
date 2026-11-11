@@ -20,7 +20,7 @@ export function ConnectorInspector() {
   const authHeader = backend.active?.auth_header ?? null;
   const isTls = baseUrl ? baseUrl.startsWith("https://") : null;
   const { reachable, stateCls, stateLabel } = connectorReachability(health);
-  // No resolved connector is a terminal "idle", never a perpetual "probing…" (frontend-surface-contract.md § I1).
+  // No resolved connector is a terminal "idle", never a perpetual "probing…" (webapp/CLAUDE.md § I1).
   const noBackend = connector == null;
   const label = selfOpt ? "self-optimization" : noBackend ? "idle" : stateLabel;
   // The head names the state once; the foot says only what the label cannot.

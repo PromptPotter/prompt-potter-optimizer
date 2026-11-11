@@ -14,15 +14,16 @@ protocol's; peers are [`landscape.md`](landscape.md)'s.
 Every candidate is screened against **`openai/gpt-oss-20b @ reasoning_effort: low`**, `temperature:
 0.0`, 30 rows (`seed-screen`) — the cheapest model a campaign ships on. Rows dated 2026-10-14/15 were
 screened under `meta-llama/llama-3.1-8b-instruct` (the L4 pool's cheap tier) as well; the verdict
-names the solver. Sidecars:
-`.promptpotter/projects/default/diagnostics/seed-screen-<dataset>[-<solver>]-<date>.json`.
+names the solver.
 
 - **Saturated** = near ceiling, so every optimizer ties. A saturated dataset is not tested, so **an
   absent dataset is usually saturated, not overlooked**.
 - **A low score is not admission either** — near zero has no reachable headroom.
-- **Floor** = the best constant answer on the same rows. A seat needs the origin in **15–60%** AND a
-  settled gap over the floor ([`../operations/datasets.md`](../operations/datasets.md) § Selection
-  criteria, 1b) — screen it before reading any origin.
+- **The band is an approximate, unproven estimate: a lower origin is better, but one at 60–70% still
+  leaves room to climb** (operator, 2026-11-10).
+- **Floor** = the best constant answer on the same rows. A seat needs a settled gap over the floor
+  ([`../operations/datasets.md`](../operations/datasets.md) § Selection criteria, 1b) — screen it
+  before reading any origin.
 - Literature anchors from older proxies **underpredict `gpt-oss-20b @ low` by 10–20pp**; bias every
   sub-20B prior upward. Headroom admits a dataset, never ranks it
   ([`external-constraints.md`](external-constraints.md) § L4).
@@ -78,9 +79,8 @@ did is the campaign tree's `readout.log` and `evidence`; earlier rows are
 | IFBench · CRUXEval-O · MuSR (2-subtask) | — | ❌ not measurable |
 
 **Rejected without trial** — [`../operations/datasets.md`](../operations/datasets.md) § Rejected
-without trial. A containerized agent episode is a measured cell (`connectors/harbor.py`) and an
-LLM-judge grade a banked observation (`application/scoring/judges/`), so a *boundary* rejection no
-longer holds.
+without trial. An agent episode is a measured cell and an LLM-judge grade a banked observation, so a
+*boundary* rejection there no longer holds.
 
 **What the roster decided.**
 - Potter's inner optimizer runs `minimax/minimax-m3.1-flash` (jl-optmodel-1, 2026-10-30): held-out
@@ -101,9 +101,6 @@ model; the head-to-head target, identical across every arm, is the bbeh-comparis
 
 **Tuning numbers and headline numbers do not mix.** Tuning runs at 50–100 samples, headlines at
 200+; a small-sample tuning number never appears in a main results table.
-
-Per-dataset scorers are `dataset.yaml::campaign.scoring`; each one's answer-format contract is the
-live `matchers.py::MATCHERS` `note`.
 
 ## PEvol-Bench — the AC-grade bench definition (v1 draft)
 
@@ -144,8 +141,7 @@ fitness are read on the selecting rows; the clean number is the held-out bench s
 sees ([`../architecture.md`](../architecture.md) § The bench score is not an optimizer's selection).
 
 **The bench set is spent by reuse.** Every campaign kept or dropped off its headline is one adaptive
-query against the same rows; each pass stamps the count (`VerificationPass.reads_before`), the headline
-serves its selection's (`BenchStatus.reads_before`). There is deliberately no once-only split — a
+query against the same rows; each pass stamps the count and the headline serves its selection's. There is deliberately no once-only split — a
 head-to-head needs every pick graded on ONE set; a new `run_seed` is the fresh holdout, and the count
 says when one is due. [arXiv:2605.05973](https://arxiv.org/abs/2605.05973) corrects the curse
 assuming a fixed shortlist and smooth selection, which PoBB's stopping strains — check its estimator

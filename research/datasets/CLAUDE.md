@@ -4,7 +4,7 @@ Definitions no wheel ships: research and test tooling, never a dataset a user st
 checkout resolves them by name with no setting (`config/paths.py::research_datasets_root`); a wheel
 install has no research tier. A name reads from the first tier holding it, tenant, then install,
 then here (`infrastructure/store/dataset_access.py::resolve_dataset`); no name here is one the
-install ships (`tests/test_identity.py`). **Nothing here is listed**: an L4
+install ships. **Nothing here is listed**: an L4
 campaign shows only because it exists. The install's `defaults.yaml` lays under each chain, so a
 `family.yaml` here reads as one under `assets/datasets/` does.
 

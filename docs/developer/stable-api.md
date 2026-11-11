@@ -74,7 +74,7 @@ The loop-mint verbs. The flag set is `presentation/cli/commands/verbs.py` and wh
 
 ## 5b. Embedded launch entry (Python)
 
-`application/embedded_run.py::open_session`, `::run_campaign`, `::submit_gate_decision`, `::submit_arms`, `::pause`, `::cancel`, `::grade_bench`, `::compact_archive` and `::reindex_measurement_archive` — signatures there. What a host cannot read off a signature:
+Every name `application/embedded_run.py`'s `__all__` exports (`run_head_to_head` mints a head-to-head's arms in one act) — signatures there. What a host cannot read off a signature:
 
 - **Two steps because every caller works between them**: the mint is the same `mint_framed_cycle` prologue `new` and the web mint run, so the cycle is resumable, forkable and diagnosable by the §5 verbs; the session `run_campaign` answers is bound to the cycle the run ended on, a fork included.
 - **`campaign_config` is what a MINT declares** — required on a fresh session, refused on one bound to a cycle.
@@ -123,4 +123,4 @@ What each file holds is [`../operations/persistence-and-state.md`](../operations
 ## 8. What is NOT stable
 
 - **Internal module structure, private names, and runtime dataclass shapes** beyond §1–§7; package `__init__` files re-export nothing — this document is the public surface. In-memory caches. Prompt templates at `promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — data, tunable on any release. The optimizer node types (`application/optimizers/nodes.py`) and the `NodeContext` a member is handed. Test helpers and the `webapp/` layout.
-- **The REST API** (`docs/specs/openapi.generated.json`), the stream's §6 contract aside. Identity is a browser SESSION COOKIE (`presentation/api/middleware/oidc.py`); no route takes an API key or an inbound bearer token. A third party reaches the campaign surface only with `PROMPTPOTTER_AUTH=off` — not an integration surface.
+- **The REST API** (`docs/specs/openapi.generated.json`), the stream's §6 contract aside. Identity is a browser SESSION COOKIE (`promptpotter_session`, `presentation/api/middleware/oidc.py`); no route takes an API key or an inbound bearer token. A third party reaches the campaign surface only with `PROMPTPOTTER_AUTH=off` — not an integration surface.

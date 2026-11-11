@@ -7,5 +7,5 @@ FastAPI, with the API as the carved-out `/api/v1` namespace.
 `python scripts/gate.py --web` from the repo root for the checks CI runs.
 
 Layer contracts — scoring authority, display-data sources, the one viewed address —
-are all in `CLAUDE.md`. The surface behaviour contract it is measured against is
-[`../docs/specs/frontend-surface-contract.md`](../docs/specs/frontend-surface-contract.md).
+are all in `CLAUDE.md`, and so is the surface behaviour contract it is measured against:
+[`CLAUDE.md`](CLAUDE.md) § Surface states and invariants.

@@ -330,7 +330,7 @@ resolved_prompts:
         "note": OPTIONAL sticky pointer for L2 (string, <=150c; leave empty when unused), persisting until your next replan. Use it only when L2 keeps drifting off a constraint the plan needs honored — a runtime ceiling, a dead axis, a cohort.
         "rationale": one sentence, <=125c, naming the under-explored dimension the plan moves the search to
   # Read when the campaign optimizes an inner optimizer's prompts (`promptpotter-self/`,
-  # via `nodes.{node}.config.prompt_family`). Spec: docs/specs/l4-outer-loop.md.
+  # via `nodes.{node}.config.prompt_family`). See docs/concepts/l4.md.
   l1_generate_self_optimizing/1:
     persona: >-
       You improve an INNER PromptPotter optimizer's own prompts. You never answer a task — you edit

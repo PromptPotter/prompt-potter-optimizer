@@ -1,4 +1,4 @@
-// The disabled controls are INTENTIONAL placeholders (`docs/specs/host-assistant.md`): never hide them.
+// The disabled controls are INTENTIONAL placeholders (`docs/specs/roadmap.md` § Host assistant): never hide them.
 import { useEffect, useRef, useState } from "react";
 import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
 import { useViewedCourse } from "@/lib/lineage";

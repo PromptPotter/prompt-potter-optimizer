@@ -20,9 +20,8 @@ Each generation an LLM mutates the parent into a small population; every individ
 
 PoBB (Russo 2016) assumes i.i.d. observation; the shared order front-loads the seed's misses on purpose, so unpaired, a leader that ran the easy prefix reads as unbeatable. **PoBB priors are sample-keyed, and the leader is backfilled onto the candidate's upcoming samples before each comparison.**
 
-- **Sample-keyed priors**: `PoBBCheck.priors: cid → CellSheet`, each prior's graded rows; a prior holds a cell it SCORED (`PoBBCheck.holds`), so an errored one is caught up again. A prior's caught-up cells are rows of its round reading too (`runner/measurement.py::_catch_up`), so the race and the election read one sheet. The parent enters on its OWN rows (`Frontier.parent_own_rows`), never the frontier; the searchpoint a prior is caught up under rides `race.py::CatchUpPool`.
-- **Reactive backfill, per sample.** `CatchUpPool` starts one prior's call on one cell and returns the commit that writes it; the cell's catch-ups commit once it is taken, before the checks read coverage, so a backfill for an untaken cell is paid and never written. Each (prior, cell) pair is measured once, recorded as a `RaceCatchUpRecord`, and lands in `measurements/` for every future round.
-- **A backfill row is not a panel row**: stamped with the PRIOR's identity and `MeasurementRole.BACKFILL` (`shared/measurement_context.py`) — a row of its prior's round reading (above), never a cell of the panel walk that bought it (resume's hole repair re-measures it).
+- **Sample-keyed priors**: a prior holds a cell it SCORED, so an errored one is caught up again. A prior's caught-up cells are rows of its round reading too, so the race and the election read one sheet. The parent enters on its OWN rows, never the frontier.
+- **Reactive backfill, per sample**, committed once the cell is taken, so a backfill for an untaken cell is paid and never written. Each (prior, cell) pair is measured once and lands in `measurements/` for every future round, stamped with the PRIOR's identity — never a cell of the panel walk that bought it.
 - **Cost: roughly one extra candidate-equivalent of LLM spend per round** — the price of validity. It also removes lucky-prefix inflation mechanically.
 
 ## The θ rule
@@ -30,26 +29,23 @@ PoBB (Russo 2016) assumes i.i.d. observation; the shared order front-loads the s
 Every candidate, the first raced against the parent alone, once read on `elimination_n_min` cells its θ is read on (`selection.py::cells_read` over `rasch.py::theta_cells`, never rows walked — [`verdict-resolution.md`](verdict-resolution.md) § The round order), after every query:
 
 1. Read each prior sharing `elimination_n_min` scored cells with the candidate; one that cannot be caught up is **excluded, never zero-filled**.
-2. Fit as the election does, the prior as the bar (`rasch.py::candidate_abilities`): each `θ` and Laplace `se` on the cycle's fixed δ ruler; warm, the prior on every cell it scored, cold on the cells it shares. That read is a named decision move: `paired_p_best`, which read the prior on the shared cells alone, went with it, and capo-pobb's ε cuts moved (CHANGELOG, Unreleased).
+2. Fit as the election does, the prior as the bar (`rasch.py::candidate_abilities`): each `θ` and Laplace `se` on the cycle's fixed δ ruler; warm, the prior on every cell it scored, cold on the cells it shares.
 3. `P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))`, closed form; `p_best = min` over priors.
-4. Bound it by what the DISCORDANT pairs support — `shared/statistics.py::sign_posterior` over `selection.py::discordance`. Concordant cells move θ but cannot say which arm is better. Support is DIRECTIONAL: contradicting pairs collapse the claim to 0.5 (a bare magnitude would license 0.9375 for an arm that lost 3 of 3); it can only spare an arm. **Discordance counts VERDICTS (`Grade.fitness`), never the objective** — a cost term would make a verbose arm lose every tie; cost reaches the comparison through θ alone (`selection.py::paired_grades`).
+4. Bound it by what the DISCORDANT pairs support — `shared/statistics.py::sign_posterior` over `selection.py::discordance`. Concordant cells move θ but cannot say which arm is better, and few observations do not keep the gate conservative: ties narrow both `se`. Support is DIRECTIONAL: contradicting pairs collapse the claim to 0.5 (a bare magnitude would license 0.9375 for an arm that lost 3 of 3); it can only spare an arm. **Discordance counts VERDICTS (`Grade.fitness`), never the objective** — a cost term would make a verbose arm lose every tie; cost reaches the comparison through θ alone (`selection.py::paired_grades`).
 5. Stop when `p_best < ε(n)` — eliminated (graded by depth: `epsilon_floor`; switch `epsilon_stop`) — or, with `lock_in` on, where the election would elect the arm now — locked in (`pobb/checks.py::locks_in`): `selection.py::elect_round_winner` over the round's arms before it and this one, against the parent, on the election's rows and the selector's own bar (`nodes.py::Selector.admission`), so an arm that is locked in is one the election admits. A selector with no such bar locks none in. **A locked-in arm joins the priors** (`runner/measurement.py::_conclude_arm`), caught up where it stopped, so every later arm races the leader; an eliminated one never does.
 
-The **same ability the round election ranks by**, so the two cannot disagree, valid on partial prefixes. Code: `application/scoring/selection.py::prior_read` (the one pairing, for live `check()` and the resume replayer), driven by `application/optimizers/potter/pobb/checks.py::PoBBCheck`. Cross-cycle comparison is the `ab` verb (`resume_and_fork/ab_replay.py`) — re-derived decisions, no new measurements.
+The **same ability the round election ranks by** (one pairing, `application/scoring/selection.py::prior_read`, for the live check and the resume replayer), so the two cannot disagree, valid on partial prefixes.
 
-**The election's bar reads step 4's posterior on its own confidence.** `selection.py::elect_round_winner`
-admits an arm on a raw θ lift above `rasch.py::FIT_SLACK`, more shared cells won than lost on
-VERDICTS, AND step 4's bounded `P(θ_arm > θ_parent)` above potter's `theta_election` `admission` —
-never PoBB's ε, which says when to stop BUYING an arm, not when to promote one. `ElectionKnobs`
-refuses an `admission` below `sign_posterior(1, 0)` = 0.75, so one discordant cell never promotes.
-Admission is bounded; the election RANKS on the unbounded posterior (bounding it moved a banked crown
-across a 0.0007 gap). **A pick's crowning cells are its discordant wins over its bar**, on the rows
-that election read (`selection.py::crowning_cells`): there its rows are the luck the selection kept,
-so `AdaptiveQueue.draw` and `election_rows` keep them out of every race it judges. A cell it tied on
-reads it as any draw would and stays in the pool. A held round's leader ahead of its parent on θ is
-kept beside it and walks the next round's panel once, ahead of L1's arms
-(`potter/election.py::elect_on_theta`): the cells that ranked it first are the ones its luck rode.
-What the bar does not test is
+**The election's bar reads step 4's posterior on its own confidence.** The election admits an arm on
+a raw θ lift above `rasch.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND step 4's
+bounded `P(θ_arm > θ_parent)` above potter's `theta_election` `admission` — never PoBB's ε, which
+says when to stop BUYING an arm, not when to promote one. An `admission` below `sign_posterior(1, 0)`
+= 0.75 is refused, so one discordant cell never promotes. Admission is bounded; the election RANKS on
+the unbounded posterior (bounding it moved a banked crown across a 0.0007 gap). **A pick's crowning
+cells are its discordant wins over its bar**: there its rows are the luck the selection kept, so they
+stay out of every race it judges; a cell it tied on stays in the pool. A held round's leader ahead of
+its parent on θ walks the next round's panel once, ahead of L1's arms: the cells that ranked it first
+are the ones its luck rode. What the bar does not test is
 [`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md) § Open — multi-arc's.
 
 ## Two regimes
@@ -79,11 +75,11 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
 | 5 | **`PoBBCheck`** — two exits, in order, each behind its switch: leader lock-in at the selector's `admission`, paired `P(best) < ε(n)` | every query | `n_min` | eliminated, or locked in; records `elimination_cut` / `leader_lock_in` | — | `optimizers/potter/pobb/checks.py` |
 
-**Per query:** cache lookup → stale-data protocol if degraded → `SampleScoredRecord` (`telemetry.py::emit_sample_scored`) → the cell's catch-ups commit → every check in `degradation_checks`, first signal ends the candidate (fatal beats rate beats PoBB).
+The first signal ends the candidate: fatal beats rate beats PoBB.
 
-**Each rule answers how EARLY it could fire** (`StopRule.earliest_stop`) — early, never late — so a look-ahead walk launches a cell only if no rule can fire before it, and a cut discards at most one call. The fatal fast-path reads one row's content and stays out (as do `scoring/query_loop.py`'s fault aborts). A pause, skip or budget stop keeps what is paid for and starts nothing; an in-flight call is cancelled only where that stops its bill (`Connector.cancel_stops_billing`); no cell starts that the spend book cannot hold at its bound (`infrastructure/llm/spend_book.py`).
+**Each rule answers how EARLY it could fire** — early, never late — so a look-ahead walk launches a cell only if no rule can fire before it, and a cut discards at most one call. A pause, skip or budget stop keeps what is paid for and starts nothing; an in-flight call is cancelled only where that stops its bill; no cell starts that the spend book cannot hold at its bound.
 
-**Candidates walk at once and decide in turn** (`runner/measurement.py::measure_population`, one loop `scoring/query_loop.py::run_walks`): a later candidate may measure ahead but is checked and cut only once every earlier one is decided, so its priors are a serial round's. That horizon, summed over walks and catch-ups, is the concurrency served (`run_phase_control.py::FlightGauge`).
+**Candidates walk at once and decide in turn**: a later candidate may measure ahead but is checked and cut only once every earlier one is decided, so its priors are a serial round's.
 
 **One comparator, one stop rule — do not add a sixth.** No unpaired answer-collapse cut: one label on a hardest-first `n_min` prefix is no reading against the parent, which the posterior already takes; a constant answerer is refused at the election instead (`domain/arms.py::is_electable`). No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
 
@@ -179,16 +175,4 @@ Departures from the paper:
 
 ## On-disk shape and replay
 
-Each `ELIMINATION_CUT` / `LEADER_LOCK_IN` record (in `rounds/round_NNNN.json`) carries under `data`: `p_best`, `leader`, `candidate_cells` (the GRADED cells the posterior was fit on, by `Sample.key`, in walk order), `prior_histories[cid]` (each prior's `fitness` and `objective` per cell, after backfill) and `crowned` (the cells that crowned the parent). `inputs_ref` records the bar that fired (`epsilon` or `admission`) and the `parent`; the record's kind names the `EliminationGate` (`pobb/checks.py`).
-
-The replayer (`optimizers/potter/resume.py::_race_replay`) feeds the rescored rows at `candidate_cells` and the recorded `prior_histories` to the same `pobb/checks.py::prior_reads` (ε) and `pobb/checks.py::locks_in` (admission) on the fixed δ ruler. **The record is the entire input — no cross-round lookup, no backfill** — so replay is bit-for-bit absent a scorer change; under one, the candidate side is rescored and priors stay recorded.
-
-## Open questions
-
-1. **Tie-breaking at budget cap.** Top 2–3 at similar `P(best)`: ship pick-by-point-estimate; design a cap-extension policy after seeing how often it fires.
-2. **Small-*n* θ.** Few observations do NOT keep the gate conservative — ties narrow both `se` (`p_best` 0.124 at a low base rate, `sealqa/longseal-12`). Step 4 bounds that; the EB hyperprior on ability variance keeps the fit from collapsing.
-
-Why this family of stop rules, its prior art, and the lineage search as MCTS:
-[`../research/landscape.md`](../research/landscape.md) § Why PoBB's family and not another.
-
-The `classify_result()` rule table: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result--fatal-classification). Operator framing: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
+**A cut or lock-in record is the replay's entire input — no cross-round lookup, no backfill** — so replay on the fixed δ ruler is bit-for-bit absent a scorer change; under one, the candidate side is rescored and priors stay recorded. Why this family of stop rules: [`../research/landscape.md`](../research/landscape.md) § Why PoBB's family and not another. The fatal-classification rule table: `domain/results_health.py::classify_result`.

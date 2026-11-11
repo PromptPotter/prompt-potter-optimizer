@@ -7,6 +7,7 @@ The boardgame manual for PromptPotter. Read these chapters in order — by the e
 3. [Your first campaign](03-first-campaign.md) — type `/potter-run` in Claude Code; the skill does the rest.
 4. [Reading the output](04-reading-the-output.md) — what the live lines mean, how rounds are scored, where results land.
 5. [Troubleshooting](05-troubleshooting.md) — common errors and what to try.
-6. [Going deeper](06-going-deeper.md) — pointers into the reference folders once you want to understand the internals.
+
+Past chapter 5, the reference folders are indexed in [`../README.md`](../README.md).
 
 Nothing in this folder mentions Python classes, module paths, or internal state files. If a chapter needs those to explain itself, it belongs in `concepts/` or `developer/`, not here.

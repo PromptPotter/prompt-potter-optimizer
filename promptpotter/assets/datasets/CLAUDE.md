@@ -1,17 +1,6 @@
 # assets/datasets/ — the shipped template definitions
 
-Each `dataset.yaml` directory is a definition named by its path, read-only in the wheel; a tenant definition resolves first. **The wheel ships only what a user may start**: research and test tooling (L4's `promptpotter-self`) is the checkout's [`research/datasets/`](../../../research/datasets/CLAUDE.md), never listed. The roster is the tree:
-
-```
-assets/datasets/
-├── defaults.yaml          # {pipeline:, campaign:} — laid under every definition
-├── {family}/family.yaml   # shared sections; the family itself is no dataset
-└── {name}/                # nested any depth; a plain directory between is a path segment
-    ├── dataset.yaml       # source: / pipeline: / campaign: / panel: / card: — only what differs from above
-    ├── task.md            # L1's framing input: front matter = committed framing, body = description
-    ├── origin.yaml        # the starting prompts, per node (optional)
-    └── README.md          # operator-facing: source, split, every model screen
-```
+Each `dataset.yaml` directory is a definition named by its path, read-only in the wheel; a tenant definition resolves first. **The wheel ships only what a user may start**: research and test tooling (L4's `promptpotter-self`) is the checkout's [`research/datasets/`](../../../research/datasets/CLAUDE.md), never listed. `defaults.yaml` (`{pipeline:, campaign:}`) lies under every definition; a `{family}/family.yaml` holds shared sections and is no dataset. Beside a `dataset.yaml`: `task.md` (L1's framing: front matter committed, body the description), `origin.yaml` (optional starting prompts per node), `README.md` (source, split, every model screen).
 
 ## A dataset file is a partial
 
@@ -25,8 +14,8 @@ Rows are a recipe (`BANK_RECIPES` / `PANEL_RECIPES`) plus the cut beside it; a n
 
 - **Declare `campaign_config.accuracy_ceiling` only where you can say what measured it**; unset leaves `rounds_to_ceiling` unset, the honest reading.
 - `dataset_split: {bench: N, demo: M}` holds out the only rows a node's `shots` may name.
-- **Unframed is a declaration, never an absence** — `task_framing: off` is the ablation arm. `task.md`'s front matter is optional: absent, the first framed mint decomposes the body into the tenant's `task-context/{dataset_id_prefix(name)}.yaml`, never back here.
+- **Unframed is a declaration, never an absence**: `task_framing: off` is the ablation arm. Absent front matter, the first framed mint decomposes `task.md`'s body into the tenant's task-context tree (keyed by `dataset_id_prefix`), never back here.
 
 ## Sole route for backend tunable changes
 
-**The backend overlay (`dataset.yaml` `pipeline.nodes.{name}.config`) is the only way to switch model, provider, temperature or any `optimizer.param_keys` tunable — never edit the backend repo**, TermNorm included. An LLM node declaring no `model` raises at `configure_and_apply_pipeline`. `route_order` is [`infrastructure/llm/CLAUDE.md`](../../infrastructure/llm/CLAUDE.md)'s.
+**The backend overlay (`dataset.yaml` `pipeline.nodes.{name}.config`) is the only way to switch model, provider, temperature or any `optimizer.param_keys` tunable — never edit the backend repo**, TermNorm included. An LLM node declaring no `model` raises. `route_order` is [`infrastructure/llm/CLAUDE.md`](../../infrastructure/llm/CLAUDE.md)'s.

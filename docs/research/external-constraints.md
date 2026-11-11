@@ -10,7 +10,7 @@ recalled. What the code already enforces is named by its symbol only.
 
 1. **The scorer sits outside anything the loop can see or edit** (L4): the inner cycle's scorer,
    formula and held-out cells are never a `pipeline_param`
-   ([`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md) owns the invariant). Source:
+   ([`../concepts/l4.md`](../concepts/l4.md) owns the invariant). Source:
    [Auditing Harness Tampering](https://arxiv.org/abs/2609.00069) (read) — tampering persisting in
    the *best-scoring* lineage, 18.3% to 84.6% across audited systems.
 2. **Early stopping must be defensible under optional stopping** (the preprint). A fixed-α test repeated under
@@ -28,9 +28,8 @@ recalled. What the code already enforces is named by its symbol only.
    [spec](https://agentskills.io/specification), read): frontmatter is a closed set — `name` (≤64
    chars, lowercase, digits, hyphens, equal to the directory), `description` (≤1024), optional
    `license`, `compatibility` (≤500), `metadata`, `allowed-tools`; body under ~5000 tokens, file
-   under 500 lines. `connectors/harbor.py::_write_skill` writes the frontmatter with a fixed
-   `description`; the body limit and security floor are `layer_state.py::_SKILL_TIERS_TEXT`, a prompt
-   directive, not a validator.
+   under 500 lines. The frontmatter is written with a fixed `description`; the body limit and
+   security floor are a prompt directive, not a validator.
 
 ## SKILL — the skilled-agent target
 
@@ -40,7 +39,7 @@ recalled. What the code already enforces is named by its symbol only.
   first skill; a library needs a routing design before a few dozen.
 - **Selection sees only the description** (~100 tokens at startup, the body on activation), so
   `description` is the routing surface. With one skill there is nothing to route, so the candidate is
-  the body alone (`harbor.py::_write_skill`); the skilled agent makes `description` a search axis and
+  the body alone; the skilled agent makes `description` a search axis and
   binds the frontmatter rules to every candidate. Mutual distinguishability against siblings is a
   measurable objective; retrieval at scale reads bodies too ([SkillRouter](https://arxiv.org/abs/2603.22455)).
 - **A skill a model writes for itself, unscored, helps nobody**: curated skills +16.2 pp on average
@@ -87,7 +86,7 @@ recalled. What the code already enforces is named by its symbol only.
 
 ## Survey round — many cheap starts, the band near p ≈ 0.5
 
-For [`../specs/survey-round.md`](../specs/survey-round.md): starts are cheap and many, judged small,
+For [`../specs/roadmap.md`](../specs/roadmap.md) § Survey round: starts are cheap and many, judged small,
 then raced (MIPROv2 [2406.11695](https://arxiv.org/html/2406.11695) §3.1, APE
 [2211.01910](https://arxiv.org/html/2211.01910) §3.2, CAPO [2504.16005](https://arxiv.org/html/2504.16005),
 BOHB [1807.01774](https://arxiv.org/html/1807.01774v1)); whether the start matters depends on the
@@ -100,8 +99,7 @@ optimization.
 ## The preprint
 
 - **Clustered and paired SEs, not binomial** ([Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640):
-  clustering inflates SEs up to 3×) — `scoring/paired.py`, `shared/statistics.py::holm_adjusted`,
-  `ArmContrast.q_value` (BH), `evidence/comparison.py::snr`.
+  clustering inflates SEs up to 3×) — paired readings, Holm across pairs, BH `q_value`, SNR.
 - **Small samples need exact or bootstrap intervals** (["Don't use the CLT…"](https://arxiv.org/abs/2503.01747))
   — below a few hundred datapoints, most of our panels; not served today.
 - **Report SNR per benchmark** ([Signal and Noise](https://arxiv.org/abs/2508.13144), 900K runs):
@@ -206,6 +204,6 @@ Checked 2026-10-31 through a summarizing fetch; re-read a source before quoting 
   vs OpenInference (`openinference.span.kind` on every span). Langfuse and MLflow sit downstream of both.
 - **Prompt registries**: MLflow `{{variable}}` placeholders, immutable integer versions, aliases;
   Langfuse labels as the deployment pointer. Write-back maps onto those and invents no branch model
-  ([`../specs/mlflow-interop.md`](../specs/mlflow-interop.md)).
+  ([`../specs/roadmap.md`](../specs/roadmap.md) § MLflow interop).
 - **Not binding, checked**: A2A v1.0; Inspect AI `.eval` logs; AGENTS.md / llms.txt; EU AI Act GPAI
   duties (we modify no weights).
