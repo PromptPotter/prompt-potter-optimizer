@@ -95,7 +95,6 @@ _TURN_CAP = 1200
 
 # A tag is only a name: a rebuild under an old one would replay every cell banked on the old build.
 _COMMIT_LABEL = "org.promptpotter.db-llm-bench.commit"
-_IMAGES_CHECKED: set[str] = set()
 
 
 def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -348,9 +347,7 @@ async def _preflight(_backend_url: str) -> str | None:
 
 
 async def _check_image(image: str) -> None:
-    # At the first cell, not in `Connector.preflight`: that is handed no node config.
-    if image in _IMAGES_CHECKED:
-        return
+    # At every cell, not in `Connector.preflight`: that is handed no node config.
     code, out = await docker(
         "image", "inspect", "--format", f'{{{{index .Config.Labels "{_COMMIT_LABEL}"}}}}', image
     )
@@ -370,7 +367,6 @@ async def _check_image(image: str) -> None:
             f"{out or 'unknown'!r}, not the one its tag names. {built}",
             spent={},
         )
-    _IMAGES_CHECKED.add(image)
 
 
 def _failure(query: str, log: str, spent: dict[str, dict[str, object]]) -> CellUnscoreableError:

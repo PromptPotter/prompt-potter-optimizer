@@ -20,7 +20,6 @@ measured the machine is never a cell: ``_infrastructure_failure`` retries, then 
 from __future__ import annotations
 
 import asyncio
-import functools
 import json
 import logging
 import os
@@ -260,7 +259,6 @@ def _roster_path(dataset: str, version: str) -> Path:
     return _ROSTER_DIR / f"harbor-roster.{dataset}@{version}.json"
 
 
-@functools.cache
 def _pinned_roster(dataset: str, version: str) -> list[dict[str, Any]]:
     # A read never dials out: the roster is what `pin_roster` wrote, or nothing.
     path = _roster_path(dataset, version)

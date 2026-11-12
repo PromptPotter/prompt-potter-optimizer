@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
-from factories import backend_client, jumping_clock, pipeline_schema, samples, spend_book
+from factories import (
+    backend_client,
+    jumping_clock,
+    pipeline_schema,
+    samples,
+    spend_book,
+    workspace,
+)
 from offline_world import Router
 
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.sample_measurement import cell_billing
-from promptpotter.connectors import dspy_module
+from promptpotter.connectors import dbllmbench, dspy_module, harbor
 from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
@@ -23,6 +31,7 @@ from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.spend_book import SendBound
+from promptpotter.shared.errors import CellInfrastructureError
 from promptpotter.shared.run_scope import scoped
 
 
@@ -152,3 +161,28 @@ def test_connector_cells(offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_p
     assert data[dspy_module.SCORE_KEY] == 1.0, "a 5xx spent the call its resend answered"
     assert len(sends) == 3, f"{len(sends)} sends: two calls, one resent once"
     assert len(_lm_bills(tmp_path / "resent.jsonl")) == 2, "an answered call left no bill"
+
+    # The host's state is read per cell: an image rebuilt under its tag, a re-pinned roster.
+    built = ["abc1234"]
+
+    async def inspected(*_args: str, **_kw: Any) -> tuple[int, str]:
+        return 0, built[0]
+
+    monkeypatch.setattr(dbllmbench, "docker", inspected)
+    image = "pp-dbllmbench:abc1234-search"
+    jumping_clock(dbllmbench._check_image(image))
+    built[0] = "f00d000"
+    with pytest.raises(CellInfrastructureError):
+        jumping_clock(dbllmbench._check_image(image))
+    monkeypatch.setattr(harbor, "_ROSTER_DIR", tmp_path)
+    resolve = harbor.CONNECTOR.resolve_experiment
+    assert resolve is not None
+    stores = workspace(tmp_path / "harbor")
+    panel = {"harbor_dataset": "bench", "harbor_dataset_version": "1.0"}
+    for pinned in (["t1"], ["t2", "t3"]):
+        tasks = [{"id": t, "path": t} for t in pinned]
+        (tmp_path / "harbor-roster.bench@1.0.json").write_text(
+            json.dumps({"tasks": tasks}), encoding="utf-8"
+        )
+        resolved = [t["id"] for t in resolve(stores, panel)["tasks"]]
+        assert resolved == pinned, f"a live server resolved {resolved} off a re-pinned roster"
