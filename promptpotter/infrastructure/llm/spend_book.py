@@ -799,7 +799,6 @@ class Admission:
             key_source=self._paid_by,
             price=price,
             tokens=tokens,
-            ledger=self._ledger,
         )
         self._charges.append(bill)
         return bill

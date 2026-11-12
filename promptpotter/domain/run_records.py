@@ -489,8 +489,6 @@ class Bill(FrozenModel):
     # Both money fields ``None``: unpriced.
     price: CallPrice
     tokens: int
-    # The ledger the call landed on, relative to the account.
-    ledger: str
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

@@ -479,7 +479,7 @@ def billed_call(
     )
     record: dict[str, Any] = {"node": "l1_generate", "input_tokens": 1, "output_tokens": 0} | fields
     tokens = record["input_tokens"] + record["output_tokens"]
-    bill = Bill(hold_id=hold_id, key_source=key_source, price=price, tokens=tokens, ledger="")
+    bill = Bill(hold_id=hold_id, key_source=key_source, price=price, tokens=tokens)
     return TokenUsageRecord(money=price if replay else bill, **record)
 
 

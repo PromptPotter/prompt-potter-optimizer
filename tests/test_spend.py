@@ -2781,7 +2781,6 @@ def _account_stores(
                     rate_priced_usd=None,
                 ),
                 tokens=spent["input_tokens"] + spent["output_tokens"],
-                ledger="campaigns/held/cycles/c0/events.jsonl",
             )
         )
     return stores
@@ -3095,7 +3094,6 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
                 rate_priced_usd=None,
             ),
             tokens=9_000_000,
-            ledger="campaigns/held/cycles/c0/events.jsonl",
         )
     )
     wallet = account_wallet(spent_out)
@@ -3599,7 +3597,6 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
                 rate_priced_usd=None,
             ),
             tokens=10,
-            ledger="campaigns/camp-6b/cycles/cycle_forked01/events.jsonl",
         )
     )
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.10), (
@@ -4275,17 +4272,11 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     )
     wiped = CycleHop(campaign_id=f"{prefix}__dddddd", cycle_id="cycle-0")
     built_stores.charges.append(
-        Bill(
+        Hold(
             hold_id="wiped",
+            parent=None,
             key_source="host",
-            price=CallPrice(
-                kind="optimizer",
-                model="gpt-x",
-                provider="openai",
-                cost_usd=0.1,
-                rate_priced_usd=None,
-            ),
-            tokens=10,
+            bound=Budget(usd=0.1),
             ledger=built_stores.charges.held_on(campaigns.ledger(wiped)),
         )
     )

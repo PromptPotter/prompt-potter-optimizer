@@ -173,7 +173,8 @@ class CampaignStore:
         deleted campaign nor one the account's charges name, which outlive every landing's wipe."""
         prefix = dataset_id_prefix(dataset_name) if dataset_name else "campaign"
         bank = workspace_bank(self._base_dir)
-        charged = {PurePosixPath(bill.ledger) for bill in money_on(charges.path).bills}
+        holds = money_on(charges.path).holds.values()
+        charged = {PurePosixPath(hold.ledger) for hold in holds if hold.ledger is not None}
         while True:
             campaign_id = f"{prefix}__{secrets.token_hex(3)}"
             held = charges.held_on(self.campaign_root_dir(campaign_id))

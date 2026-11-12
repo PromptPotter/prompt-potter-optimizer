@@ -611,10 +611,6 @@
                 "title": "Key Source",
                 "type": "string"
               },
-              "ledger": {
-                "title": "Ledger",
-                "type": "string"
-              },
               "price": {
                 "$ref": "#/$defs/CallPrice"
               },
@@ -637,8 +633,7 @@
               "hold_id",
               "key_source",
               "price",
-              "tokens",
-              "ledger"
+              "tokens"
             ],
             "title": "Bill",
             "type": "object"
