@@ -54,9 +54,9 @@ BASELINE = {
     # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
     "deferred_imports": 6,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
-    "p_record": 23,
+    "p_record": 21,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
-    "p_record_drift": 14,
+    "p_record_drift": 12,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
     "p_served": 190,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
