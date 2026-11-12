@@ -250,13 +250,16 @@ def _rank_survivors(
     *,
     objective: CapoObjective,
 ) -> list[ArmKey]:
-    readings = {key: _cell_objectives(rows[key].cells, objective) for key in survivors}
+    # An arm with no graded cell is absent from the ranking, as an untested rival is from the race.
+    readings = {
+        key: read for key in survivors if (read := _cell_objectives(rows[key].cells, objective))
+    }
     shared = set.intersection(*(set(r) for r in readings.values())) if readings else set()
 
     def mean(key: ArmKey) -> float:
         return sum(readings[key][s] for s in shared) / len(shared) if shared else 0.0
 
-    return sorted(survivors, key=mean, reverse=True)
+    return sorted(readings, key=mean, reverse=True)
 
 
 def _readings(
