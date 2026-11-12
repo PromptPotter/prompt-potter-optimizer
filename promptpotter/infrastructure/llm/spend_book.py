@@ -607,17 +607,6 @@ class SpendBook(Projection):
         )
 
 
-def unbounded_spend_book() -> SpendBook:
-    return SpendBook(
-        declared=Budget(),
-        share=Budget(),
-        reserve=Budget(),
-        hold_id=None,
-        meters="bill",
-        opened=time.monotonic(),
-    )
-
-
 def require_spend_book(what: str) -> SpendBook:
     if (book := run_scope().book) is None:
         raise RuntimeError(f"{what}: no spend book is bound, so no admitted ceiling bounds it")

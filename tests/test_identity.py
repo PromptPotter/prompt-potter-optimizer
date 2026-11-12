@@ -46,6 +46,7 @@ from factories import (
     samples,
     seat,
     set_cycle,
+    spend_book,
     stored_campaign,
     workspace,
 )
@@ -296,7 +297,6 @@ from promptpotter.infrastructure.identity import blocklist, grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.registry import default_routes
-from promptpotter.infrastructure.llm.spend_book import unbounded_spend_book
 from promptpotter.infrastructure.producer_lock import cycle_held, release, take
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
@@ -887,7 +887,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
                     optimizer=select_optimizer(OptimizerChoice()),
                     determinism=clamp,
                 ),
-                scoped(book=unbounded_spend_book()),
+                scoped(book=spend_book()),
             ):
                 await call_mod.llm_call(
                     [{"role": "user", "content": content}],
@@ -3143,7 +3143,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                 optimizer=reflected_on.cycle.optimizer,
                 determinism=reflected_on.cycle.config.optimization.determinism,
             ),
-            scoped(book=unbounded_spend_book()),
+            scoped(book=spend_book()),
             verb_ledger(built_stores, reflected_on.cycle.session.hop),
         ):
             reflection = asyncio.run(GepaReflect().propose(reflecting, no_cells, Proposals([])))

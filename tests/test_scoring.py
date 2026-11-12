@@ -375,7 +375,6 @@ from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     require_spend_book,
-    unbounded_spend_book,
 )
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import cycle_held, release_cycle
@@ -1267,7 +1266,7 @@ def _peer_cycle(
             determinism=cycle.config.optimization.determinism,
         ):
             run_init(cycle, ledger)
-            with scoped(book=unbounded_spend_book() if book is None else book):
+            with scoped(book=spend_book() if book is None else book):
                 yield cycle, ledger
 
 
