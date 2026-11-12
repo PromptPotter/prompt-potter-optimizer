@@ -134,7 +134,7 @@ class Election(FrozenModel):
 
 
 class RoundOutcome(FrozenModel):
-    """``RoundClosedRecord`` carries exactly this: a field declared here reaches the ledger."""
+    """A ``RoundStatement`` extends it and the round file is it plus its rows: a field declared here reaches both."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

@@ -76,8 +76,8 @@ def _walk(model_cls: type[BaseModel], prefix: tuple[str, ...] = ()) -> list[Knob
             continue
         raise RuntimeError(
             f"config leaf {'.'.join(path)!r} carries no Knob(...) — an undeclared "
-            "knob is invisible to the config map and classifies DATA_AFFECTING on every "
-            "resume. Declare its estimand(s) on the field itself: "
+            "knob is invisible to the config map and keys every campaign's measured "
+            "address. Declare its estimand(s) on the field itself: "
             "`Annotated[<type>, Knob(Estimand.STOPPING)]`."
         )
     return out

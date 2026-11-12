@@ -158,7 +158,7 @@ def data_root(leg: Path) -> Path:
 
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
-RESUME_APPENDS = ("phases", "run_phases", "arms", "rulers", "rounds_entered")
+RESUME_APPENDS = ("phases", "run_phases", "arms", "rounds_entered")
 # Which of a round's cells a launch paid and which it replayed, by where each count sits: a
 # reading side's `bought`, a cell row's `cached`, a fold's `cached` and `tokens` — never a key of
 # that name elsewhere, such as the fitness term `evaluators.tokens`.
