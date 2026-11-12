@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import sys
 import time
 import uuid
@@ -25,14 +24,14 @@ from promptpotter.domain.spend import (
     METER_PRICES_REPLAYS,
     MONEY_AXES,
     NESTED_NODE_PREFIX,
+    NOTHING_PAID,
     Budget,
     CeilingMeter,
     KeySource,
-    PaidSpend,
     TokenAccount,
     TokenUsageKind,
+    UserSpend,
     draws_coupon,
-    metered,
     usd_text,
 )
 from promptpotter.infrastructure.llm.telemetry import (
@@ -44,9 +43,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     filed_kind,
     token_usage_record,
 )
-from promptpotter.infrastructure.projections.base import Projection
-from promptpotter.infrastructure.store.account_spend import unreported_under
-from promptpotter.infrastructure.store.read_model import money_on
+from promptpotter.infrastructure.store.read_model import Money, money_on, still_held
 from promptpotter.shared.errors import (
     ErrorCategory,
     HostAllowanceExhaustedError,
@@ -65,8 +62,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.infrastructure.store.wallet_store import ChargeBook
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -191,29 +186,27 @@ class LiveCycle(NamedTuple):
         return share.allotment
 
 
-class RunHold(NamedTuple):
-    """A run's hold on its account's charges, which a set-limits restates: what the host's coupon
-    holds back for it binds the sends on the box's key alone."""
-
-    charges: ChargeBook
-    hold_id: str
-
-    def bound(self) -> Budget:
-        return money_on(self.charges.path).holds[self.hold_id].bound
-
-
 # What an enclosing book files a nested run's sends as, as its ledger's copy of them does.
 _ENCLOSED: TokenUsageKind = "backend"
 
 
-class SpendBook(Projection):
+def _resource(hold: Hold) -> TokenUsageKind:
+    return _ENCLOSED if hold.resource is None else hold.resource
+
+
+class SpendBook:
+    """A run's admission, read at each send off the one fold of money (`read_model.Money`): its
+    share off the ledger it meters, its reserve off its job's hold on the account."""
+
     def __init__(
         self,
         *,
         declared: Budget,
         share: Budget | LiveCycle,
-        reserve: Budget | RunHold,
-        hold_id: str | None,
+        charges: ChargeBook,
+        hold_id: str,
+        headroom: Budget,
+        metered_on: Path | None,
         meters: CeilingMeter,
         opened: float,
         cycle: LiveCycle | None = None,
@@ -221,35 +214,21 @@ class SpendBook(Projection):
         # The launch's own axis (`wall_clock_s`); money binds on the share and the reserve.
         self.declared = declared.only(CYCLE_AXES)
         self.share = share
-        self.reserve_of = reserve
-        # The job's hold its calls draw on; ``None`` on a book no job holds.
+        self.charges = charges
+        # The job's hold every call and cell of this book draws on.
         self.hold_id = hold_id
+        # What the coupon admits on an axis the job's hold leaves unbounded: a paid call's.
+        self.headroom = headroom
+        # The cycle's ledger its share meters (replays and a nested run's copies live there);
+        # ``None`` meters what its job's hold drew.
+        self.metered_on = metered_on
         self.cycle = cycle
         self.meters = meters
         # The launch's ``time.monotonic()``: a book re-armed mid-launch keeps its clock.
         self.opened = opened
-        # The cycle's OWN, in the meter's units: never a figure to print as spent.
-        self.usd_metered = 0.0
-        self.tokens_spent = 0
-        self.usd_unreported = 0.0
-        self.tokens_unreported = 0
-        # What this cycle metered that no host key paid (the account's own keys, replays): the
-        # coupon's reserve never counts it.
-        self.off_coupon_usd = 0.0
-        self.off_coupon_tokens = 0
-        # What the box's key paid for kinds the meter does not count (a Compare arm's bench): the
-        # reserve binds every send on that key, so the root book counts it beside the meter.
-        self.beside_usd = 0.0
-        self.beside_tokens = 0
-        self._held_usd: dict[TokenUsageKind, float] = {}
-        self._held_tokens: dict[TokenUsageKind, int] = {}
-        self._out_usd: dict[TokenUsageKind, float] = {}
-        self._out_tokens: dict[TokenUsageKind, int] = {}
         self.set_aside_usd = 0.0
         self.set_aside_tokens = 0
-        self._seen: TokenUsageRecord | None = None
-        # A bill its fold could not count: the meter is short of it, so no send is admitted after.
-        self.unmetered: Exception | None = None
+        # The ledger a nested run's sends are copied onto, as this book's root.
         self.ledger: CycleEventLog | None = None
         # A nested run's book: each send is admitted against it AND every book enclosing it.
         self.enclosing: SpendBook | None = None
@@ -268,8 +247,10 @@ class SpendBook(Projection):
 
     @property
     def reserve(self) -> Budget:
-        held = self.reserve_of
-        return held if isinstance(held, Budget) else held.bound()
+        return self.headroom.over(self._money().holds[self.hold_id].bound)
+
+    def _money(self) -> Money:
+        return money_on(self.charges.path)
 
     def root(self) -> SpendBook:
         return self if self.enclosing is None else self.enclosing.root()
@@ -278,24 +259,6 @@ class SpendBook(Projection):
         """Seconds this launch may still run; ``None`` where no wall clock bounds it."""
         limit = self.budget.wall_clock_s
         return None if limit is None else limit - (time.monotonic() - self.opened)
-
-    def _usd_used(self) -> float:
-        return self.usd_metered + self.usd_unreported + self.set_aside_usd
-
-    def _tokens_used(self) -> int:
-        return self.tokens_spent + self.tokens_unreported + self.set_aside_tokens
-
-    def _coupon_usd_used(self) -> float:
-        return self._usd_used() - self.off_coupon_usd + self.beside_usd
-
-    def _coupon_tokens_used(self) -> int:
-        return self._tokens_used() - self.off_coupon_tokens + self.beside_tokens
-
-    def _handle_token_usage(self, record: TokenUsageRecord) -> None:
-        self._seen = record
-        # A nested run's copy is the ledger's: its book already counted it into this one.
-        if not record.node.startswith(NESTED_NODE_PREFIX):
-            self.count(record)
 
     def binds(self, kind: TokenUsageKind) -> bool:
         return kind in METER_KINDS[self.meters]
@@ -308,71 +271,87 @@ class SpendBook(Projection):
         """A bill meter prices no replay; the other prices one the first time its campaign reads it."""
         return not self.prices_replays or campaign_priced(cell_key)
 
-    def count(self, record: TokenUsageRecord) -> None:
-        for book, filed_as in self._levels(record.price.kind):
-            try:
-                book._counted(record.filed_as(filed_as))
-            except Exception as fault:
-                # Its guard reports it; no send in its chain is admitted against the short meter.
-                book.unmetered = fault
-                raise
+    @property
+    def spent(self) -> UserSpend:
+        """What the share counts, in its meter's units, set-aside and calls out apart."""
+        return self._spent(self._money(), host=False)
 
-    def _counted(self, record: TokenUsageRecord) -> None:
-        paid_by = None if record.bill is None else record.bill.key_source
-        if self.binds(record.price.kind):
-            self._meter(*metered(record, self.meters), paid_by)
-        else:
-            self._beside(*metered(record, "bill"), paid_by)
+    def _filed(self, money: Money, hold: Hold) -> TokenUsageKind | None:
+        """*hold*'s kind as this book files it; ``None`` where it draws on no hold of its job."""
+        kind, above = hold.resource, hold.parent
+        while above is not None and above != self.hold_id:
+            parent = money.holds[above]
+            if parent.resource is None:
+                kind = _ENCLOSED
+            above = parent.parent
+        return None if above is None else (_ENCLOSED if kind is None else kind)
 
-    def _meter(self, usd: float | None, tokens: int, paid_by: KeySource | None) -> None:
-        if usd is not None:
-            self.usd_metered += usd
-        self.tokens_spent += tokens
-        if not draws_coupon(paid_by):
-            self.off_coupon_usd += usd or 0.0
-            self.off_coupon_tokens += tokens
+    def _spent(self, money: Money, *, host: bool) -> UserSpend:
+        """What the share (*host*: the reserve, on the box's key) counts as spent and unreported:
+        its run's sends, and an earlier run's on its cycle."""
+        if self.metered_on is None:
+            drawn = money.drawn.get(self.hold_id, NOTHING_PAID)
+            return drawn.host if host else drawn.total
+        on = money_on(self.metered_on)
+        ledger = self.charges.held_on(self.metered_on)
 
-    def _beside(self, usd: float | None, tokens: int, paid_by: KeySource | None) -> None:
-        if draws_coupon(paid_by):
-            self.beside_usd += usd or 0.0
-            self.beside_tokens += tokens
+        def mine(hold: Hold) -> bool:
+            kind = self._filed(money, hold)
+            if kind is None:
+                return hold.ledger == ledger
+            return host or self.binds(kind)
 
-    def _spend(
-        self, kind: TokenUsageKind, usd: float | None, tokens: int, paid_by: KeySource
-    ) -> None:
-        """``usd`` is ``None`` where neither a bill nor a rate prices the call."""
-        for book, filed_as in self._levels(kind):
-            (book._meter if book.binds(filed_as) else book._beside)(usd, tokens, paid_by)
+        whole, unpriced = money.unreported_holds()
+        left = still_held(filter(mine, whole), filter(mine, unpriced))
+        if host:
+            return on.spent.cost.host.plus(left.host)
+        metered = on.metered[self.meters]
+        return UserSpend(metered.usd_amount, metered.token_amount, 0).plus(left.total)
 
-    def set_aside(self, usd: float, tokens: int) -> None:
-        self.set_aside_usd = usd
-        self.set_aside_tokens = tokens
+    def _out(self, money: Money, *, host: bool, beside: TokenUsageKind | None) -> tuple[float, int]:
+        """What the calls and cells out under its job still hold, on the share those it meters;
+        *beside*'s are the caller's to count."""
+        usd, tokens = 0.0, 0
+        for hold in money.open.values():
+            kind = _resource(hold)
+            if hold.parent != self.hold_id or kind == beside:
+                continue
+            if draws_coupon(hold.key_source) if host else self.binds(kind):
+                held_usd, held_tokens = money.kept(hold, host=host)
+                usd, tokens = usd + held_usd, tokens + held_tokens
+        return usd, tokens
 
-    def saw(self, record: TokenUsageRecord) -> bool:
-        """Valid only right after the append: it compares against the LAST record seen."""
-        return record is self._seen
-
-    def mirror(self, record: TokenUsageRecord) -> None:
-        """The root ledger's copy of a nested run's call; its books counted it already."""
-        if self.ledger is None:
-            return
-        mode = instrument_mode()
-        copy = record.filed_as(_ENCLOSED).model_copy(
-            update={
-                "node": f"{NESTED_NODE_PREFIX}{record.node}",
-                # The ROOT's round, whose ledger this lands on; the nested run binds its own.
-                "round": current_round() if mode is None else mode.root_round,
-                "mirrored": False,
-            }
+    def _left(
+        self, money: Money, *, host: bool, beside: TokenUsageKind | None
+    ) -> tuple[float | None, int | None]:
+        """What the share (*host*: the reserve) still admits, below nothing once overdrawn;
+        ``None`` on an axis it leaves unbounded."""
+        limit = self.reserve if host else self.allotment
+        if limit.usd is None and limit.tokens is None:
+            return None, None
+        spent = self._spent(money, host=host)
+        out_usd, out_tokens = self._out(money, host=host, beside=beside)
+        return (
+            None
+            if limit.usd is None
+            else limit.usd - spent.at_most_usd - self.set_aside_usd - out_usd,
+            None
+            if limit.tokens is None
+            else limit.tokens - spent.at_most_tokens - self.set_aside_tokens - out_tokens,
         )
-        self.ledger.append(copy)
 
     def exhausted(self) -> ErrorCategory | None:
         allotment = self.allotment
-        if allotment.usd is not None and self._usd_used() >= allotment.usd:
-            return ErrorCategory.SPEND_CEILING
-        if allotment.tokens is not None and self._tokens_used() >= allotment.tokens:
-            return ErrorCategory.TOKEN_CEILING
+        if allotment.usd is not None or allotment.tokens is not None:
+            spent = self.spent
+            if (
+                allotment.usd is not None
+                and spent.at_most_usd + self.set_aside_usd >= allotment.usd
+            ):
+                return ErrorCategory.SPEND_CEILING
+            tokens = spent.at_most_tokens + self.set_aside_tokens
+            if allotment.tokens is not None and tokens >= allotment.tokens:
+                return ErrorCategory.TOKEN_CEILING
         # The reserve is not asked: a run on the account's own keys outlives its coupon, and a
         # send on the box's key past it is refused where it is held (`refuse_unless_room`).
         left = self.clock_left()
@@ -385,34 +364,17 @@ class SpendBook(Projection):
     ) -> Iterator[tuple[ErrorCategory, bool, int]]:
         """The campaign's share binds every send it meters; the coupon's reserve every one on the
         box's key; each holds the send's whole bound."""
-        budget = self.allotment
-        reserved = self.reserve if draws_coupon(paid_by) else Budget()
-        for reserve, limit, used, out in (
-            (False, budget.usd, self._usd_used(), self._held_usd),
-            (True, reserved.usd, self._coupon_usd_used(), self._out_usd),
-        ):
-            if limit is not None:
-                left = limit - used - sum(v for k, v in out.items() if k != beside)
+        money = self._money()
+        share_usd, share_tokens = self._left(money, host=False, beside=beside)
+        held_usd, held_tokens = (
+            self._left(money, host=True, beside=beside) if draws_coupon(paid_by) else (None, None)
+        )
+        for reserve, left in ((False, share_usd), (True, held_usd)):
+            if left is not None:
                 yield ErrorCategory.SPEND_CEILING, reserve, _admits(left, bound.usd, reserve)
-        for reserve, limit_t, used_t, out_t in (
-            (False, budget.tokens, self._tokens_used(), self._held_tokens),
-            (True, reserved.tokens, self._coupon_tokens_used(), self._out_tokens),
-        ):
-            if limit_t is not None:
-                left_t = limit_t - used_t - sum(v for k, v in out_t.items() if k != beside)
+        for reserve, left_t in ((False, share_tokens), (True, held_tokens)):
+            if left_t is not None:
                 yield ErrorCategory.TOKEN_CEILING, reserve, _admits(left_t, bound.tokens, reserve)
-
-    def take_up(self, charges: ChargeBook, ledger: Path) -> PaidSpend:
-        """The cycle's own prior, once at open: each bill counted as its send's was, a nested
-        run's copy included, then what its sends left unreported on the account."""
-        for record in money_on(ledger).usage:
-            self._counted(record)
-        left = unreported_under(charges, ledger)
-        self.usd_unreported = left.total.unreported_usd
-        self.tokens_unreported = left.total.unreported_tokens
-        self.off_coupon_usd += left.user.unreported_usd
-        self.off_coupon_tokens += left.user.unreported_tokens
-        return left
 
     # These two plan cells alone, on what the cell's connector declares pays it.
     def fits(
@@ -435,28 +397,46 @@ class SpendBook(Projection):
         kind: TokenUsageKind,
         *,
         what: str,
-        reservation: CellReservation | None,
         paid_by: KeySource,
-    ) -> None:
-        levels = list(self._levels(kind))
-        if (fault := next((b.unmetered for b, _ in levels if b.unmetered), None)) is not None:
-            raise fault
-        at = next(
-            (
-                i
-                for i, (book, filed_as) in enumerate(levels)
-                if reservation is not None
-                and reservation.book is book
-                and reservation.kind == filed_as
-            ),
-            None,
+        ledger: str | None,
+    ) -> str:
+        """THE door a call's or a cell's hold opens through: refused where a level has no room for
+        it, then one write on the account, under its run's open cell or else its job."""
+        parent = draws_on(self)
+        money = self._money()
+        for book, filed_as in self._levels(kind):
+            past = book._past_cells(money, bound, parent)
+            book.refuse_unless_room(past, filed_as, what, paid_by)
+        hold_id = uuid.uuid4().hex
+        self.charges.append(
+            Hold(
+                hold_id=hold_id,
+                parent=parent,
+                key_source=paid_by,
+                bound=bound.budget,
+                resource=kind,
+                ledger=ledger,
+            )
         )
-        for book, filed_as in levels if at is None else levels[:at]:
-            book.refuse_unless_room(bound, filed_as, what, paid_by)
-        if at is not None and reservation is not None:
-            reservation.draw(bound, what, paid_by)
-        for book, filed_as in levels:
-            book._move(filed_as, bound, 1, paid_by)
+        return hold_id
+
+    def _past_cells(self, money: Money, bound: SendBound, parent: str) -> SendBound:
+        """What *bound* asks of this book past what each cell between *parent* and its job still
+        holds: a cell's reservation stops a cell, never the estimate."""
+        usd, tokens = bound.usd, bound.tokens
+        above = parent
+        while above != self.hold_id:
+            cell = money.holds[above]
+            if cell.resource is not None:
+                left_usd, left_tokens = money.left(cell)
+                if usd is not None and left_usd is not None:
+                    usd = max(0.0, usd - max(0.0, left_usd))
+                if tokens is not None and left_tokens is not None:
+                    tokens = max(0, tokens - max(0, left_tokens))
+            if cell.parent is None:
+                raise RuntimeError(f"hold {parent} draws on no hold of job {self.hold_id}")
+            above = cell.parent
+        return SendBound(input_tokens=0, output_tokens=tokens, usd=usd, unpriced=bound.unpriced)
 
     def _levels(self, kind: TokenUsageKind) -> Iterator[tuple[SpendBook, TokenUsageKind]]:
         """This book and every book enclosing it, each with the kind it files *kind* as, where it
@@ -466,21 +446,6 @@ class SpendBook(Projection):
             if book.binds(kind) or book.enclosing is None:
                 yield book, kind
             book, kind = book.enclosing, _ENCLOSED
-
-    def _move(self, kind: TokenUsageKind, bound: SendBound, sign: int, paid_by: KeySource) -> None:
-        if self.binds(kind):
-            self._held_usd[kind] = self._held_usd.get(kind, 0.0) + sign * (bound.usd or 0.0)
-            self._held_tokens[kind] = self._held_tokens.get(kind, 0) + sign * (bound.tokens or 0)
-        # What is out against the reserve: a send on the account's own key holds none of it.
-        if draws_coupon(paid_by):
-            self._out_usd[kind] = self._out_usd.get(kind, 0.0) + sign * (bound.usd or 0.0)
-            self._out_tokens[kind] = self._out_tokens.get(kind, 0) + sign * (bound.tokens or 0)
-
-    def refuse_in_chain(
-        self, bound: SendBound, kind: TokenUsageKind, what: str, paid_by: KeySource
-    ) -> None:
-        for book, filed_as in self._levels(kind):
-            book.refuse_unless_room(bound, filed_as, what, paid_by)
 
     def refuse_unless_room(
         self, bound: SendBound, kind: TokenUsageKind, what: str, paid_by: KeySource
@@ -521,18 +486,16 @@ class SpendBook(Projection):
             else "cycle's share of the campaign ceiling"
         )
         bounds = self.reserve if reserve else self.allotment
+        money = self._money()
+        spent = self._spent(money, host=reserve)
+        out_usd, out_tokens = self._out(money, host=reserve, beside=None)
         if category is ErrorCategory.SPEND_CEILING:
             # Only a bounded axis refuses, so the cap it names is set.
             cap = bounds.usd_amount
-            out = sum((self._out_usd if reserve else self._held_usd).values())
             owed = [
-                (
-                    self.usd_metered - (self.off_coupon_usd if reserve else 0.0),
-                    CEILING_METER_LABELS[self.meters],
-                ),
-                (self.beside_usd if reserve else 0.0, "on sends the meter does not count"),
-                (self.usd_unreported, "unreported"),
-                (out, "in calls still out"),
+                (spent.sent_usd, CEILING_METER_LABELS["bill" if reserve else self.meters]),
+                (spent.unreported_usd, "unreported"),
+                (out_usd, "in calls still out"),
                 (self.set_aside_usd, "set aside for the bench"),
             ]
             left = cap - sum(usd for usd, _ in owed)
@@ -545,36 +508,31 @@ class SpendBook(Projection):
             )
         if each.tokens is None:
             return f"{what}: nothing caps its reply, so it cannot run under a token ceiling"
-        out_t = self._out_tokens if reserve else self._held_tokens
         return (
             f"{what} holds {each.tokens:,} tokens while it is out, and the "
-            f"{bounds.token_amount:,}-token {limit} holds {self.tokens_spent:,} spent, "
-            f"{self.tokens_unreported:,} unreported, {sum(out_t.values()):,} for calls out and "
+            f"{bounds.token_amount:,}-token {limit} holds {spent.used_tokens:,} spent, "
+            f"{spent.unreported_tokens:,} unreported, {out_tokens:,} for calls out and "
             f"{self.set_aside_tokens:,} set aside for the bench"
         )
 
-    def release(self, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource) -> None:
-        for book, filed_as in self._levels(kind):
-            book._move(filed_as, bound, -1, paid_by)
+    def set_aside(self, usd: float, tokens: int) -> None:
+        self.set_aside_usd = usd
+        self.set_aside_tokens = tokens
 
-    def unpriced(self, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource) -> None:
-        self.release(bound, kind, paid_by)
-        self.keep_held(_amount(bound.usd or 0.0, 0), kind, paid_by)
-
-    def unreported(self, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource) -> None:
-        self.release(bound, kind, paid_by)
-        self.keep_held(bound, kind, paid_by)
-
-    def keep_held(self, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource) -> None:
-        for book, filed_as in self._levels(kind):
-            if not book.binds(filed_as):
-                book._beside(bound.usd, bound.tokens or 0, paid_by)
-                continue
-            book.usd_unreported += bound.usd or 0.0
-            book.tokens_unreported += bound.tokens or 0
-            if not draws_coupon(paid_by):
-                book.off_coupon_usd += bound.usd or 0.0
-                book.off_coupon_tokens += bound.tokens or 0
+    def mirror(self, record: TokenUsageRecord) -> None:
+        """The root ledger's copy of a nested run's call, which its meter counts."""
+        if self.ledger is None:
+            return
+        mode = instrument_mode()
+        copy = record.filed_as(_ENCLOSED).model_copy(
+            update={
+                "node": f"{NESTED_NODE_PREFIX}{record.node}",
+                # The ROOT's round, whose ledger this lands on; the nested run binds its own.
+                "round": current_round() if mode is None else mode.root_round,
+                "mirrored": False,
+            }
+        )
+        self.ledger.append(copy)
 
     def prices_sends(self) -> bool:
         """Whether ANY send is held in dollars here: a price list is then needed whoever pays."""
@@ -582,29 +540,26 @@ class SpendBook(Projection):
 
     def coupon_left(self) -> Budget:
         """What the reserve still admits on the box's key, past what it counted and has out."""
-        reserve = self.reserve
-        return Budget(
-            usd=None
-            if reserve.usd is None
-            else max(0.0, reserve.usd - self._coupon_usd_used() - sum(self._out_usd.values())),
-            tokens=None
-            if reserve.tokens is None
-            else max(
-                0, reserve.tokens - self._coupon_tokens_used() - sum(self._out_tokens.values())
-            ),
-        )
+        return _at_least_nothing(*self._left(self._money(), host=True, beside=None))
 
     def money_left(self) -> Budget:
         """What the allotment still admits past spend and holds: an enclosed run's whole ceiling."""
-        allotment = self.allotment
-        return Budget(
-            usd=None
-            if allotment.usd is None
-            else max(0.0, allotment.usd - self._usd_used() - sum(self._held_usd.values())),
-            tokens=None
-            if allotment.tokens is None
-            else max(0, allotment.tokens - self._tokens_used() - sum(self._held_tokens.values())),
-        )
+        return _at_least_nothing(*self._left(self._money(), host=False, beside=None))
+
+
+def _at_least_nothing(usd: float | None, tokens: int | None) -> Budget:
+    return Budget(
+        usd=None if usd is None else max(0.0, usd),
+        tokens=None if tokens is None else max(0, tokens),
+    )
+
+
+def draws_on(book: SpendBook) -> str:
+    """The hold a new one under *book* draws on: its run's open cell reservation, else its job's."""
+    cell = run_scope().reservation
+    if cell is not None and money_on(book.charges.path).holds[cell].parent == book.hold_id:
+        return cell
+    return book.hold_id
 
 
 def require_spend_book(what: str) -> SpendBook:
@@ -627,62 +582,31 @@ def filed(label: CallLabel) -> CallLabel:
     return CallLabel(label.node, filed_kind(label.kind))
 
 
-def _bound_book(what: str) -> SpendBook:
-    book = require_spend_book(what)
-    billing_ledger(what)
-    return book
-
-
-def _amount(usd: float, tokens: int) -> SendBound:
-    return SendBound(input_tokens=0, output_tokens=tokens, usd=usd)
-
-
-class CellReservation:
-    """In memory only: a reservation is no send, so it writes no ledger record."""
-
-    def __init__(
-        self, book: SpendBook, kind: TokenUsageKind, bound: SendBound, paid_by: KeySource
-    ) -> None:
-        self.book = book
-        self.kind = kind
-        self.paid_by = paid_by
-        self.usd = bound.usd or 0.0
-        self.tokens = bound.tokens or 0
-
-    def draw(self, bound: SendBound, what: str, paid_by: KeySource) -> None:
-        """The rest is admitted against the ceiling: it stops a cell, never the estimate."""
-        usd, tokens = min(self.usd, bound.usd or 0.0), min(self.tokens, bound.tokens or 0)
-        short = _amount((bound.usd or 0.0) - usd, (bound.tokens or 0) - tokens)
-        if short.usd or short.tokens:
-            self.book.refuse_in_chain(
-                short, self.kind, f"{what}, past its cell's reservation", paid_by
-            )
-        self.usd -= usd
-        self.tokens -= tokens
-        # What the cell reserved, on its connector's payer, now held by the send that drew it.
-        self.book.release(_amount(usd, tokens), self.kind, self.paid_by)
-
-
 def reservation_left() -> SendBound:
-    if (reservation := run_scope().reservation) is None:
+    if (cell := run_scope().reservation) is None:
         raise RuntimeError("no cell reservation is open to bound this send")
-    return _amount(reservation.usd, reservation.tokens)
+    money = money_on(require_spend_book("a cell's reservation").charges.path)
+    usd, tokens = money.left(money.holds[cell])
+    return SendBound(
+        input_tokens=0,
+        output_tokens=0 if tokens is None else max(0, tokens),
+        usd=0.0 if usd is None else max(0.0, usd),
+    )
 
 
 @contextmanager
 def reserved(label: CallLabel, bound: SendBound, *, paid_by: KeySource) -> Iterator[None]:
-    """``bound`` is the run a cell DECLARES, never its worst case, which fits one cell at a time."""
+    """``bound`` is the run a cell DECLARES, never its worst case, which fits one cell at a time:
+    a hold its sends draw on, released at its exit."""
     label = filed(label)
-    book = _bound_book(label.node)
-    book.hold(
-        bound, label.kind, what=label.node, reservation=run_scope().reservation, paid_by=paid_by
-    )
-    reservation = CellReservation(book, label.kind, bound, paid_by)
+    book = require_spend_book(label.node)
+    billing_ledger(label.node)
+    cell = book.hold(bound, label.kind, what=label.node, paid_by=paid_by, ledger=None)
     try:
-        with scoped(reservation=reservation):
+        with scoped(reservation=cell):
             yield
     finally:
-        book.release(_amount(reservation.usd, reservation.tokens), label.kind, paid_by)
+        book.charges.append(Release(hold_id=cell))
 
 
 class Billed(NamedTuple):
@@ -710,7 +634,6 @@ class Admission:
         label: CallLabel,
         bound: SendBound,
         *,
-        reservation: CellReservation | None,
         model: str | None,
         provider: str | None,
         paid_by: KeySource,
@@ -719,38 +642,23 @@ class Admission:
         self._label = label
         self._paid_by = paid_by
         self._bound = bound
-        self._billed_usd = 0.0
-        self._billed_tokens = 0
-        self._priced = True
         self._model = model
         self._provider = provider
         self._started = time.monotonic()
-        self._hold_id = uuid.uuid4().hex
-        # A nested run's sends land on its ROOT's ledger; the account's charges take each once.
+        # A nested run's sends land on its ROOT's ledger too; the account's charges take each once.
         self._root = book.root()
-        self._charges = bound_account(label.node).charges
-        self._ledger = self._charges.held_on((self._root.ledger or billing_ledger(label.node)).path)
-        self._parent = book.hold_id
-        self._unseen: list[TokenUsageRecord] = []
-        # Priced parts no ledger record carries yet, metered straight into the book at its close.
-        self._unlanded: list[_Part] = []
+        self._charges = book.charges
+        # Its usage lands where the ledger was bound at admission, whatever a probe mutes after.
+        self._ledger = billing_ledger(label.node)
         self.closed = False
         what = f"{label.node} on {model}" if model else label.node
-        book.hold(bound, label.kind, what=what, reservation=reservation, paid_by=paid_by)
-        try:
-            self._charges.append(
-                Hold(
-                    hold_id=self._hold_id,
-                    parent=self._parent,
-                    key_source=paid_by,
-                    bound=bound.budget,
-                    ledger=self._ledger,
-                )
-            )
-        except BaseException:
-            self._finish()
-            book.release(bound, label.kind, paid_by)
-            raise
+        self._hold_id = book.hold(
+            bound,
+            label.kind,
+            what=what,
+            paid_by=paid_by,
+            ledger=self._charges.held_on((self._root.ledger or self._ledger).path),
+        )
 
     def _price(self, part: Billed) -> _Part:
         price = call_price(
@@ -761,10 +669,7 @@ class Admission:
             cost_usd=part.cost_usd,
             recorded=part.rate_priced_usd,
         )
-        one = _Part(part, price, part.usage.input + part.usage.output)
-        self._bill(price.bill_or_rate_usd, one.tokens)
-        self._unlanded.append(one)
-        return one
+        return _Part(part, price, part.usage.input + part.usage.output)
 
     def _write(self, one: _Part, bill: Bill) -> None:
         part = one.part
@@ -781,17 +686,7 @@ class Admission:
         # The root's copy is the one money is summed off: it lands before the nested run's own.
         if self._root is not self._book:
             self._root.mirror(record)
-        if append_record(record) is None:
-            usd = one.price.bill_or_rate_usd
-            logger.warning(
-                "%s: a call counted at $%s reached a muted ledger; only this run's book counts it",
-                part.node or self._label.node,
-                "?" if usd is None else f"{usd:.6f}",
-            )
-            return
-        self._unlanded.remove(one)
-        if not self._book.saw(record):
-            self._unseen.append(record)
+        append_record(record, self._ledger)
 
     def _charge(self, price: CallPrice, tokens: int) -> Bill:
         bill = Bill(
@@ -803,13 +698,6 @@ class Admission:
         self._charges.append(bill)
         return bill
 
-    def _bill(self, usd: float | None, tokens: int) -> None:
-        if usd is None:
-            self._priced = False
-        else:
-            self._billed_usd += usd
-        self._billed_tokens += tokens
-
     def close(self, outcome: SendOutcome) -> None:
         if outcome.reported is not None:
             self.settle(*outcome.reported.parts, unknown=outcome.reported.unknown)
@@ -819,47 +707,27 @@ class Admission:
             self.release()
 
     def settle(self, *parts: Billed, unknown: SendBound | None = None) -> None:
-        """The book closes on every part and the unknown remainder whatever its writes do: a write
-        that raises still leaves it settled whole, and the raise reaches the caller."""
+        """Every part is on the account before any ledger write can raise past the rest."""
         self._finish()
         priced = [self._price(part) for part in parts]
-        try:
-            # Every part is on the account before any ledger write can raise past the rest.
-            bills = [self._charge(one.price, one.tokens) for one in priced]
-            if unknown is not None:
-                self._charges.append(Lapse(hold_id=self._hold_id, bound=unknown.budget))
-            elif not parts:
-                self._charges.append(Release(hold_id=self._hold_id))
-            for one, bill in zip(priced, bills, strict=True):
-                self._write(one, bill)
-        finally:
-            self._close_book(unknown)
-
-    def _close_book(self, unknown: SendBound | None) -> None:
+        bills = [self._charge(one.price, one.tokens) for one in priced]
         if unknown is not None:
-            self._book.keep_held(unknown, self._label.kind, self._paid_by)
-        if self._priced:
-            self._book.release(self._bound, self._label.kind, self._paid_by)
-        else:
-            self._book.unpriced(self._bound, self._label.kind, self._paid_by)
-        for record in self._unseen:
-            self._book.count(record)
-        for one in self._unlanded:
-            self._book._spend(
-                self._label.kind, one.price.bill_or_rate_usd, one.tokens, self._paid_by
-            )
+            self._charges.append(Lapse(hold_id=self._hold_id, bound=unknown.budget))
+        elif not parts:
+            self._charges.append(Release(hold_id=self._hold_id))
+        for one, bill in zip(priced, bills, strict=True):
+            self._write(one, bill)
 
     def release(self) -> None:
         self.settle()
 
     def unreported(self) -> None:
         self._finish()
-        self._book.unreported(self._bound, self._label.kind, self._paid_by)
         self._charges.append(Lapse(hold_id=self._hold_id, bound=self._bound.budget))
 
     def _finish(self) -> None:
         if self.closed:
-            # A second close would release the hold twice and admit sends on room nobody has.
+            # A second close would close the hold twice and draw a lapse nobody sent.
             raise RuntimeError(f"{self._label.node}: an admission is closed once")
         self.closed = True
 
@@ -874,13 +742,10 @@ def admitted(
     paid_by: KeySource,
 ) -> Iterator[Admission]:
     label = filed(label)
-    book = _bound_book(label.node)
-    reservation = run_scope().reservation
     admission = Admission(
-        book,
+        require_spend_book(label.node),
         label,
         bound,
-        reservation=reservation,
         model=model,
         provider=provider,
         paid_by=paid_by,

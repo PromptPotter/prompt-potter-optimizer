@@ -82,7 +82,6 @@ from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, OptSearchPoint, loci_of
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_ALL_NO_OP,
-    PARSE_FAILURE_CHARGED,
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
     Critique,
@@ -564,7 +563,7 @@ def _compute_round_1_verdict(
         return "unknown"
 
     parse_failure = rounds[0].closed_state.output(L1Readout).l1_parse_failure
-    if parse_failure in PARSE_FAILURE_CHARGED:
+    if parse_failure == PARSE_FAILURE_MALFORMED:
         return "broken"
     # What remains is TOOLING: the verdict is a CHARGE against the prompt, and this round earns none.
     if parse_failure is not None:

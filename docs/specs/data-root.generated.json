@@ -811,6 +811,16 @@
                 "title": "Record Type",
                 "type": "string"
               },
+              "resource": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/TokenUsageKind"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "timestamp": {
                 "title": "Timestamp",
                 "type": "string"
@@ -821,6 +831,7 @@
               "parent",
               "key_source",
               "bound",
+              "resource",
               "ledger"
             ],
             "title": "Hold",
@@ -828,7 +839,7 @@
           },
           "Lapse": {
             "additionalProperties": false,
-            "description": "A send that may have billed and reported nothing: it closes its call's hold, and *bound* is\nwhat it may have cost, unreported once the hold above it closes.",
+            "description": "A send that may have billed and reported nothing: it closes its call's hold, and *bound* is\nwhat it may have cost, drawn on every hold above it and unreported at once.",
             "properties": {
               "bound": {
                 "$ref": "#/$defs/Budget"

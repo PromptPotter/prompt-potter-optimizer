@@ -823,8 +823,10 @@ def call_book(
     return SpendBook(
         declared=Budget(),
         share=Budget(),
-        reserve=reserve,
+        charges=stores.charges,
         hold_id=hold_id,
+        headroom=reserve,
+        metered_on=None,
         meters="bill",
         opened=time.monotonic(),
     )
@@ -976,7 +978,14 @@ def hold_run(stores: Stores, hold_id: str, bound: Budget, *, parent: str | None)
     """THE run's hold on its account, opened at admission and restated by a set-limits: the
     coupon's reserve for it, which its book and every other launch's wallet read."""
     stores.charges.append(
-        Hold(hold_id=hold_id, parent=parent, key_source="host", bound=bound, ledger=None)
+        Hold(
+            hold_id=hold_id,
+            parent=parent,
+            key_source="host",
+            bound=bound,
+            resource=None,
+            ledger=None,
+        )
     )
 
 
