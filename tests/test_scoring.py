@@ -159,19 +159,23 @@ from promptpotter.application.optimizers.variation.members import (
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_observers import declare_gate
 from promptpotter.application.run_phase_control import RunControl
-from promptpotter.application.runner import arm_gate
 from promptpotter.application.runner.bench import (
+    bank_campaign_result,
     bench_selection,
     bench_series,
+    line_launches,
     pair_on_bench,
     read_bench,
     score_on_bench,
 )
-from promptpotter.application.runner.campaign_result import bank_campaign_result, line_launches
-from promptpotter.application.runner.cycle_close import build_cycle_result
-from promptpotter.application.runner.inner.spawn_context import inner_spawn_of
-from promptpotter.application.runner.measurement import ReferencePairs
-from promptpotter.application.runner.round import announce_opening, execute_round, run_init
+from promptpotter.application.runner.entry import build_cycle_result
+from promptpotter.application.runner.inner.tasks import inner_spawn_of
+from promptpotter.application.runner.round import (
+    ReferencePairs,
+    announce_opening,
+    execute_round,
+    run_init,
+)
 from promptpotter.application.runner.termination import standing_tripped, target_tripped
 from promptpotter.application.scoring import closed_rounds, evaluators, query_loop
 from promptpotter.application.scoring import passes as held_out
@@ -2535,7 +2539,9 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                     declare_gate(*args, **kwargs)
                     held.set()
 
-                monkeypatch.setattr(arm_gate, "declare_gate", gate_declared)
+                monkeypatch.setattr(
+                    "promptpotter.application.runner.round.declare_gate", gate_declared
+                )
 
                 async def answer() -> None:
                     await held.wait()

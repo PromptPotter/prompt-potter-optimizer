@@ -817,7 +817,7 @@ class Reviewer(NodeMember, Protocol):
 
 
 class OperatorSeat(NodeMember):
-    """The arm gate's seat, the bench's own and no manifest's: an operator's arm is a child it admits as any other (`runner/arm_gate.py`)."""
+    """The arm gate's seat, the bench's own and no manifest's: an operator's arm is a child it admits as any other (`runner/round.py::author_arm`)."""
 
     name: ClassVar[str] = "operator_seat"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM

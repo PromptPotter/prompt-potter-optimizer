@@ -57,7 +57,7 @@ _INSTRUMENT = "instrument"
 
 class PinnedCell(FrozenModel):
     """A declared cell with what measures it, digested where its panel resolves
-    (`runner/inner/connector.py`): in the pin, so its key moves with its own instrument alone."""
+    (`runner/inner/spawn.py`): in the pin, so its key moves with its own instrument alone."""
 
     cell: Seat
     instrument: str = Field(min_length=1)

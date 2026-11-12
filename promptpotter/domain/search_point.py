@@ -98,7 +98,7 @@ class JobSearchPoint(FrozenModel):
         return pipeline_schema.sp_hash(self.pipeline_params)
 
     def content_hash(self, dataset: list[Any], *, candidate_library: Collection[str]) -> str:
-        """Names a campaign's root (``runner/campaign_ids.py``); no measurement is filed under it."""
+        """Names a campaign's root (``runner/mint.py::root_cycle_id_of``); no measurement is filed under it."""
         return content_hash(
             dataset, self.pipeline_params.dump(), candidate_library=candidate_library
         )

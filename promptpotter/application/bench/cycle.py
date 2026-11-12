@@ -146,7 +146,7 @@ class Cycle:
     optimizer: SelectedOptimizer
     slices: SliceMap
     difficulty: DifficultyView
-    # Read once at the cycle's open (`runner/open_cycle.py`): what every round's earned blocks mine.
+    # Read once at the cycle's open (`runner/mint.py::open_cycle`): what every round's earned blocks mine.
     survey: CampaignSurvey
     # By round, what each round not yet closed has produced, which its close banks (`close_state`).
     outputs: dict[int, dict[str, RoundOutput]] = field(default_factory=dict)

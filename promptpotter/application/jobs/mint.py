@@ -43,7 +43,7 @@ from promptpotter.application.preflight import (
     unpriced_routes,
 )
 from promptpotter.application.run_observers import declare_run_wiring
-from promptpotter.application.runner.campaign_ids import (
+from promptpotter.application.runner.mint import (
     origin_content_hash,
     root_cycle_id_of,
 )

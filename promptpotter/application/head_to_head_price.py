@@ -20,7 +20,7 @@ from promptpotter.application.preflight import (
     check_cap_funds_round,
     check_search_split_holds_round,
 )
-from promptpotter.application.runner.campaign_result import line_launches
+from promptpotter.application.runner.bench import line_launches
 from promptpotter.application.scoring.sample_measurement import measured_cell_price
 from promptpotter.domain.campaign_config import CycleConfig
 from promptpotter.domain.command_kinds import MintHeadToHeadPayload

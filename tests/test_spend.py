@@ -115,8 +115,9 @@ from promptpotter.application.optimizers.potter.race import CatchUpPool
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl, budget_stop
-from promptpotter.application.runner.campaign_result import cycle_bench, line_run
-from promptpotter.application.runner.inner import spawn, spawn_context
+from promptpotter.application.runner.bench import cycle_bench, line_run
+from promptpotter.application.runner.inner import spawn
+from promptpotter.application.runner.inner.tasks import InnerSpawnContext
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring import query_loop
@@ -1187,7 +1188,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     monkeypatch.setattr(spawn, "_run_inner_campaign", _hanging_inner)
     seats = inner_cells("potter")
     owner = CycleHop(campaign_id="ppself__aaaaaa", cycle_id="cycle_deadbeef0000")
-    spawning = spawn_context.InnerSpawnContext(
+    spawning = InnerSpawnContext(
         inner_sandbox_root=inner_sandbox(built_stores, owner.campaign_id, owner.cycle_id),
         identity=built_stores.identity,
         shared_root=built_stores.shared_root,

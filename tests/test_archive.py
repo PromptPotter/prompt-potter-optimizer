@@ -2,7 +2,7 @@
 
 Owns `infrastructure/store/measurement_archive.py` and `archive_queries.py`,
 `application/maintenance/`, `application/bench/resume_and_fork/`, `application/origin.py` and
-`application/runner/origin_gate.py`. A
+`application/runner/loop.py`. A
 replay served to the wrong content, a paid row dropped, a fork that inherits the wrong origin.
 """
 
@@ -99,9 +99,8 @@ from promptpotter.application.pipeline_resolve import (
     permitted_narrowing,
     steer_verdict,
 )
-from promptpotter.application.runner.inner.spawn_context import inner_spawn_of
-from promptpotter.application.runner.loop import LoopEnd, run_round_loop
-from promptpotter.application.runner.origin_gate import open_origin_round
+from promptpotter.application.runner.inner.tasks import inner_spawn_of
+from promptpotter.application.runner.loop import LoopEnd, open_origin_round, run_round_loop
 from promptpotter.application.runner.round import run_init
 from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_rounds

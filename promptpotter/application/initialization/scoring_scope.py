@@ -13,7 +13,7 @@ from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline, cycle_config
 from promptpotter.application.preflight import refuse_below_reasoning_floor
 from promptpotter.application.run_phase_control import RunControl
-from promptpotter.application.runner.inner.spawn_context import (
+from promptpotter.application.runner.inner.tasks import (
     inner_spawn_of,
 )
 from promptpotter.application.scoring.classification import build_degradation_checks

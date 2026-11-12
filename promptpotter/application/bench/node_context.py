@@ -25,7 +25,7 @@ from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
 from promptpotter.application.optimizers.nodes import CycleRead, ReadArm, admits
 from promptpotter.application.run_callbacks import restated_round
-from promptpotter.application.runner.inner.spawn_context import inner_cells
+from promptpotter.application.runner.inner.tasks import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.search_point_scorer import score_search_point

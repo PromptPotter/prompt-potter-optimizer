@@ -172,19 +172,22 @@ from promptpotter.application.run_observers import (
     declare_run_stop,
     declare_run_wiring,
 )
-from promptpotter.application.runner.arm_gate import author_arm
-from promptpotter.application.runner.campaign_result import cycle_bench
+from promptpotter.application.runner.bench import cycle_bench
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.inner import spawn
-from promptpotter.application.runner.inner.connector import CONNECTOR, promptpotter_wire_adapter
-from promptpotter.application.runner.inner.spawn import inner_campaign_id
-from promptpotter.application.runner.inner.spawn_context import InnerSpawnContext
+from promptpotter.application.runner.inner.spawn import (
+    CONNECTOR,
+    inner_campaign_id,
+    promptpotter_wire_adapter,
+)
 from promptpotter.application.runner.inner.tasks import (
     InnerBenchmarkConfig,
+    InnerSpawnContext,
     InnerTasks,
     InnerTaskSpec,
     inner_instrument_config,
 )
+from promptpotter.application.runner.round import author_arm
 from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.config import paths

@@ -15,7 +15,7 @@ The frozen dataclass `promptpotter/connectors/protocol.py::Connector`: **the dat
 anything = "my_package.connector:CONNECTOR"
 ```
 
-The object must be a `Connector`; **its `name` field is the registry key**, so a package cannot claim a key its connector does not declare. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`application/runner/inner/connector.py`](../../promptpotter/application/runner/inner/connector.py). A plugin is trusted code, not sandboxed ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § A connector is trusted code, not sandboxed); v1 promises entry points never become one. Built-ins are not entry points. Beyond `protocol.py`: wire adapters MUST be pure `(sample, PipelineParams) → dict` over the typed carrier (`promptpotter/domain/pipeline_params.py::PipelineParams`), the `identity_config` layer removed before the call · `extract_experiment` MUST return the panel's rows in panel order.
+The object must be a `Connector`; **its `name` field is the registry key**, so a package cannot claim a key its connector does not declare. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`application/runner/inner/spawn.py`](../../promptpotter/application/runner/inner/spawn.py). A plugin is trusted code, not sandboxed ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § A connector is trusted code, not sandboxed); v1 promises entry points never become one. Built-ins are not entry points. Beyond `protocol.py`: wire adapters MUST be pure `(sample, PipelineParams) → dict` over the typed carrier (`promptpotter/domain/pipeline_params.py::PipelineParams`), the `identity_config` layer removed before the call · `extract_experiment` MUST return the panel's rows in panel order.
 
 ---
 
@@ -70,7 +70,7 @@ Four roots, owned by `promptpotter/config/paths.py`; the resolution rules are st
 
 ## 5. CLI flags — `new` and `resume`
 
-The loop-mint verbs. The flag set is `presentation/cli/commands/verbs.py` and what each does to the tree is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)'s; v1 promises the two verbs and their declared flags keep their meanings. Not readable off `--help`: every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/campaign_ids.py::root_cycle_id_of`); a launch flag SETS an axis of the cycle's budget over what the dataset declares and stays on the standing budget for later resumes (`set-limits` moves it mid-flight). Maintenance and diagnostic verbs are not part of v1.
+The loop-mint verbs. The flag set is `presentation/cli/commands/verbs.py` and what each does to the tree is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)'s; v1 promises the two verbs and their declared flags keep their meanings. Not readable off `--help`: every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/mint.py::root_cycle_id_of`); a launch flag SETS an axis of the cycle's budget over what the dataset declares and stays on the standing budget for later resumes (`set-limits` moves it mid-flight). Maintenance and diagnostic verbs are not part of v1.
 
 ## 5b. Embedded launch entry (Python)
 

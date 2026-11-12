@@ -1,3 +1,5 @@
+"""Only the cycle holding the campaign's LINE banks or grades; one beside it does neither."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,8 +8,15 @@ from functools import partial
 from statistics import fmean
 from typing import TYPE_CHECKING, NamedTuple
 
+from promptpotter.application.datasets.authored import scorer_of
+from promptpotter.application.jobs.launcher.admission import campaign_refusal
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
-from promptpotter.application.scoring.closed_rounds import closed_rounds, walked_rows
+from promptpotter.application.scoring.closed_rounds import (
+    closed_rounds,
+    cycle_instrument,
+    walked_rows,
+)
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.paired import (
     MemberRows,
@@ -21,6 +30,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     score_search_point,
 )
 from promptpotter.application.scoring.selection import level_band
+from promptpotter.domain.arms import candidate_label
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     COLUMN_GRADE,
@@ -34,11 +44,13 @@ from promptpotter.domain.bench import (
     LiftCost,
     LineRun,
     OwnLevel,
+    PartitionRecord,
     PassOutcome,
     PassStop,
     bench_split,
     bench_status,
 )
+from promptpotter.domain.campaign import Campaign, worked_seconds
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.l4.proxies import line_round_levels, spent_on_line
 from promptpotter.domain.paired_reading import (
@@ -56,13 +68,24 @@ from promptpotter.domain.phase_views import (
     VerificationEnterView,
     VerificationGradedView,
 )
-from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutcome
-from promptpotter.domain.run_standing import declared_selection
+from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, RunPhase, StopOutcome
+from promptpotter.domain.run_records import LaunchClockRecord
+from promptpotter.domain.run_standing import LineOutlay, declared_selection
 from promptpotter.domain.scoring import ROW_GRADES, WalkedCell
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.domain.verification import BenchPasses, VerificationPass
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.store.archive_queries import bench_reads
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    LedgerSpend,
+    scan_bench_open,
+    scan_bench_passes,
+    scan_launch_clocks,
+    scan_ledger_spend,
+    scan_ledger_wall_clock,
+)
+from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.measurement_context import (
     MeasuredPass,
     MeasurementRole,
@@ -74,13 +97,16 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.application.initialization.session import Session
+    from promptpotter.application.initialization.session import LaunchClock, Session
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.arms import PointContext
     from promptpotter.domain.campaign import CampaignRefusal
+    from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.phases import StopReason
     from promptpotter.domain.results import RoundOutcome, RoundResult
     from promptpotter.domain.scoring import CellSheet, Scorer
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -649,3 +675,257 @@ async def bench_selection(
     elif STOP_REASON_INFO[run_stop_reason(stop)].outcome is StopOutcome.PAUSED:
         raise stop
     return _with_selection(banked, selected)
+
+
+def _line(stores: Stores, hop: CycleHop) -> list[CycleHop] | None:
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    if campaign is None:
+        return None
+    line = stores.campaigns.line(campaign.root_hop)
+    return line if line[-1] == hop else None
+
+
+def bank_campaign_result(
+    stores: Stores,
+    hop: CycleHop,
+    *,
+    ledger: CycleEventLog,
+    clock: LaunchClock,
+    finished_at: str,
+    optimizer_phases: frozenset[str],
+) -> None:
+    """Once per launch, on the cycle holding the line as it ends: a rebased parent banks none."""
+    line = _line(stores, hop)
+    if line is None:
+        return
+    ledger.append(launch_clock_record(stores, line, clock, finished_at, optimizer_phases))
+
+
+def launch_clock_record(
+    stores: Stores,
+    line: list[CycleHop],
+    clock: LaunchClock,
+    finished_at: str,
+    phases: frozenset[str],
+) -> LaunchClockRecord:
+    """This launch's clock over the line's ledgers, from its start to *finished_at*."""
+    return LaunchClockRecord(
+        started_at=clock.started_at,
+        finished_at=finished_at,
+        clock=scan_ledger_wall_clock(
+            [stores.campaigns.ledger(h) for h in line],
+            started_at=clock.started_at,
+            finished_at=finished_at,
+            optimizer_phases=phases,
+        ),
+    )
+
+
+def line_launches(stores: Stores, campaign: Campaign) -> list[LaunchClockRecord]:
+    """Each cycle's OWN appends: a launch banks on the cycle holding the line as it ends."""
+    return scan_launch_clocks(
+        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
+    )
+
+
+def line_outlay(session: Session, phases: frozenset[str]) -> LineOutlay:
+    """What the line has paid by now: every cycle's spend read whole, and the worked seconds of
+    each ended launch and of this one to now."""
+    stores, clock = session.store, session.state.clock
+    campaign = stores.campaigns.load_campaign(session.hop.campaign_id)
+    assert campaign is not None and clock is not None, "a closing round's launch is on a line"
+    line = stores.campaigns.line(campaign.root_hop)
+    closing = launch_clock_record(stores, line, clock, utcnow_iso(), phases)
+    return LineOutlay(
+        search_usd=read_line_spend(stores, campaign).spend.search_incurred_usd,
+        worked_s=worked_seconds([*line_launches(stores, campaign), closing]),
+    )
+
+
+def _bench_counted(spend: SpendRollup) -> Budget:
+    bench = spend.by_kind["bench"]
+    return Budget.amount(bench.incurred_usd, bench.input_tokens + bench.output_tokens)
+
+
+async def bench_origin(
+    session: Session,
+    origin_sp: JobSearchPoint,
+    *,
+    origin_id: str,
+    spend: SpendRollup,
+    cb: RunCallbacks,
+) -> BenchPasses | None:
+    stores, hop = session.store, session.hop
+    if _line(stores, hop) is None:
+        return None
+    held = line_passes(stores, hop.campaign_id)
+    if held is not None and held.origin.answers(
+        origin_sp.sp_hash(session.pipeline_schema),
+        [s.key for s in session.state.scoring.partition.bench],
+        session.state.scoring.scorer.id,
+    ):
+        passes = held
+    else:
+        # The bench bucket's own delta: a search call landing while this pass is out is not reserve.
+        before = _bench_counted(spend)
+        origin_pass = await score_on_bench(
+            session,
+            origin_sp,
+            individual_id=origin_id,
+            subject="origin",
+            label=candidate_label(0, 0),
+            round_num=0,
+            cb=cb,
+        )
+        split = session.state.scoring.partition.split
+        after = _bench_counted(spend)
+        passes = BenchPasses(
+            tolerance=split.tolerance if split is not None else 0,
+            origin=origin_pass,
+            reserve_usd=after.usd_amount - before.usd_amount,
+            reserve_tokens=after.token_amount - before.token_amount,
+            # A pass sent beside another reference pairs with nothing on this one.
+            selections={},
+        )
+    graded(
+        cb,
+        session,
+        passes.origin,
+        subject="origin",
+        reserve=Budget.amount(passes.reserve_usd, passes.reserve_tokens),
+    )
+    return passes
+
+
+def read_line_spend(stores: Stores, campaign: Campaign) -> LedgerSpend:
+    """Every cycle read WHOLE: what a superseded cycle paid past its cut is the line's cost too."""
+    return scan_ledger_spend(
+        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
+    )
+
+
+def line_run(stores: Stores, hop: CycleHop) -> LineRun:
+    # A launch stopped before run init names no cycle.
+    named = bool(hop.cycle_id)
+    index = stores.campaigns.load(hop, moment=None) if named else None
+    standing = None if index is None else index.standing
+    # A pass holds the cycle too, and reads SCORING: only the loop's hold is a run still selecting.
+    run = stores.run_state(hop) if named else None
+    attached = run is not None and run.producer.attached
+    scoring = run is not None and run.run_phase is RunPhase.SCORING
+    return LineRun(
+        selecting=attached and not scoring,
+        # The bracket, not the lock alone: `grade-bench` reads this under its own pass's lock.
+        pass_open=attached and scan_bench_open(stores.campaigns.ledger(hop)),
+        ending=None if index is None else index.stop_reason,
+        selection=None if standing is None else standing.selection,
+        rounds_closed=0 if standing is None else standing.rounds_closed,
+    )
+
+
+def line_passes(stores: Stores, campaign_id: str) -> BenchPasses | None:
+    """The line's OWN ledgers: a root cut from another tree graded its prefix in another epoch."""
+    campaign = stores.campaigns.load_campaign(campaign_id)
+    if campaign is None:
+        return None
+    return scan_bench_passes(
+        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
+    )
+
+
+def read_cycle_bench(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScore:
+    return cycle_bench(stores, campaign, hop, cycle_config(stores, campaign, hop).config)
+
+
+def cycle_bench(
+    stores: Stores, campaign: Campaign, hop: CycleHop, config: CampaignConfig
+) -> BenchScore:
+    return bench_under(
+        stores,
+        campaign,
+        hop,
+        line_passes(stores, campaign.campaign_id),
+        config,
+        scorer_of(config, verifier_graded=False),
+        run=line_run(stores, hop),
+    )
+
+
+def bench_line(
+    stores: Stores,
+    campaign: Campaign,
+    hop: CycleHop,
+    config: CampaignConfig,
+    *,
+    run: LineRun,
+) -> BenchLine:
+    holder = stores.campaigns.line_holder(campaign.root_hop)
+    drawn = stores.campaigns.last(hop, PartitionRecord)
+    split = config.dataset_split
+    return BenchLine(
+        hop=hop,
+        on_line=holder == hop,
+        inner=stores.inner,
+        refused=_refused(stores, campaign),
+        held_by=None if holder == hop else holder.cycle_id,
+        trigger=config.bench_trigger,
+        held_out=len(drawn.bench_ids) if drawn is not None else 0 if split is None else split.bench,
+        instrument_id=cycle_instrument(
+            drawn, stores.campaigns.standing_rounds(hop, moment=None).rounds
+        ),
+        run=run,
+        spend=read_line_spend(stores, campaign).spend,
+    )
+
+
+def _refused(stores: Stores, campaign: Campaign) -> CampaignRefusal | None:
+    """The refusal a pass on *campaign* is admitted under, as its bench line serves it."""
+    refused = campaign_refusal(stores, campaign)
+    return None if refused is None else refused.refusal
+
+
+def bench_under(
+    stores: Stores,
+    campaign: Campaign,
+    hop: CycleHop,
+    passes: BenchPasses | None,
+    config: CampaignConfig,
+    scorer: Scorer,
+    *,
+    run: LineRun,
+) -> BenchScore:
+    line = bench_line(stores, campaign, hop, config, run=run)
+    return read_bench(stores, passes if line.on_line else None, scorer, line=line)
+
+
+def declare_line_bench(
+    session: Session,
+    config: CampaignConfig,
+    cb: RunCallbacks,
+    *,
+    passes: BenchPasses | None,
+    selecting: bool,
+    ending: StopReason | None,
+) -> BenchScore:
+    stores, hop = session.store, session.hop
+    scorer = scorer_of(config, verifier_graded=False)
+    # The index says `selecting` / `ending` only once the run closes; the launch's own word wins.
+    run = line_run(stores, hop)._replace(selecting=selecting, ending=ending)
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    if campaign is None or not hop.cycle_id:
+        split = config.dataset_split
+        line = BenchLine(
+            hop=hop,
+            on_line=False,
+            inner=stores.inner,
+            refused=None if campaign is None else _refused(stores, campaign),
+            held_by=None,
+            trigger=config.bench_trigger,
+            held_out=0 if split is None else split.bench,
+            instrument_id=session.instrument_id,
+            run=run,
+            spend=None,
+        )
+        return declare_bench(cb, read_bench(stores, None, scorer, line=line))
+    held = passes if passes is not None else line_passes(stores, hop.campaign_id)
+    return declare_bench(cb, bench_under(stores, campaign, hop, held, config, scorer, run=run))

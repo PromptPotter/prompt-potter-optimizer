@@ -1,7 +1,7 @@
 # PromptPotter-self — Optimizer-of-the-Optimizer
 
 A self-referential dataset: outer PromptPotter optimizes the **optimizer prompts** that drive the
-inner PromptPotter cycle. Connector boundary: `promptpotter/application/runner/inner/connector.py`. What is true of L4:
+inner PromptPotter cycle. Connector boundary: `promptpotter/application/runner/inner/spawn.py`. What is true of L4:
 [`docs/concepts/l4.md`](../../../../docs/concepts/l4.md).
 
 Each outer "sample" is one entry in `dataset.yaml::panel`: it mints and runs a full inner campaign on
