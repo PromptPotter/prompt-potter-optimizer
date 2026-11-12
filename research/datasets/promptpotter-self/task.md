@@ -12,9 +12,8 @@ optimization_goals: >-
   inner search had ADOPTED by that round on HELD-OUT rows it never searched, minus the origin
   prompt's on the same rows). A run your prompt spoils is floored and scores 0. The score is the area under the inner curve: a lift bought in
   round 1 counts in every later round, so it is worth more than the same lift bought in round 4,
-  and a promotion that only held on the rows the search selected on scores zero. So winning
-  edits make the inner optimizer find GENERAL fixes to its own observed failures FASTER, reading
-  from its critique and transcripts.
+  and a promotion that only held on the rows the search selected on scores zero. Winning
+  edits make the inner optimizer find GENERAL fixes to its observed failures FASTER.
 key_challenges: >-
   Outer candidates drift into a single recycled hypothesis instead of grounding each edit in the specific
   inner failure the critique and transcripts show; noisy fitness from a small inner panel makes that drift

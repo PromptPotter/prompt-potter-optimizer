@@ -35,6 +35,7 @@ One workspace per optimizer, `<home>/<optimizer>/`, because the archive and the 
 | `rebased/` | potter's campaign resumed with `--from 1` under an L2 proposing the same config-changing fork at every fire; fails unless the line forks and ends on a stop other than `REBASED` within its budget |
 | `gated/` | the first optimizer's campaign with the backend refusing every cell, halted at the origin gate twice: resumed still refused, the resume passes the gate once as the operator's override, each cell its origin walk sends sent once; resumed answering, the origin passes on health, each lost cell sent once, on no fork. A launch the gate halts runs no pass, so its lost cells are its origin walk's alone and the bench pass is the proceeding resume's; a refusal's resend wait is not slept (`scripts/offline_world.py::install_network`, `scripts/offline_run.py::run_gated`) |
 | `healed/` | potter's campaign with invalid answers scripted by call (`scripts/offline_run.py::HEALS`), each healed on the rung the client's ladder climbs to: a clean re-ask, a schema repair, a refusal's generation salvaged on the first send and on the repair rung, a failed repair healed by the re-ask. Fails unless every scripted call took exactly its script's sends and the campaign decides what the straight one did, less the sends and the failed attempts each call records |
+| `l4/` | the L4 fixture (`promptpotter-self/e2e`): an outer potter campaign whose every cell runs an inner potter campaign on the bank in this world, the inner runs' decisions in its trace beside the outer's (`decisions.inner`), the inner requests in `requests/` |
 | `interrupted/`, `interrupted-twice/` | the first optimizer's one-round campaign under one and two SIGINTs, then `resume`d |
 | `controlled/arms/requests/`, `controlled/arm-<optimizer>/` | a head-to-head's arms, minted in one act |
 
@@ -42,7 +43,7 @@ One workspace per optimizer, `<home>/<optimizer>/`, because the archive and the 
 
 ## Proving parity
 
-Run it on the base once and keep that home; every later run names it and prints, per optimizer, `UNMOVED` or the trace fields that moved (`decisions.run.<key>`, `decisions.rounds[<n>]`, `decisions.ledger.<list>`, `decisions.harness.<key>`, how many requests, `world`):
+Run it on the base once and keep that home; every later run names it and prints, per leg that wrote a trace, `UNMOVED`, `no base`, or the trace fields that moved (`decisions.run.<key>`, `decisions.rounds[<n>]`, `decisions.ledger.<list>`, `decisions.harness.<key>`, how many requests, `world`):
 
 ```bash
 PROMPTPOTTER_HOME=after python scripts/offline_run.py --against base
@@ -57,7 +58,7 @@ Requests moving while decisions hold is a rendering change; decisions moving is 
 
 - **The bank**: synthetic JustLogic-shaped rows for `justlogic/d234`, written before the session opens.
 - **The backend**: TermNorm's wire, one `llm_only` node whose answer is correct with probability `k/10`, `k` read off the `Variant <tag>:` marker in the rendered prompt, each cell's draw keyed on that prompt and the row — a config edit that leaves the prompt alone answers alike. Potter's markers follow a scripted trajectory whose stalls fire L2 at the pinned `l1_patience`; `FakeBackend(hardness=…)` spreads `k` per row so a δ ruler fits.
-- **The optimizer LLM** answers by CALL IDENTITY — node, seed, turn — never by wording or arrival order; a structured call gets a minimal valid instance of its schema, unless `ByCallIdentity.heals` scripts invalid answers for that call (`scripts/offline_world.py::Heal`), its retries keeping its identity. `ByCallIdentity(rebasing=True)` adds a `fork_proposal` to every L2 answer.
+- **The optimizer LLM** answers by CALL IDENTITY — asker, node, seed, turn — never by wording or arrival order; an L4 cell's inner campaign asks as its seat and arm (`scripts/offline_run.py::_asker`); a structured call gets a minimal valid instance of its schema, unless `ByCallIdentity.heals` scripts invalid answers for that call (`scripts/offline_world.py::Heal`), its retries keeping its identity. `ByCallIdentity(rebasing=True)` adds a `fork_proposal` to every L2 answer.
 - **The knobs** are the dataset's `campaign` under the script's `BENCH` sizes; one seeded determinism clamp holds every optimizer.
 
 **Adding an optimizer needs nothing here**: it runs as its manifest declares, one installed through entry points included — `examples/optimizer-plugin/` is that case, and `gate.py --only optimizer-plugin` proves it on its `--straight` run (red unless an arm carries `source="example:propose"`).

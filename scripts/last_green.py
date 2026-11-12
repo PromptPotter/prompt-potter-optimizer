@@ -22,6 +22,8 @@ ENGINE_RUNTIME = ("promptpotter/", "examples/", "pyproject.toml", "uv.lock")
 OFFLINE_RUN = "offline-run"
 OFFLINE_RUN_READS = (
     *ENGINE_RUNTIME,
+    # The L4 leg's fixture (`offline_run.py::L4_DATASET`).
+    "research/datasets/promptpotter-self/",
     "scripts/offline_run.py",
     "scripts/offline_world.py",
     "scripts/last_green.py",
