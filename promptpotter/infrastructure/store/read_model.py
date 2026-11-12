@@ -11,7 +11,16 @@ from collections.abc import Callable, Hashable, Iterable, Sequence
 from functools import partial
 from itertools import islice
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_checkable
+from typing import (
+    Any,
+    ClassVar,
+    NamedTuple,
+    Protocol,
+    assert_never,
+    cast,
+    get_args,
+    runtime_checkable,
+)
 
 from pydantic import ValidationError
 
@@ -842,6 +851,8 @@ class _Money:
                 self._bill(record, mirrored=False)
             case TokenUsageRecord():
                 self._call(record)
+            case _:
+                assert_never(record)
 
     def _hold(self, hold: Charge) -> None:
         self._open[hold.hold_id] = self._holds[hold.hold_id] = hold

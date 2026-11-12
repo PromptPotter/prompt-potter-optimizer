@@ -245,6 +245,22 @@ class ActivityFeed:
                 self._round = record.round
             case PhaseRecord(event="enter", round=int() as opened) if self._round is None:
                 self._round = opened
+            case (
+                PhaseRecord()
+                | LLMCallStartRecord()
+                | LLMCallRecord()
+                | LLMCallProgressRecord()
+                | ArmRecord()
+                | SampleScoredRecord()
+                | RoundClosedRecord()
+                | RoundWarningRecord()
+                | ErrorRecord()
+                | ProviderHoldRecord()
+                | ProviderEasedRecord()
+            ):
+                pass
+            case _:
+                assert_never(record)
 
     def _item(self, item_id: str, record: ActivityRecord) -> ActivityItem | None:
         match record:
