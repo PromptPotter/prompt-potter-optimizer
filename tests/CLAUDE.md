@@ -8,8 +8,10 @@
 
 - **Coupling in the assertion → delete; coupling in the setup → rewire** onto `factories.py`. A renamed or restructured contract gets a fresh test; never port assertions.
 - **"This change moves no decision" is not a test**: prove it with the offline run ([`offline-run.md`](../docs/developer/offline-run.md)).
-- **`python scripts/gate.py --only pytest`** runs the suite. A new subject is a SECTION in the file that already owns its production path.
-- **Each `# N.` section is ONE test function**: a journey down the production path it owns, asserting every decision along the way; a table of values is a `for` inside it. <!-- probe: git grep -cE "parametrize" -- tests/*.py == 0 -->
+- **`python scripts/gate.py --only pytest`** runs the suite. A new subject is a function under the `# N.` section of the file that already owns its production path.
+- **One function per independent fact**, named as the fact, at most ~150 lines; a table of values is a `for` inside it. <!-- probe: git grep -cE "parametrize" -- tests/*.py == 0 -->
+- **A journey stays one function only where each step's state is the next step's input**, and one line above it names that dependency.
+- **Setup two facts share is a fixture or a `_helper` in the module**, built through `factories.py`, never a frozen file; a closure several facts call is a fixture returning it. A fact never leans on state another fact left: it builds that state itself.
 
 ## Structural invariants live in production, not tests
 

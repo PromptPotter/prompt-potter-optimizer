@@ -24,7 +24,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 from unittest.mock import Mock
 
 import openpyxl
@@ -92,7 +92,11 @@ from promptpotter.application.datasets.draft_campaign import (
     owned_draft,
     upload_pipeline_json,
 )
-from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
+from promptpotter.application.datasets.draft_patch import (
+    DraftPatchPlan,
+    apply_draft_patch,
+    plan_draft_patch,
+)
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
 from promptpotter.application.datasets.origin_resolve import (
     build_origin_consultation,
@@ -103,6 +107,7 @@ from promptpotter.application.datasets.tabular_ingest import IngestError, read_t
 from promptpotter.application.embedded_run import run_campaign
 from promptpotter.application.hierarchy import entries_version, list_hierarchy
 from promptpotter.application.initialization.scoring_scope import verb_ledger
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.launch import Inline
@@ -130,7 +135,13 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect, ParetoScores
-from promptpotter.application.optimizers.nodes import MintFacts, Panel, Proposals, admits
+from promptpotter.application.optimizers.nodes import (
+    MintFacts,
+    Panel,
+    Proposals,
+    RoundContext,
+    admits,
+)
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -149,6 +160,7 @@ from promptpotter.application.optimizers.potter.records import L2Memory, L3Memor
 from promptpotter.application.optimizers.potter.validators import l1_shots_in_demo_pool
 from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
+    DraftPipeline,
     ParamLayers,
     ServedPipeline,
     campaign_admits,
@@ -198,6 +210,7 @@ from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.connectors import upload_connector
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import (
+    BankPartition,
     BenchRefusal,
     DatasetSplit,
     PartitionRecord,
@@ -206,11 +219,13 @@ from promptpotter.domain.bench import (
 )
 from promptpotter.domain.campaign import (
     Arm,
+    Campaign,
     CampaignRefusal,
     CampaignRefusedError,
     Compare,
     DeterminismClamp,
     Optimize,
+    RunDeclaration,
     run_clamp,
 )
 from promptpotter.domain.campaign_config import (
@@ -340,6 +355,8 @@ from promptpotter.shared.hashing import SourceFacts, dataset_hash, source_facts,
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, default_identity
 from promptpotter.shared.run_scope import scoped
 
+pytestmark = pytest.mark.usefixtures("offline", "optimizing_memory")
+
 _L1 = Variation(node="potter:l1_generate", mode="llm")
 _DATASETS = install_datasets_root()
 _RESEARCH = Path(__file__).resolve().parents[1] / "research" / "datasets"
@@ -384,25 +401,34 @@ def _connector_config(**fields: Any) -> CampaignConfig:
 
 # 1. Hashes — what a measurement is filed under
 
+_MARKED = "from promptpotter.shared.hashing import shapes_optimizer_prompt\n"
+_CAPO_MUTATED = {
+    "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
+}
+_TERMNORM = {"pipeline": {"backend_type": "termnorm"}}
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_other(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    built_stores: Stores,
-    offline: Router,
-) -> None:
+
+def _unranked() -> PipelineSchema:
+    return pipeline_schema(
+        [
+            PipelineNode(
+                name="solve", kind=NodeKind.LLM, current_config={"model": "m"}, tunes_llm=False
+            )
+        ]
+    )
+
+
+def test_a_value_the_canonical_form_cannot_spell_is_refused() -> None:
     # A value the canonical form cannot spell is refused, never stringified into a stored key.
     with pytest.raises(TypeError):
         stable_hash({"when": Path(".")})
 
-    # Prose moves no source digest, and a code token does.
+
+def test_prose_moves_no_source_digest_and_a_code_token_does() -> None:
     def digest(text: str) -> str:
         return "".join(unit["source"] for unit in source_facts(text)["units"])
 
-    marked = "from promptpotter.shared.hashing import shapes_optimizer_prompt\n"
-    bare = marked + (
+    bare = _MARKED + (
         "shapes_optimizer_prompt(None)\n"
         "LIMIT = 3\n"
         "class Arm:\n"
@@ -412,7 +438,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "            return n - self.width\n"
         "        return n\n"
     )
-    documented = marked + (
+    documented = _MARKED + (
         '"""Module docstring."""\n'
         "shapes_optimizer_prompt(None)\n"
         "LIMIT = 3  # a comment\n"
@@ -431,12 +457,12 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert digest(bare) == digest(documented), "prose re-keyed a treatment"
     for old, new in (("n > LIMIT", "n >= LIMIT"), ("LIMIT = 3", "LIMIT = 4")):
         assert digest(bare.replace(old, new)) != digest(bare), f"`{new}` moved no treatment"
-    only_prose = marked + 'shapes_optimizer_prompt(None)\ndef f():\n    """Doc."""\n'
+    only_prose = _MARKED + 'shapes_optimizer_prompt(None)\ndef f():\n    """Doc."""\n'
     assert digest(only_prose) == digest(only_prose.replace('"""Doc."""', "pass")), (
         "a body of nothing but a docstring keyed apart from an empty one"
     )
     # A refusal shapes no prompt: its words, and what only a raise reads, are free.
-    refusing = marked + (
+    refusing = _MARKED + (
         "HINT = 1\n"
         "@shapes_optimizer_prompt\n"
         "def cut(n):\n"
@@ -449,10 +475,15 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     cut_reads = [u["reads"] for u in source_facts(reworded)["units"] if u["name"] == "cut"]
     assert cut_reads and "HINT" not in cut_reads[0]["names"], "a raise-only read was walked"
     # An annotation is free, but `Annotated` metadata is a value its name carries, so it is walked.
-    annotated = marked + "@shapes_optimizer_prompt\ndef pick(n: Annotated[Arm, BOUND]): pass\n"
+    annotated = _MARKED + "@shapes_optimizer_prompt\ndef pick(n: Annotated[Arm, BOUND]): pass\n"
     (pick,) = source_facts(annotated)["units"]
     assert "BOUND" in pick["reads"]["names"], "an annotation's metadata went unwalked"
     assert "Arm" not in pick["reads"]["names"], "an annotation was walked"
+
+
+def test_the_digest_walk_stops_at_plumbing_and_reads_the_edited_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # The walk stops at plumbing: editing what it reads re-keys nothing.
     package = (tmp_path / "pkg" / "promptpotter").resolve()
     for module, text in {
@@ -460,7 +491,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "config/__init__": "",
         "config/settings": "WIDTH = 2\n",
         "config/shaped": "WIDTH = 2\n",
-        "unit": marked + "from promptpotter.config import settings, shaped\n"
+        "unit": _MARKED + "from promptpotter.config import settings, shaped\n"
         "@shapes_optimizer_prompt\n"
         "def width():\n    return settings.WIDTH + shaped.WIDTH\n",
     }.items():
@@ -517,7 +548,8 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     digests_file.unlink()
     assert process()() == edited_digest, "the cached digest differs from a fresh derivation"
 
-    # The judge a cell is graded by moves its searchpoint hash.
+
+def test_the_judge_a_cell_is_graded_by_moves_its_searchpoint_hash() -> None:
     schema = pipeline_schema(
         [
             PipelineNode(
@@ -556,7 +588,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         == hashes["two_steps"]
     ), "declaration order must not re-cut the measurement key"
 
-    # An L4 override moves the prompt and the hash of every preset, and the inner campaign it runs.
+
+def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
+    tmp_path: Path, built_stores: Stores, offline: Router
+) -> None:
     capo = select_optimizer(OptimizerChoice(optimizer="capo"))
     capo_seat = jumping_clock(
         run_init_round(
@@ -568,9 +603,6 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     )
     calls = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate")).read(Calls)
     values = {"task_description": "sort the list", "instruction": "Sort it."}
-    mutated = {
-        "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
-    }
     potter = select_optimizer(OptimizerChoice(optimizer="potter"))
     every = frozenset(Presumption)
     sent, capo_hashes, treated = (
@@ -586,7 +618,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
                 workspace(tmp_path / "mutated"),
                 offline,
                 samples(40, "TRUE"),
-                optimization=_l4_arm("capo", mutated),
+                optimization=_l4_arm("capo", _CAPO_MUTATED),
             )
         ),
         optimizers.NODE_MEMBERS.get("capo_mutate"),
@@ -596,13 +628,15 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         == "Rephrase [Sort it.] to sort the list."
         != sent
     ), "the mutated CAPO prompt never reached the request it sends"
-    assert _l4_selected("capo", mutated).treatment(every, built_stores.block_packs).digest != (
-        treated
-    ), "two inner cells under two arms stamp ONE treatment — a bank reads them as one arm"
+    assert _l4_selected("capo", _CAPO_MUTATED).treatment(
+        every, built_stores.block_packs
+    ).digest != (treated), (
+        "two inner cells under two arms stamp ONE treatment — a bank reads them as one arm"
+    )
     # A valid layout edit on one node: `diagnostics` stays placed.
     layout = {"l1_critique": {"layout": {"thinking_style": ["axis_memory"]}}}
     for optimizer, hashes, override, edited_node in (
-        (capo, capo_hashes, mutated, "capo_mutate"),
+        (capo, capo_hashes, _CAPO_MUTATED, "capo_mutate"),
         (potter, baseline, layout, "l1_critique"),
     ):
         moved = _l4_selected(optimizer.name, override).prompt_hashes()
@@ -672,18 +706,23 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
                     }
                 }
             ),
-            mutated,
+            _CAPO_MUTATED,
         ).optimization
     )
     assert runs(both) == "Rephrase [Sort it.] to sort the list.", "a draft edit beat L4's"
-    assert both.prompt_hashes() == _l4_selected("capo", mutated).prompt_hashes(), (
+    assert both.prompt_hashes() == _l4_selected("capo", _CAPO_MUTATED).prompt_hashes(), (
         "one text under two declarations hashed apart: the hash reads a second door"
     )
 
-    # The inner campaign id separates two candidates, two seeds, two treatments and two estimators.
+
+def test_the_inner_campaign_id_separates_candidates_seeds_treatments_and_estimators(
+    built_stores: Stores,
+) -> None:
+    capo = select_optimizer(OptimizerChoice(optimizer="capo"))
+    every = frozenset(Presumption)
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
     c2 = {"l1_generate": {"instruction": "narrow the axes"}}
-    ids = {inner_campaign_id(_SPEC, o, "e") for o in (c1, c2, {}, mutated)}
+    ids = {inner_campaign_id(_SPEC, o, "e") for o in (c1, c2, {}, _CAPO_MUTATED)}
     assert len(ids) == 4, (
         "two candidates differing only in one override field share a campaign — "
         "their measurements merge under one id with no error"
@@ -714,7 +753,14 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert replace(capo, manifest=rewalked).treatment(every, built_stores.block_packs).digest != (
         capo.treatment(every, built_stores.block_packs).digest
     ), "a manifest walking its initial population apart ran under the treatment of one racing it"
+
+
+def test_a_prompt_shaping_classs_method_rekeys_the_run(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # A prompt-shaping class's method re-keys the run though it is only ever read through an instance.
+    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
+    every = frozenset(Presumption)
     manifest_file, read_text = Path(optimizer_manifest.__file__), Path.read_text
     as_shipped = read_text(manifest_file, "utf-8")
     drawing_on = as_shipped.replace(
@@ -733,7 +779,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             "an edit to which pools a member draws ran under the unedited treatment"
         )
     nodes._source_digest.cache_clear()
-    # A pool its readers could draw nothing from never runs: the silent outcome is a pool-less search.
+
+
+def test_a_pool_its_readers_could_draw_nothing_from_never_runs(built_stores: Stores) -> None:
+    # The silent outcome is a pool-less search.
     earned_only = ManifestNodeOverlay(config={"active": [f"persona/{EARNED_SOURCE}"]})
     closed = ManifestNodeOverlay(config={"block_access": "closed"})
     select_optimizer(OptimizerChoice(optimizer="potter", nodes={"block_pool": earned_only}))
@@ -745,13 +794,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         )
     stray_shot = ManifestNodeOverlay(config={"active": ["not-a-sample-key"]})
     named = select_optimizer(OptimizerChoice(optimizer="capo", nodes={"demo_pool": stray_shot}))
-    unranked = pipeline_schema(
-        [
-            PipelineNode(
-                name="solve", kind=NodeKind.LLM, current_config={"model": "m"}, tunes_llm=False
-            )
-        ]
-    )
+    unranked = _unranked()
     assert named.pool_refusals(
         mint=MintFacts(
             [Sample(id=1, query="q", ground_truth="a")],
@@ -759,7 +802,14 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             built_stores.block_packs,
         )
     ), "a demo pool naming a key its partition lacks reached a mint"
+
+
+def test_a_packs_drawable_snippets_key_its_treatment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+) -> None:
     # A pack's drawable snippets are starting content: two packs merging under one treatment is silent.
+    every = frozenset(Presumption)
+    unranked = _unranked()
     made = Authored(
         kind="authored",
         author="t",
@@ -864,7 +914,9 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
                 f"{path} under {matcher}: admission missed a presumption"
             )
 
-    # The determinism clamp outranks every other layer and keys the bank.
+
+@pytest.fixture
+def ask(tmp_path: Path, offline: Router) -> Callable[..., Any]:
     reuse = LLMReuseCache(tmp_path / "reuse", "optimizer_reuse")
 
     def ask(
@@ -903,6 +955,12 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         asyncio.run(entered())
         return offline.llm.sent[-1]
 
+    return ask
+
+
+def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_bank(
+    tmp_path: Path, ask: Callable[..., Any]
+) -> None:
     pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
     for clamp, (temperature, seed, route) in (
         (pinned, (0.0, 7, ["Alibaba"])),
@@ -923,9 +981,12 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "the second route replayed the first route's banked answer"
     )
 
-    # A head-to-head pins one seed on every arm: an arm's replicate (numbered at the mint, § 2)
-    # enters the seed, and arms of one replicate share it, so a pair differs by its treatment alone
-    # (common random numbers).
+
+def test_a_head_to_head_pins_one_seed_on_every_arm(ask: Callable[..., Any]) -> None:
+    # An arm's replicate (numbered at the mint, § 2) enters the seed, and arms of one replicate
+    # share it, so a pair differs by its treatment alone (common random numbers).
+    pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
+
     def armed(key: str, replicate: int) -> Compare:
         return Compare(arm=Arm(head_to_head_id="h", arm_key=key, replicate=replicate))
 
@@ -939,6 +1000,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     )
     assert run_clamp(pinned, Optimize()) == pinned, "a run outside a head-to-head moved its pin"
 
+
+def test_an_unpinned_node_is_filed_as_and_sent_to_the_host_it_is_pinned_to(
+    ask: Callable[..., Any],
+) -> None:
     # A node left to the gateway's choice of host is filed as, and sent to, the host it is pinned to.
     routes = default_routes()
 
@@ -961,6 +1026,27 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         job = PointContext(schema=routed, framing=TaskDecomposition(), demo=[]).job(point)
         return archive_entry(job, dataset_hash="d", pipeline_schema=routed).config_key
 
+    for model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b:nitro"):
+        bare = normalize_model_id(model)
+        gateway = next(name for name, pins in routes.items() if bare in pins)
+        pin = routes[gateway][bare]
+        routing = {"provider": gateway, "model": model}
+        assert filed_under(routing) == filed_under({**routing, "route_order": pin}), (
+            f"{model}: an unpinned node was filed apart from the host it is served by"
+        )
+        assert filed_under(routing) != filed_under({**routing, "route_order": ["Elsewhere"]}), (
+            f"{model}: two hosts answered under one key"
+        )
+        opts: tuple[tuple[dict[str, Any], Any], ...] = (({}, pin), ({"route_order": []}, None))
+        for opted, route in opts:
+            sent = ask(model, provider=gateway, model=model, **opted)
+            assert sent.get("provider", {}).get("order") == route, (
+                f"{model} {opted}: an optimizer call went to another host than the one it is "
+                "filed under"
+            )
+
+
+def test_an_edit_on_the_second_prompt_node_is_scored_with_it_and_filed_apart() -> None:
     # The individual is {locus: value} over the roster: a child written on the SECOND prompt
     # node's field is scored with it and filed apart, each node rendering its own declared order.
     chain = pipeline_schema(
@@ -1009,26 +1095,9 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     )
     assert after_key != before_key, "an edit on the second prompt node was filed with its parent"
 
-    for model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b:nitro"):
-        bare = normalize_model_id(model)
-        gateway = next(name for name, pins in routes.items() if bare in pins)
-        pin = routes[gateway][bare]
-        routing = {"provider": gateway, "model": model}
-        assert filed_under(routing) == filed_under({**routing, "route_order": pin}), (
-            f"{model}: an unpinned node was filed apart from the host it is served by"
-        )
-        assert filed_under(routing) != filed_under({**routing, "route_order": ["Elsewhere"]}), (
-            f"{model}: two hosts answered under one key"
-        )
-        opts: tuple[tuple[dict[str, Any], Any], ...] = (({}, pin), ({"route_order": []}, None))
-        for opted, route in opts:
-            sent = ask(model, provider=gateway, model=model, **opted)
-            assert sent.get("provider", {}).get("order") == route, (
-                f"{model} {opted}: an optimizer call went to another host than the one it is "
-                "filed under"
-            )
 
-    # A bank is its rows' content: a question alone tells two banks apart.
+def test_a_question_alone_tells_two_banks_apart() -> None:
+    # A bank is its rows' content.
     asked_as = [
         [Sample(id=0, query="q", ground_truth="g", question=question)] for question in ("a", "b")
     ]
@@ -1036,6 +1105,8 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "two banks differing only in their question share one identity"
     )
 
+
+def test_the_unframed_ablation_renders_no_framing_resumed_or_not(built_stores: Stores) -> None:
     # The unframed ablation renders no framing where one is committed, resumed or not.
     write_yaml(built_stores.install_datasets_root / "gsm8k" / DEFINITION_FILE, {"pipeline": {}})
     built_stores.tenant_datasets.save_task_context(
@@ -1063,6 +1134,8 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "the campaign manifest lost the declaration, so a resume of the ablation runs framed"
     )
 
+
+def test_a_cell_is_keyed_by_its_own_instrument_and_no_other_cells(built_stores: Stores) -> None:
     # A cell is keyed by its own instrument and no other cell's: adding an inner dataset re-keys no
     # banked cell, and an edit to a seat's dataset re-keys that seat alone, off the tier it runs.
     panel: dict[str, Any] = {
@@ -1118,6 +1191,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "the cell ran another tier"
     )
 
+
+def test_a_harbor_panel_reads_its_pinned_roster_and_never_dials_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Router
+) -> None:
     # A Harbor panel reads its pinned roster and never dials out; upstream repinning re-cuts nothing.
     def panel_tasks(harbor_dataset: str, version: str, include: list[str]) -> list[Any]:
         write_yaml(
@@ -1167,6 +1244,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "a repinned registry moved the panel under the name it had"
     )
 
+
+def test_a_held_cut_is_keyed_on_its_recipe_and_opens_without_its_extra(
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Router
+) -> None:
     # A held cut is keyed on its recipe's code too, so an edited recipe re-cuts its bank.
     write_yaml(
         built_stores.tenant_datasets.dataset_dir("hubcut") / DEFINITION_FILE,
@@ -1221,17 +1302,17 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             startability.checkin_bank(built_stores, "hubfresh")
     assert not offline.unrouted, f"a refused fetch reached the hub: {offline.unrouted}"
 
-    # A name reads from the first tier holding it, an account's own, then the install's, then the
-    # research tier's, and is refused nowhere for a second holder; a card that is not plain title
-    # and summary refuses a run and lists the dataset without one.
+
+@pytest.fixture
+def tiered(tmp_path: Path) -> Stores:
+    # A card that is not plain title and summary refuses a run and lists the dataset without one.
     install_root, research_root = tmp_path / "install", tmp_path / "research"
-    termnorm = {"pipeline": {"backend_type": "termnorm"}}
     for root, name, definition in (
-        (install_root, "twin", termnorm),
+        (install_root, "twin", _TERMNORM),
         (research_root, "twin", {"pipeline": {"backend_type": "promptpotter"}}),
-        (research_root, "solo", termnorm),
-        (install_root, "carded", {**termnorm, "card": {"title": "T", "summary": "Two  words."}}),
-        (install_root, "miscarded", {**termnorm, "card": {"title": "T"}}),
+        (research_root, "solo", _TERMNORM),
+        (install_root, "carded", {**_TERMNORM, "card": {"title": "T", "summary": "Two  words."}}),
+        (install_root, "miscarded", {**_TERMNORM, "card": {"title": "T"}}),
     ):
         write_yaml(root / name / DEFINITION_FILE, definition)
     tiered = build_stores(
@@ -1241,7 +1322,18 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         research_datasets_root=research_root,
     )
     # An account's own written before the install shipped its name: a survivor, read as its own.
-    write_yaml(tiered.tenant_datasets.dataset_dir("carded") / DEFINITION_FILE, termnorm)
+    write_yaml(tiered.tenant_datasets.dataset_dir("carded") / DEFINITION_FILE, _TERMNORM)
+    for campaign_id, name in (("camp-twice", "carded"), ("camp-beside", "miscarded")):
+        hop = CycleHop(campaign_id=campaign_id, cycle_id=f"cycle_{name}0000")
+        stored_campaign(
+            tiered, minted_campaign(hop, dataset_name=name, root_content_hash=f"origin-{name}")
+        )
+        tiered.campaigns.mint_cycle(hop)
+    return tiered
+
+
+def test_a_name_reads_from_the_first_tier_holding_it(tiered: Stores) -> None:
+    # An account's own, then the install's, then the research tier's.
     assert {n: resolve_dataset(tiered, n).tier for n in ("twin", "carded", "solo")} == {
         "twin": "install",
         "carded": "yours",
@@ -1250,14 +1342,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert runnable_definition(resolve_dataset(tiered, "twin")).backend_type == "termnorm", (
         "a shadowed tier answered"
     )
-    # Nothing a name's second holder blocks: every campaign lists, and so does every origin.
-    for campaign_id, name in (("camp-twice", "carded"), ("camp-beside", "miscarded")):
-        hop = CycleHop(campaign_id=campaign_id, cycle_id=f"cycle_{name}0000")
-        stored_campaign(
-            tiered, minted_campaign(hop, dataset_name=name, root_content_hash=f"origin-{name}")
-        )
-        tiered.campaigns.mint_cycle(hop)
-    shadowed = entries_version([tiered])
+
+
+def test_a_names_second_holder_blocks_no_campaign_or_origin(tiered: Stores) -> None:
+    # Every campaign lists, and so does every origin.
     sidebar = list_hierarchy(
         tiered,
         inside=(),
@@ -1270,8 +1358,14 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert sorted(entry.label for entry in sidebar.entries) == ["carded", "miscarded"], (
         "a campaign on a shadowing name failed the sidebar, or hid its neighbour"
     )
-    # A root holding no resolved run serves the refusal it raised on its row, never one sentence
-    # for every refusal, so the reader learns which record to repair.
+    assert sorted(origin.dataset_name for origin in list_origins(tiered)) == [
+        "carded",
+        "miscarded",
+    ], "the origins survey dropped an origin whose name another tier also holds"
+
+
+def test_a_root_holding_no_resolved_run_serves_its_own_refusal(tmp_path: Path) -> None:
+    # Never one sentence for every refusal, so the reader learns which record to repair.
     unresolved = build_stores(default_identity(), projects_root=tmp_path / "unresolved")
     refused_root = CycleHop(campaign_id="camp-bare", cycle_id="cycle_bare00000000")
     unresolved.campaigns.create_campaign(minted_campaign(refused_root, dataset_name="carded"))
@@ -1290,18 +1384,18 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         assert "holds no resolved run" in caveat.label, (
             f"depth {depth}: a root's refusal was served as {caveat.label!r}, not its own reason"
         )
-    assert sorted(origin.dataset_name for origin in list_origins(tiered)) == [
-        "carded",
-        "miscarded",
-    ], "the origins survey dropped an origin whose name another tier also holds"
 
-    # The one writer (a compile's too) refuses a name another tier holds, and lands nothing; an
-    # account re-writes a name it holds in place, its survivor over the install's included.
+
+def test_the_one_writer_refuses_a_name_another_tier_holds(tiered: Stores) -> None:
+    # A compile's too, and lands nothing; an account re-writes a name it holds in place, its
+    # survivor over the install's included.
+    shadowed = entries_version([tiered])
+
     def write_own(name: str) -> Path:
         return tiered.write_own_definition(
             name,
             source={"recipe": "rows", "items": []},
-            pipeline=termnorm["pipeline"],
+            pipeline=_TERMNORM["pipeline"],
             campaign={},
             description="d",
             framing=TaskDecomposition(),
@@ -1321,16 +1415,25 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert entries_version([tiered]) != shadowed, (
         "the sidebar's validator missed the holder a name resolves to: a 304 serves the old one on"
     )
-    # A draft names a dataset no tier holds, an account's own included, and is told a free name.
-    write_yaml(research_root / "solo-2" / DEFINITION_FILE, termnorm)
-    write_yaml(tiered.tenant_datasets.dataset_dir("own") / DEFINITION_FILE, termnorm)
+
+
+def test_a_draft_naming_a_held_dataset_is_told_a_free_name(tmp_path: Path, tiered: Stores) -> None:
+    # No tier may hold the name, an account's own included.
+    research_root = tmp_path / "research"
+    write_yaml(research_root / "solo-2" / DEFINITION_FILE, _TERMNORM)
+    write_yaml(tiered.tenant_datasets.dataset_dir("own") / DEFINITION_FILE, _TERMNORM)
     for slug, free in (("miscarded", "miscarded-2"), ("solo", "solo-3"), ("own", "own-2")):
         with pytest.raises(SlugTakenError) as taken:
             asyncio.run(
                 ingest.ingest_draft(stores=tiered, blob=b"a,b\n1,2\n", filename="t.csv", slug=slug)
             )
         assert taken.value.suggested == free, f"an upload over {slug} was offered a held name"
-    # One torn definition file, one answer, whichever door reads it.
+
+
+def test_one_torn_definition_file_answers_one_way_at_every_door(
+    tmp_path: Path, tiered: Stores
+) -> None:
+    install_root = tmp_path / "install"
     for read_miscarded in (
         lambda: runnable_definition(resolve_dataset(tiered, "miscarded")),
         lambda: dataset_campaign_block(resolve_dataset(tiered, "miscarded")),
@@ -1341,6 +1444,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             FileKind.STORED_CONFIG,
             str(install_root / "miscarded" / DEFINITION_FILE),
         ), "a malformed card ran, or one file answered two ways"
+
+
+def test_the_listing_reads_each_card_and_never_the_research_tier(tiered: Stores) -> None:
+    write_yaml(tiered.tenant_datasets.dataset_dir("own") / DEFINITION_FILE, _TERMNORM)
+    rmtree_robust(tiered.tenant_datasets.dataset_dir("carded"))
     cards = {ref.dataset.name: ref.card for ref in list_readable_datasets(tiered)}
     assert cards == {
         "own": None,
@@ -1348,8 +1456,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "carded": DatasetCard("T", "Two words."),
         "miscarded": None,
     }, "the listing misread a card, or listed the research tier"
-    # What the checkout ships: its install and research tiers hold no name in common, so no
-    # install name is shadowed by research and no research name by the install.
+
+
+def test_the_checkouts_shipped_tiers_hold_no_name_in_common() -> None:
+    # No install name is shadowed by research and no research name by the install.
     shipped = [
         {p.parent.relative_to(root).as_posix() for p in root.rglob(DEFINITION_FILE)}
         for root in (paths.install_datasets_root(), paths.research_datasets_root())
@@ -1357,7 +1467,12 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     ]
     assert len(shipped) == 2 and all(shipped), "this checkout lost a tier"
     assert not set.intersection(*shipped), f"both shipped tiers hold {set.intersection(*shipped)}"
-    # An unoffered name's 404 reads as an absent one's, so the answer never says which it is.
+
+
+def test_an_unoffered_names_404_reads_as_an_absent_ones(
+    monkeypatch: pytest.MonkeyPatch, tiered: Stores
+) -> None:
+    # So the answer never says which it is.
     with monkeypatch.context() as unoffered:
         unoffered.setattr(startability, "offered", lambda _stores, _name: False)
         with pytest.raises(DatasetAccessError) as hidden:
@@ -1367,6 +1482,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert str(hidden.value).replace("twin", "nowhere") == str(absent.value), (
         "an unoffered name's 404 said more, or less, than an absent one's"
     )
+
+
+def test_new_on_a_wheel_says_where_the_l4_panel_lives(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     # `new` says the refusal's own words: on a wheel the research-tier sentence is all that tells
     # an operator where L4's panel lives.
     with monkeypatch.context() as wheel:
@@ -1379,7 +1499,12 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert "no research tier" in capsys.readouterr().err, (
         "`new` on a wheel dropped why the L4 panel is not found"
     )
-    # So does an upload `new` refuses: the slug's own reason, never a parse failure in its place.
+
+
+def test_new_says_an_uploads_slug_refusal_in_its_own_words(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Never a parse failure in its place.
     upload = tmp_path / "rows.csv"
     upload.write_text("q,a\nx,1\n", encoding="utf-8")
     with pytest.raises(ValueError) as bad_slug:
@@ -1393,8 +1518,14 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert f"Error: {bad_slug.value}" in capsys.readouterr().err.splitlines(), (
         "`new` reworded an upload's refusal"
     )
-    # A check-in renamed onto a name the install holds is refused, in the claim's own words, and
-    # told its draft is kept.
+
+
+def test_a_check_in_renamed_onto_an_install_name_is_refused_and_told_its_draft_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Refused in the claim's own words.
+    upload = tmp_path / "rows.csv"
+    upload.write_text("q,a\nx,1\n", encoding="utf-8")
     with monkeypatch.context() as cli:
         cli.setenv("OPENROUTER_API_KEY", "not-a-key")
         cli.setattr(
@@ -1409,12 +1540,16 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     ), f"a check-in took an install name, or `new` reworded the claim: {said!r}"
     assert "discard-draft" in said, "`new` dropped that the refused check-in is kept"
 
-    # Every file the store refuses whole is refused as what it IS, by its path, through the door
-    # that serves it: its code, its status and the remedy that fits it.
+
+def test_every_file_the_store_refuses_whole_is_refused_as_what_it_is(
+    tmp_path: Path, tiered: Stores
+) -> None:
+    # By its path, through the door that serves it: its code, its status and the remedy that fits it.
+    install_root = tmp_path / "install"
     beside = CycleHop(campaign_id="camp-beside", cycle_id="cycle_miscarded0000")
     held_bank = Bank.of([Sample(id=0, query="q", ground_truth="g")])
     tiered.tenant_datasets.put_bank(held_bank)
-    write_yaml(install_root / "badconfig" / DEFINITION_FILE, termnorm)
+    write_yaml(install_root / "badconfig" / DEFINITION_FILE, _TERMNORM)
     config_file = install_root / "badconfig" / DEFINITION_FILE
     grants_file, blocks_file = tmp_path / "grants.json", tmp_path / "blocklist.json"
     draft_file = tiered.drafts.draft_dir("torn") / DRAFT_FILE
@@ -1531,7 +1666,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             torn_file.unlink()
         else:
             torn_file.write_bytes(kept)
-    # A potter template filling a slot its node never declares is refused at selection, by address.
+
+
+def test_a_potter_template_filling_an_undeclared_slot_is_refused_by_address() -> None:
+    # At selection.
     typo_overlay = {"l1_generate": {"config": {"instruction": "{{typo}}"}}}
     with pytest.raises(PotterError) as typo:
         select_optimizer(
@@ -1545,14 +1683,18 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "the refusal named no config address"
     )
 
+
+def test_a_recipes_identity_reads_the_code_it_imports_and_no_other() -> None:
     for recipe, imported, why in (
         ("table", {loaders, tabular_ingest}, "a recipe's identity missed code it imports"),
         ("columns", {loaders}, "a recipe's identity took code it does not run"),
     ):
         assert set(loaders.recipe_modules(recipe)) == imported, why
 
-    # A derived read is keyed by its file's signature, and an absent file's `None` is one like any
-    # other: its compute's absent answer, then the written file's.
+
+def test_a_derived_read_is_keyed_by_its_files_signature(tmp_path: Path) -> None:
+    # An absent file's `None` is a signature like any other: its compute's absent answer, then the
+    # written file's.
     probe = tmp_path / "derived_probe.json"
 
     def sized() -> int:
@@ -1569,50 +1711,85 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 
 # 2. The config a campaign runs
 
+_PINNED = {
+    "per_sample": "label_match(predicted, ground_truth)",
+    "per_cell": "fitness * (0.92 + 0.08 * 120.0 / max(120.0, tokens))",
+}
+_DECLARED_NODE = {
+    "type": "llm",
+    "config": {"model": "m", "reasoning_effort": "low", "temperature": 0.2},
+    "optimizer": {
+        "param_keys": ["reasoning_effort", "temperature"],
+        "param_allowed_values": {"reasoning_effort": ["low", "mid", "high"]},
+    },
+}
+_ROWS = [
+    {"key": "reasoning_effort", "open": True, "allowed": ["low", "high"]},
+    {"key": "temperature", "open": False, "allowed": []},
+]
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
-    tmp_path: Path,
-    built_stores: Stores,
-    offline: Router,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    # The draft's CHAIN reaches the mint on a reused dataset.
-    pinned = {
-        "per_sample": "label_match(predicted, ground_truth)",
-        "per_cell": "fitness * (0.92 + 0.08 * 120.0 / max(120.0, tokens))",
-    }
-    root = built_stores.tenant_datasets.dataset_dir("ds")
-    optimization = dict(campaign_defaults()["optimization"])
-    schema = pipeline_schema(
+
+def _chain_schema() -> PipelineSchema:
+    return pipeline_schema(
         [
             PipelineNode(name=n, kind=NodeKind.LLM, tunes_llm=False)
             for n in ("web_search", "rerank", "llm_only")
         ]
     )
+
+
+@pytest.fixture
+def ds_draft(built_stores: Stores) -> DraftFile:
+    # A reused dataset whose definition pins its criterion.
     write_yaml(
-        root / DEFINITION_FILE,
+        built_stores.tenant_datasets.dataset_dir("ds") / DEFINITION_FILE,
         {
             "pipeline": {
                 "backend_type": upload_connector().name,
-                "pipelines": dict(schema.pipelines),
+                "pipelines": dict(_chain_schema().pipelines),
             },
-            "campaign": {"optimization": optimization, "scoring": pinned},
+            "campaign": {
+                "optimization": dict(campaign_defaults()["optimization"]),
+                "scoring": _PINNED,
+            },
         },
     )
-    draft = new_draft(
+    return new_draft(
         slug="ds",
         basis=DatasetBasis(dataset="ds"),
         n_samples=1,
         sample_preview=[],
         headers=[],
     ).patch(config={"optimization": {"optimizer": "capo"}})
+
+
+@pytest.fixture
+def planned(built_stores: Stores) -> Callable[..., CampaignConfig]:
+    def planned(on: DraftFile, **patch: Any) -> CampaignConfig:
+        plan = asyncio.run(plan_draft_patch(built_stores, on, EditDraftPatch.model_validate(patch)))
+        return draft_config(built_stores, apply_draft_patch(on, plan))
+
+    return planned
+
+
+def test_the_drafts_chain_reaches_the_mint_on_a_reused_dataset(
+    built_stores: Stores, ds_draft: DraftFile
+) -> None:
+    pinned, schema, draft = _PINNED, _chain_schema(), ds_draft
     picked = draft.patch(config={**draft.config, "exclude_nodes": ["rerank", "web_search"]})
     chosen = draft_config(built_stores, picked)
     assert running_only(schema, exclude=chosen.exclude_nodes).running == ("llm_only",), (
         "the excluded complement runs another chain than was picked"
     )
+    assert chosen.optimization.optimizer == "capo", "the draft's optimizer did not reach the mint"
+    assert chosen.scoring == pinned, "a pinned criterion lost its anchors under another edit"
+    assert draft_config(built_stores, draft).exclude_nodes == [], (
+        "an untouched chain excluded a node"
+    )
+
+
+def test_an_exclusion_drops_no_node_the_graph_fires_and_runs_no_alternative_walk() -> None:
+    schema = _chain_schema()
     off_chain = schema.model_copy(update={"pipelines": {"default": ["web_search", "llm_only"]}})
     assert running_only(off_chain, exclude=["web_search"]).running == ("llm_only", "rerank"), (
         "an exclusion dropped a node the graph fires off every walk"
@@ -1623,6 +1800,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert running_only(alternative, exclude=[]).running == ("web_search", "llm_only"), (
         "a node only on an alternative walk ran beside the chain"
     )
+
+
+def test_l4s_outer_escalation_nodes_are_levers() -> None:
     # L4's outer graph: the escalation nodes walk nowhere, LEVI's seed walks its phase.
     l4_graph = running_only(
         parse_pipeline_response(inner_cells("potter", "levi").pipeline()), exclude=[]
@@ -1631,6 +1811,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert escalations <= set(l4_graph.node_config_schema(steer_bound=False)), (
         "an outer node the inner run fires is no lever"
     )
+
+
+def test_an_upload_searches_the_model_axis_its_connectors_menu_bounds() -> None:
     # An upload searches the `model` axis TermNorm serves, bounded by its connector's menu.
     uploads = upload_connector().uploads
     assert uploads is not None
@@ -1651,18 +1834,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert upload_graph.model_options(answering) == list(uploads.available_models), (
         "the upload's menu does not bound the model axis L1 searches"
     )
-    assert chosen.optimization.optimizer == "capo", "the draft's optimizer did not reach the mint"
-    assert chosen.scoring == pinned, "a pinned criterion lost its anchors under another edit"
-    assert draft_config(built_stores, draft).exclude_nodes == [], (
-        "an untouched chain excluded a node"
-    )
 
-    def planned(on: DraftFile, **patch: Any) -> CampaignConfig:
-        plan = asyncio.run(plan_draft_patch(built_stores, on, EditDraftPatch.model_validate(patch)))
-        return draft_config(built_stores, apply_draft_patch(on, plan))
 
-    # A check-in picks the criterion as the server reads it; sent back, a pinned formula's own
-    # dials move nothing, and a matcher pick keeps the composite.
+def test_a_check_in_picks_the_criterion_as_the_server_reads_it(
+    built_stores: Stores, ds_draft: DraftFile, planned: Callable[..., CampaignConfig]
+) -> None:
+    # Sent back, a pinned formula's own dials move nothing, and a matcher pick keeps the composite.
+    pinned, draft = _PINNED, ds_draft
+    chosen = draft_config(built_stores, draft)
     assert draft_criterion(
         chosen.scoring, campaign_terms(upload_connector().name)
     ) == DraftCriterion(matcher="label_match", dials="tokens=0.08"), (
@@ -1679,7 +1858,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert planned(draft, config={"scoring": {"dials": "cost=0.1"}}).scoring == dials, (
         "dials froze another criterion than they spell"
     )
+
+
+def test_a_switch_drops_the_knobs_the_old_optimizer_was_edited_on(
+    built_stores: Stores, planned: Callable[..., CampaignConfig]
+) -> None:
     # A knob edit on the basis's optimizer, then a switch: the knob addressed the old one.
+    pinned, schema = _PINNED, _chain_schema()
+    optimization = dict(campaign_defaults()["optimization"])
     write_yaml(
         built_stores.tenant_datasets.dataset_dir("cap") / DEFINITION_FILE,
         {
@@ -1707,21 +1893,16 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert switched.optimizer == "potter" and "blocks" not in switched.nodes, (
         "a switch kept the old optimizer's knobs"
     )
-    # A draft edit sent as rows freezes the search space the overlay spelled. A REUSED dataset:
-    # its file is not the check-in's to write, so the overlay rides the config.
+
+
+@pytest.fixture
+def frozen(built_stores: Stores) -> Callable[..., Any]:
+    # A REUSED dataset: its file is not the check-in's to write, so the overlay rides the config.
     reused = built_stores.tenant_datasets.dataset_dir("d")
-    declared_node = {
-        "type": "llm",
-        "config": {"model": "m", "reasoning_effort": "low", "temperature": 0.2},
-        "optimizer": {
-            "param_keys": ["reasoning_effort", "temperature"],
-            "param_allowed_values": {"reasoning_effort": ["low", "mid", "high"]},
-        },
-    }
     write_yaml(
         reused / DEFINITION_FILE,
         {
-            "pipeline": {"backend_type": "termnorm", "nodes": {"llm_only": declared_node}},
+            "pipeline": {"backend_type": "termnorm", "nodes": {"llm_only": _DECLARED_NODE}},
             "campaign": _connector_config().model_dump(mode="json"),
         },
     )
@@ -1739,20 +1920,25 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         )
         return draft_pipeline(built_stores, apply_draft_patch(edited, plan), plan.served).config
 
-    rows = [
-        {"key": "reasoning_effort", "open": True, "allowed": ["low", "high"]},
-        {"key": "temperature", "open": False, "allowed": []},
-    ]
+    return frozen
+
+
+def test_a_draft_edit_sent_as_rows_freezes_the_space_the_overlay_spells(
+    frozen: Callable[..., Any],
+) -> None:
     spelled = {
         "param_keys": ["reasoning_effort"],
         "param_allowed_values": {"reasoning_effort": ["low", "high"]},
     }
-    as_rows = frozen(node_narrowing={"llm_only": rows}).optimizer_narrowing
+    as_rows = frozen(node_narrowing={"llm_only": _ROWS}).optimizer_narrowing
     assert as_rows == {"llm_only": NodeSearchNarrowing.model_validate(spelled)}, (
         "rows froze another space"
     )
     as_overlay = frozen(config={"optimizer_narrowing": {"llm_only": spelled}})
     assert as_rows == as_overlay.optimizer_narrowing, "rows and the overlay froze two spaces"
+
+
+def test_an_unnamed_answer_slot_is_the_last_field(frozen: Callable[..., Any]) -> None:
     # No field named `answer`, none named by the operator: the slot is the LAST, reasoning first.
     answer_schema = {"type": "object", "properties": {"reasoning": {}, "code": {}}}
     authored = frozen(
@@ -1769,14 +1955,18 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert authored["llm_only"].laid_keys()["answer_fields"] == ["code"], (
         "the answer slot is not the last field"
     )
-    # A reused dataset's own contract is authored already: editing it reopens no axis.
+
+
+def test_a_reused_datasets_own_contract_reopens_no_axis(built_stores: Stores) -> None:
+    # It is authored already.
+    answer_schema = {"type": "object", "properties": {"reasoning": {}, "code": {}}}
     contracted = {"model": "m", "output_schema": answer_schema, "answer_fields": ["reasoning"]}
     write_yaml(
         built_stores.tenant_datasets.dataset_dir("dj") / DEFINITION_FILE,
         {
             "pipeline": {
                 "backend_type": "termnorm",
-                "nodes": {"llm_only": {**declared_node, "config": contracted}},
+                "nodes": {"llm_only": {**_DECLARED_NODE, "config": contracted}},
             },
             "campaign": _connector_config().model_dump(mode="json"),
         },
@@ -1797,13 +1987,26 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert "response_format" not in edited_node and edited_node["answer_fields"] == ["reasoning"], (
         "a reused dataset's declared contract read as unauthored"
     )
-    # A check-in names only a connector that runs its upload; a container one is never chosen there.
+
+
+def test_a_check_in_names_only_a_connector_that_runs_its_upload(
+    frozen: Callable[..., Any],
+) -> None:
+    # A container one is never chosen there.
     for foreign in ("dbllmbench", "harbor", "dspy", "no-such"):
         with pytest.raises(PayloadInvalidError):
             frozen(connector=foreign)
 
-    # An upload's draft splits once: its node edit is the definition's, which its Start writes, so
-    # the campaign it mints declares none, as one named off that definition does not.
+
+class _KnobbedUpload(NamedTuple):
+    draft_id: str
+    knob_plan: DraftPatchPlan
+    knobbed: DraftFile
+    upload_laid: DraftPipeline
+
+
+@pytest.fixture
+def knobbed_upload(built_stores: Stores) -> _KnobbedUpload:
     landed = asyncio.run(
         ingest.ingest_draft(stores=built_stores, blob=b"q,a\nx,1\ny,2\nz,1\n", filename="up.csv")
     )
@@ -1823,6 +2026,15 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     knobbed = apply_draft_patch(upload, knob_plan)
     upload_laid = draft_pipeline(built_stores, knobbed, knob_plan.served)
+    return _KnobbedUpload(landed.draft_id, knob_plan, knobbed, upload_laid)
+
+
+def test_an_uploads_draft_splits_once_between_definition_and_campaign(
+    built_stores: Stores, knobbed_upload: _KnobbedUpload
+) -> None:
+    # Its node edit is the definition's, which its Start writes, so the campaign it mints declares
+    # none, as one named off that definition does not.
+    _, _, knobbed, upload_laid = knobbed_upload
     assert "pipeline_overlay" not in upload_laid.config.model_dump(exclude_defaults=True), (
         "an upload's check-in declares its definition's half into the campaign"
     )
@@ -1843,7 +2055,13 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert (again.config, again.params) == (upload_laid.config, upload_laid.params), (
         "a dataset named off an upload's Start declares or runs another config than its check-in"
     )
-    # A resolver's model proposal is the one edit at its node's config path, applied as any edit.
+
+
+def test_a_resolvers_model_proposal_is_one_edit_its_turn_raises_and_never_applies(
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores, knobbed_upload: _KnobbedUpload
+) -> None:
+    # The proposal is the one edit at its node's config path, applied as any edit.
+    _, _, knobbed, upload_laid = knobbed_upload
     menu = next(r for r in upload_laid.rows["llm_only"] if r.key == "model").options
     model_found = OriginFinding(
         field="node.llm_only.model", proposed_value=menu[-1], confidence="high", evidence="row 1"
@@ -1858,9 +2076,33 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         .model
         == menu[-1]
     ), "a resolver's model proposal was dropped"
+    # ...and only as that edit: a node's model moves spend, so the turn raises it and applies none.
+    answer = CheckinOutput(task_intent="map", answer_format="a label", findings=[model_found])
 
-    # A menu offers no model its Start refuses, and offers it again once a host prices it: the
-    # API's sweep re-asks an unpriced route, whichever process answered it.
+    async def answered(**_: object) -> tuple[CheckinOutput, int]:
+        return answer, 0
+
+    monkeypatch.setattr(origin_resolve, "run_checkin", answered)
+    monkeypatch.setattr(origin_resolve, "paid_call", lambda **_: contextlib.nullcontext())
+    turn = asyncio.run(
+        origin_resolve.resolve_origin_turn(stores=built_stores, draft=knobbed, pipeline=upload_laid)
+    )
+    assert turn.draft.config == knobbed.config, "a resolver turn applied a node's model unpriced"
+    assert [c.payload.patch for c in turn.resolution.raised] == [proposal.patch], (
+        "a resolver turn dropped the model edit it may not apply"
+    )
+
+
+def test_a_menu_offers_no_model_its_start_refuses_until_a_host_prices_it(
+    monkeypatch: pytest.MonkeyPatch,
+    built_stores: Stores,
+    offline: Router,
+    knobbed_upload: _KnobbedUpload,
+) -> None:
+    # The API's sweep re-asks an unpriced route, whichever process answered it.
+    _, knob_plan, knobbed, upload_laid = knobbed_upload
+    menu = next(r for r in upload_laid.rows["llm_only"] if r.key == "model").options
+
     def menu_now() -> list[str]:
         laid = draft_pipeline(built_stores, knobbed, knob_plan.served)
         return next(r for r in laid.rows["llm_only"] if r.key == "model").options
@@ -1877,8 +2119,12 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         del offline.hosts[unhosted]
         pricing.refresh_route_answers()
         assert unhosted in menu_now(), "a model a host prices again stayed off every menu"
-    # ...and a route no host ever prices, a misspelt model, is re-asked for one day of its answer,
-    # never for good: a re-fetch answering the same keeps when it first answered.
+
+
+def test_a_route_no_host_ever_prices_is_reasked_for_one_day_of_its_answer(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    # A misspelt model, never for good: a re-fetch answering the same keeps when it first answered.
     misspelt = "vendor/misspelt-model"
     offline.hosts[misspelt] = {"data": {"endpoints": []}}
     clock = [time.time()]
@@ -1891,24 +2137,21 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         assert pricing.remembered_priced(misspelt, "openrouter") is None, (
             "the sweep kept re-asking a route no host prices past a day of its answer"
         )
-    # ...and only as that edit: a node's model moves spend, so the turn raises it and applies none.
+
+
+def test_an_empty_answer_buys_a_turn_only_where_one_is_owed(
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores, knobbed_upload: _KnobbedUpload
+) -> None:
+    # Decided by the server at every door: a draft holding no task and authored prompts buys none
+    # from the browser's empty Send or from a `new <file>` naming no task, and only the operator's
+    # re-run buys one over it.
+    draft_id, _, _, upload_laid = knobbed_upload
+    menu = next(r for r in upload_laid.rows["llm_only"] if r.key == "model").options
+    model_found = OriginFinding(
+        field="node.llm_only.model", proposed_value=menu[-1], confidence="high", evidence="row 1"
+    )
     answer = CheckinOutput(task_intent="map", answer_format="a label", findings=[model_found])
-
-    async def answered(**_: object) -> tuple[CheckinOutput, int]:
-        return answer, 0
-
-    monkeypatch.setattr(origin_resolve, "run_checkin", answered)
     monkeypatch.setattr(origin_resolve, "paid_call", lambda **_: contextlib.nullcontext())
-    turn = asyncio.run(
-        origin_resolve.resolve_origin_turn(stores=built_stores, draft=knobbed, pipeline=upload_laid)
-    )
-    assert turn.draft.config == knobbed.config, "a resolver turn applied a node's model unpriced"
-    assert [c.payload.patch for c in turn.resolution.raised] == [proposal.patch], (
-        "a resolver turn dropped the model edit it may not apply"
-    )
-    # An empty answer buys a turn only where one is owed, decided by the server at every door: a
-    # draft holding no task and authored prompts buys none from the browser's empty Send or from a
-    # `new <file>` naming no task, and only the operator's re-run buys one over it.
     turns: list[object] = []
 
     async def counted(**_: object) -> tuple[CheckinOutput, int]:
@@ -1916,7 +2159,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         return answer, 0
 
     monkeypatch.setattr(origin_resolve, "run_checkin", counted)
-    authored = owned_draft(built_stores, landed.draft_id).patch(
+    authored = owned_draft(built_stores, draft_id).patch(
         column_query="q", column_ground_truth="a", origin_prompts={"llm_only": {"persona": "Map."}}
     )
     built_stores.drafts.write_draft(authored)
@@ -1938,8 +2181,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         )
     )
     assert len(turns) == 1, "the operator's re-run bought no turn"
-    # An edit lays over the draft's config depth first, keeping the node's other knobs; a scoring
-    # edit names only what one takes, and its criterion compiles before it is kept.
+
+
+def test_an_edit_lays_over_the_drafts_config_depth_first(
+    built_stores: Stores, knobbed_upload: _KnobbedUpload
+) -> None:
+    # Keeping the node's other knobs; a scoring edit names only what one takes, and its criterion
+    # compiles before it is kept.
+    knobbed = knobbed_upload.knobbed
     capped = asyncio.run(
         plan_draft_patch(
             built_stores,
@@ -1963,7 +2212,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                 )
             )
 
-    # A row reads as the search space its ticks and padlock drew.
+
+def test_a_row_reads_as_the_search_space_its_ticks_and_padlock_drew() -> None:
     params = [
         NodeConfigParam(
             key="model",
@@ -2003,7 +2253,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "a padlocked prompt row drew another search space"
     )
 
-    # A campaign runs the config it froze, whatever its dataset file says later.
+
+def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_later(
+    built_stores: Stores,
+) -> None:
+    # Each step appends to the ledger the next step's cycle_config reads.
     stores = built_stores
     dials = {"per_sample": "exact", "dials": "cost: 0.1"}
     write_yaml(
@@ -2051,8 +2305,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert [forked.optimizer_narrowing[n].param_keys for n in "ab"] == [[], ["k"]], (
         "a seed's narrowing replaced the nodes it did not name"
     )
-    # A steer lays over the campaign's narrowing by part: its closed axes stay closed, its held
-    # fields held, and the steered model joins the menu without sanctioning the steer.
+
+
+def test_a_steer_lays_over_the_campaigns_narrowing_by_part() -> None:
+    # Its closed axes stay closed, its held fields held, and the steered model joins the menu
+    # without sanctioning the steer; an onward seed lays over the steer's laid narrowing.
     probe = _connector_config(
         optimizer_narrowing={
             "solve": {
@@ -2095,23 +2352,31 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         ["instruction", "persona"],
     ), "an onward seed reopened its parent's closed axis or released a field its line held"
 
-    # A fork closes the axis its operator closed on the forked cycle's own menu: ticks equal to
-    # the ROOT's whole menu still close the rung only the fork's menu carries.
-    def declaring(rungs: list[str]) -> dict[str, Any]:
-        node = {
-            "type": "llm",
-            "config": {"model": "m", "reasoning_effort": "low", "temperature": 0.0},
-            "optimizer": {
-                "param_keys": ["reasoning_effort", "temperature"],
-                "param_allowed_values": {"reasoning_effort": rungs, "model": ["m", "n"]},
-            },
-        }
-        return {"nodes": {"a": node}, "pipelines": {"default": ["a"]}}
 
+def _declaring(rungs: list[str]) -> dict[str, Any]:
+    node = {
+        "type": "llm",
+        "config": {"model": "m", "reasoning_effort": "low", "temperature": 0.0},
+        "optimizer": {
+            "param_keys": ["reasoning_effort", "temperature"],
+            "param_allowed_values": {"reasoning_effort": rungs, "model": ["m", "n"]},
+        },
+    }
+    return {"nodes": {"a": node}, "pipelines": {"default": ["a"]}}
+
+
+def _fk_dataset(stores: Stores) -> None:
     write_yaml(
         stores.tenant_datasets.dataset_dir("fk") / DEFINITION_FILE,
         {"pipeline": {"backend_type": "termnorm"}},
     )
+
+
+@pytest.fixture
+def steered(built_stores: Stores) -> Campaign:
+    # A root and its fork, each on its own recorded menu: the fork's carries one rung more.
+    stores = built_stores
+    _fk_dataset(stores)
     steered = minted_campaign(
         CycleHop(campaign_id="fk__000001", cycle_id="cycle_root"),
         config=_connector_config(),
@@ -2123,12 +2388,21 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         stores.campaigns.mint_cycle(hop)
         stores.campaigns.write_resolved_run(
             hop,
-            PipelineRead(declaration=declaring(rungs), dataset_overlay={}),
+            PipelineRead(declaration=_declaring(rungs), dataset_overlay={}),
             experiment=None,
             model_capabilities={},
         )
+    return steered
+
+
+def test_a_fork_closes_the_axis_its_operator_closed_on_its_own_menu(
+    built_stores: Stores, steered: Campaign
+) -> None:
+    # Ticks equal to the ROOT's whole menu still close the rung only the fork's menu carries.
+    stores = built_stores
+    fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
     fork_seed = parse_cycle_seed(
-        ForkSeed.model_validate({"node_narrowing": {"a": rows}}), stores, steered, fork
+        ForkSeed.model_validate({"node_narrowing": {"a": _ROWS}}), stores, steered, fork
     )
     assert fork_seed.optimizer_narrowing == {
         "a": NodeSearchNarrowing(
@@ -2136,12 +2410,18 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             param_allowed_values={"reasoning_effort": ["low", "high"]},
         )
     }, "the fork left open a rung its operator closed"
-    # A seed never steers outside the menu it states itself.
+
+
+def test_a_seed_never_steers_outside_its_own_menu_or_off_its_keys_type(
+    built_stores: Stores, steered: Campaign
+) -> None:
+    stores = built_stores
+    fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
     with pytest.raises(PayloadInvalidError):
         parse_cycle_seed(
             ForkSeed.model_validate(
                 {
-                    "node_narrowing": {"a": rows},
+                    "node_narrowing": {"a": _ROWS},
                     "pipeline_overlay": {"a": {"reasoning_effort": "xhigh"}},
                 }
             ),
@@ -2157,8 +2437,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             steered,
             fork,
         )
-    # A node permits what its recorded schema serves under the line, so the dataset's optimizer
-    # block sanctions a model the campaign's own (empty) layer never names.
+
+
+def test_a_node_permits_what_its_recorded_schema_serves_under_the_line(
+    built_stores: Stores, steered: Campaign
+) -> None:
+    # So the dataset's optimizer block sanctions a model the campaign's own (empty) layer never names.
+    stores = built_stores
+    fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
     assert fork_preview(stores, steered.campaign_id, {"a": {"model": "n"}}) == ForkPreviewResponse(
         steer="clean", permitted={"a": ["m", "n"]}
     ), "a steer inside the dataset's model list was graded the babysit act"
@@ -2170,9 +2456,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         ["low", "high", "xhigh"],
         ["m", "n"],
     ), "a fork's steer was checked against its root's menu, not its own"
-    # A served row says whether its reader may steer it past `permitted`: an account without
-    # `campaign.babysit` is held there on the model, an axis stays free, and an account that may
-    # babysit is held nowhere.
+
+
+def test_a_served_row_says_whether_its_reader_may_steer_it_past_permitted(
+    built_stores: Stores, steered: Campaign
+) -> None:
+    # An account without `campaign.babysit` is held there on the model, an axis stays free, and an
+    # account that may babysit is held nowhere.
+    stores = built_stores
     unbabysat = replace(
         stores,
         identity=replace(
@@ -2186,8 +2477,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             "a served row let its reader steer past what babysit binds, or held one it does not"
         )
         assert row_at["model"].permitted == ["m", "n"] and row_at["temperature"].pickable == "any"
-    # An optimizer knob names the layer its mint recorded behind it, never the tier the account is
-    # on now; an edit restating the dataset's value is the edit's.
+
+
+def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
+    built_stores: Stores,
+) -> None:
+    # Never the tier the account is on now; an edit restating the dataset's value is the edit's.
+    stores = built_stores
+    _fk_dataset(stores)
     restated = {"optimization": {"nodes": {"l1_generate": {"config": {"n_variants": 3}}}}}
     on_dataset = {"optimization": {**restated["optimization"], "degradation_threshold": 0.4}}
     assert laid_config(
@@ -2218,7 +2515,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     stores.campaigns.write_resolved_run(
         layered.root_hop,
         PipelineRead(
-            declaration=declaring(["low"]),
+            declaration=_declaring(["low"]),
             dataset_overlay={},
             knob_layers=recorded,
         ),
@@ -2236,7 +2533,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "k_max": "free_tier",
         "pool_window": "campaign",
     }, "a knob named another layer than its mint recorded behind it"
-    # A steer the campaign never sanctioned cannot pass as a clean fork.
+
+
+def test_a_steer_the_campaign_never_sanctioned_cannot_pass_as_a_clean_fork() -> None:
     sanctioning = {
         "l1_generate": NodeSearchNarrowing(param_allowed_values={"model": ["openai/gpt-oss-120b"]})
     }
@@ -2268,8 +2567,19 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "any",
     ], "a bound cost lever offered its permitted values, which the verdict refuses"
 
-    # Every door declares through ONE seam, and a declaration is a delta over today's defaults: a
-    # moved code default leaves the minted manifest alone and is named when it moves the origin.
+
+class _Declared(NamedTuple):
+    opened: Session
+    rows_30: list[Sample]
+    solve: PipelineNode
+    door: CampaignConfig
+    declared: RunDeclaration
+
+
+@pytest.fixture
+def decl(built_stores: Stores) -> _Declared:
+    # A session on the account's `decl` dataset, declared through the door every campaign takes.
+    stores = built_stores
     write_yaml(
         stores.tenant_datasets.dataset_dir("decl") / DEFINITION_FILE,
         {
@@ -2294,7 +2604,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         dataset=resolve_dataset(stores, "decl"),
     )
     door = _connector_config()
-    declared = declare(opened, door, purpose=Optimize())
+    return _Declared(opened, rows_30, solve, door, declare(opened, door, purpose=Optimize()))
+
+
+def test_every_door_declares_through_one_seam_as_a_delta_over_todays_defaults(
+    decl: _Declared,
+) -> None:
+    # A moved code default leaves the minted manifest alone and is named when it moves the origin.
+    opened, rows_30, _, door, declared = decl
     assert effective_config(declared).model_dump() == door.model_dump(), (
         "a seat runs another config than the one it declared"
     )
@@ -2329,6 +2646,13 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert len(run_ids) == 3, (
         "two arms over one content, or an arm and a seat, share a run id every surface keys on"
     )
+
+
+def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
+    built_stores: Stores, decl: _Declared
+) -> None:
+    stores = built_stores
+    opened, rows_30, _, door, _ = decl
     arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
     door_layers = ConfigLayers({}, door.model_dump(mode="json", exclude_unset=True))
 
@@ -2379,9 +2703,17 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "an act on a held head-to-head minted a campaign"
     )
 
-    # A replicate is numbered at the mint by the key the evidence groups on, the treatment, across
-    # every act on the id: a later act's arm on a standing treatment is its next replicate, on its
-    # own seed, and arms of one replicate share theirs (common random numbers).
+
+def test_a_replicate_is_numbered_at_the_mint_by_its_treatment_across_every_act(
+    built_stores: Stores, decl: _Declared
+) -> None:
+    # A later act's arm on a standing treatment is its next replicate, on its own seed, and arms of
+    # one replicate share theirs (common random numbers).
+    stores = built_stores
+    opened, rows_30, _, door, _ = decl
+    arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
+    door_layers = ConfigLayers({}, door.model_dump(mode="json", exclude_unset=True))
+
     def act(h2h: str, *arms: tuple[str, OptimizationOverrides]) -> dict[str, Compare]:
         request = HeadToHeadRequest(
             head_to_head_id=h2h,
@@ -2421,13 +2753,22 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert [knob[key].arm.replicate for key in ("k1", "k2")] == [1, 2], (
         "an arm stating a default knob ran as replicate 1 of a treatment it shares"
     )
-    # An arm sets an operator's knobs only: a dataset knob of its own is a difference no arm names.
+
+
+def test_an_arm_sets_an_operators_knobs_only() -> None:
+    # A dataset knob of its own is a difference no arm names.
     with pytest.raises(ValueError):
         ArmRequest.model_validate(
             {"arm_key": "d1", "optimization": {"optimizer": "potter", "degradation_threshold": 0.5}}
         )
-    # An L4 seat declares through the door every campaign takes, and an arm so declared runs what a
-    # campaign minted on that declaration resolves to.
+
+
+def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
+    tmp_path: Path, built_stores: Stores, decl: _Declared
+) -> None:
+    # An arm so declared runs what a campaign minted on that declaration resolves to.
+    stores = built_stores
+    opened, _, solve, _, _ = decl
     panel = InnerTasks(
         inner_benchmark="decl",
         inner_benchmark_config=InnerBenchmarkConfig(
@@ -2488,6 +2829,19 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         cycle_config(stores, as_campaign, as_campaign.root_hop).config.model_dump()
         == effective_config(l4_arm).model_dump()
     ), "an arm runs another config than a campaign declared that way"
+
+
+class _Held(NamedTuple):
+    opened: Session
+    campaign: Campaign
+
+
+@pytest.fixture
+def held(built_stores: Stores, decl: _Declared) -> _Held:
+    # The door's campaign minted, its partition banked, and its session resumed on the root it holds.
+    stores = built_stores
+    opened, rows_30, _, door, declared = decl
+    plan = resolve_cycle_plan(opened, declared, rows_30)
     held_campaign = minted_campaign(
         CycleHop(campaign_id="decl__000001", cycle_id=plan.cycle_id),
         config=door,
@@ -2520,13 +2874,21 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert read_active_pointer(stores.base_dir) != held_campaign.root_hop, (
         "a resume moved the latest launch before its run held the cycle"
     )
+    return _Held(opened, held_campaign)
+
+
+def test_a_manifest_over_moved_defaults_runs_on_them_and_says_so(
+    built_stores: Stores, decl: _Declared, held: _Held
+) -> None:
+    # What it runs under says so on the record every launch writes.
+    stores = built_stores
+    declared = decl.declared
+    opened, held_campaign = held
     wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
     root_cut = Cut(
         cycle=CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)),
         hop=held_campaign.root_hop,
     )
-    # A manifest pinned over bench defaults this build no longer ships runs on, and what it runs
-    # under says so on the record every launch writes.
     stale = held_campaign.model_copy(
         update={"declaration": declared.model_copy(update={"bench_defaults_pin": "older"})}
     )
@@ -2555,6 +2917,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "an optimizer whose manifest moved under one declaration drifted nothing, or blamed "
         "another part"
     )
+
+
+def test_a_resume_never_runs_on_another_origin_than_its_rounds_stand_on(
+    built_stores: Stores, decl: _Declared, held: _Held
+) -> None:
+    stores = built_stores
+    rows_30 = decl.rows_30
+    opened, held_campaign = held
     recut = loop_session(
         stores,
         opened.pipeline_schema,
@@ -2571,9 +2941,36 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         resolve_resume(
             replace(opened, candidate_library=("an unlisted label",)), held_campaign, rows_30
         )
+    # The capability menu the origin hashed under is on record: a moved one is the cause named.
+    floored = ModelCapability(
+        model="m", provider="", reasoning_efforts=["high"], reasoning_note="", source="test"
+    )
+    stores.campaigns.write_resolved_run(
+        held_campaign.root_hop,
+        opened.pipeline_read,
+        experiment=None,
+        model_capabilities={"": {"m": floored}},
+    )
+    with pytest.raises(ConfigDriftError) as refused:
+        resolve_resume(recut, held_campaign, rows_30[:-1])
+    assert refused.value.details["capabilities_moved"] == ["/m"], (
+        "a resume past a moved capability snapshot blamed only the dataset"
+    )
+
+
+def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    built_stores: Stores,
+    offline: Router,
+    held: _Held,
+) -> None:
     # A resume runs on the connector its campaign was minted on: its dataset re-pointed since is
     # refused at the terminal's door, the embedded one and the inner one alike, before any probes
     # or binds a connector.
+    stores = built_stores
+    held_campaign = held.campaign
     decl_definition = stores.tenant_datasets.dataset_dir("decl") / DEFINITION_FILE
     as_minted = {
         "pipeline": {"backend_type": "termnorm"},
@@ -2653,7 +3050,15 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "the served bench offers a grade on a connector its dataset no longer names"
     )
     write_yaml(decl_definition, as_minted)
-    # A steering seed is its fork's declared delta, never a waiver of the root's own drift.
+
+
+def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
+    built_stores: Stores, decl: _Declared, held: _Held
+) -> None:
+    # Never a waiver of the root's own drift.
+    stores = built_stores
+    rows_30 = decl.rows_30
+    opened, held_campaign = held
     steered_hop = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_steered")
     stores.campaigns.mint_cycle(steered_hop)
     partition = stores.campaigns.last(held_campaign.root_hop, PartitionRecord)
@@ -2668,26 +3073,26 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     resolve_resume(steered_fork, held_campaign, rows_30)
     with pytest.raises(ConfigDriftError):
         resolve_resume(steered_fork, held_campaign, rows_30[:-1])
-    # The capability menu the origin hashed under is on record: a moved one is the cause named.
-    floored = ModelCapability(
-        model="m", provider="", reasoning_efforts=["high"], reasoning_note="", source="test"
-    )
-    stores.campaigns.write_resolved_run(
-        held_campaign.root_hop,
-        opened.pipeline_read,
-        experiment=None,
-        model_capabilities={"": {"m": floored}},
-    )
-    with pytest.raises(ConfigDriftError) as refused:
-        resolve_resume(recut, held_campaign, rows_30[:-1])
-    assert refused.value.details["capabilities_moved"] == ["/m"], (
-        "a resume past a moved capability snapshot blamed only the dataset"
-    )
-    # A launch's observers hold its ledger's projections, and another holder joins the very ones
-    # they hold; only while the run lives: one that drained, or whose exit unwound through
+
+
+def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_lives(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    built_stores: Stores,
+    decl: _Declared,
+    held: _Held,
+) -> None:
+    # Another holder joins the very ones they hold; one that drained, or whose exit unwound through
     # `run_optimization`'s `finally`, leaves neither its ledger's index nor its cycle held.
+    stores = built_stores
+    declared = decl.declared
+    opened, held_campaign = held
+    wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
     root_dir = CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop))
     launched = effective_config(declared)
+    # The wiring a launch declares before its observers build.
+    selected = select_optimizer(launched.optimization)
+    declare_run_wiring(opened, launched, wired_ledger, campaign=held_campaign, selected=selected)
     address = {"campaign_id": opened.hop.campaign_id, "cycle_id": opened.hop.cycle_id}
 
     def pause(key: str) -> str:
@@ -2793,9 +3198,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "a run whose exit unwound kept its ledger's projections or its cycle"
     )
     assert not drained.called, "a run that raised drained its dashboard on the way out"
-    # A projection that cannot write is one stale-file warning on its ledger, never a raise into
-    # the appends whose lines landed, and nothing it raised is held for a later append.
 
+
+def test_a_projection_that_cannot_write_is_one_stale_file_warning(tmp_path: Path) -> None:
+    # Never a raise into the appends whose lines landed, and nothing it raised is held for a later
+    # append.
     class _Unwritable(Projection):
         def _handle_round_warning(self, record: RoundWarningRecord) -> None:  # noqa: ARG002 -- routed by its annotation
             raise OSError("disk full")
@@ -2812,7 +3219,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "a projection's write fault unwound a landed append, or went unreported, or stormed"
     )
 
-    # Answering in TEXT sends no contract to answer INTO.
+
+def test_answering_in_text_sends_no_contract_to_answer_into() -> None:
     d234 = read_dataset_pipeline(_install("justlogic/d234"))
     assert d234 is not None
     # TermNorm serves its prompt's fields and no slot: its node template declares the slot.
@@ -2826,51 +3234,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert (
         fold_output_contract(PipelineParams().with_nodes(base), text_schema).laid_nodes == base
     ), "an unmoved point must hash as it always did"
-    # One door: whatever the carrier builds reads back off its dump, each node's keys in laid order.
-    as_laid: dict[str, object] = {"prompt": "p", "temperature": 0.2, "model": "m"}
-    for built in (
-        PipelineParams().with_nodes({"solve": as_laid}).with_steps(["solve"]),
-        PipelineParams.model_validate({"steps": ["solve"], "solve": as_laid}),
-    ):
-        assert PipelineParams.model_validate(built.dump()).dump() == built.dump()
-        assert [list(cfg) for cfg in built.laid_nodes.values()] == [list(as_laid)], (
-            "the wire sent a node's keys out of their laid order"
-        )
-    # The laid order is the wire's, never the call's identity: one call laid in two orders is one.
-    relaid = dict(reversed(as_laid.items()))
-    assert (NodeCall.model_validate(relaid), PipelineParams.model_validate({"solve": relaid})) == (
-        NodeCall.model_validate(as_laid),
-        PipelineParams.model_validate({"solve": as_laid}),
-    ), "two calls with the same keys compared unequal for their laid order"
-    # Equality reads the fields alone, however a call was built: a copy validates nothing.
-    seeded_call = NodeCall.model_validate({"model": "m", "seed": 3})
-    for one_call in (
-        NodeCall.model_validate({"model": "m"}).model_copy(update={"seed": 3}),
-        NodeCall(model="m", seed=3),
-        NodeCall.model_validate({"seed": 3, "model": "m"}),
-    ):
-        assert one_call == seeded_call and one_call.model_copy(update={"seed": 4}) != seeded_call, (
-            "two calls with the same fields compared unequal, or a moved field compared equal"
-        )
-    nulled = PipelineParams.model_validate({"solve": {"model": "m", "seed": None}})
-    assert (
-        nulled.laid_nodes == PipelineParams.model_validate({"solve": {"model": "m"}}).laid_nodes
-    ), "a call laid `seed: null` hashed apart from one laid without it"
-    for build in (PipelineParams.model_validate, PipelineParams().with_nodes):
-        with pytest.raises(ValidationError):
-            build({"solve": {"max_tokens": 1024.0}})
-    with pytest.raises(ValidationError, match="may not be named"):
-        pipeline_schema(nodes=[PipelineNode(name="steps", tunes_llm=False)])
-    # No door builds a node named for a carrier field, the keyword `nodes=` included.
-    reserving: tuple[Callable[[], PipelineParams], ...] = (
-        lambda: PipelineParams(nodes={"solve": NodeCall.model_validate(as_laid)}),
-        lambda: PipelineParams().with_nodes({"nodes": as_laid}),
-        lambda: PipelineParams().with_nodes({"steps": as_laid}),
-        lambda: PipelineParams.model_validate({"nodes": as_laid}),
-    )
-    for build_reserved in reserving:
-        with pytest.raises(ValidationError):
-            build_reserved()
     chose_text = copy.deepcopy(base)
     chose_text["llm_only"][SCHEMA_TOGGLE_PARAM] = ANSWER_AS_TEXT
     chose_text["llm_only"][description_key("answer")] = "IGNORED"
@@ -2897,6 +3260,64 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert joint_schema.param_options(joint_node, SCHEMA_TOGGLE_PARAM) == [ANSWER_AS_JSON], (
         "a node graded on several slots was offered prose, where every field misses"
     )
+
+
+def test_whatever_the_carrier_builds_reads_back_in_laid_order_and_is_one_call() -> None:
+    # One door: each node's keys in laid order; the laid order is the wire's, never the identity.
+    as_laid: dict[str, object] = {"prompt": "p", "temperature": 0.2, "model": "m"}
+    for built in (
+        PipelineParams().with_nodes({"solve": as_laid}).with_steps(["solve"]),
+        PipelineParams.model_validate({"steps": ["solve"], "solve": as_laid}),
+    ):
+        assert PipelineParams.model_validate(built.dump()).dump() == built.dump()
+        assert [list(cfg) for cfg in built.laid_nodes.values()] == [list(as_laid)], (
+            "the wire sent a node's keys out of their laid order"
+        )
+    # The laid order is the wire's, never the call's identity: one call laid in two orders is one.
+    relaid = dict(reversed(as_laid.items()))
+    assert (NodeCall.model_validate(relaid), PipelineParams.model_validate({"solve": relaid})) == (
+        NodeCall.model_validate(as_laid),
+        PipelineParams.model_validate({"solve": as_laid}),
+    ), "two calls with the same keys compared unequal for their laid order"
+
+
+def test_call_equality_reads_the_fields_alone_however_a_call_was_built() -> None:
+    # A copy validates nothing.
+    seeded_call = NodeCall.model_validate({"model": "m", "seed": 3})
+    for one_call in (
+        NodeCall.model_validate({"model": "m"}).model_copy(update={"seed": 3}),
+        NodeCall(model="m", seed=3),
+        NodeCall.model_validate({"seed": 3, "model": "m"}),
+    ):
+        assert one_call == seeded_call and one_call.model_copy(update={"seed": 4}) != seeded_call, (
+            "two calls with the same fields compared unequal, or a moved field compared equal"
+        )
+    nulled = PipelineParams.model_validate({"solve": {"model": "m", "seed": None}})
+    assert (
+        nulled.laid_nodes == PipelineParams.model_validate({"solve": {"model": "m"}}).laid_nodes
+    ), "a call laid `seed: null` hashed apart from one laid without it"
+
+
+def test_no_door_builds_a_mistyped_call_or_a_node_named_for_a_carrier_field() -> None:
+    as_laid: dict[str, object] = {"prompt": "p", "temperature": 0.2, "model": "m"}
+    for build in (PipelineParams.model_validate, PipelineParams().with_nodes):
+        with pytest.raises(ValidationError):
+            build({"solve": {"max_tokens": 1024.0}})
+    with pytest.raises(ValidationError, match="may not be named"):
+        pipeline_schema(nodes=[PipelineNode(name="steps", tunes_llm=False)])
+    # No door builds a node named for a carrier field, the keyword `nodes=` included.
+    reserving: tuple[Callable[[], PipelineParams], ...] = (
+        lambda: PipelineParams(nodes={"solve": NodeCall.model_validate(as_laid)}),
+        lambda: PipelineParams().with_nodes({"nodes": as_laid}),
+        lambda: PipelineParams().with_nodes({"steps": as_laid}),
+        lambda: PipelineParams.model_validate({"nodes": as_laid}),
+    )
+    for build_reserved in reserving:
+        with pytest.raises(ValidationError):
+            build_reserved()
+
+
+def test_a_nested_fields_description_folds_into_the_contract_it_names() -> None:
     amount_items: dict[str, Any] = {"type": "object", "properties": {"amount": {"type": "string"}}}
     invoice = {"lines": {"type": "array", "items": amount_items}, "total": {"type": "number"}}
     nested = pipeline_schema(
@@ -2925,7 +3346,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "the fold mutated the declared schema it read: the parent individual still holds it"
     )
 
-    # An invented param is rejected, and so is the individual a variation wrote it on.
+
+def test_an_invented_param_is_rejected_and_so_is_the_individual_a_variation_wrote_it_on(
+    tmp_path: Path,
+) -> None:
+    # Each step reads the panel, schema or child the step before resolved.
     # A checkout resolves its research tier with no setting; a seat no committed tier holds is the
     # account's: a panel the account cannot resolve refuses at init, naming the seat.
     outer_stores = build_stores(default_identity(), projects_root=tmp_path / "outer")
@@ -3011,9 +3436,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     ], "a write off its declared carrier reached the child"
     assert config == {}, "a prompt field rode the config overlay"
 
-    # A SECOND prompt node, on a roster of its own, is written as the first is — by L1's wire and
-    # an operator's arm — and a member knowing one prompt is refused pre-spend.
-    two = pipeline_schema(
+
+def _two_prompt_nodes() -> PipelineSchema:
+    return pipeline_schema(
         [
             PipelineNode(name="draft", kind=NodeKind.LLM, prompt_info=PROMPT_INFO, tunes_llm=True),
             PipelineNode(
@@ -3026,34 +3451,53 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             ),
         ]
     )
+
+
+def _two_prompt_origin() -> OptSearchPoint:
+    return OptSearchPoint(
+        prompts={
+            "draft": NodePrompt(fields={"instruction": "Draft it."}),
+            "review": NodePrompt(fields={"instruction": "Review it.", "rubric": "Correctness."}),
+        }
+    )
+
+
+def _gepa_seat(stores: Stores, population: list[OptSearchPoint]) -> RoundContext:
+    reflected_on = seat(
+        stores,
+        schema=_two_prompt_nodes(),
+        bank=[Sample(id=7, query="q", ground_truth="a"), Sample(id=8, query="r", ground_truth="b")],
+        demo=1,
+        optimization={"optimizer": "gepa"},
+    )
+    set_cycle(
+        reflected_on.cycle,
+        line=[
+            round_result(
+                0, arms={PARENT: arm_state("parent", individual=population[0])}, improved=False
+            )
+        ],
+        population=population,
+    )
+    return reflected_on
+
+
+def test_l1s_wire_offers_the_roster_the_second_prompt_node_declares() -> None:
+    # A SECOND prompt node, on a roster of its own, is written as the first is.
+    two = _two_prompt_nodes()
     wire = build_l1_response_schema(two, citable_fields=["critique"], inner_cells=None)
     offered = wire["properties"]["variants"]["items"]["properties"]["prompt_fields_updates"]
     review = offered["properties"]["review"]["anyOf"][0]
     assert set(review["properties"]) == {"instruction", "rubric"}, (
         "L1 was offered another roster than the second prompt node declares"
     )
-    origin = OptSearchPoint(
-        prompts={
-            "draft": NodePrompt(fields={"instruction": "Draft it."}),
-            "review": NodePrompt(fields={"instruction": "Review it.", "rubric": "Correctness."}),
-        }
-    )
-    gepa = select_optimizer(OptimizerChoice(optimizer="gepa"))
-    reflected_on = seat(
-        built_stores,
-        schema=two,
-        bank=[Sample(id=7, query="q", ground_truth="a"), Sample(id=8, query="r", ground_truth="b")],
-        demo=1,
-        optimization={"optimizer": "gepa"},
-    )
-    population = [origin]
-    set_cycle(
-        reflected_on.cycle,
-        line=[
-            round_result(0, arms={PARENT: arm_state("parent", individual=origin)}, improved=False)
-        ],
-        population=population,
-    )
+
+
+def test_an_operators_arm_writes_the_second_prompt_node_and_nothing_off_its_roster(
+    built_stores: Stores,
+) -> None:
+    origin = _two_prompt_origin()
+    reflected_on = _gepa_seat(built_stores, [origin])
     arm = SubmittedArm(
         prompt_fields={"review": {"rubric": "Cite the clause."}},
         changes_description="tighten the review",
@@ -3070,6 +3514,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     off_roster = author_arm(reflected_on, origin, stray)
     assert len(off_roster.validation_failures) == 2, "an arm writing off the roster was measured"
+
+
+def test_a_member_knowing_one_prompt_is_refused_pre_spend_on_a_chain_of_two() -> None:
+    two = _two_prompt_nodes()
+    gepa = select_optimizer(OptimizerChoice(optimizer="gepa"))
     capo = select_optimizer(OptimizerChoice(optimizer="capo"))
     assert optimizers.unfit_pipeline(capo, two, "termnorm") is not None, (
         "a member rewriting the one prompt node was admitted on a chain of two"
@@ -3077,8 +3526,13 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert optimizers.unfit_pipeline(gepa, two, "termnorm") is None, (
         "GEPA was refused a chain it can walk"
     )
+
+
+def test_only_a_held_prompt_field_withdraws_it_from_l1() -> None:
     # The shipped defaults' config-axis narrowing leaves every prompt field to L1; only
     # `prompt_fields_held` withdraws one, and a surface with nothing open is refused pre-spend.
+    two = _two_prompt_nodes()
+    gepa = select_optimizer(OptimizerChoice(optimizer="gepa"))
     axes_only = two.narrow(
         {
             "review": NodeSearchNarrowing(
@@ -3120,6 +3574,15 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert optimizers.unfit_pipeline(gepa, all_held, "termnorm") is not None, (
         "a campaign leaving its optimizer nothing to edit was admitted"
     )
+
+
+def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
+    built_stores: Stores, offline: Router
+) -> None:
+    # Each reflection's child joins the population the next reflection reads.
+    origin = _two_prompt_origin()
+    population = [origin]
+    reflected_on = _gepa_seat(built_stores, population)
 
     # Round 0 measured each parent a reflection re-reads; the bench resolves it by id.
     def measured(*held: OptSearchPoint) -> list[RoundResult]:
@@ -3165,6 +3628,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert reflected == [{"draft"}, {"review"}, {"draft"}], (
         "GEPA's reflection did not round-robin a lineage across the prompt nodes"
     )
+
+
+def test_a_whole_prompt_rewrite_lands_in_the_slot_the_node_declares() -> None:
+    two = _two_prompt_nodes()
+    gepa = select_optimizer(OptimizerChoice(optimizer="gepa"))
     rubric_only = pipeline_schema(
         [
             PipelineNode(
@@ -3187,8 +3655,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     with pytest.raises(ValidationError, match="rewrite_slot"):
         NodePromptInfo(fields=("rubric",), rewrite_slot="instruction")
 
-    # Every committed dataset's framing reads within its budget: an over-budget field lands green
-    # and refuses every launch on its dataset at mint.
+
+def test_every_committed_datasets_framing_reads_within_its_budget(tmp_path: Path) -> None:
+    # An over-budget field lands green and refuses every launch on its dataset at mint.
     checkout = build_stores(default_identity(), projects_root=tmp_path / "checkout")
     for tier_root in (checkout.install_datasets_root, checkout.research_datasets_root):
         assert tier_root is not None, "this checkout lost a tier"
@@ -3206,10 +3675,24 @@ _EXPORTED_ROWS = [
 ]
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
-    monkeypatch: pytest.MonkeyPatch, built_stores: Stores, tmp_path: Path, offline: Router
-) -> None:
+def _split_bank() -> tuple[list[Sample], DatasetSplit, BankPartition]:
+    bank = samples(60, "TRUE", query="claim ")
+    split = DatasetSplit(bench=12, demo=6)
+    return bank, split, partition_bank(bank, split, seed=0)
+
+
+def _recut_banks(stores: Stores) -> tuple[list[Sample], Bank, Bank]:
+    # An L4 cell's bank, its held-out rows bench-only copies, and that bank re-cut: both held.
+    bank, _, _ = _split_bank()
+    l4_bank = [*bank[:30], *(s.model_copy(update={"held_out": True}) for s in bank[30:50])]
+    drawn_bank = Bank.of(l4_bank)
+    recut = Bank.of([*l4_bank[:40], l4_bank[40].model_copy(update={"query": "x"})])
+    for held_bank in (drawn_bank, recut):
+        stores.tenant_datasets.put_bank(held_bank)
+    return l4_bank, drawn_bank, recut
+
+
+def test_an_exported_table_reads_to_the_labels_it_holds() -> None:
     # A mis-decoded label grades every cell against text the person never wrote, with no error.
     for filename, blob in (
         (
@@ -3235,8 +3718,10 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
             f"{filename}: an exported table read to labels it does not hold"
         )
 
-    # An OpenDocument repeat count is the file's claim: blanks keep their columns, tails stay
-    # unexpanded, and a valued repeat stops at the cap instead of allocating what it declares.
+
+def test_an_opendocument_repeat_count_is_the_files_claim() -> None:
+    # Blanks keep their columns, tails stay unexpanded, and a valued repeat stops at the cap
+    # instead of allocating what it declares.
     def ods(*rows: str) -> bytes:
         ns = " ".join(
             f'xmlns:{p}="urn:oasis:names:tc:opendocument:xmlns:{p}:1.0"'
@@ -3277,7 +3762,9 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     plain = ods(header_row, *(row(*map(cell, r.values())) for r in _EXPORTED_ROWS))
     assert list(read_tabular(plain, "s.ods").rows) == _EXPORTED_ROWS, "an OpenDocument misread"
 
-    # An Excel <dimension> and row number are claims too: the caps bound the walk, not the sheet.
+
+def test_an_excel_dimension_and_row_number_bound_no_walk() -> None:
+    # They are claims too: the caps bound the walk, not the sheet.
     def xlsx(dimension: str, last_row: int) -> bytes:
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -3305,10 +3792,10 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     with pytest.raises(IngestError):
         read_tabular(xlsx("A1:B3", 1_048_576), "s.xlsx")
 
-    # No held-out row reaches a round panel or an archive view.
-    bank = samples(60, "TRUE", query="claim ")
-    split = DatasetSplit(bench=12, demo=6)
-    part = partition_bank(bank, split, seed=0)
+
+def test_no_held_out_row_sits_on_the_search_side_or_in_a_shot() -> None:
+    # Nor reaches a round panel or an archive view.
+    bank, split, part = _split_bank()
     held = {s.id for s in (*part.bench, *part.demo)}
     assert (len(part.bench), len(part.demo), len(part.search)) == (12, 6, 42), (
         "the partition held out another count than its split declares"
@@ -3326,7 +3813,24 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
             )
         ]
         assert rejected == [str(leak)], f"a shot naming scored row {leak} was accepted"
+    reversed_bench = partition_bank(bank[::-1], split, seed=0).bench
+    assert {s.id for s in reversed_bench} == {s.id for s in part.bench}, (
+        "the bench moved with the bank's row order"
+    )
+    assert {s.id for s in partition_bank(bank, split, seed=1).bench} != {
+        s.id for s in part.bench
+    }, "the partition seed drew no other bench"
+    twins = [*bank, *(s.model_copy(update={"id": 60 + s.id}) for s in bank)]
+    doubled = partition_bank(twins, split, seed=0)
+    assert {s.key for s in doubled.bench}.isdisjoint(s.key for s in doubled.search), (
+        "a copy of a held-out sample sits on the search side"
+    )
+    assert len(doubled.bench) == 2 * split.bench, "a held-out sample's copy was searched"
+
+
+def test_a_shot_mutation_stays_in_the_demo_pool() -> None:
     # Asserts the SUPPORT, never the stream: add, drop and keep each occur over the seeds.
+    _, _, part = _split_bank()
     demo_keys = frozenset(s.key for s in part.demo)
     pool = sorted(demo_keys)
     moves = set()
@@ -3342,20 +3846,11 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     ), "a full shot list grew past its k_max"
     child = cross_shots([pool[:2], pool[2:6]], rng=random.Random(0))
     assert len(child) == 3 and set(child) <= demo_keys, "a crossed shot list left the demo pool"
-    reversed_bench = partition_bank(bank[::-1], split, seed=0).bench
-    assert {s.id for s in reversed_bench} == {s.id for s in part.bench}, (
-        "the bench moved with the bank's row order"
-    )
-    assert {s.id for s in partition_bank(bank, split, seed=1).bench} != {
-        s.id for s in part.bench
-    }, "the partition seed drew no other bench"
-    twins = [*bank, *(s.model_copy(update={"id": 60 + s.id}) for s in bank)]
-    doubled = partition_bank(twins, split, seed=0)
-    assert {s.key for s in doubled.bench}.isdisjoint(s.key for s in doubled.search), (
-        "a copy of a held-out sample sits on the search side"
-    )
-    assert len(doubled.bench) == 2 * split.bench, "a held-out sample's copy was searched"
-    # A declared bench row moves no other row, so widening a bench keeps every paid cell's pool.
+
+
+def test_a_declared_bench_row_moves_no_other_row() -> None:
+    # So widening a bench keeps every paid cell's pool.
+    bank, split, part = _split_bank()
     extra = [
         Sample(id=60 + i, query=f"held {i}", ground_truth="TRUE", held_out=True) for i in range(9)
     ]
@@ -3371,8 +3866,10 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     ):
         with pytest.raises(ValueError):
             partition_bank(unsplittable, declared_split, seed=0)
-    # An L4 pool seats a held-out ENVIRONMENT the same way: the seat is out of the pin, so the
-    # cell replays once searched, and a pool declaring no split cannot draw it by mistake.
+
+
+def test_an_l4_pool_seats_a_held_out_environment_out_of_the_pin() -> None:
+    # So the cell replays once searched, and a pool declaring no split cannot draw it by mistake.
     task = {"kind": "seat", "id": "gsm_hard/8b", "inner_dataset": "gsm_hard", "inner_model": "m"}
     other = {**task, "id": "hotpotqa/8b", "inner_dataset": "hotpotqa"}
     seats = {
@@ -3405,8 +3902,12 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert (environments.search, environments.bench) == ((drawn,), (seated,)), (
         "a held-out environment was drawn for the search"
     )
-    # A cycle's diagnostics read the partition its run init drew: an L4 cell's held-out rows ride
-    # its bank as bench-only copies, so re-drawing off its config alone searches them.
+
+
+def test_a_cycles_diagnostics_read_the_partition_its_run_init_drew() -> None:
+    # An L4 cell's held-out rows ride its bank as bench-only copies, so re-drawing off its config
+    # alone searches them.
+    bank, _, _ = _split_bank()
     l4_bank = [*bank[:30], *(s.model_copy(update={"held_out": True}) for s in bank[30:50])]
     cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0), seed=0)
     back = restored_partition(bank, cell_drawn.record(dataset_hash="d"))
@@ -3416,11 +3917,11 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert partition_bank(bank, DatasetSplit(bench=0), seed=0).bench == (), (
         "a re-draw held rows out"
     )
-    # A resume after its label was re-cut reads the bank its cycle drew, never the newer one.
-    drawn_bank = Bank.of(l4_bank)
-    recut = Bank.of([*l4_bank[:40], l4_bank[40].model_copy(update={"query": "x"})])
-    for held_bank in (drawn_bank, recut):
-        built_stores.tenant_datasets.put_bank(held_bank)
+
+
+def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(built_stores: Stores) -> None:
+    # Never the newer one.
+    l4_bank, drawn_bank, recut = _recut_banks(built_stores)
     built_stores.tenant_datasets.relabel("recut", recut.dataset_hash)
     hop = CycleHop(campaign_id="camp-recut", cycle_id="cycle_recut")
     built_stores.campaigns.append(
@@ -3436,8 +3937,14 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert resumed.bank == drawn_bank, (
         "a resume after a re-cut switched its cycle onto the new bank"
     )
-    # A bank whose rows declare another field is refused by its path: read as unflagged rows, its
-    # held tail is searched. The listing, a survey, lists its one dataset UNREADABLE beside the rest.
+
+
+def test_a_bank_whose_rows_declare_another_field_is_refused_by_its_path(
+    built_stores: Stores,
+) -> None:
+    # Read as unflagged rows, its held tail is searched. The listing, a survey, lists its one
+    # dataset UNREADABLE beside the rest.
+    _, drawn_bank, recut = _recut_banks(built_stores)
     stale = [
         {"bench_only": True, **{k: v for k, v in row.items() if k != "held_out"}}
         if "held_out" in row
@@ -3505,6 +4012,11 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         "bank_unreadable",
         stale_path,
     ), "the dataset-scope leaderboard answered a stale bank as another refusal"
+
+
+def test_no_held_out_row_reaches_the_index_the_optimizers_panels_read() -> None:
+    bank, _, part = _split_bank()
+    held = {s.id for s in (*part.bench, *part.demo)}
     index = SampleIndex(bank=Bank.of(bank), sample_ids=part.admitted_ids)
     for n in range(12):
         index.replay_row(
@@ -3520,7 +4032,10 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         )
     assert not index.records(), "a held-out row reached the index the optimizer's panels read"
 
-    # The check-in model reads no held-out row.
+
+def test_the_check_in_model_reads_no_held_out_row_and_inits_on_the_pipeline_checked(
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+) -> None:
     checkin_bank = samples(40, "TRUE", query="claim ")
     built_stores.tenant_datasets.put_bank(heldout := Bank.of(checkin_bank))
     built_stores.tenant_datasets.relabel("heldout", heldout.dataset_hash)
@@ -3542,9 +4057,20 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert not [s.id for s in bench_rows if f'"{s.query}"' in content], (
         "a bench row reached the resolver"
     )
+    monkeypatch.setattr(checkin_launch, "assert_origin_ready", lambda _draft, _pipeline: None)
+    opened = asyncio.run(
+        checkin_launch.open_checkin(built_stores, draft.draft_id, served, overlays=[])
+    )
+    assert opened.session.pipeline_schema == draft_pipeline(built_stores, draft, served).declared, (
+        "the run inits on another pipeline than the one its Start was checked against"
+    )
 
-    # An upload's Start asks the mint's refusals of the draft BEFORE its dataset lands, so a refused
-    # Start takes no slug and its retry is refused the same way, never as a collision.
+
+def test_an_uploads_start_asks_the_mints_refusals_before_its_dataset_lands(
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+) -> None:
+    # A refused Start takes no slug and its retry is refused the same way, never as a collision;
+    # the draft each Start refuses is the one the next Start renames.
     landed = asyncio.run(
         ingest.ingest_draft(stores=built_stores, blob=b"q,a\nx,1\ny,2\nz,1\n", filename="tiny.csv")
     )
@@ -3595,34 +4121,17 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert built_stores.tenant_datasets.held_version("email-tagging") == held_before, (
         "a refused Start recorded a cut"
     )
-    opened = asyncio.run(
-        checkin_launch.open_checkin(built_stores, draft.draft_id, served, overlays=[])
-    )
-    assert opened.session.pipeline_schema == draft_pipeline(built_stores, draft, served).declared, (
-        "the run inits on another pipeline than the one its Start was checked against"
-    )
 
-    # Rewriting the prompt panel cannot accumulate the operator framing.
-    upstream = "Raw invoice text is provided directly as the input column."
-    framing = TaskDecomposition(
-        upstream_context=upstream,
-        downstream_context="The assigned code books a ledger entry.",
-    )
-    opt_sp = prompted(
-        "classify",
-        persona="You assign Swiss account codes.",
-        problem_description="Assign the four-digit account code for the invoice.",
-    )
-    booking = pipeline_schema(
-        [PipelineNode(name="classify", kind=NodeKind.LLM, prompt_info=PROMPT_INFO, tunes_llm=True)]
-    )
-    classify = booking.prompt_nodes()[0]
-    bundle = InjectionBundle(
-        parent=opt_sp,
+
+def _bundle(
+    parent: OptSearchPoint, framing: TaskDecomposition, schema: PipelineSchema
+) -> InjectionBundle:
+    return InjectionBundle(
+        parent=parent,
         l2=L2Memory(),
         l3=L3Memory(),
         framing=framing,
-        pipeline_schema=booking,
+        pipeline_schema=schema,
         cycle_slice=CycleSlice(
             round_num=1,
             l1_stall_depth=0,
@@ -3641,6 +4150,48 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         slot_of={},
         pool_window=8,
     )
+
+
+def _outer_schema(nodes: tuple[str, ...]) -> PipelineSchema:
+    fields = list(OptimizerPromptTemplate.model_fields)
+    return pipeline_schema(
+        nodes=[
+            PipelineNode(
+                name=name,
+                kind=NodeKind.LLM,
+                param_keys=set(fields),
+                param_types=dict.fromkeys(fields, "string"),
+                tunes_llm=False,
+            )
+            for name in nodes
+        ],
+    )
+
+
+def _inner_bundle() -> InjectionBundle:
+    # The L4 generator's: the INNER campaign's manifest's optimizer prompts, never the outer's own.
+    outer = _outer_schema(tuple(NODE_LAYOUTS))
+    return replace(
+        _bundle(OptSearchPoint(), TaskDecomposition(), outer), inner_cells=inner_cells("potter")
+    )
+
+
+def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> None:
+    upstream = "Raw invoice text is provided directly as the input column."
+    framing = TaskDecomposition(
+        upstream_context=upstream,
+        downstream_context="The assigned code books a ledger entry.",
+    )
+    opt_sp = prompted(
+        "classify",
+        persona="You assign Swiss account codes.",
+        problem_description="Assign the four-digit account code for the invoice.",
+    )
+    booking = pipeline_schema(
+        [PipelineNode(name="classify", kind=NodeKind.LLM, prompt_info=PROMPT_INFO, tunes_llm=True)]
+    )
+    classify = booking.prompt_nodes()[0]
+    bundle = _bundle(opt_sp, framing, booking)
     rendered = "\n\n".join(i.text for i in DispatchHub.render_items("rendered_prompt", bundle))
     shown = {
         label.removeprefix("[").removesuffix("]"): body
@@ -3663,31 +4214,10 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         "dropping the framing from the task context trades this bug for a blinder one"
     )
 
-    # The L4 generator is shown the optimizer prompts it rewrites: the INNER campaign's
-    # manifest's, never the outer's own.
-    fields = list(OptimizerPromptTemplate.model_fields)
 
-    def outer_schema(nodes: tuple[str, ...]) -> PipelineSchema:
-        return pipeline_schema(
-            nodes=[
-                PipelineNode(
-                    name=name,
-                    kind=NodeKind.LLM,
-                    param_keys=set(fields),
-                    param_types=dict.fromkeys(fields, "string"),
-                    tunes_llm=False,
-                )
-                for name in nodes
-            ],
-        )
-
-    inner = replace(
-        bundle,
-        parent=OptSearchPoint(),
-        framing=TaskDecomposition(),
-        pipeline_schema=outer_schema(tuple(NODE_LAYOUTS)),
-        inner_cells=inner_cells("potter"),
-    )
+def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites() -> None:
+    # The INNER campaign's manifest's, never the outer's own, and no mandatory panel is refused.
+    inner = _inner_bundle()
     subject_chars = sum(len(i.text) for i in DispatchHub.render_items("rendered_prompt", inner))
     allowance = NODE_LAYOUTS["l1_generate"].discretionary_chars
     assert subject_chars > allowance, (
@@ -3702,11 +4232,18 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
     refused_panels = set(filled.injections.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
     assert not refused_panels, f"mandatory panel(s) refused by the budget: {sorted(refused_panels)}"
-    # A panel mixing two manifests: each outer node is shown, and checked, as its own manifest's.
+
+
+def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifests(
+    tmp_path: Path, built_stores: Stores, offline: Router
+) -> None:
+    # A panel mixing two manifests; the edit it admits reaches the inner cell's request.
+    fields = list(OptimizerPromptTemplate.model_fields)
+    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
     capo = select_optimizer(OptimizerChoice(optimizer="capo"))
     mixed = inner_cells("potter", "capo")
-    mixed_schema = outer_schema((*NODE_LAYOUTS, *capo.llm_nodes))
-    mixed_bundle = replace(inner, pipeline_schema=mixed_schema, inner_cells=mixed)
+    mixed_schema = _outer_schema((*NODE_LAYOUTS, *capo.llm_nodes))
+    mixed_bundle = replace(_inner_bundle(), pipeline_schema=mixed_schema, inner_cells=mixed)
     mixed_shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", mixed_bundle))
     base_text = base_optimizer_template(capo, "capo_mutate").instruction
     assert f"[capo_mutate.instruction]\n{base_text}" in mixed_shown, (

@@ -70,8 +70,8 @@ BASELINE = {
     "p_reads": 311,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
-    # Test functions across them: one journey per `# N.` section, plus the forks a section names.
-    "test_functions": 29,
+    # Test functions over 150 lines across them: falls to 0 as each file splits one function per fact.
+    "test_functions_over_150": 19,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"
@@ -86,12 +86,14 @@ _TESTS_ROOT = REPO / "tests"
 
 def _count_tests() -> tuple[int, int]:
     files = sorted(_TESTS_ROOT.glob("test_*.py"))
-    functions = sum(
-        line.startswith(("def test_", "async def test_"))
+    over_150 = sum(
+        node.end_lineno is not None and node.end_lineno - node.lineno >= 150
         for f in files
-        for line in f.read_text(encoding="utf-8").splitlines()
+        for node in ast.parse(f.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name.startswith("test_")
     )
-    return len(files), functions
+    return len(files), over_150
 
 
 # What the browser is OFFERED — every property of every schema in the generated contract, so the
@@ -495,7 +497,7 @@ def compute_ledger() -> dict[str, int]:
     for member in optimizers.NODE_MEMBERS.table.values():
         priced.update(member.priced_surface)
     read = _read_names(sites)
-    test_files, test_functions = _count_tests()
+    test_files, test_functions_over_150 = _count_tests()
 
     return {
         "reexport_shims": sum(_is_reexport_shim(p) for p in py_files if p.name == "__init__.py"),
@@ -515,7 +517,7 @@ def compute_ledger() -> dict[str, int]:
         "p_member": _count_handed(NodeContext),
         "p_reads": sum(map(_count_handed, CycleRead.__subclasses__())),
         "test_files": test_files,
-        "test_functions": test_functions,
+        "test_functions_over_150": test_functions_over_150,
     }
 
 
