@@ -1329,6 +1329,7 @@ _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 _EMBEDDED_HEX32 = re.compile(r"[0-9a-f]{32}")
 _SHORT_HEX = re.compile(r"\b[0-9a-f]{6,12}\b")
 _CYCLE_ID = re.compile(r"cycle_[0-9a-f]{8,}")
+_FORK_ID = re.compile(r"cycle_[0-9a-f]{8,}_fork_[0-9a-f]{8}")
 _CAMPAIGN_ID = re.compile(
     f"(?:{'|'.join(re.escape(dataset_id_prefix(d)) for d in (DATASET, L4_DATASET))})__[0-9a-f]{{6}}"
 )
@@ -1337,8 +1338,9 @@ _WIN_PATH = re.compile(r"(?:\\\\\?\\)?[A-Za-z]:[\\/][^\s'\"<>|]*")
 
 
 class Canon:
-    def __init__(self, ids: dict[str, str]) -> None:
+    def __init__(self, ids: dict[str, str], forks: dict[str, str]) -> None:
         self.ids = ids
+        self.forks = forks
         # Prose names a candidate by an id prefix ("crossover 2dda4b+917e53", "parent c27b1862").
         self.short = {k[:n]: v for k, v in ids.items() for n in range(6, 13)}
 
@@ -1350,6 +1352,7 @@ class Canon:
         v = _EMBEDDED_HEX32.sub(lambda m: self.ids.get(m.group(0), "<id>"), v)
         v = _SHORT_HEX.sub(lambda m: self.short.get(m.group(0), m.group(0)), v)
         v = _CAMPAIGN_ID.sub("<campaign>", v)
+        v = _FORK_ID.sub(lambda m: self.forks[m.group(0)], v)
         v = _CYCLE_ID.sub("<cycle>", v)
         v = _SESSION_ID.sub("<session>", v)
         return _WIN_PATH.sub("<path>", v)
@@ -1395,6 +1398,24 @@ def _id_map(ledger: list[dict[str, Any]], rounds: list[dict[str, Any]]) -> dict[
         for row in d.get("scoreboard") or []:
             ids.setdefault(row["reading"]["arm"]["key"], f"parent@R{d.get('round')}")
     return ids
+
+
+def _fork_labels(cycle: Path) -> dict[str, str]:
+    """Each fork of *cycle*'s campaign by the rounds its line was cut at: its id hashes the clock."""
+    parents: dict[str, tuple[str | None, int | None]] = {}
+    for minted in cycle.parent.iterdir():
+        index = read_cycle_index(minted, moment=None)
+        assert index is not None, f"{minted.name} ran without minting its cycle"
+        parents[minted.name] = (index.parent_cycle_id, index.cut_round)
+
+    def label(cycle_id: str) -> str:
+        parent, cut = parents[cycle_id]
+        return "<cycle>" if parent is None else f"{label(parent)}/R{cut}"
+
+    labels = {c: label(c) for c, (parent, _) in parents.items() if parent is not None}
+    if len(set(labels.values())) < len(labels):
+        raise SystemExit(f"offline run: two forks of one parent cut at one round: {labels}")
+    return labels
 
 
 def _cells(rows: Any) -> list[dict[str, Any]]:
@@ -1507,7 +1528,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
     assert folded is not None, f"{cycle.name} ran without minting its cycle"
     index = folded.model_dump(mode="json")
     ids = _id_map(ledger, rounds)
-    canon = Canon(ids)
+    canon = Canon(ids, _fork_labels(cycle))
     final = index["final"] or {}
     run = {
         "stop_reason": index["stop_reason"],
