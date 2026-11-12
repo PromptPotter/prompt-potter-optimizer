@@ -85,7 +85,7 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.application.mask.divergence import VerdictOutcome, find_divergences
 from promptpotter.application.mask.load import load_mask_record
-from promptpotter.application.optimizers.capo.members import PairedTCut
+from promptpotter.application.optimizers.capo.members import PairedTCut, PopulationKept
 from promptpotter.application.optimizers.capo.state import CapoObjective
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
 from promptpotter.application.optimizers.nodes import MeasuredRound, Panel, ReadArm
@@ -744,17 +744,19 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     winner = RoundWinner(
         arms=[unwalked], coverage_floor=1, admission=0.5, parent=bar_arm, crowned=[]
     )
+    kept = PopulationKept(objective=paired.objective, survivors=[unwalked])
     for inputs, recorded in (
         (cut.inputs_ref, True),
         (paired, True),
         (minibatch, True),
         (winner, unwalked),
+        (kept, [unwalked]),
     ):
         gone = replay_decisions(
             _round(round=3, cells={}),
             [ResumeCheckpointRecord(kind=inputs.kind, inputs_ref=inputs, outcome=recorded)],
         )
-        assert gone is not None and gone.current_outcome in (False, None), (
+        assert gone is not None and gone.current_outcome in (False, None, []), (
             f"{inputs.kind}: an absent arm's decision replayed"
         )
 

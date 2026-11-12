@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, ClassVar
+from typing import Any
 
 from promptpotter.application.optimizer_manifest import bound_optimizer
-from promptpotter.application.optimizers.nodes import LlmNode
 from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.strict_model import FrozenModel
@@ -362,22 +361,6 @@ def resolve_node_layout(node: str) -> L1Layout:
     reaches here, refused at selection (`LayoutNode.lever_refusals`)."""
     layout, _ = resolve_layout_override(node, bound_optimizer().levers(node).get("layout"))
     return layout
-
-
-class LayoutNode(LlmNode):
-    name: ClassVar[str]
-    outer_levers: ClassVar[Mapping[str, str]] = {"layout": "object"}
-
-    def resolved_levers(self, declared: Mapping[str, Any]) -> dict[str, Any]:
-        return layout_levers(self.name, declared)
-
-    def lever_refusals(self, declared: Mapping[str, Any]) -> list[str]:
-        _, breaches = resolve_layout_override(self.name, declared.get("layout"))
-        return (
-            [f"its layout edit breaks {sorted(o.validator_id for o in breaches)}"]
-            if breaches
-            else []
-        )
 
 
 def layout_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:

@@ -137,9 +137,6 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     RoundDigest,
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub
-from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
-    validate_template,
-)
 from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
     build_l1_response_schema,
 )
@@ -896,6 +893,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
                         config=NodeConfig.model_validate(
                             checkin_manifest().config.model_dump(exclude_unset=True) | laid
                         ),
+                        template=checkin_template(),
                         cache=reuse,
                         seed=seed,
                     ),
@@ -1533,14 +1531,19 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             torn_file.unlink()
         else:
             torn_file.write_bytes(kept)
-    # A potter template filling a slot its node never declares is refused as the check-in's is.
-    l1_runs = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
+    # A potter template filling a slot its node never declares is refused at selection, by address.
+    typo_overlay = {"l1_generate": {"config": {"instruction": "{{typo}}"}}}
     with pytest.raises(PotterError) as typo:
-        validate_template("l1_generate", l1_runs.model_copy(update={"instruction": "{{typo}}"}))
+        select_optimizer(
+            OptimizerChoice.model_validate({"optimizer": "potter", "nodes": typo_overlay})
+        )
     assert (typo.value.code, typo.value.http_status) == (
         FileKind.OPTIMIZER_PROMPT.code,
         FileKind.OPTIMIZER_PROMPT.http_status,
     ), "a typo'd slot in a potter template was served as another refusal"
+    assert "optimization.nodes.l1_generate.config.instruction" in str(typo.value), (
+        "the refusal named no config address"
+    )
 
     for recipe, imported, why in (
         ("table", {loaders, tabular_ingest}, "a recipe's identity missed code it imports"),

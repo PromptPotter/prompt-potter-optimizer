@@ -47,22 +47,50 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landing 30:**
   - money 1–5: one charge record, one money fold, the host as one declared verified email;
   - rk-run 4–8: one model, one node-config merge, the rewrite knob, one layered config read, typed node layers.
-- **holds nest** (backbone; operator, 2026-11-12). One hold at every depth: a `Hold` with a bound and a parent hold, for the run, a cell and a call alike.
+- **landed 31:** proof 1–4: the surface ledger fails only on a rise, `assert_never` closes every record
+  fold, six contract-doc drifts, a typed behaviour trace with `--coverage`.
+- **landed 32:** proof 5: scripted invalid answers heal potter's calls, and an offline L4 leg. The
+  estimator's golden corpus is held.
+- **landed 33:** rk-opt 1–3: a call carries its template, the word tables on the enums, capo's absent
+  arm out of the ranking; the offline harness drops a re-keyed digest.
+- **landing 34:** the holds nest 1: `Hold` / `Bill` / `Release` / `Lapse` on the account book, a
+  worst-case hold at every level, every root hold a job's (a paid call outside a run a slotless
+  `PaidCall` job), one write per call hold, one sibling rule at the gate.
+- **holds nest 2** (backbone; operator, 2026-11-12). One hold at every depth: a `Hold` with a bound and a parent hold, for the run, a cell and a call alike.
   - The open part is the bound less what its children hold or billed, read by the one money fold.
   - `CellReservation` and quota's separate run reserve go.
-  - Runs beside proof.
-- **proof:** the fresh-eyes review's quick wins (gate throughput, `assert_never`, doc drifts), a typed behaviour trace, and a stronger offline world. No key moves.
-- **tests:** the test-shape charter, one function per independent fact. It runs alone, since it owns `tests/`.
-- **rk-opt 5**, with tune 2: `ab` re-fits under the current scorer, regrading the other campaigns' rows off the archive.
-- **rk-dec**, beside payer.
-- **behaviour keys:** generated keys, then the switch, which is the last re-key. §0.5's contract edit is the operator's.
+  - A hold holds its worst case at every level, so a budget is never exceeded; overshoot (holds sized
+    at the learned expected cost, a bill past its hold drawn from the level above and reported) is a
+    run-limits switch, off by default (operator, 2026-11-12).
+- **rk-opt 5**, with tune 2 and the registry fold, beside the holds nest: `ab` re-fits under the
+  current scorer, regrading the other campaigns' rows off the archive.
+- **tests:** first, every committed dataset's framing is read by the suite; then the test-shape
+  charter, one function per independent fact, a guard tested once over its doors. It runs alone, since
+  it owns `tests/`.
+- **det**, beside tests: `capo/diverged` decides the same way run to run, and the offline world reaches
+  the wound.
+- **holders**, beside **passes**: one holder identity and one `holder_of` fold for slots, claims,
+  cycles and money (admit-2's and passb-2's hold rows close); one declared `Pass` row per pass kind
+  above the one walk, so verify and the noise floor send in parallel.
+- **cfg**, beside payer: the merge rule declared per key by the node document's schema, one fold with
+  a provenance stamp per key; a model per inner node rides it (one L4 re-key). payer reads the
+  free-tier pair.
+- **rk-dec:** the crowning bar's statistic a switch (today's the default), USD the matched axis, the
+  origin walk inside its door.
+- **valid:** one validity check for resume and fork (`ab_replay`'s verdict), one mint writer, one way
+  onto a fork.
+- **behaviour keys:** generated keys, then the switch, which is the last re-key. §0.5's bullet is
+  accepted (operator, 2026-11-12).
 - **L4:** re-measure C0.
-- **then:** faults; narr, rec, rn-conn, ren.
+- **readings:** one reading for every comparison, the 31 `*Reading` classes folded; key-neutral
+  behind the behaviour keys.
+- **then:** faults; narr (the stored dashboard views go, renderers reading the records), rec, rn-conn,
+  ren (the two `knobs.py` and `free_tier.py` pairs).
 
 The re-keys end at the behaviour-key switch.
 
-9. **The edge tail**, in this order: passb-2, payer, addr, webb-4, la, lw (md if the operator says
-   so); lite, xconn, mkey, then mcp on mkey's tip, tv-2 under one access review; ws, forks, the block
+9. **The edge tail**, in this order: passb-2, addr, webb-4, la, lw, webd (the browser's copies of
+   engine facts served instead; md if the operator says so); lite, xconn, mkey, then mcp on mkey's tip, tv-2 under one access review; ws, forks, the block
    picker's census; tune 1 and 3, small, pick, box (the operator runs it); tests-w, ts-arch, ts-score,
    ts-spend; rel and `gate.py --release`.
 
@@ -75,8 +103,11 @@ A short window defers from the end (pending tracks, ren, faults, the ts private-
 never w0, the trim, stream, startb, stopb, land, admit-2, money, rk-opt, rk-run, payer or rel.
 
 **Forks left to the operator** (taste and policy; a chain leaves each as it stands): whether `log.md`
-and `review.md` go (md) · whether the visits analytics move to the site repo · what "calls held equal"
-holds equal and the crowning bar's statistic (rk-dec) · the sub-cent money rule (forks) · which env
+and `review.md` go (md) · whether the visits analytics move to the site repo · whether resume
+re-executes members against the content caches instead of checking validity (≈−1.2k lines; blocked
+today by evictable caches, operator inputs fed back and §0.5's fork-on-divergence) · whether L2/L3's θ
+high-water becomes a paired read (kept on purpose by `verdict-resolution.md`; the ladder is the
+ablation arm) · the sub-cent money rule (forks) · which env
 file the box keeps (box) · a bench's total · whether an upload's bytes are kept before the parse · a
 prompt field's order · the host assistant's open questions (§ Host assistant).
 

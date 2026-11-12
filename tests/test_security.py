@@ -527,7 +527,8 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     )
     potter = select_optimizer(OptimizerChoice(optimizer="potter"))
     generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
-    l1_request = DispatchHub.fill(generator, bundle, node="l1_generate").template.render()
+    filled = DispatchHub.fill(generator, bundle, node="l1_generate")
+    l1_request = generator.model_copy(update=filled.fields).render()
     assert poisoned_value in l1_request, "an arm's reject never reached the next generation"
     diagnostics = DispatchHub.render("diagnostics", bundle)
     assert (

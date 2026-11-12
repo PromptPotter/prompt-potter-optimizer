@@ -13,7 +13,7 @@ from promptpotter.application.bench.children import (
     overlay_failures,
     placeholder_failures,
 )
-from promptpotter.application.bench.llm_call import InjectionBreakdown, LLMCallContext, llm_call
+from promptpotter.application.bench.llm_call import LLMCallContext, llm_call
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.intelligence.earned_blocks import (
@@ -522,20 +522,18 @@ class Calls(CycleRead):
         node, selected = node or self._member.name, self._cycle.optimizer
         return running_prompt(node, selected.node_config(node), selected.manifest)
 
-    def call_context(
-        self, injections: InjectionBreakdown | None = None, *, idx: int | None = None
-    ) -> LLMCallContext:
+    def call_context(self, idx: int | None = None) -> LLMCallContext:
         session, node, round_num = self._cycle.session, self._member.name, self._round.round_num
         return LLMCallContext(
             node=node,
             config=self._cycle.optimizer.node_config(node),
+            template=self.prompt(),
             ledger=self._round.ledger,
             round_num=round_num,
             candidate_idx=idx,
             cache=session.store.optimizer_reuse,
             # A resume replays its reply, a repeat anywhere else samples.
             seed=self._cycle.rng(round_num, f"{node}:{idx}:request").getrandbits(31),
-            injections=injections or InjectionBreakdown(),
         )
 
     async def ask(self, prompt: str, idx: int | None = None) -> str:

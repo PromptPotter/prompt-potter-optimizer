@@ -235,17 +235,6 @@ row it closes.
   reads an arm with no shared cells as a 0.0 mean, so a replay over a round that lacks the arm confirms
   it instead of answering it absent. Action: an arm with no shared cells is absent, as in the race's
   replay. **Re-test:** `pytest tests/test_archive.py -k replays_its_decisions` covers `population_kept`.
-- **An optimizer node's template rides beside its config**: `llm_call.py::run_optimizer_node` takes a
-  filled `template` and an `LLMCallContext` whose `config` named it (`critique.py::distil_critique`,
-  `firing.py::_run_transition`, `task_context.py::run_checkin`, `generate.py:133`), so the two can
-  disagree. Action: the call context carries the running template its fill reads. **Rides with:**
-  the rest of rk-opt link 4. **Re-test:** `git grep -n "template=filled" -- promptpotter`.
-- **An edited template's unknown slot is refused at dispatch, not at selection, and names no address**:
-  `dispatch/injections/registry.py` validates what `dispatch/prompts.py::load_optimizer_prompt` loads,
-  and `optimizer_manifest.py::_select` cannot reach potter's `injection_table()`. Action: a member hook
-  names its known slots and selection calls it, refusing by config address. **Rides with:** the rest
-  of rk-opt link 4. **Re-test:** an overlay holding `{{typo}}` is refused at `new`, naming
-  `optimization.nodes.l1_generate.config.instruction`.
 - **`tests/test_identity.py` reaches the spawn's private `_laid_arm`** (`_l4_arm`, `_l4_laid`, the depth
   step). Action: the journey drives `_open_seat` over an offline inner campaign. **Rides with:**
   the rest of rk-opt link 4. **Re-test:** `grep -n "_laid_arm" tests/test_identity.py` is empty.
@@ -278,11 +267,8 @@ row it closes.
   with:** the rest of rk-opt link 4. **Re-test:** in
   `test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails`'s locked block, the leader's
   last `running` before the close counts the cells `rows(leader)` holds.
-- **Two word tables over one enum, three times** (`evidence/head_to_head.py::GUARD_STATE_INFO` beside its
-  labels, `paired_reading.py::READING_STATE_KIND` beside its info, `origin_panel.py::ROUND_ADVANCE_STALL`
-  beside its info), and `library.py::LibrarySnippet` flattens a cited-or-authored snippet into nullable
-  fields. Action: one table each, its words outside the marked decision units; the snippet keeps its
-  union. **Rides with:** the rest of rk-opt link 4.
+- **`library.py::LibrarySnippet` flattens a cited-or-authored snippet into nullable fields**. Action:
+  the snippet keeps its union. **Rides with:** the rest of rk-opt link 4.
 - **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
   carry their passes beside `VerificationPass`. Action: both ride the one record. **Rides with:**
   the rest of rk-opt link 4. **Re-test:** `git grep -n "\.overlap\b" -- promptpotter` is empty.
@@ -363,6 +349,13 @@ row it closes.
   `close_round` each spell `stated_line` + `RoundClosedRecord.of`; the restate has one builder,
   `bench/node_context.py::restated_round`. Action: a `closed_round` builder beside it. **Rides with:**
   narr 2. **Re-test:** `git grep -c "RoundClosedRecord.of(" -- promptpotter tests` is 1.
+- **The ledger banks dashboard views**: `domain/phase_views.py` holds 13 pre-rendered view classes,
+  built in `application/views/ingress.py` through `ViewContext` and taken apart again in
+  `views/render/ansi.py` and `projections/live_dashboard/projection.py`; `RoundCompleteView` repeats
+  `RoundClosedRecord`, and `RunSpendView` copies the spend fields one by one. Action: the ledger keeps
+  domain facts only and every renderer reads the records; the view classes go with `ViewContext`
+  (the largest excision of the row above; a run-data reshape, wiped). **Rides with:** narr 2.
+  **Re-test:** `git grep -cE "^class \w+View\b" -- promptpotter/domain/phase_views.py` is 0.
 - **A pause by interrupt is served as a bare "Paused"**: the `run_phase` record holds
   `cause: "interrupt"`, and no surface names it. Action: a stop's cause is narrated and served on every
   door. **Rides with:** narr 2. **Re-test:** interrupt a running `new`; the readout and `hierarchy` name
@@ -563,13 +556,93 @@ row it closes.
   `format.ts::shortId`, `compare/EvidenceCharts.tsx` and `evidence/read.py`. **Re-test:**
   `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
 
+### tests (alone, after the holds nest)
+
+- **Dataset prose has no gate against the framing budget**: `promptpotter-self`'s 641-char
+  `optimization_goals` landed green and every L4 launch refused at mint
+  (`domain/search_point.py::TaskDecomposition`'s `check_budget`). Action: the suite reads every committed
+  dataset (install and `research/`) through `bench/task_context.py::committed_task_context`; the check
+  moves into the parse if no second seam must re-check. **Rides with:** tests 0. **Re-test:** a
+  601-char framing field in any committed `task.md` fails the suite.
+- **One guard is tested once per door**: tests grew +2.3k lines in three days, mostly security and
+  identity, a test per door of one guard. Action: a guard living at one choke point is tested once,
+  over the table of its doors (one function, no parametrize); a guard spelled at more than one door is a
+  row for the chain owning it. **Rides with:** tests, after the charter.
+
+### det (after rk-opt 5, beside tests)
+
+- **`capo/diverged` decides differently run to run**: two offline runs of one tree move its decisions
+  (`decisions.rounds[1..4]`, elections, the bench), so every equals-main reads that leg MOVED and a real
+  move there is invisible. Action: find the nondeterministic input (a clock-stamped fork id ordering
+  something is the first suspect) and make the leg byte-identical. **Rides with:** det 1.
+  **Re-test:** two `offline_run.py --against` runs of one tree read `capo/diverged: UNMOVED`.
+- **The offline world never reaches the wound**: every heal rung failing (L1 gets no candidates, L2
+  records `layer_parse_failure`) and the capo / gepa / levi form failures run no leg. Action: a scripted
+  leg that drives each. **Rides with:** det 2.
+- **`PARSE_FAILURE_WRONG_TYPE` is dead**: `optimizers/potter/l1/generate.py` and
+  `domain/optimizer_state.py` name a parse failure no path produces. Action: it goes. **Rides with:**
+  det 2. **Re-test:** `git grep -c "PARSE_FAILURE_WRONG_TYPE" -- promptpotter` is 0.
+
+### holders (after the holds nest, beside passes)
+
+- **Every hold names its holder its own way**: `Job.producer_id`, `LaunchClaimRecord.claimant_lock`,
+  the cycle lock, a bill's ledger path (whose liveness is asked of the cycle lock), the send set and
+  object identity; six readers ask "who holds X" (`admission.py::refuse_taken_cycle`,
+  `maintenance/reset.py::holder_in_reach` and `::_claimed`, `identity/default_claim.py`,
+  `runtime_flags.py::derive_run_state`, the shared-cycle refusals), and the bugs sit at the joins. The
+  holds nest covers money's run, cell and call; the campaign share and the slot, claim and cycle side
+  stay apart, though machine → account → campaign → cycle is one nest for slots and money alike.
+  Action: one `Hold` (id, resource, parent, holder = the job id, bound, state asked | held | settled)
+  and one `holder_of(resource)` fold with a death rule per kind; the six readers read it. The hot-path
+  OS locks (archive cell claims, machine slots, draft claims, the gate) and the rate meters stay
+  native; the cycle lock stays as the hold's kernel-backed index. ≈−0.9k lines. It closes, by their
+  Re-tests, admit-2's rows on the double release, the refused seat's observers, the embedded and inner
+  opens, the hand-rolled start releases, the fork cut before admission, the mint without a claim, the
+  queued launch dying with its asker and the inner seat minted before admission; money's default claim
+  moving a scored tree; passb-2's paused pass read as selecting and the command whose filer died.
+  **Rides with:** holders.
+
+### passes (beside holders)
+
+- **A pass is named six ways and stops seven**: `ScoringVerb`, `RunSource`, `MeasurementRole` plus
+  free strings (`FiledAnswer.role`), `VerificationKind`, `CampaignPhase` and the role spend tables name
+  one pass; `search_point_scorer.py` hard-codes `keep_cut=False`, so the bench and verify rebuild the
+  walk; the noise floor and the seed screen are one k-fresh-replicate loop, each serial; two openers
+  (`scoring_scope.py::open_diagnostic`, the seed screen's own). Action: one `Pass` row (kind, cells,
+  replicates, fresh, depth, checks, stop, record) declared per kind above `query_loop.py::run_walks`.
+  ≈−0.45k lines. **Rides with:** passes.
+- **Verify and the noise floor send one cell at a time**: only `runner/bench.py` and the seed screen
+  set `held_lookahead`; the rest fall to `command_log.py`'s requested lookahead, 1 by default, and only
+  the panel gets degradation checks. Action: the `Pass` row declares its depth and checks. **Rides
+  with:** passes. **Re-test:** a verify pass's sends overlap.
+
+### cfg (the re-key window, beside payer)
+
+- **The merge rule is chosen by the door, not declared by the document**: `runner/inner/spawn.py`'s
+  `_laid_arm` and `potter/records.py`'s `steered_onto` merge by dict spread, skipping
+  `pipeline_params.py`'s rule that a new model drops `route_order`; `pipeline_manifest.py`'s `laid_over`
+  passes no types, so an object knob is replaced whole; "" means unchanged, emptied, no write, reset or
+  inherit by site; reset has two path grammars (`draft_patch.py`, `command_kinds.py`); the patch check
+  is spelled about five times, healing in some and raising in others. Action: a layer is (name, a patch
+  or a function of the fold so far); a patch sets, clears or merges per path, by the rule the
+  document's schema declares for that key; one fold returns the document and a provenance stamp per key
+  (`pipeline_resolve.py::ParamLayers` already is this for target params). `merge_config_layers`, the
+  knob-layer projections, `apply_config_overrides`, `_laid_arm` / `_one_model`, the `steered*` memory,
+  both reset grammars and the browser's "" handling go; ≈−0.9k lines. It closes rk-run's two-merges,
+  cleared-steer-field, relabel and `config_map` rows, admit-2's untyped steer and retired-knob rows,
+  ren 8's node-config census, the pipeline-switch row by explicit layer names, and rk-dec 3 (a model
+  per inner node rides it). One L4 re-key and its wipe. **Rides with:** cfg.
+
 ### batch/26 · rk-dec
 
 - **The crowning bar tests nothing a result can quote**: `application/scoring/selection.py::elect_round_winner`
   admits with no interval and no multiplicity correction, and `RoundResult.improved` reads any selection
-  past round 0 as a promotion; at panel width no corrected exact verdict reaches α=0.05. Action: the bar
-  tests a hypothesis a result can quote, chosen after separability is re-read on a tenant-ruler run.
-  **Rides with:** rk-dec 2. **Re-test:** a tenant-ruler run's `index.json::final.rounds_to_separable`
+  past round 0 as a promotion; at panel width no corrected exact verdict reaches α=0.05. Action
+  (operator, 2026-11-12): ONE predicate whose statistic is a switch, every reading built: today's
+  posterior bar; an exact paired sign test on the discordant cells, Holm-corrected across the round's
+  arms; an anytime-valid e-process on the paired discordance, valid wherever the race stops. Each
+  reading names what a result quotes, and `RoundResult.improved` reads the bar. Today's stays the
+  default until separability is read on banked runs. **Rides with:** rk-dec 2. **Re-test:** a tenant-ruler run's `index.json::final.rounds_to_separable`
   beside its `rounds_to_improved`.
 - **The never / partly / always spread contradicts the headline beside it**:
   `application/scoring/measurement_log.py::_cycle_cells` pools every candidate the cycle ran, so
@@ -577,7 +650,7 @@ row it closes.
   headline's own cells. **Rides with:** rk-dec 2.
 - **"Calls held equal" has no axis to hold**: `domain/spend.py::Budget` meters usd, tokens, rounds and
   wall clock, while the roadmap, `paper/README.md` and `paper/plans/` each hold a different axis
-  equal. Action: one matched axis, named on `Budget`. **Rides with:** rk-dec 2. **Re-test:**
+  equal. Action: USD is the one matched axis, named on `Budget` (operator, 2026-11-12). **Rides with:** rk-dec 2. **Re-test:**
   `price-head-to-head paper/plans/comparability.yaml` — do one point's `search_cells` differ by arm?
 - **The election has no one-arm read**: `scoring/selection.py:177` fits a prior through
   `candidate_abilities({"read": rows}, …)`, a fake arm key. Action: a one-arm read on the election's fit.
@@ -611,6 +684,34 @@ row it closes.
   accessors in `initialization/session.py`. Action: read the fields; the accessors go. **Rides with:**
   rk-dec (the re-key window), whose Owns gain `bench/difficulty.py` and `session.py`'s accessors.
   **Re-test:** `git grep -c "require_scorer\|require_partition" -- promptpotter` is 0.
+
+### valid (after rk-dec, before the behaviour keys)
+
+- **A resume asks "is this still valid" five ways**: `resume.py`'s consumed set and prompt hashes,
+  `jobs/mint.py`'s defaults drift, seven members' `replay()` (capo, gepa, levi, the election, the race)
+  and `round_packages` / `rederive`. Action: one validity check: `resume.py::_divergence` becomes
+  `ab_replay`'s verdict, walked by `find_divergences`; ≈−250 lines. The round a fork is cut at can
+  move: name it. **Rides with:** valid 1.
+- **A cycle's mint is written before it is minted**: the root mint writes its partition, seed and
+  resolved run before `CycleMintedRecord`, against `run_records.py`'s own docstring. Action: one
+  `mint_cycle` writer. **Rides with:** valid 2.
+- **Three ways onto a fork**: the mid-INIT rebind, `_run_line`'s rebase and an operator relaunch.
+  Action: one. **Rides with:** valid 2.
+
+### readings (after the L4 C0 re-measure; behaviour keys make it key-neutral)
+
+- **One estimate is read ~10 ways**: of the 31 `*Reading` classes, about 10 are estimates off cells
+  (`ArmReading`, `PairedReading`, `MetricReading`, `FactorReading`, …); the other ~22 carry a status
+  (`CommandReading`, `PauseReading`, …) and stay. Action: one reading (estimate, interval, n, state) that
+  every estimate returns and every surface renders, and `paired.py::read_pair`'s estimator spec gains a
+  kind (paired t, θ, exact sign), each returning `MeasuredLift`; rk-dec's bar and rk-opt's lift test read
+  it. θ and paired t stay distinct measurands (θ is unpaired and model-based, which PoBB's truncation
+  needs); CAPO, GEPA and LEVI keep their papers' bars. **Rides with:** readings. **Re-test:** the
+  chain's census lists the estimate readings; one remains.
+- **A finished arm meets a harder bar than a cut one**: `lost_ideas` asks a finished arm's interval to
+  sit wholly below, a cut arm only the ε posterior. Action: one bar for both. **Rides with:** readings.
+- **A round's advance mixes a point and an interval**: `origin_panel.py::RoundAdvance`'s "tops" half is
+  a point compare beside an interval read. Action: one interval read. **Rides with:** readings.
 
 ### batch/26 · rn-conn
 
@@ -825,6 +926,15 @@ row it closes.
 - **`hooks/useLocalStorage.ts::STORAGE_KEYS` mixes hook and non-hook keys**, and `sidePanelKey`'s
   `side-panel:*` has no `promptpotter.` prefix. Action: one key table, every key prefixed. **Rides with:**
   lw 1. **Re-test:** `` git grep -n '`side-panel:' -- webapp/lib `` is empty.
+
+### webd (the edge tail, after lw)
+
+- **The browser recomputes engine facts**: `webapp/lib/derivations/` (~2.2k lines, plus tests) derives
+  node config, spend, run phase and the search point the engine already computes. Action: each fact is
+  served on its existing read and the TypeScript copy and its tests go; the derivation rows filed
+  elsewhere (`wonOnTheta` / `electedMetric`, `output-contract.ts`, `paired-reading.ts::liftVersus`, the
+  `ConfigMode` row) close inside it where their chain has not. **Rides with:** webd. **Re-test:**
+  `git ls-files webapp/lib/derivations | grep -v __tests__ | xargs wc -l` falls by the served facts.
 
 ### batch/28 · lb
 
@@ -1059,6 +1169,13 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   dry-run by default, refusing while a producer can append; (2) attribution, an L4 outer cell stamps the
   runs its inner campaign produced; (3) the reach map. **Rides with:** small 3. **Re-test:**
   `compact-archive inventory`.
+- **31 `*_INFO` side tables sit beside their enums** (`STOP_REASON_INFO`, `GUARD_STATE_INFO`, …): a
+  member's data lives in a second table keyed by it. Action: the data lives on the enum members and the
+  tables go (Sonnet, mechanical). **Rides with:** small 4. **Re-test:**
+  `git grep -cE "^[A-Z_]+_INFO\b.*[:=]" -- promptpotter` is 0.
+- **An immutable record is written four ways**: `FrozenModel`, `StrictModel`, `NamedTuple` and frozen
+  `dataclass`. Action: `docs/developer/conventions.md` names one per role (a record crossing a seam, a
+  local value); a file converts when a chain touches it, never a sweep. **Rides with:** small 5.
 
 ### batch/31 · box
 
@@ -1143,6 +1260,13 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **`CycleSeed*` / `ForkSeed` → `CycleStart*` / `ForkStart`**, so "seed" is the RNG seed alone.
   **Rides with:** ren 6.
 - **The served hierarchy discriminator `level` → `entry_kind`**. **Rides with:** ren 7.
+- **Two `knobs.py` and two `free_tier.py` modules**: `application/knobs.py` (the served knob
+  projection) beside `optimizers/potter/knobs.py`, and `domain/free_tier.py` beside
+  `application/free_tier.py`. Action: each named for what it holds, or the pair folds where one fact
+  has two homes (payer's census reads the free-tier pair first). **Rides with:** ren 8.
+- **Node config is one document read through ~11 modules**: schema, parsing, overlay and knobs each
+  hold a view of it after landing 30's one layered read. Action: one model of the node document with
+  knobs a view on it. **Rides with:** cfg (its declared merge rule).
 
 ### batch/32 · rel
 
@@ -1235,6 +1359,11 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ## Held — no wave-4 chain yet
 
+- **The estimator has no golden corpus**: its key reads `measurement_modules()` over its source, not
+  its outputs on fixed inputs. A corpus would read each inner cell's `CycleResult` (~255 KB each) and the
+  tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
+  operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
+  estimator's entry in the behaviour-key file names its key's inputs.
 - **The sign-in exchange-failure refusal still reads `health` in the router**:
   `presentation/api/routers/auth.py::callback` calls `account.record_refusal` and `health.is_broken`
   itself (its log line beside the act went). Action: split `health`'s account dependency; the callback
@@ -1268,9 +1397,9 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   the whole dataset. Action: a sandboxed mint writes no account label. **Held:** none claims it.
   **Re-test:** an inner mint leaves the account's label file untouched.
 - **A ± that measures nothing**: `seed-screen`'s `margin_se` reads 0.000 over identical temperature-0
-  passes, which carry no row-sampling variance, and the panel quotes it as a precision. Action: an SE
-  over row resamples, or none served. **Held:** none claims it. **Re-test:** a temperature-0 screen's
-  `margin_se`.
+  passes, which carry no row-sampling variance, and the panel quotes it as a precision. Action: the
+  floor is an arm whose per-cell score is known for free (truth equals the majority), so the origin is
+  read PAIRED against it. **Rides with:** readings. **Re-test:** a temperature-0 screen's `margin_se`.
 - **The outer prompt ranks on θ, not the scored term**: Shape: `potter/dispatch/injections/panels.py`'s
   "weakest first" and "worse than the origin beyond their own error bar" read `mean_round_delta`, which
   is in-sample and scores nothing, because `held_out_lift` carries no SE. Action: serve the held-out

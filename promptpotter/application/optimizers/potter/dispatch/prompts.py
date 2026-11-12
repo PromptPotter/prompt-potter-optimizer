@@ -3,14 +3,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.bench.node_context import Calls
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     checkin_manifest,
     running_prompt,
-)
-from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
-    validate_template,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import resolve_node_layout
 from promptpotter.application.optimizers.potter.records import L1Layout, L2Memory
@@ -18,7 +14,6 @@ from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
 
 if TYPE_CHECKING:
-    from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.runner.inner.tasks import InnerCells
     from promptpotter.domain.pipeline_params import PipelineParams
 
@@ -63,13 +58,6 @@ def effective_optimizer_prompts(
             f: str(override[f] if f in override else getattr(base, f)) for f in fields
         }
     return out
-
-
-def load_optimizer_prompt(ctx: NodeContext, name: str) -> OptimizerPromptTemplate:
-    """*name*'s running prompt under the cycle's selection, through the asking member's `Calls`."""
-    template = ctx.read(Calls).prompt(name)
-    validate_template(name, template)
-    return template
 
 
 def node_layout(node: str, l2: L2Memory) -> L1Layout:

@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
+    from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
     from promptpotter.domain.paired_reading import ArmKey, PriorStanding
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -311,6 +312,10 @@ class LlmNode(NodeMember):
     def lever_refusals(self, _declared: Mapping[str, Any]) -> list[str]:
         """Why its laid levers cannot render, which selection refuses (`optimizer_manifest.py::_select`)."""
         return []
+
+    def unknown_slots(self, _template: OptimizerPromptTemplate) -> set[str]:
+        """The ``{{slot}}`` names its running template holds and its call never fills, which selection refuses."""
+        return set()
 
 
 @dataclass(frozen=True)

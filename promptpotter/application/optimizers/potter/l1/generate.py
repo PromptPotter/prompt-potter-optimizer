@@ -15,10 +15,7 @@ from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
     build_l1_response_schema,
     effective_l1_field_names,
 )
-from promptpotter.application.optimizers.potter.dispatch.prompts import (
-    load_optimizer_prompt,
-    node_layout,
-)
+from promptpotter.application.optimizers.potter.dispatch.prompts import node_layout
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1GenerateOutput,
     VariantEvidenceGrounding,
@@ -92,8 +89,8 @@ async def l1_generate(
 
     bundle = build_bundle(ctx, ctx.slice(Ladder))
     pipeline_schema = bundle.pipeline_schema
-    filled = DispatchHub.fill(load_optimizer_prompt(ctx, "l1_generate"), bundle, node="l1_generate")
-    breakdown = filled.breakdown
+    context = calls.call_context()
+    filled = DispatchHub.fill(context.template, bundle, node=context.node)
     budget = bundle.cycle_slice.exploration_budget
     citable = citable_fields(
         node_layout("l1_generate", bundle.l2),
@@ -125,12 +122,13 @@ async def l1_generate(
     response_model = build_l1_response_model(effective_l1_field_names())
     try:
         generated, _prompt, _repairs = await run_optimizer_node(
+            context=context,
+            fields=filled.fields,
             prompt_vars=prompt_vars,
+            injections=filled.breakdown,
             temperature=temperature,
             response_model=response_model,
             response_schema=output_schema,
-            context=calls.call_context(breakdown),
-            template=filled.template,
         )
     except OptimizerPromptParseError as parse_err:
         # TOOLING is never charged, a truncation always: a prompt that outgrew max_tokens owns its failure.

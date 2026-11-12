@@ -11,7 +11,6 @@ from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
 )
-from promptpotter.application.optimizers.potter.dispatch.prompts import load_optimizer_prompt
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     ForkProposal,
     StandingForkProposal,
@@ -152,13 +151,15 @@ async def _run_transition(
     ladder = ctx.slice(Ladder)
     # The prompt reports the verdict that asked for it, which lands only if this fire does.
     bundle = build_bundle(ctx, ladder if fire.ask is None else as_read_by(ladder, fire.ask))
-    filled = DispatchHub.fill(load_optimizer_prompt(ctx, layer.name), bundle, node=layer.name)
+    context = ctx.read(Calls).call_context()
+    filled = DispatchHub.fill(context.template, bundle, node=context.node)
     try:
         raw, _, _ = await run_optimizer_node(
+            context=context,
+            fields=filled.fields,
             prompt_vars=filled.injection_vars,
-            template=filled.template,
+            injections=filled.breakdown,
             response_model=layer.reply_model(bundle),
-            context=ctx.read(Calls).call_context(filled.breakdown),
         )
         result = layer.parse(ctx, raw)
     except OptimizerPromptParseError as parse_err:

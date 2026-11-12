@@ -33,10 +33,12 @@ from promptpotter.application.optimizers.potter.dispatch.facade import (
     fingerprinted_modules,
     node_packages,
 )
-from promptpotter.application.optimizers.potter.dispatch.injections.registry import injection_table
+from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
+    LayoutNode,
+    injection_table,
+)
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
-    LayoutNode,
     coerce_l1_layout,
     unplaceable_edit,
     validate_l1_layout,

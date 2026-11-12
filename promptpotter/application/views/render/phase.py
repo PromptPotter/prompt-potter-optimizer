@@ -29,7 +29,6 @@ from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.origin_panel import (
     ROUND_ADVANCE_INFO,
-    ROUND_ADVANCE_STALL,
     RoundAdvance,
     StallEffect,
 )
@@ -215,7 +214,7 @@ def render_round_stats(
 
 def render_patience_status(advance: RoundAdvance, stall: int, patience: int | None) -> str:
     info = ROUND_ADVANCE_INFO[advance]
-    if ROUND_ADVANCE_STALL[advance] is StallEffect.RESETS:
+    if advance.stall is StallEffect.RESETS:
         return _node_line(f"{GREEN}✓ {info.label}, auto-continuing...{RESET}")
     rounds = "round" if stall == 1 else "rounds"
     bound = "" if patience is None else f" (converges at {patience})"

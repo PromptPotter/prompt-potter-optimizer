@@ -54,7 +54,13 @@ from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.store.io import read_json, read_yaml
-from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import (
+    FileKind,
+    NotFoundError,
+    PayloadInvalidError,
+    PotterError,
+    unknown_slots_said,
+)
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.run_scope import run_scope
 
@@ -659,6 +665,24 @@ def _refuse_unnamed_arms(selected: SelectedOptimizer) -> None:
         )
 
 
+def _refuse_unknown_slots(selected: SelectedOptimizer) -> None:
+    # Refused by the config address holding it: dispatch would render the slot empty.
+    for node, member in optimizers.llm_nodes().items():
+        if node not in selected.node_configs:
+            continue
+        template = running_prompt(node, selected.node_config(node), selected.manifest)
+        if unknown := member.unknown_slots(template):
+            at = [
+                f"optimization.nodes.{node}.config.{field}"
+                for field, text in template.prompt_fields().items()
+                if any("{{" + slot + "}}" in text for slot in unknown)
+            ]
+            raise PotterError(
+                f"{unknown_slots_said(node, unknown)} at {at}",
+                code=FileKind.OPTIMIZER_PROMPT.code,
+            )
+
+
 def _refuse_unheld_steers(selected: SelectedOptimizer) -> None:
     for target, keys in selected.steered_axes.items():
         held = selected.node_config(target).model_fields_set
@@ -844,6 +868,7 @@ def _select(
     _refuse_unknown_main(selected)
     _refuse_unnamed_arms(selected)
     _refuse_unheld_steers(selected)
+    _refuse_unknown_slots(selected)
     if refused := selected.pool_refusals(mint=None):
         raise ValueError("; ".join(refused))
     return selected

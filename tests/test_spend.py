@@ -59,6 +59,7 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 from promptpotter.application import free_tier
 from promptpotter.application.account import account_of, local_stores
 from promptpotter.application.bench import llm_call as call_mod
+from promptpotter.application.bench.task_context import checkin_template
 from promptpotter.application.commands.dispatcher import (
     Applier,
     CommandCall,
@@ -1249,6 +1250,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
                     checkin_manifest().config.model_dump(exclude_unset=True)
                     | {"provider": "openai", "model": "m"}
                 ),
+                template=checkin_template(),
                 cache=loop_reuse,
                 seed=None,
             ),

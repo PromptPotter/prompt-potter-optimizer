@@ -78,34 +78,33 @@ class GuardState(StrEnum):
     DIFFERS = "differs"
 
 
-GUARD_STATE_INFO: Worded[GuardState, str] = Worded(
+class GuardStateInfo(NamedTuple):
+    label: str
+    sentence: str
+
+
+GUARD_STATE_INFO: Worded[GuardState, GuardStateInfo] = Worded(
     {
-        GuardState.CONTROLLED: (
+        GuardState.CONTROLLED: GuardStateInfo(
+            "controlled",
             "One quantity, as declared: every campaign is an arm of one head-to-head, on its bank, "
             "split, held-out rows, scorer, target model, origin and budget, with one optimizer model "
-            "set and no operator's steer."
+            "set and no operator's steer.",
         ),
-        GuardState.UNCONTROLLED: (
+        GuardState.UNCONTROLLED: GuardStateInfo(
+            "not controlled",
             "One quantity, undeclared: nothing read here differs, and a campaign that is no arm of a "
             "head-to-head, or an arm a launch act ran off it, could read other campaigns' "
-            "measurements, take an operator's steer or re-run its own rounds."
+            "measurements, take an operator's steer or re-run its own rounds.",
         ),
-        GuardState.DIFFERS: (
+        GuardState.DIFFERS: GuardStateInfo(
+            "differs",
             "Not one quantity: what graded or bounded these headlines differs, so a gap between two "
-            "is not the optimizer's alone."
+            "is not the optimizer's alone.",
         ),
     }
 )
 assert GUARD_STATE_INFO.keys() == set(GuardState)
-
-GUARD_STATE_LABELS: Worded[GuardState, str] = Worded(
-    {
-        GuardState.CONTROLLED: "controlled",
-        GuardState.UNCONTROLLED: "not controlled",
-        GuardState.DIFFERS: "differs",
-    }
-)
-assert GUARD_STATE_LABELS.keys() == set(GuardState)
 
 
 class GuardDifference(StrEnum):
@@ -257,7 +256,7 @@ def pair_guard(
         if controlled
         else GuardState.UNCONTROLLED
     )
-    sentence = GUARD_STATE_INFO[state]
+    sentence = GUARD_STATE_INFO[state].sentence
     if differs_on:
         sentence += f" Differs on: {', '.join(d.value for d in differs_on)}."
     if left := sorted({act.value for m in members for act in m.left_comparison}):

@@ -7,7 +7,14 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.llm_call import InjectionBreakdown
-from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler, Target
+from promptpotter.application.bench.node_context import (
+    Bounds,
+    Calls,
+    Frontier,
+    Lineage,
+    Ruler,
+    Target,
+)
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
@@ -30,10 +37,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     L1_LAYOUT_SLOTS,
     NODE_LAYOUTS,
 )
-from promptpotter.application.optimizers.potter.dispatch.prompts import (
-    load_optimizer_prompt,
-    node_layout,
-)
+from promptpotter.application.optimizers.potter.dispatch.prompts import node_layout
 from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
 from promptpotter.application.optimizers.potter.knobs import (
     EscalationKnobs,
@@ -115,7 +119,7 @@ def _cap_runaway(name: str, items: list[Item], cap: int) -> list[Item]:
 class FilledPrompt(NamedTuple):
     """``rendered`` is what the node was SHOWN, after selection, so the ledger's breakdown and the prompt agree."""
 
-    template: OptimizerPromptTemplate
+    fields: dict[str, str]
     injection_vars: dict[str, str]
     rendered: dict[str, str]
     coverage: dict[str, PanelCoverage]
@@ -199,13 +203,11 @@ class DispatchHub:
                 update[slot] = (static + "\n\n" + joined) if static else joined
             else:
                 update[slot] = static
-        filled = template.model_copy(update=update)
-
-        remaining = filled.slots()
+        remaining = template.model_copy(update=update).slots()
         injection_vars = {
             name: DispatchHub.render(name, bundle) for name in remaining if name in table
         }
-        return FilledPrompt(filled, injection_vars, rendered, coverage)
+        return FilledPrompt(update, injection_vars, rendered, coverage)
 
 
 def _no_round_warnings() -> contextlib.AbstractContextManager[RunScope]:
@@ -227,9 +229,13 @@ def node_packages(ctx: NodeContext, bundle: InjectionBundle) -> dict[str, str]:
     out: dict[str, str] = {}
     with _no_round_warnings():
         for node in NODE_LAYOUTS:
-            filled = DispatchHub.fill(load_optimizer_prompt(ctx, node), bundle, node=node)
+            template = ctx.read(Calls).prompt(node)
+            filled = DispatchHub.fill(template, bundle, node=node)
             out[node] = stable_hash(
-                [filled.template.render(), sorted(filled.injection_vars.items())]
+                [
+                    template.model_copy(update=filled.fields).render(),
+                    sorted(filled.injection_vars.items()),
+                ]
             )
     return out
 

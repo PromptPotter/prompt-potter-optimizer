@@ -8,18 +8,22 @@ import inspect
 import pkgutil
 from collections.abc import Mapping
 from types import MappingProxyType, ModuleType
-from typing import Annotated
+from typing import Annotated, Any, ClassVar
 
+from promptpotter.application.optimizers.nodes import LlmNode
 from promptpotter.application.optimizers.potter.dispatch import injections as _injections_pkg
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     _Injection,
     injection_registry,
 )
-from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
+from promptpotter.application.optimizers.potter.dispatch.layout import (
+    NODE_LAYOUTS,
+    layout_levers,
+    resolve_layout_override,
+)
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-from promptpotter.shared.errors import FileKind, PotterError, unknown_slots_said
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 # The one citable name that is NOT a panel: the escape hatch a measured stall licenses.
@@ -73,17 +77,24 @@ def injection_table() -> Mapping[str, _Injection]:
     return MappingProxyType(table)
 
 
-@shapes_optimizer_prompt
-def validate_template(name: str, template: OptimizerPromptTemplate) -> None:
-    """A typo'd ``{{slot}}`` is otherwise a silent empty render."""
-    spec = NODE_LAYOUTS.get(name)
-    extras = spec.caller_extras if spec is not None else frozenset()
-    if unknown := template.unknown_slots(injection_table().keys() | extras):
-        raise PotterError(
-            f"{unknown_slots_said(name, unknown)}. Register a renderer (dispatch/injections/) or "
-            f"add it to NODE_LAYOUTS[{name!r}].caller_extras if the slot is a caller-supplied "
-            "extra.",
-            code=FileKind.OPTIMIZER_PROMPT.code,
+class LayoutNode(LlmNode):
+    name: ClassVar[str]
+    outer_levers: ClassVar[Mapping[str, str]] = {"layout": "object"}
+
+    def resolved_levers(self, declared: Mapping[str, Any]) -> dict[str, Any]:
+        return layout_levers(self.name, declared)
+
+    def lever_refusals(self, declared: Mapping[str, Any]) -> list[str]:
+        _, breaches = resolve_layout_override(self.name, declared.get("layout"))
+        return (
+            [f"its layout edit breaks {sorted(o.validator_id for o in breaches)}"]
+            if breaches
+            else []
+        )
+
+    def unknown_slots(self, template: OptimizerPromptTemplate) -> set[str]:
+        return template.unknown_slots(
+            injection_table().keys() | NODE_LAYOUTS[self.name].caller_extras
         )
 
 

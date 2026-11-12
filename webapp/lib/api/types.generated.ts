@@ -5392,6 +5392,11 @@ export interface SignInRefusalInfo {
   tone: Tone;
 }
 
+export interface GuardStateInfo {
+  label: string;
+  sentence: string;
+}
+
 export interface ActivityWindowInfo {
   label: string;
   seconds: number;
@@ -5576,17 +5581,10 @@ export const GUARD_DIFFERENCE_INFO: Record<GuardDifference, string> = {
 };
 
 // Mirror of application/evidence/head_to_head.py::GUARD_STATE_INFO, in display order.
-export const GUARD_STATE_INFO: Record<GuardState, string> = {
-  "controlled": "One quantity, as declared: every campaign is an arm of one head-to-head, on its bank, split, held-out rows, scorer, target model, origin and budget, with one optimizer model set and no operator's steer.",
-  "uncontrolled": "One quantity, undeclared: nothing read here differs, and a campaign that is no arm of a head-to-head, or an arm a launch act ran off it, could read other campaigns' measurements, take an operator's steer or re-run its own rounds.",
-  "differs": "Not one quantity: what graded or bounded these headlines differs, so a gap between two is not the optimizer's alone.",
-};
-
-// Mirror of application/evidence/head_to_head.py::GUARD_STATE_LABELS, in display order.
-export const GUARD_STATE_LABELS: Record<GuardState, string> = {
-  "controlled": "controlled",
-  "uncontrolled": "not controlled",
-  "differs": "differs",
+export const GUARD_STATE_INFO: Record<GuardState, GuardStateInfo> = {
+  "controlled": { label: "controlled", sentence: "One quantity, as declared: every campaign is an arm of one head-to-head, on its bank, split, held-out rows, scorer, target model, origin and budget, with one optimizer model set and no operator's steer." },
+  "uncontrolled": { label: "not controlled", sentence: "One quantity, undeclared: nothing read here differs, and a campaign that is no arm of a head-to-head, or an arm a launch act ran off it, could read other campaigns' measurements, take an operator's steer or re-run its own rounds." },
+  "differs": { label: "differs", sentence: "Not one quantity: what graded or bounded these headlines differs, so a gap between two is not the optimizer's alone." },
 };
 
 // Mirror of application/evidence/head_to_head.py::VERDICT_ABSENT_INFO, in display order.
@@ -6096,7 +6094,6 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [SETUP_STEP_TITLES, ["optimizer", "data", "scoring", "pipeline", "head_to_head", "run"]],
   [GUARD_DIFFERENCE_INFO, ["instrument_id", "dataset_hash", "split", "bench_rows", "scorer_id", "models", "origin", "budget", "defaults", "optimizer_models", "human_intervened", "origin_reading"]],
   [GUARD_STATE_INFO, ["controlled", "uncontrolled", "differs"]],
-  [GUARD_STATE_LABELS, ["controlled", "uncontrolled", "differs"]],
   [VERDICT_ABSENT_INFO, ["under_two_cells", "pending"]],
   [SUBJECT_KIND_LABELS, ["campaign", "course", "candidate"]],
   [ACTIVITY_WINDOW_INFO, ["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"]],

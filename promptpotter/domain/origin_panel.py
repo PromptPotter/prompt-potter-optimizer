@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from enum import StrEnum
-from typing import Annotated, NamedTuple
+from typing import NamedTuple, assert_never
 
 from pydantic import Field
 
 from promptpotter.domain.paired_reading import (
-    READING_STATE_KIND,
     ArmName,
     MeasurandUnit,
     PairedReading,
@@ -27,6 +26,9 @@ class StallEffect(StrEnum):
     SKIPS = "skips"
 
 
+# Marked: `stall` is the ONE pacing rule L1 patience, `rounds_without_advance` and the life bank
+# read; the words (`ROUND_ADVANCE_INFO`) reach a closure only where a prompt prints one.
+@shapes_optimizer_prompt
 class RoundAdvance(StrEnum):
     """Whether a closed round ADVANCED the best-so-far line."""
 
@@ -37,23 +39,27 @@ class RoundAdvance(StrEnum):
     HELD = "held"
     UNREAD = "unread"
 
+    @property
+    def stall(self) -> StallEffect:
+        match self:
+            case RoundAdvance.ORIGIN:
+                return StallEffect.STARTS
+            case (
+                RoundAdvance.ADVANCED | RoundAdvance.ADVANCED_UNPAIRED | RoundAdvance.NOT_SEPARATED
+            ):
+                return StallEffect.RESETS
+            case RoundAdvance.HELD:
+                return StallEffect.COUNTS
+            case RoundAdvance.UNREAD:
+                return StallEffect.SKIPS
+            case _:
+                assert_never(self)
+
 
 class RoundAdvanceInfo(NamedTuple):
     label: str
     sentence: str
 
-
-# The ONE pacing table: L1 patience, `rounds_without_advance` and the life bank read it. Marked; the
-# words beside it are not, and reach a closure only where a prompt prints one.
-ROUND_ADVANCE_STALL: Annotated[dict[RoundAdvance, StallEffect], shapes_optimizer_prompt] = {
-    RoundAdvance.ORIGIN: StallEffect.STARTS,
-    RoundAdvance.ADVANCED: StallEffect.RESETS,
-    RoundAdvance.ADVANCED_UNPAIRED: StallEffect.RESETS,
-    RoundAdvance.NOT_SEPARATED: StallEffect.RESETS,
-    RoundAdvance.HELD: StallEffect.COUNTS,
-    RoundAdvance.UNREAD: StallEffect.SKIPS,
-}
-assert ROUND_ADVANCE_STALL.keys() == set(RoundAdvance)
 
 ROUND_ADVANCE_INFO: Worded[RoundAdvance, RoundAdvanceInfo] = Worded(
     {
@@ -94,7 +100,7 @@ def round_advance(
         return RoundAdvance.ORIGIN
     if not improved:
         return RoundAdvance.HELD
-    match READING_STATE_KIND[lead.state]:
+    match lead.state.kind:
         case ReadingStateKind.UNPAIRED:
             return RoundAdvance.ADVANCED_UNPAIRED
         case ReadingStateKind.WAITING | ReadingStateKind.ABSENT | ReadingStateKind.REFUSED:
