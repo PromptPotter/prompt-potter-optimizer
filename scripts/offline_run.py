@@ -15,6 +15,7 @@ import contextlib
 import dataclasses
 import hashlib
 import inspect
+import itertools
 import json
 import os
 import random
@@ -31,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
+import httpx
 import yaml
 from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen, imported
 from offline_world import (
@@ -41,10 +43,13 @@ from offline_world import (
     WORLD,
     FakeBackend,
     FakeLLM,
+    Heal,
     Router,
+    Said,
     completion,
     draw,
     install_network,
+    invalid,
 )
 from processes import (
     REPO,
@@ -120,12 +125,13 @@ from promptpotter.infrastructure.store.archive_queries import (
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
-from promptpotter.infrastructure.store.layout import dataset_id_prefix
+from promptpotter.infrastructure.store.layout import dataset_id_prefix, inner_sandboxes_dir
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
-from promptpotter.shared.run_scope import scoped
+from promptpotter.shared.measurement_context import instrument_depth
+from promptpotter.shared.run_scope import run_scope, scoped
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
@@ -156,6 +162,20 @@ SCRIPTED_L2 = {"l1_patience": 2}
 # alike, and θ reads `prior_pinned`; 3 and 4 hold a level, 0 and 2 leave the ruler too flat.
 REBASE_HARDNESS = 3
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
+# Potter's straight campaign with invalid answers scripted by call, each on the rung that heals it:
+# a re-ask, a repair, a salvaged refusal, a repair salvaged, a repair failing into a re-ask.
+L4 = "l4"
+# The browser walk's L4 fixture: an outer potter campaign whose every cell runs an inner potter
+# campaign on `DATASET`, in this world.
+L4_DATASET = "promptpotter-self/e2e"
+HEALED = "healed"
+HEALS: dict[str, tuple[Heal, ...]] = {
+    "L1CritiqueOutput_0": (Heal.EMPTY,),
+    "L1GenerateOutput_0": (Heal.NONCOMPLIANT,),
+    "L1GenerateOutput_1": (Heal.REFUSED,),
+    "L1CritiqueOutput_1": (Heal.NONCOMPLIANT, Heal.REFUSED),
+    "L2ContextOutput_0": (Heal.NONCOMPLIANT, Heal.NONCOMPLIANT),
+}
 
 
 def data_root(leg: Path) -> Path:
@@ -214,7 +234,7 @@ def _marks(text: str) -> list[int]:
     return list(dict.fromkeys(int(m) for m in _ROW_MARK.findall(text)))
 
 
-_AXIS_MENU = re.compile(r"EXACTLY one of: (.+)")
+_AXIS_MENU = re.compile(r"(?:EXACTLY one of|VERBATIM from): (.+)")
 # A cited panel, by the heading it opens on: the framing where the leg's config renders one.
 FRAMING = ("task_context", "TASK CONTEXT:\n")
 TALLY = ("answer_distribution", "ANSWER DISTRIBUTION (")
@@ -225,8 +245,9 @@ def cited_panel(config: CampaignConfig) -> tuple[str, str]:
 
 
 def _axis_menu(prompt: str) -> list[str]:
-    menu = _AXIS_MENU.search(prompt)
-    assert menu is not None, "offline run: the critique prompt names no axis list"
+    """Empty where an L4 arm rewrote the instruction stating it away."""
+    if (menu := _AXIS_MENU.search(prompt)) is None:
+        return []
     return menu.group(1).split(". ", 1)[0].removesuffix(".").split(", ")
 
 
@@ -307,6 +328,19 @@ def _recombine(obj: dict[str, Any], props: dict[str, Any], filler: SchemaFiller,
     obj["recombinations"] = children
 
 
+def _asker() -> str:
+    """Empty for the run's own call; an L4 cell's inner campaign by its seat's seed and the arm
+    laid into its overlay, never by its id, which hashes the code."""
+    if not instrument_depth():
+        return ""
+    scope = run_scope()
+    assert scope.optimizer is not None and scope.determinism is not None, "an inner run binds both"
+    held = json.dumps(
+        [scope.determinism.seed, scope.optimizer.overlay], sort_keys=True, default=str
+    )
+    return hashlib.sha256(held.encode()).hexdigest()[:8]
+
+
 class ByCallIdentity:
     """The offline run's `FakeLLM` policy: an answer follows the CALL's identity, never the
     prompt's wording nor the arrival order. *rebasing*, every L2 fire proposes a fork. *crossing*,
@@ -328,7 +362,12 @@ class ByCallIdentity:
         self.crossing = crossing
         self.prefixes = {node: template.split("{{")[0] for node, template in templates.items()}
         self.calls: dict[str, int] = {}
-        self.turns: dict[tuple[str, int | None], int] = {}
+        self.turns: dict[tuple[str, str, int | None], int] = {}
+        # Scripted invalid answers by call (`node_call`), one per send before the call heals.
+        self.heals: dict[str, tuple[Heal, ...]] = {}
+        self.sends: Counter[str] = Counter()
+        # A structured node's call a heal left open, by asker: its next send retries it.
+        self.healing: dict[tuple[str, str], tuple[str, int]] = {}
 
     def _text_node(self, prompt: str) -> str:
         opened = [node for node, prefix in self.prefixes.items() if prompt.startswith(prefix)]
@@ -336,17 +375,23 @@ class ByCallIdentity:
             raise KeyError(f"offline run: no llm node's template opens {prompt[:80]!r}")
         return max(opened, key=lambda node: len(self.prefixes[node]))
 
-    def __call__(self, body: dict[str, Any]) -> dict[str, Any]:
-        prompt = "\n".join(str(m["content"]) for m in body["messages"])
+    def __call__(self, body: dict[str, Any]) -> Said:
+        # A retry re-sends the call's own turns, then the failed answer and the ask to mend it.
+        asked = itertools.takewhile(lambda m: m["role"] != "assistant", body["messages"])
+        prompt = "\n".join(str(m["content"]) for m in asked)
         schema = body.get("response_format", {}).get("json_schema")
         node = schema["name"] if schema else self._text_node(prompt)
         self.calls[node] = self.calls.get(node, 0) + 1
-        # Concurrent text sends of one node land in any order; their seeds tell them apart. A
-        # structured node sends one at a time, so its turn is the node's count whatever its seed.
-        seed: int | None = None if schema else body.get("seed")
-        turn = self.turns.get((node, seed), 0)
-        self.turns[node, seed] = turn + 1
-        call = str(turn) if seed is None else f"{seed}.{turn}"
+        asker = _asker()
+        if (asker, node) in self.healing:
+            call, turn = self.healing.pop((asker, node))
+        else:
+            # Concurrent text sends of one node land in any order; their seeds tell them apart. A
+            # structured node sends one at a time per asker, so its turn is the asker's count of it.
+            seed: int | None = None if schema else body.get("seed")
+            turn = self.turns.get((asker, node, seed), 0)
+            self.turns[asker, node, seed] = turn + 1
+            call = ".".join(str(p) for p in (asker, seed, turn) if p not in ("", None))
         if schema:
             filler = SchemaFiller(schema["schema"], node=node, call=call)
             obj = filler.fill(schema["schema"], ())
@@ -355,13 +400,33 @@ class ByCallIdentity:
             )
         else:
             content = self._text(node, call, prompt)
-        (self.capture / f"{node}_{call}.json").write_text(
+        key = f"{node}_{call}"
+        attempt = self.sends[key]
+        self.sends[key] += 1
+        script = self.heals.get(key, ())
+        said: Said = completion(content, model=body["model"], id=f"offline-{node}-{call}")
+        shown: Any = content
+        if attempt < len(script):
+            said = invalid(script[attempt], content, model=body["model"])
+            shown = said.json() if isinstance(said, httpx.Response) else said
+            if script[attempt] is not Heal.REFUSED:
+                self.healing[asker, node] = (call, turn)
+        (self.capture / f"{key}{f'~{attempt}' if attempt else ''}.json").write_text(
             json.dumps(
-                {"request": body, "response": content}, indent=1, sort_keys=True, ensure_ascii=False
+                {"request": body, "response": shown}, indent=1, sort_keys=True, ensure_ascii=False
             ),
             encoding="utf-8",
         )
-        return completion(content, model=body["model"], id=f"offline-{node}-{call}")
+        return said
+
+    def unhealed(self) -> list[str]:
+        """Each scripted call not sent once per invalid answer plus the send that healed it; a
+        refusal heals on its own send."""
+        return [
+            key
+            for key, script in self.heals.items()
+            if self.sends[key] != len(script) + (script[-1] is not Heal.REFUSED)
+        ]
 
     def _text(self, node: str, call: str, prompt: str) -> str:
         rng = random.Random(f"{node}:{call}")
@@ -414,7 +479,9 @@ class ByCallIdentity:
             ]
             # Read off the prompt's axis list, as a model naming its axis verbatim would.
             axes = _axis_menu(prompt)
-            lead = next((a for a in axes if a.endswith(".instruction")), axes[0])
+            # Listing none, a model names the axis it guesses, which the parse drops.
+            guess = axes[0] if axes else "instruction"
+            lead = next((a for a in axes if a.endswith(".instruction")), guess)
             obj["priority_fix"] = f"{lead}: track every negation explicitly (critique {call})"
             obj["suggested_axes"] = axes[:2]
         elif node.startswith("L2Context"):
@@ -449,19 +516,27 @@ class ByCallIdentity:
         start = prompt.index(heading) + len(heading) + draw("cite", generation, i) % 20
         v["evidence_grounding"] = {"field": field, "citation": prompt[start : start + 40]}
         # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
-        offered = item["properties"]["prompt_fields_updates"]["properties"]
+        # An L4 outer edits the inner optimizer's fields as its pipeline params; there a short
+        # instruction guts its contracts (`l1_strict.py::l1_prompt_field_not_gutted`).
+        props = item["properties"]
+        slot, edited = (
+            ("prompt_fields_updates", "instruction")
+            if "prompt_fields_updates" in props
+            else ("pipeline_overlay", "thinking_style")
+        )
+        offered = props[slot]["properties"]
         second = ("thinking_style",) if self.crossing else ()
-        v["prompt_fields_updates"] = {
+        v[slot] = {
             node: {
                 field: _variant(
                     f"g{generation}v{i}{node}{tag}",
                     random.Random(f"l1:{generation}:{i}:{node}{tag and f':{tag}'}"),
                 )
-                for field, tag in (("instruction", ""), *((f, f) for f in second))
+                for field, tag in ((edited, ""), *((f, f) for f in second))
                 if field in fields["properties"]
             }
             for node, fields in offered.items()
-            if "instruction" in fields["properties"]
+            if edited in fields["properties"]
         }
         # As a model would: one cluster line of the CRITIQUE panel, else the first rows any panel marks.
         clusters = [
@@ -677,6 +752,7 @@ async def run_one(
     bench_trigger: BenchTrigger = "at_end",
     diverge: bool = False,
     crossover: str | None = None,
+    heal: bool = False,
 ) -> tuple[Path, str]:
     """The archive is the workspace's, never *out*'s: campaigns in one process share it.
     *pause_after* pauses at that round's boundary; *pause_in_walk* at the first cell that round
@@ -689,6 +765,8 @@ async def run_one(
     harness = Harness.installed(
         out, config, text_templates(config), samples, crossing=crossover is not None
     )
+    if heal:
+        harness.llm.heals = HEALS
 
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
@@ -724,6 +802,8 @@ async def run_one(
     cycle = await banked(
         stores, session, result, harness, out, name=optimizer, bench_trigger=bench_trigger
     )
+    if unhealed := harness.llm.unhealed():
+        raise SystemExit(f"offline run: the scripted calls {unhealed} did not heal as scripted")
     return cycle, session.campaign_id
 
 
@@ -790,6 +870,10 @@ async def banked(
         call = CommandCall(GradeBenchPayload(campaign_id=session.hop.campaign_id))
         bench = (await host_dispatcher(stores).answer(grade_bench, call)).result
     decisions = extract(cycle, bench)
+    # An L4 outer's inner campaigns, as a set: cells measured at once land in any order.
+    nested = inner_sandboxes_dir(default_projects_root()).glob("*/*/campaigns/*/cycles/*")
+    if inner := sorted(json.dumps(extract(c, None), sort_keys=True) for c in nested):
+        decisions["inner"] = [json.loads(one) for one in inner]
     decisions["harness"] = {
         "stop_reason": str(result.stop_reason),
         "unrouted": sorted(harness.router.unrouted),
@@ -987,6 +1071,30 @@ async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
             f"cells once each; the fixed origin sent its {len(lost)} lost cells once "
             f"({len(resent)} origin sends) and ran on to {result.stop_reason}"
         )
+
+
+async def run_l4(workspace: Path, *, rows: int) -> None:
+    """The fixture's knobs, its spend cap lifted and its draws seeded: the inner runs execute the
+    optimizer code a change touches, and the outer trace reads what they measured."""
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
+    samples = synthetic_rows(rows)
+    stand_in_fetch(stores, samples)
+    raw = dict(dataset_campaign_block(resolve_dataset(stores, L4_DATASET)))
+    # One seat holds out no row, so no bench is ever asked for.
+    raw.update(bench_trigger="at_end")
+    opt = raw["optimization"]
+    opt.update(budget={**opt["budget"], "usd": 1000.0}, determinism={"seed": 0})
+    config = CampaignConfig.model_validate(raw)
+    harness = Harness.installed(workspace, config, text_templates(config), samples, crossing=False)
+    session, result = await run_campaign(
+        L4_DATASET, config, stores=stores, readout_sink=print, budget=Budget(), mode=RunMode()
+    )
+    await banked(stores, session, result, harness, workspace, name=L4, bench_trigger="at_end")
+    askers = {asker for asker, _, _ in harness.llm.turns if asker}
+    print(
+        f"{L4} outer {result.stop_reason}: {len(askers)} inner campaigns asked, "
+        f"{harness.backend.cells} inner cells measured"
+    )
 
 
 def run_terminal(
@@ -1204,7 +1312,9 @@ _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 _EMBEDDED_HEX32 = re.compile(r"[0-9a-f]{32}")
 _SHORT_HEX = re.compile(r"\b[0-9a-f]{6,12}\b")
 _CYCLE_ID = re.compile(r"cycle_[0-9a-f]{8,}")
-_CAMPAIGN_ID = re.compile(re.escape(dataset_id_prefix(DATASET)) + r"__[0-9a-f]{6}")
+_CAMPAIGN_ID = re.compile(
+    f"(?:{'|'.join(re.escape(dataset_id_prefix(d)) for d in (DATASET, L4_DATASET))})__[0-9a-f]{{6}}"
+)
 _SESSION_ID = re.compile(r"\bs_[0-9a-f]{8}\b")
 _WIN_PATH = re.compile(r"(?:\\\\\?\\)?[A-Za-z]:[\\/][^\s'\"<>|]*")
 
@@ -1651,15 +1761,52 @@ def crossed_legs(
     return all(hosted.values()) and same
 
 
-def moved_against(workspace: Path, earlier: Path) -> str:
-    if not (earlier / TRACE).is_file():
-        return f"no trace in {earlier}"
-    moved = BehaviourTrace.read(workspace).moved(BehaviourTrace.read(earlier))
-    return f"MOVED {', '.join(moved)}" if moved else "UNMOVED"
+def less_heals(workspace: Path) -> dict[str, Any]:
+    """Less what a heal adds to a call: its sends, and the failed attempts the call records."""
+    doc = BehaviourTrace.read(workspace).decisions
+    calls = sorted(
+        ({**c, "repairs": 0} for c in doc["ledger"]["optimizer_calls"]),
+        key=lambda c: json.dumps(c, sort_keys=True),
+    )
+    harness = {k: v for k, v in doc["harness"].items() if k != "llm_calls"}
+    return {**doc, "ledger": {**doc["ledger"], "optimizer_calls": calls}, "harness": harness}
+
+
+def healed_leg(potter: Path, leg: Future[int]) -> bool:
+    """Prints the healed leg's reading; True where it decided what potter's straight run did."""
+    healed = potter / HEALED
+    if rc := leg.result():
+        print(f"potter: scripted heals FAILED (exit {rc}) -- {healed / 'run.log'}")
+        return False
+    calls = BehaviourTrace.read(healed).decisions["ledger"]["optimizer_calls"]
+    moved = _moved(less_heals(healed), less_heals(potter), "decisions", 2)
+    print(
+        f"potter: {len(HEALS)} calls answered invalid healed, {sum(c['repairs'] for c in calls)} "
+        f"failed attempts recorded; decisions {'MOVED ' + ', '.join(moved) if moved else 'UNMOVED'}"
+    )
+    return not moved
+
+
+def moved_against(home: Path, earlier: Path, names: Sequence[str]) -> list[str]:
+    """Per trace every leg of *names* wrote, which of its fields moved against *earlier*'s home;
+    a leg the earlier run lacks has no base."""
+    said = []
+    for name in names:
+        legs = [home / name / TRACE, *(home / name).glob(f"*/{TRACE}")]
+        for trace in sorted(t for t in legs if t.is_file()):
+            leg = trace.parent.relative_to(home).as_posix()
+            if not (then := earlier / leg / TRACE).is_file():
+                said.append(f"{leg}: against {earlier}: no base")
+                continue
+            moved = BehaviourTrace.read(trace.parent).moved(BehaviourTrace.read(then.parent))
+            said.append(
+                f"{leg}: against {earlier}: {'MOVED ' + ', '.join(moved) if moved else 'UNMOVED'}"
+            )
+    return said
 
 
 def read_straight_and_resumed(
-    name: str, workspace: Path, resumed: Future[int] | None, pause_after: int, against: Path | None
+    name: str, workspace: Path, resumed: Future[int] | None, pause_after: int
 ) -> int:
     ran = BehaviourTrace.read(workspace).decisions["run"]
     (cycle,) = (data_root(workspace) / PROJECTS_DIR).glob("*/campaigns/*/cycles/*")
@@ -1674,8 +1821,6 @@ def read_straight_and_resumed(
         else f"none ({bench['vs_origin']['state']})"
     )
     print(f"{name}: {ran['stop_reason']}, bench lift {headline} -- {cycle}")
-    if against is not None:
-        print(f"{name}: against {against}: {moved_against(workspace, against / name)}")
     if resumed is None:
         return failed
     if rc := resumed.result():
@@ -1797,6 +1942,8 @@ def run_child_leg(args: argparse.Namespace) -> None:
         asyncio.run(run_rebasing(workspace, rounds=args.rounds, rows=args.rows))
     elif args.gated:
         asyncio.run(run_gated(args.child, workspace, rows=args.rows))
+    elif args.l4:
+        asyncio.run(run_l4(workspace, rows=args.rows))
     else:
         one = run_one(
             args.child,
@@ -1808,6 +1955,7 @@ def run_child_leg(args: argparse.Namespace) -> None:
             bench_trigger=args.bench_trigger,
             diverge=args.diverge,
             crossover=args.crossover,
+            heal=args.heal,
         )
         print(asyncio.run(one)[0])
     proven_home(workspace)
@@ -1862,6 +2010,8 @@ def main() -> int:
     ap.add_argument("--rebase", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--gated", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--crossover", choices=CROSSED_HOSTS, help=argparse.SUPPRESS)
+    ap.add_argument("--heal", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--l4", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--terminal", choices=("new", "resume"), help=argparse.SUPPRESS)
     ap.add_argument("--interrupts", type=int, default=0, help=argparse.SUPPRESS)
     args = ap.parse_args()
@@ -1912,7 +2062,7 @@ def main() -> int:
     pause_after = min(1, args.rounds - 1)
     # Potter's own legs need rounds past the one they pause at.
     potter_legs = legs and "potter" in due and pause_after > 0
-    tasks = 2 * len(due) + (len(INTERRUPTED) + 2) * firsts + 4 * potter_legs if legs else len(due)
+    tasks = 2 * len(due) + (len(INTERRUPTED) + 2) * firsts + 6 * potter_legs if legs else len(due)
     pool = ThreadPoolExecutor(RamBudget.read().offline_run_children(tasks))
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
@@ -1952,6 +2102,10 @@ def main() -> int:
     gating = spawn(first, home / first / GATED, "--gated") if firsts else None
     # Only potter's L2 proposes a fork.
     rebasing = spawn("potter", home / "potter" / REBASED, "--rebase") if potter_legs else None
+    # Only potter's nodes answer structured, so only its calls climb the client's repair ladder.
+    healing = spawn("potter", home / "potter" / HEALED, "--heal") if potter_legs else None
+    # The L4 fixture's outer and inner optimizer are potter's.
+    nesting = spawn("potter", home / "potter" / L4, "--l4") if potter_legs else None
     # Its pool is read off the closed rounds, so a resume must hand it the pool a straight run had.
     l1_host, l2_host = (f"--crossover={host}" for host in CROSSED_HOSTS)
     crossing = (
@@ -1985,7 +2139,7 @@ def main() -> int:
             continue
         if not args.controlled:
             failed[name] += read_straight_and_resumed(
-                name, workspace, resumed[name] if legs else None, pause_after, args.against
+                name, workspace, resumed[name] if legs else None, pause_after
             )
     for count, leg in stopped.items():
         ok, said = leg.result()
@@ -2003,6 +2157,11 @@ def main() -> int:
     said_leg(failed, "potter", home / "potter" / REBASED, rebasing, "a line forking at every L2")
     if crossing is not None:
         failed["potter"] += not crossed_legs(home / "potter", crossing, pause_after)
+    if healing is not None:
+        failed["potter"] += not healed_leg(home / "potter", healing)
+    said_leg(failed, "potter", home / "potter" / L4, nesting, "an L4 campaign over inner runs")
+    if args.against is not None:
+        print("\n".join(moved_against(home, args.against, due)))
     if args.controlled and not any(failed.values()):
         print(controlled_reading(home, arm_names))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
