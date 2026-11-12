@@ -17,14 +17,14 @@ potter's loop — another optimizer is its own manifest and inherits none of it.
 | **L2 · refine context** | when L1 stalls | Rewrites *how* L1 searches: which evidence it sees and how hard it explores. |
 | **L3 · modify plan** | when L2 stalls | Rewrites the strategic plan L1 works within. |
 
-The loop exits on a **stopping rule** — `halt_at_fitness`, a budget axis spent, or the controller's own
-exhaustion — not on a fixed trial count. Potter's two efficiency mechanisms ride the measurement seam every
+The loop exits on a **stopping rule** — `halt_at_fitness`, a budget axis spent, lives exhausted, the
+controller's own exhaustion, or a fault; the set is `domain/phases.py::StopReason` — not on a fixed trial count. Potter's two efficiency mechanisms ride the measurement seam every
 optimizer rides: candidate budget allocation ([`../methods/candidate-elimination.md`](../methods/candidate-elimination.md))
 and hard-sample ordering ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The round order).
 
 The critique is the only step that reads raw per-sample results; **`l1_critique → l1_generate` is
 performance-driven feedback, not failure-driven healing** (after [PromptWizard](https://arxiv.org/abs/2405.18369)).
-**It searches a tree, not a trail**: a spent branch rewinds to the ancestor a UCB rule picks —
+**It searches a tree, not a trail**: a spent branch rewinds to the round the L2/L3 layer's `fork_proposal` names (`stand_on`), else the one a UCB rule picks (`application/bench/node_context.py::Lineage.branch_round`) —
 [`../research/landscape.md`](../research/landscape.md) § Comparison to MCTS.
 
 ## Escalation

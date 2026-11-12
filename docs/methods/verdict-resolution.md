@@ -6,7 +6,7 @@ blind to every outcome:
 
 | | Question | Function | When |
 |---|---|---|---|
-| **Round draw** | Which samples does the round score? | `AdaptiveQueue.draw`: a seeded uniform draw, stratum-covered | **Between** rounds — reads no outcome and no ability (§ The between-round draw) |
+| **Round draw** | Which samples does the round score? | `AdaptiveQueue.draw`: a seeded uniform draw, stratum-covered | **Between** rounds — ranks on no outcome and no ability; only the parent's crowning cells leave the pool (§ The between-round draw) |
 | **Acquisition score** | Which sample is hardest to call? | `pick_value = decision_information_gain + delta_learning_gain` | the persisted hard-samples ranking alone |
 | **Round order** | In what order do we score the round's samples? | `build_round_order` | **Within** a round — one deterministic order, shared by every candidate |
 
@@ -57,7 +57,8 @@ underdispersion (measured `φ = 0.10`, θ_se 0.28 where the information gives 0.
 2PL is the field default, so 1PL is what needs defending —
 [`../research/external-constraints.md`](../research/external-constraints.md) § The preprint carries the
 benchmarks. 2PL adds per-sample discrimination `aₛ`; it graduates per dataset, behind the same θ
-interface, only when it beats 1PL out-of-sample (with hysteresis), so a thin dataset never regresses.
+interface, only when it clears a BIC gate and beats 1PL on held-out CV log-likelihood by a margin
+(`intelligence/rasch.py::graduate_ruler_model`), so a thin dataset never regresses.
 
 ---
 
@@ -221,8 +222,9 @@ bench would read: a draw ranked on θ or on the origin's headroom buys the paren
 lift is a lift on that slice (measured: a θ-elected winner trailed its parent on the bench while the
 iid panel's best arm went unchosen). The draw takes the search split less the parent's crowning cells
 and, once the ruler is warm, shuffles each stratum on the round's seed (a resume redraws the same
-cells). `elimination_n_min` ruler cells lead the shuffle — the cells a warm θ is read on, which PoBB's
-gates and the coverage floor count — and one cell per `source_pin` level is fronted. Where the parent
+cells). In each stratum `elimination_n_min` ruler cells lead the shuffle — the cells a warm θ is read
+on, which PoBB's gates and the coverage floor count — and `adaptive_queue_mechanism.py::covered_prefix`
+fronts one cell per `source_pin` level some but not all cells share. Where the parent
 misses is the round ORDER's business, never the draw's.
 
 **Warm-gated.** `per_round_resubset` (default `True`): while δ is cold the subset stays the
