@@ -53,44 +53,85 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   estimator's golden corpus is held.
 - **landed 33:** rk-opt 1–3: a call carries its template, the word tables on the enums, capo's absent
   arm out of the ranking; the offline harness drops a re-keyed digest.
-- **landing 34:** the holds nest 1: `Hold` / `Bill` / `Release` / `Lapse` on the account book, a
+- **landed 34:** the holds nest 1: `Hold` / `Bill` / `Release` / `Lapse` on the account book, a
   worst-case hold at every level, every root hold a job's (a paid call outside a run a slotless
   `PaidCall` job), one write per call hold, one sibling rule at the gate.
-- **holds nest 2** (backbone; operator, 2026-11-12). One hold at every depth: a `Hold` with a bound and a parent hold, for the run, a cell and a call alike.
-  - The open part is the bound less what its children hold or billed, read by the one money fold.
-  - `CellReservation` and quota's separate run reserve go.
-  - A hold holds its worst case at every level, so a budget is never exceeded; overshoot (holds sized
-    at the learned expected cost, a bill past its hold drawn from the level above and reported) is a
-    run-limits switch, off by default (operator, 2026-11-12).
-- **rk-opt 5**, with tune 2 and the registry fold, beside the holds nest: `ab` re-fits under the
-  current scorer, regrading the other campaigns' rows off the archive.
-- **tests:** first, every committed dataset's framing is read by the suite; then the test-shape
-  charter, one function per independent fact, a guard tested once over its doors. It runs alone, since
-  it owns `tests/`.
-- **det**, beside tests: `capo/diverged` decides the same way run to run, and the offline world reaches
-  the wound.
-- **holders**, beside **passes**: one holder identity and one `holder_of` fold for slots, claims,
-  cycles and money (admit-2's and passb-2's hold rows close); one declared `Pass` row per pass kind
-  above the one walk, so verify and the noise floor send in parallel.
-- **cfg**, beside payer: the merge rule declared per key by the node document's schema, one fold with
-  a provenance stamp per key; a model per inner node rides it (one L4 re-key). payer reads the
-  free-tier pair.
+- **landed 35:** rk-opt 4–6: potter asks through one `Calls` door, Wave C flattened, the bench owns
+  the catch-up pool.
+- **landed 36:** the holds nest 2: the spend book a projection of the fold (`CellReservation` and
+  quota's separate run reserve gone), a lapse drawing on every ancestor at once, `Hold.resource`.
+- **landed 37:** det: `capo/diverged` reads the same run to run (a fork reaches the trace by its line
+  of cuts; no decision read its clock-stamped id), and `wounded/` legs drive every heal rung failing and
+  the capo / gepa / levi form failures; `PARSE_FAILURE_WRONG_TYPE` is gone.
+- **landed 38:** rk-opt 7–9: one lift test for the three bars, the collapse gate read against the
+  parent, `LibrarySnippet`'s union and the served prompt-field labels, and one strict wire rule for every
+  optimizer node (closed objects, typed leaves, an untyped axis refused at load), proven on Cerebras and
+  Together with one call per node family. Overlap and repair stay a design fork (its row).
+- **landed 39:** rules: the stale engine and webapp rules rewritten to the code, two slack probes held
+  to their counts, `nestedPipelinesRead` in `reads.ts`, and the hand-authored trailer the operator's alone.
+- **landed 40:** docs: the concept and method claims the code contradicts rewritten to the code.
+- **landed 41:** rn-conn 3: TermNorm keeps its terms across a reload under load, a resend spends no
+  `max_calls`, the runner image and harbor roster are read per cell, an LLM-judge metric is billed to its
+  cell, and the n8n key ignores a trailing `/`.
+- **landed 42:** `DeltaRuler.entries_covering` goes, its last caller gone (re-keys potter).
+- **landed 43:** tests: every committed dataset's framing read against its budget, and the test-shape
+  charter: one function per fact, none over 150 lines, every assert kept.
+- **landed 44:** paths: one path-component validator matched whole (no trailing newline, drive prefix,
+  device name or trailing dot), docker producer tokens through it with their locks in the data home, and
+  no upload parse on the event loop.
+- **landed 45:** overshoot: a run-limits switch, off by default, holds a call at its node's learned mean
+  (never above worst case); a bill past its hold draws on the level above and is served as the run's
+  overshoot count.
+- **landed 46:** mob: the e2e guard reads every pane on a touch project at 390 px, the touch floor is a
+  `::before` hit area, overlays flip and clamp, the docks are measured, and a disabled reason renders in
+  the DOM.
+- **landed 47:** passes 1-2: one declared `Pass` row per pass kind above the one walk, so verify, the
+  bench and the noise floor send at the backend's ceiling with degradation checks, and
+  `bench_trigger: each_round` goes (operator, 2026-11-12).
+- **holders**, beside **passes 3**: one holder identity and one `holder_of` fold for slots, claims,
+  cycles and money (admit-2's and passb-2's hold rows close), only accounts survive (seven migrations
+  go), and a survivor write or a bill append is fsynced. passes 3: no diagnostic verb, one list campaign
+  set by its arms and replicates whose readings the dashboard serves (the seed screen and
+  probe-reasoning go). After holders, **passes 4**: a retry acts once and a dead filer's command ends,
+  judged by holders' death rule.
+- **mob 2**, beside any engine chain whose Owns hold no webapp file: on a phone a card header folds its
+  trailing actions into ⋯ (operator, 2026-11-13), the masthead id and setup line placed by it, and the
+  phone walk's back step.
+- **cfg**, beside payer and **life**: the merge rule declared per key by the node document's schema,
+  one fold with a provenance stamp per key; a model per inner node rides it (one L4 re-key). payer
+  reads the free-tier pair. life: one explicit launch lifecycle (asked → admitted → held → running →
+  ended), each exit a declared transition, `Hold` its data.
+- **rk-opt 10+:** the reply cache keyed on the schema sent, potter's renderers reading the node's own
+  reads (`InjectionBundle` goes), one admit door per arm role for the catch-up pool, L1 told the rows to
+  win from the parent's own information, a cell's optimizer in `domain/l4` terms with its cells resolved
+  once, and `ab` re-fitting the whole ruler (re-keys potter's prompts).
 - **rk-dec:** the crowning bar's statistic a switch (today's the default), USD the matched axis, the
-  origin walk inside its door.
+  origin walk inside its door, and three shipped-off knobs hard-wired (`pobb.lock_in`,
+  `origin_gate: critical_only`, `convergence_patience`; operator, 2026-11-12).
 - **valid:** one validity check for resume and fork (`ab_replay`'s verdict), one mint writer, one way
-  onto a fork.
+  onto a fork, and a copy that revalidates.
+- **hubs:** record kinds in family modules and round facts as kind-keyed slices, so a feature adds a
+  file instead of editing `runner/entry.py`, `domain/results.py`, `domain/run_records.py`,
+  `campaign_store/store.py` or `runner/round.py`.
+- **layers:** a gate check holds the lazy imports that close a package cycle to a falling baseline,
+  each knot is cut at its root, and `RunScope` moves into `application/` (members' imports move: the
+  last re-key before the keys).
 - **behaviour keys:** generated keys, then the switch, which is the last re-key. §0.5's bullet is
   accepted (operator, 2026-11-12).
 - **L4:** re-measure C0.
 - **readings:** one reading for every comparison, the 31 `*Reading` classes folded; key-neutral
-  behind the behaviour keys.
-- **then:** faults; narr (the stored dashboard views go, renderers reading the records), rec, rn-conn,
-  ren (the two `knobs.py` and `free_tier.py` pairs).
+  behind the behaviour keys. Beside it, **recipes**: each benchmark's loader becomes a field mapping on
+  the generic recipe and the panel templates asset files (operator, 2026-11-12; re-keys those cuts).
+- **then:** faults; narr (the stored dashboard views go, renderers reading the records), rec (a
+  discriminated union where optional fields and a validator spell one; write-only fields go, a gate
+  check holding every field to a reader), rn-conn, ren (the two
+  `knobs.py` and `free_tier.py` pairs; six class names defined twice, a gate refusing a seventh).
 
 The re-keys end at the behaviour-key switch.
 
 9. **The edge tail**, in this order: passb-2, addr, webb-4, la, lw, webd (the browser's copies of
-   engine facts served instead; md if the operator says so); lite, xconn, mkey, then mcp on mkey's tip, tv-2 under one access review; ws, forks, the block
+   engine facts served instead, its test fixtures generated from the served shapes, and every served
+   field read or deleted; md if the operator says so); lite, xconn, mkey, then mcp on mkey's tip, tv-2 under one access review; ws, forks, the block
    picker's census; tune 1 and 3, small, pick, box (the operator runs it); tests-w, ts-arch, ts-score,
    ts-spend; rel and `gate.py --release`.
 
@@ -109,7 +150,16 @@ today by evictable caches, operator inputs fed back and §0.5's fork-on-divergen
 high-water becomes a paired read (kept on purpose by `verdict-resolution.md`; the ladder is the
 ablation arm) · the sub-cent money rule (forks) · which env
 file the box keeps (box) · a bench's total · whether an upload's bytes are kept before the parse · a
-prompt field's order · the host assistant's open questions (§ Host assistant).
+prompt field's order · the host assistant's open questions (§ Host assistant) · whether
+`enable_2pl_graduation`, `degradation_fatal_fastpath`, `lift_reference` and `fitness_ceiling` /
+`rounds_to_ceiling` stay (asked 2026-11-12, not decided) · whether an inner L4 run inherits its outer
+run's overshoot switch (today set-limits refuses inner cycles, so an inner run always holds worst case).
+
+**Kept on the operator's word** (2026-11-12; a survey proposes none of them again): the n8n and
+dbllmbench connectors; the grounding and simpleqa judges; SealQA (a Harbor source recipe);
+`halt_at_fitness`; the `block_access` modes; `schema_field_rename`; the three recombination routes
+(left to M13); archive and unarchive; the visits and the daily digest; the account trail; the Telegram
+admin bot.
 
 ### After the release
 
@@ -303,7 +353,8 @@ turn's end resumes on one Play and a Play the allowance cannot cover is refused 
 
 ## The right winner — redundant mechanisms
 
-PoBB's per-cell bar locks in falsely about four times as often as it states
+PoBB's per-cell bar stops wrongly about 3.8 times as often as it states, false locks 1.6 times (24%);
+with `lock_in` shipped off, the default's error is false cuts (33.5%)
 ([`../../paper/notes/stopping-rule-false-stops.md`](../../paper/notes/stopping-rule-false-stops.md)). Owed,
 each moving what the loop decides ([`../developer/offline-run.md`](../developer/offline-run.md)):
 - **Lock in only past an anytime-valid bound**, a mixture likelihood ratio on θ at α/K per arm, reading
