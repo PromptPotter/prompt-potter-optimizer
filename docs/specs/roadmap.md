@@ -64,8 +64,16 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   it owns `tests/`.
 - **det**, beside tests: `capo/diverged` decides the same way run to run, and the offline world reaches
   the wound.
-- **rk-dec**, beside payer: the crowning bar's statistic a switch (today's the default), USD the
-  matched axis. payer reads the free-tier pair.
+- **holders**, beside **passes**: one holder identity and one `holder_of` fold for slots, claims,
+  cycles and money (admit-2's and passb-2's hold rows close); one declared `Pass` row per pass kind
+  above the one walk, so verify and the noise floor send in parallel.
+- **cfg**, beside payer: the merge rule declared per key by the node document's schema, one fold with
+  a provenance stamp per key; a model per inner node rides it (one L4 re-key). payer reads the
+  free-tier pair.
+- **rk-dec:** the crowning bar's statistic a switch (today's the default), USD the matched axis, the
+  origin walk inside its door.
+- **valid:** one validity check for resume and fork (`ab_replay`'s verdict), one mint writer, one way
+  onto a fork.
 - **behaviour keys:** generated keys, then the switch, which is the last re-key. §0.5's bullet is
   accepted (operator, 2026-11-12).
 - **L4:** re-measure C0.
@@ -90,7 +98,11 @@ A short window defers from the end (pending tracks, ren, faults, the ts private-
 never w0, the trim, stream, startb, stopb, land, admit-2, money, rk-opt, rk-run, payer or rel.
 
 **Forks left to the operator** (taste and policy; a chain leaves each as it stands): whether `log.md`
-and `review.md` go (md) · whether the visits analytics move to the site repo · the sub-cent money rule (forks) · which env
+and `review.md` go (md) · whether the visits analytics move to the site repo · whether resume
+re-executes members against the content caches instead of checking validity (≈−1.2k lines; blocked
+today by evictable caches, operator inputs fed back and §0.5's fork-on-divergence) · whether L2/L3's θ
+high-water becomes a paired read (kept on purpose by `verdict-resolution.md`; the ladder is the
+ablation arm) · the sub-cent money rule (forks) · which env
 file the box keeps (box) · a bench's total · whether an upload's bytes are kept before the parse · a
 prompt field's order · the host assistant's open questions (§ Host assistant).
 

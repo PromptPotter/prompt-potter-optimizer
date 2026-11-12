@@ -598,6 +598,56 @@ row it closes.
   `domain/optimizer_state.py` name a parse failure no path produces. Action: it goes. **Rides with:**
   det 2. **Re-test:** `git grep -c "PARSE_FAILURE_WRONG_TYPE" -- promptpotter` is 0.
 
+### holders (after the holds nest, beside passes)
+
+- **Every hold names its holder its own way**: `Job.producer_id`, `LaunchClaimRecord.claimant_lock`,
+  the cycle lock, a bill's ledger path (whose liveness is asked of the cycle lock), the send set and
+  object identity; six readers ask "who holds X" (`admission.py::refuse_taken_cycle`,
+  `maintenance/reset.py::holder_in_reach` and `::_claimed`, `identity/default_claim.py`,
+  `runtime_flags.py::derive_run_state`, the shared-cycle refusals), and the bugs sit at the joins. The
+  holds nest covers money's run, cell and call; the campaign share and the slot, claim and cycle side
+  stay apart, though machine → account → campaign → cycle is one nest for slots and money alike.
+  Action: one `Hold` (id, resource, parent, holder = the job id, bound, state asked | held | settled)
+  and one `holder_of(resource)` fold with a death rule per kind; the six readers read it. The hot-path
+  OS locks (archive cell claims, machine slots, draft claims, the gate) and the rate meters stay
+  native; the cycle lock stays as the hold's kernel-backed index. ≈−0.9k lines. It closes, by their
+  Re-tests, admit-2's rows on the double release, the refused seat's observers, the embedded and inner
+  opens, the hand-rolled start releases, the fork cut before admission, the mint without a claim, the
+  queued launch dying with its asker and the inner seat minted before admission; money's default claim
+  moving a scored tree; passb-2's paused pass read as selecting and the command whose filer died.
+  **Rides with:** holders.
+
+### passes (beside holders)
+
+- **A pass is named six ways and stops seven**: `ScoringVerb`, `RunSource`, `MeasurementRole` plus
+  free strings (`FiledAnswer.role`), `VerificationKind`, `CampaignPhase` and the role spend tables name
+  one pass; `search_point_scorer.py` hard-codes `keep_cut=False`, so the bench and verify rebuild the
+  walk; the noise floor and the seed screen are one k-fresh-replicate loop, each serial; two openers
+  (`scoring_scope.py::open_diagnostic`, the seed screen's own). Action: one `Pass` row (kind, cells,
+  replicates, fresh, depth, checks, stop, record) declared per kind above `query_loop.py::run_walks`.
+  ≈−0.45k lines. **Rides with:** passes.
+- **Verify and the noise floor send one cell at a time**: only `runner/bench.py` and the seed screen
+  set `held_lookahead`; the rest fall to `command_log.py`'s requested lookahead, 1 by default, and only
+  the panel gets degradation checks. Action: the `Pass` row declares its depth and checks. **Rides
+  with:** passes. **Re-test:** a verify pass's sends overlap.
+
+### cfg (the re-key window, beside payer)
+
+- **The merge rule is chosen by the door, not declared by the document**: `runner/inner/spawn.py`'s
+  `_laid_arm` and `potter/records.py`'s `steered_onto` merge by dict spread, skipping
+  `pipeline_params.py`'s rule that a new model drops `route_order`; `pipeline_manifest.py`'s `laid_over`
+  passes no types, so an object knob is replaced whole; "" means unchanged, emptied, no write, reset or
+  inherit by site; reset has two path grammars (`draft_patch.py`, `command_kinds.py`); the patch check
+  is spelled about five times, healing in some and raising in others. Action: a layer is (name, a patch
+  or a function of the fold so far); a patch sets, clears or merges per path, by the rule the
+  document's schema declares for that key; one fold returns the document and a provenance stamp per key
+  (`pipeline_resolve.py::ParamLayers` already is this for target params). `merge_config_layers`, the
+  knob-layer projections, `apply_config_overrides`, `_laid_arm` / `_one_model`, the `steered*` memory,
+  both reset grammars and the browser's "" handling go; ≈−0.9k lines. It closes rk-run's two-merges,
+  cleared-steer-field, relabel and `config_map` rows, admit-2's untyped steer and retired-knob rows,
+  ren 8's node-config census, the pipeline-switch row by explicit layer names, and rk-dec 3 (a model
+  per inner node rides it). One L4 re-key and its wipe. **Rides with:** cfg.
+
 ### batch/26 · rk-dec
 
 - **The crowning bar tests nothing a result can quote**: `application/scoring/selection.py::elect_round_winner`
@@ -650,13 +700,33 @@ row it closes.
   rk-dec (the re-key window), whose Owns gain `bench/difficulty.py` and `session.py`'s accessors.
   **Re-test:** `git grep -c "require_scorer\|require_partition" -- promptpotter` is 0.
 
+### valid (after rk-dec, before the behaviour keys)
+
+- **A resume asks "is this still valid" five ways**: `resume.py`'s consumed set and prompt hashes,
+  `jobs/mint.py`'s defaults drift, seven members' `replay()` (capo, gepa, levi, the election, the race)
+  and `round_packages` / `rederive`. Action: one validity check: `resume.py::_divergence` becomes
+  `ab_replay`'s verdict, walked by `find_divergences`; ≈−250 lines. The round a fork is cut at can
+  move: name it. **Rides with:** valid 1.
+- **A cycle's mint is written before it is minted**: the root mint writes its partition, seed and
+  resolved run before `CycleMintedRecord`, against `run_records.py`'s own docstring. Action: one
+  `mint_cycle` writer. **Rides with:** valid 2.
+- **Three ways onto a fork**: the mid-INIT rebind, `_run_line`'s rebase and an operator relaunch.
+  Action: one. **Rides with:** valid 2.
+
 ### readings (after the L4 C0 re-measure; behaviour keys make it key-neutral)
 
-- **One comparison is read 31 ways**: 31 `*Reading` classes (`ArmReading`, `PairedReading`,
-  `MetricReading`, `FactorReading`, …) across `application/evidence/` (~3k lines) and
-  `views/evidence.py`. Action: one reading (estimate, interval, n, state) that every comparison returns
-  and every surface renders; rk-dec's bar and rk-opt's `AbilityReading` lift test read it. **Rides
-  with:** readings. **Re-test:** `git grep -cE "class \w+Reading\b" -- promptpotter` is 1.
+- **One estimate is read ~10 ways**: of the 31 `*Reading` classes, about 10 are estimates off cells
+  (`ArmReading`, `PairedReading`, `MetricReading`, `FactorReading`, …); the other ~22 carry a status
+  (`CommandReading`, `PauseReading`, …) and stay. Action: one reading (estimate, interval, n, state) that
+  every estimate returns and every surface renders, and `paired.py::read_pair`'s estimator spec gains a
+  kind (paired t, θ, exact sign), each returning `MeasuredLift`; rk-dec's bar and rk-opt's lift test read
+  it. θ and paired t stay distinct measurands (θ is unpaired and model-based, which PoBB's truncation
+  needs); CAPO, GEPA and LEVI keep their papers' bars. **Rides with:** readings. **Re-test:** the
+  chain's census lists the estimate readings; one remains.
+- **A finished arm meets a harder bar than a cut one**: `lost_ideas` asks a finished arm's interval to
+  sit wholly below, a cut arm only the ε posterior. Action: one bar for both. **Rides with:** readings.
+- **A round's advance mixes a point and an interval**: `origin_panel.py::RoundAdvance`'s "tops" half is
+  a point compare beside an interval read. Action: one interval read. **Rides with:** readings.
 
 ### batch/26 · rn-conn
 
@@ -1210,8 +1280,8 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `application/free_tier.py`. Action: each named for what it holds, or the pair folds where one fact
   has two homes (payer's census reads the free-tier pair first). **Rides with:** ren 8.
 - **Node config is one document read through ~11 modules**: schema, parsing, overlay and knobs each
-  hold a view of it after landing 30's one layered read. Action: ren 8's census names what still holds
-  the document twice; each is a row for the chain owning its file. **Rides with:** ren 8.
+  hold a view of it after landing 30's one layered read. Action: one model of the node document with
+  knobs a view on it. **Rides with:** cfg (its declared merge rule).
 
 ### batch/32 · rel
 
@@ -1342,9 +1412,9 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   the whole dataset. Action: a sandboxed mint writes no account label. **Held:** none claims it.
   **Re-test:** an inner mint leaves the account's label file untouched.
 - **A ± that measures nothing**: `seed-screen`'s `margin_se` reads 0.000 over identical temperature-0
-  passes, which carry no row-sampling variance, and the panel quotes it as a precision. Action: an SE
-  over row resamples, or none served. **Held:** none claims it. **Re-test:** a temperature-0 screen's
-  `margin_se`.
+  passes, which carry no row-sampling variance, and the panel quotes it as a precision. Action: the
+  floor is an arm whose per-cell score is known for free (truth equals the majority), so the origin is
+  read PAIRED against it. **Rides with:** readings. **Re-test:** a temperature-0 screen's `margin_se`.
 - **The outer prompt ranks on θ, not the scored term**: Shape: `potter/dispatch/injections/panels.py`'s
   "weakest first" and "worse than the origin beyond their own error bar" read `mean_round_delta`, which
   is in-sample and scores nothing, because `held_out_lift` carries no SE. Action: serve the held-out
