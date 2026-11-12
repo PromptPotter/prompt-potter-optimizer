@@ -6,6 +6,7 @@ import threading
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
 from typing import NamedTuple, assert_never, get_args
 
 from pydantic import Field
@@ -30,7 +31,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
     CampaignLaunch,
@@ -70,9 +71,8 @@ from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
 from promptpotter.infrastructure.store.account_spend import account_bill, campaign_spend
 from promptpotter.infrastructure.store.read_model import money_on
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, tenant_stores
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.infrastructure.store.wallet_store import ChargeBook
 from promptpotter.shared.errors import (
     BudgetUnenforceableError,
     LaunchRefusalReason,
@@ -320,7 +320,7 @@ def read_account_wallet(
         else campaign_spend(stores.campaigns, excluding_campaign).host
     )
     held = _live_holds(
-        job_registry, stores.charges, user_id=user.user_id, excluding_job_id=excluding_job_id
+        stores, job_registry, user_id=user.user_id, excluding_job_id=excluding_job_id
     )
     if held is None:
         return AccountWallet(coupon, _nothing_on(coupon.face), contended=True)
@@ -992,15 +992,25 @@ def hold_run(stores: Stores, hold_id: str, bound: Budget, *, parent: str | None)
 
 
 def release_run(stores: Stores, hold_id: str) -> None:
-    """The run's hold closes with its job: by its release, or the sweep's for a dead producer."""
+    """The run's hold closes with its job: by its release, or `reap_dead_runs` for a dead producer."""
     stores.charges.append(Release(hold_id=hold_id))
 
 
+def reap_dead_runs(projects_root: Path, job_registry: JobRegistry) -> None:
+    """Releases each job whose producer is gone and closes its hold; an inner run's closes with
+    the enclosing run's, whose producer it shared."""
+    for job in job_registry.reap_orphans():
+        if not isinstance(job.holder, InnerRun):
+            release_run(tenant_stores(projects_root, WorkspaceDir(Path(job.workspace))), job.job_id)
+
+
 def _live_holds(
-    job_registry: JobRegistry, charges: ChargeBook, *, user_id: str, excluding_job_id: str | None
+    stores: Stores, job_registry: JobRegistry, *, user_id: str, excluding_job_id: str | None
 ) -> Budget | None:
-    """What the open holds still hold of the coupon (`Money.held_back`). ``None`` fails closed on
-    an unstamped sibling, whose hold is not written yet. Exclusion is by job, never by hop."""
+    """What the open holds still hold of the coupon (`Money.held_back`), each dead producer's
+    closed first, so a box no sweep runs on frees it. ``None`` fails closed on an unstamped
+    sibling, whose hold is not written yet. Exclusion is by job, never by hop."""
+    reap_dead_runs(stores.projects_root, job_registry)
     running = job_registry.list_holding_spend(user_id=user_id)
     own = next((j for j in running if j.job_id == excluding_job_id), None)
     mine = None if own is None else (own.created_at, own.job_id)
@@ -1012,7 +1022,7 @@ def _live_holds(
         for job in running
     ):
         return None
-    return money_on(charges.path).held_back(excluding_job_id)
+    return money_on(stores.charges.path).held_back(excluding_job_id)
 
 
 def _grace_bounded(remaining: float, spent: UserSpend) -> float:

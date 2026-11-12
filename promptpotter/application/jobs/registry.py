@@ -432,7 +432,7 @@ class JobRegistry:
         return starts
 
     def reap_orphans(self) -> list[Job]:
-        """The sweep's, and no read's: releases each job whose producer is gone, reclaims that
+        """`quota.reap_dead_runs`'s alone: releases each job whose producer is gone, reclaims that
         producer's file, moves a release launched before today among the ended, and deletes an
         ended record released over `_ENDED_KEPT` ago. The jobs it released, as they stood."""
         today = utcnow_iso()[:10]

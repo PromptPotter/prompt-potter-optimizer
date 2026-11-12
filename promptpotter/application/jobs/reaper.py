@@ -6,11 +6,10 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from promptpotter.application.jobs.quota import release_run
+from promptpotter.application.jobs.quota import reap_dead_runs
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.domain.job import InnerRun
 from promptpotter.infrastructure.llm.pricing import refresh_route_answers
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.layout import (
@@ -84,14 +83,11 @@ def sweep_dead_cycles(projects_root: Path) -> int:
 
 
 def sweep(projects_root: Path) -> None:
-    """Every reclaim of what a dead producer left: no read releases, stamps or deletes any of it."""
+    """Every reclaim of what a dead producer left: no read stamps or deletes any of it, and only
+    the wallet's releases its runs (`reap_dead_runs`)."""
     sweep_dead_cycles(projects_root)
     reclaim_orphan_sandboxes(projects_root)
-    for job in JobRegistry.attach(jobs_dir(projects_root)).reap_orphans():
-        # An inner run's hold closes with its enclosing run's, whose producer it shared; a hold
-        # written before a crash took its admission stamp closes too.
-        if not isinstance(job.holder, InnerRun):
-            release_run(tenant_stores(projects_root, WorkspaceDir(Path(job.workspace))), job.job_id)
+    reap_dead_runs(projects_root, JobRegistry.attach(jobs_dir(projects_root)))
 
 
 async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY_S) -> None:

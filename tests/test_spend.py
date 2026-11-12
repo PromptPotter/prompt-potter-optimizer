@@ -75,6 +75,7 @@ from promptpotter.application.head_to_head_price import (
     priced_head_to_head,
 )
 from promptpotter.application.jobs import interlock, mint, quota
+from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.account_activity import account_activity
 from promptpotter.application.jobs.coupon import (
     AllowanceState,
@@ -3613,6 +3614,21 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.11), (
         "a call on no run held nothing of the coupon"
     )
+    # A dead producer's hold closes at the next wallet read, on a box no sweep runs on.
+    crashed = billing.request_slot(
+        user_id="sub-6",
+        principal_id="sub-6",
+        workspace=biller.campaigns.workspace,
+        holder=CampaignLaunch("ds1"),
+        hop=billed_hop,
+    )
+    _admitted(biller, billing, crashed.job_id, Budget(usd=0.05))
+    assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.06)
+    with monkeypatch.context() as dead:
+        dead.setattr(registry_module, "producer_alive", lambda *_: False)
+        assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.11), (
+            "a crashed run held the coupon until a sweep"
+        )
 
     # A head-to-head is one door: every arm planned, priced and admitted before any takes a key,
     # so a refused act leaves no arm behind; each arm runs the budget it declared, and a retry
