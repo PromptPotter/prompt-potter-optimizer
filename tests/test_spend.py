@@ -193,8 +193,8 @@ from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     ArmRecord,
+    Bill,
     CallPrice,
-    Charge,
     ConfigOverrides,
     CycleSeed,
     CycleSeedRecord,
@@ -202,6 +202,7 @@ from promptpotter.domain.run_records import (
     ForkRemainder,
     ForkSpec,
     ForkTrigger,
+    Hold,
     LaunchAnswer,
     PhaseRecord,
     RoundEnteredRecord,
@@ -354,7 +355,7 @@ def _admitted(stores: Stores, registry: JobRegistry, job_id: str, reserve: Budge
 
 
 def _reserve_of(stores: Stores, job_id: str) -> Budget:
-    return money_on(stores.charges.path).runs[job_id].held
+    return money_on(stores.charges.path).holds[job_id].bound
 
 
 def _held(
@@ -634,10 +635,10 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         emit_replayed_step_tokens(banked, {})
     *ran, replayed = [r for _, r in cells.iter() if isinstance(r, TokenUsageRecord)]
     assert row_.error_category == ErrorCategory.UNSCOREABLE, "an ungraded cell read as graded"
-    assert [(r.price.cost_usd, r.input_tokens, r.charge is None) for r in ran] == [
+    assert [(r.price.cost_usd, r.input_tokens, r.bill is None) for r in ran] == [
         (0.0076, 1200, False)
     ], "a cell that ran without a grade billed nothing of what it spent"
-    assert (replayed.price.cost_usd, replayed.price.rate_priced_usd, replayed.charge) == (
+    assert (replayed.price.cost_usd, replayed.price.rate_priced_usd, replayed.bill) == (
         None,
         0.25,
         None,
@@ -650,7 +651,7 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
     blank_calls, _, blank = await _grade_twice(tmp_path / "blank", offline, reply="   ")
     assert score.score == 1.0, "the replayed reply must grade identically, not merely cheaply"
     assert calls == 1, f"an identical comparison re-billed the provider: {calls}x"
-    assert [m.charge is None for m in metered] == [False, True], "a served grading went unmetered"
+    assert [m.bill is None for m in metered] == [False, True], "a served grading went unmetered"
     assert {m.price.kind for m in metered} == {"judge"}, "grading spend landed outside its bucket"
     # No charge: OUR cache served the reply. `cache_read`: the PROVIDER discounted a sent call.
     assert (metered[0].cache_read_tokens, metered[0].input_tokens) == (8, 11), (
@@ -1362,7 +1363,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     def cold() -> tuple[float, int, CycleSeed | None]:
         rows = [json.loads(line) for line in read_lines(index.path)]
         bills = [
-            row["money"]["call"]["cost_usd"] for row in rows if row["record_type"] == "token_usage"
+            row["money"]["price"]["cost_usd"] for row in rows if row["record_type"] == "token_usage"
         ]
         seeds = [row["seed"] for row in rows if row["record_type"] == "cycle_seed"]
         seeded = CycleSeed.model_validate(seeds[-1]) if seeds else None
@@ -2223,17 +2224,12 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     hold_usd = 0.0036
     killed = SpendHoldRecord(
         node="killed",
-        charge=Charge(
-            state="held",
+        kind="optimizer",
+        hold=Hold(
             hold_id="killed",
             parent=None,
             key_source="host",
-            call=CallPrice(
-                kind="optimizer", model=None, provider=None, cost_usd=None, rate_priced_usd=None
-            ),
-            tokens=0,
             bound=Budget(usd=hold_usd, tokens=2_100),
-            ledger="burst/ledger.jsonl",
         ),
     )
     burst_ledger.append(killed)
@@ -2249,7 +2245,9 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     # A bill naming no price closes its hold in tokens alone; the money stays at the hold's bound.
     bare = CycleEventLog(tmp_path / "bare" / "ledger.jsonl")
     bare.append(
-        SpendHoldRecord(node="bare", charge=killed.charge.model_copy(update={"hold_id": "bare"}))
+        SpendHoldRecord(
+            node="bare", kind="optimizer", hold=killed.hold.model_copy(update={"hold_id": "bare"})
+        )
     )
     bare.append(billed_call(node="bare", input_tokens=40, output_tokens=9, hold_id="bare"))
     assert unreported_on(bare.path).usd == pytest.approx(hold_usd), (
@@ -2457,7 +2455,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         f"{posts} POSTs — a read timeout is NEVER resent: the backend still works it, and a "
         "second POST bills twice"
     )
-    assert [r.price.cost_usd for r in _token_bills(cell_ledger)] == [0.0, 0.001], (
+    assert [r.price.cost_usd for r in _token_bills(cell_ledger)] == [0.001], (
         "a failed POST's reported step spend went unbilled"
     )
     assert wallet.usd_unreported == pytest.approx(2 * 0.01 + 2 * 0.004), (
@@ -2786,12 +2784,10 @@ def _account_stores(
     stores.campaigns.mint_cycle(_HELD_HOP)
     if spent is not None:
         stores.charges.append(
-            Charge(
-                state="billed",
+            Bill(
                 hold_id="spent",
-                parent=None,
                 key_source="host",
-                call=CallPrice(
+                price=CallPrice(
                     kind="optimizer",
                     model="gpt-x",
                     provider="openai",
@@ -2799,7 +2795,6 @@ def _account_stores(
                     rate_priced_usd=None,
                 ),
                 tokens=spent["input_tokens"] + spent["output_tokens"],
-                bound=None,
                 ledger="campaigns/held/cycles/c0/events.jsonl",
             )
         )
@@ -3103,12 +3098,10 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "openai",
     ), "a send past the coupon was refused for another cause, or named no provider to key"
     spent_out.charges.append(
-        Charge(
-            state="billed",
+        Bill(
             hold_id="own",
-            parent=None,
             key_source="user",
-            call=CallPrice(
+            price=CallPrice(
                 kind="optimizer",
                 model="gpt-x",
                 provider="openrouter",
@@ -3116,7 +3109,6 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
                 rate_priced_usd=None,
             ),
             tokens=9_000_000,
-            bound=None,
             ledger="campaigns/held/cycles/c0/events.jsonl",
         )
     )
@@ -3600,6 +3592,26 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         _pay(billed_ledger, 0.10, input_tokens=1_000, output_tokens=0, book=live_book)
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.10), (
         "a live run's billed $0.10 was held twice: once billed, once inside its $0.20 reserve"
+    )
+    # Liveness is the book's: the run's end closes its hold, and a send it left open is then
+    # unreported at its bound; a call on no run holds the coupon for every other launch.
+    biller.charges.append(
+        Hold(hold_id="left", parent=live.job_id, key_source="host", bound=Budget(usd=0.05))
+    )
+    assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.10), (
+        "a send open under a live run's reserve was held twice"
+    )
+    stamped = billing.get(live.job_id)
+    assert stamped is not None
+    RunStart(biller, billing, stamped).release(RuntimeError("the run raised"))
+    assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.15), (
+        "an ended run kept its reserve, or the send it left open went unread"
+    )
+    biller.charges.append(
+        Hold(hold_id="turn", parent=None, key_source="host", bound=Budget(usd=0.04))
+    )
+    assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.11), (
+        "a call on no run held nothing of the coupon"
     )
 
     # A head-to-head is one door: every arm planned, priced and admitted before any takes a key,
@@ -4207,12 +4219,10 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     )
     wiped = CycleHop(campaign_id=f"{prefix}__dddddd", cycle_id="cycle-0")
     built_stores.charges.append(
-        Charge(
-            state="billed",
+        Bill(
             hold_id="wiped",
-            parent=None,
             key_source="host",
-            call=CallPrice(
+            price=CallPrice(
                 kind="optimizer",
                 model="gpt-x",
                 provider="openai",
@@ -4220,7 +4230,6 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
                 rate_priced_usd=None,
             ),
             tokens=10,
-            bound=None,
             ledger=built_stores.charges.held_on(campaigns.ledger(wiped)),
         )
     )

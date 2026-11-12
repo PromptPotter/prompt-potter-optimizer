@@ -11,21 +11,31 @@ from collections.abc import Callable, Hashable, Iterable, Sequence
 from functools import partial
 from itertools import islice
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_checkable
+from typing import (
+    Any,
+    ClassVar,
+    NamedTuple,
+    Protocol,
+    assert_never,
+    cast,
+    get_args,
+    runtime_checkable,
+)
 
 from pydantic import ValidationError
 
 from promptpotter.domain.run_records import (
     RECORD_ADAPTER,
-    Charge,
+    Bill,
     CycleRecord,
+    Hold,
+    Release,
     SpendHoldRecord,
     TokenUsageRecord,
     stale_file_warning,
 )
 from promptpotter.domain.spend import (
     NOTHING_PAID,
-    ZERO_SPEND,
     Budget,
     CeilingMeter,
     PaidSpend,
@@ -740,29 +750,29 @@ def derived[T](key: Hashable, *, sig: Hashable, compute: Callable[[], T]) -> T:
     return value
 
 
-def _billed(bill: Charge) -> UserSpend:
+def _billed(bill: Bill) -> UserSpend:
     price, tokens = bill.price, bill.tokens
     if price.cost_usd is None and price.rate_priced_usd is None:
         return UserSpend(0.0, tokens, tokens)
     return UserSpend(price.cost_usd or 0.0, tokens, 0, rate_priced_usd=price.rate_priced_usd or 0.0)
 
 
-def _unreported_of(hold: Charge) -> PaidSpend:
+def _unreported_of(hold: Hold) -> PaidSpend:
     """Unpriced lands in the token residue: `$0.00` would report an unpriceable send as a free one."""
-    bound = hold.held
+    bound = hold.bound
     tokens = bound.tokens or 0
     if bound.usd is None:
         return PaidSpend.of(hold.key_source, UserSpend(0.0, 0, tokens, 0.0, tokens))
     return PaidSpend.of(hold.key_source, UserSpend(0.0, 0, 0, bound.usd, tokens))
 
 
-def still_held(open_holds: Iterable[Charge], unpriced: Iterable[Charge]) -> PaidSpend:
+def still_held(open_holds: Iterable[Hold], unpriced: Iterable[Hold]) -> PaidSpend:
     total = NOTHING_PAID
     for hold in open_holds:
         total = total.plus(_unreported_of(hold))
     # Its bill already filed the tokens, as residue (:func:`_billed`); only the money is kept.
     for hold in unpriced:
-        if (usd := hold.held.usd) is not None:
+        if (usd := hold.bound.usd) is not None:
             money = UserSpend(0.0, 0, 0, usd, 0)
             total = total.plus(PaidSpend.of(hold.key_source, money))
     return total
@@ -781,27 +791,25 @@ class Spent(NamedTuple):
         )
 
 
-MoneyRecord = Charge | SpendHoldRecord | TokenUsageRecord
+MoneyRecord = Hold | Bill | Release | SpendHoldRecord | TokenUsageRecord
 
 
 class Money(NamedTuple):
     """One subject's money: the account's charge book, or one ledger's OWN lines."""
 
     spent: Spent
-    # Each call's hold no bill closed yet.
-    open: dict[str, Charge]
-    # Each run's hold, at its latest bound.
-    runs: dict[str, Charge]
+    # Each hold no bill or release closed yet.
+    open: dict[str, Hold]
+    # Each hold, at its latest bound.
+    holds: dict[str, Hold]
     # What was billed under each hold, its own calls' and every hold's beneath it.
     drawn: dict[str, PaidSpend]
     # The holds a bill closed in tokens alone, naming neither a provider's figure nor a rate's
     # price: the bound's money stays held.
-    unpriced: tuple[Charge, ...]
+    unpriced: tuple[Hold, ...]
     # Each priced hold's bills, summed, by the node and kind it was held as.
     dearest: tuple[tuple[str, TokenUsageKind, float, int], ...]
-    # What the box's keys billed, by the ledger each send landed on.
-    on_coupon: dict[str, UserSpend]
-    bills: tuple[Charge, ...]
+    bills: tuple[Bill, ...]
     # Every call, a replay included, as each meter counts it.
     usage: tuple[TokenUsageRecord, ...]
     metered: dict[CeilingMeter, Budget]
@@ -813,36 +821,57 @@ class Money(NamedTuple):
     def held(self) -> PaidSpend:
         return still_held(self.open.values(), self.unpriced)
 
-    def held_back(self, hold_id: str) -> Budget:
-        """What a run's hold still holds of its account: its bound less what was billed under it on
-        its payer's keys, never below nothing (a bill past it is drawn all the same). An axis its
-        bound leaves open holds nothing."""
-        hold = self.runs[hold_id]
-        bound, drawn = hold.held, self.drawn.get(hold_id, NOTHING_PAID)
-        billed = drawn.host if draws_coupon(hold.key_source) else drawn.user
-        return Budget.amount(
-            0.0 if bound.usd is None else max(0.0, bound.usd - billed.at_most_usd),
-            0 if bound.tokens is None else max(0, bound.tokens - billed.at_most_tokens),
+    def holding(self, hold_id: str) -> bool:
+        """Whether *hold_id* and every hold above it is still open."""
+        above: str | None = hold_id
+        while above is not None:
+            if above not in self.open:
+                return False
+            above = self.open[above].parent
+        return True
+
+    @property
+    def unreported(self) -> PaidSpend:
+        """What sends no open hold covers may have cost: each hold left open under a closed one,
+        and each unpriced one whose parent no longer holds."""
+        return still_held(
+            (hold for hold in self.open.values() if not self.holding(hold.hold_id)),
+            (h for h in self.unpriced if h.parent is None or not self.holding(h.parent)),
         )
+
+    def held_back(self, excluding: str | None) -> Budget:
+        """What the open holds on the account alone still hold of its coupon: each its bound less
+        what was billed under it, never below nothing (a bill past it is drawn all the same). An
+        axis a bound leaves open holds nothing."""
+        usd, tokens = 0.0, 0
+        for hold in self.open.values():
+            if hold.parent is not None or hold.hold_id == excluding:
+                continue
+            if not draws_coupon(hold.key_source):
+                continue
+            bound, billed = hold.bound, self.drawn.get(hold.hold_id, NOTHING_PAID).host
+            if bound.usd is not None:
+                usd += max(0.0, bound.usd - billed.at_most_usd)
+            if bound.tokens is not None:
+                tokens += max(0, bound.tokens - billed.at_most_tokens)
+        return Budget.amount(usd, tokens)
 
 
 class _Money:
     """THE fold of money: a hold opens under its parent, each bill closes a call's and draws on
-    every hold above it, a replay is priced and charges nothing."""
+    every hold above it, a release closes one, a replay is priced and charges nothing."""
 
     records: ClassVar[RecordClasses] = get_args(MoneyRecord)
 
     def __init__(self) -> None:
         self._spent = Spent(NOTHING_PAID, NOTHING_PAID)
-        self._open: dict[str, Charge] = {}
-        self._runs: dict[str, Charge] = {}
+        self._open: dict[str, Hold] = {}
         self._drawn: dict[str, PaidSpend] = {}
-        self._holds: dict[str, Charge] = {}
-        self._unpriced: dict[str, Charge] = {}
+        self._holds: dict[str, Hold] = {}
+        self._unpriced: dict[str, Hold] = {}
         self._labels: dict[str, tuple[str, TokenUsageKind]] = {}
         self._dearest: dict[str, tuple[float, int]] = {}
-        self._on_coupon: dict[str, UserSpend] = {}
-        self._bills: list[Charge] = []
+        self._bills: list[Bill] = []
         self._usage: list[TokenUsageRecord] = []
         self._usd: dict[CeilingMeter, float] = dict.fromkeys(get_args(CeilingMeter), 0.0)
         self._tokens: dict[CeilingMeter, int] = dict.fromkeys(get_args(CeilingMeter), 0)
@@ -856,40 +885,37 @@ class _Money:
         self._view = None
         match record:
             case SpendHoldRecord():
-                self._labels[record.charge.hold_id] = (record.node, record.charge.price.kind)
-                self._hold(record.charge)
-            case Charge(state="held"):
+                self._labels[record.hold.hold_id] = (record.node, record.kind)
+                self._hold(record.hold)
+            case Hold():
                 self._hold(record)
-            case Charge():
+            case Bill():
                 self._bill(record, mirrored=False)
+            case Release():
+                self._open.pop(record.hold_id, None)
             case TokenUsageRecord():
                 self._call(record)
+            case _:
+                assert_never(record)
 
-    def _hold(self, hold: Charge) -> None:
+    def _hold(self, hold: Hold) -> None:
         self._holds[hold.hold_id] = hold
-        if hold.call is None:
-            self._runs[hold.hold_id] = hold
-        else:
-            self._open[hold.hold_id] = hold
+        self._open[hold.hold_id] = hold
 
-    def _bill(self, bill: Charge, *, mirrored: bool) -> None:
-        spent = _billed(bill)
-        paid = PaidSpend.of(bill.key_source, spent)
+    def _bill(self, bill: Bill, *, mirrored: bool) -> None:
+        paid = PaidSpend.of(bill.key_source, _billed(bill))
         self._spent = Spent(
             self._spent.cost.plus(paid),
             self._spent.billed if mirrored else self._spent.billed.plus(paid),
         )
         self._bills.append(bill)
-        if draws_coupon(bill.key_source):
-            ledger = bill.landed_on
-            self._on_coupon[ledger] = self._on_coupon.get(ledger, ZERO_SPEND).plus(spent)
         hold_id, usd = bill.hold_id, bill.price.bill_or_rate_usd
-        above = bill.parent
+        # A bill names a hold of another trail where a nested run's copy is carried onto its root.
+        above = self._holds[hold_id].parent if hold_id in self._holds else None
         while above is not None:
             self._drawn[above] = self._drawn.get(above, NOTHING_PAID).plus(paid)
             above = self._holds[above].parent if above in self._holds else None
         self._open.pop(hold_id, None)
-        # A bill names a hold of another trail where a nested run's copy is carried onto its root.
         if hold_id in self._holds and usd is None:
             self._unpriced[hold_id] = self._holds[hold_id]
         if hold_id in self._labels and usd is not None:
@@ -905,7 +931,7 @@ class _Money:
             self._tokens[meter] += tokens
         spend_slot(self._by_round, usage.spend_round, SpendRollup).bank(usage)
         # A replay carries no charge: it cost nothing.
-        if (bill := usage.charge) is not None:
+        if (bill := usage.bill) is not None:
             self._calls += 1
             self._worked_s += usage.duration_s
             self._bill(bill, mirrored=usage.mirrored)
@@ -915,7 +941,7 @@ class _Money:
             self._view = Money(
                 self._spent,
                 dict(self._open),
-                dict(self._runs),
+                dict(self._holds),
                 dict(self._drawn),
                 tuple(self._unpriced.values()),
                 tuple(
@@ -923,7 +949,6 @@ class _Money:
                     for hold_id, (usd, tokens) in self._dearest.items()
                     if hold_id not in self._unpriced
                 ),
-                dict(self._on_coupon),
                 tuple(self._bills),
                 tuple(self._usage),
                 {m: Budget.amount(self._usd[m], self._tokens[m]) for m in self._usd},

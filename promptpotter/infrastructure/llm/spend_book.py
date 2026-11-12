@@ -7,12 +7,14 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.domain.run_records import (
+    Bill,
     CallPrice,
-    Charge,
     CycleShareRecord,
+    Hold,
+    Release,
     TokenUsageRecord,
 )
 from promptpotter.domain.spend import (
@@ -192,7 +194,7 @@ class RunHold(NamedTuple):
     hold_id: str
 
     def bound(self) -> Budget:
-        return money_on(self.charges.path).runs[self.hold_id].held
+        return money_on(self.charges.path).holds[self.hold_id].bound
 
 
 # What an enclosing book files a nested run's sends as, as its ledger's copy of them does.
@@ -315,7 +317,7 @@ class SpendBook(Projection):
                 raise
 
     def _counted(self, record: TokenUsageRecord) -> None:
-        paid_by = None if record.charge is None else record.charge.key_source
+        paid_by = None if record.bill is None else record.bill.key_source
         if self.binds(record.price.kind):
             self._meter(*metered(record, self.meters), paid_by)
         else:
@@ -850,23 +852,14 @@ class Admission:
         try:
             held = self._hold(self._hold_id, bound)
             account_held = True
-            emit_spend_hold(node=label.node, charge=held, ledger=self._held_on)
+            self._emit(held)
         except BaseException:
             self._finish()
             book.release(self._held, bound, label.kind, paid_by)
-            # Nothing was sent: the account's hold closes at zero, or its bill keeps the bound forever.
+            # Nothing was sent: the account's hold closes, or the account holds its bound forever.
             if account_held:
-                self._charge(self._bound_price(0.0), 0)
+                self._charges.append(Release(hold_id=self._hold_id))
             raise
-
-    def _bound_price(self, usd: float | None) -> CallPrice:
-        return CallPrice(
-            kind=self._label.kind,
-            model=self._model,
-            provider=self._provider,
-            cost_usd=usd,
-            rate_priced_usd=None,
-        )
 
     def _price(self, part: Billed) -> _Part:
         price = call_price(
@@ -882,7 +875,7 @@ class Admission:
         self._unlanded.append(one)
         return one
 
-    def _write(self, one: _Part, charge: Charge) -> None:
+    def _write(self, one: _Part, bill: Bill) -> None:
         part = one.part
         record = token_usage_record(
             node=part.node or self._label.node,
@@ -890,7 +883,7 @@ class Admission:
             duration_s=(
                 time.monotonic() - self._started if part.duration_s is None else part.duration_s
             ),
-            money=charge,
+            money=bill,
             served_by=part.served_by,
             mirrored=self._root is not self._book,
         )
@@ -909,34 +902,31 @@ class Admission:
         if not self._book.saw(record):
             self._unseen.append(record)
 
-    def _hold(self, hold_id: str, bound: SendBound) -> Charge:
-        return self._append(
-            "held", hold_id, self._bound_price(None), 0, Budget(usd=bound.usd, tokens=bound.tokens)
-        )
-
-    def _charge(self, price: CallPrice, tokens: int) -> Charge:
-        return self._append("billed", self._hold_id, price, tokens, None)
-
-    def _append(
-        self,
-        state: Literal["held", "billed"],
-        hold_id: str,
-        price: CallPrice,
-        tokens: int,
-        bound: Budget | None,
-    ) -> Charge:
-        charge = Charge(
-            state=state,
+    def _hold(self, hold_id: str, bound: SendBound) -> Hold:
+        hold = Hold(
             hold_id=hold_id,
             parent=self._parent,
             key_source=self._paid_by,
-            call=price,
+            bound=Budget(usd=bound.usd, tokens=bound.tokens),
+        )
+        self._charges.append(hold)
+        return hold
+
+    def _emit(self, hold: Hold) -> None:
+        emit_spend_hold(
+            node=self._label.node, kind=self._label.kind, hold=hold, ledger=self._held_on
+        )
+
+    def _charge(self, price: CallPrice, tokens: int) -> Bill:
+        bill = Bill(
+            hold_id=self._hold_id,
+            key_source=self._paid_by,
+            price=price,
             tokens=tokens,
-            bound=bound,
             ledger=self._ledger,
         )
-        self._charges.append(charge)
-        return charge
+        self._charges.append(bill)
+        return bill
 
     def _bill(self, usd: float | None, tokens: int) -> None:
         if usd is None:
@@ -957,15 +947,18 @@ class Admission:
         """The book closes on every part and the unknown remainder whatever its writes do: a write
         that raises still leaves it settled whole, and the raise reaches the caller."""
         self._finish()
-        priced = [self._price(part) for part in parts or (Billed(TokenAccount(), 0.0),)]
+        priced = [self._price(part) for part in parts]
         try:
             # Every part is on the account before any ledger write can raise past the rest.
-            charges = [self._charge(one.price, one.tokens) for one in priced]
-            for one, charge in zip(priced, charges, strict=True):
-                self._write(one, charge)
+            bills = [self._charge(one.price, one.tokens) for one in priced]
+            if not parts:
+                released = Release(hold_id=self._hold_id)
+                self._charges.append(released)
+                append_record(released, self._held_on)
+            for one, bill in zip(priced, bills, strict=True):
+                self._write(one, bill)
             if unknown is not None:
-                left = self._hold(uuid.uuid4().hex, unknown)
-                emit_spend_hold(node=self._label.node, charge=left, ledger=self._held_on)
+                self._emit(self._hold(uuid.uuid4().hex, unknown))
         finally:
             self._close_book(unknown)
 
@@ -988,7 +981,6 @@ class Admission:
             )
 
     def release(self) -> None:
-        # A bill of nothing, so no later scan reads the hold as a send that ended unreported.
         self.settle()
 
     def unreported(self) -> None:
@@ -1054,10 +1046,10 @@ def unreported_on(ledger: Path) -> Unreported:
     own_left = [hold for hold in left if not draws_coupon(hold.key_source)]
     own_money = [hold for hold in money if not draws_coupon(hold.key_source)]
     return Unreported(
-        sum(hold.held.usd or 0.0 for hold in money),
-        sum(hold.held.tokens or 0 for hold in left),
+        sum(hold.bound.usd or 0.0 for hold in money),
+        sum(hold.bound.tokens or 0 for hold in left),
         len(money),
         tuple((CallLabel(node, kind), usd, tokens) for node, kind, usd, tokens in trail.dearest),
-        off_coupon_usd=sum(hold.held.usd or 0.0 for hold in own_money),
-        off_coupon_tokens=sum(hold.held.tokens or 0 for hold in own_left),
+        off_coupon_usd=sum(hold.bound.usd or 0.0 for hold in own_money),
+        off_coupon_tokens=sum(hold.bound.tokens or 0 for hold in own_left),
     )

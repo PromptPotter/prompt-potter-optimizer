@@ -595,6 +595,54 @@
       ],
       "shape": {
         "$defs": {
+          "Bill": {
+            "additionalProperties": false,
+            "description": "One answered part of a call, which closes the call's hold.",
+            "properties": {
+              "hold_id": {
+                "title": "Hold Id",
+                "type": "string"
+              },
+              "key_source": {
+                "enum": [
+                  "host",
+                  "user"
+                ],
+                "title": "Key Source",
+                "type": "string"
+              },
+              "ledger": {
+                "title": "Ledger",
+                "type": "string"
+              },
+              "price": {
+                "$ref": "#/$defs/CallPrice"
+              },
+              "record_type": {
+                "const": "bill",
+                "default": "bill",
+                "title": "Record Type",
+                "type": "string"
+              },
+              "timestamp": {
+                "title": "Timestamp",
+                "type": "string"
+              },
+              "tokens": {
+                "title": "Tokens",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "hold_id",
+              "key_source",
+              "price",
+              "tokens",
+              "ledger"
+            ],
+            "title": "Bill",
+            "type": "object"
+          },
           "Budget": {
             "additionalProperties": false,
             "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.",
@@ -721,6 +769,81 @@
             "title": "CallPrice",
             "type": "object"
           },
+          "Hold": {
+            "additionalProperties": false,
+            "description": "A run's or a call's hold on the account's money, open until a bill or a release closes it; a\nlater hold of the same id restates its bound.",
+            "properties": {
+              "bound": {
+                "$ref": "#/$defs/Budget"
+              },
+              "hold_id": {
+                "title": "Hold Id",
+                "type": "string"
+              },
+              "key_source": {
+                "enum": [
+                  "host",
+                  "user"
+                ],
+                "title": "Key Source",
+                "type": "string"
+              },
+              "parent": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Parent"
+              },
+              "record_type": {
+                "const": "hold",
+                "default": "hold",
+                "title": "Record Type",
+                "type": "string"
+              },
+              "timestamp": {
+                "title": "Timestamp",
+                "type": "string"
+              }
+            },
+            "required": [
+              "hold_id",
+              "parent",
+              "key_source",
+              "bound"
+            ],
+            "title": "Hold",
+            "type": "object"
+          },
+          "Release": {
+            "additionalProperties": false,
+            "description": "A hold closed with nothing more billed on it: a send never made, a run ended.",
+            "properties": {
+              "hold_id": {
+                "title": "Hold Id",
+                "type": "string"
+              },
+              "record_type": {
+                "const": "release",
+                "default": "release",
+                "title": "Record Type",
+                "type": "string"
+              },
+              "timestamp": {
+                "title": "Timestamp",
+                "type": "string"
+              }
+            },
+            "required": [
+              "hold_id"
+            ],
+            "title": "Release",
+            "type": "object"
+          },
           "TokenUsageKind": {
             "enum": [
               "optimizer",
@@ -732,98 +855,25 @@
             "type": "string"
           }
         },
-        "additionalProperties": false,
-        "description": "One line of the account's money: a hold at its bound under its parent hold, a run's or a\ncall's, then each answered part of a call billing it.",
-        "properties": {
-          "bound": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/Budget"
-              },
-              {
-                "type": "null"
-              }
-            ]
+        "discriminator": {
+          "mapping": {
+            "bill": "#/$defs/Bill",
+            "hold": "#/$defs/Hold",
+            "release": "#/$defs/Release"
           },
-          "call": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/CallPrice"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "hold_id": {
-            "title": "Hold Id",
-            "type": "string"
-          },
-          "key_source": {
-            "enum": [
-              "host",
-              "user"
-            ],
-            "title": "Key Source",
-            "type": "string"
-          },
-          "ledger": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ledger"
-          },
-          "parent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent"
-          },
-          "record_type": {
-            "const": "charge",
-            "default": "charge",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "held",
-              "billed"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "tokens": {
-            "title": "Tokens",
-            "type": "integer"
-          }
+          "propertyName": "record_type"
         },
-        "required": [
-          "state",
-          "hold_id",
-          "parent",
-          "key_source",
-          "call",
-          "tokens",
-          "bound",
-          "ledger"
-        ],
-        "title": "Charge",
-        "type": "object"
+        "oneOf": [
+          {
+            "$ref": "#/$defs/Hold"
+          },
+          {
+            "$ref": "#/$defs/Bill"
+          },
+          {
+            "$ref": "#/$defs/Release"
+          }
+        ]
       }
     },
     "check-in manifest": {

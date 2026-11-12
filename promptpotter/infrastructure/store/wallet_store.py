@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pydantic import Field, SecretStr, TypeAdapter
 
-from promptpotter.domain.run_records import Charge
+from promptpotter.domain.run_records import ChargeLine
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
@@ -120,12 +120,9 @@ class ChargeBook:
         self.account_dir = account_dir
         self.path = account_dir / CHARGES_FILE
 
-    def append(self, charge: Charge) -> None:
+    def append(self, line: ChargeLine) -> None:
         self.account_dir.mkdir(parents=True, exist_ok=True)
-        append_line(self.path, charge.model_dump_json().encode("utf-8"))
+        append_line(self.path, line.model_dump_json().encode("utf-8"))
 
     def held_on(self, ledger: Path) -> str:
         return Path(os.path.relpath(ledger, self.account_dir)).as_posix()
-
-    def ledger_of(self, hold: Charge) -> Path:
-        return self.account_dir / hold.landed_on

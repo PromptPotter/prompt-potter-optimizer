@@ -463,55 +463,45 @@ class CallPrice(FrozenModel):
         return bill_or_rate_usd(self.cost_usd, self.rate_priced_usd)
 
 
-class Charge(FrozenModel):
-    """One line of the account's money: a hold at its bound under its parent hold, a run's or a
-    call's, then each answered part of a call billing it."""
+class Hold(FrozenModel):
+    """A run's or a call's hold on the account's money, open until a bill or a release closes it; a
+    later hold of the same id restates its bound."""
 
-    record_type: Literal["charge"] = "charge"
-    state: Literal["held", "billed"]
+    record_type: Literal["hold"] = "hold"
     hold_id: str
-    # The hold it draws on, a bill its call's hold's: a call's its run's, an inner run's its
-    # enclosing run's; ``None`` on one drawing on the account alone.
+    # The hold it draws on: a call's its run's, an inner run's its enclosing run's; ``None`` draws
+    # on the account alone.
     parent: str | None
     key_source: KeySource
-    # The call's price: on its hold what it is held as, on a bill what it billed (both money fields
-    # ``None``: unpriced); ``None`` on a run's hold, which holds for every call under it.
-    call: CallPrice | None
-    # A bill's; 0 on a hold, whose tokens are its bound's.
-    tokens: int
-    # A hold's: the most it and every hold under it may draw (``None`` on an axis nothing bounds);
-    # ``None`` on a bill. A later hold of the same id restates it.
-    bound: Budget | None
-    # The ledger a call landed on, relative to the account; ``None`` on a run's hold.
-    ledger: str | None
+    # The most it and every hold under it may draw; ``None`` on an axis nothing bounds.
+    bound: Budget
     timestamp: str = Field(default_factory=utcnow_iso)
 
-    @model_validator(mode="after")
-    def _held_or_billed(self) -> Charge:
-        held, run = self.state == "held", self.call is None
-        if held != (self.bound is not None) or (held and self.tokens) or (not held and run):
-            raise ValueError(f"charge {self.hold_id}: a hold carries a bound, a bill a price")
-        if run != (self.ledger is None):
-            raise ValueError(f"charge {self.hold_id}: a call names its ledger, a run none")
-        return self
 
-    @property
-    def price(self) -> CallPrice:
-        if self.call is None:
-            raise ValueError(f"hold {self.hold_id} is a run's, which prices no call")
-        return self.call
+class Bill(FrozenModel):
+    """One answered part of a call, which closes the call's hold."""
 
-    @property
-    def held(self) -> Budget:
-        if self.bound is None:
-            raise ValueError(f"charge {self.hold_id} is a bill, which holds nothing")
-        return self.bound
+    record_type: Literal["bill"] = "bill"
+    hold_id: str
+    key_source: KeySource
+    # Both money fields ``None``: unpriced.
+    price: CallPrice
+    tokens: int
+    # The ledger the call landed on, relative to the account.
+    ledger: str
+    timestamp: str = Field(default_factory=utcnow_iso)
 
-    @property
-    def landed_on(self) -> str:
-        if self.ledger is None:
-            raise ValueError(f"hold {self.hold_id} is a run's, which lands on no ledger")
-        return self.ledger
+
+class Release(FrozenModel):
+    """A hold closed with nothing more billed on it: a send never made, a run ended."""
+
+    record_type: Literal["release"] = "release"
+    hold_id: str
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+# One line of the account's charge book (`store/wallet_store.py::ChargeBook`).
+ChargeLine = Annotated[Hold | Bill | Release, Field(discriminator="record_type")]
 
 
 class TokenUsageRecord(FrozenModel):
@@ -530,8 +520,8 @@ class TokenUsageRecord(FrozenModel):
     # The part of ``input_tokens`` billed at a premium to POPULATE that cache.
     cache_write_tokens: int = 0
     duration_s: float = 0.0
-    # A send's billed charge; a replay's recorded price alone, which no wallet paid.
-    money: Charge | CallPrice
+    # A send's bill; a replay's recorded price alone, which no wallet paid.
+    money: Bill | CallPrice
     # A nested run's own view of its call; money is summed off the copy on the outer ledger.
     mirrored: bool = False
     round: int | None = None
@@ -540,17 +530,17 @@ class TokenUsageRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
-    def charge(self) -> Charge | None:
+    def bill(self) -> Bill | None:
         """``None`` exactly on a replay."""
-        return self.money if isinstance(self.money, Charge) else None
+        return self.money if isinstance(self.money, Bill) else None
 
     @property
     def price(self) -> CallPrice:
-        return self.money.price if isinstance(self.money, Charge) else self.money
+        return self.money.price if isinstance(self.money, Bill) else self.money
 
     def filed_as(self, kind: TokenUsageKind) -> TokenUsageRecord:
         price = self.price.model_copy(update={"kind": kind})
-        money = price if self.charge is None else self.money.model_copy(update={"call": price})
+        money = price if self.bill is None else self.money.model_copy(update={"price": price})
         return self.model_copy(update={"money": money})
 
     @property
@@ -564,8 +554,9 @@ class SpendHoldRecord(FrozenModel):
 
     record_type: Literal["spend_hold"] = "spend_hold"
     node: str
-    # The account's `held` line of the same hold.
-    charge: Charge
+    kind: TokenUsageKind
+    # The account's line of the same hold.
+    hold: Hold
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -1400,6 +1391,7 @@ CycleRecord = Annotated[
     | RoundWarningRecord
     | StandingBudgetRecord
     | RunPhaseRecord
+    | Release
     | RunWiringRecord
     | SampleScoredRecord
     | SampleStartedRecord

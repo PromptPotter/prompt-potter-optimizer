@@ -139,8 +139,8 @@ from promptpotter.domain.ruler import (
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     ArmRecord,
+    Bill,
     CallPrice,
-    Charge,
     ElectionRecord,
     PipelineRead,
     RoundClosedRecord,
@@ -478,17 +478,8 @@ def billed_call(
     )
     record: dict[str, Any] = {"node": "l1_generate", "input_tokens": 1, "output_tokens": 0} | fields
     tokens = record["input_tokens"] + record["output_tokens"]
-    charge = Charge(
-        state="billed",
-        hold_id=hold_id,
-        parent=None,
-        key_source=key_source,
-        call=price,
-        tokens=tokens,
-        bound=None,
-        ledger="",
-    )
-    return TokenUsageRecord(money=price if replay else charge, **record)
+    bill = Bill(hold_id=hold_id, key_source=key_source, price=price, tokens=tokens, ledger="")
+    return TokenUsageRecord(money=price if replay else bill, **record)
 
 
 def loop_session(

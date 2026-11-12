@@ -1552,6 +1552,54 @@
         "title": "BenchStatus",
         "type": "object"
       },
+      "Bill": {
+        "additionalProperties": false,
+        "description": "One answered part of a call, which closes the call's hold.",
+        "properties": {
+          "hold_id": {
+            "title": "Hold Id",
+            "type": "string"
+          },
+          "key_source": {
+            "enum": [
+              "host",
+              "user"
+            ],
+            "title": "Key Source",
+            "type": "string"
+          },
+          "ledger": {
+            "title": "Ledger",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/CallPrice"
+          },
+          "record_type": {
+            "const": "bill",
+            "default": "bill",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold_id",
+          "key_source",
+          "price",
+          "tokens",
+          "ledger"
+        ],
+        "title": "Bill",
+        "type": "object"
+      },
       "Broken": {
         "additionalProperties": false,
         "description": "The bench's run-health rules stopped it.",
@@ -1828,100 +1876,6 @@
         ],
         "title": "CellSetName",
         "type": "string"
-      },
-      "Charge": {
-        "additionalProperties": false,
-        "description": "One line of the account's money: a hold at its bound under its parent hold, a run's or a\ncall's, then each answered part of a call billing it.",
-        "properties": {
-          "bound": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Budget"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "call": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CallPrice"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "hold_id": {
-            "title": "Hold Id",
-            "type": "string"
-          },
-          "key_source": {
-            "enum": [
-              "host",
-              "user"
-            ],
-            "title": "Key Source",
-            "type": "string"
-          },
-          "ledger": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ledger"
-          },
-          "parent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent"
-          },
-          "record_type": {
-            "const": "charge",
-            "default": "charge",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "held",
-              "billed"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "tokens": {
-            "title": "Tokens",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "state",
-          "hold_id",
-          "parent",
-          "key_source",
-          "call",
-          "tokens",
-          "bound",
-          "ledger"
-        ],
-        "title": "Charge",
-        "type": "object"
       },
       "CheckpointInputs": {
         "additionalProperties": false,
@@ -2420,6 +2374,7 @@
             "provider_hold": "#/components/schemas/ProviderHoldRecord",
             "race_catch_up": "#/components/schemas/RaceCatchUpRecord",
             "race_standing": "#/components/schemas/RaceStandingRecord",
+            "release": "#/components/schemas/Release",
             "resolved_run": "#/components/schemas/ResolvedRunRecord",
             "round_closed": "#/components/schemas/RoundClosedRecord",
             "round_entered": "#/components/schemas/RoundEnteredRecord",
@@ -2554,6 +2509,9 @@
           },
           {
             "$ref": "#/components/schemas/RunPhaseRecord"
+          },
+          {
+            "$ref": "#/components/schemas/Release"
           },
           {
             "$ref": "#/components/schemas/RunWiringRecord"
@@ -3577,6 +3535,56 @@
           "said"
         ],
         "title": "HealthRecord",
+        "type": "object"
+      },
+      "Hold": {
+        "additionalProperties": false,
+        "description": "A run's or a call's hold on the account's money, open until a bill or a release closes it; a\nlater hold of the same id restates its bound.",
+        "properties": {
+          "bound": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "hold_id": {
+            "title": "Hold Id",
+            "type": "string"
+          },
+          "key_source": {
+            "enum": [
+              "host",
+              "user"
+            ],
+            "title": "Key Source",
+            "type": "string"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "record_type": {
+            "const": "hold",
+            "default": "hold",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hold_id",
+          "parent",
+          "key_source",
+          "bound"
+        ],
+        "title": "Hold",
         "type": "object"
       },
       "IndividualLineage": {
@@ -6015,6 +6023,7 @@
               "provider_hold",
               "race_catch_up",
               "race_standing",
+              "release",
               "resolved_run",
               "round_closed",
               "round_entered",
@@ -6379,6 +6388,31 @@
           "reason"
         ],
         "title": "Reelection",
+        "type": "object"
+      },
+      "Release": {
+        "additionalProperties": false,
+        "description": "A hold closed with nothing more billed on it: a send never made, a run ended.",
+        "properties": {
+          "hold_id": {
+            "title": "Hold Id",
+            "type": "string"
+          },
+          "record_type": {
+            "const": "release",
+            "default": "release",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hold_id"
+        ],
+        "title": "Release",
         "type": "object"
       },
       "ResolvedRunRecord": {
@@ -8513,8 +8547,11 @@
         "additionalProperties": false,
         "description": "Written BEFORE the send, at its bound; unclosed, it binds every ceiling and is not spent.",
         "properties": {
-          "charge": {
-            "$ref": "#/components/schemas/Charge"
+          "hold": {
+            "$ref": "#/components/schemas/Hold"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TokenUsageKind"
           },
           "node": {
             "title": "Node",
@@ -8545,7 +8582,8 @@
         },
         "required": [
           "node",
-          "charge"
+          "kind",
+          "hold"
         ],
         "title": "SpendHoldRecord",
         "type": "object"
@@ -8810,7 +8848,7 @@
           "money": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Charge"
+                "$ref": "#/components/schemas/Bill"
               },
               {
                 "$ref": "#/components/schemas/CallPrice"

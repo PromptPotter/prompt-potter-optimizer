@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, ClassVar, NamedTuple
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
 from promptpotter.domain.run_records import (
     BankedSpend,
-    Charge,
+    Bill,
     SpendTombstoneRecord,
 )
 from promptpotter.domain.spend import (
@@ -32,7 +32,6 @@ from promptpotter.infrastructure.store.read_model import (
     RecordClasses,
     Spent,
     money_on,
-    still_held,
 )
 from promptpotter.infrastructure.store.wallet_store import ChargeBook
 
@@ -121,7 +120,7 @@ def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
     return sorted(sandbox.glob("*/campaigns/*/cycles/*")) if sandbox.is_dir() else []
 
 
-def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[Charge]:
+def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[Bill]:
     return [
         bill
         for bill in money_on(charges.path).bills
@@ -132,25 +131,7 @@ def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[Ch
 def account_bill(charges: ChargeBook) -> PaidSpend:
     """Every send the account made, a deleted campaign's and an L4 sandbox's included: no delete reaches a charge."""
     money = money_on(charges.path)
-    attached: dict[str, bool] = {}
-
-    def stopped(hold: Charge) -> bool:
-        # Whether what is held is unreported moves with the run, not the file: asked per read.
-        if hold.landed_on not in attached:
-            cycle_dir = CycleLayout.of_ledger(charges.ledger_of(hold)).cycle_dir
-            attached[hold.landed_on] = producer_attached(cycle_dir)
-        return not attached[hold.landed_on]
-
-    held = still_held(
-        (hold for hold in money.open.values() if stopped(hold)),
-        (hold for hold in money.unpriced if stopped(hold)),
-    )
-    return money.spent.billed.plus(held)
-
-
-def ledger_bills(charges: ChargeBook) -> dict[str, UserSpend]:
-    """What the box's keys billed per ledger (`Charge.ledger`)."""
-    return money_on(charges.path).on_coupon
+    return money.spent.billed.plus(money.unreported)
 
 
 def bank_spend(

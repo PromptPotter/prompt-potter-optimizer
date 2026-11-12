@@ -42,8 +42,9 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.run_records import (
     CampaignCeilingRecord,
-    Charge,
     CycleShareRecord,
+    Hold,
+    Release,
     StandingBudgetRecord,
 )
 from promptpotter.domain.said import Said
@@ -889,8 +890,8 @@ def change_budget(
                 requested, stores=stores, job_registry=job_registry, job=job, hop=hop, sends=sends
             )
             if job is not None:
-                hold = money_on(stores.charges.path).runs[job.job_id]
-                hold_run(stores, job.job_id, hold.held.over(reserve), parent=hold.parent)
+                hold = money_on(stores.charges.path).holds[job.job_id]
+                hold_run(stores, job.job_id, hold.bound.over(reserve), parent=hold.parent)
         move_campaign_money(
             change, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
         )
@@ -987,41 +988,31 @@ _ADMISSION_WINDOW_S = 1.0
 def hold_run(stores: Stores, hold_id: str, bound: Budget, *, parent: str | None) -> None:
     """THE run's hold on its account, opened at admission and restated by a set-limits: the
     coupon's reserve for it, which its book and every other launch's wallet read."""
-    stores.charges.append(
-        Charge(
-            state="held",
-            hold_id=hold_id,
-            parent=parent,
-            key_source="host",
-            call=None,
-            tokens=0,
-            bound=bound,
-            ledger=None,
-        )
-    )
+    stores.charges.append(Hold(hold_id=hold_id, parent=parent, key_source="host", bound=bound))
+
+
+def release_run(stores: Stores, hold_id: str) -> None:
+    """The run's hold closes with its job: by its release, or the sweep's for a dead producer."""
+    stores.charges.append(Release(hold_id=hold_id))
 
 
 def _live_holds(
     job_registry: JobRegistry, charges: ChargeBook, *, user_id: str, excluding_job_id: str | None
 ) -> Budget | None:
-    """What the live runs still hold of the coupon, each its hold's (`Money.held_back`), a nested
-    run's bills drawing on its enclosing run's. ``None`` fails closed on an unstamped sibling.
-    Exclusion is by job, never by hop."""
+    """What the open holds still hold of the coupon (`Money.held_back`). ``None`` fails closed on
+    an unstamped sibling, whose hold is not written yet. Exclusion is by job, never by hop."""
     running = job_registry.list_holding_spend(user_id=user_id)
     own = next((j for j in running if j.job_id == excluding_job_id), None)
     mine = None if own is None else (own.created_at, own.job_id)
-    money = money_on(charges.path)
-    held = NOTHING_METERED
-    for job in running:
-        if job.job_id == excluding_job_id:
-            continue
-        if not job.admitted:
-            # Only an EARLIER unstamped sibling blocks, or two simultaneous launches refuse each other.
-            if mine is None or (job.created_at, job.job_id) < mine:
-                return None
-            continue
-        held = held.plus(money.held_back(job.job_id))
-    return held
+    # Only an EARLIER unstamped sibling blocks, or two simultaneous launches refuse each other.
+    if any(
+        not job.admitted
+        and job.job_id != excluding_job_id
+        and (mine is None or (job.created_at, job.job_id) < mine)
+        for job in running
+    ):
+        return None
+    return money_on(charges.path).held_back(excluding_job_id)
 
 
 def _grace_bounded(remaining: float, spent: UserSpend) -> float:

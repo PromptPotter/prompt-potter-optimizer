@@ -6,7 +6,7 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.domain.run_records import Charge
+from promptpotter.domain.run_records import Bill
 from promptpotter.domain.spend import KEY_SOURCE_LABELS, bill_is_floor, calls_rate_priced
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_spend import account_usage
@@ -59,7 +59,7 @@ class ActivityResponse(StrictModel):
     group_by: ActivityGroupBy = Field(
         description="The colour axis: `model` is the exact model id, `api_key` the key that "
         "paid: the provider that billed the call, and whether the host's key under the coupon "
-        "or the account's own sent it (`Charge.key_source`)."
+        "or the account's own sent it (`Bill.key_source`)."
     )
     buckets: list[ActivityBucket]
     series_labels: list[str] = Field(
@@ -91,7 +91,7 @@ class ActivityResponse(StrictModel):
     )
 
 
-def _series_label(bill: Charge, group_by: ActivityGroupBy) -> str:
+def _series_label(bill: Bill, group_by: ActivityGroupBy) -> str:
     price = bill.price
     if group_by == "model":
         base = price.model or "unknown"

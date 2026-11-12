@@ -705,7 +705,7 @@ class _Timeline:
                 held.gates.append((at, record.run_phase is RunPhase.GATE))
             case RoundClosedRecord():
                 held.closes.append((at, record.round))
-            case TokenUsageRecord() if record.charge is not None:
+            case TokenUsageRecord() if record.bill is not None:
                 held.calls.append((at, record.price.kind, record.node, record.duration_s))
             case SampleScoredRecord():
                 facts = record.result.facts

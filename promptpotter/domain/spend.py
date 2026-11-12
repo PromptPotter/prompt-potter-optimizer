@@ -621,7 +621,7 @@ class SpendBucket(StrictModel):
         elif in_tok or out_tok:
             self.incurred_unpriced_tokens += in_tok + out_tok
 
-        if record.charge is not None:
+        if record.bill is not None:
             self.input_tokens += in_tok
             self.output_tokens += out_tok
             self.reasoning_tokens += int(record.reasoning_tokens)
@@ -891,7 +891,7 @@ def metered(record: TokenUsageRecord, meter: CeilingMeter) -> tuple[float | None
     price = record.price
     if price.kind not in METER_KINDS[meter]:
         return 0.0, 0
-    if record.charge is None:
+    if record.bill is None:
         return meter_usd(meter, sent=0.0, incurred=price.bill_or_rate_usd), 0
     usd = price.bill_or_rate_usd
     return meter_usd(meter, sent=usd, incurred=usd), record.input_tokens + record.output_tokens

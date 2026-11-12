@@ -2083,8 +2083,9 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
             for key, value in JOB_ADAPTER.dump_python(job, mode="json").items()
             if key not in ("ending", "stepped", "lapse")
         }
-        write_json(jobs.job_file(job.job_id), old | {"released_at": old["created_at"]} | bent)
-        return jobs.job_file(job.job_id)
+        written = jobs.jobs_dir / f"{job.job_id}.json"
+        write_json(written, old | {"released_at": old["created_at"]} | bent)
+        return written
 
     old_jobs = {
         released_before(stage=RunPhase.STARTING.value, refusal="over budget"): "refused",
@@ -2106,7 +2107,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         holder=CampaignLaunch("ds1"),
         stage=RunPhase.QUEUED,
     )
-    live_file = jobs.job_file(survivor.job_id)
+    live_file = jobs.jobs_dir / f"{survivor.job_id}.json"
     launch_as_written = {"dataset_name": "ds1", "draft_id": None, "kind": "campaign_launch"}
     write_json(
         live_file,

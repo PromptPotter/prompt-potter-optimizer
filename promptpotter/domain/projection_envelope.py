@@ -40,6 +40,7 @@ ProjectionKind = Literal[
     "provider_hold",
     "race_catch_up",
     "race_standing",
+    "release",
     "resolved_run",
     "round_closed",
     "round_entered",

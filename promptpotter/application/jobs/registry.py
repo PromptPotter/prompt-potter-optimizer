@@ -229,9 +229,6 @@ class JobRegistry:
     def jobs_dir(self) -> Path:
         return self._dir
 
-    def job_file(self, job_id: str) -> Path:
-        return self._path(job_id)
-
     def claimant_lock(self) -> Path:
         return this_producer_lock(self._dir)
 
@@ -434,12 +431,13 @@ class JobRegistry:
                     starts[job.holder.draft_id] = stage
         return starts
 
-    def reap_orphans(self) -> None:
+    def reap_orphans(self) -> list[Job]:
         """The sweep's, and no read's: releases each job whose producer is gone, reclaims that
         producer's file, moves a release launched before today among the ended, and deletes an
-        ended record released over `_ENDED_KEPT` ago."""
+        ended record released over `_ENDED_KEPT` ago. The jobs it released, as they stood."""
         today = utcnow_iso()[:10]
         kept_from = iso_z(datetime.now(UTC) - _ENDED_KEPT)
+        reaped: list[Job] = []
         with self.admission_gate():
             for path in self._dir.joinpath(ENDED_JOBS_DIR).glob("*.json"):
                 if (ended := self._read(path)) is not None and (
@@ -459,6 +457,8 @@ class JobRegistry:
                     )
                     self._end(job.job_id, lapse="orphaned")
                     reclaim_producer(self._dir, job.producer_id)
+                    reaped.append(job)
+        return reaped
 
     def _persist(self, job: Job, *, at: Path | None = None) -> None:
         write_json(at or self._path(job.job_id), JOB_ADAPTER.dump_python(job, mode="json"))

@@ -20,6 +20,7 @@ from promptpotter.application.jobs.quota import (
     land_job,
     move_campaign_money,
     next_launch_budget,
+    release_run,
     sends_on,
     share_campaign_ceiling,
     slot_rate,
@@ -109,14 +110,21 @@ class RunStart:
         self, ended: CycleResult | BaseException | None = None, *, stamps: CycleHop | None = None
     ) -> None:
         """A raise is the cycle's stop on *stamps* (a refused one ``NOT_ADMITTED``), and off a
-        cycle the claim goes; a result is what the run returned; nothing, a pass that returned."""
+        cycle the claim goes; a result is what the run returned; nothing, a pass that returned. An
+        admitted job's hold on the account closes with it."""
         match ended:
             case BaseException():
-                self._fail(ended, stamps)
+                job = self.job_registry.release(self.job_id, ended)
             case None:
-                self.job_registry.release(self.job_id)
+                job = self.job_registry.release(self.job_id)
             case _:
-                self.job_registry.release(self.job_id, ended.stop_reason, stepped=ended.stepped)
+                job = self.job_registry.release(
+                    self.job_id, ended.stop_reason, stepped=ended.stepped
+                )
+        if job is not None and job.admitted:
+            release_run(self.stores, self.job_id)
+        if isinstance(ended, BaseException):
+            self._fail(job, ended, stamps)
 
     def land(self, hop: CycleHop, held: HeldBudget) -> None:
         """The job onto the cycle its hold just minted, its share with it; a slotted job claims the
@@ -130,8 +138,7 @@ class RunStart:
             raise RuntimeError(f"job {self.job_id} was cleared while its cycle was minted")
         claim_cycle(self.stores, self.job_registry, promoted, hop)
 
-    def _fail(self, exc: BaseException, stamps: CycleHop | None) -> None:
-        job = self.job_registry.release(self.job_id, exc)
+    def _fail(self, job: Job | None, exc: BaseException, stamps: CycleHop | None) -> None:
         stop_reason = StopReason.NOT_ADMITTED if job is None or job.ending is None else job.ending
         stores = self.stores
         # Best-effort — it must never mask *exc*.
