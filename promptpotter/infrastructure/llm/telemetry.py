@@ -14,7 +14,6 @@ from promptpotter.domain.run_records import (
     Bill,
     CallPrice,
     CycleRecord,
-    Hold,
     PricedKeyRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
@@ -24,7 +23,6 @@ from promptpotter.domain.run_records import (
     RoundWarningSeverity,
     SampleScoredRecord,
     SampleStartedRecord,
-    SpendHoldRecord,
     TokenUsageRecord,
 )
 from promptpotter.domain.scoring import GradedCell, WalkedCell
@@ -280,12 +278,6 @@ def claim_campaign_price(key: str) -> bool:
 
 def claim_call_price(reuse_key: str) -> bool:
     return claim_campaign_price(f"call:{reuse_key}")
-
-
-def emit_spend_hold(
-    *, node: str, kind: TokenUsageKind, hold: Hold, ledger: CycleEventLog | None
-) -> None:
-    append_record(SpendHoldRecord(node=node, kind=kind, hold=hold, round=current_round()), ledger)
 
 
 def emit_error_record(

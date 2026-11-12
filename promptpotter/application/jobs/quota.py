@@ -320,7 +320,7 @@ def read_account_wallet(
     history = (
         ZERO_SPEND
         if excluding_campaign is None
-        else campaign_spend(stores.campaigns, excluding_campaign).host
+        else campaign_spend(stores.campaigns, stores.charges, excluding_campaign).host
     )
     held = _live_holds(
         stores, job_registry, user_id=user.user_id, excluding_job_id=excluding_job_id
@@ -975,7 +975,9 @@ _ADMISSION_WINDOW_S = 1.0
 def hold_run(stores: Stores, hold_id: str, bound: Budget, *, parent: str | None) -> None:
     """THE run's hold on its account, opened at admission and restated by a set-limits: the
     coupon's reserve for it, which its book and every other launch's wallet read."""
-    stores.charges.append(Hold(hold_id=hold_id, parent=parent, key_source="host", bound=bound))
+    stores.charges.append(
+        Hold(hold_id=hold_id, parent=parent, key_source="host", bound=bound, ledger=None)
+    )
 
 
 def release_run(stores: Stores, hold_id: str) -> None:

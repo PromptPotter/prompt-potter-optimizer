@@ -14,6 +14,7 @@ from promptpotter.domain.run_records import (
     CallPrice,
     CycleShareRecord,
     Hold,
+    Lapse,
     Release,
     TokenUsageRecord,
 )
@@ -27,6 +28,7 @@ from promptpotter.domain.spend import (
     Budget,
     CeilingMeter,
     KeySource,
+    PaidSpend,
     TokenAccount,
     TokenUsageKind,
     draws_coupon,
@@ -39,11 +41,11 @@ from promptpotter.infrastructure.llm.telemetry import (
     call_price,
     campaign_priced,
     current_round,
-    emit_spend_hold,
     filed_kind,
     token_usage_record,
 )
 from promptpotter.infrastructure.projections.base import Projection
+from promptpotter.infrastructure.store.account_spend import unreported_under
 from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -85,6 +87,10 @@ class SendBound:
     @property
     def tokens(self) -> int | None:
         return None if self.output_tokens is None else self.input_tokens + self.output_tokens
+
+    @property
+    def budget(self) -> Budget:
+        return Budget(usd=self.usd, tokens=self.tokens)
 
 
 # Tokens a provider may add around a request's own text: chat-template markers, a rendered schema.
@@ -396,15 +402,16 @@ class SpendBook(Projection):
                 left_t = limit_t - used_t - sum(v for k, v in out_t.items() if k != beside)
                 yield ErrorCategory.TOKEN_CEILING, reserve, _admits(left_t, bound.tokens, reserve)
 
-    def take_up(self, ledger: Path) -> Unreported:
+    def take_up(self, charges: ChargeBook, ledger: Path) -> PaidSpend:
         """The cycle's own prior, once at open: each bill counted as its send's was, a nested
-        run's copy included, then what stayed held."""
+        run's copy included, then what its sends left unreported on the account."""
         for record in money_on(ledger).usage:
             self._counted(record)
-        left = unreported_on(ledger)
-        self.usd_unreported, self.tokens_unreported = left.usd, left.tokens
-        self.off_coupon_usd += left.off_coupon_usd
-        self.off_coupon_tokens += left.off_coupon_tokens
+        left = unreported_under(charges, ledger)
+        self.usd_unreported = left.total.unreported_usd
+        self.tokens_unreported = left.total.unreported_tokens
+        self.off_coupon_usd += left.user.unreported_usd
+        self.off_coupon_tokens += left.user.unreported_tokens
         return left
 
     # These two plan cells alone, on what the cell's connector declares pays it.
@@ -707,10 +714,6 @@ class _Part(NamedTuple):
     tokens: int
 
 
-# Holds THIS process has out, so a ledger scan never reads one awaiting its bill as unreported.
-_OUT: set[str] = set()
-
-
 class Admission:
     def __init__(
         self,
@@ -734,11 +737,10 @@ class Admission:
         self._provider = provider
         self._started = time.monotonic()
         self._hold_id = uuid.uuid4().hex
-        # A nested run's holds and bills land on its ROOT's ledger; the account's charges take each once.
+        # A nested run's sends land on its ROOT's ledger; the account's charges take each once.
         self._root = book.root()
-        self._held_on = self._root.ledger or billing_ledger(label.node)
         self._charges = bound_account(label.node).charges
-        self._ledger = self._charges.held_on(self._held_on.path)
+        self._ledger = self._charges.held_on((self._root.ledger or billing_ledger(label.node)).path)
         self._parent = book.hold_id
         self._unseen: list[TokenUsageRecord] = []
         # Priced parts no ledger record carries yet, metered straight into the book at its close.
@@ -746,18 +748,19 @@ class Admission:
         self.closed = False
         what = f"{label.node} on {model}" if model else label.node
         book.hold(bound, label.kind, what=what, reservation=reservation, paid_by=paid_by)
-        _OUT.add(self._hold_id)
-        account_held = False
         try:
-            held = self._hold(self._hold_id, bound)
-            account_held = True
-            self._emit(held)
+            self._charges.append(
+                Hold(
+                    hold_id=self._hold_id,
+                    parent=self._parent,
+                    key_source=paid_by,
+                    bound=bound.budget,
+                    ledger=self._ledger,
+                )
+            )
         except BaseException:
             self._finish()
             book.release(bound, label.kind, paid_by)
-            # Nothing was sent: the account's hold closes, or the account holds its bound forever.
-            if account_held:
-                self._charges.append(Release(hold_id=self._hold_id))
             raise
 
     def _price(self, part: Billed) -> _Part:
@@ -801,21 +804,6 @@ class Admission:
         if not self._book.saw(record):
             self._unseen.append(record)
 
-    def _hold(self, hold_id: str, bound: SendBound) -> Hold:
-        hold = Hold(
-            hold_id=hold_id,
-            parent=self._parent,
-            key_source=self._paid_by,
-            bound=Budget(usd=bound.usd, tokens=bound.tokens),
-        )
-        self._charges.append(hold)
-        return hold
-
-    def _emit(self, hold: Hold) -> None:
-        emit_spend_hold(
-            node=self._label.node, kind=self._label.kind, hold=hold, ledger=self._held_on
-        )
-
     def _charge(self, price: CallPrice, tokens: int) -> Bill:
         bill = Bill(
             hold_id=self._hold_id,
@@ -850,14 +838,12 @@ class Admission:
         try:
             # Every part is on the account before any ledger write can raise past the rest.
             bills = [self._charge(one.price, one.tokens) for one in priced]
-            if not parts:
-                released = Release(hold_id=self._hold_id)
-                self._charges.append(released)
-                append_record(released, self._held_on)
+            if unknown is not None:
+                self._charges.append(Lapse(hold_id=self._hold_id, bound=unknown.budget))
+            elif not parts:
+                self._charges.append(Release(hold_id=self._hold_id))
             for one, bill in zip(priced, bills, strict=True):
                 self._write(one, bill)
-            if unknown is not None:
-                self._emit(self._hold(uuid.uuid4().hex, unknown))
         finally:
             self._close_book(unknown)
 
@@ -879,16 +865,15 @@ class Admission:
         self.settle()
 
     def unreported(self) -> None:
-        """Writes nothing: the hold stays open on the ledger, and the book keeps its bound held."""
         self._finish()
         self._book.unreported(self._bound, self._label.kind, self._paid_by)
+        self._charges.append(Lapse(hold_id=self._hold_id, bound=self._bound.budget))
 
     def _finish(self) -> None:
         if self.closed:
             # A second close would release the hold twice and admit sends on room nobody has.
             raise RuntimeError(f"{self._label.node}: an admission is closed once")
         self.closed = True
-        _OUT.discard(self._hold_id)
 
 
 @contextmanager
@@ -917,30 +902,3 @@ def admitted(
     finally:
         if not admission.closed:
             admission.unreported()
-
-
-class Unreported(NamedTuple):
-    usd: float
-    tokens: int
-    sends: int
-    # The part of the above held on the account's own keys, which its coupon never counts.
-    off_coupon_usd: float = 0.0
-    off_coupon_tokens: int = 0
-
-
-def unreported_on(ledger: Path) -> Unreported:
-    """``store/account_spend.py`` cannot see ``_OUT``; it asks the run's phase for liveness."""
-    # The ledger's OWN lines only: walking a fork chain holds the parent's open sends twice.
-    trail = money_on(ledger)
-    left = [hold for hold_id, hold in trail.open.items() if hold_id not in _OUT]
-    # A hold with no bound was admitted where no ceiling stood, and names no money to keep.
-    money = [*left, *trail.unpriced]
-    own_left = [hold for hold in left if not draws_coupon(hold.key_source)]
-    own_money = [hold for hold in money if not draws_coupon(hold.key_source)]
-    return Unreported(
-        sum(hold.bound.usd or 0.0 for hold in money),
-        sum(hold.bound.tokens or 0 for hold in left),
-        len(money),
-        off_coupon_usd=sum(hold.bound.usd or 0.0 for hold in own_money),
-        off_coupon_tokens=sum(hold.bound.tokens or 0 for hold in own_left),
-    )

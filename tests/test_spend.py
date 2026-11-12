@@ -206,12 +206,12 @@ from promptpotter.domain.run_records import (
     Hold,
     LaunchAnswer,
     PhaseRecord,
+    Release,
     RoundEnteredRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     SampleScoredRecord,
     SampleStartedRecord,
-    SpendHoldRecord,
     SpendTombstoneRecord,
     StandingBudgetRecord,
     TokenUsageRecord,
@@ -256,9 +256,9 @@ from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
     SpendBook,
     admitted,
+    bound_account,
     replied,
     reserved,
-    unreported_on,
 )
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.base import Projection
@@ -268,6 +268,7 @@ from promptpotter.infrastructure.store.account_spend import (
     billed_spend,
     campaign_spend,
     ledger_cost,
+    unreported_under,
 )
 from promptpotter.infrastructure.store.campaign_store import store as campaign_store_module
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -296,7 +297,7 @@ from promptpotter.infrastructure.store.read_model import (
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.infrastructure.store.wallet_store import CouponGrant
+from promptpotter.infrastructure.store.wallet_store import ChargeBook, CouponGrant
 from promptpotter.presentation.api.routers import commands as commands_api
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.errors import (
@@ -1525,6 +1526,18 @@ def _token_bills(ledger: CycleEventLog) -> list[TokenUsageRecord]:
     return [r for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
 
 
+def _charges() -> ChargeBook:
+    return bound_account("the test").charges
+
+
+def _unreported_sends(ledger: CycleEventLog) -> int:
+    """The account's sends on *ledger* left unreported (`Money.unreported_holds`)."""
+    charges = _charges()
+    on = charges.held_on(ledger.path)
+    whole, unpriced = money_on(charges.path).unreported_holds()
+    return sum(hold.ledger == on for hold in (*whole, *unpriced))
+
+
 @pytest.mark.usefixtures("offline")
 def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
@@ -2198,50 +2211,50 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
     assert any(isinstance(o, SendRefusedError) for o in outcomes), "the ceiling never bound"
     unreported = sum(isinstance(o, asyncio.CancelledError | httpx.ReadTimeout) for o in outcomes)
-    left_out = unreported_on(burst_ledger.path)
-    assert unreported and left_out.sends == unreported, "a send that left unbilled lost its hold"
+    charges = _charges()
+    left_out = unreported_under(charges, burst_ledger.path).host.unreported_usd
+    assert unreported and _unreported_sends(burst_ledger) == unreported, (
+        "a send that left unbilled lapsed nowhere"
+    )
     assert len(records) == sum(not isinstance(o, BaseException) for o in outcomes), (
         "a reply left no bill, or a failed send left one"
     )
-    assert book.usd_unreported == pytest.approx(left_out.usd), "the book forgot an open hold"
+    assert book.usd_unreported == pytest.approx(left_out), "the book forgot a lapsed send"
     assert book.usd_metered + book.usd_unreported <= ceiling_usd + 1e-12, (
-        "bills and open holds together ran past the ceiling"
+        "bills and lapsed sends together ran past the ceiling"
     )
-    # A hard exit runs no `finally`: the hold written ahead of the call is all that says it left.
+    # A hard exit runs no `finally`: the hold written ahead of the call is held while its job
+    # holds, and unreported at its bound once the job's hold closes.
     hold_usd = 0.0036
-    killed = SpendHoldRecord(
-        node="killed",
-        kind="optimizer",
-        hold=Hold(
-            hold_id="killed",
-            parent=None,
-            key_source="host",
-            bound=Budget(usd=hold_usd, tokens=2_100),
-        ),
+    killed = Hold(
+        hold_id="killed",
+        parent="reaped",
+        key_source="host",
+        bound=Budget(usd=hold_usd, tokens=2_100),
+        ledger=charges.held_on(burst_ledger.path),
     )
-    burst_ledger.append(killed)
-    account = billed_spend([burst_ledger.path]).host
+    charges.append(killed.model_copy(update={"hold_id": "reaped", "parent": None, "ledger": None}))
+    charges.append(killed)
+    assert _unreported_sends(burst_ledger) == unreported, "a send out under a live job lapsed"
+    charges.append(Release(hold_id="reaped"))
+    account = (
+        billed_spend([burst_ledger.path]).plus(unreported_under(charges, burst_ledger.path)).host
+    )
     assert account.used_usd == 0.0, "a price off our rate table was read as spent"
     assert account.rate_priced_usd == pytest.approx(recorded), "the rate-priced sum moved"
-    assert account.unreported_usd == pytest.approx(left_out.usd + hold_usd), (
+    assert account.unreported_usd == pytest.approx(left_out + hold_usd), (
         "a killed send's hold was not counted as out"
     )
-    assert unreported_on(burst_ledger.path).sends == unreported + 1, (
-        "a killed send's hold went unread"
-    )
+    assert _unreported_sends(burst_ledger) == unreported + 1, "a killed send's hold went unread"
     # A bill naming no price closes its hold in tokens alone; the money stays at the hold's bound.
     bare = CycleEventLog(tmp_path / "bare" / "ledger.jsonl")
-    bare.append(
-        SpendHoldRecord(
-            node="bare", kind="optimizer", hold=killed.hold.model_copy(update={"hold_id": "bare"})
-        )
-    )
-    bare.append(billed_call(node="bare", input_tokens=40, output_tokens=9, hold_id="bare"))
-    assert unreported_on(bare.path).usd == pytest.approx(hold_usd), (
+    on_bare = charges.held_on(bare.path)
+    charges.append(killed.model_copy(update={"hold_id": "bare", "parent": None, "ledger": on_bare}))
+    priceless = billed_call(node="bare", input_tokens=40, output_tokens=9, hold_id="bare").bill
+    assert priceless is not None
+    charges.append(priceless.model_copy(update={"ledger": on_bare}))
+    assert unreported_under(charges, bare.path).host.unreported_usd == pytest.approx(hold_usd), (
         "a priceless bill freed its hold"
-    )
-    assert billed_spend([bare.path]).host.unreported_usd == pytest.approx(hold_usd), (
-        "the account read a priceless bill as settling its hold"
     )
 
     # A nested run's send is admitted by its own book AND its root's, held and billed on the root's
@@ -2260,7 +2273,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "a nested send was not billed on its root's ledger"
     )
     assert [r.mirrored for r in _token_bills(nested)] == [True], "the nested copy bills twice"
-    assert unreported_on(root.path).sends == 0, "a billed nested send stayed held"
+    assert _unreported_sends(root) == 0, "a billed nested send stayed held"
     assert billed_spend([nested.path]).total.sent_usd == 0.0, "the nested ledger billed its mirror"
     assert ledger_cost([nested.path]).total.sent_usd == pytest.approx(
         billed_spend([root.path]).total.sent_usd
@@ -2290,7 +2303,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             provider="openai",
             paid_by="host",
         ).unreported()
-    assert unreported_on(root.path).sends == 1, "a nested send cut short was held nowhere"
+    assert _unreported_sends(root) == 1, "a nested send cut short lapsed nowhere"
     assert book.usd_unreported == pytest.approx(hold_usd), (
         "a nested send cut short stayed held on its own book and freed its root's"
     )
@@ -2319,21 +2332,22 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     wire.broken_once = True
     with _billing_on(held_ledger, book):
         jumping_clock(_owned_chat("tls"))
-    assert unreported_on(held_ledger.path).sends == 1, (
+    assert _unreported_sends(held_ledger) == 1, (
         "a TLS record fault after the request left is resent like a 5xx, and the broken send held"
     )
     wire.unbilled = True
     bills, spent_usd = len(_token_bills(held_ledger)), book.usd_metered
     with _billing_on(held_ledger, book):
         jumping_clock(_owned_chat("unbilled"))
-    assert unreported_on(held_ledger.path).sends == 2 and book.usd_metered == spent_usd, (
+    assert _unreported_sends(held_ledger) == 2 and book.usd_metered == spent_usd, (
         "a reply reporting no usage is a bill that never came: held, never settled at 0"
     )
     assert len(_token_bills(held_ledger)) == bills, "a reply with no usage wrote a bill"
     wire.unbilled = False
     nitro = CallLabel("nitro", "optimizer")
-    before, held_usd, spent_usd = (
-        unreported_on(held_ledger.path),
+    sends_before, before, held_usd, spent_usd = (
+        _unreported_sends(held_ledger),
+        unreported_under(charges, held_ledger.path).host,
         book.usd_unreported,
         book.usd_metered,
     )
@@ -2349,11 +2363,14 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         ).settle(Billed(TokenAccount(input=600, output=100), None))
     assert book.usd_metered == spent_usd, "a bill naming tokens and no price read as free"
     assert book.usd_unreported == pytest.approx(held_usd + hold_usd), "it was not held at its bound"
-    after = unreported_on(held_ledger.path)
-    assert (after.sends, after.tokens) == (before.sends + 1, before.tokens), (
-        "a priceless bill's hold was not counted as out"
+    after = unreported_under(charges, held_ledger.path).host
+    assert (_unreported_sends(held_ledger), after.unreported_tokens) == (
+        sends_before + 1,
+        before.unreported_tokens,
+    ), "a priceless bill's hold was not counted as out"
+    assert after.unreported_usd == pytest.approx(before.unreported_usd + hold_usd), (
+        "a priceless hold left its bound"
     )
-    assert after.usd == pytest.approx(before.usd + hold_usd), "a priceless hold left its bound"
 
     # One unit of work resends from one budget, whichever loop asks.
     async def two_rungs() -> None:
@@ -2650,10 +2667,12 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     assert purse.usd_metered == pytest.approx(cut_usd), (
         "the book read another bill than the turns wrote"
     )
-    out = unreported_on(turns_ledger.path)
+    out = unreported_under(_charges(), turns_ledger.path).host.unreported_usd
     assert whole.usd is not None
-    assert out.sends == 1 and out.usd < whole.usd / 100, f"a cancel left ${out.usd} unreported"
-    assert purse.usd_unreported == pytest.approx(out.usd), "the book held another sum than is out"
+    assert _unreported_sends(turns_ledger) == 1 and out < whole.usd / 100, (
+        f"a cancel left ${out} unreported"
+    )
+    assert purse.usd_unreported == pytest.approx(out), "the book held another sum than is out"
     assert purse.fits(whole, paid_by="host") == 1, "a cell's bound was not reserved whole"
     cut_short[0] = False
     with _billing_on(turns_ledger, purse):
@@ -2679,7 +2698,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             )
         )
     searched = spend_book(1.0, meters="search_incurred")
-    searched.take_up(prior.path)
+    searched.take_up(_charges(), prior.path)
     assert (searched.usd_metered, searched.off_coupon_usd, searched.beside_usd) == pytest.approx(
         (0.02, 0.02, 0.02)
     ), "a resume read an own key's bill as the box's, or lost a bill its meter skips"
@@ -3560,7 +3579,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     # A fork rebases the run onto another cycle: its bills draw its hold by the hold tree, never by
     # the ledger they landed on.
     biller.charges.append(
-        Hold(hold_id="forked", parent=live.job_id, key_source="host", bound=Budget(usd=0.02))
+        Hold(
+            hold_id="forked",
+            parent=live.job_id,
+            key_source="host",
+            bound=Budget(usd=0.02),
+            ledger="campaigns/camp-6b/cycles/cycle_forked01/events.jsonl",
+        )
     )
     biller.charges.append(
         Bill(
@@ -3583,7 +3608,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     # Liveness is the book's: the run's end closes its hold, and a send it left open is then
     # unreported at its bound; a call on no run holds the coupon for every other launch.
     biller.charges.append(
-        Hold(hold_id="left", parent=live.job_id, key_source="host", bound=Budget(usd=0.05))
+        Hold(
+            hold_id="left",
+            parent=live.job_id,
+            key_source="host",
+            bound=Budget(usd=0.05),
+            ledger="campaigns/camp-6b/cycles/cycle_forked01/events.jsonl",
+        )
     )
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.10), (
         "a send open under a live run's reserve was held twice"
@@ -3604,7 +3635,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     )
     _admitted(biller, billing, chat.job_id, Budget())
     biller.charges.append(
-        Hold(hold_id="turn", parent=chat.job_id, key_source="host", bound=Budget(usd=0.04))
+        Hold(
+            hold_id="turn",
+            parent=chat.job_id,
+            key_source="host",
+            bound=Budget(usd=0.04),
+            ledger="chat/events.jsonl",
+        )
     )
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.11), (
         "a call on no run held nothing of the coupon"
@@ -3826,9 +3863,9 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         "the account read another sum than its cycles billed"
     )
 
-    # An admission that fails past its hold frees the book's room and charges the account nothing.
-    def unwritable(**_: object) -> None:
-        raise OSError("the ledger's disk is full")
+    # An admission whose hold cannot be written frees the book's room and charges the account nothing.
+    def unwritable_line(_book: ChargeBook, _line: object) -> None:
+        raise OSError("the account's disk is full")
 
     root_hop = CycleHop(campaign_id="camp-2", cycle_id=root)
     bill, book = account_bill(stores.charges), spend_book(1.0)
@@ -3839,7 +3876,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         scoped(book=book),
         pytest.raises(OSError),
     ):
-        patched.setattr("promptpotter.infrastructure.llm.spend_book.emit_spend_hold", unwritable)
+        patched.setattr(ChargeBook, "append", unwritable_line)
         with admitted(
             CallLabel("backend", "backend"),
             SendBound(input_tokens=2_000, output_tokens=800, usd=0.5),
@@ -3913,7 +3950,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     )
     # A delete that dies after its bank and before the tree goes: the tombstone is its commit.
     camp_dir = stores.campaigns.campaign_root_dir("camp-2")
-    spent_before = campaign_spend(stores.campaigns, "camp-2")
+    spent_before = campaign_spend(stores.campaigns, stores.charges, "camp-2")
     owned_sandbox = inner_sandbox(stores, "camp-2", root)
     with monkeypatch.context() as patched:
 
@@ -3933,7 +3970,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert camp_dir.is_dir() and not owned_sandbox.exists(), (
         "a delete torn at its tree stranded the campaign's inner sandbox, which no retry reaches"
     )
-    assert campaign_spend(stores.campaigns, "camp-2") == spent_before, (
+    assert campaign_spend(stores.campaigns, stores.charges, "camp-2") == spent_before, (
         "a torn delete's rows counted beside its tombstone: the campaign's spend read twice"
     )
     torn_read = stores.campaigns.load_campaign("camp-2")
@@ -4121,8 +4158,11 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         "the Activity pane lost the sends of what was deleted, reset or never minted"
     )
 
-    # A settle whose remainder's hold cannot be written still closes the book whole: its part
-    # billed and the remainder held, never the whole bound held again on top of the bill.
+    # A settle whose ledger write fails still closes the book whole: its part billed and the
+    # remainder held, never the whole bound held again on top of the bill.
+    def unwritable(_record: object) -> None:
+        raise OSError("the ledger's disk is full")
+
     after_reset = CycleHop(campaign_id="camp-4", cycle_id=root)
     stores.campaigns.create_campaign(minted_campaign(after_reset))
     stores.campaigns.mint_cycle(after_reset)
@@ -4140,7 +4180,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
             paid_by="host",
         ) as send,
     ):
-        patched.setattr("promptpotter.infrastructure.llm.spend_book.emit_spend_hold", unwritable)
+        patched.setattr("promptpotter.infrastructure.llm.spend_book.append_record", unwritable)
         send.settle(
             Billed(TokenAccount(input=2_000, output=400), 0.2),
             unknown=SendBound(input_tokens=0, output_tokens=400, usd=0.1),

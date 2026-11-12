@@ -2040,7 +2040,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert [one.path for one in minting.unloadable] == [torn_dir]
     holders.release(holding.job_id, StopReason.CONVERGED)
     release_cycle(campaigns.cycle_dir(kept_hop))
-    spent = campaign_spend(campaigns, torn_hop.campaign_id)
+    spent = campaign_spend(campaigns, built_stores.charges, torn_hop.campaign_id)
     assert spent != NOTHING_PAID
     late_hop = CycleHop(campaign_id="c__cccccc", cycle_id="y")
     campaigns.mint_cycle(late_hop)
@@ -2061,9 +2061,10 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         f"a mint that wrote its manifest since the plan was deleted: {applied.said}"
     )
     assert unlanded is not None and unlanded.key is None and unlanded.said == applied.said
-    assert not torn_dir.exists() and campaign_spend(campaigns, torn_hop.campaign_id) == spent, (
-        "a torn mint was kept, or its spend left the account's bill with it"
-    )
+    assert (
+        not torn_dir.exists()
+        and campaign_spend(campaigns, built_stores.charges, torn_hop.campaign_id) == spent
+    ), "a torn mint was kept, or its spend left the account's bill with it"
 
     # A job released before its release named an ending is migrated off its own record, ledgers
     # unread: a refusal refused, any other orphaned (no live producer speaks for it), so a run

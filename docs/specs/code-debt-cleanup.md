@@ -192,12 +192,11 @@ row it closes.
   - a cell reserves in memory only (`spend_book.py::CellReservation`, with its own `draw` and the
     chain index in `SpendBook.hold`), so a reserved cell's hold is on no book
     (`Connector.holds_own_sends`);
-  - a call's `Hold` is written twice, on the account and inside a `SpendHoldRecord` on its ledger,
-    whose fold keeps its own liveness (`spend_book.py::_OUT`, `account_spend.py::_unreported_once_stopped`).
+  - a call's `Hold` is on the account, closed by a `Bill`, a `Release` or a `Lapse`.
 
   Action: one `Hold` at every depth, with a bound and a parent hold, on one book. A draw goes against
   the nearest open parent, and the open part is the bound less its children's holds and bills, read by
-  `read_model.py::money_on`. `CellReservation` and the ledger's copy go. **Rides with:** holds nest
+  `read_model.py::money_on`. `CellReservation` goes. **Rides with:** holds nest
   (roadmap § Sequence, Phase 2). **Re-test:** `git grep -n "class CellReservation" -- promptpotter`
   is empty.
 - **The campaign store reaches into the LLM layer for a ledger read**: `campaign_store/store.py:58`

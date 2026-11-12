@@ -1116,14 +1116,6 @@
             "title": "Unpriced Tokens",
             "type": "integer"
           },
-          "unreported_tokens": {
-            "title": "Unreported Tokens",
-            "type": "integer"
-          },
-          "unreported_usd": {
-            "title": "Unreported Usd",
-            "type": "number"
-          },
           "used_tokens": {
             "title": "Used Tokens",
             "type": "integer"
@@ -1137,9 +1129,7 @@
           "used_usd",
           "rate_priced_usd",
           "used_tokens",
-          "unpriced_tokens",
-          "unreported_usd",
-          "unreported_tokens"
+          "unpriced_tokens"
         ],
         "title": "BankedSpend",
         "type": "object"
@@ -2374,7 +2364,6 @@
             "provider_hold": "#/components/schemas/ProviderHoldRecord",
             "race_catch_up": "#/components/schemas/RaceCatchUpRecord",
             "race_standing": "#/components/schemas/RaceStandingRecord",
-            "release": "#/components/schemas/Release",
             "resolved_run": "#/components/schemas/ResolvedRunRecord",
             "round_closed": "#/components/schemas/RoundClosedRecord",
             "round_entered": "#/components/schemas/RoundEnteredRecord",
@@ -2387,7 +2376,6 @@
             "sample_started": "#/components/schemas/SampleStartedRecord",
             "scoring_locked": "#/components/schemas/ScoringLockedRecord",
             "spawned": "#/components/schemas/SpawnedRecord",
-            "spend_hold": "#/components/schemas/SpendHoldRecord",
             "spend_tombstone": "#/components/schemas/SpendTombstoneRecord",
             "standing_budget": "#/components/schemas/StandingBudgetRecord",
             "token_usage": "#/components/schemas/TokenUsageRecord",
@@ -2511,9 +2499,6 @@
             "$ref": "#/components/schemas/RunPhaseRecord"
           },
           {
-            "$ref": "#/components/schemas/Release"
-          },
-          {
             "$ref": "#/components/schemas/RunWiringRecord"
           },
           {
@@ -2527,9 +2512,6 @@
           },
           {
             "$ref": "#/components/schemas/SpawnedRecord"
-          },
-          {
-            "$ref": "#/components/schemas/SpendHoldRecord"
           },
           {
             "$ref": "#/components/schemas/SpendTombstoneRecord"
@@ -3535,56 +3517,6 @@
           "said"
         ],
         "title": "HealthRecord",
-        "type": "object"
-      },
-      "Hold": {
-        "additionalProperties": false,
-        "description": "A run's or a call's hold on the account's money, open until a bill or a release closes it; a\nlater hold of the same id restates its bound.",
-        "properties": {
-          "bound": {
-            "$ref": "#/components/schemas/Budget"
-          },
-          "hold_id": {
-            "title": "Hold Id",
-            "type": "string"
-          },
-          "key_source": {
-            "enum": [
-              "host",
-              "user"
-            ],
-            "title": "Key Source",
-            "type": "string"
-          },
-          "parent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent"
-          },
-          "record_type": {
-            "const": "hold",
-            "default": "hold",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "hold_id",
-          "parent",
-          "key_source",
-          "bound"
-        ],
-        "title": "Hold",
         "type": "object"
       },
       "IndividualLineage": {
@@ -6023,7 +5955,6 @@
               "provider_hold",
               "race_catch_up",
               "race_standing",
-              "release",
               "resolved_run",
               "round_closed",
               "round_entered",
@@ -6036,7 +5967,6 @@
               "sample_started",
               "scoring_locked",
               "spawned",
-              "spend_hold",
               "spend_tombstone",
               "standing_budget",
               "token_usage",
@@ -6388,31 +6318,6 @@
           "reason"
         ],
         "title": "Reelection",
-        "type": "object"
-      },
-      "Release": {
-        "additionalProperties": false,
-        "description": "A hold closed with nothing more billed on it: a send never made, a run ended.",
-        "properties": {
-          "hold_id": {
-            "title": "Hold Id",
-            "type": "string"
-          },
-          "record_type": {
-            "const": "release",
-            "default": "release",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "hold_id"
-        ],
-        "title": "Release",
         "type": "object"
       },
       "ResolvedRunRecord": {
@@ -8541,51 +8446,6 @@
           "spawned_by"
         ],
         "title": "SpawnedRecord",
-        "type": "object"
-      },
-      "SpendHoldRecord": {
-        "additionalProperties": false,
-        "description": "Written BEFORE the send, at its bound; unclosed, it binds every ceiling and is not spent.",
-        "properties": {
-          "hold": {
-            "$ref": "#/components/schemas/Hold"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/TokenUsageKind"
-          },
-          "node": {
-            "title": "Node",
-            "type": "string"
-          },
-          "record_type": {
-            "const": "spend_hold",
-            "default": "spend_hold",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Round"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node",
-          "kind",
-          "hold"
-        ],
-        "title": "SpendHoldRecord",
         "type": "object"
       },
       "SpendTombstoneRecord": {

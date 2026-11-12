@@ -29,8 +29,8 @@ from promptpotter.domain.run_records import (
     Bill,
     CycleRecord,
     Hold,
+    Lapse,
     Release,
-    SpendHoldRecord,
     TokenUsageRecord,
     stale_file_warning,
 )
@@ -783,14 +783,11 @@ class Spent(NamedTuple):
     # What its own sends billed: the cost less the mirrored sends a nested run's own ledger bills.
     billed: PaidSpend
 
-    def plus(self, spent: Spent, held: PaidSpend) -> Spent:
-        """*held* is the ledger's own holds, which both sums carry."""
-        return Spent(
-            self.cost.plus(spent.cost).plus(held), self.billed.plus(spent.billed).plus(held)
-        )
+    def plus(self, spent: Spent) -> Spent:
+        return Spent(self.cost.plus(spent.cost), self.billed.plus(spent.billed))
 
 
-MoneyRecord = Hold | Bill | Release | SpendHoldRecord | TokenUsageRecord
+MoneyRecord = Hold | Bill | Release | Lapse | TokenUsageRecord
 
 
 class Money(NamedTuple):
@@ -806,6 +803,8 @@ class Money(NamedTuple):
     # The holds a bill closed in tokens alone, naming neither a provider's figure nor a rate's
     # price: the bound's money stays held.
     unpriced: tuple[Hold, ...]
+    # Each send a lapse closed, at what it may have cost.
+    lapsed: tuple[Hold, ...]
     bills: tuple[Bill, ...]
     # Every call, a replay included, as each meter counts it.
     usage: tuple[TokenUsageRecord, ...]
@@ -813,10 +812,6 @@ class Money(NamedTuple):
     by_round: dict[int, SpendRollup]
     calls: int
     worked_s: float
-
-    @property
-    def held(self) -> PaidSpend:
-        return still_held(self.open.values(), self.unpriced)
 
     def holding(self, hold_id: str) -> bool:
         """Whether *hold_id* and every hold above it is still open."""
@@ -827,14 +822,19 @@ class Money(NamedTuple):
             above = self.open[above].parent
         return True
 
+    def unreported_holds(self) -> tuple[list[Hold], list[Hold]]:
+        """The sends no open hold covers, at their bound and at its money alone: each hold left
+        open under a closed one, and each lapsed or unpriced one whose parent no longer holds."""
+
+        def gone(hold: Hold) -> bool:
+            return hold.parent is None or not self.holding(hold.parent)
+
+        left = [hold for hold in self.open.values() if not self.holding(hold.hold_id)]
+        return [*left, *filter(gone, self.lapsed)], list(filter(gone, self.unpriced))
+
     @property
     def unreported(self) -> PaidSpend:
-        """What sends no open hold covers may have cost: each hold left open under a closed one,
-        and each unpriced one whose parent no longer holds."""
-        return still_held(
-            (hold for hold in self.open.values() if not self.holding(hold.hold_id)),
-            (h for h in self.unpriced if h.parent is None or not self.holding(h.parent)),
-        )
+        return still_held(*self.unreported_holds())
 
     def held_back(self, excluding: str | None) -> Budget:
         """What the open holds on the account still hold of its coupon, from each root but
@@ -863,7 +863,8 @@ class Money(NamedTuple):
 
 class _Money:
     """THE fold of money: a hold opens under its parent, each bill closes a call's and draws on
-    every hold above it, a release closes one, a replay is priced and charges nothing."""
+    every hold above it, a release closes one, a lapse closes a call's at what it may have cost, a
+    replay is priced and charges nothing."""
 
     records: ClassVar[RecordClasses] = get_args(MoneyRecord)
 
@@ -873,6 +874,7 @@ class _Money:
         self._drawn: dict[str, PaidSpend] = {}
         self._holds: dict[str, Hold] = {}
         self._unpriced: dict[str, Hold] = {}
+        self._lapsed: list[Hold] = []
         self._bills: list[Bill] = []
         self._usage: list[TokenUsageRecord] = []
         self._usd: dict[CeilingMeter, float] = dict.fromkeys(get_args(CeilingMeter), 0.0)
@@ -886,14 +888,16 @@ class _Money:
     def feed(self, record: MoneyRecord) -> None:
         self._view = None
         match record:
-            case SpendHoldRecord():
-                self._hold(record.hold)
             case Hold():
                 self._hold(record)
             case Bill():
                 self._bill(record, mirrored=False)
             case Release():
                 self._open.pop(record.hold_id, None)
+            case Lapse():
+                self._open.pop(record.hold_id, None)
+                lapsed = self._holds[record.hold_id].model_copy(update={"bound": record.bound})
+                self._lapsed.append(lapsed)
             case TokenUsageRecord():
                 self._call(record)
             case _:
@@ -942,6 +946,7 @@ class _Money:
                 dict(self._holds),
                 dict(self._drawn),
                 tuple(self._unpriced.values()),
+                tuple(self._lapsed),
                 tuple(self._bills),
                 tuple(self._usage),
                 {m: Budget.amount(self._usd[m], self._tokens[m]) for m in self._usd},

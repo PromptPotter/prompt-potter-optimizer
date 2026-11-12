@@ -475,6 +475,8 @@ class Hold(FrozenModel):
     key_source: KeySource
     # The most it and every hold under it may draw; ``None`` on an axis nothing bounds.
     bound: Budget
+    # The ledger a call's sends land on, relative to the account; ``None`` on a job's hold.
+    ledger: str | None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -500,8 +502,18 @@ class Release(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class Lapse(FrozenModel):
+    """A send that may have billed and reported nothing: it closes its call's hold, and *bound* is
+    what it may have cost, unreported once the hold above it closes."""
+
+    record_type: Literal["lapse"] = "lapse"
+    hold_id: str
+    bound: Budget
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 # One line of the account's charge book (`store/wallet_store.py::ChargeBook`).
-ChargeLine = Annotated[Hold | Bill | Release, Field(discriminator="record_type")]
+ChargeLine = Annotated[Hold | Bill | Release | Lapse, Field(discriminator="record_type")]
 
 
 class TokenUsageRecord(FrozenModel):
@@ -549,18 +561,6 @@ class TokenUsageRecord(FrozenModel):
         return 0 if self.round is None else self.round
 
 
-class SpendHoldRecord(FrozenModel):
-    """Written BEFORE the send, at its bound; unclosed, it binds every ceiling and is not spent."""
-
-    record_type: Literal["spend_hold"] = "spend_hold"
-    node: str
-    kind: TokenUsageKind
-    # The account's line of the same hold.
-    hold: Hold
-    round: int | None = None
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
 class PricedKeyRecord(FrozenModel):
     """A key the search has PRICED, so a later read of it, resumed or not, prices nothing again."""
 
@@ -577,13 +577,16 @@ class BankedSpend(FrozenModel):
     rate_priced_usd: float
     used_tokens: int
     unpriced_tokens: int
-    # What its unreported sends may have cost (`SpendHoldRecord`) — banked apart, as it is read.
-    unreported_usd: float
-    unreported_tokens: int
 
     @classmethod
     def of(cls, spent: UserSpend) -> BankedSpend:
-        return cls(**spent._asdict())
+        """Bills alone: an unreported send's cost stays on the account (`Lapse`), past any delete."""
+        return cls(
+            used_usd=spent.used_usd,
+            rate_priced_usd=spent.rate_priced_usd,
+            used_tokens=spent.used_tokens,
+            unpriced_tokens=spent.unpriced_tokens,
+        )
 
     @property
     def spend(self) -> UserSpend:
@@ -1391,13 +1394,11 @@ CycleRecord = Annotated[
     | RoundWarningRecord
     | StandingBudgetRecord
     | RunPhaseRecord
-    | Release
     | RunWiringRecord
     | SampleScoredRecord
     | SampleStartedRecord
     | ScoringLockedRecord
     | SpawnedRecord
-    | SpendHoldRecord
     | SpendTombstoneRecord
     | TrailTombstoneRecord
     | TokenUsageRecord,

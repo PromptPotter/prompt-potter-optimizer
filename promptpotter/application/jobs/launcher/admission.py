@@ -592,13 +592,16 @@ def open_spend_book(
         opened=opened,
         cycle=LiveCycle(stores.campaigns, hop) if live and hop is not None else None,
     )
-    if hop is not None and (unreported := book.take_up(stores.campaigns.ledger(hop))).sends:
+    if hop is None:
+        return book
+    left = book.take_up(stores.charges, stores.campaigns.ledger(hop)).total
+    if left.unreported_usd or left.unreported_tokens:
         logger.warning(
-            "%d paid send(s) on %s ended unpriced; the ceiling holds up to $%.4f for them, and "
-            "no surface counts it as spent.",
-            unreported.sends,
+            "paid sends on %s reported no bill; the ceiling holds up to $%.4f and %d tokens for "
+            "them as unreported.",
             hop,
-            unreported.usd,
+            left.unreported_usd,
+            left.unreported_tokens,
         )
     return book
 

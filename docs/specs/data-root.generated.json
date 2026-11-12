@@ -788,6 +788,17 @@
                 "title": "Key Source",
                 "type": "string"
               },
+              "ledger": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Ledger"
+              },
               "parent": {
                 "anyOf": [
                   {
@@ -814,9 +825,39 @@
               "hold_id",
               "parent",
               "key_source",
-              "bound"
+              "bound",
+              "ledger"
             ],
             "title": "Hold",
+            "type": "object"
+          },
+          "Lapse": {
+            "additionalProperties": false,
+            "description": "A send that may have billed and reported nothing: it closes its call's hold, and *bound* is\nwhat it may have cost, unreported once the hold above it closes.",
+            "properties": {
+              "bound": {
+                "$ref": "#/$defs/Budget"
+              },
+              "hold_id": {
+                "title": "Hold Id",
+                "type": "string"
+              },
+              "record_type": {
+                "const": "lapse",
+                "default": "lapse",
+                "title": "Record Type",
+                "type": "string"
+              },
+              "timestamp": {
+                "title": "Timestamp",
+                "type": "string"
+              }
+            },
+            "required": [
+              "hold_id",
+              "bound"
+            ],
+            "title": "Lapse",
             "type": "object"
           },
           "Release": {
@@ -859,6 +900,7 @@
           "mapping": {
             "bill": "#/$defs/Bill",
             "hold": "#/$defs/Hold",
+            "lapse": "#/$defs/Lapse",
             "release": "#/$defs/Release"
           },
           "propertyName": "record_type"
@@ -872,6 +914,9 @@
           },
           {
             "$ref": "#/$defs/Release"
+          },
+          {
+            "$ref": "#/$defs/Lapse"
           }
         ]
       }
