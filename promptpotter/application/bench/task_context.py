@@ -237,7 +237,7 @@ async def run_checkin(
     """Every record the call writes lands on *ledger*, bound for it: no run scope stands at a turn."""
     with scoped(ledger=ledger):
         raw, _prompt, repair_attempts = await run_optimizer_node(
-            template=checkin_template(),
+            fields={},
             prompt_vars={"consultation_instruction": consultation_instruction},
             response_model=response_model,
             user_content=user_content,
@@ -258,6 +258,7 @@ def checkin_call_context(stores: Stores, ledger: CycleEventLog) -> LLMCallContex
     return LLMCallContext(
         node=CHECKIN_NODE,
         config=checkin_manifest().config,
+        template=checkin_template(),
         ledger=ledger,
         round_num=0,
         cache=stores.optimizer_reuse,

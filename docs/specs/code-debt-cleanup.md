@@ -236,17 +236,6 @@ row it closes.
   reads an arm with no shared cells as a 0.0 mean, so a replay over a round that lacks the arm confirms
   it instead of answering it absent. Action: an arm with no shared cells is absent, as in the race's
   replay. **Re-test:** `pytest tests/test_archive.py -k replays_its_decisions` covers `population_kept`.
-- **An optimizer node's template rides beside its config**: `llm_call.py::run_optimizer_node` takes a
-  filled `template` and an `LLMCallContext` whose `config` named it (`critique.py::distil_critique`,
-  `firing.py::_run_transition`, `task_context.py::run_checkin`, `generate.py:133`), so the two can
-  disagree. Action: the call context carries the running template its fill reads. **Rides with:**
-  the rest of rk-opt link 4. **Re-test:** `git grep -n "template=filled" -- promptpotter`.
-- **An edited template's unknown slot is refused at dispatch, not at selection, and names no address**:
-  `dispatch/injections/registry.py` validates what `dispatch/prompts.py::load_optimizer_prompt` loads,
-  and `optimizer_manifest.py::_select` cannot reach potter's `injection_table()`. Action: a member hook
-  names its known slots and selection calls it, refusing by config address. **Rides with:** the rest
-  of rk-opt link 4. **Re-test:** an overlay holding `{{typo}}` is refused at `new`, naming
-  `optimization.nodes.l1_generate.config.instruction`.
 - **`tests/test_identity.py` reaches the spawn's private `_laid_arm`** (`_l4_arm`, `_l4_laid`, the depth
   step). Action: the journey drives `_open_seat` over an offline inner campaign. **Rides with:**
   the rest of rk-opt link 4. **Re-test:** `grep -n "_laid_arm" tests/test_identity.py` is empty.

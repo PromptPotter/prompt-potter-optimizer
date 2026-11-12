@@ -12,9 +12,6 @@ from promptpotter.application.optimizers.potter.dispatch.injections.panels impor
     clustered_sample_ids,
     detectable_rows,
 )
-from promptpotter.application.optimizers.potter.dispatch.prompts import (
-    load_optimizer_prompt,
-)
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     CLUSTER_ROWS_MIN,
     L1CritiqueOutput,
@@ -30,14 +27,16 @@ if TYPE_CHECKING:
 async def distil_critique(ctx: NodeContext) -> Critique:
     """Of the round *ctx* stands on, whether the round adapts or a later walk re-runs it; the readout a dict so persistence does not drag Pydantic into the domain serialization path."""
     bundle = build_bundle(ctx, ctx.slice(Ladder))
-    filled = DispatchHub.fill(load_optimizer_prompt(ctx, "l1_critique"), bundle, node="l1_critique")
+    context = ctx.read(Calls).call_context()
+    filled = DispatchHub.fill(context.template, bundle, node=context.node)
     # A cluster an edit could fix whole and still not separate from its parent is noise to target.
     least = max(CLUSTER_ROWS_MIN, detectable_rows(bundle) or 0)
     result, _prompt, _repairs = await run_optimizer_node(
+        context=context,
+        fields=filled.fields,
         prompt_vars=filled.injection_vars,
-        template=filled.template,
+        injections=filled.breakdown,
         response_model=critique_response_model(frozenset(clustered_sample_ids(bundle)), least),
-        context=ctx.read(Calls).call_context(filled.breakdown),
     )
     assert isinstance(result, L1CritiqueOutput), (
         f"l1_critique must return L1CritiqueOutput, got {type(result).__name__}"

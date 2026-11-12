@@ -42,6 +42,8 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
@@ -65,18 +67,21 @@ class InjectionBreakdown:
     dropped: dict[str, int] = field(default_factory=dict)
 
 
+_NO_INJECTIONS = InjectionBreakdown()
+
+
 @dataclass(frozen=True, kw_only=True)
 class LLMCallContext:
-    # The calling node and its config as its selection resolved it: the one source a call lays over.
+    # The calling node, its config and the template that config runs, as one selection resolved them.
     node: str
     config: NodeConfig
+    template: OptimizerPromptTemplate
     cache: LLMReuseCache
     # Drawn per call off the run's clamp (`Cycle.rng`); it keys the reuse cache. None outside a run.
     seed: int | None
     ledger: CycleEventLog | None = None
     round_num: int | None = None
     candidate_idx: int | None = None
-    injections: InjectionBreakdown = field(default_factory=InjectionBreakdown)
 
 
 # What a node declaring no temperature samples at.
@@ -131,6 +136,7 @@ class _Call:
     response_model: type[BaseModel] | None
     response_schema: dict[str, Any] | None
     context: LLMCallContext
+    injections: InjectionBreakdown
     started: float
     call_id: str
 
@@ -188,8 +194,7 @@ def _reuse_key(
 
 
 def _announce(call: _Call) -> None:
-    context, label = call.context, call.label
-    injections = context.injections
+    context, label, injections = call.context, call.label, call.injections
     prompt_chars = sum(len(m.get("content") or "") for m in call.messages)
     start_record = LLMCallStartRecord(
         call_id=call.call_id,
@@ -322,6 +327,7 @@ async def llm_call(
     messages: list[ChatMessage],
     *,
     context: LLMCallContext,
+    injections: InjectionBreakdown = _NO_INJECTIONS,
     trace_meta: dict[str, Any] | None = None,
     response_model: type[BaseModel] | None = None,
     response_schema: dict[str, Any] | None = None,
@@ -336,6 +342,7 @@ async def llm_call(
         response_model=response_model,
         response_schema=response_schema,
         context=context,
+        injections=injections,
         started=time.monotonic(),
         call_id=uuid.uuid4().hex if context.ledger is not None else "",
     )
@@ -373,14 +380,16 @@ async def llm_call(
 
 async def run_optimizer_node(
     *,
-    template: OptimizerPromptTemplate,
+    context: LLMCallContext,
+    fields: Mapping[str, str],
     prompt_vars: dict[str, Any],
     response_model: type[BaseModel] | None,
+    injections: InjectionBreakdown = _NO_INJECTIONS,
     temperature: float | None = None,
     response_schema: dict[str, Any] | None = None,
     user_content: str | None = None,
-    context: LLMCallContext,
 ) -> tuple[Any, str, int]:
+    template = context.template.model_copy(update=dict(fields))
     prompt = template.compile_prompt(**prompt_vars)
     if user_content is not None:
         messages: list[ChatMessage] = [
@@ -394,6 +403,7 @@ async def run_optimizer_node(
         response_model=response_model,
         response_schema=response_schema,
         context=context,
+        injections=injections,
         trace_meta={
             "template_name": context.node,
             "template_fields": template.prompt_fields(),
