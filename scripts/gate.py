@@ -1409,7 +1409,7 @@ CHECKS: tuple[Check, ...] = (
         "py",
         _pytest,
         reads=_suite_reads,
-        ceiling_mb=331,  # 38 MB above a measured warm 293 MB: a 40 MB growth is red
+        ceiling_mb=375,  # 38 MB above a measured warm 337 MB: a 40 MB growth is red
     ),
     # The script keeps a green per optimizer, keyed on the sources that optimizer reaches, so a run
     # by hand answers for it and a pushed tip reruns only the optimizers whose sources moved.

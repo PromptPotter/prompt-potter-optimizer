@@ -69,9 +69,9 @@ BASELINE = {
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
     "p_reads": 311,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
-    "test_files": 6,
+    "test_files": 7,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.
-    "test_functions": 29,
+    "test_functions": 30,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"
