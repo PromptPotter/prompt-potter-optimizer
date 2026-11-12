@@ -4,9 +4,9 @@ import contextlib
 import logging
 import sys
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.llm_call import InjectionBreakdown
+from promptpotter.application.bench.llm_call import FilledPrompt, InjectionBreakdown
 from promptpotter.application.bench.node_context import (
     Bounds,
     Calls,
@@ -26,7 +26,6 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.dispatch.compose import (
     SECTION_SEP,
-    PanelCoverage,
     select,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
@@ -116,23 +115,6 @@ def _cap_runaway(name: str, items: list[Item], cap: int) -> list[Item]:
     return kept
 
 
-class FilledPrompt(NamedTuple):
-    """``rendered`` is what the node was SHOWN, after selection, so the ledger's breakdown and the prompt agree."""
-
-    fields: dict[str, str]
-    injection_vars: dict[str, str]
-    rendered: dict[str, str]
-    coverage: dict[str, PanelCoverage]
-
-    @property
-    def breakdown(self) -> InjectionBreakdown:
-        shown = {**self.rendered, **self.injection_vars}
-        return InjectionBreakdown(
-            chars={name: len(text) for name, text in shown.items() if text},
-            dropped={name: c.dropped for name, c in self.coverage.items() if c.dropped > 0},
-        )
-
-
 class InjectionRenderError(PromptCompositionError):
     def __init__(self, name: str, cause: BaseException) -> None:
         self.cause = cause
@@ -207,7 +189,12 @@ class DispatchHub:
         injection_vars = {
             name: DispatchHub.render(name, bundle) for name in remaining if name in table
         }
-        return FilledPrompt(update, injection_vars, rendered, coverage)
+        shown = {**rendered, **injection_vars}
+        injections = InjectionBreakdown(
+            chars={name: len(text) for name, text in shown.items() if text},
+            dropped={name: c.dropped for name, c in coverage.items() if c.dropped > 0},
+        )
+        return FilledPrompt(update, injection_vars, rendered, injections)
 
 
 def _no_round_warnings() -> contextlib.AbstractContextManager[RunScope]:
@@ -234,7 +221,7 @@ def node_packages(ctx: NodeContext, bundle: InjectionBundle) -> dict[str, str]:
             out[node] = stable_hash(
                 [
                     template.model_copy(update=filled.fields).render(),
-                    sorted(filled.injection_vars.items()),
+                    sorted(filled.prompt_vars.items()),
                 ]
             )
     return out

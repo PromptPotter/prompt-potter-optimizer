@@ -9,9 +9,10 @@ from pydantic import Field, create_model, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 from promptpotter.application.bench.llm_call import (
+    FilledPrompt,
     LLMCallContext,
     OptimizerResponseModel,
-    run_optimizer_node,
+    answer,
 )
 from promptpotter.application.optimizer_manifest import checkin_manifest, running_prompt
 from promptpotter.config.paths import checkin_manifest_path
@@ -236,17 +237,12 @@ async def run_checkin(
 ) -> tuple[CheckinOutput, int]:
     """Every record the call writes lands on *ledger*, bound for it: no run scope stands at a turn."""
     with scoped(ledger=ledger):
-        raw, _prompt, repair_attempts = await run_optimizer_node(
-            fields={},
-            prompt_vars={"consultation_instruction": consultation_instruction},
-            response_model=response_model,
+        return await answer(
+            checkin_call_context(stores, ledger),
+            response_model,
+            FilledPrompt({}, {"consultation_instruction": consultation_instruction}),
             user_content=user_content,
-            context=checkin_call_context(stores, ledger),
         )
-    assert isinstance(raw, CheckinOutput), (
-        f"checkin must return CheckinOutput, got {type(raw).__name__}"
-    )
-    return raw, repair_attempts
 
 
 def draft_ledger(stores: Stores, draft_id: str) -> CycleEventLog:

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.llm_call import run_optimizer_node
 from promptpotter.application.bench.node_context import Calls, Children, Lineage
 from promptpotter.application.optimizers.potter.dispatch.bundle import RECOMBINATION_ID_CHARS
 from promptpotter.application.optimizers.potter.dispatch.facade import (
@@ -17,7 +16,6 @@ from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import node_layout
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
-    L1GenerateOutput,
     VariantEvidenceGrounding,
     build_l1_response_model,
 )
@@ -38,7 +36,6 @@ from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, loci_
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
-    PARSE_FAILURE_WRONG_TYPE,
 )
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
@@ -89,16 +86,13 @@ async def l1_generate(
 
     bundle = build_bundle(ctx, ctx.slice(Ladder))
     pipeline_schema = bundle.pipeline_schema
-    context = calls.call_context()
-    filled = DispatchHub.fill(context.template, bundle, node=context.node)
+    filled = DispatchHub.fill(calls.prompt(), bundle, node=ctx.node)
     budget = bundle.cycle_slice.exploration_budget
     citable = citable_fields(
         node_layout("l1_generate", bundle.l2),
         exploration_budget=budget,
         rendered=filled.rendered,
     )
-    prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **filled.injection_vars}
-
     schema_field_rename = knobs.schema_field_rename
     # Under `closed` the wire takes an active entry's id where a pooled field's text would go.
     pooled = (
@@ -119,15 +113,11 @@ async def l1_generate(
     # The wire speaks the DEMO POOL panel's ids; an individual holds sample keys.
     key_of = {s.id: s.key for s in bundle.demo_pool}
     hosted = bundle.l2.recombinations if bundle.l2.for_round == bundle.cycle_slice.round_num else []
-    response_model = build_l1_response_model(effective_l1_field_names())
     try:
-        generated, _prompt, _repairs = await run_optimizer_node(
-            context=context,
-            fields=filled.fields,
-            prompt_vars=prompt_vars,
-            injections=filled.breakdown,
+        generated = await calls.answer(
+            build_l1_response_model(effective_l1_field_names()),
+            replace(filled, prompt_vars={"n_variants": str(n_variants), **filled.prompt_vars}),
             temperature=temperature,
-            response_model=response_model,
             response_schema=output_schema,
         )
     except OptimizerPromptParseError as parse_err:
@@ -152,15 +142,6 @@ async def l1_generate(
             parse_err.diagnosis(),
         )
         return L1Generation([], reason, citable, budget)
-    # The repair-retry path can leak a raw str/dict/list when JSON parses but does not bind.
-    if not isinstance(generated, L1GenerateOutput):
-        logger.error(
-            "L1 R%d: l1_generate response decoded as %s instead of L1GenerateOutput — "
-            "treating as parse failure, returning zero candidates",
-            round_num,
-            type(generated).__name__,
-        )
-        return L1Generation([], PARSE_FAILURE_WRONG_TYPE, citable, budget)
 
     variants_list = generated.variants
 

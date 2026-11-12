@@ -3689,7 +3689,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
         "the generator was handed no subject — it is rewriting text it cannot see"
     )
-    refused_panels = set(filled.breakdown.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
+    refused_panels = set(filled.injections.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
     assert not refused_panels, f"mandatory panel(s) refused by the budget: {sorted(refused_panels)}"
     # A panel mixing two manifests: each outer node is shown, and checked, as its own manifest's.
     capo = select_optimizer(OptimizerChoice(optimizer="capo"))

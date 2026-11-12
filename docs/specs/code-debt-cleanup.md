@@ -244,16 +244,16 @@ row it closes.
   (`sample-trajectory.ts::MOVEMENT_CLASS`, `PipelineFlow`'s `tone`) wait until a served word row carries
   its `Tone` (`domain/said.py`). **Rides with:** the rest of rk-opt link 4. **Re-test:**
   `git grep -n "PROMPT_FIELD\|MOVEMENT_CLASS" -- webapp/lib`.
-- **Potter's calls bypass the bench's call door**: the peers ask through `node_context.py::Calls`;
-  potter builds each call by hand (`dispatch/facade.py::build_bundle`, then
-  `llm_call.py::run_optimizer_node`) and handles one fault four ways, one silently under `graceful`;
+- **Potter's renderers read a hand-copied snapshot**: potter asks through `node_context.py::Calls.answer`
+  now, but `dispatch/facade.py::build_bundle` copies run state into `dispatch/bundle.py::InjectionBundle`
+  for every renderer (35 fields, then a `replace` for `silent_l1_panels`);
   `escalation/firing.py::Layer` and `escalation/firing.py::TransitionResult` are a second member
-  protocol; `dispatch/bundle.py::InjectionBundle` hand-copies run state for every renderer;
-  `escalation/rules.py::_first_match` runs a fixed rule table; the fitness formula has a second spelling
-  (`evaluators.py::resolve_cell_formula`). Action: `Calls.ask(prompt, reply=Model)` with one fault
-  policy; renderers read a potter-owned view in a hashed module; the rules three match functions that
+  protocol; `escalation/rules.py::_first_match` runs a fixed rule table; the fitness formula has a second
+  spelling (`evaluators.py::resolve_cell_formula`). Action: renderers read the node's own reads through
+  a potter-owned view, and the two pure-renderer tests (`test_identity`'s rendered-prompt journey,
+  `test_security`'s poisoned-panel test) drive a node context; the rules three match functions that
   keep the name `escalation/rules.py::EscalationEvent` stamps; one formula spelling. **Rides with:**
-  the rest of rk-opt link 4. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
+  rk-opt's next chain. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
 - **Wave C, the optimizers in one re-key batch**: `potter/l1/` → `l1.py`, `validators/` 7 → 2, peer
   optimizers' `prompts` + `state` into `members.py`, `pobb/` and `escalation/` flattened, and
   `runner/inner/tasks.InnerCells` moved into `domain/l4`. **Rides with:** the rest of rk-opt link 4.

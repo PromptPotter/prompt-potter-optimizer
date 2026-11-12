@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from promptpotter.application.jobs.coupon import keyed_client
 from promptpotter.application.optimizer_manifest import bound_determinism
@@ -24,7 +24,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, silence_detail
 from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
-    extract_parsed_json,
+    try_parse_json,
 )
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 from promptpotter.infrastructure.llm.registry import default_routes
@@ -42,8 +42,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
@@ -68,6 +66,16 @@ class InjectionBreakdown:
 
 
 _NO_INJECTIONS = InjectionBreakdown()
+
+
+@dataclass(frozen=True)
+class FilledPrompt:
+    """``rendered`` is what the node was SHOWN, after selection, so the ledger's breakdown and the prompt agree."""
+
+    fields: dict[str, str]
+    prompt_vars: dict[str, str]
+    rendered: dict[str, str] = field(default_factory=dict)
+    injections: InjectionBreakdown = _NO_INJECTIONS
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -360,10 +368,6 @@ async def llm_call(
         model=merged.model,
     )
     response = answered.response
-    # ``parsed`` is typed ``Any``, so a banked reply's `model_validate` leaves the saved dict a dict.
-    if response_model is not None and isinstance(response.parsed, dict):
-        response.parsed = response_model.model_validate(response.parsed)
-
     if context.ledger is not None:
         context.ledger.append(
             _call_record(
@@ -378,19 +382,18 @@ async def llm_call(
     return response
 
 
-async def run_optimizer_node(
-    *,
+async def answer[M: BaseModel](
     context: LLMCallContext,
-    fields: Mapping[str, str],
-    prompt_vars: dict[str, Any],
-    response_model: type[BaseModel] | None,
-    injections: InjectionBreakdown = _NO_INJECTIONS,
+    reply: type[M],
+    filled: FilledPrompt,
+    *,
     temperature: float | None = None,
     response_schema: dict[str, Any] | None = None,
     user_content: str | None = None,
-) -> tuple[Any, str, int]:
-    template = context.template.model_copy(update=dict(fields))
-    prompt = template.compile_prompt(**prompt_vars)
+) -> tuple[M, int]:
+    """With its schema repairs; every fault is one `OptimizerPromptParseError`, an unbound reply included."""
+    template = context.template.model_copy(update=filled.fields)
+    prompt = template.compile_prompt(**filled.prompt_vars)
     if user_content is not None:
         messages: list[ChatMessage] = [
             {"role": "system", "content": prompt},
@@ -400,15 +403,31 @@ async def run_optimizer_node(
         messages = [{"role": "user", "content": prompt}]
     response = await llm_call(
         messages=messages,
-        response_model=response_model,
+        response_model=reply,
         response_schema=response_schema,
         context=context,
-        injections=injections,
+        injections=filled.injections,
         trace_meta={
             "template_name": context.node,
             "template_fields": template.prompt_fields(),
-            "variables": prompt_vars,
+            "variables": filled.prompt_vars,
         },
         temperature=temperature,
     )
-    return extract_parsed_json(response), prompt, len(response.schema_repair_errors)
+    repairs = len(response.schema_repair_errors)
+    landed = response.parsed
+    if isinstance(landed, reply):
+        return landed, repairs
+    try:
+        bound = reply.model_validate(
+            try_parse_json(response.content, context.node) if landed is None else landed
+        )
+    except ValidationError as unbound:
+        raise OptimizerPromptParseError(
+            response.content,
+            unbound,
+            attempts=repairs + 1,
+            model=response.model,
+            finish_reason=response.finish_reason,
+        ) from unbound
+    return bound, repairs

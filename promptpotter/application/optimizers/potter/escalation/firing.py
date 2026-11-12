@@ -4,7 +4,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, Protocol, Self
 
-from promptpotter.application.bench.llm_call import run_optimizer_node
 from promptpotter.application.bench.node_context import Calls, Lineage, Progress, Replay, Ruler
 from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.dispatch.facade import (
@@ -151,17 +150,10 @@ async def _run_transition(
     ladder = ctx.slice(Ladder)
     # The prompt reports the verdict that asked for it, which lands only if this fire does.
     bundle = build_bundle(ctx, ladder if fire.ask is None else as_read_by(ladder, fire.ask))
-    context = ctx.read(Calls).call_context()
-    filled = DispatchHub.fill(context.template, bundle, node=context.node)
+    calls = ctx.read(Calls)
+    filled = DispatchHub.fill(calls.prompt(), bundle, node=ctx.node)
     try:
-        raw, _, _ = await run_optimizer_node(
-            context=context,
-            fields=filled.fields,
-            prompt_vars=filled.injection_vars,
-            injections=filled.breakdown,
-            response_model=layer.reply_model(bundle),
-        )
-        result = layer.parse(ctx, raw)
+        result = layer.parse(ctx, await calls.answer(layer.reply_model(bundle), filled))
     except OptimizerPromptParseError as parse_err:
         # Unhandled it kills the cycle, and under L4 that voids a whole outer sample.
         logger.error(

@@ -13,7 +13,12 @@ from promptpotter.application.bench.children import (
     overlay_failures,
     placeholder_failures,
 )
-from promptpotter.application.bench.llm_call import LLMCallContext, llm_call
+from promptpotter.application.bench.llm_call import (
+    FilledPrompt,
+    LLMCallContext,
+    answer,
+    llm_call,
+)
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.intelligence.earned_blocks import (
@@ -64,6 +69,8 @@ from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRol
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from pydantic import BaseModel
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.difficulty import DifficultyView
@@ -522,7 +529,7 @@ class Calls(CycleRead):
         node, selected = node or self._member.name, self._cycle.optimizer
         return running_prompt(node, selected.node_config(node), selected.manifest)
 
-    def call_context(self, idx: int | None = None) -> LLMCallContext:
+    def _context(self, idx: int | None) -> LLMCallContext:
         session, node, round_num = self._cycle.session, self._member.name, self._round.round_num
         return LLMCallContext(
             node=node,
@@ -537,10 +544,26 @@ class Calls(CycleRead):
         )
 
     async def ask(self, prompt: str, idx: int | None = None) -> str:
-        response = await llm_call(
-            [{"role": "user", "content": prompt}], context=self.call_context(idx=idx)
-        )
+        response = await llm_call([{"role": "user", "content": prompt}], context=self._context(idx))
         return response.content
+
+    async def answer[M: BaseModel](
+        self,
+        reply: type[M],
+        filled: FilledPrompt,
+        *,
+        temperature: float | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> M:
+        """Its own template filled with *filled*, bound to *reply* or raised as one parse failure."""
+        bound, _repairs = await answer(
+            self._context(None),
+            reply,
+            filled,
+            temperature=temperature,
+            response_schema=response_schema,
+        )
+        return bound
 
     async def ask_each(self, prompts: Mapping[int, str]) -> list[str]:
         """Every send lands before one's refusal is raised; a refused send is re-asked alone, into the room really left."""
