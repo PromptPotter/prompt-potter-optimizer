@@ -919,7 +919,7 @@ class BehaviourTrace:
 
     @classmethod
     def read(cls, workspace: Path) -> BehaviourTrace:
-        return cls(**json.loads((workspace / TRACE).read_text(encoding="utf-8")))
+        return cls(**_kept(json.loads((workspace / TRACE).read_text(encoding="utf-8"))))
 
     def write(self, out: Path) -> None:
         out.mkdir(parents=True, exist_ok=True)
@@ -1307,6 +1307,23 @@ DROP_KEYS = {
     # A fact about the holdout, which a campaign beside this one moves and no decision reads.
     "reads_before",
 }  # fmt: skip
+# A digest of keys dropped above, by the key that holds it: a re-key moves it, behaviour never does.
+DROP_UNDER: dict[str, frozenset[str]] = {"cell_set": frozenset({"id"})}
+
+
+def _dropped(key: str, under: str) -> bool:
+    return key in DROP_KEYS or key in DROP_UNDER.get(under, frozenset())
+
+
+def _kept(o: Any, under: str = "") -> Any:
+    """*o* less every key a trace never compares, so a base written before a rule compares under it."""
+    if isinstance(o, dict):
+        return {k: _kept(v, k) for k, v in o.items() if not _dropped(k, under)}
+    if isinstance(o, list):
+        return [_kept(v, under) for v in o]
+    return o
+
+
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _EMBEDDED_HEX32 = re.compile(r"[0-9a-f]{32}")
@@ -1337,11 +1354,13 @@ class Canon:
         v = _SESSION_ID.sub("<session>", v)
         return _WIN_PATH.sub("<path>", v)
 
-    def __call__(self, o: Any) -> Any:
+    def __call__(self, o: Any, under: str = "") -> Any:
         if isinstance(o, dict):
-            return {self.s(str(k)): self(v) for k, v in o.items() if str(k) not in DROP_KEYS}
+            return {
+                self.s(str(k)): self(v, str(k)) for k, v in o.items() if not _dropped(str(k), under)
+            }
         if isinstance(o, list | tuple):
-            return [self(v) for v in o]
+            return [self(v, under) for v in o]
         if isinstance(o, bool) or o is None or isinstance(o, int):
             return o
         if isinstance(o, float):
