@@ -9,7 +9,7 @@ from promptpotter.domain.arm_reading import UNIT_FORMATS, level_text, lift_text
 from promptpotter.domain.arms import ArmSlot, Concluded, arm_name
 from promptpotter.domain.bench import COST_ABSENCE_WORDS, LiftCost
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.origin_panel import ROUND_ADVANCE_STALL, RoundAdvance, StallEffect
+from promptpotter.domain.origin_panel import RoundAdvance, StallEffect
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     ArmKey,
@@ -35,7 +35,7 @@ def closed_after_origin(rounds: Sequence[int]) -> int:
 def rounds_without_advance(rounds: Sequence[RoundOutcome]) -> int:
     depth = 0
     for rr in reversed(rounds):
-        match ROUND_ADVANCE_STALL[rr.overlap.advance]:
+        match rr.overlap.advance.stall:
             case StallEffect.STARTS | StallEffect.RESETS:
                 break
             case StallEffect.COUNTS:
@@ -52,7 +52,7 @@ def stalls_left(rounds: Sequence[RoundOutcome], lives: tuple[int, int]) -> int:
     for rr in rounds:
         if rr.round == 0 or rr.election is None or rr.election.electable == 0:
             continue
-        match ROUND_ADVANCE_STALL[rr.overlap.advance]:
+        match rr.overlap.advance.stall:
             case StallEffect.RESETS:
                 bank = min(cap, bank + 1)
             case StallEffect.COUNTS:

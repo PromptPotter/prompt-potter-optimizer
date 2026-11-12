@@ -268,11 +268,8 @@ row it closes.
   with:** the rest of rk-opt link 4. **Re-test:** in
   `test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails`'s locked block, the leader's
   last `running` before the close counts the cells `rows(leader)` holds.
-- **Two word tables over one enum, three times** (`evidence/head_to_head.py::GUARD_STATE_INFO` beside its
-  labels, `paired_reading.py::READING_STATE_KIND` beside its info, `origin_panel.py::ROUND_ADVANCE_STALL`
-  beside its info), and `library.py::LibrarySnippet` flattens a cited-or-authored snippet into nullable
-  fields. Action: one table each, its words outside the marked decision units; the snippet keeps its
-  union. **Rides with:** the rest of rk-opt link 4.
+- **`library.py::LibrarySnippet` flattens a cited-or-authored snippet into nullable fields**. Action:
+  the snippet keeps its union. **Rides with:** the rest of rk-opt link 4.
 - **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
   carry their passes beside `VerificationPass`. Action: both ride the one record. **Rides with:**
   the rest of rk-opt link 4. **Re-test:** `git grep -n "\.overlap\b" -- promptpotter` is empty.

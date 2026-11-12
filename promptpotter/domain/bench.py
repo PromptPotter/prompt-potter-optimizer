@@ -10,7 +10,6 @@ from pydantic import Field, model_validator
 
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
-    READING_STATE_KIND,
     ArmName,
     CellSet,
     CellSetBasis,
@@ -452,8 +451,7 @@ def bench_status(
         trigger=trigger,
         can_run=refusal is None,
         refusal=refusal,
-        offered=refusal is None
-        or (not inner and READING_STATE_KIND[state] is ReadingStateKind.WAITING),
+        offered=refusal is None or (not inner and state.kind is ReadingStateKind.WAITING),
         subject=subject,
         held_by=held_by,
         stop=None if decided is None else decided.stop,

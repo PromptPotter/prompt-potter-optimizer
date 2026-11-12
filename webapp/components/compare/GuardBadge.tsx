@@ -1,4 +1,4 @@
-import { type PairGuard, GUARD_STATE_LABELS } from "@/lib/api/types";
+import { type PairGuard, GUARD_STATE_INFO } from "@/lib/api/types";
 import { Badge, Term } from "@/components/ui";
 
 export function GuardBadge({ guard }: { guard: PairGuard }) {
@@ -6,7 +6,7 @@ export function GuardBadge({ guard }: { guard: PairGuard }) {
     <>
       <Term content={guard.sentence}>
         <Badge tone={guard.state === "controlled" ? undefined : "danger"}>
-          {GUARD_STATE_LABELS[guard.state]}
+          {GUARD_STATE_INFO[guard.state].label}
         </Badge>
       </Term>
       {guard.differs_on.map((field) => (

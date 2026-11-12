@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Collection
 from enum import StrEnum
-from typing import Annotated, Literal, NamedTuple, NewType, Self
+from typing import Literal, NamedTuple, NewType, Self, assert_never
 
 from pydantic import Field, model_validator
 
@@ -31,6 +31,9 @@ class ReadingStateKind(StrEnum):
     REFUSED = "refused"
 
 
+# Marked: a state's kind decides the round's advance, and so the stall a prompt reports; its words
+# (`READING_STATE_INFO`) are unmarked, so no prompt's closure reaches them.
+@shapes_optimizer_prompt
 class ReadingState(StrEnum):
     """Whether a pair was read, and the ONE reason it was not."""
 
@@ -55,6 +58,40 @@ class ReadingState(StrEnum):
     CELL_SET_DIFFERS = "cell_set_differs"
     INSTRUMENT_DIFFERS = "instrument_differs"
 
+    @property
+    def kind(self) -> ReadingStateKind:
+        match self:
+            case ReadingState.READ:
+                return ReadingStateKind.READ
+            case ReadingState.NOT_ASKED | ReadingState.PENDING:
+                return ReadingStateKind.WAITING
+            case (
+                ReadingState.NOT_HELD
+                | ReadingState.NO_HOLDOUT
+                | ReadingState.HELD_ELSEWHERE
+                | ReadingState.NO_SELECTION
+                | ReadingState.SAME_INDIVIDUAL
+            ):
+                return ReadingStateKind.UNPAIRED
+            case (
+                ReadingState.PASS_STOPPED
+                | ReadingState.PAST_TOLERANCE
+                | ReadingState.MEMBER_UNSCOREABLE
+                | ReadingState.UNDER_TWO_CELLS
+                | ReadingState.RUN_FAILED
+            ):
+                return ReadingStateKind.ABSENT
+            case (
+                ReadingState.SCOPE_DIFFERS
+                | ReadingState.MEASURAND_DIFFERS
+                | ReadingState.DATASET_DIFFERS
+                | ReadingState.CELL_SET_DIFFERS
+                | ReadingState.INSTRUMENT_DIFFERS
+            ):
+                return ReadingStateKind.REFUSED
+            case _:
+                assert_never(self)
+
 
 class ReadingStateInfo(NamedTuple):
     """``label`` and ``sentence`` are SERVED on every scope a pair is read in, the bench's
@@ -65,30 +102,6 @@ class ReadingStateInfo(NamedTuple):
     sentence: str
     fault: bool
 
-
-# Marked: a state's kind decides the round's advance, and so the stall a prompt reports. The words
-# below are unmarked, so no prompt's closure reaches them through this table.
-READING_STATE_KIND: Annotated[dict[ReadingState, ReadingStateKind], shapes_optimizer_prompt] = {
-    ReadingState.READ: ReadingStateKind.READ,
-    ReadingState.NOT_ASKED: ReadingStateKind.WAITING,
-    ReadingState.PENDING: ReadingStateKind.WAITING,
-    ReadingState.NOT_HELD: ReadingStateKind.UNPAIRED,
-    ReadingState.NO_HOLDOUT: ReadingStateKind.UNPAIRED,
-    ReadingState.HELD_ELSEWHERE: ReadingStateKind.UNPAIRED,
-    ReadingState.PASS_STOPPED: ReadingStateKind.ABSENT,
-    ReadingState.PAST_TOLERANCE: ReadingStateKind.ABSENT,
-    ReadingState.MEMBER_UNSCOREABLE: ReadingStateKind.ABSENT,
-    ReadingState.UNDER_TWO_CELLS: ReadingStateKind.ABSENT,
-    ReadingState.NO_SELECTION: ReadingStateKind.UNPAIRED,
-    ReadingState.SAME_INDIVIDUAL: ReadingStateKind.UNPAIRED,
-    ReadingState.RUN_FAILED: ReadingStateKind.ABSENT,
-    ReadingState.SCOPE_DIFFERS: ReadingStateKind.REFUSED,
-    ReadingState.MEASURAND_DIFFERS: ReadingStateKind.REFUSED,
-    ReadingState.DATASET_DIFFERS: ReadingStateKind.REFUSED,
-    ReadingState.CELL_SET_DIFFERS: ReadingStateKind.REFUSED,
-    ReadingState.INSTRUMENT_DIFFERS: ReadingStateKind.REFUSED,
-}
-assert READING_STATE_KIND.keys() == set(ReadingState)
 
 READING_STATE_INFO: Worded[ReadingState, ReadingStateInfo] = Worded(
     {
