@@ -23,11 +23,11 @@
 
 ## L2 — what `l2_context` (and L3's `l3_plan`) may write
 
-**L2 fires on L1 stall, an unusable L1 reply or evidence starvation; `escalation.py` routes, never diagnoses or stops.** L2 judges recoverability; `terminate_proposal` is its exit for a backend fault.
+**L2 fires on L1 stall, an unusable L1 reply or evidence starvation; `escalation.py` routes, never diagnoses; its one stop is `NextAction.STOP_L3_PATIENCE` → `OPTIMIZER_EXHAUSTED`.** L2 judges recoverability; `terminate_proposal` is its exit for a backend fault.
 
 - **L2 writes exactly `l1_layout` and `l1_overrides`, one node overlay on `l1_generate`** (`L2Memory.steer`), never `pipeline_params`; as recombination host, `recombinations` (ids and loci only); plus the layer-control channel. Each steer cites an axis, sample or yield number.
 - **No layer writes `task_context`**: no wire schema has its field; target text is L1's alone, through `prompt_fields_updates`. <!-- probe: git grep -cE "task_context:" -- promptpotter/application/optimizers/potter/dispatch/schemas.py == 0 -->
-- **L3 fires only on L2 stall** and writes a strategic replan (`L3Memory.plan`) every prompt reads.
+- **L3 fires on L2 stall, or on `l1_layout_refused` (`escalation.py::HEAL_RULES`)**, and writes a strategic replan (`L3Memory.plan`) every prompt reads.
 
 ## The layer-control channel — `fork_proposal` + `terminate_proposal`
 
@@ -35,7 +35,7 @@
 
 ## The optimizer never searches the GATEWAY or the ROUTE
 
-**`PARAM_FORBIDDEN_KEYS` (`domain/search_point.py`) is an invariant**: the operator sets a node's route in the dataset overlay ([`datasets/CLAUDE.md`](../../../assets/datasets/CLAUDE.md) § Sole route), the optimizer's in `OptimizationConfig.determinism`, applied last. `model` is an axis opened per node by `optimizer.param_keys` within `param_allowed_values["model"]` ([decisions](../../../../docs/decisions.md) § 0005).
+**`PARAM_FORBIDDEN_KEYS` (`domain/pipeline_params.py`) is an invariant**: the operator sets a node's route in the dataset overlay ([`datasets/CLAUDE.md`](../../../assets/datasets/CLAUDE.md) § Sole route), the optimizer's in `OptimizationConfig.determinism`, applied last. `model` is an axis opened per node by `optimizer.param_keys` within `param_allowed_values["model"]` ([decisions](../../../../docs/decisions.md) § 0005).
 
 ## Editing a renderer's PROSE is a measurement change
 
