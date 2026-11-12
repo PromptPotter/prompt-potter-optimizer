@@ -128,4 +128,4 @@ class ChargeBook:
         return Path(os.path.relpath(ledger, self.account_dir)).as_posix()
 
     def ledger_of(self, hold: Charge) -> Path:
-        return self.account_dir / hold.ledger
+        return self.account_dir / hold.landed_on

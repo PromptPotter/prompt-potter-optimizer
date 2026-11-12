@@ -37,7 +37,7 @@ L4's law is `domain/l4/`; this package runs it, and the `promptpotter` connector
 - **An entry point hands DATA, never a callable**: a `LaunchRequest` arm, a `RunMode`, `Inline` where a person watches.
 - **A paid verb outside a run is admitted inside the application function**: a scoring pass through `paid_pass` (a slot, refused `machine_busy`, never queued), one LLM call through `jobs/quota.py::paid_call`; both refuse a taken cycle.
 - **A server-launched run executes in its own process** (`jobs/launcher/run_job.py`); a queued job's intent never leaves the process that authenticated it, so a restart drops the queue.
-- **A job file is written by `JobRegistry._stamp` under the admission gate**; a second writer overwrites a lowered reserve. <!-- probe: git grep -cE "_persist\(" -- promptpotter/application/jobs/registry.py == 4 -->
+- **A job file is written by `JobRegistry._stamp` under the admission gate**; a second writer overwrites a release or a retarget. <!-- probe: git grep -cE "_persist\(" -- promptpotter/application/jobs/registry.py == 4 -->
 
 ## Backend overlay
 

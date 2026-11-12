@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal, assert_never, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter
@@ -8,7 +8,6 @@ from pydantic import ConfigDict, Field, TypeAdapter
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.refusal import Refusal
-from promptpotter.domain.spend import Budget
 
 # The slot is held before the mint resolves the cycle it will name; `update_target` fills it in.
 UNRESOLVED_HOP = CycleHop(campaign_id="", cycle_id="")
@@ -102,9 +101,6 @@ class Job:
     released_at: str | None
     # The code its producer runs, stamped with `producer_id`: a landing waits on a live job on another.
     code_revision: str
-    # What the account holds back for it, which its run's book reads live; its cycle's share of the
-    # campaign's ceiling is the cycle's (`CycleShareRecord`).
-    reserve: Budget = field(default_factory=Budget)
     # Unset = never granted a run, so its failure is a refusal.
     admitted_at: str | None = None
     producer_id: str = ""

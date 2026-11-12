@@ -373,7 +373,6 @@ from promptpotter.domain.wounds import fatal_validation_failures
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import (
-    Hold,
     SpendBook,
     require_spend_book,
     unbounded_spend_book,
@@ -1536,7 +1535,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             if running:
                 paid.append(sample.id)
                 if cutting and len(paid) >= budget:
-                    book.hold_of = Hold(Budget(usd=0.0), book.reserve)
+                    book.share = Budget(usd=0.0)
             return _PEER_READ_ORDER[sample.id] % 2 == 0
 
         with _peer_cycle(
@@ -1815,7 +1814,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         if theta_walking:
             theta_paid.append(sample.id)
             if len(theta_paid) >= 2:
-                theta_book.hold_of = Hold(Budget(usd=0.0), theta_book.reserve)
+                theta_book.share = Budget(usd=0.0)
         return True
 
     async def unpriced(sample: Sample, _session: Any, _pipeline_params: Any) -> MeasuredCell:
@@ -2311,9 +2310,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             update={"arm": ArmName(key=ArmKey("an earlier pick"), round=7, label="C7.1")}
         )
         book = require_spend_book("the bench journey")
-        unspent, book.hold_of = book.hold_of, Hold(Budget(usd=0.0), book.reserve)
+        unspent, book.share = book.share, Budget(usd=0.0)
         short = graded(earlier)
-        book.hold_of = unspent
+        book.share = unspent
         stop = short.selections[head.individual.id].stop
         assert stop is not None and stop.cause is StopReason.SPEND_BUDGET, (
             "a spent budget stops the pass and names the bound"

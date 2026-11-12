@@ -595,6 +595,70 @@
       ],
       "shape": {
         "$defs": {
+          "Budget": {
+            "additionalProperties": false,
+            "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.",
+            "properties": {
+              "rounds": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Closed rounds after the origin, per cycle, read at each round boundary; 0 measures the origin only.",
+                "title": "Rounds"
+              },
+              "tokens": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The campaign's billed tokens, shared like `usd`; the axis that still binds where a model has no rate on file.",
+                "title": "Tokens"
+              },
+              "usd": {
+                "anyOf": [
+                  {
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The campaign's USD, in its ceiling meter: one book its live cycles share.",
+                "title": "Usd"
+              },
+              "wall_clock_s": {
+                "anyOf": [
+                  {
+                    "exclusiveMinimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Seconds ONE launch runs, its clock afresh at every launch; a remote cell still open at the edge is cut and the run stops `wall_clock`.",
+                "title": "Wall Clock S"
+              }
+            },
+            "title": "Budget",
+            "type": "object"
+          },
           "CallPrice": {
             "additionalProperties": false,
             "description": "What one call cost, the one carrier of a call's price: on a send's charge, or a replay's own.",
@@ -669,8 +733,28 @@
           }
         },
         "additionalProperties": false,
-        "description": "One line of a send's money: its hold at the send's bound, then each answered part closing it.",
+        "description": "One line of the account's money: a hold at its bound under its parent hold, a run's or a\ncall's, then each answered part of a call billing it.",
         "properties": {
+          "bound": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Budget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "call": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CallPrice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "hold_id": {
             "title": "Hold Id",
             "type": "string"
@@ -684,11 +768,26 @@
             "type": "string"
           },
           "ledger": {
-            "title": "Ledger",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ledger"
           },
-          "price": {
-            "$ref": "#/$defs/CallPrice"
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
           },
           "record_type": {
             "const": "charge",
@@ -716,9 +815,11 @@
         "required": [
           "state",
           "hold_id",
+          "parent",
           "key_source",
-          "price",
+          "call",
           "tokens",
+          "bound",
           "ledger"
         ],
         "title": "Charge",
@@ -1652,70 +1753,6 @@
       ],
       "shape": {
         "$defs": {
-          "Budget": {
-            "additionalProperties": false,
-            "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.",
-            "properties": {
-              "rounds": {
-                "anyOf": [
-                  {
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "description": "Closed rounds after the origin, per cycle, read at each round boundary; 0 measures the origin only.",
-                "title": "Rounds"
-              },
-              "tokens": {
-                "anyOf": [
-                  {
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "description": "The campaign's billed tokens, shared like `usd`; the axis that still binds where a model has no rate on file.",
-                "title": "Tokens"
-              },
-              "usd": {
-                "anyOf": [
-                  {
-                    "minimum": 0.0,
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "description": "The campaign's USD, in its ceiling meter: one book its live cycles share.",
-                "title": "Usd"
-              },
-              "wall_clock_s": {
-                "anyOf": [
-                  {
-                    "exclusiveMinimum": 0.0,
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "description": "Seconds ONE launch runs, its clock afresh at every launch; a remote cell still open at the edge is cut and the run stops `wall_clock`.",
-                "title": "Wall Clock S"
-              }
-            },
-            "title": "Budget",
-            "type": "object"
-          },
           "CampaignLaunch": {
             "additionalProperties": false,
             "description": "A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle.",
@@ -2004,9 +2041,6 @@
               }
             ],
             "title": "Released At"
-          },
-          "reserve": {
-            "$ref": "#/$defs/Budget"
           },
           "stage": {
             "anyOf": [

@@ -41,7 +41,6 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.refusal import Refusal
-from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import open_text_robust, unlink_robust, write_json
 from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
@@ -210,11 +209,8 @@ class JobRegistry:
             job = self.get(job_id)
             return None if job is None or not job.queued else self._end(job_id, lapse="withdrawn")
 
-    def mark_admitted(self, job_id: str, reserve: Budget) -> None:
-        self._stamp(job_id, lambda _: {"admitted_at": utcnow_iso(), "reserve": reserve})
-
-    def set_reserve(self, job_id: str, reserve: Budget) -> None:
-        self._stamp(job_id, lambda _: {"reserve": reserve})
+    def mark_admitted(self, job_id: str) -> None:
+        self._stamp(job_id, lambda _: {"admitted_at": utcnow_iso()})
 
     def update_target(self, job_id: str, *, hop: CycleHop) -> None:
         self._stamp(job_id, lambda _: {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id})
@@ -234,7 +230,6 @@ class JobRegistry:
         return self._dir
 
     def job_file(self, job_id: str) -> Path:
-        """What a live spend book reads its reserve off: the job is the reserve's one store."""
         return self._path(job_id)
 
     def claimant_lock(self) -> Path:

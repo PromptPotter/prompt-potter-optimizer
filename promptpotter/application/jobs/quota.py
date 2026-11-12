@@ -6,7 +6,6 @@ import threading
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
-from pathlib import Path
 from typing import NamedTuple, assert_never, get_args
 
 from pydantic import Field
@@ -31,7 +30,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
     CampaignLaunch,
@@ -43,6 +42,7 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.run_records import (
     CampaignCeilingRecord,
+    Charge,
     CycleShareRecord,
     StandingBudgetRecord,
 )
@@ -66,17 +66,9 @@ from promptpotter.domain.spend import (
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.llm.registry import providers
-from promptpotter.infrastructure.llm.spend_book import (
-    Hold,
-    SpendBook,
-    unbounded_spend_book,
-)
-from promptpotter.infrastructure.store.account_spend import (
-    account_bill,
-    campaign_spend,
-    ledger_bills,
-)
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
+from promptpotter.infrastructure.store.account_spend import account_bill, campaign_spend
+from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.infrastructure.store.wallet_store import ChargeBook
@@ -326,7 +318,7 @@ def read_account_wallet(
         if excluding_campaign is None
         else campaign_spend(stores.campaigns, excluding_campaign).host
     )
-    held = _outstanding_reservations(
+    held = _live_holds(
         job_registry, stores.charges, user_id=user.user_id, excluding_job_id=excluding_job_id
     )
     if held is None:
@@ -833,7 +825,8 @@ def _call_book(stores: Stores, provider: str) -> SpendBook:
         raise _contended("what this account has left")
     return SpendBook(
         declared=Budget(),
-        hold=Hold(Budget(), wallet.headroom),
+        share=Budget(),
+        reserve=wallet.headroom,
         meters="bill",
         opened=time.monotonic(),
     )
@@ -896,7 +889,8 @@ def change_budget(
                 requested, stores=stores, job_registry=job_registry, job=job, hop=hop, sends=sends
             )
             if job is not None:
-                job_registry.set_reserve(job.job_id, job.reserve.over(reserve))
+                hold = money_on(stores.charges.path).runs[job.job_id]
+                hold_run(stores, job.job_id, hold.held.over(reserve), parent=hold.parent)
         move_campaign_money(
             change, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
         )
@@ -990,16 +984,33 @@ def _contended(subject: str) -> RateLimitedError:
 _ADMISSION_WINDOW_S = 1.0
 
 
-def _outstanding_reservations(
+def hold_run(stores: Stores, hold_id: str, bound: Budget, *, parent: str | None) -> None:
+    """THE run's hold on its account, opened at admission and restated by a set-limits: the
+    coupon's reserve for it, which its book and every other launch's wallet read."""
+    stores.charges.append(
+        Charge(
+            state="held",
+            hold_id=hold_id,
+            parent=parent,
+            key_source="host",
+            call=None,
+            tokens=0,
+            bound=bound,
+            ledger=None,
+        )
+    )
+
+
+def _live_holds(
     job_registry: JobRegistry, charges: ChargeBook, *, user_id: str, excluding_job_id: str | None
 ) -> Budget | None:
-    """What the live runs may still draw: each its reserve less what the account's charges say
-    its cycle's sends billed on the box's keys, a nested run's included. ``None`` fails closed on
-    an unstamped sibling. Exclusion is by job, never by hop."""
+    """What the live runs still hold of the coupon, each its hold's (`Money.held_back`), a nested
+    run's bills drawing on its enclosing run's. ``None`` fails closed on an unstamped sibling.
+    Exclusion is by job, never by hop."""
     running = job_registry.list_holding_spend(user_id=user_id)
     own = next((j for j in running if j.job_id == excluding_job_id), None)
     mine = None if own is None else (own.created_at, own.job_id)
-    bills = ledger_bills(charges)
+    money = money_on(charges.path)
     held = NOTHING_METERED
     for job in running:
         if job.job_id == excluding_job_id:
@@ -1009,25 +1020,7 @@ def _outstanding_reservations(
             if mine is None or (job.created_at, job.job_id) < mine:
                 return None
             continue
-        # An axis no account bounds reserves nothing on it.
-        usd, tokens = job.reserve.usd, job.reserve.tokens
-        # A holder whose sends land on no cycle of its own has billed nothing it can name.
-        cycle = (
-            cycle_dir_for(WorkspaceDir(Path(job.workspace)), job.hop)
-            if isinstance(job.holder, CampaignLaunch) and job.hop != UNRESOLVED_HOP
-            else None
-        )
-        billed = (
-            ZERO_SPEND
-            if cycle is None
-            else bills.get(charges.held_on(CycleLayout(cycle).ledger), ZERO_SPEND)
-        )
-        held = held.plus(
-            Budget.amount(
-                max(0.0, (usd or 0.0) - billed.at_most_usd),
-                max(0, (tokens or 0) - billed.at_most_tokens),
-            )
-        )
+        held = held.plus(money.held_back(job.job_id))
     return held
 
 

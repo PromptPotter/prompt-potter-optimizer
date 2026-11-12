@@ -1549,7 +1549,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         hop=hop,
         holder=CampaignLaunch("ds1"),
     )
-    past.mark_admitted(handed.job_id, Budget())
+    past.mark_admitted(handed.job_id)
     RunStart(built_stores, past, handed).release(
         CampaignRefusedError(CampaignRefusal.NOT_ACTIVE, "archived past its handoff")
     )
@@ -2981,7 +2981,7 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
         lapsed = registry.release(job.job_id, thrown)
         assert lapsed is not None and lapsed.lapse == lapse, f"a {lapse} launch read {lapsed}"
     spent = launch()
-    registry.mark_admitted(spent.job_id, Budget(usd=1.0))
+    registry.mark_admitted(spent.job_id)
     registry.release(spent.job_id, StopReason.CONVERGED)
     assert quota.campaigns_today(registry, user_id) == 1, (
         "the daily quota counted a launch that spent nothing, or lost one that did"

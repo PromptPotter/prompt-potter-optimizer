@@ -166,7 +166,7 @@ from promptpotter.domain.verification import BenchPasses, VerificationPass
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import Hold, SpendBook
+from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import hold_cycle
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -367,7 +367,8 @@ def spend_book(
     spent.setdefault("opened", time.monotonic())
     return SpendBook(
         declared=Budget(wall_clock_s=wall_clock_s),
-        hold=Hold(Budget(usd=usd_cap), Budget(usd=usd_cap if usd_reserve is ... else usd_reserve)),
+        share=Budget(usd=usd_cap),
+        reserve=Budget(usd=usd_cap if usd_reserve is ... else usd_reserve),
         meters=meters,
         **spent,
     )
@@ -480,9 +481,11 @@ def billed_call(
     charge = Charge(
         state="billed",
         hold_id=hold_id,
+        parent=None,
         key_source=key_source,
-        price=price,
+        call=price,
         tokens=tokens,
+        bound=None,
         ledger="",
     )
     return TokenUsageRecord(money=price if replay else charge, **record)

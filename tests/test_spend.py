@@ -102,6 +102,7 @@ from promptpotter.application.jobs.quota import (
     coupon_status,
     cycle_share,
     hold_moved,
+    hold_run,
     paid_call,
 )
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
@@ -249,6 +250,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     Admission,
     Billed,
     CallLabel,
+    RunHold,
     SendBound,
     SpendBook,
     admitted,
@@ -284,7 +286,12 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
-from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, Projected
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    LedgerSpan,
+    Projected,
+    money_on,
+)
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
@@ -340,7 +347,18 @@ def run_bound(tmp_path: Path) -> Iterator[None]:
         yield
 
 
+def _admitted(stores: Stores, registry: JobRegistry, job_id: str, reserve: Budget) -> None:
+    """Admitted as `admit_and_share` admits it: its hold on the account, then the stamp."""
+    hold_run(stores, job_id, reserve, parent=None)
+    registry.mark_admitted(job_id)
+
+
+def _reserve_of(stores: Stores, job_id: str) -> Budget:
+    return money_on(stores.charges.path).runs[job_id].held
+
+
 def _held(
+    stores: Stores,
     registry: JobRegistry,
     admitted: Budget,
     *,
@@ -356,7 +374,7 @@ def _held(
         hop=UNRESOLVED_HOP,
         holder=EmbeddedRun("ds1"),
     )
-    registry.mark_admitted(job.job_id, Budget() if reserve is None else reserve)
+    _admitted(stores, registry, job.job_id, Budget() if reserve is None else reserve)
     return HeldBudget(
         admitted=admitted,
         standing=Budget() if standing is None else standing,
@@ -366,9 +384,7 @@ def _held(
     )
 
 
-def _armed(
-    stores: Stores, hop: CycleHop | None, held: HeldBudget, registry: JobRegistry
-) -> SpendBook:
+def _armed(stores: Stores, hop: CycleHop | None, held: HeldBudget) -> SpendBook:
     """A run's book, live on its job and its cycle's records where it has one; its share lands
     there first, as admission lands it, unless one already stands."""
     if hop is not None and stores.campaigns.last(hop, CycleShareRecord) is None:
@@ -376,7 +392,6 @@ def _armed(
     return open_spend_book(
         held,
         stores=stores,
-        job_registry=registry,
         hop=hop,
         meters="bill",
         opened=time.monotonic(),
@@ -959,6 +974,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     stores = workspace(tmp_path, signup)
     spawned = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
     held = _held(
+        stores,
         spawned,
         Budget(usd=0.25, tokens=40_000, rounds=None, wall_clock_s=900.0),
         reserve=Budget(usd=0.5, tokens=80_000),
@@ -991,7 +1007,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         optimizer=select_optimizer(launched_config.optimization),
     )
     spec = launched.job_spec(mode)
-    book = _armed(stores, None, spec.budget, spawned)
+    book = _armed(stores, None, spec.budget)
     assert (book.budget, book.allotment, book.reserve) == (
         held.admitted.only(CYCLE_AXES),
         Budget(usd=0.25, tokens=40_000),
@@ -1346,7 +1362,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     def cold() -> tuple[float, int, CycleSeed | None]:
         rows = [json.loads(line) for line in read_lines(index.path)]
         bills = [
-            row["money"]["price"]["cost_usd"] for row in rows if row["record_type"] == "token_usage"
+            row["money"]["call"]["cost_usd"] for row in rows if row["record_type"] == "token_usage"
         ]
         seeds = [row["seed"] for row in rows if row["record_type"] == "cycle_seed"]
         seeded = CycleSeed.model_validate(seeds[-1]) if seeds else None
@@ -1518,7 +1534,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     campaigns.mint_cycle(hop)
     cycle_dir = campaigns.cycle_dir(hop)
     jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
-    declared = _held(jobs, Budget())
+    declared = _held(built_stores, jobs, Budget())
 
     def declare(budget: Budget) -> None:
         # Money binds on the cycle's share, the rest on its own axes: both records, both live.
@@ -1526,7 +1542,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         hold_moved(built_stores, hop, budget.only(MONEY_AXES))
 
     CycleEventLog.open(CycleDir(cycle_dir)).append(billed_call(1.0, input_tokens=9_000))
-    book = _armed(built_stores, hop, declared, jobs)
+    book = _armed(built_stores, hop, declared)
     assert budget_stop(book) is None, (
         "a run that declared NOTHING still holds a book, which stays silent until a ceiling exists"
     )
@@ -1570,7 +1586,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         holder=CampaignLaunch("ds1"),
         hop=moved,
     )
-    registry.mark_admitted(job.job_id, Budget(usd=0.30, tokens=5_000_000))
+    _admitted(built_stores, registry, job.job_id, Budget(usd=0.30, tokens=5_000_000))
     caps = HeldBudget(
         admitted=Budget(usd=0.30, tokens=210_000),
         standing=Budget(),
@@ -1578,7 +1594,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         share=Budget(usd=0.30, tokens=210_000),
         step_rounds=None,
     )
-    moved_book = _armed(built_stores, moved, caps, registry)
+    moved_book = _armed(built_stores, moved, caps)
     assert budget_stop(moved_book) == StopReason.TOKEN_BUDGET, "the token ceiling bound nothing"
     dispatcher = CommandDispatcher(built_stores, registry)
     armed = _change_run_limits(dispatcher, moved, Budget(usd=0.50))
@@ -1694,7 +1710,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     assert share(held_a) == pytest.approx(0.25), (
         "fork b's launch raised the campaign's ceiling and handed fork a fork b's money"
     )
-    beside = _armed(built_stores, fork_b, held_b, shared)
+    beside = _armed(built_stores, fork_b, held_b)
     eighth = SendBound(input_tokens=0, output_tokens=0, usd=0.125)
     assert beside.fits(eighth, eighth, paid_by="host") == 4, (
         "fork b's book spends what fork a still holds: two forks, two ceilings"
@@ -1747,7 +1763,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     for cycle in pair:
         built_stores.campaigns.mint_cycle(cycle)
     job_a, held_a = launch(pair[0], 1.0)
-    book_a = _armed(built_stores, pair[0], held_a, shared)
+    book_a = _armed(built_stores, pair[0], held_a)
     job_b6, held_b6 = launch(pair[1], 3.0)
     assert (share(held_a), share(held_b6)) == (1.0, 2.0), (
         "two live cycles were admitted more than their campaign's ceiling between them"
@@ -1830,7 +1846,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     with pytest.raises(QuotaExceededError):
         launch(race[1], 3.0)
 
-    # A job file has one writer at a time: a ceiling lowered by another process while the run
+    # A job file has one writer at a time: a job retargeted by another process while the run
     # stamps its start is never overwritten by the run's stale copy (bl5.B2).
     stamped = shared.create(
         user_id="u-stamp",
@@ -1839,27 +1855,27 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         hop=race[1],
         holder=CampaignLaunch("ds1"),
     )
-    shared.mark_admitted(stamped.job_id, Budget(usd=3.0))
+    shared.mark_admitted(stamped.job_id)
     api = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 4)
-    lowered, interleaved = Budget(usd=1.0), [False]
+    interleaved = [False]
     read_job = shared.get
 
-    def read_then_lowered(job_id: str) -> Any:
+    def read_then_moved(job_id: str) -> Any:
         job = read_job(job_id)
         with contextlib.suppress(ServiceUnavailableError):
-            api.set_reserve(job_id, lowered)
+            api.update_target(job_id, hop=race[0])
             interleaved[0] = True
         return job
 
     with monkeypatch.context() as patched:
         patched.setattr(interlock, "LOCK_TIMEOUT", 0.0)
-        patched.setattr(shared, "get", read_then_lowered)
+        patched.setattr(shared, "get", read_then_moved)
         shared.mark_started(stamped.job_id)
         if not interleaved[0]:
-            api.set_reserve(stamped.job_id, lowered)
+            api.update_target(stamped.job_id, hop=race[0])
     after = shared.get(stamped.job_id)
-    assert after is not None and after.reserve == lowered, (
-        "a reserve lowered mid-stamp was overwritten by the run's stale job file"
+    assert after is not None and after.hop == race[0], (
+        "a job retargeted mid-stamp was overwritten by the run's stale job file"
     )
     assert after.started_at is not None
     shared.release(stamped.job_id, StopReason.CONVERGED)
@@ -2210,11 +2226,13 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         charge=Charge(
             state="held",
             hold_id="killed",
+            parent=None,
             key_source="host",
-            price=CallPrice(
-                kind="optimizer", model=None, provider=None, cost_usd=hold_usd, rate_priced_usd=None
+            call=CallPrice(
+                kind="optimizer", model=None, provider=None, cost_usd=None, rate_priced_usd=None
             ),
-            tokens=2_100,
+            tokens=0,
+            bound=Budget(usd=hold_usd, tokens=2_100),
             ledger="burst/ledger.jsonl",
         ),
     )
@@ -2771,8 +2789,9 @@ def _account_stores(
             Charge(
                 state="billed",
                 hold_id="spent",
+                parent=None,
                 key_source="host",
-                price=CallPrice(
+                call=CallPrice(
                     kind="optimizer",
                     model="gpt-x",
                     provider="openai",
@@ -2780,13 +2799,14 @@ def _account_stores(
                     rate_priced_usd=None,
                 ),
                 tokens=spent["input_tokens"] + spent["output_tokens"],
+                bound=None,
                 ledger="campaigns/held/cycles/c0/events.jsonl",
             )
         )
     return stores
 
 
-def _running(registry: JobRegistry, *, admitted: bool, reserve: Budget) -> None:
+def _running(stores: Stores, registry: JobRegistry, *, admitted: bool, reserve: Budget) -> None:
     """Another run of the account holding *reserve*, admitted or still at its gate."""
     held = registry.create(
         user_id="sub-9",
@@ -2796,9 +2816,8 @@ def _running(registry: JobRegistry, *, admitted: bool, reserve: Budget) -> None:
         holder=CampaignLaunch(dataset_name="d"),
         stage=RunPhase.RUNNING,
     )
-    registry.set_reserve(held.job_id, reserve)
     if admitted:
-        registry.mark_admitted(held.job_id, reserve)
+        _admitted(stores, registry, held.job_id, reserve)
 
 
 async def _paid_door(door: str, stores: Any) -> None:
@@ -3009,7 +3028,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         stores = _account_stores(at, issuer=issuer, user=user, spent=spent, face=face)
         registry = JobRegistry(stores.jobs_dir, capacity=lambda _live: 1)
         if running is not None:
-            _running(registry, **cast("dict[str, Any]", running))
+            _running(stores, registry, **cast("dict[str, Any]", running))
         if isinstance(admits, type):
             with pytest.raises(admits) as refused:
                 if door == "launch":
@@ -3087,8 +3106,9 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         Charge(
             state="billed",
             hold_id="own",
+            parent=None,
             key_source="user",
-            price=CallPrice(
+            call=CallPrice(
                 kind="optimizer",
                 model="gpt-x",
                 provider="openrouter",
@@ -3096,6 +3116,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
                 rate_priced_usd=None,
             ),
             tokens=9_000_000,
+            bound=None,
             ledger="campaigns/held/cycles/c0/events.jsonl",
         )
     )
@@ -3387,13 +3408,15 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         hop=hop,
     )
     assert job.holds_slot, "an empty box must hand out a slot, not a place in line"
-    registry.mark_admitted(job.job_id, Budget(usd=0.30, tokens=5_000_000))
+    _admitted(metered, registry, job.job_id, Budget(usd=0.30, tokens=5_000_000))
     hold_moved(metered, hop, Budget(usd=0.15, tokens=2_500_000))
     dispatcher = CommandDispatcher(metered, registry)
     _change_run_limits(dispatcher, hop, Budget(rounds=3))
     _change_run_limits(dispatcher, hop, Budget(tokens=1_000))
     held = registry.get(job.job_id)
-    assert held is not None and held.reserve == Budget(usd=0.30, tokens=2_000), (
+    assert held is not None and _reserve_of(metered, job.job_id) == Budget(
+        usd=0.30, tokens=2_000
+    ), (
         "the untouched USD reservation was released, or the token one did not move with its "
         "ceiling: as much again for the calls out"
     )
@@ -3419,7 +3442,9 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     assert held is not None and cycle_share(metered, held).usd is None, (
         "an uncap became a bounded share"
     )
-    assert held.reserve.usd is not None, "an uncap left the account nothing held back for the run"
+    assert _reserve_of(metered, job.job_id).usd is not None, (
+        "an uncap left the account nothing held back for the run"
+    )
 
     # A moved ceiling is the CAMPAIGN's: every cycle's spend counts against it once, a fork's
     # walked prefix not twice, and what the parent billed past the cut counts too.
@@ -3458,7 +3483,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         holder=CampaignLaunch("ds1"),
         hop=fork,
     )
-    registry.mark_admitted(job.job_id, Budget(usd=0.8))
+    _admitted(forker, registry, job.job_id, Budget(usd=0.8))
     hold_moved(forker, fork, Budget(usd=0.8))
     forker.grant.save(CouponGrant(face=Budget(usd=1.0)))
     allowance = account_of(forker)
@@ -3468,7 +3493,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             Budget(usd=5.0), stores=forker, job_registry=registry, hop=fork, sends=_UNPRICED_CELLS
         )
     change_budget(Budget(usd=5.0), stores=forker, job_registry=registry, hop=fork, sends=_CELLS)
-    caps, raised = forker.campaigns.read_campaign_ceiling(fork), registry.get(job.job_id)
+    caps = forker.campaigns.read_campaign_ceiling(fork)
     _, relaunched = admit_launch(
         declared=Budget(),
         user=allowance,
@@ -3482,7 +3507,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "$1.00 allowance, $0.50 of it the campaign's own: its ceiling is the whole $1.00, which "
         "already counts that $0.50 — not $1.10 off a fork prefix counted twice"
     )
-    assert raised is not None and raised.reserve.usd == pytest.approx(1.0), (
+    assert _reserve_of(forker, job.job_id).usd == pytest.approx(1.0), (
         "the reservation moved off the ceiling it backs"
     )
 
@@ -3502,7 +3527,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             holder=CampaignLaunch("ds1"),
             hop=racing_hop,
         )
-        racing.mark_admitted(held_job.job_id, Budget(usd=0.0))
+        _admitted(racer, racing, held_job.job_id, Budget(usd=0.0))
         hold_moved(racer, racing_hop, Budget(usd=0.0))
     first_read, second_at_gate, go = threading.Event(), threading.Event(), threading.Event()
     wallet_of, gate_of = quota.read_account_wallet, racing.admission_gate
@@ -3538,7 +3563,10 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         go.set()
         first.join(timeout=60)
         second.join(timeout=60)
-    reserved = sum(job.reserve.usd or 0.0 for job in racing.list_holding_spend(user_id="sub-8"))
+    reserved = sum(
+        _reserve_of(racer, job.job_id).usd or 0.0
+        for job in racing.list_holding_spend(user_id="sub-8")
+    )
     assert reserved <= 0.30 + 1e-9, (
         f"two set-limits reserved ${reserved:.2f} on a $0.30 coupon: the second read the wallet "
         "before the first's reserve landed"
@@ -3559,10 +3587,17 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         holder=CampaignLaunch("ds1"),
         hop=billed_hop,
     )
-    billing.mark_admitted(live.job_id, Budget(usd=0.20))
+    _admitted(biller, billing, live.job_id, Budget(usd=0.20))
+    live_book = SpendBook(
+        declared=Budget(),
+        share=Budget(),
+        reserve=RunHold(biller.charges, live.job_id),
+        meters="bill",
+        opened=time.monotonic(),
+    )
     with scoped(account=biller):
         billed_ledger = CycleEventLog.open(CycleDir(biller.campaigns.cycle_dir(billed_hop)))
-        _pay(billed_ledger, 0.10, input_tokens=1_000, output_tokens=0)
+        _pay(billed_ledger, 0.10, input_tokens=1_000, output_tokens=0, book=live_book)
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.10), (
         "a live run's billed $0.10 was held twice: once billed, once inside its $0.20 reserve"
     )
@@ -3694,12 +3729,19 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
 # 6. Spend outlives what spent it
 
 
-def _pay(ledger: CycleEventLog, cost_usd: float, *, input_tokens: int, output_tokens: int) -> None:
-    """One send through the one admission every paid call takes, on *ledger*."""
+def _pay(
+    ledger: CycleEventLog,
+    cost_usd: float,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    book: SpendBook | None = None,
+) -> None:
+    """One send through the one admission every paid call takes, on *ledger*, under *book*."""
     bound_send = SendBound(input_tokens=input_tokens, output_tokens=output_tokens, usd=cost_usd)
     with (
         scoped(ledger=ledger),
-        scoped(book=spend_book()),
+        scoped(book=spend_book() if book is None else book),
         admitted(
             CallLabel("backend", "backend"),
             bound_send,
@@ -4168,8 +4210,9 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         Charge(
             state="billed",
             hold_id="wiped",
+            parent=None,
             key_source="host",
-            price=CallPrice(
+            call=CallPrice(
                 kind="optimizer",
                 model="gpt-x",
                 provider="openai",
@@ -4177,6 +4220,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
                 rate_priced_usd=None,
             ),
             tokens=10,
+            bound=None,
             ledger=built_stores.charges.held_on(campaigns.ledger(wiped)),
         )
     )

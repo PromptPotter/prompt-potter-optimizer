@@ -136,10 +136,10 @@ def account_bill(charges: ChargeBook) -> PaidSpend:
 
     def stopped(hold: Charge) -> bool:
         # Whether what is held is unreported moves with the run, not the file: asked per read.
-        if hold.ledger not in attached:
+        if hold.landed_on not in attached:
             cycle_dir = CycleLayout.of_ledger(charges.ledger_of(hold)).cycle_dir
-            attached[hold.ledger] = producer_attached(cycle_dir)
-        return not attached[hold.ledger]
+            attached[hold.landed_on] = producer_attached(cycle_dir)
+        return not attached[hold.landed_on]
 
     held = still_held(
         (hold for hold in money.open.values() if stopped(hold)),
@@ -149,7 +149,7 @@ def account_bill(charges: ChargeBook) -> PaidSpend:
 
 
 def ledger_bills(charges: ChargeBook) -> dict[str, UserSpend]:
-    """What the box's keys billed per ledger (`Charge.ledger`): a live run's draw on its reserve."""
+    """What the box's keys billed per ledger (`Charge.ledger`)."""
     return money_on(charges.path).on_coupon
 
 

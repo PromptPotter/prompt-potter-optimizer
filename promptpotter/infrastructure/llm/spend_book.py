@@ -9,7 +9,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
-from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.run_records import (
     CallPrice,
     Charge,
@@ -62,6 +61,7 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
     from promptpotter.infrastructure.store.stores import Stores
+    from promptpotter.infrastructure.store.wallet_store import ChargeBook
 
 logger = logging.getLogger(__name__)
 
@@ -167,14 +167,6 @@ def _admits(left: float, each: float | None, reserve: bool) -> int:
     return n if reserve or each is None or left <= 0 else max(n, 1)
 
 
-class Hold(NamedTuple):
-    # The most the book's cycle may have metered of its campaign's ceiling, in all.
-    allotment: Budget
-    # What the host's coupon holds back for it, on the axes a coupon bounds: it binds the sends on
-    # the box's key alone, since a send on the account's own key draws no coupon.
-    reserve: Budget
-
-
 class LiveCycle(NamedTuple):
     """The cycle a live book re-reads at each send, through its store."""
 
@@ -184,27 +176,23 @@ class LiveCycle(NamedTuple):
     def standing(self) -> Budget:
         return self.campaigns.read_standing_budget(self.hop).budget
 
-
-class LiveHold:
-    """Each half off its one store, re-read live: the share off the cycle's ledger, which a reshare
-    moves, and the reserve off the registry job, which a set-limits moves."""
-
-    def __init__(self, cycle: LiveCycle, job_file: Path) -> None:
-        self.cycle = cycle
-        self.job_file = job_file
-        self._stamp: tuple[int, int, int] | None = None
-        self._reserve = Budget()
-
-    def read(self) -> Hold:
-        share = self.cycle.campaigns.last(self.cycle.hop, CycleShareRecord)
+    def share(self) -> Budget:
+        """The most the cycle may have metered of its campaign's ceiling, which a reshare moves."""
+        share = self.campaigns.last(self.hop, CycleShareRecord)
         if share is None:
-            raise RuntimeError(f"no share landed on {self.cycle.hop} before its book opened")
-        stat = self.job_file.stat()
-        stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
-        if stamp != self._stamp:
-            self._reserve = JOB_ADAPTER.validate_json(self.job_file.read_bytes()).reserve
-            self._stamp = stamp
-        return Hold(share.allotment, self._reserve)
+            raise RuntimeError(f"no share landed on {self.hop} before its book opened")
+        return share.allotment
+
+
+class RunHold(NamedTuple):
+    """A run's hold on its account's charges, which a set-limits restates: what the host's coupon
+    holds back for it binds the sends on the box's key alone."""
+
+    charges: ChargeBook
+    hold_id: str
+
+    def bound(self) -> Budget:
+        return money_on(self.charges.path).runs[self.hold_id].held
 
 
 # What an enclosing book files a nested run's sends as, as its ledger's copy of them does.
@@ -216,14 +204,16 @@ class SpendBook(Projection):
         self,
         *,
         declared: Budget,
-        hold: Hold | LiveHold,
+        share: Budget | LiveCycle,
+        reserve: Budget | RunHold,
         meters: CeilingMeter,
         opened: float,
         cycle: LiveCycle | None = None,
     ) -> None:
-        # The launch's own axis (`wall_clock_s`); money binds on the hold.
+        # The launch's own axis (`wall_clock_s`); money binds on the share and the reserve.
         self.declared = declared.only(CYCLE_AXES)
-        self.hold_of = hold
+        self.share = share
+        self.reserve_of = reserve
         self.cycle = cycle
         self.meters = meters
         # The launch's ``time.monotonic()``: a book re-armed mid-launch keeps its clock.
@@ -263,16 +253,20 @@ class SpendBook(Projection):
             return self.declared
         return self.declared.over(self.cycle.standing())
 
-    def _hold(self) -> Hold:
-        return self.hold_of if isinstance(self.hold_of, Hold) else self.hold_of.read()
-
     @property
     def allotment(self) -> Budget:
-        return self._hold().allotment.only(MONEY_AXES)
+        share = self.share if isinstance(self.share, Budget) else self.share.share()
+        return share.only(MONEY_AXES)
 
     @property
     def reserve(self) -> Budget:
-        return self._hold().reserve
+        held = self.reserve_of
+        return held if isinstance(held, Budget) else held.bound()
+
+    @property
+    def hold_id(self) -> str | None:
+        """The run's hold its calls draw on; ``None`` on a book no run holds."""
+        return None if isinstance(self.reserve_of, Budget) else self.reserve_of.hold_id
 
     def root(self) -> SpendBook:
         return self if self.enclosing is None else self.enclosing.root()
@@ -672,7 +666,8 @@ class SpendBook(Projection):
 def unbounded_spend_book() -> SpendBook:
     return SpendBook(
         declared=Budget(),
-        hold=Hold(Budget(), Budget()),
+        share=Budget(),
+        reserve=Budget(),
         meters="bill",
         opened=time.monotonic(),
     )
@@ -838,6 +833,7 @@ class Admission:
         self._held_on = self._root.ledger or billing_ledger(label.node)
         self._charges = bound_account(label.node).charges
         self._ledger = self._charges.held_on(self._held_on.path)
+        self._parent = book.hold_id
         self._unseen: list[TokenUsageRecord] = []
         # Priced parts no ledger record carries yet, metered straight into the book at its close.
         self._unlanded: list[_Part] = []
@@ -852,9 +848,7 @@ class Admission:
         _OUT.add(self._hold_id)
         account_held = False
         try:
-            held = self._charge(
-                "held", self._hold_id, self._bound_price(bound.usd), bound.tokens or 0
-            )
+            held = self._hold(self._hold_id, bound)
             account_held = True
             emit_spend_hold(node=label.node, charge=held, ledger=self._held_on)
         except BaseException:
@@ -862,7 +856,7 @@ class Admission:
             book.release(self._held, bound, label.kind, paid_by)
             # Nothing was sent: the account's hold closes at zero, or its bill keeps the bound forever.
             if account_held:
-                self._charge("billed", self._hold_id, self._bound_price(0.0), 0)
+                self._charge(self._bound_price(0.0), 0)
             raise
 
     def _bound_price(self, usd: float | None) -> CallPrice:
@@ -915,15 +909,30 @@ class Admission:
         if not self._book.saw(record):
             self._unseen.append(record)
 
-    def _charge(
-        self, state: Literal["held", "billed"], hold_id: str, price: CallPrice, tokens: int
+    def _hold(self, hold_id: str, bound: SendBound) -> Charge:
+        return self._append(
+            "held", hold_id, self._bound_price(None), 0, Budget(usd=bound.usd, tokens=bound.tokens)
+        )
+
+    def _charge(self, price: CallPrice, tokens: int) -> Charge:
+        return self._append("billed", self._hold_id, price, tokens, None)
+
+    def _append(
+        self,
+        state: Literal["held", "billed"],
+        hold_id: str,
+        price: CallPrice,
+        tokens: int,
+        bound: Budget | None,
     ) -> Charge:
         charge = Charge(
             state=state,
             hold_id=hold_id,
+            parent=self._parent,
             key_source=self._paid_by,
-            price=price,
+            call=price,
             tokens=tokens,
+            bound=bound,
             ledger=self._ledger,
         )
         self._charges.append(charge)
@@ -951,15 +960,11 @@ class Admission:
         priced = [self._price(part) for part in parts or (Billed(TokenAccount(), 0.0),)]
         try:
             # Every part is on the account before any ledger write can raise past the rest.
-            charges = [
-                self._charge("billed", self._hold_id, one.price, one.tokens) for one in priced
-            ]
+            charges = [self._charge(one.price, one.tokens) for one in priced]
             for one, charge in zip(priced, charges, strict=True):
                 self._write(one, charge)
             if unknown is not None:
-                left = self._charge(
-                    "held", uuid.uuid4().hex, self._bound_price(unknown.usd), unknown.tokens or 0
-                )
+                left = self._hold(uuid.uuid4().hex, unknown)
                 emit_spend_hold(node=self._label.node, charge=left, ledger=self._held_on)
         finally:
             self._close_book(unknown)
@@ -1049,10 +1054,10 @@ def unreported_on(ledger: Path) -> Unreported:
     own_left = [hold for hold in left if not draws_coupon(hold.key_source)]
     own_money = [hold for hold in money if not draws_coupon(hold.key_source)]
     return Unreported(
-        sum(hold.price.cost_usd or 0.0 for hold in money),
-        sum(hold.tokens for hold in left),
+        sum(hold.held.usd or 0.0 for hold in money),
+        sum(hold.held.tokens or 0 for hold in left),
         len(money),
         tuple((CallLabel(node, kind), usd, tokens) for node, kind, usd, tokens in trail.dearest),
-        off_coupon_usd=sum(hold.price.cost_usd or 0.0 for hold in own_money),
-        off_coupon_tokens=sum(hold.tokens for hold in own_left),
+        off_coupon_usd=sum(hold.held.usd or 0.0 for hold in own_money),
+        off_coupon_tokens=sum(hold.held.tokens or 0 for hold in own_left),
     )

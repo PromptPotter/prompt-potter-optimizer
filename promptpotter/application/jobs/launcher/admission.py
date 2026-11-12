@@ -16,6 +16,7 @@ from promptpotter.application.jobs.quota import (
     check_launch_quotas,
     declare_run_budget,
     hold_moved,
+    hold_run,
     land_job,
     move_campaign_money,
     next_launch_budget,
@@ -56,7 +57,7 @@ from promptpotter.domain.spend import (
     HeldBudget,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import Hold, LiveCycle, LiveHold, SpendBook
+from promptpotter.infrastructure.llm.spend_book import LiveCycle, RunHold, SpendBook
 from promptpotter.infrastructure.store.dataset_access import (
     definition_version,
     resolve_dataset,
@@ -432,10 +433,10 @@ def admit_and_share(
     hop: CycleHop | None,
     step_rounds: int | None,
     sends: tuple[Send, ...],
-    enclosing: Budget | None = None,
+    enclosing: SpendBook | None = None,
 ) -> HeldBudget:
-    """THE admission of every run and pass, sending *sends*; an inner run is admitted against its
-    *enclosing* book, whose reserve binds what it sends."""
+    """THE admission of every run and pass, sending *sends*, and its hold on the account; an inner
+    run is admitted against what its *enclosing* book has left, whose hold binds what it sends."""
     meter: CeilingMeter = (
         "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
     )
@@ -462,16 +463,20 @@ def admit_and_share(
                 if hop is None
                 else stores.campaigns.metered_spend(hop.campaign_id, meter)
             )
+            left = enclosing.money_left()
             room = Budget(
-                usd=None if enclosing.usd is None else enclosing.usd + spent.usd_amount,
-                tokens=None if enclosing.tokens is None else enclosing.tokens + spent.token_amount,
+                usd=None if left.usd is None else left.usd + spent.usd_amount,
+                tokens=None if left.tokens is None else left.tokens + spent.token_amount,
             )
             admitted, reserve = declared.over(_within(declared, room)), Budget()
             ceiling = admitted
         allotment = share_campaign_ceiling(
             ceiling, stores=stores, job_registry=job_registry, job=job, hop=hop, meter=meter
         )
-        job_registry.mark_admitted(job.job_id, reserve)
+        hold_run(
+            stores, job.job_id, reserve, parent=None if enclosing is None else enclosing.hold_id
+        )
+        job_registry.mark_admitted(job.job_id)
         if hop is not None:
             hold_moved(stores, hop, allotment)
             move_campaign_money(
@@ -560,25 +565,18 @@ def open_spend_book(
     held: HeldBudget,
     *,
     stores: Stores,
-    job_registry: JobRegistry,
     hop: CycleHop | None,
     meters: CeilingMeter,
     opened: float,
     live: bool,
 ) -> SpendBook:
-    """On a cycle its share is read live off the cycle's record, which a reshare moves, and its
-    reserve off the job; off one, as admitted. A *live* book reads the cycle's standing axes too."""
-    hold: Hold | LiveHold
-    if hop is None:
-        job = job_registry.get(held.job_id)
-        if job is None:
-            raise RuntimeError(f"a book opens only on its own job, and {held.job_id} is gone")
-        hold = Hold(held.share, job.reserve)
-    else:
-        hold = LiveHold(LiveCycle(stores.campaigns, hop), job_registry.job_file(held.job_id))
+    """On a cycle its share is read live off the cycle's record, which a reshare moves; off one, as
+    admitted. Its reserve is its hold's on the account, which a set-limits restates. A *live* book
+    reads the cycle's standing axes too."""
     book = SpendBook(
         declared=held.admitted,
-        hold=hold,
+        share=held.share if hop is None else LiveCycle(stores.campaigns, hop),
+        reserve=RunHold(stores.charges, held.job_id),
         meters=meters,
         opened=opened,
         cycle=LiveCycle(stores.campaigns, hop) if live and hop is not None else None,
@@ -608,11 +606,9 @@ async def slotless_share[S](
     """A run's admission with no slot, taken BEFORE anything paid: the job, then its hold, then
     *run* under it, whose result the job's release records. An inner run's share is of what the
     enclosing run's book has left at its spawn."""
-    enclosing: Budget | None = None
-    if isinstance(holder, InnerRun):
-        if (book := run_scope().book) is None:
-            raise RuntimeError("an inner run spawns only under its enclosing run's book")
-        enclosing = book.money_left()
+    enclosing = run_scope().book if isinstance(holder, InnerRun) else None
+    if isinstance(holder, InnerRun) and enclosing is None:
+        raise RuntimeError("an inner run spawns only under its enclosing run's book")
     job_registry = JobRegistry.attach(stores.jobs_dir)
     start = RunStart(
         stores,
@@ -709,7 +705,6 @@ async def paid_pass(
         book = open_spend_book(
             held,
             stores=stores,
-            job_registry=job_registry,
             hop=hop,
             meters=meters,
             opened=time.monotonic(),

@@ -177,7 +177,6 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
     book = open_spend_book(
         session.state.held,
         stores=session.store,
-        job_registry=JobRegistry.attach(session.store.jobs_dir),
         hop=session.hop,
         meters=ceiling_meter(session.purpose),
         opened=session.state.launch_clock().monotonic,

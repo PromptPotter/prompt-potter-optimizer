@@ -1831,8 +1831,28 @@
       },
       "Charge": {
         "additionalProperties": false,
-        "description": "One line of a send's money: its hold at the send's bound, then each answered part closing it.",
+        "description": "One line of the account's money: a hold at its bound under its parent hold, a run's or a\ncall's, then each answered part of a call billing it.",
         "properties": {
+          "bound": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Budget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "call": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CallPrice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "hold_id": {
             "title": "Hold Id",
             "type": "string"
@@ -1846,11 +1866,26 @@
             "type": "string"
           },
           "ledger": {
-            "title": "Ledger",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ledger"
           },
-          "price": {
-            "$ref": "#/components/schemas/CallPrice"
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
           },
           "record_type": {
             "const": "charge",
@@ -1878,9 +1913,11 @@
         "required": [
           "state",
           "hold_id",
+          "parent",
           "key_source",
-          "price",
+          "call",
           "tokens",
+          "bound",
           "ledger"
         ],
         "title": "Charge",

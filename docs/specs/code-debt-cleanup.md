@@ -189,7 +189,7 @@ row it closes.
   its own rollup. Action: the live readers ride `_Money` as a projection. **Rides with:** holds nest.
 - **Money holds once per level, three ways** (operator, 2026-11-12: a backbone root, not a row):
   - the run reserves in quota's job registry (`job.reserve`, `_outstanding_reservations`), handed to
-    its book as `spend_book.py::Hold`;
+    its book as a `Hold`;
   - a cell reserves in memory only (`spend_book.py::CellReservation`, with its own `draw` and the
     chain index in `SpendBook.hold`), so a reserved cell's hold is on no ledger
     (`Connector.holds_own_sends`);
