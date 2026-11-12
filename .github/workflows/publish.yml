@@ -20,6 +20,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Its `gate.py --py` counts the surface ledger at the merge-base with `origin/main`.
+        with:
+          fetch-depth: 0
 
       # First, before anything is built: nothing else in this repo pins the tag,
       # `pyproject.toml` and `CITATION.cff` together, and a version uploaded to an index

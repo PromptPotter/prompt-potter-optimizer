@@ -60,4 +60,4 @@ Requests differing while decisions match is a rendering change; decisions differ
 - **The optimizer LLM** answers by CALL IDENTITY — node, seed, turn — never by wording or arrival order; a structured call gets a minimal valid instance of its schema. `ByCallIdentity(rebasing=True)` adds a `fork_proposal` to every L2 answer.
 - **The knobs** are the dataset's `campaign` under the script's `BENCH` sizes; one seeded determinism clamp holds every optimizer.
 
-**Adding an optimizer needs nothing here**: it runs as its manifest declares, one installed through entry points included — `examples/optimizer-plugin/` is that case, and `gate.py --only optimizer-plugin` proves it (red unless an arm carries `source="example:propose"`).
+**Adding an optimizer needs nothing here**: it runs as its manifest declares, one installed through entry points included — `examples/optimizer-plugin/` is that case, and `gate.py --only optimizer-plugin` proves it on its `--straight` run (red unless an arm carries `source="example:propose"`).
