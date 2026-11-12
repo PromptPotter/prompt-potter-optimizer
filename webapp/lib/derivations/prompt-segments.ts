@@ -13,6 +13,15 @@ export interface KnownSnippet {
   supersedes: string | null;
 }
 
+// A cited snippet's work; an authored one names none, so its kind stands as its source.
+export function snippetSource(s: LibrarySnippet): string {
+  return s.provenance.kind === "cited" ? s.provenance.source : s.provenance.kind;
+}
+
+export function snippetSupersedes(s: LibrarySnippet): string | null {
+  return s.provenance.kind === "authored" ? s.provenance.supersedes : null;
+}
+
 // The first snippet of a lineage: an edit names the source of what it was edited from.
 export function lineageRoot(
   snippets: readonly LibrarySnippet[],
@@ -20,9 +29,10 @@ export function lineageRoot(
 ): LibrarySnippet | undefined {
   const seen = new Set<string>();
   let at = snippets.find((s) => s.id === id);
-  while (at !== undefined && at.supersedes !== null && !seen.has(at.id)) {
+  while (at !== undefined && !seen.has(at.id)) {
+    const parent = snippetSupersedes(at);
+    if (parent === null) return at;
     seen.add(at.id);
-    const parent: string = at.supersedes;
     const next = snippets.find((s) => s.id === parent);
     if (next === undefined) return at;
     at = next;

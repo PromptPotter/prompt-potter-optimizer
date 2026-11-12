@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { libraryRead } from "@/lib/api";
 import type { LibraryResponse, LibrarySnippet } from "@/lib/api/types";
+import { snippetSource, snippetSupersedes } from "@/lib/derivations";
 import { useRead } from "@/lib/hooks/useRead";
 import { promptFieldLabel } from "@/lib/prompt-fields";
 import { endSnippetDrag, startSnippetDrag } from "@/lib/state/snippet-drag";
@@ -23,9 +24,9 @@ type Picked = Record<Facet, readonly string[]>;
 const NONE: Picked = { source: [], method: [], pack: [], tag: [] };
 
 function valuesOf(s: LibrarySnippet, facet: Facet): readonly string[] {
-  if (facet === "source") return [s.source];
+  if (facet === "source") return [snippetSource(s)];
   if (facet === "pack") return [s.pack];
-  if (facet === "method") return s.method === null ? [] : [s.method];
+  if (facet === "method") return s.provenance.kind === "cited" ? [s.provenance.method] : [];
   return s.tags;
 }
 
@@ -232,12 +233,10 @@ export function SnippetLibrary({
                       key={`${s.pack}/${s.id}`}
                       snippet={s}
                       parent={
-                        s.supersedes === null
-                          ? null
-                          : (library.snippets.find((p) => p.id === s.supersedes) ?? null)
+                        library.snippets.find((p) => p.id === snippetSupersedes(s)) ?? null
                       }
                       field={field}
-                      source={sourceTitle(s.source)}
+                      source={sourceTitle(snippetSource(s))}
                       onPick={onPick}
                     />
                   ))}
@@ -318,12 +317,13 @@ function SourceLabel({
 
 // A version names what it was edited from: the parent's opening words, or its id where the library lacks it.
 function lineage(s: LibrarySnippet, parent: LibrarySnippet | null): string | null {
-  if (s.supersedes === null) return null;
+  const p = s.provenance;
+  if (p.kind !== "authored" || p.supersedes === null) return null;
   const from =
     parent === null
-      ? s.supersedes
+      ? p.supersedes
       : `“${parent.text.length > PARENT_CHARS ? `${parent.text.slice(0, PARENT_CHARS)}…` : parent.text}”`;
-  return `v${s.version}${s.author === null ? "" : ` by ${s.author}`}, from ${from}`;
+  return `v${p.version} by ${p.author}, from ${from}`;
 }
 
 const PARENT_CHARS = 40;
@@ -386,7 +386,7 @@ function SnippetRow({
         )}
         <span className="snippet-source">
           {source}
-          {s.method ? ` · ${s.method}` : ""} · {s.pack}
+          {s.provenance.kind === "cited" ? ` · ${s.provenance.method}` : ""} · {s.pack}
         </span>
         {s.presumes.length === 0 ? null : (
           <Term
@@ -396,7 +396,7 @@ function SnippetRow({
             presumes {s.presumes.join(", ")}
           </Term>
         )}
-        {s.supersedes === null ? null : (
+        {snippetSupersedes(s) === null ? null : (
           <span className="snippet-source">{lineage(s, parent)}</span>
         )}
         {long ? (

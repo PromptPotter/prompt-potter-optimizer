@@ -2,7 +2,7 @@ import { useImperativeHandle, useMemo, useRef, useState, type DragEvent, type Re
 import { commands, libraryRead } from "@/lib/api";
 import type { DraftPatch, NodePrompt } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
-import { segmentPrompt, type KnownSnippet } from "@/lib/derivations";
+import { segmentPrompt, snippetSupersedes, type KnownSnippet } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
 import { useWorkspace } from "@/lib/workspace";
@@ -81,7 +81,11 @@ export function PromptFieldsEditor({
     () =>
       library === null
         ? []
-        : library.snippets.map((s) => ({ text: s.text, id: s.id, supersedes: s.supersedes })),
+        : library.snippets.map((s) => ({
+            text: s.text,
+            id: s.id,
+            supersedes: snippetSupersedes(s),
+          })),
     [library],
   );
   // An edit is banked as a version of its snippet in the campaign or check-in it is written in.
@@ -225,7 +229,7 @@ export function PromptFieldsEditor({
                 known={knownIn(f.key)}
                 library={library}
                 rows={compact ? 2 : (f.rows ?? 2)}
-                placeholder={f.hint}
+                placeholder={f.hint ?? undefined}
                 structured={folded && STRUCTURED.test(text)}
                 readOnly={readOnly}
                 onText={(v) => setField(f.key, v)}

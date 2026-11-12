@@ -238,11 +238,9 @@ row it closes.
 - **`tests/test_identity.py` reaches the spawn's private `_laid_arm`** (`_l4_arm`, `_l4_laid`, the depth
   step). Action: `_laid_arm` and `_one_model` ride `cfg`, and the journey drives `_open_seat` over an
   offline inner campaign. **Rides with:** rk-dec 3. **Re-test:** `grep -n "_laid_arm" tests/test_identity.py` is empty.
-- **A served prompt-field set is labelled in the browser**: `webapp/lib/prompt-fields.ts::PROMPT_FIELD`.
-  Action: the served prompt-field row carries its label, and the constant goes; the ink maps
-  (`sample-trajectory.ts::MOVEMENT_CLASS`, `PipelineFlow`'s `tone`) wait until a served word row carries
-  its `Tone` (`domain/said.py`). **Rides with:** the rest of rk-opt link 4. **Re-test:**
-  `git grep -n "PROMPT_FIELD\|MOVEMENT_CLASS" -- webapp/lib`.
+- **The browser inks a served state from its own map**: `webapp/lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`
+  and `PipelineFlow`'s `tone`. Action: they go once a served word row carries its `Tone`
+  (`domain/said.py`). **Re-test:** `git grep -n "MOVEMENT_CLASS" -- webapp/lib`.
 - **Potter's renderers read a hand-copied snapshot**: potter asks through `node_context.py::Calls.answer`
   now, but `dispatch/facade.py::build_bundle` copies run state into `dispatch/bundle.py::InjectionBundle`
   for every renderer (35 fields, then a `replace` for `silent_l1_panels`);
@@ -266,11 +264,13 @@ row it closes.
   moves down beside `run_walks` so the protocol goes. **Rides with:** rk-opt's next chain. **Re-test:** in
   `test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails`'s locked block, the leader's
   last `running` before the close counts the cells `rows(leader)` holds.
-- **`library.py::LibrarySnippet` flattens a cited-or-authored snippet into nullable fields**. Action:
-  the snippet keeps its union. **Rides with:** the rest of rk-opt link 4.
 - **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
-  carry their passes beside `VerificationPass`. Action: both ride the one record. **Rides with:**
-  the rest of rk-opt link 4. **Re-test:** `git grep -n "\.overlap\b" -- promptpotter` is empty.
+  carry their passes beside `VerificationPass`. Action: both ride the one record. **Held (design
+  fork):** (a) each overlap top-up is a `VerificationPass` of a new `overlap` kind on the round, and
+  `RoundResult.overlap_results` derives from them, while `RoundOutcome.overlap` (the `OverlapReading`,
+  17 files) stays; or (b) the reading and its cells are one origin-panel record the round and its
+  restatement carry, so `.overlap` goes whole. Both reshape `RoundStatement` (a wipe). **Re-test:**
+  `git grep -n "\.overlap\b" -- promptpotter` is empty.
 - **`ab` re-fits under the current scorer on the whole ruler** (decision 21, rk-opt 5). The tenant
   ruler at a round's reach holds other campaigns' rows, so `ab` regrades those foreign rows off the
   archive too, not only the record's own cells, and with the formula unchanged its fit equals today's

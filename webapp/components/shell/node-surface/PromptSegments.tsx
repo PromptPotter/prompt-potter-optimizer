@@ -5,6 +5,7 @@ import {
   joinSegments,
   lineageRoot,
   segmentPrompt,
+  snippetSource,
   withFreeText,
   withSnippetText,
   type KnownSnippet,
@@ -16,8 +17,9 @@ function sourceOf(library: LibraryResponse | null, known: KnownSnippet): string 
   const id = known.id ?? known.supersedes;
   const root = library === null || id === null ? undefined : lineageRoot(library.snippets, id);
   if (root === undefined) return null;
-  const source = library?.sources.find((x) => x.id === root.source);
-  if (source === undefined) return root.source;
+  const work = snippetSource(root);
+  const source = library?.sources.find((x) => x.id === work);
+  if (source === undefined) return work;
   return source.short_title;
 }
 

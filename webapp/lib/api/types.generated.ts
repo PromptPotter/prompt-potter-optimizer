@@ -401,21 +401,29 @@ export interface LibrarySnippet {
   presumes: ('ranking' | 'last_line_answer')[];
   /** Free labels for search alone; nothing else reads them */
   tags: string[];
-  /** A `sources` id for a cited snippet; `authored` for one an account wrote, which
-   * no work names */
-  source: string;
-  /** The cited technique's family as its pack records it; absent for an authored
-   * snippet */
-  method: string | null;
   /** The pack holding it, as a `packs` knob names it */
   pack: string;
-  /** 0 for a cited snippet; an authored one's is one past the snippet it supersedes */
+  provenance: LibraryCited | LibraryAuthored;
+}
+
+/** A snippet its pack cites from a published work. */
+export interface LibraryCited {
+  kind: 'cited';
+  /** The work's arXiv id, a `sources` id */
+  source: string;
+  /** The cited technique's family as its pack records it */
+  method: string;
+}
+
+/** A snippet an account wrote: a version of the one it was edited from, or
+ * written from nothing. */
+export interface LibraryAuthored {
+  kind: 'authored';
+  author: string;
+  /** One past the snippet it supersedes, a cited one counting 0 */
   version: number;
-  /** The `id` of the snippet it was edited from; absent for a cited snippet and one
-   * written from nothing */
+  /** The `id` of the snippet it was edited from; null for one written from nothing */
   supersedes: string | null;
-  /** Who wrote an authored snippet; absent for a cited one */
-  author: string | null;
 }
 
 /** A refusal as served: the rest of the answer it rides in serves on beside it. */
@@ -5513,6 +5521,12 @@ export interface PoolSourceInfo {
   in_play: string;
 }
 
+export interface PromptFieldInfo {
+  label: string;
+  hint: string | null;
+  rows: number | null;
+}
+
 export interface HealthCauseInfo {
   title: string;
   remedy: string;
@@ -5980,6 +5994,18 @@ export const POOL_SOURCE_INFO: Record<PoolSource, PoolSourceInfo> = {
   "partition": { one: "row", many: "rows", in_play: "Rows in play" },
 };
 
+// Mirror of domain/prompt_block.py::PROMPT_FIELD_INFO, in display order.
+export const PROMPT_FIELD_INFO: Record<string, PromptFieldInfo> = {
+  "persona": { label: "Persona", hint: "Who the model should act as", rows: 2 },
+  "task_intent": { label: "Task intent", hint: "The goal, in one line", rows: 2 },
+  "problem_description": { label: "Problem", hint: "What each input is", rows: 2 },
+  "instruction": { label: "Instructions", hint: "The directive the model follows", rows: 3 },
+  "thinking_style": { label: "Thinking style", hint: "How to reason before answering", rows: 2 },
+  "answer_format": { label: "Answer format", hint: "Exact shape of the output", rows: 2 },
+  "shots": { label: "Worked examples", hint: "Rows of your data shown with their answers", rows: null },
+  "plan": { label: "Plan", hint: null, rows: null },
+};
+
 // Mirror of domain/round_health.py::HEALTH_CAUSE_INFO, in display order.
 export const HEALTH_CAUSE_INFO: Record<'origin_unmeasured' | 'origin_incomplete' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | 'transient', HealthCauseInfo> = {
   "origin_unmeasured": { title: "not measured", remedy: "Re-score the origin. If it stops in the same place, read the error on the last cell that was measured — the cause is upstream of the prompt. A cell measured but not graded is the formula's: fix the formula and re-read that cell, never re-buy it." },
@@ -6134,6 +6160,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [MOVABLE_AGENT_LABELS, ["proposer", "optimizer"]],
   [NODE_KIND_INFO, ["io", "llm", "tool", "retriever", "cache", "measurement", "member"]],
   [POOL_SOURCE_INFO, ["library", "partition"]],
+  [PROMPT_FIELD_INFO, ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format", "shots", "plan"]],
   [HEALTH_CAUSE_INFO, ["origin_unmeasured", "origin_incomplete", "structural", "unscoreable", "holed", "evidence_starved", "structural_untested", "persistent", "degraded", "transient"]],
   [HEALTH_GRADE_INFO, ["healthy", "degraded", "critical", "unmeasured"]],
   [THETA_CAVEAT_INFO, ["cold_ruler", "flat_ruler", "collapsed_band", "prior_pinned", "unmeasured_delta", "floor_pinned"]],

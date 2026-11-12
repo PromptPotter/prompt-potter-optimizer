@@ -8785,6 +8785,75 @@
         "title": "LensShift",
         "type": "object"
       },
+      "LibraryAuthored": {
+        "additionalProperties": false,
+        "description": "A snippet an account wrote: a version of the one it was edited from, or written from nothing.",
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "kind": {
+            "const": "authored",
+            "title": "Kind",
+            "type": "string"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `id` of the snippet it was edited from; null for one written from nothing",
+            "title": "Supersedes"
+          },
+          "version": {
+            "description": "One past the snippet it supersedes, a cited one counting 0",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "author",
+          "version",
+          "supersedes"
+        ],
+        "title": "LibraryAuthored",
+        "type": "object"
+      },
+      "LibraryCited": {
+        "additionalProperties": false,
+        "description": "A snippet its pack cites from a published work.",
+        "properties": {
+          "kind": {
+            "const": "cited",
+            "title": "Kind",
+            "type": "string"
+          },
+          "method": {
+            "description": "The cited technique's family as its pack records it",
+            "title": "Method",
+            "type": "string"
+          },
+          "source": {
+            "description": "The work's arXiv id, a `sources` id",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "source",
+          "method"
+        ],
+        "title": "LibraryCited",
+        "type": "object"
+      },
       "LibraryFile": {
         "additionalProperties": false,
         "description": "An uploaded candidate library, under every upload's one bound.",
@@ -8860,34 +8929,10 @@
         "additionalProperties": false,
         "description": "One snippet of one pack the account reads, as a library surface lists it.",
         "properties": {
-          "author": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Who wrote an authored snippet; absent for a cited one",
-            "title": "Author"
-          },
           "id": {
             "description": "Its content id, the suffix of each pool entry `{part}.{id}` it expands into; one on the shelf, since a pack repeating another's text is refused",
             "title": "Id",
             "type": "string"
-          },
-          "method": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The cited technique's family as its pack records it; absent for an authored snippet",
-            "title": "Method"
           },
           "pack": {
             "description": "The pack holding it, as a `packs` knob names it",
@@ -8902,10 +8947,23 @@
             "title": "Presumes",
             "type": "array"
           },
-          "source": {
-            "description": "A `sources` id for a cited snippet; `authored` for one an account wrote, which no work names",
-            "title": "Source",
-            "type": "string"
+          "provenance": {
+            "discriminator": {
+              "mapping": {
+                "authored": "#/components/schemas/LibraryAuthored",
+                "cited": "#/components/schemas/LibraryCited"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LibraryCited"
+              },
+              {
+                "$ref": "#/components/schemas/LibraryAuthored"
+              }
+            ],
+            "title": "Provenance"
           },
           "suits": {
             "description": "The prompt parts it suits, in `PROMPT_FIELDS` order: a drop onto another part is allowed and shown as such",
@@ -8914,18 +8972,6 @@
             },
             "title": "Suits",
             "type": "array"
-          },
-          "supersedes": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The `id` of the snippet it was edited from; absent for a cited snippet and one written from nothing",
-            "title": "Supersedes"
           },
           "tags": {
             "description": "Free labels for search alone; nothing else reads them",
@@ -8938,11 +8984,6 @@
           "text": {
             "title": "Text",
             "type": "string"
-          },
-          "version": {
-            "description": "0 for a cited snippet; an authored one's is one past the snippet it supersedes",
-            "title": "Version",
-            "type": "integer"
           }
         },
         "required": [
@@ -8951,12 +8992,8 @@
           "suits",
           "presumes",
           "tags",
-          "source",
-          "method",
           "pack",
-          "version",
-          "supersedes",
-          "author"
+          "provenance"
         ],
         "title": "LibrarySnippet",
         "type": "object"

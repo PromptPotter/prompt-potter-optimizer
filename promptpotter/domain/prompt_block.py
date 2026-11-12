@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from pydantic import Field, StringConstraints, model_validator
 
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
+from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.worded import Worded
 
 # One path segment, so a name a knob carries resolves to a directory under the packs root alone.
 PackName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9._-]*$")]
@@ -89,6 +91,35 @@ class PromptPart(StrEnum):
 
 
 assert tuple(PromptPart) == PROMPT_FIELDS, "a snippet suits exactly the six prompt fields"
+
+
+class PromptFieldInfo(NamedTuple):
+    label: str
+    hint: str | None
+    # The editor's height in lines; ``None`` sizes it to its default.
+    rows: int | None
+
+
+# By the key a node's prompt dict holds; a key it lacks is labelled by its own words.
+PROMPT_FIELD_INFO: Worded[str, PromptFieldInfo] = Worded(
+    {
+        PromptPart.PERSONA: PromptFieldInfo("Persona", "Who the model should act as", 2),
+        PromptPart.TASK_INTENT: PromptFieldInfo("Task intent", "The goal, in one line", 2),
+        PromptPart.PROBLEM_DESCRIPTION: PromptFieldInfo("Problem", "What each input is", 2),
+        PromptPart.INSTRUCTION: PromptFieldInfo(
+            "Instructions", "The directive the model follows", 3
+        ),
+        PromptPart.THINKING_STYLE: PromptFieldInfo(
+            "Thinking style", "How to reason before answering", 2
+        ),
+        PromptPart.ANSWER_FORMAT: PromptFieldInfo("Answer format", "Exact shape of the output", 2),
+        # Not decomposition fields, but they ride the same dict.
+        SHOTS_KEY: PromptFieldInfo(
+            "Worked examples", "Rows of your data shown with their answers", None
+        ),
+        "plan": PromptFieldInfo("Plan", None, None),
+    }
+)
 
 
 @shapes_optimizer_prompt

@@ -94,7 +94,7 @@ from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.library import library
+from promptpotter.application.library import LibraryAuthored, library
 from promptpotter.application.maintenance.landing import apply_landing, last_landing, plan_landing
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import running_prompt, select_optimizer
@@ -661,7 +661,9 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     )
     asyncio.run(CommandDispatcher(ada).dispatch(CommandCall(banked)))
     by_ada = {s.text: s for s in library(ada.block_packs).snippets}
-    assert (by_ada[edit].supersedes, by_ada[edit].version) == (snippet_id(seed.text), 2), (
+    authored = by_ada[edit].provenance
+    assert isinstance(authored, LibraryAuthored), "a banked edit reads as cited"
+    assert (authored.supersedes, authored.version) == (snippet_id(seed.text), 2), (
         "a banked edit lost the snippet it supersedes"
     )
     assert [s.text for s in library(eve.block_packs).snippets] == [seed.text], (

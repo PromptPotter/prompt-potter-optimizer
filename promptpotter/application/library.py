@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import Field
 
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.domain.prompt_block import (
-    AUTHORED_SOURCE,
     Authored,
     BlockPack,
     Cited,
@@ -37,6 +36,27 @@ class LibrarySource(StrictModel):
     year: int
 
 
+class LibraryCited(StrictModel):
+    """A snippet its pack cites from a published work."""
+
+    kind: Literal["cited"]
+    source: str = Field(description="The work's arXiv id, a `sources` id")
+    method: str = Field(description="The cited technique's family as its pack records it")
+
+
+class LibraryAuthored(StrictModel):
+    """A snippet an account wrote: a version of the one it was edited from, or written from nothing."""
+
+    kind: Literal["authored"]
+    author: str
+    version: int = Field(
+        ge=1, description="One past the snippet it supersedes, a cited one counting 0"
+    )
+    supersedes: str | None = Field(
+        description="The `id` of the snippet it was edited from; null for one written from nothing"
+    )
+
+
 class LibrarySnippet(StrictModel):
     """One snippet of one pack the account reads, as a library surface lists it."""
 
@@ -54,22 +74,8 @@ class LibrarySnippet(StrictModel):
         "matcher lacks one never draws it into a pool"
     )
     tags: list[str] = Field(description="Free labels for search alone; nothing else reads them")
-    source: str = Field(
-        description=f"A `sources` id for a cited snippet; `{AUTHORED_SOURCE}` for one an "
-        "account wrote, which no work names"
-    )
-    method: str | None = Field(
-        description="The cited technique's family as its pack records it; absent for an authored snippet"
-    )
     pack: str = Field(description="The pack holding it, as a `packs` knob names it")
-    version: int = Field(
-        description="0 for a cited snippet; an authored one's is one past the snippet it supersedes"
-    )
-    supersedes: str | None = Field(
-        description="The `id` of the snippet it was edited from; absent for a cited snippet and "
-        "one written from nothing"
-    )
-    author: str | None = Field(description="Who wrote an authored snippet; absent for a cited one")
+    provenance: Annotated[LibraryCited | LibraryAuthored, Field(discriminator="kind")]
 
 
 class LibraryResponse(StrictModel):
@@ -99,17 +105,23 @@ def library(shelf: PackShelf) -> LibraryResponse:
             refused.append(pack)
             continue
         for s in pack.snippets:
-            cited = s.provenance if isinstance(s.provenance, Cited) else None
-            authored = s.provenance if isinstance(s.provenance, Authored) else None
-            if cited is not None and cited.work not in sources:
-                work = pack.works[cited.work]
-                sources[cited.work] = LibrarySource(
-                    id=cited.work,
-                    title=work.title,
-                    short_title=work.title.split(":", 1)[0],
-                    first_author=work.first_author,
-                    year=work.year,
-                )
+            provenance: LibraryCited | LibraryAuthored
+            match s.provenance:
+                case Cited(work=cited, technique_family=method):
+                    provenance = LibraryCited(kind="cited", source=cited, method=method)
+                    if cited not in sources:
+                        work = pack.works[cited]
+                        sources[cited] = LibrarySource(
+                            id=cited,
+                            title=work.title,
+                            short_title=work.title.split(":", 1)[0],
+                            first_author=work.first_author,
+                            year=work.year,
+                        )
+                case Authored(author=author, version=version, supersedes=supersedes):
+                    provenance = LibraryAuthored(
+                        kind="authored", author=author, version=version, supersedes=supersedes
+                    )
             snippets.append(
                 LibrarySnippet(
                     id=snippet_id(s.text),
@@ -117,12 +129,8 @@ def library(shelf: PackShelf) -> LibraryResponse:
                     suits=list(s.parts),
                     presumes=sorted(s.presumes),
                     tags=list(s.tags),
-                    source=s.source,
-                    method=cited.technique_family if cited else None,
                     pack=name,
-                    version=s.version,
-                    supersedes=authored.supersedes if authored else None,
-                    author=authored.author if authored else None,
+                    provenance=provenance,
                 )
             )
     return LibraryResponse(
