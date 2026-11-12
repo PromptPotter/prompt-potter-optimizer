@@ -463,10 +463,9 @@ def _is_reexport_shim(init_file: Path) -> bool:
 
 
 def compute_ledger() -> dict[str, int]:
-    from promptpotter.application import optimizers
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.knobs import KNOBS, member_knob_count
-    from promptpotter.application.optimizers.nodes import CycleRead
+    from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
     from promptpotter.config.settings import Settings
     from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
     from promptpotter.domain.run_records import CycleRecord
@@ -486,7 +485,7 @@ def compute_ledger() -> dict[str, int]:
         ],
     )
     priced: collections.Counter[str] = collections.Counter()
-    for member in optimizers.NODE_MEMBERS.table.values():
+    for member in NODE_MEMBERS.table.values():
         priced.update(member.priced_surface)
     read = _read_names(sites)
     test_files, test_functions = _count_tests()

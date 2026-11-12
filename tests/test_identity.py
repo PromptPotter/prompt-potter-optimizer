@@ -52,7 +52,7 @@ from factories import (
 from offline_world import Router
 from pydantic import ValidationError
 
-from promptpotter.application import optimizer_manifest, optimizers, run_observers
+from promptpotter.application import optimizer_manifest, run_observers
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.children import (
     admission_failures,
@@ -127,7 +127,14 @@ from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect
 from promptpotter.application.optimizers.gepa.state import ParetoScores
-from promptpotter.application.optimizers.nodes import MintFacts, Panel, Proposals, admits
+from promptpotter.application.optimizers.nodes import (
+    NODE_MEMBERS,
+    MintFacts,
+    Panel,
+    Proposals,
+    admits,
+    unfit_pipeline,
+)
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -564,7 +571,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             optimization={"optimizer": "capo"},
         )
     )
-    calls = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate")).read(Calls)
+    calls = NodeContext(capo_seat, NODE_MEMBERS.get("capo_mutate")).read(Calls)
     values = {"task_description": "sort the list", "instruction": "Sort it."}
     mutated = {
         "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
@@ -587,7 +594,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
                 optimization=_l4_arm("capo", mutated),
             )
         ),
-        optimizers.NODE_MEMBERS.get("capo_mutate"),
+        NODE_MEMBERS.get("capo_mutate"),
     ).read(Calls)
     assert (
         capo_calls.prompt().compile_prompt(**values)
@@ -2998,10 +3005,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     off_roster = author_arm(reflected_on, origin, stray)
     assert len(off_roster.validation_failures) == 2, "an arm writing off the roster was measured"
     capo = select_optimizer(OptimizerChoice(optimizer="capo"))
-    assert optimizers.unfit_pipeline(capo, two) is not None, (
+    assert unfit_pipeline(capo, two) is not None, (
         "a member rewriting the one prompt node was admitted on a chain of two"
     )
-    assert optimizers.unfit_pipeline(gepa, two) is None, "GEPA was refused a chain it can walk"
+    assert unfit_pipeline(gepa, two) is None, "GEPA was refused a chain it can walk"
     # The shipped defaults' config-axis narrowing leaves every prompt field to L1; only
     # `prompt_fields_held` withdraws one, and a surface with nothing open is refused pre-spend.
     axes_only = two.narrow(
@@ -3038,7 +3045,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             for n in two.declared_nodes
         }
     )
-    assert optimizers.unfit_pipeline(gepa, all_held) is not None, (
+    assert unfit_pipeline(gepa, all_held) is not None, (
         "a campaign leaving its optimizer nothing to edit was admitted"
     )
 
@@ -3061,7 +3068,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     set_cycle(reflected_on.cycle, line=measured(reflected_on.cycle.parent))
     reflected: list[set[str]] = []
     for _ in range(3):
-        reflecting = NodeContext(reflected_on, optimizers.NODE_MEMBERS.get("gepa_reflect"))
+        reflecting = NodeContext(reflected_on, NODE_MEMBERS.get("gepa_reflect"))
         no_cells = Panel(cells=[], order=[], block_size=0)
         with (
             scoped(
@@ -3096,7 +3103,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             )
         ]
     )
-    assert optimizers.unfit_pipeline(gepa, rubric_only) is not None, (
+    assert unfit_pipeline(gepa, rubric_only) is not None, (
         "a peer was admitted to rewrite a field its prompt node does not declare"
     )
 
@@ -3641,7 +3648,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
             optimization={"optimizer": mixed.owners[node].name},
         )
         return (
-            NodeContext(proposing, optimizers.NODE_MEMBERS.get(node))
+            NodeContext(proposing, NODE_MEMBERS.get(node))
             .read(Children)
             .child([parent], overlay=overlay)
         )
@@ -3675,7 +3682,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         )
     )
     sent = (
-        NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate"))
+        NodeContext(capo_seat, NODE_MEMBERS.get("capo_mutate"))
         .read(Calls)
         .prompt()
         .compile_prompt(task_description="sort the list", instruction="Sort it.")

@@ -11,8 +11,8 @@ from pydantic import Field
 
 from example_optimizer import prompts
 from promptpotter.application.bench.node_context import Calls, Children, Lineage, Replay, Target
-from promptpotter.application.optimizers import ManifestDir, nodes, paper_templates
-from promptpotter.application.optimizers.nodes import RewriteKnobs
+from promptpotter.application.optimizers import nodes, paper_templates
+from promptpotter.application.optimizers.nodes import ManifestDir, RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.paired_reading import ArmKey

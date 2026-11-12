@@ -12,7 +12,6 @@ import httpx
 from promptpotter import connectors
 from promptpotter.application import (
     health,  # noqa: F401 -- a reader no run imports joins the roster
-    optimizers,
 )
 from promptpotter.application.datasets.loaders import (
     build_panel,
@@ -26,6 +25,7 @@ from promptpotter.application.datasets.prompts import (
 from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
+from promptpotter.application.optimizers.nodes import MANIFESTS, NODE_MEMBERS
 from promptpotter.application.pipeline_resolve import ServedPipeline, served_pipeline
 from promptpotter.application.scoring.evaluators import (
     connector_name_refusals,
@@ -213,12 +213,12 @@ def complete_registries(*, every_treatment: bool = True) -> None:
             where = f"connector {name!r} [{connectors.CONNECTORS.origins[name]}]"
             raise RuntimeError(f"{where}: {'; '.join(shadowed)}.")
     judge_registry.JUDGES.complete()
-    optimizers.MANIFESTS.complete()
-    for member in optimizers.NODE_MEMBERS.table.values():
+    MANIFESTS.complete()
+    for member in NODE_MEMBERS.table.values():
         member.complete()
     StatePart.complete()
     if every_treatment:
-        for name in optimizers.MANIFESTS.table:
+        for name in MANIFESTS.table:
             read_treatment(name)
         # The check-in as every check-in and mint reads it, an install shadow included.
         checkin_manifest()

@@ -14,7 +14,7 @@ The smallest optimizer the bench runs, registered through entry points alone —
 
 ```bash
 pip install -e .
-python -c "from promptpotter.application.optimizers import MANIFESTS; print(MANIFESTS.origins['example'])"
+python -c "from promptpotter.application.optimizers.nodes import MANIFESTS; print(MANIFESTS.origins['example'])"
 ```
 
 It prints `example-optimizer: example_optimizer.members:MANIFEST`, the distribution and entry point

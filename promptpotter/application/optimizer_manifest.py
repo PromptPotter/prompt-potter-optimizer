@@ -7,15 +7,17 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from promptpotter.application import optimizers
 from promptpotter.application.optimizers.nodes import (
     INITIAL_POPULATION,
+    MANIFESTS,
+    NODE_MEMBERS,
     RUN_INIT,
     CountKnob,
     Initializer,
     PanelSize,
     Reviewer,
     RoundWalk,
+    llm_nodes,
     source_digest,
 )
 from promptpotter.config.paths import (
@@ -220,13 +222,10 @@ def _round_plan(
                 f"{holds} {kinds} node: its walk is {walk}.",
             )
         # A gateway is no member: the plan holds its name.
-        members = [
-            n if declared[n] is NodeKind.GATEWAY else optimizers.NODE_MEMBERS.get(n) for n in nodes
-        ]
+        members = [n if declared[n] is NodeKind.GATEWAY else NODE_MEMBERS.get(n) for n in nodes]
         filled[role.name] = tuple(members) if many else next(iter(members), None)
     initial = [
-        cast("Proposer", optimizers.NODE_MEMBERS.get(n))
-        for n in schema.pipelines.get(INITIAL_POPULATION, ())
+        cast("Proposer", NODE_MEMBERS.get(n)) for n in schema.pipelines.get(INITIAL_POPULATION, ())
     ]
     walks: tuple[tuple[str, Sequence[Proposer]], ...] = (
         (DEFAULT_PIPELINE, filled["proposers"]),
@@ -249,7 +248,7 @@ def _round_plan(
             f"only such a manifest does — it walks {[p.name for p in initial]} and declares "
             f"{seeds_walk!r}.",
         )
-    initializers = [optimizers.NODE_MEMBERS.get(n) for n in schema.pipelines.get(RUN_INIT, ())]
+    initializers = [NODE_MEMBERS.get(n) for n in schema.pipelines.get(RUN_INIT, ())]
     if strays := [m.name for m in initializers if not isinstance(m, Initializer)]:
         raise _walk_refused(
             name,
@@ -296,8 +295,7 @@ class SelectedOptimizer:
         return frozenset(
             kind
             for node in self.member_nodes
-            for kind in optimizers.NODE_MEMBERS.get(node).reads
-            | optimizers.NODE_MEMBERS.get(node).writes
+            for kind in NODE_MEMBERS.get(node).reads | NODE_MEMBERS.get(node).writes
         )
 
     @property
@@ -389,9 +387,7 @@ class SelectedOptimizer:
 
     def roster_one(self, member: type) -> str:
         """The load held every consulted edge to one roster member."""
-        (name,) = (
-            n for n in self.member_nodes if isinstance(optimizers.NODE_MEMBERS.get(n), member)
-        )
+        (name,) = (n for n in self.member_nodes if isinstance(NODE_MEMBERS.get(n), member))
         return name
 
     def knob_owner(self, member: NodeMember, kind: type[StrictModel]) -> str:
@@ -401,7 +397,7 @@ class SelectedOptimizer:
         held = [
             n
             for n in (self.roster_one(c) for c in member.consults)
-            if issubclass(optimizers.NODE_MEMBERS.get(n).knobs, kind)
+            if issubclass(NODE_MEMBERS.get(n).knobs, kind)
         ]
         if len(held) != 1:
             raise TypeError(
@@ -419,7 +415,7 @@ class SelectedOptimizer:
             return member
         held = [
             m
-            for m in (optimizers.NODE_MEMBERS.get(self.roster_one(c)) for c in member.consults)
+            for m in (NODE_MEMBERS.get(self.roster_one(c)) for c in member.consults)
             if pool in m.draws
         ]
         if len(held) != 1:
@@ -457,7 +453,7 @@ class SelectedOptimizer:
         for initializer in self.plan.initializers:
             closed = any(
                 self.access(member, pool) == "closed"
-                for member in map(optimizers.NODE_MEMBERS.get, self.member_nodes)
+                for member in map(NODE_MEMBERS.get, self.member_nodes)
                 for pool in member.draws
                 if pool in initializer.writes
             )
@@ -479,7 +475,7 @@ class SelectedOptimizer:
 
     @property
     def members(self) -> tuple[NodeMember, ...]:
-        return tuple(map(optimizers.NODE_MEMBERS.get, self.member_nodes))
+        return tuple(map(NODE_MEMBERS.get, self.member_nodes))
 
     @property
     def proposing(self) -> tuple[Proposer, ...]:
@@ -519,7 +515,7 @@ class SelectedOptimizer:
 
     @property
     def phases(self) -> frozenset[str]:
-        stated = optimizers.llm_nodes()
+        stated = llm_nodes()
         return frozenset(
             member.phase.phase
             for node in self.llm_nodes
@@ -528,7 +524,7 @@ class SelectedOptimizer:
 
     @property
     def steered_axes(self) -> dict[str, set[str]]:
-        stated = optimizers.llm_nodes()
+        stated = llm_nodes()
         out: dict[str, set[str]] = {}
         for node in self.llm_nodes:
             for target, keys in (stated[node].steers if node in stated else {}).items():
@@ -536,7 +532,7 @@ class SelectedOptimizer:
         return out
 
     def outer_levers(self, node: str) -> dict[str, str]:
-        member = optimizers.llm_nodes().get(node)
+        member = llm_nodes().get(node)
         return {} if member is None else dict(member.outer_levers)
 
     def levers(self, node: str) -> dict[str, Any]:
@@ -609,7 +605,7 @@ class SelectedOptimizer:
 
 
 def _resolved_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
-    member = optimizers.llm_nodes().get(node)
+    member = llm_nodes().get(node)
     return {} if member is None else member.resolved_levers(declared)
 
 
@@ -636,7 +632,7 @@ def _refuse_unknown_main(selected: SelectedOptimizer) -> None:
         held = (
             node in selected.member_nodes
             and node not in initializers
-            and knob in optimizers.NODE_MEMBERS.get(node).knobs.model_fields
+            and knob in NODE_MEMBERS.get(node).knobs.model_fields
         )
         if not held:
             raise ValueError(
@@ -672,14 +668,14 @@ def _refuse_unheld_steers(selected: SelectedOptimizer) -> None:
 
 
 def _knobs(name: str, kind: NodeKind | None, config: Mapping[str, Any]) -> StrictModel:
-    model = optimizers.NODE_MEMBERS.get(name).knobs
+    model = NODE_MEMBERS.get(name).knobs
     if kind in MEMBER_KINDS:
         return model.model_validate(dict(config))
     return model.model_validate({k: v for k, v in config.items() if k in model.model_fields})
 
 
 def _carrying_knobs(schema: PipelineSchema, declared: PipelineManifest) -> PipelineSchema:
-    table = optimizers.NODE_MEMBERS.table
+    table = NODE_MEMBERS.table
     nodes: list[PipelineNode] = []
     for node in schema.declared_nodes:
         model = table[node.name].knobs if node.name in table else None
@@ -699,7 +695,7 @@ def _carrying_knobs(schema: PipelineSchema, declared: PipelineManifest) -> Pipel
 
 def _located(name: str) -> tuple[Path, PipelineManifest | ManifestSwitch]:
     try:
-        shipped = optimizers.MANIFESTS.get(name).directory
+        shipped = MANIFESTS.get(name).directory
     except KeyError as exc:
         raise NotFoundError(f"No optimizer named {name!r}", code="optimizer_unknown") from exc
     return shipped, authored_manifest(optimizer_manifest_path(shipped))
@@ -789,10 +785,10 @@ def _select(
             f"optimizer {name!r} declares {CHECKIN_NODE!r}, which the bench's check-in owns."
         )
     schema = _carrying_knobs(_parse(manifest.laid_over(overlay), schemas), manifest)
-    table = optimizers.NODE_MEMBERS.table
+    table = NODE_MEMBERS.table
     # NOW, never mid-round: a bad overlay or an llm node naming no model stops the run before it spends.
     llm = [n for n in schema.declared_nodes if n.kind is NodeKind.LLM]
-    stated = optimizers.llm_nodes()
+    stated = llm_nodes()
     levers = {n.name: stated[n.name].outer_levers for n in llm if n.name in stated}
     node_configs = {
         n.name: laid_config(
@@ -859,7 +855,7 @@ def _edges_of(member: NodeMember) -> frozenset[type]:
 
 
 def _roster(schema: PipelineSchema) -> tuple[str, ...]:
-    table = optimizers.NODE_MEMBERS.table
+    table = NODE_MEMBERS.table
     declared = [n.name for n in schema.declared_nodes if n.name in table]
     reached = {n for walk in _WALKS for n in schema.pipelines.get(walk, ()) if n in table}
     frontier = list(reached)
@@ -876,7 +872,7 @@ def _walk(selected: SelectedOptimizer) -> tuple[NodeMember, ...]:
     """Every member in the order the first rounds walk it, then the members only a walked one reaches."""
     plan = selected.plan
     named = {n for walk in _WALKS for n in selected.schema.pipelines.get(walk, ())}
-    reached = [optimizers.NODE_MEMBERS.get(n) for n in selected.member_nodes if n not in named]
+    reached = [NODE_MEMBERS.get(n) for n in selected.member_nodes if n not in named]
     return (
         *plan.initializers,
         *plan.first_walk,
@@ -885,8 +881,8 @@ def _walk(selected: SelectedOptimizer) -> tuple[NodeMember, ...]:
 
 
 def _open_edges(selected: SelectedOptimizer) -> list[str]:
-    members = {node: optimizers.NODE_MEMBERS.get(node) for node in selected.member_nodes}
-    table = optimizers.NODE_MEMBERS.table
+    members = {node: NODE_MEMBERS.get(node) for node in selected.member_nodes}
+    table = NODE_MEMBERS.table
     open_ = [
         f"{n!r} is declared and neither walked nor reached by a walked member"
         for n in (d.name for d in selected.schema.declared_nodes)
@@ -988,7 +984,7 @@ def bound_determinism() -> DeterminismClamp | None:
 def resolved_overrides(overrides: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
     """The identity `inner_campaign_id` hashes, each node's edit as it resolves: a lever as its
     member resolves it, dropped at its floor, so declarations rendering ONE prompt hash alike."""
-    stated = optimizers.llm_nodes()
+    stated = llm_nodes()
     nodes: dict[str, dict[str, Any]] = {}
     for node, raw in overrides.items():
         held = stated[node].outer_levers if node in stated else {}

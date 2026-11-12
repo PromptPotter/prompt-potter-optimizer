@@ -547,7 +547,7 @@ row it closes.
 - **A held prompt field fails every peer child, and `field` means two things.** Decided (decision 20):
   CAPO, GEPA and LEVI's whole-text rewrite lands in the slot the target pipeline declares, named by one
   knob `rewrites: prompt | <field>`; its preflight refuses a held slot and `rewritten` empties only open
-  fields (`paper_templates.py:49`, `children.py:86-94`, `optimizers/__init__.py:169`). The L4 digests
+  fields (`paper_templates.py:49`, `children.py:86-94`, `optimizers/nodes.py:972`). The L4 digests
   re-key. **Rides with:** rk-run 8. **Re-test:** `git grep -c "field: instruction" -- promptpotter/assets/optimizers`
   is 0.
 - **A selection is still made beside the one a read already holds.** `checkin.py::_land_draft` refuses

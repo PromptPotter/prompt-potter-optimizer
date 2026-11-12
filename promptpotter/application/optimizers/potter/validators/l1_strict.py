@@ -6,8 +6,8 @@ import re
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application import optimizers
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
+from promptpotter.application.optimizers.nodes import llm_nodes
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L1_HELD_PROMPT_FIELDS,
     prose_ceiling,
@@ -341,7 +341,7 @@ def l1_inner_layout_applies(overlay: Mapping[str, Any]) -> list[ValidationFailur
         if spec is None or not isinstance(node_params, dict) or "layout" not in node_params:
             continue
         axis, edit = f"{node_name}.layout", node_params["layout"]
-        offered = {n for n in NODE_LAYOUTS if "layout" in optimizers.llm_nodes()[n].outer_levers}
+        offered = {n for n in NODE_LAYOUTS if "layout" in llm_nodes()[n].outer_levers}
         if node_name not in offered:
             # Convicted rather than raised: it is a proposal like any other.
             failures.append(

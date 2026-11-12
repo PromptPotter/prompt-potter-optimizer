@@ -67,6 +67,7 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
+from promptpotter.application.optimizers.nodes import MANIFESTS, NODE_MEMBERS
 from promptpotter.application.runner.inner.tasks import measurement_modules
 from promptpotter.config.paths import (
     PROJECTS_DIR,
@@ -1345,7 +1346,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
 def digests() -> dict[str, str]:
     complete_registries()
     out = {"estimator": module_source_digest(*measurement_modules())}
-    for name in sorted(optimizers.MANIFESTS.table):
+    for name in sorted(MANIFESTS.table):
         selected = select_optimizer(OptimizerChoice(optimizer=name))
         out[f"treatment:{name}"] = selected.treatment(
             frozenset(Presumption), PackShelf(account=None)
@@ -1369,10 +1370,10 @@ def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
 
     packages = {
         node: owned(Path(inspect.getfile(type(member))).parent)
-        for node, member in optimizers.NODE_MEMBERS.table.items()
+        for node, member in NODE_MEMBERS.table.items()
     }
     owners = {d for d in packages.values() if d} | {
-        d for n in optimizers.MANIFESTS.table if (d := owned(optimizers.MANIFESTS.get(n).directory))
+        d for n in MANIFESTS.table if (d := owned(MANIFESTS.get(n).directory))
     }
 
     def imports(files: Iterable[Path]) -> set[str]:
@@ -1726,11 +1727,7 @@ def main() -> int:
     home = named_home()
     complete_registries()
     arm_names = args.optimizer or ["potter", "capo"]
-    names = (
-        list(CONTROLLED)
-        if args.controlled
-        else args.optimizer or sorted(optimizers.MANIFESTS.table)
-    )
+    names = list(CONTROLLED) if args.controlled else args.optimizer or sorted(MANIFESTS.table)
     kept = LastGreen.open()
     keys = {} if kept is None else optimizer_keys(kept, names, controlled=args.controlled)
     held = args.against is None and holds_run(home, run)

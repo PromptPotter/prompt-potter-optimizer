@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import importlib
 import json
 import pkgutil
 import sys
@@ -21,27 +22,31 @@ from typing import (
     Protocol,
     assert_never,
     cast,
+    get_args,
     runtime_checkable,
 )
 
 from pydantic import Field
 
 from promptpotter.application.scoring.formula.matchers import MATCHERS
+from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.arms import ArmSlot, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
 from promptpotter.domain.origin_panel import election_rows
-from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.pool import DemoPool
+from promptpotter.domain.pipeline_schema import MEMBER_KINDS, NodeKind
+from promptpotter.domain.pool import DemoPool, Pool
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import CatchUps
 from promptpotter.infrastructure.store.source_scan import prompt_source_digest
 from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.plugin_registry import Registry
 
 if TYPE_CHECKING:
     import asyncio
+    from collections.abc import Iterator
     from types import ModuleType
 
     from pydantic import BaseModel
@@ -62,7 +67,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.paired_reading import ArmKey, PriorStanding
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.pool import Access, Pool, PoolEntry
+    from promptpotter.domain.pool import Access, PoolEntry
     from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
@@ -826,3 +831,149 @@ class OperatorSeat(NodeMember):
 
 
 OPERATOR_SEAT = OperatorSeat()
+
+
+ENTRY_POINT_GROUP = "promptpotter.optimizer_nodes"
+"""Published, keyed by manifest node name: renaming it un-registers every plugin at once."""
+
+MANIFEST_ENTRY_POINT_GROUP = "promptpotter.optimizer_manifests"
+"""Published, keyed by manifest name: renaming it un-registers every plugin at once."""
+
+
+class ManifestDir(NamedTuple):
+    # What `optimization.optimizer` selects.
+    name: str
+    directory: Path
+
+
+_MEMBER_KINDS = MEMBER_KINDS | {NodeKind.LLM}
+
+
+def _validate(obj: object, origin: str) -> NodeMember:
+    name = getattr(obj, "name", None)
+    if isinstance(obj, type) or not isinstance(name, str) or not name:
+        raise RuntimeError(
+            f"[{origin}] resolved to {obj!r}: a member is an instance naming the manifest node it "
+            "answers in `name`."
+        )
+    where = f"optimizer node member {name!r} [{origin}]"
+    if getattr(obj, "kind", None) not in _MEMBER_KINDS:
+        raise RuntimeError(f"{where}: kind must be one of {sorted(_MEMBER_KINDS)}.")
+    knobs = getattr(obj, "knobs", None)
+    if not (isinstance(knobs, type) and issubclass(knobs, StrictModel)):
+        raise RuntimeError(f"{where}: `knobs` must be a StrictModel subclass.")
+    if getattr(obj, "prompt_arity", None) not in get_args(PromptArity):
+        raise RuntimeError(f"{where}: `prompt_arity` must be one of {get_args(PromptArity)}.")
+    for declared in ("reads", "writes"):
+        parts = getattr(obj, declared, None)
+        if not isinstance(parts, frozenset) or not all(
+            isinstance(s, type) and issubclass(s, StatePart) and s.__dict__.get("kind")
+            for s in parts
+        ):
+            raise RuntimeError(
+                f"{where}: `{declared}` must be a frozenset of registered StatePart kinds."
+            )
+    sees = getattr(obj, "sees", None)
+    if not isinstance(sees, frozenset) or not all(
+        isinstance(s, type) and issubclass(s, CycleRead) for s in sees
+    ):
+        raise RuntimeError(f"{where}: `sees` must be a frozenset of CycleRead kinds.")
+    member = cast("NodeMember", obj)
+    if refused := sorted(why for kind in sees if (why := kind.refusal(member)) is not None):
+        raise RuntimeError(f"{where}: " + "; ".join(refused) + ".")
+    consults = getattr(obj, "consults", None)
+    if not isinstance(consults, frozenset) or not all(isinstance(c, type) for c in consults):
+        raise RuntimeError(f"{where}: `consults` must be a frozenset of member classes.")
+    reached = {knobs, *(getattr(c, "knobs", None) for c in consults)}
+    draws = getattr(obj, "draws", None)
+    if not isinstance(draws, Mapping) or not all(
+        isinstance(pool, type)
+        and issubclass(pool, Pool)
+        and pool.__dict__.get("kind")
+        and isinstance(draw, KnobDraw)
+        and draw.knobs in reached
+        and draw.knob in draw.knobs.model_fields
+        for pool, draw in draws.items()
+    ):
+        raise RuntimeError(
+            f"{where}: `draws` must map registered Pool kinds to an AccessKnob or CountKnob "
+            "naming a knob of its own or a consulted member's knobs."
+        )
+    if defaulted := sorted(n for n, f in knobs.model_fields.items() if not f.is_required()):
+        raise RuntimeError(
+            f"{where}: knobs {defaulted} carry a default. The manifest declares every value, so "
+            "a code default would be a second source for one number."
+        )
+    return member
+
+
+def _validate_manifest(obj: object, origin: str) -> ManifestDir:
+    if not isinstance(obj, ManifestDir) or not obj.name or not obj.directory.is_dir():
+        raise RuntimeError(
+            f"[{origin}] resolved to {obj!r}: an optimizer manifest is a `ManifestDir` naming "
+            "what `optimization.optimizer` selects and the directory holding its pipeline.yaml."
+        )
+    return obj
+
+
+def _members() -> Iterator[Any]:
+    for package in sorted(BUILTIN_PACKAGES):
+        yield importlib.import_module(f"{_PACKAGE}.{package}.members")
+
+
+def _builtins() -> Iterator[tuple[str, object]]:
+    for module in _members():
+        for obj in module.MEMBERS:
+            yield module.__name__, obj
+
+
+def _manifests() -> Iterator[tuple[str, object]]:
+    for directory in sorted(optimizers_root().iterdir()):
+        if (directory / "pipeline.yaml").is_file():
+            yield str(directory), ManifestDir(directory.name, directory)
+
+
+NODE_MEMBERS = Registry(ENTRY_POINT_GROUP, _builtins, _validate)
+MANIFESTS = Registry(MANIFEST_ENTRY_POINT_GROUP, _manifests, _validate_manifest)
+
+
+def llm_nodes() -> Mapping[str, LlmNode]:
+    return {name: found for name, found in NODE_MEMBERS.table.items() if isinstance(found, LlmNode)}
+
+
+def unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> str | None:
+    """Why *selected* cannot write *schema*'s prompt nodes, asked before a mint spends; ``None`` where it can."""
+    prompt_nodes = schema.prompt_nodes()
+    if not any(n.open_prompt_fields for n in prompt_nodes) and not any(
+        schema.node_param_keys().values()
+    ):
+        prompts = (
+            "every prompt field is held"
+            if prompt_nodes
+            else f"no node of its chain {list(schema.active_steps)} declares a prompt"
+        )
+        return (
+            f"this campaign leaves its optimizer nothing to edit: {prompts} and no config axis is "
+            "open on any node, so each variant would be a no-op. Open a prompt field "
+            "(`prompt_fields_held`) or a config axis (`param_keys`) in `optimizer_narrowing`."
+        )
+    roster = [node.name for node in prompt_nodes]
+    for name in selected.member_nodes:
+        arity = NODE_MEMBERS.get(name).prompt_arity
+        if arity == "one" and len(prompt_nodes) != 1:
+            return (
+                f"optimizer {selected.name!r} node {name!r} rewrites the pipeline's one prompt "
+                f"node, and this pipeline's chain has {len(roster)}: {roster}."
+            )
+        knobs = selected.knobs(name)
+        if (
+            arity != "none"
+            and isinstance(knobs, RewriteKnobs)
+            and (missing := [n.name for n in prompt_nodes if knobs.field not in n.prompt_fields])
+        ):
+            return (
+                f"optimizer {selected.name!r} node {name!r} rewrites the prompt field "
+                f"{knobs.field!r}, which {missing} does not declare — set the node's `field` "
+                "knob in `optimization.nodes` to one it does."
+            )
+    return None

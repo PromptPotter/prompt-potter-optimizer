@@ -53,7 +53,6 @@ from factories import (
 )
 from offline_world import Router
 
-from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
@@ -86,7 +85,7 @@ from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.optimizers.capo.members import PairedTCut
 from promptpotter.application.optimizers.capo.state import CapoObjective
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
-from promptpotter.application.optimizers.nodes import MeasuredRound, Panel, ReadArm
+from promptpotter.application.optimizers.nodes import NODE_MEMBERS, MeasuredRound, Panel, ReadArm
 from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
@@ -701,7 +700,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     def race_of() -> PoBBRace:
         return PoBBRace(
-            NodeContext(racing, optimizers.NODE_MEMBERS.get("pobb")),
+            NodeContext(racing, NODE_MEMBERS.get("pobb")),
             Panel(cells=ten, order=ten, block_size=len(ten)),
             lambda _sp, _sample, _prior_id: None,  # type: ignore[arg-type, return-value]
         )
@@ -787,7 +786,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     child_arm = arm_state("child", slot=ArmSlot(round=1, idx=0, total=1), individual=child)
     read_parent = ReadArm(ArmKey(parent.id), arm_state("parent", individual=parent), bar)
     selection = elect_on_theta(
-        NodeContext(electing, optimizers.NODE_MEMBERS.get("theta_election")),
+        NodeContext(electing, NODE_MEMBERS.get("theta_election")),
         MeasuredRound(
             arms={walked_child: child_arm},
             rows={walked_child: arm},

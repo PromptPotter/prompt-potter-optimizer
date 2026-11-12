@@ -5,7 +5,6 @@ import logging
 import random
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
-from promptpotter.application import optimizers
 from promptpotter.application.bench.children import (
     DROPPED_MANDATORY_PLACEHOLDER,
     admission_failures,
@@ -23,7 +22,7 @@ from promptpotter.application.intelligence.earned_blocks import (
 from promptpotter.application.mask.backprop import select_branch_round
 from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
-from promptpotter.application.optimizers.nodes import CycleRead, ReadArm, admits
+from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead, ReadArm, admits
 from promptpotter.application.run_callbacks import restated_round
 from promptpotter.application.runner.inner.tasks import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
@@ -676,7 +675,7 @@ class NodeContext:
         if member not in cast("Controller", self._member).fires:
             raise KeyError(f"{self.node!r} fires {member.__name__} and does not declare it")
         selected = self._round.cycle.optimizer
-        return NodeContext(self._round, optimizers.NODE_MEMBERS.get(selected.roster_one(member)))
+        return NodeContext(self._round, NODE_MEMBERS.get(selected.roster_one(member)))
 
     def _declares(self, kind: type[StatePart], *, writes: bool) -> None:
         member = self._member

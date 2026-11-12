@@ -8,20 +8,20 @@ from typing import Any
 from processes import replace_changed
 from pydantic import BaseModel
 
-from promptpotter.application import optimizers
 from promptpotter.application.bench.task_context import CheckinOutput
 from promptpotter.application.optimizer_manifest import authored_manifest
+from promptpotter.application.optimizers.nodes import MANIFESTS, llm_nodes
 from promptpotter.config.paths import checkin_assets_root
 from promptpotter.domain.pipeline_manifest import ManifestSwitch
 from promptpotter.infrastructure.store.io import read_yaml
 
 
 def _manifests() -> dict[Path, Mapping[str, type[BaseModel]]]:
-    stated = optimizers.llm_nodes()
+    stated = llm_nodes()
     out: dict[Path, Mapping[str, type[BaseModel]]] = {
         checkin_assets_root(): {"checkin": CheckinOutput}
     }
-    for manifest in optimizers.MANIFESTS.table.values():
+    for manifest in MANIFESTS.table.values():
         authored = authored_manifest(manifest.directory / "pipeline.yaml")
         # A switch writes none: its schemas are those of the manifests it reads its nodes from.
         if isinstance(authored, ManifestSwitch):
