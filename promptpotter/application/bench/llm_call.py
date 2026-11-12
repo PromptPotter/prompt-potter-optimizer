@@ -54,6 +54,7 @@ def _drop_class_description(schema: dict[str, Any], _model: type[BaseModel]) -> 
 
 # The response model holds these after the call; a decoder held to them pads or cuts to fit.
 _HELD_AFTER = frozenset({"minLength", "minProperties"})
+_TYPED = frozenset({"type", "enum", "const", "anyOf", "oneOf", "allOf", "$ref"})
 
 
 @shapes_optimizer_prompt
@@ -68,8 +69,10 @@ def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
 @shapes_optimizer_prompt
 def wire_closed(schema: dict[str, Any]) -> dict[str, Any]:
     """The one wire rule a strict host enforces: every object closed, every property required, one
-    the model may leave unsaid nullable. An open map cannot be stated, so it raises."""
+    the model may leave unsaid nullable. An open map or an untyped value cannot be stated, so it raises."""
     out = {k: v for k, v in schema.items() if k not in _HELD_AFTER}
+    if not _TYPED & out.keys():
+        raise ValueError(f"an untyped value cannot ride a strict wire: {out!r:.200}")
     for key in ("anyOf", "oneOf", "allOf"):
         if key in out:
             out[key] = [wire_closed(s) for s in out[key]]

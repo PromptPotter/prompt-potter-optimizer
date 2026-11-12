@@ -149,16 +149,13 @@ def build_l1_response_schema(
         param_props: dict[str, dict[str, Any]] = {}
         for param in sorted(keys - nested - set(described)):
             allowed = pipeline_schema.param_options(node, param)
-            declared_type = node.param_types.get(param)
             # `[]` (declared, nothing legal) is not `None` (no space declared): the first emits no property.
             if allowed is not None and not allowed:
                 continue
             if allowed:
                 param_props[param] = {"type": "string", "enum": list(allowed)}
-            elif declared_type:
-                param_props[param] = {"type": declared_type}
             else:
-                param_props[param] = {}
+                param_props[param] = {"type": node.param_types[param]}
             # Stated, never a `maxLength`: `validators.py::l1_prose_within_ceiling` rejects past it.
             ceiling = prose_ceiling(node, param, inner_cells=inner_cells)
             if ceiling is not None:

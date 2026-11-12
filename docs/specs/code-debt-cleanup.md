@@ -1138,8 +1138,8 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   `ForkProposal` member mapped to one `ConfigOverrides` edit. **Rides with:** tune 1. **Re-test:**
   `git grep -n "class ForkProposal" -A20 -- promptpotter`.
 - **The strict wire is unproven on a paid host**: every optimizer schema passes
-  `bench/llm_call.py::wire_closed` and ships `strict: True`. An untyped pipeline param still rides as `{}`
-  (`l1_wire_schema.py`, `param_props[param] = {}`), which a strict host may refuse. Owed: one call per
+  `bench/llm_call.py::wire_closed` (every object closed, every leaf typed) and ships `strict: True`;
+  `domain/pipeline_parsing.py::parse_pipeline_response` refuses an untyped axis at load. Owed: one call per
   node family (check-in, `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`), pinned to Cerebras,
   each parsing. **Re-test:** those five calls.
 - **The default host pin is a trial with no verdict**: `domain/pipeline_overlay.py::pin_default_routes`

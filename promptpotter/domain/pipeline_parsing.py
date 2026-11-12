@@ -501,6 +501,19 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 **step_kwargs["param_descriptions"],
             }
 
+        # Refused at load: an axis with no type has no strict wire form, and its widget kind is a guess.
+        if untyped := sorted(
+            step_kwargs["param_keys"]
+            - set(step_kwargs["param_types"])
+            - set(step_kwargs["param_allowed_values"])
+        ):
+            _refuse(
+                f"node {name!r}: {untyped} name no type. Declare each in `optimizer.param_types`, "
+                "or give it a value in `config`.",
+                node=name,
+                untyped=untyped,
+            )
+
         parsed[name] = _built(PipelineNode, where, **step_kwargs)
 
     _check_member_structure(parsed, pipelines)
