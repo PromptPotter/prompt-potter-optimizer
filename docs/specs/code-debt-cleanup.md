@@ -364,6 +364,13 @@ row it closes.
   `close_round` each spell `stated_line` + `RoundClosedRecord.of`; the restate has one builder,
   `bench/node_context.py::restated_round`. Action: a `closed_round` builder beside it. **Rides with:**
   narr 2. **Re-test:** `git grep -c "RoundClosedRecord.of(" -- promptpotter tests` is 1.
+- **The ledger banks dashboard views**: `domain/phase_views.py` holds 13 pre-rendered view classes,
+  built in `application/views/ingress.py` through `ViewContext` and taken apart again in
+  `views/render/ansi.py` and `projections/live_dashboard/projection.py`; `RoundCompleteView` repeats
+  `RoundClosedRecord`, and `RunSpendView` copies the spend fields one by one. Action: the ledger keeps
+  domain facts only and every renderer reads the records; the view classes go with `ViewContext`
+  (the largest excision of the row above; a run-data reshape, wiped). **Rides with:** narr 2.
+  **Re-test:** `git grep -cE "^class \w+View\b" -- promptpotter/domain/phase_views.py` is 0.
 - **A pause by interrupt is served as a bare "Paused"**: the `run_phase` record holds
   `cause: "interrupt"`, and no surface names it. Action: a stop's cause is narrated and served on every
   door. **Rides with:** narr 2. **Re-test:** interrupt a running `new`; the readout and `hierarchy` name
@@ -564,13 +571,43 @@ row it closes.
   `format.ts::shortId`, `compare/EvidenceCharts.tsx` and `evidence/read.py`. **Re-test:**
   `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
 
+### tests (alone, after the holds nest)
+
+- **Dataset prose has no gate against the framing budget**: `promptpotter-self`'s 641-char
+  `optimization_goals` landed green and every L4 launch refused at mint
+  (`domain/search_point.py::TaskDecomposition`'s `check_budget`). Action: the suite reads every committed
+  dataset (install and `research/`) through `bench/task_context.py::committed_task_context`; the check
+  moves into the parse if no second seam must re-check. **Rides with:** tests 0. **Re-test:** a
+  601-char framing field in any committed `task.md` fails the suite.
+- **One guard is tested once per door**: tests grew +2.3k lines in three days, mostly security and
+  identity, a test per door of one guard. Action: a guard living at one choke point is tested once,
+  over the table of its doors (one function, no parametrize); a guard spelled at more than one door is a
+  row for the chain owning it. **Rides with:** tests, after the charter.
+
+### det (after rk-opt 5, beside tests)
+
+- **`capo/diverged` decides differently run to run**: two offline runs of one tree move its decisions
+  (`decisions.rounds[1..4]`, elections, the bench), so every equals-main reads that leg MOVED and a real
+  move there is invisible. Action: find the nondeterministic input (a clock-stamped fork id ordering
+  something is the first suspect) and make the leg byte-identical. **Rides with:** det 1.
+  **Re-test:** two `offline_run.py --against` runs of one tree read `capo/diverged: UNMOVED`.
+- **The offline world never reaches the wound**: every heal rung failing (L1 gets no candidates, L2
+  records `layer_parse_failure`) and the capo / gepa / levi form failures run no leg. Action: a scripted
+  leg that drives each. **Rides with:** det 2.
+- **`PARSE_FAILURE_WRONG_TYPE` is dead**: `optimizers/potter/l1/generate.py` and
+  `domain/optimizer_state.py` name a parse failure no path produces. Action: it goes. **Rides with:**
+  det 2. **Re-test:** `git grep -c "PARSE_FAILURE_WRONG_TYPE" -- promptpotter` is 0.
+
 ### batch/26 · rk-dec
 
 - **The crowning bar tests nothing a result can quote**: `application/scoring/selection.py::elect_round_winner`
   admits with no interval and no multiplicity correction, and `RoundResult.improved` reads any selection
-  past round 0 as a promotion; at panel width no corrected exact verdict reaches α=0.05. Action: the bar
-  tests a hypothesis a result can quote, chosen after separability is re-read on a tenant-ruler run.
-  **Rides with:** rk-dec 2. **Re-test:** a tenant-ruler run's `index.json::final.rounds_to_separable`
+  past round 0 as a promotion; at panel width no corrected exact verdict reaches α=0.05. Action
+  (operator, 2026-11-12): ONE predicate whose statistic is a switch, every reading built: today's
+  posterior bar; an exact paired sign test on the discordant cells, Holm-corrected across the round's
+  arms; an anytime-valid e-process on the paired discordance, valid wherever the race stops. Each
+  reading names what a result quotes, and `RoundResult.improved` reads the bar. Today's stays the
+  default until separability is read on banked runs. **Rides with:** rk-dec 2. **Re-test:** a tenant-ruler run's `index.json::final.rounds_to_separable`
   beside its `rounds_to_improved`.
 - **The never / partly / always spread contradicts the headline beside it**:
   `application/scoring/measurement_log.py::_cycle_cells` pools every candidate the cycle ran, so
@@ -578,7 +615,7 @@ row it closes.
   headline's own cells. **Rides with:** rk-dec 2.
 - **"Calls held equal" has no axis to hold**: `domain/spend.py::Budget` meters usd, tokens, rounds and
   wall clock, while the roadmap, `paper/README.md` and `paper/plans/` each hold a different axis
-  equal. Action: one matched axis, named on `Budget`. **Rides with:** rk-dec 2. **Re-test:**
+  equal. Action: USD is the one matched axis, named on `Budget` (operator, 2026-11-12). **Rides with:** rk-dec 2. **Re-test:**
   `price-head-to-head paper/plans/comparability.yaml` — do one point's `search_cells` differ by arm?
 - **The election has no one-arm read**: `scoring/selection.py:177` fits a prior through
   `candidate_abilities({"read": rows}, …)`, a fake arm key. Action: a one-arm read on the election's fit.
@@ -612,6 +649,14 @@ row it closes.
   accessors in `initialization/session.py`. Action: read the fields; the accessors go. **Rides with:**
   rk-dec (the re-key window), whose Owns gain `bench/difficulty.py` and `session.py`'s accessors.
   **Re-test:** `git grep -c "require_scorer\|require_partition" -- promptpotter` is 0.
+
+### readings (after the L4 C0 re-measure; behaviour keys make it key-neutral)
+
+- **One comparison is read 31 ways**: 31 `*Reading` classes (`ArmReading`, `PairedReading`,
+  `MetricReading`, `FactorReading`, …) across `application/evidence/` (~3k lines) and
+  `views/evidence.py`. Action: one reading (estimate, interval, n, state) that every comparison returns
+  and every surface renders; rk-dec's bar and rk-opt's `AbilityReading` lift test read it. **Rides
+  with:** readings. **Re-test:** `git grep -cE "class \w+Reading\b" -- promptpotter` is 1.
 
 ### batch/26 · rn-conn
 
@@ -826,6 +871,15 @@ row it closes.
 - **`hooks/useLocalStorage.ts::STORAGE_KEYS` mixes hook and non-hook keys**, and `sidePanelKey`'s
   `side-panel:*` has no `promptpotter.` prefix. Action: one key table, every key prefixed. **Rides with:**
   lw 1. **Re-test:** `` git grep -n '`side-panel:' -- webapp/lib `` is empty.
+
+### webd (the edge tail, after lw)
+
+- **The browser recomputes engine facts**: `webapp/lib/derivations/` (~2.2k lines, plus tests) derives
+  node config, spend, run phase and the search point the engine already computes. Action: each fact is
+  served on its existing read and the TypeScript copy and its tests go; the derivation rows filed
+  elsewhere (`wonOnTheta` / `electedMetric`, `output-contract.ts`, `paired-reading.ts::liftVersus`, the
+  `ConfigMode` row) close inside it where their chain has not. **Rides with:** webd. **Re-test:**
+  `git ls-files webapp/lib/derivations | grep -v __tests__ | xargs wc -l` falls by the served facts.
 
 ### batch/28 · lb
 
@@ -1060,6 +1114,13 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   dry-run by default, refusing while a producer can append; (2) attribution, an L4 outer cell stamps the
   runs its inner campaign produced; (3) the reach map. **Rides with:** small 3. **Re-test:**
   `compact-archive inventory`.
+- **31 `*_INFO` side tables sit beside their enums** (`STOP_REASON_INFO`, `GUARD_STATE_INFO`, …): a
+  member's data lives in a second table keyed by it. Action: the data lives on the enum members and the
+  tables go (Sonnet, mechanical). **Rides with:** small 4. **Re-test:**
+  `git grep -cE "^[A-Z_]+_INFO\b.*[:=]" -- promptpotter` is 0.
+- **An immutable record is written four ways**: `FrozenModel`, `StrictModel`, `NamedTuple` and frozen
+  `dataclass`. Action: `docs/developer/conventions.md` names one per role (a record crossing a seam, a
+  local value); a file converts when a chain touches it, never a sweep. **Rides with:** small 5.
 
 ### batch/31 · box
 
@@ -1144,6 +1205,13 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **`CycleSeed*` / `ForkSeed` → `CycleStart*` / `ForkStart`**, so "seed" is the RNG seed alone.
   **Rides with:** ren 6.
 - **The served hierarchy discriminator `level` → `entry_kind`**. **Rides with:** ren 7.
+- **Two `knobs.py` and two `free_tier.py` modules**: `application/knobs.py` (the served knob
+  projection) beside `optimizers/potter/knobs.py`, and `domain/free_tier.py` beside
+  `application/free_tier.py`. Action: each named for what it holds, or the pair folds where one fact
+  has two homes (payer's census reads the free-tier pair first). **Rides with:** ren 8.
+- **Node config is one document read through ~11 modules**: schema, parsing, overlay and knobs each
+  hold a view of it after landing 30's one layered read. Action: ren 8's census names what still holds
+  the document twice; each is a row for the chain owning its file. **Rides with:** ren 8.
 
 ### batch/32 · rel
 
@@ -1236,6 +1304,11 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ## Held — no wave-4 chain yet
 
+- **The estimator has no golden corpus**: its key reads `measurement_modules()` over its source, not
+  its outputs on fixed inputs. A corpus would read each inner cell's `CycleResult` (~255 KB each) and the
+  tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
+  operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
+  estimator's entry in the behaviour-key file names its key's inputs.
 - **The sign-in exchange-failure refusal still reads `health` in the router**:
   `presentation/api/routers/auth.py::callback` calls `account.record_refusal` and `health.is_broken`
   itself (its log line beside the act went). Action: split `health`'s account dependency; the callback
