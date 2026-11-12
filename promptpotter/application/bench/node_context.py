@@ -444,7 +444,7 @@ class Bounds(CycleRead):
 
     def spend_used_usd(self) -> float:
         """This cycle's, in the meter's units; a FLOOR while unpriced tokens are outstanding."""
-        return require_spend_book("the run's spend").usd_metered
+        return require_spend_book("the run's spend").spent.sent_usd
 
 
 class Target(CycleRead):

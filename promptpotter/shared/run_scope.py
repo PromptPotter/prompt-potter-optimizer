@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign import DeterminismClamp
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm.send_pacing import SendBudget
-    from promptpotter.infrastructure.llm.spend_book import CellReservation, SpendBook
+    from promptpotter.infrastructure.llm.spend_book import SpendBook
     from promptpotter.infrastructure.store.archive_queries import MemoryScope
     from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
     from promptpotter.infrastructure.store.stores import Stores
@@ -54,7 +54,8 @@ class RunScope:
     # Per unit of work (a cell, an optimizer call, a grading): its resends, its stall and its hold.
     send_budget: SendBudget | None = None
     stall_sink: Callable[[float], None] | None = None
-    reservation: CellReservation | None = None
+    # The open cell's hold on the account, which its sends draw on.
+    reservation: str | None = None
 
 
 class ScopeFields(TypedDict, total=False):
@@ -69,7 +70,7 @@ class ScopeFields(TypedDict, total=False):
     abort_check: Callable[[], bool] | None
     send_budget: SendBudget | None
     stall_sink: Callable[[float], None] | None
-    reservation: CellReservation | None
+    reservation: str | None
 
 
 _EMPTY = RunScope()

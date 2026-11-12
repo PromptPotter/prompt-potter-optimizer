@@ -142,6 +142,7 @@ from promptpotter.domain.run_records import (
     Bill,
     CallPrice,
     ElectionRecord,
+    Hold,
     PipelineRead,
     RoundClosedRecord,
     RoundEnteredRecord,
@@ -166,7 +167,7 @@ from promptpotter.domain.verification import BenchPasses, VerificationPass
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import SpendBook
+from promptpotter.infrastructure.llm.spend_book import SpendBook, bound_account, draws_on
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import hold_cycle
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -362,17 +363,41 @@ def spend_book(
     usd_reserve: float | EllipsisType | None = ...,
     meters: CeilingMeter = "bill",
     wall_clock_s: float | None = None,
+    metered_on: Path | None = None,
+    enclosing: SpendBook | None = None,
     **spent: Any,
 ) -> SpendBook:
+    """A run's book on the bound account, its job's hold the reserve (an enclosed run's draws on
+    its *enclosing* book's); *metered_on* meters a cycle's ledger, else what the job's hold drew."""
     spent.setdefault("opened", time.monotonic())
-    return SpendBook(
+    charges = bound_account("a test's book").charges
+    job = f"job-{next(_JOBS)}"
+    reserve = Budget(usd=usd_cap if usd_reserve is ... else usd_reserve)
+    charges.append(
+        Hold(
+            hold_id=job,
+            parent=None if enclosing is None else draws_on(enclosing),
+            key_source="host",
+            bound=reserve if enclosing is None else Budget(),
+            resource=None,
+            ledger=None,
+        )
+    )
+    book = SpendBook(
         declared=Budget(wall_clock_s=wall_clock_s),
         share=Budget(usd=usd_cap),
-        reserve=Budget(usd=usd_cap if usd_reserve is ... else usd_reserve),
-        hold_id=None,
+        charges=charges,
+        hold_id=job,
+        headroom=Budget(),
+        metered_on=metered_on,
         meters=meters,
         **spent,
     )
+    book.enclosing = enclosing
+    return book
+
+
+_JOBS = count()
 
 
 def fake_connector(name: str = "fake", **declared: Any) -> Connector:

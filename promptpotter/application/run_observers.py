@@ -123,9 +123,7 @@ class RunObservers:
     hold: CycleHold
 
     def arm_spend_book(self, book: SpendBook) -> None:
-        ledger = self.ledger
-        self.projecting.add(book)
-        book.ledger = ledger
+        book.ledger = self.ledger
         # A nested run (an L4 inner cell) admits each send against its own book AND its root's.
         if instrument_depth() > 0:
             book.enclosing = run_scope().book

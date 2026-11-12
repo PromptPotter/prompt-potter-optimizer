@@ -1986,7 +1986,9 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
             )
             return gated or await run_round_loop(cycle, cycle.config, session, ctx.ledger)
 
-        with scoped(ledger=ctx.ledger), scoped(book=spend_book()):
+        with scoped(account=stores):
+            book = spend_book()
+        with scoped(ledger=ctx.ledger), scoped(book=book):
             end = asyncio.run(walk())
         if not crashes:
             ctx.ledger.append(RunPhaseRecord.stop(end.stop_reason))

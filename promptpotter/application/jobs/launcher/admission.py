@@ -61,7 +61,8 @@ from promptpotter.domain.spend import (
     HeldBudget,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import LiveCycle, RunHold, SpendBook
+from promptpotter.infrastructure.llm.spend_book import LiveCycle, SpendBook, draws_on
+from promptpotter.infrastructure.store.account_spend import unreported_under
 from promptpotter.infrastructure.store.dataset_access import (
     definition_version,
     resolve_dataset,
@@ -484,7 +485,7 @@ def admit_and_share(
             ceiling, stores=stores, job_registry=job_registry, job=job, hop=hop, meter=meter
         )
         hold_run(
-            stores, job.job_id, reserve, parent=None if enclosing is None else enclosing.hold_id
+            stores, job.job_id, reserve, parent=None if enclosing is None else draws_on(enclosing)
         )
         job_registry.mark_admitted(job.job_id)
         if hop is not None:
@@ -580,21 +581,24 @@ def open_spend_book(
     opened: float,
     live: bool,
 ) -> SpendBook:
-    """On a cycle its share is read live off the cycle's record, which a reshare moves; off one, as
-    admitted. Its reserve is its hold's on the account, which a set-limits restates. A *live* book
-    reads the cycle's standing axes too."""
+    """On a cycle its share is read live off the cycle's record, which a reshare moves, and meters
+    the cycle's ledger; off one, as admitted, metering its job's hold. Its reserve is its hold's on
+    the account, which a set-limits restates. A *live* book reads the cycle's standing axes too."""
+    ledger = None if hop is None else stores.campaigns.ledger(hop)
     book = SpendBook(
         declared=held.admitted,
         share=held.share if hop is None else LiveCycle(stores.campaigns, hop),
-        reserve=RunHold(stores.charges, held.job_id),
+        charges=stores.charges,
         hold_id=held.job_id,
+        headroom=Budget(),
+        metered_on=ledger,
         meters=meters,
         opened=opened,
         cycle=LiveCycle(stores.campaigns, hop) if live and hop is not None else None,
     )
-    if hop is None:
+    if ledger is None:
         return book
-    left = book.take_up(stores.charges, stores.campaigns.ledger(hop)).total
+    left = unreported_under(stores.charges, ledger).total
     if left.unreported_usd or left.unreported_tokens:
         logger.warning(
             "paid sends on %s reported no bill; the ceiling holds up to $%.4f and %d tokens for "
