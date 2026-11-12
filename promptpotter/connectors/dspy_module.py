@@ -380,6 +380,8 @@ async def _in_process_run(
     try:
         with dspy.context(lm=None if default is None else _metered(default, sends, lm_kwargs)):
             prediction = await _acall(student, example)
+            # Off the loop, and metered: an LLM-judge metric's sends are the cell's.
+            score = float(await dspy.asyncify(program.metric)(example, prediction))
     except Exception as exc:
         if sends.ended is not None and sends.ended is not exc:
             raise sends.ended from exc
@@ -394,7 +396,7 @@ async def _in_process_run(
     return {
         "data": {
             RESULT_KEY: [str(prediction)],
-            SCORE_KEY: float(program.metric(example, prediction)),
+            SCORE_KEY: score,
             "terminal_node": PROGRAM_NODE,
             "step_tokens": sends.step_tokens(),
         }

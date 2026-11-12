@@ -21,7 +21,8 @@ from offline_world import Router
 
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.sample_measurement import cell_billing
-from promptpotter.connectors import dbllmbench, dspy_module, harbor
+from promptpotter.config.settings import settings
+from promptpotter.connectors import dbllmbench, dspy_module, harbor, n8n
 from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
@@ -139,10 +140,10 @@ def test_connector_cells(offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_p
     sends: list[int] = []
     lm = _scripted_lm(sends, [lm15.ServerError("boom", status=500)])
 
-    class _TwoCalls(dspy.Module):  # type: ignore[misc]
-        def __init__(self) -> None:
+    class _Calls(dspy.Module):  # type: ignore[misc]
+        def __init__(self, calls: int) -> None:
             super().__init__()
-            self.steps = [dspy.Predict("question -> answer") for _ in range(2)]
+            self.steps = [dspy.Predict("question -> answer") for _ in range(calls)]
             for step in self.steps:
                 step.lm = lm
 
@@ -153,7 +154,7 @@ def test_connector_cells(offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_p
 
     example = dspy.Example(question="2+2?", answer="4").with_inputs("question")
     program = dspy_module.DspyProgram(
-        student=_TwoCalls(),
+        student=_Calls(2),
         metric=lambda ex, pred: pred.answer == ex.answer,
         examples=[example],
     )
@@ -161,6 +162,18 @@ def test_connector_cells(offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_p
     assert data[dspy_module.SCORE_KEY] == 1.0, "a 5xx spent the call its resend answered"
     assert len(sends) == 3, f"{len(sends)} sends: two calls, one resent once"
     assert len(_lm_bills(tmp_path / "resent.jsonl")) == 2, "an answered call left no bill"
+
+    # An LLM-judge metric's send is the cell's: billed beside the program's.
+    judge = _scripted_lm(sends, [])
+
+    def judged(_example: Any, prediction: Any) -> float:
+        return float(bool(dspy.settings.lm(f"Is {prediction.answer} right?")))
+
+    program = dspy_module.DspyProgram(student=_Calls(1), metric=judged, examples=[example])
+    with dspy.context(lm=judge):
+        data = _dspy_cell(program, 2, tmp_path / "judged.jsonl")
+    assert data[dspy_module.SCORE_KEY] == 1.0, "the judge's verdict is not the cell's score"
+    assert len(_lm_bills(tmp_path / "judged.jsonl")) == 2, "the judge's send went unbilled"
 
     # The host's state is read per cell: an image rebuilt under its tag, a re-pinned roster.
     built = ["abc1234"]
@@ -186,3 +199,12 @@ def test_connector_cells(offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_p
         )
         resolved = [t["id"] for t in resolve(stores, panel)["tasks"]]
         assert resolved == pinned, f"a live server resolved {resolved} off a re-pinned roster"
+
+    # An n8n cell is keyed on the URL the wire posts to: a trailing `/` in `.env` re-keys none.
+    harness = n8n.CONNECTOR.identity_config
+    assert harness is not None
+    keys = []
+    for url in ("https://n8n.example/webhook/eval", "https://n8n.example/webhook/eval/"):
+        monkeypatch.setattr(settings, "N8N_HARNESS_URL", url)
+        keys.append(harness(stores, None))
+    assert keys[0] == keys[1], "a trailing slash re-keyed every banked n8n cell"

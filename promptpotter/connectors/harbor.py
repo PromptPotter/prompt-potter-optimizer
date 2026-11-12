@@ -1178,7 +1178,11 @@ class _AgentModel:
     admitted, paced and billed there, on the box's key (``CONNECTOR.cell_payer``)."""
 
     def __init__(self, model: str | None, provider: str | None, send: Mapping[str, Any]) -> None:
-        assert model and provider, "refused at resolve (`_refuse_send_faults`)"
+        if not model or not provider:
+            raise RuntimeError(
+                f"harbor connector: a trial reached its agent naming model {model!r} on provider "
+                f"{provider!r}, which `_refuse_send_faults` refuses before a cell is bought."
+            )
         payer = CONNECTOR.cell_payer
         if payer != "host":
             raise RuntimeError(

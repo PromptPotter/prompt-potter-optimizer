@@ -108,17 +108,8 @@ async def _termnorm_preflight(backend_url: str) -> str | None:
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(5.0, connect=3.0), verify=tls_context()
     ) as http:
-        try:
-            # Reachability, not health: a 5xx past the connect surfaces later on the ledger.
-            await http.get(f"{backend_url}/status")
-        except httpx.ConnectError as exc:
-            return (
-                f"{str(exc).strip() or 'connection refused'} at {backend_url}.\n\n"
-                "The TermNorm backend ships in a sibling repo. Clone it beside "
-                "this checkout, then start it:\n"
-                "  TermNorm-excel\\start-server-py-LLMs.bat\n\n"
-                "Install guide: docs/manual/02-install.md"
-            )
+        # Reachability, not health: a 5xx past the connect surfaces later on the ledger.
+        await http.get(f"{backend_url}/status")
     return None
 
 
