@@ -8,17 +8,13 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
+# The one parse failure charged against the prompt; ask it, never `is not None`.
 PARSE_FAILURE_MALFORMED: Annotated[str, shapes_optimizer_prompt] = "optimizer_prompt_parse_failure"
-PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
 # Empty or truncated content is missing data, not a verdict: never charged, yet an L4 cell whose
 # every round reached no cell FLOORS, whatever the reason (`l4/proxies.py::floor_reason`).
 PARSE_FAILURE_TOOLING: Annotated[str, shapes_optimizer_prompt] = "l1_provider_empty_response"
 # A response whose every variant leaves its parent unchanged: zero candidates, never charged.
 PARSE_FAILURE_ALL_NO_OP: Annotated[str, shapes_optimizer_prompt] = "l1_all_no_op_variants"
-# Ask this predicate, never `is not None`, which reads TOOLING as a verdict.
-PARSE_FAILURE_CHARGED: frozenset[str] = frozenset(
-    {PARSE_FAILURE_MALFORMED, PARSE_FAILURE_WRONG_TYPE}
-)
 
 
 class FailureClusterReadout(TypedDict):

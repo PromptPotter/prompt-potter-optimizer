@@ -71,7 +71,7 @@ class ValidationFailure(FrozenModel):
             "``reproposes_known_failing_config`` (matches a prior "
             "``RuntimeFailure.observed_config`` row), "
             "``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` "
-            "/ ``optimizer_prompt_unexpected_type`` (generator-side failure), "
+            "(generator-side failure), "
             "``steers_inner_stopping`` (an L4 override telling the inner loop when to STOP "
             "rather than how to search — it edits the frame `held_out_lift` averages over "
             "instead of the search it measures), "

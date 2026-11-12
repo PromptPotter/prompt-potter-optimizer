@@ -82,8 +82,9 @@ LLM_WIRE = "/chat/completions"
 
 
 class Heal(enum.StrEnum):
-    """An invalid answer to a structured call, by the rung of the client's ladder it sends the
-    call to: a schema repair, a clean re-ask, or a refusal whose generation the client salvages."""
+    """An invalid answer, by the rung of the client's ladder it sends a structured call to: a
+    schema repair, a clean re-ask, or a refusal whose generation the client salvages. A text call
+    climbs none: noncompliant is out of its form."""
 
     NONCOMPLIANT = "noncompliant"
     EMPTY = "empty"

@@ -2006,18 +2006,18 @@ export interface ValidationFailure {
    * healing move is the model, not the value),
    * ``reproposes_known_failing_config`` (matches a prior
    * ``RuntimeFailure.observed_config`` row), ``l1_provider_empty_response`` /
-   * ``optimizer_prompt_parse_failure`` / ``optimizer_prompt_unexpected_type``
-   * (generator-side failure), ``steers_inner_stopping`` (an L4 override
-   * telling the inner loop when to STOP rather than how to search — it edits
-   * the frame `held_out_lift` averages over instead of the search it
-   * measures), ``steers_across_seeds`` (an L4 override making an inner node
-   * reason over the seed panel, which exists only one level up — the rule
-   * renders empty where it lands), ``guts_inherited_contract`` (an L4
-   * override replacing a long prompt field with a fraction of its length,
-   * deleting contracts the parent carried in plain prose), ``no_op_variant``
-   * / ``duplicate_variant`` (invariant-detect), ``hallucinated_node`` (named
-   * a node absent from the schema — NON-fatal: the phantom edit is stripped,
-   * the candidate still scores; routed as signal, not a synthetic-0). */
+   * ``optimizer_prompt_parse_failure`` (generator-side failure),
+   * ``steers_inner_stopping`` (an L4 override telling the inner loop when to
+   * STOP rather than how to search — it edits the frame `held_out_lift`
+   * averages over instead of the search it measures), ``steers_across_seeds``
+   * (an L4 override making an inner node reason over the seed panel, which
+   * exists only one level up — the rule renders empty where it lands),
+   * ``guts_inherited_contract`` (an L4 override replacing a long prompt field
+   * with a fraction of its length, deleting contracts the parent carried in
+   * plain prose), ``no_op_variant`` / ``duplicate_variant`` (invariant-
+   * detect), ``hallucinated_node`` (named a node absent from the schema —
+   * NON-fatal: the phantom edit is stripped, the candidate still scores;
+   * routed as signal, not a synthetic-0). */
   reason: string;
 }
 

@@ -104,6 +104,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.draft_edit import OptimizationOverrides
+from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
@@ -175,6 +176,27 @@ HEALS: dict[str, tuple[Heal, ...]] = {
     "L1GenerateOutput_1": (Heal.REFUSED,),
     "L1CritiqueOutput_1": (Heal.NONCOMPLIANT, Heal.REFUSED),
     "L2ContextOutput_0": (Heal.NONCOMPLIANT, Heal.NONCOMPLIANT),
+}
+WOUNDED = "wounded"
+# Per optimizer, calls answered invalid on every send (by `requests/` name) and the mark its run
+# records: L1 no candidates, an L2 fire a warning, a text node's child its parse failure.
+WOUNDS: dict[str, dict[str, tuple[tuple[Heal, ...], str]]] = {
+    "potter": {
+        "L1GenerateOutput_0": ((Heal.NONCOMPLIANT,) * 3, PARSE_FAILURE_MALFORMED),
+        # An empty answer is the provider's unless the clean re-ask reproduces it.
+        "L1GenerateOutput_1": ((Heal.EMPTY, Heal.NONCOMPLIANT), PARSE_FAILURE_TOOLING),
+        "L1GenerateOutput_2": ((Heal.EMPTY,) * 2, PARSE_FAILURE_MALFORMED),
+        "L2ContextOutput_0": ((Heal.NONCOMPLIANT,) * 3, "layer_parse_failure"),
+    },
+    "capo": {
+        "capo_crossover_538586935.0": ((Heal.NONCOMPLIANT,), PARSE_FAILURE_MALFORMED),
+        "capo_crossover_1395829419.0": ((Heal.EMPTY,), PARSE_FAILURE_TOOLING),
+    },
+    "gepa": {"gepa_reflect_1270264589.0": ((Heal.EMPTY,), PARSE_FAILURE_TOOLING)},
+    "levi": {
+        "levi_paradigm_shift_1980294598.0": ((Heal.NONCOMPLIANT,), PARSE_FAILURE_MALFORMED),
+        "levi_refine_1987354733.0": ((Heal.EMPTY,), PARSE_FAILURE_TOOLING),
+    },
 }
 
 
@@ -365,6 +387,8 @@ class ByCallIdentity:
         self.turns: dict[tuple[str, str, int | None], int] = {}
         # Scripted invalid answers by call (`node_call`), one per send before the call heals.
         self.heals: dict[str, tuple[Heal, ...]] = {}
+        # Scripted invalid answers by call on its every send: a structured call fails each rung.
+        self.wounds: dict[str, tuple[Heal, ...]] = {}
         self.sends: Counter[str] = Counter()
         # A structured node's call a heal left open, by asker: its next send retries it.
         self.healing: dict[tuple[str, str], tuple[str, int]] = {}
@@ -403,13 +427,15 @@ class ByCallIdentity:
         key = f"{node}_{call}"
         attempt = self.sends[key]
         self.sends[key] += 1
-        script = self.heals.get(key, ())
+        script = self.heals.get(key) or self.wounds.get(key, ())
         said: Said = completion(content, model=body["model"], id=f"offline-{node}-{call}")
         shown: Any = content
         if attempt < len(script):
             said = invalid(script[attempt], content, model=body["model"])
             shown = said.json() if isinstance(said, httpx.Response) else said
-            if script[attempt] is not Heal.REFUSED:
+            # A wound's last send leaves the client no rung to retry it on.
+            retried = key in self.heals or attempt + 1 < len(script)
+            if schema and script[attempt] is not Heal.REFUSED and retried:
                 self.healing[asker, node] = (call, turn)
         (self.capture / f"{key}{f'~{attempt}' if attempt else ''}.json").write_text(
             json.dumps(
@@ -419,14 +445,15 @@ class ByCallIdentity:
         )
         return said
 
-    def unhealed(self) -> list[str]:
-        """Each scripted call not sent once per invalid answer plus the send that healed it; a
-        refusal heals on its own send."""
-        return [
+    def off_script(self) -> list[str]:
+        """Each scripted call not sent once per invalid answer, plus the send that healed it where
+        it heals; a refusal heals on its own send."""
+        healed = [
             key
             for key, script in self.heals.items()
             if self.sends[key] != len(script) + (script[-1] is not Heal.REFUSED)
         ]
+        return healed + [k for k, script in self.wounds.items() if self.sends[k] != len(script)]
 
     def _text(self, node: str, call: str, prompt: str) -> str:
         rng = random.Random(f"{node}:{call}")
@@ -753,6 +780,7 @@ async def run_one(
     diverge: bool = False,
     crossover: str | None = None,
     heal: bool = False,
+    wound: bool = False,
 ) -> tuple[Path, str]:
     """The archive is the workspace's, never *out*'s: campaigns in one process share it.
     *pause_after* pauses at that round's boundary; *pause_in_walk* at the first cell that round
@@ -767,6 +795,8 @@ async def run_one(
     )
     if heal:
         harness.llm.heals = HEALS
+    if wound:
+        harness.llm.wounds = {key: sent for key, (sent, _) in WOUNDS[optimizer].items()}
 
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
@@ -802,8 +832,8 @@ async def run_one(
     cycle = await banked(
         stores, session, result, harness, out, name=optimizer, bench_trigger=bench_trigger
     )
-    if unhealed := harness.llm.unhealed():
-        raise SystemExit(f"offline run: the scripted calls {unhealed} did not heal as scripted")
+    if strayed := harness.llm.off_script():
+        raise SystemExit(f"offline run: the scripted calls {strayed} were not sent as scripted")
     return cycle, session.campaign_id
 
 
@@ -1827,6 +1857,33 @@ def healed_leg(potter: Path, leg: Future[int]) -> bool:
     return not moved
 
 
+def wound_marks(workspace: Path) -> Counter[str]:
+    """Each parse failure the run recorded: L1's by round, a layer's warning, a child's refusal."""
+    doc = BehaviourTrace.read(workspace).decisions
+    marks = Counter(w["kind"] for w in doc["ledger"]["round_warnings"])
+    for r in doc["rounds"]:
+        if (readout := r["optimizer_state"]["outputs"].get("l1_readout")) is not None:
+            marks[readout["l1_parse_failure"]] += 1
+        for arm in r["arms"].values():
+            marks.update(f["reason"] for f in arm["validation_failures"] or [])
+    parse_failures = (PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING, "layer_parse_failure")
+    return Counter({mark: n for mark, n in marks.items() if mark in parse_failures})
+
+
+def wounded_leg(name: str, workspace: Path, leg: Future[int]) -> bool:
+    """Prints the wounded leg's reading; True where the run recorded each wound's mark once."""
+    wounded = workspace / WOUNDED
+    if rc := leg.result():
+        print(f"{name}: scripted wounds FAILED (exit {rc}) -- {wounded / 'run.log'}")
+        return False
+    marks, owed = wound_marks(wounded), Counter(mark for _, mark in WOUNDS[name].values())
+    print(
+        f"{name}: {len(WOUNDS[name])} calls answered invalid on every send, recorded "
+        f"{dict(sorted(marks.items()))}{'' if marks == owed else f' (owed {dict(owed)})'}"
+    )
+    return marks == owed
+
+
 def moved_against(home: Path, earlier: Path, names: Sequence[str]) -> list[str]:
     """Per trace every leg of *names* wrote, which of its fields moved against *earlier*'s home;
     a leg the earlier run lacks has no base."""
@@ -1996,6 +2053,7 @@ def run_child_leg(args: argparse.Namespace) -> None:
             diverge=args.diverge,
             crossover=args.crossover,
             heal=args.heal,
+            wound=args.wound,
         )
         print(asyncio.run(one)[0])
     proven_home(workspace)
@@ -2051,6 +2109,7 @@ def main() -> int:
     ap.add_argument("--gated", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--crossover", choices=CROSSED_HOSTS, help=argparse.SUPPRESS)
     ap.add_argument("--heal", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--wound", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--l4", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--terminal", choices=("new", "resume"), help=argparse.SUPPRESS)
     ap.add_argument("--interrupts", type=int, default=0, help=argparse.SUPPRESS)
@@ -2102,7 +2161,13 @@ def main() -> int:
     pause_after = min(1, args.rounds - 1)
     # Potter's own legs need rounds past the one they pause at.
     potter_legs = legs and "potter" in due and pause_after > 0
-    tasks = 2 * len(due) + (len(INTERRUPTED) + 2) * firsts + 6 * potter_legs if legs else len(due)
+    # Each script wounds a call of the first two rounds.
+    wounded = [name for name in due if name in WOUNDS] if legs and args.rounds > 1 else []
+    tasks = (
+        2 * len(due) + (len(INTERRUPTED) + 2) * firsts + 6 * potter_legs + len(wounded)
+        if legs
+        else len(due)
+    )
     pool = ThreadPoolExecutor(RamBudget.read().offline_run_children(tasks))
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
@@ -2144,6 +2209,7 @@ def main() -> int:
     rebasing = spawn("potter", home / "potter" / REBASED, "--rebase") if potter_legs else None
     # Only potter's nodes answer structured, so only its calls climb the client's repair ladder.
     healing = spawn("potter", home / "potter" / HEALED, "--heal") if potter_legs else None
+    wounding = {name: spawn(name, home / name / WOUNDED, "--wound") for name in wounded}
     # The L4 fixture's outer and inner optimizer are potter's.
     nesting = spawn("potter", home / "potter" / L4, "--l4") if potter_legs else None
     # Its pool is read off the closed rounds, so a resume must hand it the pool a straight run had.
@@ -2199,6 +2265,8 @@ def main() -> int:
         failed["potter"] += not crossed_legs(home / "potter", crossing, pause_after)
     if healing is not None:
         failed["potter"] += not healed_leg(home / "potter", healing)
+    for name, wound in wounding.items():
+        failed[name] += not wounded_leg(name, home / name, wound)
     said_leg(failed, "potter", home / "potter" / L4, nesting, "an L4 campaign over inner runs")
     if args.against is not None:
         print("\n".join(moved_against(home, args.against, due)))
