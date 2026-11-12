@@ -386,7 +386,7 @@ def task_routes(pipeline_params: PipelineParams, schema: PipelineSchema) -> list
         model, provider, hosts = cfg.model, cfg.provider, cfg.route_order
         if model and provider:
             routes[model, provider, tuple(hosts) if hosts else None] = None
-    for node in schema.nodes:
+    for node in schema.running_nodes:
         if node.provider and "model" in node.param_keys:
             for model in schema.model_options(node):
                 routes[model, node.provider, None] = None

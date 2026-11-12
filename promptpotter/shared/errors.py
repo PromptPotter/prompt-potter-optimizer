@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -113,7 +113,7 @@ class PotterError(Exception):
 
 
 class SendRefusedError(PotterError):
-    """The run ENDS on the stop ``category`` maps to (``domain/phases.py::REFUSAL_STOPS``).
+    """The run ENDS on the stop ``category`` maps to (``domain/phases.py::ERROR_CATEGORY_INFO``).
 
     ``tab`` is the Account tab its remedy lives in, as a KEY: each surface words it
     (`domain/account_words.py::refusal_words`), so no navigation wording rides the sentence."""
@@ -581,23 +581,3 @@ def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
         return ErrorCategory(cat)
     except ValueError:
         return None
-
-
-ERROR_IS_CHARGED: Annotated[dict[ErrorCategory, bool], shapes_optimizer_prompt] = {
-    ErrorCategory.CLIENT: True,
-    ErrorCategory.SERVER: False,
-    ErrorCategory.CONNECTION: False,
-    ErrorCategory.PROVIDER_CREDIT: False,
-    ErrorCategory.PROVIDER_THROTTLED: False,
-    ErrorCategory.SPEND_CEILING: False,
-    ErrorCategory.TOKEN_CEILING: False,
-    ErrorCategory.HOST_ALLOWANCE: False,
-    ErrorCategory.WALL_CLOCK: False,
-    ErrorCategory.PRICE_LIST_UNREACHABLE: False,
-    ErrorCategory.NO_RATE: False,
-    ErrorCategory.PIPELINE: True,
-    ErrorCategory.HALTED: True,
-    ErrorCategory.UNSCOREABLE: False,
-    ErrorCategory.UNKNOWN: True,
-}
-assert set(ERROR_IS_CHARGED) == set(ErrorCategory), "every ErrorCategory must take a side"

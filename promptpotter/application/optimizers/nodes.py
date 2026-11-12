@@ -31,7 +31,7 @@ from promptpotter.domain.arms import ArmSlot, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
 from promptpotter.domain.origin_panel import election_rows
-from promptpotter.domain.pipeline_schema import NodeKind
+from promptpotter.domain.pipeline_schema import INITIAL_POPULATION, NodeKind
 from promptpotter.domain.pool import DemoPool
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
@@ -50,7 +50,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.knobs import CouplingSeverity
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
     from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
@@ -69,6 +68,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopRule, StopSignal
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
     # (the call already started, the commit writing its row once a walk takes the cell, the discard).
     CatchUp = tuple[asyncio.Future[Any], Callable[[], Sequence[GradedCell]], Callable[[], None]]
@@ -326,10 +326,6 @@ class RoundOpening:
     replayed: bool
 
 
-INITIAL_POPULATION = "initial_population"
-RUN_INIT = "run_init"
-
-
 @dataclass(frozen=True)
 class RoundWalk:
     """``pipeline`` makes the round's arms; ``seeds`` walk ahead of it into the population it reads; ``gate`` says what of it walks."""
@@ -441,7 +437,7 @@ class RoundContext:
 
     cycle: Cycle
     round_num: int
-    callbacks: RunCallbacks
+    ledger: CycleEventLog
     # Each arm the round walked, its panel walk and every read of it as a reference, whoever asked.
     walks: dict[ArmKey, ArmWalk] = field(default_factory=dict, init=False)
 
@@ -796,10 +792,6 @@ class Controller(NodeMember, Protocol):
 
     async def diagnose(self, ctx: NodeContext) -> None:
         """``--diag``: act on the round just closed; the bench then shows the next round unmeasured."""
-        ...
-
-    async def show_round(self, ctx: RoundContext) -> None:
-        """Propose *ctx*'s round and bank it UNMEASURED: ``--diag``'s last step."""
         ...
 
 

@@ -751,10 +751,13 @@ class ManifestNodeOverlay(FrozenModel):
 DEFAULT_PIPELINE = "default"
 """The chain a schema runs: a backend's per cell, an optimizer manifest's per round."""
 
+RUN_INIT = "run_init"
+INITIAL_POPULATION = "initial_population"
+PHASE_PIPELINES = (RUN_INIT, INITIAL_POPULATION)
+"""The walks an optimizer's phases take beside ``default``; any other walk is an alternative chain."""
+
 
 class PipelineSchema(FrozenModel):
-    name: str = ""
-    version: str = ""
     description: str = ""
     # Every DECLARED node, on the chain or not; the chain a round runs is `nodes`.
     declared_nodes: list[PipelineNode] = Field(default_factory=list)
@@ -778,7 +781,7 @@ class PipelineSchema(FrozenModel):
             raise ValueError(f"a node may not be named {reserved}: the pipeline params read it")
         return self
 
-    # Derived on read, never cached: `model_copy` (`narrow`, `filter_to_steps`) skips init hooks.
+    # Derived on read, never cached: `model_copy` (`narrow`, `running_only`) skip init hooks.
 
     @property
     def _node_map(self) -> dict[str, "PipelineNode"]:
@@ -795,9 +798,26 @@ class PipelineSchema(FrozenModel):
     def active_steps(self) -> tuple[str, ...]:
         return tuple(n.name for n in self.nodes)
 
-    def active_steps_excluding(self, exclude: Iterable[str]) -> list[str]:
-        dropped = set(exclude)
-        return [n for n in self.active_steps if n not in dropped]
+    @property
+    def running_nodes(self) -> list[PipelineNode]:
+        """Which nodes a run reaches: the chain, then each on a phase walk or on none (the graph
+        fires it); a node only on an alternative walk runs on the chain alone."""
+        on_chain = set(self.active_steps)
+        walks = self.pipelines.items()
+        phased = {n for name, steps in walks if name in PHASE_PIPELINES for n in steps}
+        walked = {n for _, steps in walks for n in steps}
+        return [
+            *self.nodes,
+            *(
+                n
+                for n in self.declared_nodes
+                if n.name not in on_chain and (n.name in phased or n.name not in walked)
+            ),
+        ]
+
+    @property
+    def running(self) -> tuple[str, ...]:
+        return tuple(n.name for n in self.running_nodes)
 
     @property
     def is_single_node(self) -> bool:
@@ -1039,19 +1059,6 @@ class PipelineSchema(FrozenModel):
     def get_node(self, name: str) -> PipelineNode | None:
         return self._node_map.get(name)
 
-    def filter_to_steps(self, steps: list[str]) -> "PipelineSchema":
-        # The declaration too, so a filtered schema cannot still resolve a node it just excluded.
-        active = set(steps)
-        return self.model_copy(
-            update={
-                "declared_nodes": [n for n in self.declared_nodes if n.name in active],
-                "pipelines": {
-                    **self.pipelines,
-                    DEFAULT_PIPELINE: [n for n in self.pipelines[DEFAULT_PIPELINE] if n in active],
-                },
-            },
-        )
-
     def narrow(self, narrowing: dict[str, NodeSearchNarrowing] | None) -> "PipelineSchema":
         """Keys SUBSET, values REPLACE (:class:`NodeSearchNarrowing`)."""
         if not narrowing:
@@ -1169,8 +1176,8 @@ class PipelineSchema(FrozenModel):
 
     @shapes_optimizer_prompt
     def prompt_nodes(self) -> list[PipelineNode]:
-        """The chain's prompt-bearing nodes, in chain order: every one renders its own prompt."""
-        return [node for node in self.nodes if node.prompt_info is not None]
+        """The running set's prompt-bearing nodes, the chain's first: every one renders its own prompt."""
+        return [node for node in self.running_nodes if node.prompt_info is not None]
 
     def locus_kind(self, node: str, key: str) -> LocusKind:
         """The roster's answer; a node it does not declare holds no locus."""
@@ -1182,3 +1189,16 @@ class PipelineSchema(FrozenModel):
         if key == SHOTS_KEY and declared.prompt_info is not None:
             return "shots"
         return "config"
+
+
+def running_only(schema: PipelineSchema, *, exclude: Iterable[str]) -> PipelineSchema:
+    """*schema* declaring its running set alone, less *exclude*."""
+    dropped = set(exclude)
+    chain = [n for n in schema.pipelines[DEFAULT_PIPELINE] if n not in dropped]
+    running = set(schema.running) - dropped
+    return schema.model_copy(
+        update={
+            "declared_nodes": [n for n in schema.declared_nodes if n.name in running],
+            "pipelines": {**schema.pipelines, DEFAULT_PIPELINE: chain},
+        },
+    )

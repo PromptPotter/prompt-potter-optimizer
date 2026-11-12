@@ -46,8 +46,8 @@ from promptpotter.application.read_params import (
     HierarchySubtreeParams,
     MeParams,
     ReadParams,
-    off_loop,
 )
+from promptpotter.application.read_workers import off_loop
 from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.presentation.api.deps import CallerDep, read_input

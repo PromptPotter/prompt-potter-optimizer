@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, NoReturn
 
@@ -31,9 +30,6 @@ from promptpotter.domain.pipeline_schema import (
     description_paths,
 )
 from promptpotter.shared.errors import PayloadInvalidError
-
-logger = logging.getLogger(__name__)
-
 
 WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
     "temperature": "number",
@@ -507,16 +503,10 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
         parsed[name] = _built(PipelineNode, where, **step_kwargs)
 
-    pipeline_name = _text(config, "name")
-    # DEBUG: a parse on a read path fires per poll, and INFO would flood a supervised run's console.
-    logger.debug("Parsed pipeline '%s' with %d nodes", pipeline_name, len(parsed))
-
     _check_member_structure(parsed, pipelines)
     schema = _built(
         PipelineSchema,
         "pipeline",
-        name=pipeline_name.lower(),
-        version=_text(config, "version"),
         description=_text(config, "description"),
         declared_nodes=list(parsed.values()),
         pipelines=pipelines,

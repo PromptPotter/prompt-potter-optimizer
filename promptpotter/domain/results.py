@@ -166,10 +166,6 @@ class RoundOutcome(FrozenModel):
         return self.optimizer_state
 
     @property
-    def generation_only(self) -> bool:
-        return self.election is None
-
-    @property
     def head(self) -> Concluded | None:
         """The arm the round ENDED on: the headline is its numbers."""
         if self.election is None:

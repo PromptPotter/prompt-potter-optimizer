@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -48,10 +48,14 @@ PROBE_WORKLOAD = InProcessWorkload(experiment=None, experiment_dir=None, program
 class NoopSession:
     __slots__ = ()
 
-    async def set_terms(
-        self, _http: httpx.AsyncClient, _base_url: str, terms: list[str]
-    ) -> dict[str, Any]:
-        return {"status": "noop", "terms_count": len(terms)}
+    async def open(
+        self,
+        _http: httpx.AsyncClient,
+        _base_url: str,
+        _samples: Sequence[Sample],
+        _library: Sequence[str],
+    ) -> None:
+        return None
 
     async def recover(
         self, _http: httpx.AsyncClient, _base_url: str, _reply: httpx.Response
@@ -76,7 +80,16 @@ PreflightFn = Callable[[str], Awaitable[str | None]]
 # Read as the client opens its connection, never at import; `None` sends no auth header.
 AuthTokenFn = Callable[[], str | None]
 
-EndpointFn = Callable[[], str]
+
+@dataclass(frozen=True)
+class Endpoint:
+    """Where a ``remote_http`` backend listens: the operator's config, never a request's word."""
+
+    setting: str
+    """The ``.env`` key holding it, which an unset address names."""
+
+    read: Callable[[], str]
+
 
 # `(node name, node config, the run's experiment) -> what one run of that node can bill`.
 SentSpendBound = Callable[[str, NodeCall, Mapping[str, Any] | None], NodeSpendBound | None]
@@ -96,6 +109,15 @@ def cell_envelope_of(seconds: float) -> CellEnvelopeSeconds:
         return seconds
 
     return envelope
+
+
+@dataclass(frozen=True)
+class UploadDefaults:
+    chain: tuple[str, ...]
+    """A fresh upload's ``pipelines.default``."""
+
+    available_models: tuple[str, ...]
+    """The MENU, never what a node permits; a model needing a ``max_tokens`` floor needs a registry profile."""
 
 
 # The experiment-file key; its value is a scope out of `Connector.package_cache_scopes`.
@@ -134,9 +156,6 @@ class Connector:
     session_factory: Callable[[], SessionProtocol] = NoopSession
     """Called per ``BackendClient``: a session holds per-client state."""
 
-    serves_uploads: bool = False
-    """A check-in may name it: it runs an uploaded table's rows, and nothing beside them."""
-
     self_optimization: bool = False
     """The recursion: a campaign on it is an L4 outer loop."""
 
@@ -166,7 +185,7 @@ class Connector:
     """Each paid send is admitted and billed where it is made; ``False``: the cell is ONE send."""
 
     model_names_provider: bool = False
-    """Model strings are litellm's ``provider/model``, priced as ``pricing.py::inline_route`` splits."""
+    """Model strings are litellm's ``provider/model``, priced as ``pricing.py::priced_pair`` splits."""
 
     cancel_stops_billing: bool = False
     """``False``: a sent cell is left to land, since the provider bills it whether or not anyone waits."""
@@ -217,8 +236,7 @@ class Connector:
     preflight: PreflightFn | None = None
     """``None`` opts out: an in-process backend has nothing to probe."""
 
-    endpoint: EndpointFn | None = None
-    """Where a ``remote_http`` backend listens: the operator's config, never a request's word."""
+    endpoint: Endpoint | None = None
 
     auth_token: AuthTokenFn | None = None
 
@@ -237,17 +255,15 @@ class Connector:
     ) = None
     """Identity-only, never on the wire: what a panel is measured WITH, never which cells it holds."""
 
-    default_pipeline: tuple[str, ...] = ()
-    """Seeds a fresh upload's ``pipelines.default``, so only a ``serves_uploads`` connector reads it."""
+    uploads: UploadDefaults | None = None
+    """Set = a check-in may name it: it runs an uploaded table's rows, and nothing beside them."""
 
-    default_optimization: tuple[tuple[str, Any], ...] = ()
-    """Seeds ``campaign.json::optimization``; ``degradation_threshold`` has no schema default."""
+    node_templates: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    """Per node name, laid under every definition naming this connector that declares that node."""
 
-    default_node_config: Mapping[str, Any] = field(default_factory=dict)
-    """Seeds a fresh ``dataset.yaml::pipeline``; its ``param_allowed_values`` is a DEFAULT, never a cost rail."""
-
-    available_models: tuple[str, ...] = ()
-    """The MENU, never what a node permits; a model needing a ``max_tokens`` floor needs a registry profile."""
+    @property
+    def serves_uploads(self) -> bool:
+        return self.uploads is not None
 
     @property
     def owns_panel(self) -> bool:
@@ -258,7 +274,13 @@ class Connector:
         return self.execution == "remote_http" and self.pipeline_declaration is None
 
     def base_url(self) -> str:
-        return self.endpoint().rstrip("/") if self.endpoint is not None else ""
+        return self.endpoint.read().rstrip("/") if self.endpoint is not None else ""
+
+    def unconfigured(self) -> str | None:
+        """Why a ``remote_http`` backend has no address; ``None`` where it holds one or has no wire."""
+        if self.endpoint is None or self.base_url():
+            return None
+        return f"{self.endpoint.setting} is unset: name the {self.name} backend in .env."
 
     def credential_header(self) -> dict[str, str]:
         """The header the operator's credential rides in on every request; empty where config holds none."""
@@ -271,6 +293,8 @@ class Connector:
     async def unreachable(self) -> str | None:
         """Why the backend cannot be reached now; ``None`` where it answers or probes nothing. A
         failed probe's transport error is the reason, so no ``preflight`` catches its own."""
+        if (unset := self.unconfigured()) is not None:
+            return unset
         if self.preflight is None:
             return None
         import httpx

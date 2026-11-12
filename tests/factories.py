@@ -16,6 +16,7 @@ from offline_world import FakeBackend, Router
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import DifficultyView
+from promptpotter.application.bench.node_context import stated_line
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.loaders import definition_source
 from promptpotter.application.embedded_run import enter
@@ -37,7 +38,6 @@ from promptpotter.application.optimizers.potter.records import (
     L3Memory,
     Ladder,
 )
-from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
@@ -56,7 +56,12 @@ from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.paired import MemberRows
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.prompt_blocks import PackShelf
-from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector, cell_envelope_of
+from promptpotter.connectors.protocol import (
+    PROBE_WORKLOAD,
+    Connector,
+    Endpoint,
+    cell_envelope_of,
+)
 from promptpotter.connectors.termnorm import termnorm_wire_adapter
 from promptpotter.domain.arms import (
     ArmRole,
@@ -108,6 +113,7 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
     RoundArm,
 )
+from promptpotter.domain.phase_views import ViewAnchors
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import (
@@ -131,7 +137,11 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
+    ArmRecord,
+    ElectionRecord,
     PipelineRead,
+    RoundClosedRecord,
+    RoundEnteredRecord,
     RunPhaseRecord,
     SampleScoredRecord,
     TokenUsageRecord,
@@ -358,7 +368,7 @@ def fake_connector(name: str = "fake", **declared: Any) -> Connector:
         name,
         termnorm_wire_adapter,
         **{
-            "endpoint": lambda: f"http://{FakeBackend.AT}",
+            "endpoint": Endpoint("FAKE_URL", lambda: f"http://{FakeBackend.AT}"),
             "cell_envelope_s": cell_envelope_of(600.0),
             "cell_payer": "host",
             "sent_spend_bound": None,
@@ -468,9 +478,11 @@ def loop_session(
         if client is None
         else client,
         pipeline_schema=schema,
-        pipeline_read=PipelineRead(declaration={}, dataset_overlay={}, declared_nodes=frozenset()),
+        pipeline_read=PipelineRead(declaration={}, dataset_overlay={}),
         bank=Bank.of(samples),
-        dataset_name=schema.name if dataset_name is None else dataset_name,
+        dataset_name=(
+            dataset_name if dataset_name is not None else "" if dataset is None else dataset.name
+        ),
         dataset=dataset,
         campaign_id="" if hop is None else hop.campaign_id,
         cycle_id="" if hop is None else hop.cycle_id,
@@ -573,7 +585,7 @@ def seat(
             optimizer=selected,
             survey=CampaignSurvey(stores.campaigns),
         )
-    return RoundContext(seated, round_num, callbacks=RunCallbacks(ledger))
+    return RoundContext(seated, round_num, ledger=ledger)
 
 
 LAUNCHED_DATASET = "justlogic/d234"
@@ -637,7 +649,7 @@ async def run_init_round(
             with (
                 at_round(0),
                 scoped(
-                    ledger=observers.callbacks.ledger,
+                    ledger=observers.ledger,
                     optimizer=minted.optimizer,
                     determinism=run_clamp(determinism, running.purpose),
                 ),
@@ -651,12 +663,12 @@ async def run_init_round(
                     budget=held,
                 )
                 cycle, _ = await open_cycle(
-                    prep, session=running, cb=observers.callbacks, mode=RunMode()
+                    prep, session=running, ledger=observers.ledger, mode=RunMode()
                 )
-                close_init(cycle, observers.callbacks)
+                close_init(cycle, observers.ledger)
         finally:
             observers.release()
-        opened.append(RoundContext(cycle, round_num, callbacks=RunCallbacks(cycle_ledger(cycle))))
+        opened.append(RoundContext(cycle, round_num, ledger=cycle_ledger(cycle)))
         return None, cycle_result([], None, [], cost=0.0)
 
     await slotless_share(
@@ -745,7 +757,6 @@ def stored_campaign(stores: Stores, campaign: Campaign) -> None:
                 "pipelines": {"default": ["a"]},
             },
             dataset_overlay={},
-            declared_nodes=frozenset(),
         ),
         experiment=None,
         model_capabilities={},
@@ -775,7 +786,7 @@ def arm_walk(
 ) -> list[SampleScoredRecord]:
     """*individual* announced as an arm of round *rnd*, then each filed cell scored at its slot."""
     announced = Proposed(role=role, slot=ArmSlot(round=rnd, idx=0, total=1), individual=prompted())
-    RunCallbacks(ledger).on_arm(rnd, ArmKey(individual), announced)
+    ledger.append(ArmRecord(round=rnd, arm=ArmKey(individual), state=announced))
     rows = [
         SampleScoredRecord(
             round=rnd,
@@ -802,22 +813,29 @@ def close_round(
     entered, each panel arm proposed then concluded, the election, the close."""
     rr = line[-1]
     n = rr.round
-    callbacks = RunCallbacks(ledger)
-    callbacks.on_round_entered(n)
+    ledger.append(RoundEnteredRecord(round=n))
     for key, arm in rr.panel.items():
-        callbacks.on_arm(n, key, Proposed(role=arm.role, slot=arm.slot, individual=arm.individual))
+        ledger.append(
+            ArmRecord(
+                round=n,
+                arm=key,
+                state=Proposed(role=arm.role, slot=arm.slot, individual=arm.individual),
+            )
+        )
     with at_round(n):
         for key, arm in rr.panel.items():
-            callbacks.on_arm(n, key, arm)
+            ledger.append(ArmRecord(round=n, arm=key, state=arm))
     assert rr.election is not None, "a closed round elects"
-    callbacks.on_election(n, rr.election)
-    callbacks.on_round_close(
+    ledger.append(ElectionRecord(round=n, **dict(rr.election)))
+    stated, series, standing = stated_line(
         rr,
         line,
-        cycle.session.bank.slot_of,
         cycle.difficulty,
         lives=cycle.config.optimization.lives,
         outlay=LineOutlay(search_usd=None, worked_s=None),
+    )
+    ledger.append(
+        RoundClosedRecord.of(stated, cycle.session.bank.slot_of, series, standing, ViewAnchors())
     )
 
 

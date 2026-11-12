@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +16,7 @@ from promptpotter.config.paths import MACHINE_DIR
 from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
-from promptpotter.infrastructure.llm.pricing import inline_route
+from promptpotter.infrastructure.llm.pricing import priced_pair
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
     HELD_POLL_S,
@@ -150,6 +150,8 @@ class BackendClient:
     def __init__(
         self, connector: Connector, *, workload: InProcessWorkload, jobs_dir: Path
     ) -> None:
+        if (unset := connector.unconfigured()) is not None:
+            raise BackendUnreachableError(connector.name, "", unset)
         self._connector = connector
         self.base_url = connector.base_url()
         self.workload = workload
@@ -176,11 +178,9 @@ class BackendClient:
         return node.spend_bound
 
     def priced_as(self, cfg: NodeCall) -> tuple[str | None, str | None]:
-        if cfg.model is None:
-            return None, None
-        if self._connector.model_names_provider and cfg.provider is None:
-            return inline_route(cfg.model)
-        return cfg.model, cfg.provider
+        return priced_pair(
+            cfg.model, cfg.provider, names_provider=self._connector.model_names_provider
+        )
 
     @property
     def http(self) -> httpx.AsyncClient:
@@ -234,8 +234,8 @@ class BackendClient:
             )
         return declared
 
-    async def init_session(self, terms: list[str]) -> dict[str, Any]:
-        return await self._guard.set_terms(self.http, self.base_url, terms)
+    async def init_session(self, samples: Sequence[Sample], library: Sequence[str]) -> None:
+        await self._guard.open(self.http, self.base_url, samples, library)
 
     async def run_query[S](
         self,

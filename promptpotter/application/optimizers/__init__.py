@@ -147,7 +147,7 @@ def unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> str |
         prompts = (
             "every prompt field is held"
             if prompt_nodes
-            else f"no node of its chain {list(schema.active_steps)} declares a prompt"
+            else f"no node it runs {list(schema.running)} declares a prompt"
         )
         return (
             f"this campaign leaves its optimizer nothing to edit: {prompts} and no config axis is "

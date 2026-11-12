@@ -27,7 +27,7 @@ pipeline:
       description: >-
         Reads the premises and the claim, reasons in a few short steps, and answers with one label.
       config:
-        provider: openrouter
+        model: openai/gpt-oss-20b:nitro
         output_schema:
           type: object
           properties:
@@ -47,6 +47,12 @@ pipeline:
           additionalProperties: false
         answer_fields:
           - answer
+      optimizer:
+        # `provider` is a cost lever, never an axis.
+        param_keys: [temperature, max_tokens, reasoning_effort]
+        observation_name: llm_only
+        observation_mappings:
+          - {pipeline_key: final_ranking, output_field: generated_text, is_llm: true}
 
 campaign:
   display_metric: ability
@@ -80,7 +86,6 @@ campaign:
     bench: 30
     demo: 50
   optimization:
-    budget: {rounds: 5}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       adaptive_queue:

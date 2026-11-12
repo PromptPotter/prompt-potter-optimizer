@@ -5663,14 +5663,6 @@
             "title": "Declaration",
             "type": "object"
           },
-          "declared_nodes": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Declared Nodes",
-            "type": "array",
-            "uniqueItems": true
-          },
           "free_tier_overlay": {
             "additionalProperties": {
               "additionalProperties": true,
@@ -5698,8 +5690,7 @@
         },
         "required": [
           "declaration",
-          "dataset_overlay",
-          "declared_nodes"
+          "dataset_overlay"
         ],
         "title": "PipelineRead",
         "type": "object"

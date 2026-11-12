@@ -151,10 +151,10 @@ def close_cycle(
     try:
         # Before the result is built: a decision made after the last round has no next `close_round`.
         if cycle is not None:
-            flush_pending_decisions(cycle, observers.callbacks.ledger)
+            flush_pending_decisions(cycle, observers.ledger)
         banked = None if cycle is None else cycle.bench_passes
         bench = declare_line_bench(
-            session, config, observers.callbacks, passes=banked, selecting=False, ending=stop_reason
+            session, config, observers.ledger, passes=banked, selecting=False, ending=stop_reason
         )
         cycle_result = build_cycle_result(
             cycle,
@@ -205,7 +205,7 @@ def _finalize_run(
         bank_campaign_result(
             session.store,
             session.hop,
-            ledger=observers.callbacks.ledger,
+            ledger=observers.ledger,
             clock=session.state.launch_clock(),
             finished_at=cycle_result.finished_at,
             optimizer_phases=selected.phases,
@@ -274,7 +274,6 @@ async def _run_single_cycle(
     step_rounds: int | None,
 ) -> _CycleOutcome:
     dataset, campaign_config = prep.dataset, prep.campaign_config
-    cb = observers.callbacks
 
     cycle: Cycle | None = None
     forked_from: CycleHop | None = None
@@ -284,26 +283,27 @@ async def _run_single_cycle(
     open_round: int | None = None
     pause_cause = PauseCause.INTERRUPT
     try:
-        cycle, forked_from = await open_cycle(prep, session=session, cb=cb, mode=mode)
+        cycle, forked_from = await open_cycle(
+            prep, session=session, ledger=observers.ledger, mode=mode
+        )
         if forked_from is not None:
             # On the parent's own ledger, as a rebase's close ends it, before its readout names the fork.
             declare_run_stop(session, observers, StopReason.REBASED, interrupted_by=pause_cause)
             observers.drain_all()
-            observers = onto_fork(
-                cycle.session, forked_from, observers, campaign_config=campaign_config
-            )
-            cb = observers.callbacks
+            observers = onto_fork(cycle.session, forked_from, observers, prep=prep)
         session = cycle.session
-        close_init(cycle, cb)
+        close_init(cycle, observers.ledger)
         declare_round_allowance(session, step_rounds)
         book = require_spend_book("the bench's set-aside")
         ended = await open_origin_round(
             cycle,
             dataset,
-            cb,
+            observers.ledger,
             spend=observers.dashboard.live.state.spend,
             diagnosing=diagnosing is not None,
-        ) or await run_round_loop(cycle, campaign_config, session, cb, diagnosing=diagnosing)
+        ) or await run_round_loop(
+            cycle, campaign_config, session, observers.ledger, diagnosing=diagnosing
+        )
         stop_reason, cycle_error, fork, open_round, cancel_exc, stepped = ended
         if stepped:
             pause_cause = PauseCause.STEP
@@ -323,7 +323,11 @@ async def _run_single_cycle(
             # Under the last round, as the `bench` verb grades it (`scoring/passes.py::grade_line_bench`).
             with at_round(cycle.rounds[-1].round):
                 cycle.bench_passes = await bench_selection(
-                    session, cycle.rounds, points=cycle.points, banked=cycle.bench_passes, cb=cb
+                    session,
+                    cycle.rounds,
+                    points=cycle.points,
+                    banked=cycle.bench_passes,
+                    ledger=observers.ledger,
                 )
         except (*RUN_STOPS, KeyboardInterrupt, asyncio.CancelledError) as exc:
             # Only a pause escapes the pass; the resume takes the pass again.
@@ -393,12 +397,7 @@ def _mint_and_rebase_fork(
         child, branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices}))
     )
     session = session.bound(child, purpose=session.purpose)
-    observers = onto_fork(
-        session,
-        parent,
-        observers,
-        campaign_config=prep.campaign_config,
-    )
+    observers = onto_fork(session, parent, observers, prep=prep)
     logger.info(
         "Auto-rebase: %s → %s at round %d, %s rounds in its cap [trigger=%s, reason=%s]",
         parent.cycle_id,
@@ -466,7 +465,7 @@ async def run_optimization(
         with (
             at_round(0),
             scoped(
-                ledger=observers.callbacks.ledger,
+                ledger=observers.ledger,
                 optimizer=optimizer,
                 determinism=run_clamp(campaign_config.optimization.determinism, session.purpose),
             ),

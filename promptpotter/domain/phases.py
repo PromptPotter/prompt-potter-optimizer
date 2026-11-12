@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import enum
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
 
 from pydantic import Field
 
@@ -9,6 +9,7 @@ from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ErrorCategory
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
@@ -549,11 +550,12 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "Diagnostic complete",
             StopOutcome.SUCCESS,
             StopCategory.SEARCH,
-            False,
-            False,
-            "",
             True,
-            (),
+            False,
+            "The next round's arms are proposed and paused unmeasured; resuming measures exactly "
+            "these arms.",
+            True,
+            (NextAct("start-run"),),
         ),
         StopReason.CONVERGED: StopReasonInfo(
             "Converged", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ()
@@ -829,18 +831,33 @@ def stop_reason_outcome(reason: StopReason) -> StopOutcome:
     return STOP_REASON_INFO[reason].outcome
 
 
-# One table for a refused send (`SendRefusedError`) and a banked hole (`CellInfrastructureError`).
-REFUSAL_STOPS: dict[ErrorCategory, StopReason] = {
-    ErrorCategory.CONNECTION: StopReason.BACKEND_UNREACHABLE,
-    ErrorCategory.PROVIDER_CREDIT: StopReason.PROVIDER_CREDIT,
-    ErrorCategory.PROVIDER_THROTTLED: StopReason.PROVIDER_THROTTLED,
-    ErrorCategory.SPEND_CEILING: StopReason.SPEND_BUDGET,
-    ErrorCategory.TOKEN_CEILING: StopReason.TOKEN_BUDGET,
-    ErrorCategory.HOST_ALLOWANCE: StopReason.HOST_ALLOWANCE,
-    ErrorCategory.WALL_CLOCK: StopReason.WALL_CLOCK,
-    ErrorCategory.PRICE_LIST_UNREACHABLE: StopReason.PRICE_LIST_UNREACHABLE,
-    ErrorCategory.NO_RATE: StopReason.NO_RATE,
+class ErrorCategoryInfo(NamedTuple):
+    # The configuration under test answers for it, so a cell of it scores, never a hole.
+    charged: bool
+    # The stop a refused send (`SendRefusedError`) or a banked hole of it ends the run on.
+    stops: StopReason | None
+
+
+ERROR_CATEGORY_INFO: Annotated[dict[ErrorCategory, ErrorCategoryInfo], shapes_optimizer_prompt] = {
+    ErrorCategory.CLIENT: ErrorCategoryInfo(True, None),
+    ErrorCategory.SERVER: ErrorCategoryInfo(False, None),
+    ErrorCategory.CONNECTION: ErrorCategoryInfo(False, StopReason.BACKEND_UNREACHABLE),
+    ErrorCategory.PROVIDER_CREDIT: ErrorCategoryInfo(False, StopReason.PROVIDER_CREDIT),
+    ErrorCategory.PROVIDER_THROTTLED: ErrorCategoryInfo(False, StopReason.PROVIDER_THROTTLED),
+    ErrorCategory.SPEND_CEILING: ErrorCategoryInfo(False, StopReason.SPEND_BUDGET),
+    ErrorCategory.TOKEN_CEILING: ErrorCategoryInfo(False, StopReason.TOKEN_BUDGET),
+    ErrorCategory.HOST_ALLOWANCE: ErrorCategoryInfo(False, StopReason.HOST_ALLOWANCE),
+    ErrorCategory.WALL_CLOCK: ErrorCategoryInfo(False, StopReason.WALL_CLOCK),
+    ErrorCategory.PRICE_LIST_UNREACHABLE: ErrorCategoryInfo(
+        False, StopReason.PRICE_LIST_UNREACHABLE
+    ),
+    ErrorCategory.NO_RATE: ErrorCategoryInfo(False, StopReason.NO_RATE),
+    ErrorCategory.PIPELINE: ErrorCategoryInfo(True, None),
+    ErrorCategory.HALTED: ErrorCategoryInfo(True, None),
+    ErrorCategory.UNSCOREABLE: ErrorCategoryInfo(False, None),
+    ErrorCategory.UNKNOWN: ErrorCategoryInfo(True, None),
 }
+assert set(ERROR_CATEGORY_INFO) == set(ErrorCategory), "every ErrorCategory must take a side"
 
 
 class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error

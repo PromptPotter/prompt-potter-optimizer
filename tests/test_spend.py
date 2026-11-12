@@ -113,7 +113,6 @@ from promptpotter.application.optimizer_manifest import checkin_manifest, select
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
 from promptpotter.application.pipeline_resolve import cycle_config
-from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner.bench import cycle_bench, line_run
 from promptpotter.application.runner.inner import spawn
@@ -175,7 +174,7 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
-    REFUSAL_STOPS,
+    ERROR_CATEGORY_INFO,
     CampaignPhase,
     PauseCause,
     RunPhase,
@@ -193,6 +192,7 @@ from promptpotter.domain.results import CycleResult
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
+    ArmRecord,
     ConfigOverrides,
     CycleSeed,
     CycleSeedRecord,
@@ -201,6 +201,7 @@ from promptpotter.domain.run_records import (
     ForkSpec,
     ForkTrigger,
     LaunchAnswer,
+    PhaseRecord,
     RoundEnteredRecord,
     RoundWarningRecord,
     RunPhaseRecord,
@@ -508,13 +509,14 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             ("deepseek/deepseek-v4-flash", 10 * 0.00000014 + 10 * 0.00000028),
             ("gpt-4o", 10 * 0.0000025 + 10 * 0.00001),
         ):
-            model, provider = pricing.inline_route(key)
-            assert usd(model, 10, 10, provider=provider) == pytest.approx(expected), (
+            routed = pricing.priced_pair(key, None, names_provider=True)
+            assert usd(routed[0], 10, 10, provider=routed[1]) == pytest.approx(expected), (
                 f"{key}: a key prices on the route it names inline"
             )
-        assert pricing.inline_route("orphan-model") == ("orphan-model", None), (
-            "a row naming no lister invented a provider"
-        )
+        assert pricing.priced_pair("orphan-model", None, names_provider=True) == (
+            "orphan-model",
+            None,
+        ), "a row naming no lister invented a provider"
         assert usd("deepseek/deepseek-v4-flash", 10, 10, provider="openrouter") is None, (
             "a call no row prices read as priced"
         )
@@ -745,7 +747,7 @@ async def _stopped_by_operator(phase: Any) -> str | None:
     except StopLoop as stop:
         return stop.reason.value
     except SendRefusedError as refused:
-        return REFUSAL_STOPS[refused.category].value
+        return str(ERROR_CATEGORY_INFO[refused.category].stops)
     return None
 
 
@@ -1147,13 +1149,13 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
                 role=MeasurementRole.PANEL,
                 running=score_summary(walked=n),
             )
-            RunCallbacks(skips).on_arm(2, ArmKey(cid), arm_state(cid, cut=cut))
+            skips.append(ArmRecord(round=2, arm=ArmKey(cid), state=arm_state(cid, cut=cut)))
 
     def standing_skips() -> dict[tuple[int, ArmKey], int]:
         return scan_standing_rounds([LedgerSpan(skips.path)]).skipped
 
     assert standing_skips() == {(2, "a"): 3, (2, "c"): 4}, "a superseded skip replayed"
-    RunCallbacks(skips).on_round_entered(2)
+    skips.append(RoundEnteredRecord(round=2))
     assert standing_skips() == {(2, "a"): 3, (2, "c"): 4}, "a resume re-entering lost a skip"
     skips.append(RoundEnteredRecord(round=2, rewound=True))
     assert standing_skips() == {}, "a regenerated round inherited a displaced skip"
@@ -2989,8 +2991,8 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     # A pass killed mid-bench leaves its bracket open; the next holder of the cycle closes it.
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     killed = _account_stores(tmp_path / "killed", issuer=_WEB, user=user, spent=None)
-    RunCallbacks(CycleEventLog.open(CycleDir(killed.campaigns.cycle_dir(_HELD_HOP)))).on_phase(
-        CampaignPhase.BENCH, "enter"
+    CycleEventLog.open(CycleDir(killed.campaigns.cycle_dir(_HELD_HOP))).append(
+        PhaseRecord(phase=CampaignPhase.BENCH, event="enter")
     )
 
     async def _retaken() -> bool:
@@ -3915,7 +3917,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
     framing = loop_session(
         stores,
-        pipeline_schema([solve], name="drafted"),
+        pipeline_schema([solve]),
         rows,
         dataset=resolve_dataset(stores, "drafted"),
     )

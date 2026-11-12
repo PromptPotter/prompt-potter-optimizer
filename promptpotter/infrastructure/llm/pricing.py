@@ -230,8 +230,14 @@ def lookup_rate(model: str | None, provider: str | None) -> Rate | None:
     return load_rates().rates.get((provider.lower().strip(), model.lower().strip()))
 
 
-def inline_route(model: str) -> tuple[str, str | None]:
-    """Off the rate table alone: no operator-typed string reaches a library's provider resolution."""
+def priced_pair(
+    model: str | None, provider: str | None, *, names_provider: bool
+) -> tuple[str | None, str | None]:
+    """The ``(model, provider)`` a node's sends are priced as; a connector whose model strings
+    name their provider has one with no ``provider`` split here, off the rate table alone: no
+    operator-typed string reaches a library's provider resolution."""
+    if model is None or not names_provider or provider is not None:
+        return model, provider
     name = model.strip()
     table = load_rates()
     prefix, _, rest = name.partition("/")

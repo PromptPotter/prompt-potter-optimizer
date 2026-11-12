@@ -22,6 +22,7 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_for_draft,
 )
 from promptpotter.application.pipeline_responses import CampaignPipelineResponse
+from promptpotter.application.read_workers import off_loop
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig
 from promptpotter.domain.checkin_draft import DraftFile, OriginResolution, SetupStep
@@ -40,6 +41,7 @@ from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import CAP_AXIS_INFO, Budget, CapAxis, money_text
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.infrastructure.store.dataset_access import declared_pipelines
 from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -47,6 +49,17 @@ class DraftDependency(PipelineDependency):
     """One input the draft's active pipeline needs. Soft: unfulfilled, it does not block mint."""
 
     fulfilled: bool
+
+
+class PipelineMode(StrictModel):
+    """One pipeline the connector declares, as a check-in's Mode offers it."""
+
+    name: str
+    steps: list[str]
+    exclude_nodes: list[str] | None = Field(
+        description="What picking it sends as `config.exclude_nodes`; null where the draft's "
+        "chain does not hold its steps, so no exclusion runs it."
+    )
 
 
 class DraftCampaignWire(StrictModel):
@@ -96,8 +109,14 @@ class DraftCampaignWire(StrictModel):
     )
     created_at: str
     active_steps: list[str] = Field(
-        description="The pipeline this draft runs. Who may move a node's axes is "
+        description="The chain this draft runs, in order. Who may move a node's axes is "
         "`pipeline.node_config_schema`'s answer alone."
+    )
+    modes: list[PipelineMode] = Field(
+        description="The pipelines its connector declares; empty where it declares none."
+    )
+    mode: str | None = Field(
+        description="The mode whose steps are `active_steps`; null where its chain is none of them."
     )
     dependencies: list[DraftDependency]
     readiness: OriginReadiness = Field(
@@ -118,10 +137,22 @@ class DraftCampaignWire(StrictModel):
     )
 
 
-def _dependencies(chain: PipelineSchema, active: list[str]) -> tuple[PipelineDependency, ...]:
+def _dependencies(running: PipelineSchema) -> tuple[PipelineDependency, ...]:
     return dependencies_from_node_roles(
-        {n.name: n.role for n in chain.nodes if n.name in active and n.role is not None}
+        {n.name: n.role for n in running.running_nodes if n.role is not None}
     )
+
+
+def _modes(served: ServedPipeline, declared: PipelineSchema) -> list[PipelineMode]:
+    held = declared.active_steps
+    return [
+        PipelineMode(
+            name=name,
+            steps=steps,
+            exclude_nodes=[n for n in held if n not in steps] if set(steps) <= set(held) else None,
+        )
+        for name, steps in declared_pipelines(served.over({})).items()
+    ]
 
 
 def _dependency_fulfilled(dep: PipelineDependency, draft: DraftFile) -> bool:
@@ -205,13 +236,17 @@ class DraftReopenResponse(StrictModel):
 
 async def reopen_draft(stores: Stores, draft_id: str) -> DraftReopenResponse:
     """404 once started or discarded."""
-    draft = owned_draft(stores, draft_id)
-    stage = draft_starts(stores).get(draft_id)
+    draft = await off_loop(owned_draft, stores, draft_id)
+    return await off_loop(_reopened, stores, draft, await draft_served(stores, draft))
+
+
+def _reopened(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftReopenResponse:
+    stage = draft_starts(stores).get(draft.draft_id)
     return DraftReopenResponse(
-        draft=await read_draft_wire(stores, draft),
+        draft=draft_wire(stores, draft, served),
         resolution=load_resolution(stores, draft),
         resolution_pending=draft.resolution_pending(),
-        start=None if stage is None else HeldStart.of(stores, draft_id, stage),
+        start=None if stage is None else HeldStart.of(stores, draft.draft_id, stage),
     )
 
 
@@ -219,6 +254,7 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
     pipeline = draft_pipeline(stores, draft, served)
     declared = pipeline.config.optimization.budget
     active = list(pipeline.chain.active_steps)
+    modes = _modes(served, pipeline.declared)
     refusal, launch = _launch(stores, draft, declared)
     return DraftCampaignWire(
         draft_id=draft.draft_id,
@@ -238,9 +274,11 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
         candidate_library_size=len(draft.candidate_library),
         created_at=draft.created_at,
         active_steps=active,
+        modes=modes,
+        mode=next((m.name for m in modes if m.steps == active), None),
         dependencies=[
             DraftDependency(**dep.model_dump(), fulfilled=_dependency_fulfilled(dep, draft))
-            for dep in _dependencies(pipeline.chain, active)
+            for dep in _dependencies(pipeline.chain)
         ],
         readiness=origin_readiness(draft, pipeline),
         launch_refusal=refusal,

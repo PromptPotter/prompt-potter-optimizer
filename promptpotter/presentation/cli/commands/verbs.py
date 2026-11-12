@@ -137,9 +137,10 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 dest="diag",
                 action="store_true",
                 help="Diagnostic mode: origin → 1 full scored round → force "
-                "task-framing refinement (regardless of stall) → 1 generation-only "
-                "round 2 (refinement overrides applied, no scoring) → halt. "
-                "index.json::final.mode lands as 'diag'.",
+                "task-framing refinement (regardless of stall) → round 2 proposed as the "
+                "round loop proposes it, its arm gate included (`review` and `author` wait "
+                "on the operator), then paused unmeasured; `resume` measures exactly these "
+                "arms. index.json::final.mode lands as 'diag'.",
             ),
             NO_WAIT,
             *BUDGET_AXES,

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from promptpotter.config.settings import settings
-from promptpotter.connectors.protocol import Connector, cell_envelope_of
+from promptpotter.connectors.protocol import Connector, Endpoint, cell_envelope_of
 from promptpotter.domain.connector import AuthScheme
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_schema import OUTPUT_CONTRACT_KEYS
@@ -74,8 +74,6 @@ def _harness_reply(body: dict[str, Any]) -> dict[str, Any] | None:
 
 def _pipeline_declaration(_stores: Stores, _experiment: Mapping[str, Any] | None) -> dict[str, Any]:
     return {
-        "name": "n8n eval harness",
-        "version": "v1",
         "nodes": {
             HARNESS_NODE: {
                 "type": "llm",
@@ -97,8 +95,6 @@ def _identity_config(
 
 
 async def _preflight(backend_url: str) -> str | None:
-    if not backend_url:
-        return "N8N_HARNESS_URL is unset: name the harness webhook in .env."
     if not settings.N8N_HARNESS_TOKEN.get_secret_value():
         return "N8N_HARNESS_TOKEN is unset: the harness refuses a request without its secret."
     async with httpx.AsyncClient(
@@ -136,7 +132,7 @@ CONNECTOR = Connector(
     pipeline_declaration=_pipeline_declaration,
     identity_config=_identity_config,
     preflight=_preflight,
-    endpoint=_endpoint,
+    endpoint=Endpoint("N8N_HARNESS_URL", _endpoint),
     auth_token=_auth_token,
     auth_scheme=_auth_scheme,
 )

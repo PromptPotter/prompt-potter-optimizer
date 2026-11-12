@@ -107,16 +107,8 @@ def render_review_md(
     parts += _render_behavior_summary(review)
     parts += ["## Rounds", ""]
 
-    last_idx = len(rounds) - 1
     for i, round_data in enumerate(rounds):
-        is_peek = i == last_idx and round_data.generation_only
-        parts += _render_round(
-            round_data,
-            review,
-            i,
-            is_peek=is_peek,
-            schema_repair_retries=repairs_per_round[i],
-        )
+        parts += _render_round(round_data, review, i, schema_repair_retries=repairs_per_round[i])
 
     return "\n".join(parts).rstrip() + "\n"
 
@@ -418,34 +410,29 @@ def _render_round(
     review: ReviewReading | None,
     index: int,
     *,
-    is_peek: bool,
     schema_repair_retries: int = 0,
 ) -> list[str]:
-    suffix = " (next-gen peek)" if is_peek else ""
-    parts: list[str] = [
-        f"### Round {round_data.round}{suffix}",
-        "",
-    ]
     head, fold, election = round_data.head, round_data.fold, round_data.election
-    if not is_peek:
-        parts += [
-            f"- fitness: {fold_fitness_text(fold)}",
-            f"- composite_fitness: `{fmt_fitness(None if fold is None else fold.composite_fitness)}`",
-            f"- improved: **{'yes' if round_data.improved else 'no'}**",
-        ]
-        if fold is not None and (terms := fitness_terms_text(fold.term_means)):
-            parts.append(f"- formula terms: `{terms}`")
-        if series := overlap_series(round_data.overlap):
-            parts.append(f"- overlap: {series}")
-        if election is not None and election.verdict_reason:
-            parts.append(f"- verdict: {election.verdict_reason}")
+    parts: list[str] = [
+        f"### Round {round_data.round}",
+        "",
+        f"- fitness: {fold_fitness_text(fold)}",
+        f"- composite_fitness: `{fmt_fitness(None if fold is None else fold.composite_fitness)}`",
+        f"- improved: **{'yes' if round_data.improved else 'no'}**",
+    ]
+    if fold is not None and (terms := fitness_terms_text(fold.term_means)):
+        parts.append(f"- formula terms: `{terms}`")
+    if series := overlap_series(round_data.overlap):
+        parts.append(f"- overlap: {series}")
+    if election is not None and election.verdict_reason:
+        parts.append(f"- verdict: {election.verdict_reason}")
     if schema_repair_retries:
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")
     parts += _render_lineage(None if head is None else head.individual)
     if review is None:
         return parts
     parts += _render_check_checklist(review.checks[index])
-    parts += _render_variants_table(round_data, scored=not is_peek)
+    parts += _render_variants_table(round_data)
     parts += _render_critique(review.feedback[index])
     return parts
 
@@ -475,39 +462,32 @@ def _render_check_checklist(checks: list[CheckResult]) -> list[str]:
     return parts
 
 
-def _render_variants_table(round_data: RoundResult, *, scored: bool) -> list[str]:
+def _render_variants_table(round_data: RoundResult) -> list[str]:
     panel = round_data.panel
     if not panel:
         return []
-    parts: list[str] = ["**Variants**", ""]
-    if scored:
-        # The column's sheet, as its readings name it: every arm's is the round's one.
-        sheet = next(
-            (
-                fit.vs_reference.cell_set
-                for key in panel
-                if (fit := round_data.fit(key)) is not None and fit.vs_reference is not None
-            ),
-            None,
-        )
-        parts.append(
-            f"| variant | composite_fitness | fit | θ | lift {lift_versus('parent', sheet)} | won "
-            "| evidence | changes |"
-        )
-        parts.append("|---|---|---|---|---|---|---|---|")
-    else:
-        parts.append("| cand_id | changes | derived_axes | evidence |")
-        parts.append("|---|---|---|---|")
+    # The column's sheet, as its readings name it: every arm's is the round's one.
+    sheet = next(
+        (
+            fit.vs_reference.cell_set
+            for key in panel
+            if (fit := round_data.fit(key)) is not None and fit.vs_reference is not None
+        ),
+        None,
+    )
+    parts: list[str] = [
+        "**Variants**",
+        "",
+        f"| variant | composite_fitness | fit | θ | lift {lift_versus('parent', sheet)} | won "
+        "| evidence | changes |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
     for key, arm in panel.items():
         lineage = arm.individual.lineage
         changes = lineage.changes_description.replace("|", "\\|").strip()[:80]
         evidence = _fmt_evidence_cell(lineage.evidence_grounding)
-        if scored:
-            cells = _score_cells(round_data, key)
-            parts.append(f"| `{arm.label}` | {cells} | {evidence} | {changes} |")
-        else:
-            axes = ", ".join(sorted(arm.overlay))
-            parts.append(f"| `{arm.label}` | {changes} | {axes} | {evidence} |")
+        cells = _score_cells(round_data, key)
+        parts.append(f"| `{arm.label}` | {cells} | {evidence} | {changes} |")
     parts.append("")
     return parts
 
@@ -591,7 +571,6 @@ def from_disk_log(
         rounds_completed=len(index.rounds),
         started_at=final.started_at if final else None,
         finished_at=index.finished_at,
-        gen_only_rounds=sum(1 for t in rounds if t.generation_only),
     )
 
     round_views: list[RoundDigestView] = []

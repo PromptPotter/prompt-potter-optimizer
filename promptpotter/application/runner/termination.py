@@ -8,7 +8,7 @@ import traceback
 from typing import TYPE_CHECKING
 
 from promptpotter.domain.phases import (
-    REFUSAL_STOPS,
+    ERROR_CATEGORY_INFO,
     STOP_REASON_INFO,
     ErrorRecord,
     StopLoop,
@@ -45,8 +45,8 @@ def run_stop_reason(exc: BaseException) -> StopReason:
     match exc:
         case StopLoop():
             return exc.reason
-        case SendRefusedError():
-            return REFUSAL_STOPS[exc.category]
+        case SendRefusedError() if (stop := ERROR_CATEGORY_INFO[exc.category].stops) is not None:
+            return stop
         # A KeyboardInterrupt is the PAUSE FLAG's stop; an outer sample deadline cancels the same way.
         case KeyboardInterrupt() | asyncio.CancelledError():
             return StopReason.PAUSED

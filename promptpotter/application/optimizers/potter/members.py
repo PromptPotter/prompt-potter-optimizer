@@ -74,7 +74,6 @@ from promptpotter.application.optimizers.potter.escalation.state import (
     l2_fired,
     l3_fired,
 )
-from promptpotter.application.optimizers.potter.generation_only import run_generation_only_round
 from promptpotter.application.optimizers.potter.knobs import (
     AdaptiveQueueKnobs,
     CellStrata,
@@ -135,7 +134,6 @@ if TYPE_CHECKING:
         PromptArity,
         Proposals,
         ReviewReading,
-        RoundContext,
         Selection,
     )
     from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
@@ -678,9 +676,6 @@ class Escalation(nodes.Controller):
 
     async def diagnose(self, ctx: NodeContext) -> None:
         await self.act(ctx, FORCED_BY_DIAG)
-
-    async def show_round(self, ctx: RoundContext) -> None:
-        await run_generation_only_round(ctx)
 
 
 L2 = L2Context()

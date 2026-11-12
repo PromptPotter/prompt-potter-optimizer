@@ -3,12 +3,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.bench.node_context import NodeContext, rewalk_origin
+from promptpotter.application.bench.node_context import NodeContext, restated_round, rewalk_origin
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import mended_round
 from promptpotter.application.optimizers.nodes import RoundContext
-from promptpotter.application.run_callbacks import restated_round
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.cycle_paths import CycleHop
@@ -23,12 +22,12 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.optimizer_state import OptimizerState, StatePart
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.run_records import RoundProposedRecord
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
+    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
         StandingRound,
         StandingRounds,
@@ -186,20 +185,20 @@ async def repair_incomplete_rounds(
 
 
 def _seat_on(
-    cycle: Cycle, rounds: list[RoundResult], rr: RoundResult, callbacks: RunCallbacks
+    cycle: Cycle, rounds: list[RoundResult], rr: RoundResult, ledger: CycleEventLog
 ) -> RoundContext:
     """*rr*'s round as the run stood in it, a view: the trajectory up to it, *rr* closed."""
     seated = cycle.seated([*(p for p in rounds if p.round < rr.round), rr])
-    return RoundContext(cycle=seated, round_num=rr.round, callbacks=callbacks)
+    return RoundContext(cycle=seated, round_num=rr.round, ledger=ledger)
 
 
 def round_packages(
-    cycle: Cycle, rounds: list[RoundResult], callbacks: RunCallbacks
+    cycle: Cycle, rounds: list[RoundResult], ledger: CycleEventLog
 ) -> dict[int, dict[str, str]]:
     """``{round: {node: fingerprint}}``, each member asked in ITS OWN round's seat."""
     out: dict[int, dict[str, str]] = {}
     for rr in rounds:
-        seat = _seat_on(cycle, rounds, rr, callbacks)
+        seat = _seat_on(cycle, rounds, rr, ledger)
         out[rr.round] = {
             node: fingerprint
             for member in cycle.optimizer.members
@@ -209,7 +208,7 @@ def round_packages(
 
 
 async def _rederived(
-    cycle: Cycle, rounds: list[RoundResult], drifted: list[int], callbacks: RunCallbacks
+    cycle: Cycle, rounds: list[RoundResult], drifted: list[int], ledger: CycleEventLog
 ) -> dict[int, OptimizerState]:
     """A repair, not a rewind: measurements and winner untouched; round 0's state is the origin path's. Before the branch exists, so a member that cannot re-derive refuses the repair rather than leave the branch graded on a hole."""
     restated = list(rounds)
@@ -217,7 +216,7 @@ async def _rederived(
     for slot, rr in enumerate(rounds):
         if rr.round not in drifted or rr.round == 0:
             continue
-        seat = _seat_on(cycle, restated, rr, callbacks)
+        seat = _seat_on(cycle, restated, rr, ledger)
         # Outside the round loop this ContextVar still holds whatever the last round set.
         parts: list[StatePart] = []
         for member in cycle.optimizer.members:
@@ -281,7 +280,7 @@ def _origin_only(rounds: Sequence[RoundResult], standing: StandingRounds) -> boo
     return [t.round for t in rounds] == [0] and 1 not in standing.proposals
 
 
-async def rewalk_lost_origin(cycle: Cycle, dataset: list[Sample], callbacks: RunCallbacks) -> None:
+async def rewalk_lost_origin(cycle: Cycle, dataset: list[Sample], ledger: CycleEventLog) -> None:
     """A replayed origin no round has read yet, that lost cells, re-closes in place, never on a
     branch that would keep only the dead measurement: one walk sends its holes and the cells its
     walk never sent, the rest replayed. Past the divergence check, so a resume it refuses pays nothing."""
@@ -295,7 +294,7 @@ async def rewalk_lost_origin(cycle: Cycle, dataset: list[Sample], callbacks: Run
     holes = sum(map(_repairable_hole, rows))
     if not holes and len(rows) >= head.expected_samples:
         return
-    ctx = RoundContext(cycle=cycle, round_num=0, callbacks=callbacks)
+    ctx = RoundContext(cycle=cycle, round_num=0, ledger=ledger)
     await rewalk_origin(ctx, cycle.origin_cells(dataset))
     logger.warning(
         "Resume re-measured the origin's %d lost cell(s) and the %d its walk never sent; round 0 "
@@ -310,7 +309,7 @@ async def apply_correction(
     prior: list[RoundResult],
     packages_before: dict[int, dict[str, str]],
     dataset: list[Any],
-    callbacks: RunCallbacks,
+    ledger: CycleEventLog,
 ) -> str | None:
     """*cycle* is seated on *prior*, and is seated on what the branch carries where one is cut."""
     session = cycle.session
@@ -338,12 +337,12 @@ async def apply_correction(
     }
     mismatches, drifted = _package_drift(
         packages_before,
-        round_packages(cycle, corrected, callbacks),
+        round_packages(cycle, corrected, ledger),
         {t.round for t in corrected},
         proposed,
     )
     rederived = await _rederived(
-        cycle, corrected, [rn for rn in drifted if rn < cut.resume_at], callbacks
+        cycle, corrected, [rn for rn in drifted if rn < cut.resume_at], ledger
     )
     repair_target = cut_fork(
         session.store,

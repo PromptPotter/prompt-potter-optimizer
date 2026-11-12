@@ -99,7 +99,7 @@ _LIMIT_KEY_SUFFIXES = ("max_sites", "num_results", "max_token_candidates", "max_
 
 def _limit_nodes(schema: PipelineSchema) -> list[tuple[PipelineNode, str, int]]:
     out: list[tuple[PipelineNode, str, int]] = []
-    for node in schema.nodes:
+    for node in schema.running_nodes:
         cfg = node.current_config
         for key in cfg:
             if not any(key == s or key.endswith(s) for s in _LIMIT_KEY_SUFFIXES):
@@ -168,7 +168,9 @@ class Evaluator:
     requires: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
 
     def applies(self, schema: PipelineSchema) -> bool:
-        if self.node_role is not None and not any(n.role == self.node_role for n in schema.nodes):
+        if self.node_role is not None and not any(
+            n.role == self.node_role for n in schema.running_nodes
+        ):
             return False
         return self.requires(schema)
 
@@ -394,7 +396,7 @@ def _concrete_round_entries(
         if ev.node_role is None:
             out.append((ev.name, ev, None))
             continue
-        matching = [n for n in schema.nodes if n.role == ev.node_role]
+        matching = [n for n in schema.running_nodes if n.role == ev.node_role]
         namespace = len(matching) > 1
         for node in matching:
             display_name = f"{node.name}_{ev.name}" if namespace else ev.name

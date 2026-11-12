@@ -311,7 +311,7 @@ def display_tags(schema: PipelineSchema | None) -> dict[str, str]:
             n.name,
             "ai" if n.is_llm else (_KIND_TAGS.get(n.kind) if n.kind else None) or n.name[:4],
         )
-        for n in schema.nodes
+        for n in schema.running_nodes
     ]
     tag_counts = Counter(tag for _, tag in base_tags)
     tag_seq: dict[str, int] = {}

@@ -70,7 +70,7 @@ def carried_writes(
                 ValidationFailure(
                     axis=node,
                     value=node,
-                    allowed=sorted(schema.active_steps),
+                    allowed=sorted(schema.running),
                     reason="hallucinated_node",
                 )
             )

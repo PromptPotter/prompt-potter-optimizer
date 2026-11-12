@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, get_args
 
 from promptpotter.domain.said import Tone
@@ -129,9 +129,15 @@ class CellHop(Protocol):
 class SessionProtocol(Protocol):
     """Also how this backend's error replies READ, so ``BackendClient`` parses no backend's envelope."""
 
-    async def set_terms(
-        self, http: httpx.AsyncClient, base_url: str, terms: list[str], /
-    ) -> dict[str, Any]: ...
+    async def open(
+        self,
+        http: httpx.AsyncClient,
+        base_url: str,
+        samples: Sequence[Sample],
+        library: Sequence[str],
+        /,
+    ) -> None:
+        """Once per launch, before a cell is sent: what the backend indexes it derives itself."""
 
     async def recover(
         self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response, /

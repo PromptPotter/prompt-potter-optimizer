@@ -32,8 +32,10 @@ from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
 from promptpotter.domain.run_records import (
     OPERATOR_ORIGIN_SOURCES,
+    ArmRecord,
     CycleSeed,
     OriginSource,
+    PhaseRecord,
     ScoringLockedRecord,
 )
 from promptpotter.domain.sample import Sample
@@ -45,7 +47,6 @@ from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import CellSheet
@@ -203,7 +204,7 @@ async def establish_campaign_origin(
     campaign_config: CampaignConfig,
     *,
     cycle: CycleConfig,
-    listener: RunCallbacks,
+    ledger: CycleEventLog,
 ) -> CampaignOrigin:
     resolved_origin = resolve_origin_opt_search_point(
         dataset=session.dataset,
@@ -248,7 +249,7 @@ async def establish_campaign_origin(
 
     scoring_set = sample_dataset(dataset, campaign_config.sp_budget_origin)
 
-    listener.on_phase(CampaignPhase.ORIGIN, "enter", round=0)
+    ledger.append(PhaseRecord(phase=CampaignPhase.ORIGIN, event="enter", round=0))
 
     arm = measuring(
         proposed,
@@ -257,8 +258,12 @@ async def establish_campaign_origin(
         expected=len(scoring_set),
         sample_order=[s.id for s in scoring_set],
     )
-    listener.on_arm(0, key, proposed)
-    listener.on_arm(0, key, arm)
+    ledger.append(
+        ArmRecord(round=0, arm=key, state=proposed, anchors=session.state.view_context.anchors())
+    )
+    ledger.append(
+        ArmRecord(round=0, arm=key, state=arm, anchors=session.state.view_context.anchors())
+    )
 
     try:
         # One walk: a partial pass is graded by coverage (`origin_gate`), and its holes are the
@@ -271,7 +276,7 @@ async def establish_campaign_origin(
             measured=MeasuredPass(resolved_origin.id, MeasurementRole.ORIGIN),
         )
         sheet, scores = scored.sheet, scored.scores
-        locked_scoring = lock_criterion(session, campaign_config, sheet, listener.ledger)
+        locked_scoring = lock_criterion(session, campaign_config, sheet, ledger)
         if locked_scoring is not None:
             # Re-GRADED under the criterion these rows just anchored; nothing is re-measured.
             session.state.scoring = scorer_setup(
@@ -284,9 +289,11 @@ async def establish_campaign_origin(
             scores = compute_composite_fitness(sheet, scorer, pipeline_schema)
         # Both what the ledger receives and round 0's arm — never re-derive either from these rows.
         state = conclude(arm, replace(scored, sheet=sheet, scores=scores), round_num=0)
-        listener.on_arm(0, key, state)
+        ledger.append(
+            ArmRecord(round=0, arm=key, state=state, anchors=session.state.view_context.anchors())
+        )
     finally:
-        listener.on_phase(CampaignPhase.ORIGIN, "exit", round=0)
+        ledger.append(PhaseRecord(phase=CampaignPhase.ORIGIN, event="exit", round=0))
 
     return CampaignOrigin(
         origin=ReadArm(key, state, sheet), framing=framing, locked_scoring=locked_scoring

@@ -354,7 +354,7 @@ class Cycle:
 
     @property
     def elected(self) -> tuple[RoundResult, Election]:
-        """The last round that elected: a generation-only round ends on no arm."""
+        """The last round that elected."""
         return next((rr, rr.election) for rr in reversed(self.rounds) if rr.election is not None)
 
     @property

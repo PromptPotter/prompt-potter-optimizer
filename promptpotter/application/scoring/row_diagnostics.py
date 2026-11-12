@@ -48,8 +48,8 @@ def extract_sample_diagnostics(
     if pd == PipelineData():
         return diag
 
-    role_counts = Counter(s.role for s in pipeline_schema.nodes)
-    for step in pipeline_schema.nodes:
+    role_counts = Counter(s.role for s in pipeline_schema.running_nodes)
+    for step in pipeline_schema.running_nodes:
         extracted = _extract_node_diagnostics(step, pd, gt)
         if extracted is None:
             continue

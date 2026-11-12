@@ -226,7 +226,11 @@ def cell_billing(
         usd = web.get("usd") if isinstance(web, dict) else None
         if isinstance(usd, int | float) and not isinstance(usd, bool) and usd:
             searched = next(
-                (n.name for n in pipeline_schema.nodes if isinstance(n.spend_bound, WebSpendBound)),
+                (
+                    n.name
+                    for n in pipeline_schema.running_nodes
+                    if isinstance(n.spend_bound, WebSpendBound)
+                ),
                 "web_search",
             )
             parts.append(Billed(TokenAccount(), float(usd), node=searched))
@@ -257,7 +261,7 @@ def _node_spends(
 ) -> list[tuple[PipelineNode, NodeCall, NodeSpendBound | None]]:
     client = session.backend_client
     spends = []
-    for node in session.pipeline_schema.nodes:
+    for node in session.pipeline_schema.running_nodes:
         cfg = calls.get(node.name) or NodeCall()
         spends.append((node, cfg, client.node_spend_bound(node, cfg)))
     return spends

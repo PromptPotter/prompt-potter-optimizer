@@ -47,8 +47,6 @@ class DigestStatusView:
     rounds_completed: int
     started_at: str | None
     finished_at: str | None
-    # Counted into ``rounds_completed`` but rendered separately.
-    gen_only_rounds: int = 0
 
 
 @dataclass(frozen=True)

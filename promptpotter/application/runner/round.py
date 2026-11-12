@@ -22,13 +22,13 @@ from promptpotter.application.bench.node_context import (
     bank_proposals,
     measure_as_parent,
     reread_walk,
+    stated_line,
 )
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.rasch import candidate_abilities
 from promptpotter.application.optimizers.nodes import (
-    INITIAL_POPULATION,
     OPERATOR_SEAT,
     MeasuredRound,
     Proposals,
@@ -37,8 +37,6 @@ from promptpotter.application.optimizers.nodes import (
     RoundOpening,
     RoundWalk,
 )
-from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.run_observers import declare_gate, declare_running
 from promptpotter.application.runner.bench import (
     grade_round_selection,
     line_outlay,
@@ -102,9 +100,18 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
 )
 from promptpotter.domain.phase_views import MeasureEnterView
-from promptpotter.domain.phases import CampaignPhase, StopLoop, StopReason
+from promptpotter.domain.phases import CampaignPhase, RunPhase, StopLoop, StopReason
+from promptpotter.domain.pipeline_schema import INITIAL_POPULATION
 from promptpotter.domain.results import Election, InRunCells, RoundResult, round_document_digest
-from promptpotter.domain.run_records import ComparisonExit, PanelCoverage
+from promptpotter.domain.run_records import (
+    ArmRecord,
+    ComparisonExit,
+    ElectionRecord,
+    PanelCoverage,
+    PhaseRecord,
+    RoundClosedRecord,
+    RunPhaseRecord,
+)
 from promptpotter.domain.run_standing import (
     LineStep,
     best_line,
@@ -212,7 +219,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         ctx.round_num,
         len(drafts),
     )
-    declare_gate(ctx.callbacks.ledger, "arms", drafts=drafts)
+    ctx.ledger.append(RunPhaseRecord(run_phase=RunPhase.GATE, gate="arms", drafts=list(drafts)))
 
     def _take() -> list[Proposal] | None:
         standing = session.state.control.standing_submission()
@@ -233,7 +240,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
     arms = await hold_for_operator(session, _take, node=OPERATOR_SEAT.name, round_num=ctx.round_num)
     if arms is None:
         raise StopLoop(StopReason.PAUSED)
-    declare_running(ctx.callbacks.ledger)
+    ctx.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
     return arms
 
 
@@ -827,7 +834,6 @@ async def _walk_population(
     keep_cut: bool,
 ) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopReason | None]:
     cycle = ctx.cycle
-    callbacks = ctx.callbacks
     round_num = ctx.round_num
     schema = cycle.session.pipeline_schema
     proposed = population.arms(round_num)
@@ -879,14 +885,25 @@ async def _walk_population(
                 },
             }
         )
-        callbacks.on_arm(round_num, key, states[key])
+        ctx.ledger.append(
+            ArmRecord(
+                round=round_num,
+                arm=key,
+                state=states[key],
+                anchors=session.state.view_context.anchors(),
+            )
+        )
 
     def on_decided(key: ArmKey) -> None:
         arm, results = _conclude_arm(ctx, states[key], sps[key], walks[key], key, race, labels)
         rows[key] = results
         concluded[key] = arm
         ctx.walked(ReadArm(key, arm, results), asked[key])
-        callbacks.on_arm(round_num, key, arm)
+        ctx.ledger.append(
+            ArmRecord(
+                round=round_num, arm=key, state=arm, anchors=session.state.view_context.anchors()
+            )
+        )
 
     cut = await run_walks(
         walks,
@@ -994,11 +1011,11 @@ OWED_WRITE_ATTEMPTS = 3
 """Each is a whole call: the client's backpressure and 5xx retries sit INSIDE one attempt and do not count against this."""
 
 
-def run_init(cycle: Cycle, cb: RunCallbacks) -> None:
+def run_init(cycle: Cycle, ledger: CycleEventLog) -> None:
     """Once per cycle, before round 0's adapters: a cycle whose origin closed already holds what it wrote."""
     if cycle.origin_round.optimizer_state is not None:
         return
-    ctx = RoundContext(cycle=cycle, round_num=0, callbacks=cb)
+    ctx = RoundContext(cycle=cycle, round_num=0, ledger=ledger)
     for initializer in cycle.optimizer.plan.initializers:
         initializer.initialize(NodeContext(ctx, initializer))
 
@@ -1010,7 +1027,7 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
     # A replayed walk makes no call, so nothing it would read is re-sent.
     if prior.round == 0 or not prior.results or cycle.banked_walk(ctx.round_num) is not None:
         return
-    at_prior = RoundContext(cycle=cycle, round_num=prior.round, callbacks=ctx.callbacks)
+    at_prior = RoundContext(cycle=cycle, round_num=prior.round, ledger=ctx.ledger)
     for adapter in cycle.optimizer.plan.adapters:
         owed = [
             kind
@@ -1105,7 +1122,7 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
     holed = sorted(key for key, arm in panel.items() if is_leader_eligible(arm) and holes[key])
     # Sink is the LEDGER: the halt below unwinds before `close_round`.
     record_decision(
-        ctx.callbacks.ledger, PanelCoverage(holes_by_arm=holes), holed, node=None, round=round_num
+        ctx.ledger, PanelCoverage(holes_by_arm=holes), holed, node=None, round=round_num
     )
     holed_rows = [
         (key, cell) for key in holed for cell in round_result.rows(key) if cell.facts.errored
@@ -1159,45 +1176,55 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
     opening = walk.lead.opening(NodeContext(ctx, walk.lead), bench)
     fold = cycle.parent_fold
     node = walk.proposer
-    cb = ctx.callbacks
-    cb.on_phase(
-        CampaignPhase.PROPOSE,
-        "enter",
-        round=ctx.round_num,
-        view=propose_enter(
-            cb.view_context,
+    ctx.ledger.append(
+        PhaseRecord(
+            phase=CampaignPhase.PROPOSE,
+            event="enter",
             round=ctx.round_num,
-            node=node,
-            opening=opening,
-            budget_rounds=cycle.config.optimization.budget.rounds,
-            parent_fitness=None if fold is None else fold.fitness,
-            prompt_preview="\n\n".join(
-                cycle.parent.render(prompt_node)
-                for prompt_node in cycle.session.pipeline_schema.prompt_nodes()
-            )[:120],
-            model=cycle.optimizer.model(node),
-            pipeline_params=cycle.parent_point.pipeline_params,
-            parent_prompts=cycle.parent.prompts,
-            run_standing=cycle.standing,
-        ),
+            view=propose_enter(
+                cycle.session.state.view_context,
+                round=ctx.round_num,
+                node=node,
+                opening=opening,
+                budget_rounds=cycle.config.optimization.budget.rounds,
+                parent_fitness=None if fold is None else fold.fitness,
+                prompt_preview="\n\n".join(
+                    cycle.parent.render(prompt_node)
+                    for prompt_node in cycle.session.pipeline_schema.prompt_nodes()
+                )[:120],
+                model=cycle.optimizer.model(node),
+                pipeline_params=cycle.parent_point.pipeline_params,
+                parent_prompts=cycle.parent.prompts,
+                run_standing=cycle.standing,
+            ),
+        )
     )
     return opening
 
 
 def announce_population(ctx: RoundContext, opening: RoundOpening, population: Proposals) -> None:
     for key, arm in population.arms(ctx.round_num).items():
-        ctx.callbacks.on_arm(ctx.round_num, key, arm)
-    ctx.callbacks.on_phase(
-        CampaignPhase.PROPOSE,
-        "exit",
-        round=ctx.round_num,
-        view=propose_exit(
-            ctx.callbacks.view_context,
+        ctx.ledger.append(
+            ArmRecord(
+                round=ctx.round_num,
+                arm=key,
+                state=arm,
+                anchors=ctx.cycle.session.state.view_context.anchors(),
+            )
+        )
+    ctx.ledger.append(
+        PhaseRecord(
+            phase=CampaignPhase.PROPOSE,
+            event="exit",
             round=ctx.round_num,
-            opening=opening,
-            proposals=population.proposals,
-            collapses=collapse_counts(cp.validation_failures for cp in population.proposals),
-        ),
+            view=propose_exit(
+                ctx.cycle.session.state.view_context,
+                round=ctx.round_num,
+                opening=opening,
+                proposals=population.proposals,
+                collapses=collapse_counts(cp.validation_failures for cp in population.proposals),
+            ),
+        )
     )
 
 
@@ -1236,7 +1263,7 @@ def bank_walk(ctx: RoundContext, proposals: list[Proposal]) -> None:
     # An EMPTY bank replays as zero arms on every resume: a permanent failure to propose.
     if not proposals:
         return
-    flush_pending_decisions(ctx.cycle, ctx.callbacks.ledger)
+    flush_pending_decisions(ctx.cycle, ctx.ledger)
     bank_proposals(ctx, proposals, submitted=False)
 
 
@@ -1267,12 +1294,12 @@ async def propose_population(ctx: RoundContext, walk: RoundWalk, panel: Panel) -
 async def _adapt(ctx: RoundContext, plan: RoundPlan) -> None:
     if not plan.adapters:
         return
-    ctx.callbacks.on_phase(CampaignPhase.ADAPT, "enter", round=ctx.round_num)
+    ctx.ledger.append(PhaseRecord(phase=CampaignPhase.ADAPT, event="enter", round=ctx.round_num))
     for adapter in plan.adapters:
         # Survived here: the next walk re-runs it first (`settle_owed_outputs`).
         with graceful(f"round {ctx.round_num} {adapter.name} landed nothing"):
             await adapter.adapt(NodeContext(ctx, adapter))
-    ctx.callbacks.on_phase(CampaignPhase.ADAPT, "exit", round=ctx.round_num)
+    ctx.ledger.append(PhaseRecord(phase=CampaignPhase.ADAPT, event="exit", round=ctx.round_num))
 
 
 class ControllerAct(NamedTuple):
@@ -1299,20 +1326,22 @@ async def _proposed(ctx: RoundContext, panel: Panel) -> Proposals:
 async def _measured(
     ctx: RoundContext, population: Proposals, panel: Panel, pool: list[Sample]
 ) -> MeasuredRound:
-    plan, callbacks = ctx.cycle.optimizer.plan, ctx.callbacks
-    callbacks.on_phase(
-        CampaignPhase.MEASURE,
-        "enter",
-        round=ctx.round_num,
-        view=MeasureEnterView(
-            n_candidates=len(population.proposals),
-            n_samples=len(panel.cells),
-        ),
+    plan = ctx.cycle.optimizer.plan
+    ctx.ledger.append(
+        PhaseRecord(
+            phase=CampaignPhase.MEASURE,
+            event="enter",
+            round=ctx.round_num,
+            view=MeasureEnterView(
+                n_candidates=len(population.proposals),
+                n_samples=len(panel.cells),
+            ),
+        )
     )
     measured = await measure_population(
         ctx, population, panel, pool, plan.eliminator, plan.selector
     )
-    callbacks.on_phase(CampaignPhase.MEASURE, "exit", round=ctx.round_num)
+    ctx.ledger.append(PhaseRecord(phase=CampaignPhase.MEASURE, event="exit", round=ctx.round_num))
     return measured
 
 
@@ -1325,20 +1354,22 @@ def _survivors(ctx: RoundContext, selection: Selection) -> list[OptSearchPoint]:
 
 def _crowned(ctx: RoundContext, measured: MeasuredRound, selection: Selection) -> RoundResult:
     """The bench's close of the election: the round's result, gated on a whole panel, then absorbed."""
-    cycle, callbacks = ctx.cycle, ctx.callbacks
+    cycle = ctx.cycle
     result = _round_result(
         ctx, measured, selection, elects_on=cycle.optimizer.plan.selector.elects_on
     )
-    callbacks.on_phase(
-        CampaignPhase.SELECT,
-        "exit",
-        round=ctx.round_num,
-        view=select_exit(callbacks.view_context, result),
+    ctx.ledger.append(
+        PhaseRecord(
+            phase=CampaignPhase.SELECT,
+            event="exit",
+            round=ctx.round_num,
+            view=select_exit(cycle.session.state.view_context, result),
+        )
     )
     _panel_gate(ctx, result, measured.cut)
     # AFTER the panel gate: a round halted on a holed panel is unwound and re-run, never crowned.
     assert result.election is not None
-    callbacks.on_election(ctx.round_num, result.election)
+    ctx.ledger.append(ElectionRecord(round=ctx.round_num, **dict(result.election)))
     cycle.absorb_round(result)
     return result
 
@@ -1376,28 +1407,36 @@ async def _adapt_beside_overlap(
     )
 
 
-async def execute_round(
-    cycle: Cycle,
-    round_num: int,
-    callbacks: RunCallbacks,
-    *,
-    is_final_round: bool = False,
-) -> RoundWalked:
-    """One round, each role handed what the ones before it left."""
+async def walk_round(
+    cycle: Cycle, round_num: int, ledger: CycleEventLog
+) -> tuple[RoundContext, list[Sample], Panel, Proposals]:
+    """A round's open through its banked walk: a measured round's prefix, and all `--diag` shows."""
     # The search split alone: a bench or demo row a round could draw would elect on held-out rows.
     pool = list(cycle.session.state.scoring.partition.search)
-    ctx = RoundContext(cycle=cycle, round_num=round_num, callbacks=callbacks)
+    ctx = RoundContext(cycle=cycle, round_num=round_num, ledger=ledger)
     await settle_owed_outputs(ctx)
     # Before the draw, which reads the scale the election will, and before an arm spawns a cell.
     banked = cycle.banked_walk(round_num)
     reach = ruler_clock(cycle.session) if banked is None else banked.opened_on
     cycle.difficulty.open_round(cycle.rounds, reach)
     pin_inner_ruler(cycle.difficulty.stamp.reach)
+    sampler = cycle.optimizer.plan.sampler
+    panel = sampler.draw(NodeContext(ctx, sampler), pool)
+    return ctx, pool, panel, await _proposed(ctx, panel)
+
+
+async def execute_round(
+    cycle: Cycle,
+    round_num: int,
+    ledger: CycleEventLog,
+    *,
+    is_final_round: bool = False,
+) -> RoundWalked:
+    """One round, each role handed what the ones before it left."""
+    ctx, pool, panel, population = await walk_round(cycle, round_num, ledger)
     plan = cycle.optimizer.plan
-    panel = plan.sampler.draw(NodeContext(ctx, plan.sampler), pool)
-    population = await _proposed(ctx, panel)
     measured = await _measured(ctx, population, panel, pool)
-    callbacks.on_phase(CampaignPhase.SELECT, "enter", round=round_num)
+    ctx.ledger.append(PhaseRecord(phase=CampaignPhase.SELECT, event="enter", round=round_num))
     selection = plan.selector.select(NodeContext(ctx, plan.selector), measured)
     cycle.population = _survivors(ctx, selection)
     result = _crowned(ctx, measured, selection)
@@ -1406,24 +1445,24 @@ async def execute_round(
     )
     act = None
     if (controller := plan.controller) is not None:
-        seat = RoundContext(cycle=cycle, round_num=round_num, callbacks=callbacks)
+        seat = RoundContext(cycle=cycle, round_num=round_num, ledger=ledger)
         if (rule := controller.bank_round(NodeContext(seat, controller), result)) is not None:
             act = ControllerAct(controller, rule)
     return RoundWalked(result, measured.cut, act)
 
 
-async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) -> None:
+async def emit_origin_round(cycle: Cycle, session: Session, ledger: CycleEventLog) -> None:
     if cycle.origin_round.results:
-        await _adapt(RoundContext(cycle=cycle, round_num=0, callbacks=cb), cycle.optimizer.plan)
+        await _adapt(RoundContext(cycle=cycle, round_num=0, ledger=ledger), cycle.optimizer.plan)
     round_result = cycle.origin_round
 
     # The origin's cells fold after the election that adopted it, and before the close.
     assert round_result.election is not None, "round 0 elects the origin it adopted"
-    cb.on_election(0, round_result.election)
+    ledger.append(ElectionRecord(round=0, **dict(round_result.election)))
     cycle.difficulty.fold(round_result)
     # Unspent here, a look-ahead press during the origin's scoring widens round 1 too.
     session.state.control.spend_sample_lookahead()
-    await close_round(cycle, round_result, 0, session, cb)
+    await close_round(cycle, round_result, 0, session, ledger)
 
 
 def flush_pending_decisions(cycle: Cycle, ledger: CycleEventLog) -> None:
@@ -1438,19 +1477,27 @@ async def close_round(
     round_result: RoundResult,
     round_num: int,
     session: Session,
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
 ) -> RoundResult:
     stood = round_result.model_copy(update={"optimizer_state": cycle.close_state(round_num)})
     facts = cycle.optimizer.round_facts(stood)
     closing = cycle.seat(stood.model_copy(update={"optimizer_facts": facts}))
-    flush_pending_decisions(cycle, cb.ledger)
-    offset, cycle.standing = cb.on_round_close(
+    flush_pending_decisions(cycle, ledger)
+    line, series, cycle.standing = stated_line(
         closing,
         cycle.rounds,
-        session.bank.slot_of,
         cycle.difficulty,
         lives=cycle.config.optimization.lives,
         outlay=line_outlay(session, cycle.optimizer.phases),
+    )
+    offset = ledger.append(
+        RoundClosedRecord.of(
+            line,
+            session.bank.slot_of,
+            series,
+            cycle.standing,
+            session.state.view_context.anchors(),
+        )
     )
     round_result = cycle.seat(closing.model_copy(update={"at_offset": offset}))
     if cycle.sample_index is not None:
@@ -1466,11 +1513,11 @@ async def post_round(
     walked: RoundWalked,
     round_num: int,
     session: Session,
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
     *,
     is_final_round: bool = False,
 ) -> None:
-    round_result = await close_round(cycle, walked.result, round_num, session, cb)
+    round_result = await close_round(cycle, walked.result, round_num, session, ledger)
 
     # Before the stop below, so a perfect round that also ends the campaign still gets its check.
     fold, election = round_result.fold, round_result.election
@@ -1481,13 +1528,13 @@ async def post_round(
         fitness=None if fold is None else fold.fitness,
         winner_id=None if election is None else election.selected,
         seed=cycle.rng(round_num, "verify").getrandbits(31),
-        cb=cb,
+        ledger=ledger,
     )
-    await grade_round_selection(cycle, session, round_result, cb=cb)
+    await grade_round_selection(cycle, session, round_result, ledger=ledger)
     reserve_selection_pass(cycle, session)
 
     if (stop := standing_tripped(cycle)) is not None:
         raise StopLoop(stop)
     if (act := walked.act) is not None and not is_final_round:
-        seat = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
+        seat = RoundContext(cycle=cycle, round_num=round_num, ledger=ledger)
         await act.controller.act(NodeContext(seat, act.controller), act.rule)

@@ -126,13 +126,15 @@ pipeline:
   nodes:
     llm_only:
       description: Reads the email and answers with one category label.
-      config:
-        provider: openrouter
-        model: openai/gpt-oss-20b
+      optimizer:
+        # `model` is a measurement premise, so its axis stays closed; `provider` is a cost lever.
+        param_keys: [temperature, max_tokens, reasoning_effort]
+        observation_name: llm_only
+        observation_mappings:
+          - {pipeline_key: final_ranking, output_field: generated_text, is_llm: true}
 
 campaign:
   optimization:
-    budget: {rounds: 5}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       l1_generate:

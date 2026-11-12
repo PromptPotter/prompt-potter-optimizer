@@ -123,7 +123,7 @@ class Settings(BaseSettings):
 
     # Read ONLY by the termnorm connector's `endpoint` and `auth_token` hooks: a second backend
     # declares its own. The URL is the operator's alone, so the token never travels elsewhere.
-    TERMNORM_URL: str = "http://127.0.0.1:8000"
+    TERMNORM_URL: str = ""
     TERMNORM_TOKEN: SecretStr = SecretStr("")
 
     # Read only by `connectors/n8n.py`: ONE eval-harness webhook per install, and its secret,

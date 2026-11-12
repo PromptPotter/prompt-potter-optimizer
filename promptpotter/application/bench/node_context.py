@@ -24,7 +24,6 @@ from promptpotter.application.mask.backprop import select_branch_round
 from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
 from promptpotter.application.optimizers.nodes import CycleRead, ReadArm, admits
-from promptpotter.application.run_callbacks import restated_round
 from promptpotter.application.runner.inner.tasks import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
@@ -47,11 +46,15 @@ from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool, PoolEntry
 from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.run_records import (
+    ArmRecord,
     CheckpointInputs,
+    PhaseRecord,
+    RaceStandingRecord,
     RoundProposedRecord,
+    RoundRestatedRecord,
     WalkRead,
 )
-from promptpotter.domain.run_standing import walked_slot
+from promptpotter.domain.run_standing import RunStanding, walked_slot
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
@@ -74,6 +77,7 @@ if TYPE_CHECKING:
         RoundContext,
     )
     from promptpotter.application.runner.inner.tasks import InnerCells
+    from promptpotter.domain.campaign_config import LivesConfig
     from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.opt_search_point import EvidenceGrounding
     from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
@@ -84,6 +88,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import Reelection, RoundResult
     from promptpotter.domain.ruler import LevelSeries
     from promptpotter.domain.run_records import RoundStatement
+    from promptpotter.domain.run_standing import LineOutlay
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
@@ -93,10 +98,42 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def stated_line(
+    closing: RoundResult,
+    prior: Sequence[RoundResult],
+    difficulty: DifficultyView,
+    *,
+    lives: LivesConfig | None,
+    outlay: LineOutlay,
+) -> tuple[list[RoundResult], LevelSeries, RunStanding]:
+    """The line a statement of *closing* reads, and the level and standing it reads it at."""
+    line = [*(rr for rr in prior if rr.round < closing.round), closing]
+    standing = RunStanding.after(line, lives=None if lives is None else lives.bank, outlay=outlay)
+    [series] = difficulty.level_series([line])
+    return line, series, standing
+
+
+def restated_round(
+    closing: RoundResult,
+    prior: Sequence[RoundResult],
+    difficulty: DifficultyView,
+    *,
+    lives: LivesConfig | None,
+    close: RoundStatement,
+    slot_of: Mapping[str, int],
+) -> RoundRestatedRecord:
+    """*closing* stated again under its round's own anchors and outlay (*close*), never the
+    launch restating it."""
+    line, series, standing = stated_line(
+        closing, prior, difficulty, lives=lives, outlay=close.run_standing.outlay
+    )
+    return RoundRestatedRecord.of(line, slot_of, series, standing, close.anchors)
+
+
 def bank_proposals(round_: RoundContext, proposals: Sequence[Proposal], *, submitted: bool) -> None:
     """Banked beside what they were composed from, so a resume asks whether that round still says the same."""
     rounds = round_.cycle.rounds
-    round_.callbacks.ledger.append(
+    round_.ledger.append(
         RoundProposedRecord(
             round=round_.round_num,
             consumed=round_document_digest(rounds[-1]) if rounds else "",
@@ -134,8 +171,7 @@ async def reread_walk(round_: RoundContext, reads: Sequence[WalkRead]) -> None:
 async def rewalk_origin(round_: RoundContext, scoring_set: list[Sample]) -> None:
     """Round 0 closes again on ONE walk of the origin over its scoring set; the archive never replays an errored cell."""
     cycle = round_.cycle
-    callbacks = round_.callbacks
-    callbacks.on_phase(CampaignPhase.ORIGIN, "enter", round=0)
+    round_.ledger.append(PhaseRecord(phase=CampaignPhase.ORIGIN, event="enter", round=0))
     try:
         read = await measure_as_parent(
             round_,
@@ -145,7 +181,7 @@ async def rewalk_origin(round_: RoundContext, scoring_set: list[Sample]) -> None
             role=MeasurementRole.ORIGIN,
         )
     finally:
-        callbacks.on_phase(CampaignPhase.ORIGIN, "exit", round=0)
+        round_.ledger.append(PhaseRecord(phase=CampaignPhase.ORIGIN, event="exit", round=0))
     cycle.seat_origin(read, cycle.origin_round.optimizer_state)
 
 
@@ -173,7 +209,14 @@ async def measure_as_parent(
         sample_order=[s.id for s in cells],
     )
     if announce:
-        round_.callbacks.on_arm(round_.round_num, key, arm)
+        round_.ledger.append(
+            ArmRecord(
+                round=round_.round_num,
+                arm=key,
+                state=arm,
+                anchors=round_.cycle.session.state.view_context.anchors(),
+            )
+        )
     walked = await score_search_point(
         sp,
         cells,
@@ -194,7 +237,14 @@ async def measure_as_parent(
         )
     read = ReadArm(key, conclude(arm, walked, round_num=round_.round_num), walked.sheet)
     if announce:
-        round_.callbacks.on_arm(round_.round_num, key, read.state)
+        round_.ledger.append(
+            ArmRecord(
+                round=round_.round_num,
+                arm=key,
+                state=read.state,
+                anchors=round_.cycle.session.state.view_context.anchors(),
+            )
+        )
     round_.walked(read, asked)
     return read
 
@@ -479,7 +529,7 @@ class Calls(CycleRead):
         return LLMCallContext(
             node=node,
             config=self._cycle.optimizer.node_config(node),
-            ledger=self._round.callbacks.ledger,
+            ledger=self._round.ledger,
             round_num=round_num,
             candidate_idx=idx,
             cache=session.store.optimizer_reuse,
@@ -644,10 +694,21 @@ class Progress(CycleRead):
     """What the operator watches it do: its phases and its race's standing."""
 
     def phase(self, phase: str, step: Literal["enter", "exit"], view: PhaseView) -> None:
-        self._round.callbacks.on_phase(phase, step, round=self._round.round_num, view=view)
+        self._round.ledger.append(
+            PhaseRecord(phase=phase, event=step, round=self._round.round_num, view=view)
+        )
 
     def race_standing(self, snapshot: RaceSnapshot) -> None:
-        self._round.callbacks.on_race_standing(self._member.name, self._round.round_num, snapshot)
+        self._round.ledger.append(
+            RaceStandingRecord(
+                round=self._round.round_num,
+                member=self._member.name,
+                current=snapshot.current,
+                n_samples=int(snapshot.n_samples),
+                p_best=float(snapshot.p_best),
+                paired_breakdown=dict(snapshot.paired_breakdown),
+            )
+        )
 
 
 class NodeContext:
@@ -732,5 +793,5 @@ class NodeContext:
             session = cycle.session
             standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
             close = standing.rounds[restated.round].close
-            self._round.callbacks.ledger.append(close.restated(restated.closed_state))
+            self._round.ledger.append(close.restated(restated.closed_state))
         cycle.seat(restated)

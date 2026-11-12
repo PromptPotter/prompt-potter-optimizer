@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from promptpotter.application.initialization.scoring_scope import diagnostic_trace
 from promptpotter.application.jobs.coupon import keyed_client, provider_send
 from promptpotter.application.jobs.launcher.admission import paid_pass
+from promptpotter.domain.phases import ERROR_CATEGORY_INFO
 from promptpotter.domain.pipeline_overlay import normalize_model_id
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.capabilities import STANDARD_EFFORT_LADDER
@@ -16,7 +17,7 @@ from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, under_budget
 from promptpotter.infrastructure.llm.spend_book import CallLabel
-from promptpotter.shared.errors import ERROR_IS_CHARGED, ErrorCategory
+from promptpotter.shared.errors import ErrorCategory
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.llm.base import LLMClientBase
@@ -63,7 +64,7 @@ async def _one(client: LLMClientBase, model: str, rung: str | None) -> RungReadi
             )
     except Exception as exc:
         # A throttle, an outage or a spent ceiling is no refusal: read as one, it writes a wrong profile.
-        if not ERROR_IS_CHARGED[failed_send(exc).failure or ErrorCategory.UNKNOWN]:
+        if not ERROR_CATEGORY_INFO[failed_send(exc).failure or ErrorCategory.UNKNOWN].charged:
             raise
         return RungReading(rung or "(unset)", None, None, refused=str(exc)[:160])
     return RungReading(rung or "(unset)", resp.usage.reasoning, resp.usage.output)

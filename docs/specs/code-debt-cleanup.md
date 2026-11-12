@@ -28,10 +28,6 @@ row it closes.
   the observers it opened when `admission.py::slotless_share` refuses. Action: the observers open after
   admission, or close on its refusal. **Rides with:** the slotless-doors row below. **Re-test:** a test
   refuses a seat at `slotless_share` and finds no open observer.
-- **`--diag` drives its rounds a second way**: `potter/generation_only.py` runs a diag round beside the
-  round loop's own driver. Action: the round loop reads the diag mode; the second driver goes.
-  **Rides with:** stream-rk (`generation_only.py` is hashed). **Re-test:**
-  `git grep -n "run_generation_only_round" -- promptpotter` is empty.
 - **The embedded and inner runs still open their cycles their own way**: `jobs/launcher/launch.py::hold`
   opens every held launch's cycle, but `embedded_run.py::run_campaign` and
   `runner/inner/spawn.py::_open_seat` mint or resume through `admission.py::slotless_share`, and the
@@ -385,21 +381,21 @@ row it closes.
 
 ### batch/26 · stream-rk
 
-- **U3: the ledger read stack.** `RunCallbacks` is a second producer door beside `RunScope`'s ledger,
-  and `live_dashboard/projection.py::DashboardCheckout` writes a `dashboard.json` only
-  `scripts/offline_run.py` reads, folding a second, eager dashboard on every append. Action: the ledger
-  is the one producer door (`RunCallbacks` goes); the checkout writes the `LedgerIndex` fold's value at
-  `_AT_ONCE` and the debounce. **Rides with:** stream-rk 1: `optimizers/potter/generation_only.py` holds
-  `ctx.callbacks`, a hashed unit, so the cut moves potter and capo-pobb. **Re-test:**
-  `git grep -c "RunCallbacks" -- promptpotter` is 0.
-- **The mint's wiring reads its own commit back**: `run_observers.py::declare_run_wiring` loads
-  `campaign.json` for `defaults_drift`, so `jobs/mint.py::_mint_campaign` cannot write the campaign
-  last. Action: the caller hands the `Campaign` it declares. **Rides with:** stream-rk 1. **Re-test:**
-  `git grep -n "load_campaign(" -- promptpotter/application/run_observers.py` is empty.
 - **`RunArtifacts` renders off a live `Session`**: `runner/output.py` reaches `session.state.scoring`
   and its partition's `demo`. Action: it takes the scorer and partition off the ledger
-  (`PartitionRecord`, the declared formula), as `closed_rounds.py::campaign_scorer` does. **Rides
-  with:** stream-rk 1. **Re-test:** `git grep -n "session.state" -- promptpotter/application/runner/output.py` is empty.
+  (`PartitionRecord`, the declared formula), as `closed_rounds.py::campaign_scorer` does. **Held:**
+  the row below; until it lands, `campaign_scorer` grades a labelless cell unlike the run, and the
+  export and `log.md` would take that. **Re-test:** `git grep -n "session.state" -- promptpotter/application/runner/output.py` is empty.
+- **`campaign_scorer` grades a labelless cell unlike the run**: `scoring/closed_rounds.py::campaign_scorer`
+  compiles with `verifier_graded=False`, the run with `all_verifier_graded(bank)`
+  (`initialization/scoring_scope.py:64`). Under `rr(ground_truth_rank)` a `ground_truth=""` cell is
+  UNSCORED live and fitness 0.0 here, and a backend ranking reads every cell `not_found`; the served
+  round view (`cycle_reads.py`), hard samples (`measurement_log.py`) and evidence (`evidence/read.py`)
+  read it. Reachable: `wiring.py:95` admits a labelless ranker. Action: rank is a cell fact
+  (`backend_rank` and the matchers answer `None` where `facts.verifier_graded`), `ground_truth_rank`
+  and `n_candidates` join `ground_truth` in `compiler.py::_refuse_label_formula`, and the flag gates
+  refusal only. **Held:** no chain owns `scoring/` and `connectors/` together yet. **Re-test:** on a
+  `ground_truth=""` cell under `rr(ground_truth_rank)`, `campaign_scorer` and the run's scorer agree.
 
 ### batch/26 · narr (links 1-2, on stream-rk's tip)
 
@@ -417,12 +413,26 @@ row it closes.
 - **U3: one phase act is said three ways, and render text is banked on the ledger.**
   `run_records.py::PhaseRecord` carries a phase string, an untyped event string and a view whose kind
   repeats both; `InitEnterView` banks display text; `view_models.py::ViewContext` is a mutable bag a
-  fork inherits, held on `run_callbacks.py:76` and read by `runner/mint.py:317,389`,
-  `runner/round.py:245,272,414` and `run_observers.py:283`. The act's 24 `on_phase(` writers sit in 7
-  modules, some hashed (`runner/round.py`, `runner/bench.py`). Action: the typed
-  act is the record, text is computed at render, and the anchors a phase view needs come from
-  `Session.state` once `RunCallbacks` goes, so `ViewContext` goes; a re-key link. **Rides with:** narr 2.
+  fork shares, held on `initialization/session.py:82` (`LaunchState.view_context`, reset at
+  `runner/mint.py:101`) and read by `runner/mint.py:358,432`, `runner/round.py:1186,1222,1367` and 9
+  `view_context.anchors()` calls, whose `ArmRecord.anchors` defaults to `ViewAnchors()`, so a writer
+  that forgets it stamps another metric silently. The act's 25 `PhaseRecord(` writers sit in 7
+  application modules (`runner/round.py`, `bench/node_context.py`, `origin.py`, `runner/bench.py`,
+  `scoring/passes.py`, `run_phase_control.py`, `runner/mint.py`), some hashed. Action: the typed act
+  is the record, text is computed at render, and the anchors fold from the launch's INIT record in the
+  projection, so `ViewContext` and the field's default go; a re-key link. **Rides with:** narr 2.
   **Re-test:** `git grep -n "class ViewContext" -- promptpotter` is empty.
+- **The run's ledger is reached three ways**: a threaded `ledger` (`RoundContext.ledger`,
+  `RunObservers.ledger`, ~25 signatures that already take `cycle`), the run scope
+  (`active_cycle_ledger()`/`bound_ledger()`, e.g. `runner/round.py::hold_for_operator` beside
+  `operator_arms` in one chain, `scoring/passes.py::_bracketed`) and `session.state.observers.ledger`.
+  They part where a probe render mutes the scope and the threaded handle still writes. Action: writers
+  read the scope (or `Cycle.ledger`) and the `ledger` parameters go. **Rides with:** narr 2, which
+  rewrites the same writers. **Re-test:** `git grep -c "ledger: CycleEventLog" -- promptpotter/application/runner` is 0.
+- **A round's close is composed twice**: `runner/round.py::close_round` and `tests/factories.py`'s
+  `close_round` each spell `stated_line` + `RoundClosedRecord.of`; the restate has one builder,
+  `bench/node_context.py::restated_round`. Action: a `closed_round` builder beside it. **Rides with:**
+  narr 2. **Re-test:** `git grep -c "RoundClosedRecord.of(" -- promptpotter tests` is 1.
 - **A pause by interrupt is served as a bare "Paused"**: the `run_phase` record holds
   `cause: "interrupt"`, and no surface names it. Action: a stop's cause is narrated and served on every
   door. **Rides with:** narr 2. **Re-test:** interrupt a running `new`; the readout and `hierarchy` name
@@ -446,47 +456,18 @@ row it closes.
 
 ### batch/26 · rk-run
 
-- **RS: one running set — which nodes a run reaches.** A which-nodes question reads the running set (the
-  chain, its phase pipelines and the declared nodes off the chain, less the excluded); an order
-  question reads the chain. Most readers ask the chain
-  (`pipeline_schema.py::PipelineSchema.active_steps`), so a phase or off-chain node is missing from run
-  init, the Start gate, potter's view, the price and fence and the scoring role questions. Owner: one
-  `running` set, derived once on the resolved schema, the phases laid once by the optimizer's manifest,
-  each door held by a test that fails when its fix is reverted. It moves what L4 decides (`l2_context`,
-  `l3_plan` become L1 levers). **Rides with:** rk-run 1. **Re-test:** `git grep -c "active_steps" -- promptpotter`.
-- **The check-in's pipeline step is TermNorm's for every connector**:
-  `webapp/components/ingest/PipelineSetupSection.tsx` hard-codes `llm_only` and "Research + Match".
-  Action: serve the declaration's named `pipelines` map and render the select from it; delete
-  `LLM_ONLY`. **Rides with:** rk-run 1. **Re-test:** `git grep -n "LLM_ONLY" -- webapp/components` is empty.
-- **`PipelineSetupSection.tsx` derives Mode's exclusions client-side** (`active_steps` plus
-  `config.exclude_nodes`). Action: the running set serves each mode's exclusions. **Rides with:** rk-run 1.
-  **Re-test:** `git grep -n "exclude_nodes" -- webapp/components/ingest`.
-- **Two per-category tables in two modules**: `domain/phases.py::REFUSAL_STOPS` and
-  `shared/errors.py::ERROR_IS_CHARGED` each key `ErrorCategory`. Action: one row per category holds
-  every column (a re-key). **Rides with:** rk-run 2. **Re-test:**
-  `git grep -nE "^(REFUSAL_STOPS|ERROR_IS_CHARGED)\b" -- promptpotter` names two tables.
-- **Two owners, two values, for what a definition leaves unsaid**: `assets/datasets/defaults.yaml` against
-  `connectors/termnorm.py` `available_models` / `default_node_config` and
-  `draft_campaign.py::UPLOAD_BUDGET_ROUNDS` / `Connector.default_optimization`. Action: a connector's node
-  template is laid under every definition naming it; connector-neutral campaign defaults are one file;
-  the four upload-seeding `Connector` fields become one optional upload-defaults declaration whose
-  presence is `serves_uploads`. **Rides with:** rk-run 3. **Re-test:**
-  `git grep -nE "llm_only|param_keys" -- promptpotter/assets/datasets/defaults.yaml` is empty.
-- **Three TermNorm defaults in core**: `connectors/__init__.py` `DEFAULT_CONNECTOR` and `shipped`, and
-  `Settings.TERMNORM_URL` defaulting to loopback, so a box with no TermNorm lists it configured. Action:
-  the upload connector derives from its declaration; no endpoint default; each connector declares its
-  own config model. **Rides with:** rk-run 3. **Re-test:** `git grep -n "DEFAULT_CONNECTOR" -- promptpotter`.
-- **A pipeline's `name` and `version` are parsed and read by nothing**:
-  `pipeline_parsing.py::parse_pipeline_response` fills them off a declaration and only a debug log reads
-  them. Action: drop both fields and the keys that feed them. **Rides with:** rk-run 3. **Re-test:**
-  `git grep -nE "\"(name|version)\":" -- 'promptpotter/connectors/*.py'` is empty.
-- **DSPy splits the model string for pricing twice**: `dspy_module.py` meters `inline_route(model)` while
-  core's `BackendClient.priced_as` splits the same string; they disagree when a dataset sets `provider`.
-  Action: the cell takes the pair core bound. **Rides with:** rk-run 3. **Re-test:**
-  `git grep -n "inline_route" -- promptpotter/connectors/dspy_module.py` is empty.
-- **`ConnectorInspector.tsx::SECURITY_DOC_URL` links § Connection security for every connector**, an
-  in-process one too. Action: the link rides the served connector's wire kind. **Rides with:** rk-run 3.
-  **Re-test:** `git grep -n "SECURITY_DOC_URL" -- webapp/components`.
+- **DSPy derives its cell's priced pair beside core's**: `dspy_module.py::_in_process_run` calls
+  `pricing.py::priced_pair` off the payload's `params`, while core binds each node's pair once
+  (`sample_measurement.py::priced_pairs`); they agree only while the payload's `provider` is `NodeCall`'s.
+  Action: the cell takes the pair core bound. Fork: `InProcessRun` takes the bound pairs (every
+  in-process connector's signature, three ignoring it), or the cell's `CellBilling` carries them.
+  **Rides with:** rk-run, once the fork is picked. **Re-test:**
+  `git grep -n "priced_pair" -- promptpotter/connectors/dspy_module.py` is empty.
+- **A check-in cannot switch an upload between its connector's pipelines**: a draft edit has no chain
+  key, so a mode outside the held chain is disabled (`PipelineSetupSection.tsx`), and
+  `draft_build.py::_modes` ignores a definition's own `pipelines`. Action: a mode pick sets the draft's
+  `pipelines.default`, its definition half. **Re-test:** pick TermNorm's `default` on an upload; the
+  draft's `active_steps` is that chain.
 - **`LLMResponse.cost_usd` omits a resend `_admitted_send` made that may have billed**, so harbor's
   `_AgentModel.cost_usd` can read below the book's. **Rides with:** rk-run 3. **Re-test:** one 5xx then
   an answer; the row's `cost_usd` against the ledger.
@@ -550,18 +531,15 @@ row it closes.
   fields (`paper_templates.py:49`, `children.py:86-94`, `optimizers/__init__.py:169`). The L4 digests
   re-key. **Rides with:** rk-run 8. **Re-test:** `git grep -c "field: instruction" -- promptpotter/assets/optimizers`
   is 0.
-- **A selection is still made beside the one a read already holds.** `checkin.py::_land_draft` refuses
-  each overlay before landing, then `resolve_cycle_plan` selects and refuses again;
-  `application/knobs.py::config_map` selects for itself beside `pipeline_resolve.py::_Merge`'s. Action:
-  a check-in plans its cycles off the draft before landing, and a campaign's cycle config carries its
-  selection. **Rides with:** rk-run 1. **Re-test:** `git grep -n "select_optimizer(" -- promptpotter/application/knobs.py`.
-- **A draft's reopen reads on the event loop**: `datasets/draft_build.py::reopen_draft` is an async read,
-  so `application/read_params.py::ReadParams.answered` runs it on the loop, and every read in it is sync
-  (`owned_draft`, `draft_starts`, which scans every job file, `load_resolution`, and for a held draft
-  `stores.commands.book()`, which `commands/dispatcher.py:369` offloads). Root: the sync part of
-  `reopen_draft` runs in one `read_params.py::off_loop`, and `draft_served` is its only other await.
-  **Rides with:** rk-run 1, which holds `datasets/draft_build.py`. **Re-test:** `reopen_draft`'s body
-  awaits two calls, one an `off_loop`.
+- **A check-in's cycle plan selects beside its landing's refusal**: `checkin.py::_land_draft` refuses
+  each overlay before landing, then `resolve_cycle_plan` selects and refuses again; planning needs the
+  landed `Session`. Action: a check-in plans its cycles off the draft before landing, and a campaign's
+  cycle config carries its selection. **Rides with:** rk-run. **Re-test:** one `select_optimizer` call
+  between a draft's Start and its first cycle plan.
+- **`application/knobs.py::config_map` selects for itself** beside `pipeline_resolve.py::_Merge`'s
+  `optimizer`, which its caller holds; it does not depend on landing. Action: `config_map` takes the
+  caller's selection. **Rides with:** rk-run. **Re-test:**
+  `git grep -n "select_optimizer(" -- promptpotter/application/knobs.py` is empty.
 - **A per-cell criterion naming a term no cell carries compiles** (`authored.py::scorer_of`, called at
   the check-in by `datasets/draft_patch.py`) and refuses per cell at the run. Root: `compiler.py::compile_scorer`
   refuses a name no owner holds, `evaluators.py::cell_name_owners` beside the campaign's own owners (the
@@ -584,11 +562,6 @@ row it closes.
   what it runs); its Owns gain `connectors/protocol.py::InProcessWorkload` (xconn's file, named shared)
   and `runner/inner/tasks.py::parse_resolved` with its readers. **Re-test:**
   `git grep -n "parse_resolved(" -- promptpotter`.
-- **Core computes TermNorm's term index for every connector**: `initialization/session.py::Session.index_terms`,
-  pushed once by `runner/mint.py`. Action: `init_session(bank)`, each connector deriving its own
-  terms. **Rides with:** rk-run 3 (core holds no TermNorm default), whose Owns gain
-  `connectors/{termnorm,protocol}.py`, `domain/connector.py`, `infrastructure/backend.py` and
-  `initialization/session.py::Session.index_terms`. **Re-test:** `git grep -n "index_terms" -- promptpotter` is empty.
 - **`GateKind` keeps an `"origin"` no writer declares**: `domain/phases.py::GateKind`, since the origin
   gate's hold went. Action: `Literal["arms"]`. **Rides with:** the next run-data wipe (rk-run holds
   `domain/phases.py`). **Re-test:** `git grep -n "GateKind" -- promptpotter/domain/phases.py` names arms alone.

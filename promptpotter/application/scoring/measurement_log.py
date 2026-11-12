@@ -157,7 +157,7 @@ def _assemble(
         "ground_truth": facts.ground_truth or None,
         "question": pd.question,
     }
-    outputs_of = {n.name: n.output_keys for n in schema.nodes}
+    outputs_of = {n.name: n.output_keys for n in schema.running_nodes}
     spans = [
         _span(node, cfg, pd, recorded, variables, outputs_of.get(node, []))
         for node, cfg in described.node_configs

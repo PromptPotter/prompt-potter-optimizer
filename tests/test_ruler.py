@@ -472,12 +472,12 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
         objective=None,
     )
 
-    solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False)], name="ds")
+    solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False)])
 
     def series_of(
         memory: Any, stores: Stores, lines: list[Any], drawn: list[Sample] = bank
     ) -> list[Any]:
-        session = loop_session(stores, solve, drawn, scorer=scorer)
+        session = loop_session(stores, solve, drawn, scorer=scorer, dataset_name="ds")
         opened = judging_ruler(
             stores.ruler,
             scope,
@@ -705,7 +705,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     )
     l4 = scorer_of(family["campaign"]["scoring"]["per_sample"])
     graded = l4.sheet(rows)
-    round_fold = compute_composite_fitness(graded, l4, pipeline_schema([], name="ds"))
+    round_fold = compute_composite_fitness(graded, l4, pipeline_schema([]))
     assert round_fold.term_means == pytest.approx({"floored": 1 / 7, "held_out_lift": 0.0875 / 6})
     assert lift_text(round_fold.term_means["held_out_lift"], "rate") == "+1.5\N{NO-BREAK SPACE}pts"
     # The L4 formula is no matcher's call, so every printer's source reads a score; a matcher's a rate.

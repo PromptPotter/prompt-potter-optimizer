@@ -16,6 +16,9 @@ export function ConnectorInspector() {
   // Before the pipeline lands, the other backends are listed only once its read has failed.
   const others = served || read.status === "failed" ? backend.others : [];
   const { health } = backend;
+  // Only a remote wire has a connection to secure.
+  const remote = backend.active?.execution === "remote_http";
+  const unset = remote && !backend.active?.configured;
   const baseUrl = backend.active?.base_url || null;
   const authHeader = backend.active?.auth_header ?? null;
   const isTls = baseUrl ? baseUrl.startsWith("https://") : null;
@@ -55,6 +58,11 @@ export function ConnectorInspector() {
           </div>
         )}
         <div className="connector-pop-sec">
+          {unset && (
+            <span className="sec-chip warn" title="No address configured: every call refuses">
+              no url
+            </span>
+          )}
           {isTls !== null && (
             <span
               className={`sec-chip ${isTls ? "ok" : "warn"}`}
@@ -67,20 +75,22 @@ export function ConnectorInspector() {
               {isTls ? "tls" : "plain"}
             </span>
           )}
-          {baseUrl && (
-            <span className={cx("sec-chip", !authHeader && "warn")}>
-              {authHeader ? `auth: ${authHeader}` : "no auth"}
-            </span>
+          {remote && (
+            <>
+              <span className={cx("sec-chip", !authHeader && "warn")}>
+                {authHeader ? `auth: ${authHeader}` : "no auth"}
+              </span>
+              <a
+                className="sec-doc"
+                href={SECURITY_DOC_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open the connection-security setup guide on GitHub"
+              >
+                docs ↗
+              </a>
+            </>
           )}
-          <a
-            className="sec-doc"
-            href={SECURITY_DOC_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open the connection-security setup guide on GitHub"
-          >
-            docs ↗
-          </a>
         </div>
         {interior.length === 0 && (
           <p className="connector-pop-empty">

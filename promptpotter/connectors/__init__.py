@@ -7,7 +7,7 @@ import typing
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.cell_terms import misdeclared_connector_terms
 from promptpotter.domain.connector import ConnectorExecution
-from promptpotter.shared.plugin_registry import Registry, built_in_origin
+from promptpotter.shared.plugin_registry import BUILT_IN, Registry, built_in_origin
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterator
@@ -15,9 +15,6 @@ if typing.TYPE_CHECKING:
 
 ENTRY_POINT_GROUP = "promptpotter.connectors"
 """Published: renaming it un-registers every third-party plugin at once."""
-
-DEFAULT_CONNECTOR = "termnorm"
-"""What a fresh upload drafts against; a check-in edit may name another ``serves_uploads`` one."""
 
 
 def _validate(c: object, origin: str) -> Connector:
@@ -72,6 +69,19 @@ def _builtins() -> Iterator[tuple[str, object]]:
         yield module.__name__, getattr(module, "CONNECTOR", None)
 
 
-CONNECTORS = Registry(
-    ENTRY_POINT_GROUP, _builtins, _validate, shipped=frozenset({DEFAULT_CONNECTOR})
-)
+CONNECTORS = Registry(ENTRY_POINT_GROUP, _builtins, _validate)
+
+
+def upload_connector() -> Connector:
+    """What a fresh upload drafts against: the one built-in serving uploads; a check-in edit may
+    name a plugin's."""
+    found = [
+        c
+        for n, c in CONNECTORS.table.items()
+        if c.serves_uploads and CONNECTORS.origins[n] == BUILT_IN
+    ]
+    if len(found) != 1:
+        raise RuntimeError(
+            f"one built-in connector serves uploads, and {[c.name for c in found]} do."
+        )
+    return found[0]

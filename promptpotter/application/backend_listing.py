@@ -4,7 +4,11 @@ from pydantic import Field
 
 from promptpotter import connectors
 from promptpotter.application.jobs.launcher.admission import probe_backend
-from promptpotter.domain.connector import BackendReachability, backend_reachability
+from promptpotter.domain.connector import (
+    BackendReachability,
+    ConnectorExecution,
+    backend_reachability,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import NotFoundError
@@ -14,9 +18,13 @@ class BackendResponse(StrictModel):
     id: str = Field(
         description="The connector's name, as `dataset.yaml::pipeline.backend_type` names it"
     )
-    base_url: str = Field(
-        description="Where the operator configured it; empty for an in-process one"
+    execution: ConnectorExecution = Field(
+        description="Its wire kind: only a `remote_http` one has a connection to secure"
     )
+    configured: bool = Field(
+        description="False where a `remote_http` one names no address, so every call refuses"
+    )
+    base_url: str = Field(description="Where the operator configured it; empty where none is")
     auth_header: str | None = Field(
         description="The header the operator's credential rides in on every request; null where "
         "operator config holds none"
@@ -38,6 +46,8 @@ def list_backends() -> list[BackendResponse]:
     return [
         BackendResponse(
             id=name,
+            execution=connector.execution,
+            configured=connector.unconfigured() is None,
             base_url=connector.base_url(),
             auth_header=next(iter(connector.credential_header()), None),
         )

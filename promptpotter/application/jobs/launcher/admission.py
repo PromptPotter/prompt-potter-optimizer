@@ -25,8 +25,7 @@ from promptpotter.application.jobs.quota import (
 )
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.pipeline_resolve import cycle_config
-from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.run_phase_control import CycleHold
+from promptpotter.application.run_phase_control import CycleHold, close_dead_bench
 from promptpotter.domain.campaign import CampaignRefusal, CampaignRefusedError
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -691,7 +690,7 @@ async def paid_pass(
             stores.void_inbox(hop)
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
             cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
-            RunCallbacks(CycleEventLog.open(cycle_dir)).close_dead_bench()
+            close_dead_bench(CycleEventLog.open(cycle_dir))
             # The rate-limit and slot waits poll it too, as a loop's do.
             set_abort_check(holding.control.pause_requested)
             ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)

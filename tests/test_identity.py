@@ -49,7 +49,7 @@ from factories import (
     stored_campaign,
     workspace,
 )
-from offline_world import Router
+from offline_world import LLM_ONLY_NODE, Router
 from pydantic import ValidationError
 
 from promptpotter.application import optimizer_manifest, optimizers, run_observers
@@ -87,6 +87,7 @@ from promptpotter.application.datasets.draft_campaign import (
     draft_criterion,
     new_draft,
     owned_draft,
+    upload_pipeline_json,
 )
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
@@ -150,6 +151,7 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import l1_s
 from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
     ParamLayers,
+    ServedPipeline,
     campaign_admits,
     campaign_config_map,
     cycle_config,
@@ -166,8 +168,8 @@ from promptpotter.application.pipeline_resolve import (
     resolved_output_schemas,
 )
 from promptpotter.application.pipeline_responses import ForkPreviewResponse
-from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_observers import (
+    RunObservers,
     build_run_observers,
     declare_run_stop,
     declare_run_wiring,
@@ -192,8 +194,8 @@ from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.config import paths
 from promptpotter.config.paths import block_packs_root, install_datasets_root
-from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
+from promptpotter.connectors import upload_connector
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import (
     BenchRefusal,
@@ -266,6 +268,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
     description_key,
     narrowing_of,
+    running_only,
     steer_binds,
 )
 from promptpotter.domain.pool import EARNED_SOURCE, entry_id
@@ -304,12 +307,14 @@ from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     DatasetCard,
     ResolvedDataset,
+    campaign_defaults,
     install_dataset,
     list_readable_datasets,
     read_dataset_definition,
     read_dataset_pipeline,
     resolve_dataset,
     runnable_definition,
+    with_node_templates,
 )
 from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import rmtree_robust, write_json, write_yaml
@@ -372,7 +377,8 @@ def _l4_selected(optimizer: str, overrides: dict[str, dict[str, Any]]) -> Select
 
 
 def _connector_config(**fields: Any) -> CampaignConfig:
-    defaults = dict(CONNECTORS.get(DEFAULT_CONNECTOR).default_optimization)
+    threshold = campaign_defaults()["optimization"]["degradation_threshold"]
+    defaults = {"degradation_threshold": threshold}
     optimization = {**defaults, **fields.pop("optimization", {})}
     return CampaignConfig.model_validate({"optimization": optimization, **fields})
 
@@ -523,14 +529,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             )
         ]
     )
-    active = schema.active_steps_excluding([])
 
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
-        identity = identity_layer(None, None, None, judges, active)
+        identity = identity_layer(None, None, None, judges, schema.active_steps)
         return schema.sp_hash(
-            ParamLayers(steps=active, schema=schema, workspace=None, identity=identity)
-            .fold()
-            .params
+            ParamLayers(schema=schema, workspace=None, identity=identity).fold().params
         )
 
     def judge(name: str, model: str) -> JudgeSpec:
@@ -1591,7 +1594,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "per_cell": "fitness * (0.92 + 0.08 * 120.0 / max(120.0, tokens))",
     }
     root = built_stores.tenant_datasets.dataset_dir("ds")
-    optimization = dict(CONNECTORS.get(DEFAULT_CONNECTOR).default_optimization)
+    optimization = dict(campaign_defaults()["optimization"])
     schema = pipeline_schema(
         [
             PipelineNode(name=n, kind=NodeKind.LLM, tunes_llm=False)
@@ -1601,7 +1604,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     write_yaml(
         root / DEFINITION_FILE,
         {
-            "pipeline": {"backend_type": DEFAULT_CONNECTOR, "pipelines": dict(schema.pipelines)},
+            "pipeline": {
+                "backend_type": upload_connector().name,
+                "pipelines": dict(schema.pipelines),
+            },
             "campaign": {"optimization": optimization, "scoring": pinned},
         },
     )
@@ -1614,8 +1620,46 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     ).patch(config={"optimization": {"optimizer": "capo"}})
     picked = draft.patch(config={**draft.config, "exclude_nodes": ["rerank", "web_search"]})
     chosen = draft_declared(built_stores, picked)
-    assert schema.active_steps_excluding(chosen.exclude_nodes) == ["llm_only"], (
+    assert running_only(schema, exclude=chosen.exclude_nodes).running == ("llm_only",), (
         "the excluded complement runs another chain than was picked"
+    )
+    off_chain = schema.model_copy(update={"pipelines": {"default": ["web_search", "llm_only"]}})
+    assert running_only(off_chain, exclude=["web_search"]).running == ("llm_only", "rerank"), (
+        "an exclusion dropped a node the graph fires off every walk"
+    )
+    alternative = off_chain.model_copy(
+        update={"pipelines": {**off_chain.pipelines, "rerank_only": ["rerank"]}}
+    )
+    assert running_only(alternative, exclude=[]).running == ("web_search", "llm_only"), (
+        "a node only on an alternative walk ran beside the chain"
+    )
+    # L4's outer graph: the escalation nodes walk nowhere, LEVI's seed walks its phase.
+    l4_graph = running_only(
+        parse_pipeline_response(inner_cells("potter", "levi").pipeline()), exclude=[]
+    )
+    escalations = {"l2_context", "l3_plan", "levi_seed"}
+    assert escalations <= set(l4_graph.node_config_schema(steer_bound=False)), (
+        "an outer node the inner run fires is no lever"
+    )
+    # An upload searches the `model` axis TermNorm serves, bounded by its connector's menu.
+    uploads = upload_connector().uploads
+    assert uploads is not None
+    served_termnorm = ServedPipeline(
+        "termnorm", {"nodes": {"llm_only": LLM_ONLY_NODE}, "pipelines": {"llm_only": ["llm_only"]}}
+    )
+    upload_graph = parse_pipeline_response(
+        served_termnorm.over(
+            with_node_templates(
+                upload_pipeline_json(UploadBasis(connector="termnorm", kept="x.csv"), {})
+            )
+        )
+    )
+    answering = upload_graph.get_node("llm_only")
+    assert answering is not None and "model" in answering.param_keys, (
+        "an upload closed the model axis its backend serves"
+    )
+    assert upload_graph.model_options(answering) == list(uploads.available_models), (
+        "the upload's menu does not bound the model axis L1 searches"
     )
     assert chosen.optimization.optimizer == "capo", "the draft's optimizer did not reach the mint"
     assert chosen.scoring == pinned, "a pinned criterion lost its anchors under another edit"
@@ -1629,9 +1673,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
 
     # A check-in picks the criterion as the server reads it; sent back, a pinned formula's own
     # dials move nothing, and a matcher pick keeps the composite.
-    assert draft_criterion(chosen.scoring, campaign_terms(DEFAULT_CONNECTOR)) == DraftCriterion(
-        matcher="label_match", dials="tokens=0.08"
-    ), "the served criterion is not the pinned formula's"
+    assert draft_criterion(
+        chosen.scoring, campaign_terms(upload_connector().name)
+    ) == DraftCriterion(matcher="label_match", dials="tokens=0.08"), (
+        "the served criterion is not the pinned formula's"
+    )
     assert planned(draft, config={"scoring": {"dials": "tokens=0.08"}}).scoring == pinned, (
         "a pinned formula's anchors did not survive a round trip"
     )
@@ -1647,7 +1693,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     write_yaml(
         built_stores.tenant_datasets.dataset_dir("cap") / DEFINITION_FILE,
         {
-            "pipeline": {"backend_type": DEFAULT_CONNECTOR, "pipelines": dict(schema.pipelines)},
+            "pipeline": {
+                "backend_type": upload_connector().name,
+                "pipelines": dict(schema.pipelines),
+            },
             "campaign": {"optimization": {**optimization, "optimizer": "capo"}, "scoring": pinned},
         },
     )
@@ -2077,9 +2126,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         stores.campaigns.mint_cycle(hop)
         stores.campaigns.write_resolved_run(
             hop,
-            PipelineRead(
-                declaration=declaring(rungs), dataset_overlay={}, declared_nodes=frozenset()
-            ),
+            PipelineRead(declaration=declaring(rungs), dataset_overlay={}),
             experiment=None,
             model_capabilities={},
         )
@@ -2169,7 +2216,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         PipelineRead(
             declaration=declaring(["low"]),
             dataset_overlay={},
-            declared_nodes=frozenset(),
             knob_layers=recorded,
         ),
         experiment=None,
@@ -2229,7 +2275,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
     opened = loop_session(
         stores,
-        pipeline_schema([solve], name="decl"),
+        pipeline_schema([solve]),
         rows_30,
         # Bound as run init binds it: to the connector the definition names.
         client=backend_client(
@@ -2484,8 +2530,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "a moved bench defaults pin drifted nothing, or blamed another part"
     )
     for on_disk, served_drift in ((stale, drift), (held_campaign, None)):
-        write_json(manifest_path, on_disk.model_dump(mode="json"))
-        declare_run_wiring(opened, effective_config(declared), wired_ledger, selected=running)
+        declare_run_wiring(
+            opened, effective_config(declared), wired_ledger, campaign=on_disk, selected=running
+        )
         served = fold_at(root_cut)
         assert served is not None and served.defaults_drift == served_drift, (
             "a launch past moved bench defaults served no drift, or one on its own served one"
@@ -2696,8 +2743,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "a store-door append pinned its ledger's index past its own line"
     )
     # A build that raises past its projections' checkout lets go of them too.
-    with monkeypatch.context() as broken, pytest.raises(OSError, match="no callbacks"):
-        broken.setattr(RunCallbacks, "__init__", Mock(side_effect=OSError("no callbacks")))
+    with monkeypatch.context() as broken, pytest.raises(OSError, match="no observers"):
+        broken.setattr(RunObservers, "__init__", Mock(side_effect=OSError("no observers")))
         build_run_observers(session=opened, campaign_config=launched)
     assert not LedgerIndex.of(wired_ledger.path).pinned and not cycle_held(root_dir), (
         "a build that raised kept its ledger's projections or its cycle"
@@ -2751,8 +2798,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
 
     # Answering in TEXT sends no contract to answer INTO.
-    text_pipeline = read_dataset_pipeline(_install("justlogic/d234"))
-    assert text_pipeline is not None
+    d234 = read_dataset_pipeline(_install("justlogic/d234"))
+    assert d234 is not None
+    text_pipeline = ServedPipeline("termnorm", {"nodes": {"llm_only": {"type": "llm"}}}).over(d234)
     text_schema = parse_pipeline_response(text_pipeline)
     base = {n.name: dict(n.current_config) for n in text_schema.declared_nodes}
     assert {"output_schema", "answer_fields"} <= base["llm_only"].keys(), (
@@ -3572,8 +3620,6 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
 
     def outer_schema(nodes: tuple[str, ...]) -> PipelineSchema:
         return pipeline_schema(
-            name="promptpotter-self",
-            version="1",
             nodes=[
                 PipelineNode(
                     name=name,

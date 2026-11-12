@@ -19,7 +19,7 @@ from promptpotter.application.scoring.sample_measurement import (
 )
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
-    REFUSAL_STOPS,
+    ERROR_CATEGORY_INFO,
     STOP_REASON_INFO,
     StopCategory,
     StopLoop,
@@ -76,7 +76,7 @@ _BUDGET_STOPS = frozenset(
 
 
 def _budget_refusal(category: ErrorCategory | None) -> StopReason | None:
-    stop = REFUSAL_STOPS.get(category) if category is not None else None
+    stop = ERROR_CATEGORY_INFO[category].stops if category is not None else None
     return stop if stop in _BUDGET_STOPS else None
 
 
@@ -402,7 +402,7 @@ class Walk:
 
         # Asked of every row, replays included: the stale-data protocol re-measures a replayed cell.
         category = taken.facts.error_category
-        if category is not None and (stop := REFUSAL_STOPS.get(category)) is not None:
+        if category is not None and (stop := ERROR_CATEGORY_INFO[category].stops) is not None:
             logger.warning("%s: %s", STOP_REASON_INFO[stop].label, taken.facts.error)
             raise StopLoop(stop, unmeasured=n - len(self.results) + 1)
 

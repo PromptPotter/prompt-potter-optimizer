@@ -29,26 +29,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.cell_terms import CellTerm
     from promptpotter.infrastructure.store.stores import Stores
 
-DEFAULT_SCORING_MATCHER = "label_match"
-"""Only universally-applicable matcher for ``(query, ground_truth)`` shape."""
-
 PREVIEW_ROWS = 10
 """Sample-preview head size returned alongside every mutation response."""
-
-UPLOAD_BUDGET_ROUNDS = 5
-"""An upload's rounds before its check-in names any."""
-
-
-def upload_basis_block(upload: UploadBasis) -> dict[str, Any]:
-    """What an upload's draft's campaign half is laid over: its connector's defaults."""
-    connector = connectors.CONNECTORS.get(upload.connector)
-    return {
-        "scoring": f"{DEFAULT_SCORING_MATCHER}(predicted, ground_truth)",
-        "optimization": {
-            "budget": {"rounds": UPLOAD_BUDGET_ROUNDS},
-            **dict(connector.default_optimization),
-        },
-    }
 
 
 UPLOAD_DEFINITION_KEYS = frozenset({"pipeline_overlay"})
@@ -56,25 +38,20 @@ UPLOAD_DEFINITION_KEYS = frozenset({"pipeline_overlay"})
 node overlay), never its campaign's."""
 
 
-def upload_pipeline_json(
-    upload: UploadBasis, slug: str, overlay: Mapping[str, Any]
-) -> dict[str, Any]:
-    """An upload's ``dataset.yaml::pipeline``: the connector's nodes, *overlay* (per node, its
-    params) laid on as each node's ``config``, run as its connector's default chain. The one
-    definition its check-in reads and its Start writes, the sole route for a backend tunable
-    (`assets/datasets/CLAUDE.md`)."""
+def upload_pipeline_json(upload: UploadBasis, overlay: Mapping[str, Any]) -> dict[str, Any]:
+    """An upload's ``dataset.yaml::pipeline``: its connector's upload chain, *overlay* (per node,
+    its params) laid on as each node's ``config``. The one definition its Start writes, the sole
+    route for a backend tunable (`assets/datasets/CLAUDE.md`); a read lays the node templates."""
     connector = connectors.CONNECTORS.get(upload.connector)
+    uploads = connector.uploads
+    assert uploads is not None, "`draft_patch.py` and ingest name only a connector serving uploads"
     declared = {node: {"config": dict(params)} for node, params in overlay.items()}
-    pipeline: dict[str, Any] = {
-        "name": slug,
+    return {
         "backend_type": connector.name,
-        "nodes": merge_node_blocks(dict(connector.default_node_config), declared),
+        "nodes": merge_node_blocks({node: {} for node in uploads.chain}, declared),
+        "pipelines": {DEFAULT_PIPELINE: list(uploads.chain)},
+        "available_models": list(uploads.available_models),
     }
-    if connector.default_pipeline:
-        pipeline["pipelines"] = {DEFAULT_PIPELINE: list(connector.default_pipeline)}
-    if connector.available_models:
-        pipeline["available_models"] = list(connector.available_models)
-    return pipeline
 
 
 class DraftCriterion(StrictModel):

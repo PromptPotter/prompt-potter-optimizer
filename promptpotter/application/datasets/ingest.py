@@ -25,8 +25,13 @@ from promptpotter.application.datasets.tabular_ingest import (
     read_tabular,
 )
 from promptpotter.application.origin_listing import canonical_origin_campaign
-from promptpotter.application.pipeline_resolve import cycle_config, draft_served
-from promptpotter.connectors import DEFAULT_CONNECTOR
+from promptpotter.application.pipeline_resolve import (
+    ServedPipeline,
+    cycle_config,
+    draft_pipeline,
+    draft_served,
+)
+from promptpotter.connectors import upload_connector
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
@@ -69,8 +74,8 @@ def _first_blank_rows(headers: list[str], rows: list[dict[str, str]]) -> dict[st
     return blank
 
 
-async def _kept(stores: Stores, draft: DraftFile) -> DraftCampaignWire:
-    wire = draft_wire(stores, draft, await draft_served(stores, draft))
+def _kept(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftCampaignWire:
+    wire = draft_wire(stores, draft, served)
     save_checkin_draft(stores, draft)
     return wire
 
@@ -97,7 +102,7 @@ async def ingest_draft(
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
     draft = new_draft(
         slug=base_slug,
-        basis=UploadBasis(connector=DEFAULT_CONNECTOR, kept=kept.name),
+        basis=UploadBasis(connector=upload_connector().name, kept=kept.name),
         n_samples=len(table.rows),
         sample_preview=preview,
         headers=list(table.headers),
@@ -105,7 +110,7 @@ async def ingest_draft(
         column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
         first_blank_row=_first_blank_rows(list(table.headers), list(table.rows)),
     )
-    return await _kept(stores, draft)
+    return _kept(stores, draft, await draft_served(stores, draft))
 
 
 async def draft_from_dataset(
@@ -134,11 +139,6 @@ async def draft_from_dataset(
             include={"pipeline_overlay", "optimizer_narrowing"},
         )
 
-    authored_prompts = {
-        node: dict(prompt.fields)
-        for node, prompt in origin_prompts(dataset, authored.active_steps).items()
-    }
-
     slug = dataset_name.lower()
     # The check-in model reads the preview's labels, so no bench row may reach it.
     preview = [
@@ -154,18 +154,23 @@ async def draft_from_dataset(
         headers=["query", "ground_truth"],
         column_label_sets=_column_label_sets(["query", "ground_truth"], rows),
     )
+    served = await draft_served(stores, draft)
+    running = draft_pipeline(stores, draft, served).chain.running
     draft = draft.apply_resolution(
         values={
             "raw_task_description": task,
             "config": config,
-            "origin_prompts": authored_prompts,
+            "origin_prompts": {
+                node: dict(prompt.fields)
+                for node, prompt in origin_prompts(dataset, running).items()
+            },
             "candidate_library": authored.candidate_library,
         },
         provenance={} if task is None else {"task_description": Provenance.CONFIRMED},
     )
     if overrides:
         draft = draft.patch(**overrides)
-    return await _kept(stores, draft)
+    return _kept(stores, draft, served)
 
 
 async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaignWire:

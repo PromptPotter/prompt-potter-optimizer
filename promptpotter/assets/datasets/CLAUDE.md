@@ -1,10 +1,10 @@
 # assets/datasets/ — the shipped template definitions
 
-Each `dataset.yaml` directory is a definition named by its path, read-only in the wheel; a tenant definition resolves first. **The wheel ships only what a user may start**: research and test tooling (L4's `promptpotter-self`) is the checkout's [`research/datasets/`](../../../research/datasets/CLAUDE.md), never listed. `defaults.yaml` (`{pipeline:, campaign:}`) lies under every definition; a `{family}/family.yaml` holds shared sections and is no dataset. Beside a `dataset.yaml`: `task.md` (L1's framing: front matter committed, body the description), `origin.yaml` (optional starting prompts per node), `README.md` (source, split, every model screen).
+Each `dataset.yaml` directory is a definition named by its path, read-only in the wheel; a tenant definition resolves first. **The wheel ships only what a user may start**: research and test tooling (L4's `promptpotter-self`) is the checkout's [`research/datasets/`](../../../research/datasets/CLAUDE.md), never listed. `defaults.yaml` (`{campaign:}`) lies under every definition and every upload's draft; a node's template is its connector's (`protocol.py::Connector.node_templates`); a `{family}/family.yaml` holds shared sections and is no dataset. Beside a `dataset.yaml`: `task.md` (L1's framing: front matter committed, body the description), `origin.yaml` (optional starting prompts per node), `README.md` (source, split, every model screen).
 
 ## A dataset file is a partial
 
-**Every reader sees the chain laid together** (`infrastructure/store/dataset_access.py::definition_chain`): `defaults.yaml`, each `family.yaml` / `dataset.yaml` root-down, then the leaf. A value the chain already holds is deleted from the lower file; a key goes up only where every dataset reading it agrees; a value its reader derives is not written. A cell hashes the merged document, so moving a value between layers moves no key.
+**Every reader sees the chain laid together** (`infrastructure/store/dataset_access.py::definition_chain`): `defaults.yaml`, each `family.yaml` / `dataset.yaml` root-down, then the leaf, its connector's node templates under the nodes it declares. A value the chain already holds is deleted from the lower file; a key goes up only where every dataset reading it agrees; a value its reader derives is not written. A cell hashes the merged document, so moving a value between layers moves no key.
 
 ## `source:` is where the rows come from
 

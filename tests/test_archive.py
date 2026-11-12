@@ -220,7 +220,6 @@ def _walk_panel(
     """*ledger* given, the walk is an arm's and records what it took there; *bank* given, the
     panel is a part of that bank."""
     schema = pipeline_schema(
-        name="claims",
         nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)],
     )
     session = loop_session(
@@ -896,7 +895,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     resuming = seat(stores, hop=halted)
     resuming.cycle.session.state.resumed_from_round = stores.campaigns.rewind_enters(halted, 3)
     with (
-        scoped(ledger=resuming.callbacks.ledger, spawn=inner_spawn_of(resuming.cycle.session)),
+        scoped(ledger=resuming.ledger, spawn=inner_spawn_of(resuming.cycle.session)),
         spending_under(unbounded_spend_book()),
         pytest.raises(ResumeDivergenceError),
     ):
@@ -904,7 +903,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             resume_with_divergence_check(
                 resuming.cycle,
                 [],
-                resuming.callbacks,
+                resuming.ledger,
                 skip_divergence_check=False,
                 fork_on_divergence=False,
                 rewind=3,
@@ -1833,9 +1832,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             round_num=2,
             origin=(repair_origin, lambda _s: sheet(rows)),
         )
-        cycle, callbacks = running.cycle, running.callbacks
+        cycle, ledger = running.cycle, running.ledger
         rescope(spawn=inner_spawn_of(cycle.session))
-        run_init(cycle, callbacks)
+        run_init(cycle, ledger)
         # Round 1's arm ran to its end on cell 3 and came back with no measurement.
         hole = measurement(
             3, None, sample_key=repair_bank[3].key, error="boom", error_category="transient"
@@ -1861,9 +1860,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             ),
         ]
         for n in range(len(line)):
-            close_round(callbacks.ledger, line[: n + 1], cycle=cycle)
+            close_round(ledger, line[: n + 1], cycle=cycle)
         if consumed:
-            callbacks.ledger.append(
+            ledger.append(
                 RoundProposedRecord(
                     round=2,
                     consumed="",
@@ -1876,12 +1875,12 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             )
         set_cycle(cycle, line=line)
         with (
-            scoped(ledger=callbacks.ledger),
+            scoped(ledger=ledger),
             mock.patch.object(query_loop, "measure_sample", _answered),
             spending_under(unbounded_spend_book()),
         ):
-            before = round_packages(cycle, line, callbacks)
-            branch_id = asyncio.run(apply_correction(cycle, line, before, repair_bank, callbacks))
+            before = round_packages(cycle, line, ledger)
+            branch_id = asyncio.run(apply_correction(cycle, line, before, repair_bank, ledger))
         assert branch_id is not None, "a holed round was carried as it ran"
         return hop, hop.model_copy(update={"cycle_id": branch_id})
 
@@ -1948,7 +1947,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
         cycle, session = ctx.cycle, ctx.cycle.session
         session.state.clock = LaunchClock.now()
         rescope(spawn=inner_spawn_of(session))
-        ctx.callbacks.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+        ctx.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
         if replayed:
             # The origin a resume replays stands on its close (`closed_rounds.py::closed_rounds`).
             closed = stores.campaigns.standing_rounds(hop, moment=None).rounds[0]
@@ -1959,14 +1958,14 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
 
         async def walk() -> LoopEnd:
             gated = await open_origin_round(
-                cycle, [], ctx.callbacks, spend=SpendRollup(), diagnosing=False
+                cycle, [], ctx.ledger, spend=SpendRollup(), diagnosing=False
             )
-            return gated or await run_round_loop(cycle, cycle.config, session, ctx.callbacks)
+            return gated or await run_round_loop(cycle, cycle.config, session, ctx.ledger)
 
-        with scoped(ledger=ctx.callbacks.ledger), spending_under(unbounded_spend_book()):
+        with scoped(ledger=ctx.ledger), spending_under(unbounded_spend_book()):
             end = asyncio.run(walk())
         if not crashes:
-            ctx.callbacks.ledger.append(RunPhaseRecord.stop(end.stop_reason))
+            ctx.ledger.append(RunPhaseRecord.stop(end.stop_reason))
         return end.stop_reason
 
     def passes() -> list[str]:

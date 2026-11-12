@@ -24,7 +24,7 @@ Loading one imports it into this process with the API keys, tenant tree and iden
 
 ## The credential rides the connector
 
-`Connector.auth_token()`, `auth_scheme()` and `endpoint()` are operator config, so nothing a request, flag or campaign sets can aim the token elsewhere. <!-- probe: git grep -cE "Authorization" -- promptpotter/connectors/*.py == 0 --> A check-in names only a connector with `serves_uploads`.
+`Connector.auth_token()`, `auth_scheme()` and `endpoint` are operator config, and an unset `endpoint` refuses every client (`Connector.unconfigured`), so nothing a request, flag or campaign sets can aim the token elsewhere. <!-- probe: git grep -cE "Authorization" -- promptpotter/connectors/*.py == 0 --> A check-in names only a connector with `serves_uploads`.
 
 ## Conventions
 

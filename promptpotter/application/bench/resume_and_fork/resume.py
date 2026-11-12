@@ -22,8 +22,8 @@ from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.results import RoundResult
+    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ def _optimizer_mismatches(
 async def resume_with_divergence_check(
     cycle: Cycle,
     dataset: list[Any],
-    callbacks: RunCallbacks,
+    ledger: CycleEventLog,
     *,
     skip_divergence_check: bool,
     fork_on_divergence: bool,
@@ -110,7 +110,7 @@ async def resume_with_divergence_check(
     prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round, moment=None)
 
     # Fingerprinted BEFORE the repair, so the corrected set differs by exactly what it changed.
-    packages_before = round_packages(cycle, prior, callbacks)
+    packages_before = round_packages(cycle, prior, ledger)
     cycle.replay_priors(prior)
 
     # Decided on the round this run enters, before its rewind is written: a halt displaces nothing.
@@ -133,7 +133,7 @@ async def resume_with_divergence_check(
     if skip_divergence_check:
         campaign_store.leave_comparison(hop, ComparisonExit.NO_DIVERGENCE_CHECK)
 
-    fork = await apply_correction(cycle, prior, packages_before, dataset, callbacks)
+    fork = await apply_correction(cycle, prior, packages_before, dataset, ledger)
     if fork is None and found is not None:
         fork = _branch(cycle, prior, *found)
     line = hop if fork is None else CycleHop(campaign_id=hop.campaign_id, cycle_id=fork)

@@ -49,7 +49,7 @@ def effective_optimizer_prompts(
         return {}
     keys_by_node = schema.node_param_keys()
     out: dict[str, dict[str, str]] = {}
-    for node_name in schema.active_steps:
+    for node_name in schema.running:
         fields = [
             f
             for f in OptimizerPromptTemplate.RENDER_ORDER

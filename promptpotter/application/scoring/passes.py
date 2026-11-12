@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.difficulty import (
@@ -24,7 +23,6 @@ from promptpotter.application.initialization.scoring_scope import (
 from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.runner.bench import (
     bank_campaign_result,
@@ -56,7 +54,7 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.phase_views import VerificationEnterView, VerificationGradedView
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase
-from promptpotter.domain.run_records import VerifySaturated
+from promptpotter.domain.run_records import PhaseRecord, VerifySaturated
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import (
@@ -67,7 +65,7 @@ from promptpotter.domain.verification import (
     VerifyReading,
     VerifyStrategy,
 )
-from promptpotter.infrastructure.ledger import ledger_chain
+from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, at_round
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
@@ -114,16 +112,15 @@ def rounds_since_verified(verified_rounds: Iterable[int], *, round_num: int) -> 
 
 
 @contextmanager
-def _bracketed(enter: VerificationEnterView) -> Iterator[Callable[..., None]]:
+def _bracketed(enter: VerificationEnterView) -> Iterator[CycleEventLog]:
     """A pass on its cycle's ledger: entered here, graded by the caller, exited whatever ends it."""
     ledger = active_cycle_ledger()
     assert ledger is not None
-    on_phase = RunCallbacks(ledger).on_phase
-    on_phase(CampaignPhase.VERIFY, "enter", view=enter)
+    ledger.append(PhaseRecord(phase=CampaignPhase.VERIFY, event="enter", view=enter))
     try:
-        yield partial(on_phase, CampaignPhase.VERIFY, "graded")
+        yield ledger
     finally:
-        on_phase(CampaignPhase.VERIFY, "exit")
+        ledger.append(PhaseRecord(phase=CampaignPhase.VERIFY, event="exit"))
 
 
 def pick_fresh(
@@ -374,7 +371,7 @@ async def verify_candidate(
             rows=len(picked),
             strategy=strategy,
         )
-        with diagnostic_trace(stores, hop), at_round(round_num), _bracketed(enter) as grade:
+        with diagnostic_trace(stores, hop), at_round(round_num), _bracketed(enter) as ledger:
             try:
                 cells = (
                     await diagnostic_pass(
@@ -427,7 +424,7 @@ async def verify_candidate(
                 state=ReadingState.READ,
                 refusal=None,
             )
-            grade(view=graded)
+            ledger.append(PhaseRecord(phase=CampaignPhase.VERIFY, event="graded", view=graded))
         return graded
 
 
@@ -439,7 +436,7 @@ async def verify_on_saturation(
     fitness: float | None,
     winner_id: str | None,
     seed: int,
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
 ) -> None:
     """A verify the round owed and could not send banks its refusal on the pass, never stopping the run."""
     if fitness is None or fitness < 1.0 or not winner_id:
@@ -474,19 +471,21 @@ async def verify_on_saturation(
             seed=seed,
             reads_before=None,
         )
-        cb.on_phase(
-            CampaignPhase.VERIFY,
-            "graded",
-            view=VerificationGradedView(
-                verification=refused,
-                subject=None,
-                tolerance=None,
-                reserve_usd=None,
-                reserve_tokens=None,
-                reading=None,
-                state=ReadingState.MEMBER_UNSCOREABLE,
-                refusal=str(exc),
-            ),
+        ledger.append(
+            PhaseRecord(
+                phase=CampaignPhase.VERIFY,
+                event="graded",
+                view=VerificationGradedView(
+                    verification=refused,
+                    subject=None,
+                    tolerance=None,
+                    reserve_usd=None,
+                    reserve_tokens=None,
+                    reading=None,
+                    state=ReadingState.MEMBER_UNSCOREABLE,
+                    refusal=str(exc),
+                ),
+            )
         )
 
 
@@ -565,7 +564,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
             rows=k * len(scoring_set),
             strategy=None,
         )
-        with diagnostic_trace(stores, hop), _bracketed(enter) as grade:
+        with diagnostic_trace(stores, hop), _bracketed(enter) as ledger:
             for i in range(k):
                 scored = await diagnostic_pass(
                     score_search_point(
@@ -617,7 +616,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
                 state=ReadingState.READ,
                 refusal=None,
             )
-            grade(view=graded)
+            ledger.append(PhaseRecord(phase=CampaignPhase.VERIFY, event="graded", view=graded))
         return graded
 
 
@@ -671,7 +670,6 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
             readout.open_readout(cycle_dir)
             projecting.add(readout)
             projecting.add(RunArtifacts(session, config))
-            cb = RunCallbacks(ledger)
             try:
                 try:
                     banked = await bench_origin(
@@ -679,11 +677,11 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                         origin_sp,
                         origin_id=rounds[0].origin.individual.id,
                         spend=dashboard.live.state.spend,
-                        cb=cb,
+                        ledger=ledger,
                     )
                     assert banked is not None, "the line holder holds its origin's pass"
                     banked = await bench_selection(
-                        session, rounds, points=opened.points, banked=banked, cb=cb
+                        session, rounds, points=opened.points, banked=banked, ledger=ledger
                     )
                 except (KeyboardInterrupt, asyncio.CancelledError) as stop:
                     # The pass banked itself stopped, so the line's reading over it is the answer.
@@ -693,7 +691,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                 score = declare_line_bench(
                     session,
                     config,
-                    cb,
+                    ledger,
                     passes=banked,
                     selecting=False,
                     ending=line_run(stores, hop).ending,

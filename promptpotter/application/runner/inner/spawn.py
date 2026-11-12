@@ -55,7 +55,7 @@ from promptpotter.domain.l4.proxies import (
     inner_cell_facts,
     inner_cell_report,
 )
-from promptpotter.domain.phases import REFUSAL_STOPS, StopReason
+from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import SpawnedBy
@@ -101,7 +101,7 @@ logger = logging.getLogger(__name__)
 # An inner cycle's budget is ROUNDS, never a spend or token cap: those trip on token counts, which jitter.
 
 _REFUSALS: dict[StopReason | None, ErrorCategory] = {
-    stop: category for category, stop in REFUSAL_STOPS.items()
+    info.stops: category for category, info in ERROR_CATEGORY_INFO.items() if info.stops is not None
 }
 
 # Per round, for ONE inner cell; never instrument-depth-dependent, or an outcome moves with what is in flight.

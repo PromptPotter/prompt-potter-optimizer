@@ -1414,8 +1414,22 @@
             "title": "Auth Header"
           },
           "base_url": {
-            "description": "Where the operator configured it; empty for an in-process one",
+            "description": "Where the operator configured it; empty where none is",
             "title": "Base Url",
+            "type": "string"
+          },
+          "configured": {
+            "description": "False where a `remote_http` one names no address, so every call refuses",
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "execution": {
+            "description": "Its wire kind: only a `remote_http` one has a connection to secure",
+            "enum": [
+              "remote_http",
+              "in_process"
+            ],
+            "title": "Execution",
             "type": "string"
           },
           "id": {
@@ -1426,6 +1440,8 @@
         },
         "required": [
           "id",
+          "execution",
+          "configured",
           "base_url",
           "auth_header"
         ],
@@ -5329,7 +5345,7 @@
         "description": "A check-in's draft as every check-in route answers it; Start mints its campaign.\n\nNo ``tenant_id`` rides it (decisions.md § 0002).",
         "properties": {
           "active_steps": {
-            "description": "The pipeline this draft runs. Who may move a node's axes is `pipeline.node_config_schema`'s answer alone.",
+            "description": "The chain this draft runs, in order. Who may move a node's axes is `pipeline.node_config_schema`'s answer alone.",
             "items": {
               "type": "string"
             },
@@ -5413,6 +5429,26 @@
               }
             ],
             "description": "`admit_launch`'s refusal of Start at the declared budget, its `LaunchRefusalReason` in `details.reason`; null where it admits."
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mode whose steps are `active_steps`; null where its chain is none of them.",
+            "title": "Mode"
+          },
+          "modes": {
+            "description": "The pipelines its connector declares; empty where it declares none.",
+            "items": {
+              "$ref": "#/components/schemas/PipelineMode"
+            },
+            "title": "Modes",
+            "type": "array"
           },
           "n_samples": {
             "title": "N Samples",
@@ -5502,6 +5538,8 @@
           "candidate_library_size",
           "created_at",
           "active_steps",
+          "modes",
+          "mode",
           "dependencies",
           "readiness",
           "launch_refusal",
@@ -12838,6 +12876,45 @@
           "at"
         ],
         "title": "PauseReading",
+        "type": "object"
+      },
+      "PipelineMode": {
+        "additionalProperties": false,
+        "description": "One pipeline the connector declares, as a check-in's Mode offers it.",
+        "properties": {
+          "exclude_nodes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What picking it sends as `config.exclude_nodes`; null where the draft's chain does not hold its steps, so no exclusion runs it.",
+            "title": "Exclude Nodes"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "steps",
+          "exclude_nodes"
+        ],
+        "title": "PipelineMode",
         "type": "object"
       },
       "PipelineView": {

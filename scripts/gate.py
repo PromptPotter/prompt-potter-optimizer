@@ -579,11 +579,14 @@ def _dataset_shape() -> tuple[Any, dict[str, Any]]:
 
 
 def _in_any_dataset(symbol: str) -> bool:
-    """A key the definition every `dataset.yaml` is laid over holds, or `campaign`'s model declares."""
+    """The `pipeline` section, a key the definition every `dataset.yaml` is laid over holds, or
+    `campaign`'s model declares; a node template is its connector's, not this file's."""
     keys = symbol.split(".")
     defaults, schemas = _dataset_shape()
-    return _key_path(defaults, keys) or (
-        keys[0] == "campaign" and _schema_admits(schemas["CampaignConfig"], keys[1:], schemas)
+    return (
+        keys == ["pipeline"]
+        or _key_path(defaults, keys)
+        or (keys[0] == "campaign" and _schema_admits(schemas["CampaignConfig"], keys[1:], schemas))
     )
 
 

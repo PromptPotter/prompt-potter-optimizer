@@ -246,14 +246,14 @@ class OptSearchPoint(FrozenModel):
         prompt_nodes = schema.prompt_nodes()
         if off_roster := sorted(set(self.prompts) - {node.name for node in prompt_nodes}):
             raise ValueError(
-                f"this individual sets prompt loci on {off_roster}, which the pipeline's chain "
-                f"holds no prompt node for ({[node.name for node in prompt_nodes]})"
+                f"this individual sets prompt loci on {off_roster}, where the run reaches "
+                f"no prompt node of its own ({[node.name for node in prompt_nodes]})"
             )
         framed = [n.name for n in prompt_nodes if "problem_description" in n.prompt_fields]
         if (framing.upstream_context or framing.downstream_context) and len(framed) != 1:
             raise ValueError(
                 "the campaign's framing splices into the one prompt node declaring "
-                f"`problem_description`, and this pipeline's chain has {len(framed)}: {framed}"
+                f"`problem_description`, and this run reaches {len(framed)}: {framed}"
             )
         unframed = TaskDecomposition()
         return {

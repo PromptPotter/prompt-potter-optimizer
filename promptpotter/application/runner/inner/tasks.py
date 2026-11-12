@@ -497,7 +497,6 @@ class InnerCells:
                 walk = walks.setdefault(name, [])
                 walk += [n for n in steps if n in nodes and n not in walk]
         return {
-            "name": "+".join(inner.name for inner in self.optimizers),
             "nodes": nodes,
             "pipelines": {k: v for k, v in walks.items() if v},
         }

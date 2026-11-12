@@ -430,7 +430,11 @@ export interface Refusal {
 export interface BackendResponse {
   /** The connector's name, as `dataset.yaml::pipeline.backend_type` names it */
   id: string;
-  /** Where the operator configured it; empty for an in-process one */
+  /** Its wire kind: only a `remote_http` one has a connection to secure */
+  execution: 'remote_http' | 'in_process';
+  /** False where a `remote_http` one names no address, so every call refuses */
+  configured: boolean;
+  /** Where the operator configured it; empty where none is */
   base_url: string;
   /** The header the operator's credential rides in on every request; null where
    * operator config holds none */
@@ -3228,9 +3232,13 @@ export interface DraftCampaignWire {
   /** A count, not the list: a library runs to tens of thousands of entries. */
   candidate_library_size: number;
   created_at: string;
-  /** The pipeline this draft runs. Who may move a node's axes is
+  /** The chain this draft runs, in order. Who may move a node's axes is
    * `pipeline.node_config_schema`'s answer alone. */
   active_steps: string[];
+  /** The pipelines its connector declares; empty where it declares none. */
+  modes: PipelineMode[];
+  /** The mode whose steps are `active_steps`; null where its chain is none of them. */
+  mode: string | null;
   dependencies: DraftDependency[];
   /** The server's mint gate, recomputed on every draft response. */
   readiness: OriginReadiness;
@@ -3824,6 +3832,15 @@ export interface CellTerm {
   description: string;
   dial: 'anchored' | 'unit' | null;
   primary: boolean;
+}
+
+/** One pipeline the connector declares, as a check-in's Mode offers it. */
+export interface PipelineMode {
+  name: string;
+  steps: string[];
+  /** What picking it sends as `config.exclude_nodes`; null where the draft's chain
+   * does not hold its steps, so no exclusion runs it. */
+  exclude_nodes: string[] | null;
 }
 
 /** One input the draft's active pipeline needs. Soft: unfulfilled, it does not
@@ -5917,7 +5934,7 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "target_hit": { label: "Target reached", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "lives_exhausted": { label: "Out of lives", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "hard_cap_reached": { label: "Arm cap", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
-  "diag_complete": { label: "Diagnostic complete", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
+  "diag_complete": { label: "Diagnostic complete", outcome: "success", category: "search", halts_mid_round: true, has_traceback: false, next_step: "The next round's arms are proposed and paused unmeasured; resuming measures exactly these arms.", grades_selection: true, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }] },
   "converged": { label: "Converged", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "optimizer_exhausted": { label: "Optimizer out of moves", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "rebased_to_fork": { label: "Rebased to fork", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },

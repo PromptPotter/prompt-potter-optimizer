@@ -11,10 +11,9 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.coupon import bind_account
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
-from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.run_phase_control import CycleHold
+from promptpotter.application.run_phase_control import CycleHold, close_dead_bench
 from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.views.ingress import run_spend_view
@@ -23,7 +22,6 @@ from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
-    GateKind,
     PauseCause,
     RunPhase,
     StopOutcome,
@@ -53,20 +51,10 @@ from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import instrument_depth
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.domain.arms import Proposal
+    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.campaign_config import CampaignConfig
 
 logger = logging.getLogger(__name__)
-
-
-def declare_running(ledger: CycleEventLog) -> None:
-    ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
-
-
-def declare_gate(ledger: CycleEventLog, gate: GateKind, *, drafts: Sequence[Proposal] = ()) -> None:
-    ledger.append(RunPhaseRecord(run_phase=RunPhase.GATE, gate=gate, drafts=list(drafts)))
 
 
 def declare_run_stop(
@@ -103,11 +91,10 @@ def declare_run_wiring(
     campaign_config: CampaignConfig,
     ledger: CycleEventLog,
     *,
+    campaign: Campaign,
     selected: SelectedOptimizer,
 ) -> None:
     """The one writer of ``RunWiringRecord``."""
-    campaign = session.store.campaigns.load_campaign(session.hop.campaign_id)
-    assert campaign is not None, "a run is wired on a campaign its session is bound to"
     ledger.append(
         RunWiringRecord(
             round_cells_ceiling=selected.round_cells_ceiling(len(session.bank.samples)),
@@ -135,7 +122,7 @@ def declare_run_wiring(
 class RunObservers:
     store: Stores
     hop: CycleHop
-    callbacks: RunCallbacks
+    ledger: CycleEventLog
     dashboard: DashboardCheckout
     readout: ReadoutProjection
     projecting: Projecting
@@ -143,7 +130,7 @@ class RunObservers:
     _book_tokens: list[Token[SpendBook | None]] = field(default_factory=list)
 
     def arm_spend_book(self, book: SpendBook) -> None:
-        ledger = self.callbacks.ledger
+        ledger = self.ledger
         self.projecting.add(book)
         book.ledger = ledger
         if self._book_tokens:
@@ -217,7 +204,7 @@ def build_run_observers(
             readout_sink=readout_sink,
         )
         # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
-        declare_running(observers.callbacks.ledger)
+        observers.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
         bind_account(session.store)
         # A launch is a run boundary; the run a gate held resumes, what it was asked standing.
         if prior is None or prior.run_phase is not RunPhase.GATE:
@@ -229,12 +216,7 @@ def build_run_observers(
         hold.release()
         raise
     session.state.observers = observers
-    observers.callbacks.close_dead_bench()
-    if forked_from is not None:
-        # A fork's config is already admitted; a first build waits for `open_launch` to settle it.
-        declare_run_wiring(
-            session, campaign_config, observers.callbacks.ledger, selected=bound_optimizer()
-        )
+    close_dead_bench(observers.ledger)
     return observers
 
 
@@ -270,11 +252,7 @@ def _bind_observers(
     return RunObservers(
         store=session.store,
         hop=session.hop,
-        callbacks=(
-            RunCallbacks(ledger=ledger)
-            if forked_from is None
-            else RunCallbacks(ledger=ledger, view_context=forked_from.callbacks.view_context)
-        ),
+        ledger=ledger,
         dashboard=dashboard,
         readout=readout,
         projecting=projecting,

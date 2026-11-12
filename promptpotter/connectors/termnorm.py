@@ -6,11 +6,18 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from promptpotter.config.settings import settings
-from promptpotter.connectors.protocol import Connector, cell_envelope_of
+from promptpotter.connectors.protocol import (
+    Connector,
+    Endpoint,
+    UploadDefaults,
+    cell_envelope_of,
+)
 from promptpotter.domain.pipeline_params import STEPS_KEY
 from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
 
@@ -51,21 +58,26 @@ class TermNormSession:
     def __init__(self) -> None:
         self._terms: list[str] | None = None
 
-    async def set_terms(
-        self, http: httpx.AsyncClient, base_url: str, terms: list[str]
-    ) -> dict[str, Any]:
+    async def open(
+        self,
+        http: httpx.AsyncClient,
+        base_url: str,
+        samples: Sequence[Sample],
+        library: Sequence[str],
+    ) -> None:
+        # The term index: every label a row answers with, and the candidate library.
+        truths = {s.ground_truth for s in samples if s.ground_truth}
+        await self._post_terms(http, base_url, sorted(truths | set(library)))
+
+    async def _post_terms(self, http: httpx.AsyncClient, base_url: str, terms: list[str]) -> None:
         if not terms:
-            logger.warning(
-                "init_session called with empty terms — session won't support /matches",
-            )
-            return {"status": "skipped", "terms_count": 0}
+            logger.warning("no terms to index — the session won't support /matches")
+            return
         if self._terms == terms:
-            return {"status": "already_initialized", "terms_count": len(terms)}
+            return
         resp = await http.post(f"{base_url}/sessions", json={"terms": terms})
         resp.raise_for_status()
         self._terms = terms
-        result: dict[str, Any] = resp.json()
-        return result
 
     async def recover(self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response) -> bool:
         # A backend reload drops its in-memory sessions.
@@ -80,7 +92,7 @@ class TermNormSession:
         logger.warning("Got 400 (no session) — re-initializing")
         terms = self._terms
         self._terms = None  # clear so idempotency guard re-sends
-        await self.set_terms(http, base_url, terms)
+        await self._post_terms(http, base_url, terms)
         return True
 
     def resend_refused(self, reply: httpx.Response) -> str | None:
@@ -144,31 +156,29 @@ CONNECTOR = Connector(
     sent_spend_bound=None,
     cells_priced=True,
     session_factory=TermNormSession,
-    serves_uploads=True,
     expected_revision=_EXPECTED_REVISION,
     version_check=_termnorm_version_check,
     preflight=_termnorm_preflight,
-    endpoint=_termnorm_endpoint,
+    endpoint=Endpoint("TERMNORM_URL", _termnorm_endpoint),
     auth_token=_termnorm_auth_token,
     # The knee on `llm_only`: past it the wall clock stops falling and the call tail grows.
     max_cells_in_flight=16,
-    # A fresh CSV upload skips the retrieval nodes: no Brave Search billing in round 1.
-    default_pipeline=("llm_only",),
-    default_optimization=(("degradation_threshold", 0.4),),
-    available_models=(
-        "openai/gpt-oss-20b",
-        "qwen/qwen3.7-flash:nitro",
-        "inclusionai/ling-3.0-flash",
-        "upstage/solar-pro4",
+    uploads=UploadDefaults(
+        # A fresh CSV upload skips the retrieval nodes: no Brave Search billing in round 1.
+        chain=("llm_only",),
+        available_models=(
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.7-flash:nitro",
+            "inclusionai/ling-3.0-flash",
+            "upstage/solar-pro4",
+        ),
     ),
-    # No `reasoning_effort`: a rung named here follows no model the tenant swaps in.
-    default_node_config={
+    # Only what `GET /pipeline` does not serve: its axes and mappings are the backend's.
+    node_templates={
         "llm_only": {
-            "config": {
-                "provider": "openrouter",
-                "model": "openai/gpt-oss-20b",
-                "temperature": 0.0,
-            },
+            "description": "One LLM call answers each row.",
+            # No `reasoning_effort`: a rung named here follows no model the tenant swaps in.
+            "config": {"provider": "openrouter", "model": "openai/gpt-oss-20b", "temperature": 0.0},
         },
     },
 )

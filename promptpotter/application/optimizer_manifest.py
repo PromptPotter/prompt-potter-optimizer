@@ -9,8 +9,6 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from promptpotter.application import optimizers
 from promptpotter.application.optimizers.nodes import (
-    INITIAL_POPULATION,
-    RUN_INIT,
     CountKnob,
     Initializer,
     PanelSize,
@@ -43,7 +41,10 @@ from promptpotter.domain.pipeline_manifest import (
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     DEFAULT_PIPELINE,
+    INITIAL_POPULATION,
     MEMBER_KINDS,
+    PHASE_PIPELINES,
+    RUN_INIT,
     NodeKind,
     PipelineNode,
     PipelineSchema,
@@ -849,7 +850,7 @@ def _select(
     return selected
 
 
-_WALKS = (RUN_INIT, INITIAL_POPULATION, DEFAULT_PIPELINE)
+_WALKS = (*PHASE_PIPELINES, DEFAULT_PIPELINE)
 
 
 def _edges_of(member: NodeMember) -> frozenset[type]:

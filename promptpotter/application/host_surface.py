@@ -18,7 +18,7 @@ import functools
 import inspect
 import json
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
+from collections.abc import AsyncIterator, Coroutine, Mapping
 from dataclasses import dataclass
 from typing import Any, cast, get_origin
 from urllib.parse import quote, unquote
@@ -50,6 +50,7 @@ from promptpotter.application.read_params import (
     HierarchySubtreeParams,
     ReadParams,
 )
+from promptpotter.application.read_workers import off_loop
 from promptpotter.domain.command_events import CommandAckRecord, KeptRefusal
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
@@ -202,11 +203,6 @@ def host_tool(name: str) -> HostTool:
     if (tool := HOST_TOOLS.get(name)) is None:
         raise NotFoundError(f"no tool {name!r}")
     return tool
-
-
-async def _off_loop[T](answer: Callable[[], T]) -> T:
-    """A sync answer reads the disk, so it runs in a worker thread, as a sync route does."""
-    return await asyncio.to_thread(answer)
 
 
 def _jsonable(value: object) -> JsonValue:
@@ -367,7 +363,7 @@ class HostSession:
         return CommandDispatcher(self.caller.stores, job_registry=self.caller.jobs)
 
     async def _call_tool(self, tool: HostTool, arguments: Mapping[str, Any]) -> HostAnswer:
-        sent = await _off_loop(lambda: tool.arguments(arguments))
+        sent = await off_loop(tool.arguments, arguments)
         if isinstance(sent, ReadParams):
             return HostAnswer(_jsonable(await sent.answered(self.caller)))
         if tool.as_task:
@@ -397,7 +393,7 @@ class HostSession:
 
     async def _read(self, command_id: str) -> CommandReading:
         stores, jobs = self.caller.stores, self.caller.jobs
-        return await _off_loop(lambda: read_command(stores, jobs, command_id))
+        return await off_loop(read_command, stores, jobs, command_id)
 
     async def _task_result(self, task_id: str) -> tuple[str, HostAnswer]:
         """Woken by its act where this process runs it, else read every `_SETTLE_POLL_S`: its act
@@ -408,7 +404,7 @@ class HostSession:
             else:
                 await asyncio.sleep(_SETTLE_POLL_S)
         tool = host_tool(read.kind)
-        owned = await _off_loop(lambda: owned_command(self.caller.stores, task_id))
+        owned = await off_loop(owned_command, self.caller.stores, task_id)
         match owned.end:
             case CommandAckRecord(refusal=KeptRefusal() as kept):
                 raise kept.raised()
@@ -459,7 +455,7 @@ class HostSession:
         if missing := [a for a in prompt.arguments if not arguments.get(a)]:
             raise PayloadInvalidError(f"prompt {name!r} needs {', '.join(missing)}")
         instruction = _TO_THE_GATE.format(draft_id=arguments["draft_id"])
-        template = await _off_loop(checkin_template)
+        template = await off_loop(checkin_template)
         return template.compile_prompt(consultation_instruction=instruction)
 
 

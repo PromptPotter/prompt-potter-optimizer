@@ -18,11 +18,6 @@ def pipeline_node_overlay(pipeline: Mapping[str, Any]) -> dict[str, dict[str, An
     return out
 
 
-def pipeline_declared_nodes(pipeline: Mapping[str, Any]) -> frozenset[str]:
-    """Empty where the definition declares no nodes: "no opinion", never "no nodes"."""
-    return frozenset(pipeline.get("nodes") or {})
-
-
 def has_dataset_prompts(dataset: ResolvedDataset) -> bool:
     return bool(read_dataset_origin(dataset))
 

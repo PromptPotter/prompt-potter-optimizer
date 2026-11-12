@@ -13,7 +13,6 @@ from promptpotter.application.bench.resume_and_fork.decisions import record_deci
 from promptpotter.application.bench.resume_and_fork.repair import rewalk_lost_origin
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import Controller, RoundContext
-from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.runner.bench import bench_origin, bench_selection, declare_line_bench
 from promptpotter.application.runner.round import (
@@ -21,6 +20,7 @@ from promptpotter.application.runner.round import (
     execute_round,
     post_round,
     run_init,
+    walk_round,
 )
 from promptpotter.application.runner.termination import (
     RUN_ENDS,
@@ -30,13 +30,14 @@ from promptpotter.application.runner.termination import (
 )
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.phases import STOP_REASON_INFO, ErrorRecord, StopLoop, StopReason
-from promptpotter.domain.run_records import OriginGatePass, RebaseRequest
+from promptpotter.domain.run_records import OriginGatePass, RebaseRequest, RoundEnteredRecord
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import at_round
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.spend import SpendRollup
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ async def run_round_loop(
     cycle: Cycle,
     config: CampaignConfig,
     session: Session,
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
     *,
     diagnosing: Controller | None = None,
 ) -> LoopEnd:
@@ -105,12 +106,14 @@ async def run_round_loop(
             # Through the boundary checks: a --diag controller reads the round just closed.
             with at_round(round_num):
                 open_round = round_num
-                cb.on_round_entered(round_num)
+                ledger.append(RoundEnteredRecord(round=round_num))
 
                 # The cap's half only; the controller's is known once the round is scored (`execute_round`).
                 is_final_round = cap is not None and clean_rounds + 1 >= cap
 
-                walked = await execute_round(cycle, round_num, cb, is_final_round=is_final_round)
+                walked = await execute_round(
+                    cycle, round_num, ledger, is_final_round=is_final_round
+                )
                 open_round = None
                 cut = walked.cut
                 await post_round(
@@ -118,7 +121,7 @@ async def run_round_loop(
                     walked,
                     round_num,
                     session,
-                    cb,
+                    ledger,
                     is_final_round=is_final_round or cut is not None,
                 )
                 clean_rounds += 1
@@ -132,13 +135,14 @@ async def run_round_loop(
                     return LoopEnd(tripped)
 
                 if diagnosing is not None:
-                    diagnosed = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
+                    diagnosed = RoundContext(cycle=cycle, round_num=round_num, ledger=ledger)
                     await diagnosing.diagnose(NodeContext(diagnosed, diagnosing))
-                    with at_round(round_num + 1):
-                        await diagnosing.show_round(
-                            RoundContext(cycle=cycle, round_num=round_num + 1, callbacks=cb)
-                        )
-                    return LoopEnd(StopReason.DIAG_COMPLETE)
+                    # The next round is walked and banked, then left open: `resume` measures its arms.
+                    open_round = round_num + 1
+                    with at_round(open_round):
+                        ledger.append(RoundEnteredRecord(round=open_round))
+                        await walk_round(cycle, open_round, ledger)
+                    return LoopEnd(StopReason.DIAG_COMPLETE, interrupted_round=open_round)
             round_num += 1
 
     except RUN_ENDS as exc:
@@ -165,7 +169,7 @@ def loop_end_on(
 async def open_origin_round(
     cycle: Cycle,
     dataset: list[Sample],
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
     *,
     spend: SpendRollup,
     diagnosing: bool,
@@ -180,21 +184,21 @@ async def open_origin_round(
     session = cycle.session
     open_round: int | None = None
     try:
-        run_init(cycle, cb)
+        run_init(cycle, ledger)
         if diagnosing or session.state.resumed_from_round > 1:
-            await bench_line_origin(cycle, cb, spend)
+            await bench_line_origin(cycle, ledger, spend)
             return None
         open_round = 0
-        await rewalk_lost_origin(cycle, dataset, cb)
+        await rewalk_lost_origin(cycle, dataset, ledger)
         mode = cycle.config.optimization.origin_gate
         gated = (
             not origin_gate_passed(session)
             and origin_gate_tripped(cycle.origin_round.health, mode) is not None
         )
         if not gated:
-            await bench_line_origin(cycle, cb, spend)
+            await bench_line_origin(cycle, ledger, spend)
         if cycle.origin_round.at_offset is None:
-            await emit_origin_round(cycle, session, cb)
+            await emit_origin_round(cycle, session, ledger)
         open_round = None
         if not gated:
             return None
@@ -209,14 +213,14 @@ async def open_origin_round(
             )
             return LoopEnd(StopReason.ORIGIN_GATE)
         # Resuming an origin the gate halted, still unhealthy, is the operator's override.
-        pass_origin_gate(cb, by="resume")
-        await bench_line_origin(cycle, cb, spend)
+        pass_origin_gate(ledger, by="resume")
+        await bench_line_origin(cycle, ledger, spend)
     except RUN_ENDS as exc:
         return loop_end_on(exc, cycle, session, round_num=0, open_round=open_round)
     return None
 
 
-async def bench_line_origin(cycle: Cycle, cb: RunCallbacks, spend: SpendRollup) -> None:
+async def bench_line_origin(cycle: Cycle, ledger: CycleEventLog, spend: SpendRollup) -> None:
     """The origin's bench pass, its price set aside so the selection's pass still fits under the
     search's ceiling, then the line's bench declared."""
     session, config = cycle.session, cycle.config
@@ -229,7 +233,7 @@ async def bench_line_origin(cycle: Cycle, cb: RunCallbacks, spend: SpendRollup) 
             cycle.points.job(origin.individual),
             origin_id=origin.individual.id,
             spend=spend,
-            cb=cb,
+            ledger=ledger,
         )
         if cycle.bench_passes is not None and book.binds("bench"):
             book.set_aside(cycle.bench_passes.reserve_usd, cycle.bench_passes.reserve_tokens)
@@ -242,14 +246,20 @@ async def bench_line_origin(cycle: Cycle, cb: RunCallbacks, spend: SpendRollup) 
             # a re-enacting fork's floor, read today as the round it re-runs will be.
             with at_round(cycle.rounds[-1].round):
                 cycle.bench_passes = await bench_selection(
-                    session, cycle.rounds, points=cycle.points, banked=cycle.bench_passes, cb=cb
+                    session,
+                    cycle.rounds,
+                    points=cycle.points,
+                    banked=cycle.bench_passes,
+                    ledger=ledger,
                 )
-    declare_line_bench(session, config, cb, passes=cycle.bench_passes, selecting=True, ending=None)
+    declare_line_bench(
+        session, config, ledger, passes=cycle.bench_passes, selecting=True, ending=None
+    )
 
 
-def pass_origin_gate(cb: RunCallbacks, *, by: str) -> None:
+def pass_origin_gate(ledger: CycleEventLog, *, by: str) -> None:
     """The operator's override, a decision of round 0: every later launch of the cycle reads it."""
-    record_decision(cb.ledger, OriginGatePass(by=by), "proceed", node=None, round=0)
+    record_decision(ledger, OriginGatePass(by=by), "proceed", node=None, round=0)
 
 
 def origin_gate_passed(session: Session) -> bool:

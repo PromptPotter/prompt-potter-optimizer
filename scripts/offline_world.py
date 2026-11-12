@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from promptpotter.config.settings import settings
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.infrastructure import backend as backend_wire
 from promptpotter.infrastructure.llm.pricing import UPSTREAM_URL
@@ -220,6 +221,7 @@ class FakeBackend:
     each row's `k` by its own draw, so the δ ruler spans the rows and θ holds a level."""
 
     AT = "127.0.0.1:8000"
+    URL = f"http://{AT}"
     # P(correct) = k/10 by marker. Potter's script: a round-1 win, then the stalls that fire L2.
     SKILL: ClassVar[dict[str | None, int]] = {
         None: 3,
@@ -479,7 +481,10 @@ def install_network(router: Router) -> Callable[[], None]:
         urllib.request.urlopen,
         socket.getaddrinfo,
         wire["held_wait"],
+        settings.TERMNORM_URL,
     )
+    # The operator's TermNorm is this world's backend.
+    settings.TERMNORM_URL = FakeBackend.URL
     httpx.AsyncHTTPTransport.handle_async_request = handle_async_request  # type: ignore[method-assign,assignment]
     httpx.HTTPTransport.handle_request = handle_request  # type: ignore[method-assign,assignment]
     urllib.request.urlopen = urlopen
@@ -495,6 +500,7 @@ def install_network(router: Router) -> Callable[[], None]:
             urllib.request.urlopen,
             socket.getaddrinfo,
             wire["held_wait"],
+            settings.TERMNORM_URL,
         ) = real
 
     return restore

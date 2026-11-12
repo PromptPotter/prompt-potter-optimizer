@@ -15,7 +15,7 @@ from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
 from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
-from promptpotter.infrastructure.llm.pricing import inline_route
+from promptpotter.infrastructure.llm.pricing import priced_pair
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import drawn_budget, held_wait
 from promptpotter.infrastructure.llm.spend_book import (
@@ -362,7 +362,11 @@ async def _in_process_run(
     sends = _CellSends(
         sample.id,
         None if calls is None else int(calls),
-        inline_route(model) if isinstance(model, str) else (None, None),
+        priced_pair(
+            model if isinstance(model, str) else None,
+            params.get("provider"),
+            names_provider=CONNECTOR.model_names_provider,
+        ),
     )
     student = _configured(program.student, payload.get("prompt"), lm_kwargs, sends)
     # Metered too, so a call naming no LM runs the model the cell is priced as.
@@ -421,7 +425,6 @@ def dataset_pipeline(
         },
     }
     return {
-        "name": "DSPy",
         "backend_type": "dspy",
         "available_models": sorted({model, *allowed.get("model", [])}),
         "nodes": {PROGRAM_NODE: node},

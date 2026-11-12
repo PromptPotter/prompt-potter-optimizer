@@ -69,7 +69,7 @@ from promptpotter.domain.phase_views import (
     VerificationGradedView,
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, RunPhase, StopOutcome
-from promptpotter.domain.run_records import LaunchClockRecord
+from promptpotter.domain.run_records import LaunchClockRecord, PhaseRecord
 from promptpotter.domain.run_standing import LineOutlay, declared_selection
 from promptpotter.domain.scoring import ROW_GRADES, WalkedCell
 from promptpotter.domain.spend import Budget, SpendRollup
@@ -97,7 +97,6 @@ if TYPE_CHECKING:
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import LaunchClock, Session
-    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.arms import PointContext
     from promptpotter.domain.campaign import CampaignRefusal
     from promptpotter.domain.campaign_config import CampaignConfig
@@ -432,7 +431,7 @@ async def score_on_bench(
     subject: BenchSubject,
     label: str,
     round_num: int,
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
 ) -> VerificationPass:
     """A run stop escapes once the pass it cut is graded on the cells it held."""
     taken, stop = await _send_on_bench(
@@ -440,7 +439,7 @@ async def score_on_bench(
         search_point,
         arm=ArmName(key=ArmKey(individual_id), round=round_num, label=label),
         subject=subject,
-        cb=cb,
+        ledger=ledger,
     )
     if stop is not None:
         raise stop
@@ -453,21 +452,23 @@ async def _send_on_bench(
     *,
     arm: ArmName,
     subject: BenchSubject,
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
 ) -> tuple[VerificationPass, BaseException | None]:
     """The pass, and the run stop that cut it: a stopped pass is graded here, a whole one by its caller."""
     # No `round=` on the bracket: it would move the dashboard's round back to the one being graded.
-    cb.on_phase(
-        CampaignPhase.BENCH,
-        "enter",
-        view=VerificationEnterView(
-            verification="bench",
-            subject=subject,
-            arm=arm,
-            sp_hash=search_point.sp_hash(session.pipeline_schema),
-            rows=len(session.state.scoring.partition.bench),
-            strategy=None,
-        ),
+    ledger.append(
+        PhaseRecord(
+            phase=CampaignPhase.BENCH,
+            event="enter",
+            view=VerificationEnterView(
+                verification="bench",
+                subject=subject,
+                arm=arm,
+                sp_hash=search_point.sp_hash(session.pipeline_schema),
+                rows=len(session.state.scoring.partition.bench),
+                strategy=None,
+            ),
+        )
     )
     # Counted before the send, so the pass is never one of its own readers.
     reads_before = _reads_before(session)
@@ -490,11 +491,11 @@ async def _send_on_bench(
             stop=PassStop(cause=run_stop_reason(stopping), warning=None),
             reads_before=reads_before,
         )
-        graded(cb, session, stopped, subject=subject)
+        graded(ledger, session, stopped, subject=subject)
         return stopped, stopping
     finally:
         session.state.control = control
-        cb.on_phase(CampaignPhase.BENCH, "exit")
+        ledger.append(PhaseRecord(phase=CampaignPhase.BENCH, event="exit"))
 
 
 async def _pass_on_bench(
@@ -555,18 +556,13 @@ def _bench_pass(
     )
 
 
-def declare_bench(cb: RunCallbacks, score: BenchScore) -> BenchScore:
-    cb.on_phase(CampaignPhase.BENCH, "scored", view=BenchScoredView(bench=score))
-    return score
-
-
 def _tolerance(session: Session) -> int:
     split = session.state.scoring.partition.split
     return split.tolerance if split is not None else 0
 
 
 def graded(
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
     session: Session,
     bench_pass: VerificationPass,
     *,
@@ -576,24 +572,26 @@ def graded(
     """The one write a line's passes are folded from: a pass no call here follows is lost with the process."""
     tolerance = _tolerance(session)
     read = _read_pass(session.store, bench_pass, session.state.scoring.scorer, tolerance=tolerance)
-    cb.on_phase(
-        CampaignPhase.BENCH,
-        "graded",
-        view=VerificationGradedView(
-            verification=bench_pass,
-            subject=subject,
-            tolerance=tolerance,
-            reserve_usd=None if reserve is None else reserve.usd_amount,
-            reserve_tokens=None if reserve is None else reserve.token_amount,
-            reading=read.reading,
-            state=read.outcome.state,
-            refusal=None,
-        ),
+    ledger.append(
+        PhaseRecord(
+            phase=CampaignPhase.BENCH,
+            event="graded",
+            view=VerificationGradedView(
+                verification=bench_pass,
+                subject=subject,
+                tolerance=tolerance,
+                reserve_usd=None if reserve is None else reserve.usd_amount,
+                reserve_tokens=None if reserve is None else reserve.token_amount,
+                reading=read.reading,
+                state=read.outcome.state,
+                refusal=None,
+            ),
+        )
     )
 
 
 async def grade_round_selection(
-    cycle: Cycle, session: Session, round_result: RoundResult, *, cb: RunCallbacks
+    cycle: Cycle, session: Session, round_result: RoundResult, *, ledger: CycleEventLog
 ) -> None:
     passes, election, head = cycle.bench_passes, round_result.election, round_result.head
     if not (
@@ -612,9 +610,9 @@ async def grade_round_selection(
         subject="selected",
         label=label,
         round_num=round_result.round,
-        cb=cb,
+        ledger=ledger,
     )
-    graded(cb, session, taken, subject="selected")
+    graded(ledger, session, taken, subject="selected")
     cycle.bench_passes = _with_selection(passes, taken)
 
 
@@ -646,7 +644,7 @@ async def bench_selection(
     *,
     points: PointContext,
     banked: BenchPasses,
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
 ) -> BenchPasses:
     """Only a pause escapes the pass: any other stop ends it short, banked as a stopped pass."""
     origin = banked.origin
@@ -667,10 +665,10 @@ async def bench_selection(
         selected_sp,
         arm=ArmName(key=ArmKey(head.individual.id), round=picked.round, label=head.label),
         subject="selected",
-        cb=cb,
+        ledger=ledger,
     )
     if stop is None:
-        graded(cb, session, selected, subject="selected")
+        graded(ledger, session, selected, subject="selected")
     elif STOP_REASON_INFO[run_stop_reason(stop)].outcome is StopOutcome.PAUSED:
         raise stop
     return _with_selection(banked, selected)
@@ -754,7 +752,7 @@ async def bench_origin(
     *,
     origin_id: str,
     spend: SpendRollup,
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
 ) -> BenchPasses | None:
     stores, hop = session.store, session.hop
     if _line(stores, hop) is None:
@@ -776,7 +774,7 @@ async def bench_origin(
             subject="origin",
             label=candidate_label(0, 0),
             round_num=0,
-            cb=cb,
+            ledger=ledger,
         )
         split = session.state.scoring.partition.split
         after = _bench_counted(spend)
@@ -789,7 +787,7 @@ async def bench_origin(
             selections={},
         )
     graded(
-        cb,
+        ledger,
         session,
         passes.origin,
         subject="origin",
@@ -898,7 +896,7 @@ def bench_under(
 def declare_line_bench(
     session: Session,
     config: CampaignConfig,
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
     *,
     passes: BenchPasses | None,
     selecting: bool,
@@ -923,6 +921,11 @@ def declare_line_bench(
             run=run,
             spend=None,
         )
-        return declare_bench(cb, read_bench(stores, None, scorer, line=line))
-    held = passes if passes is not None else line_passes(stores, hop.campaign_id)
-    return declare_bench(cb, bench_under(stores, campaign, hop, held, config, scorer, run=run))
+        score = read_bench(stores, None, scorer, line=line)
+    else:
+        held = passes if passes is not None else line_passes(stores, hop.campaign_id)
+        score = bench_under(stores, campaign, hop, held, config, scorer, run=run)
+    ledger.append(
+        PhaseRecord(phase=CampaignPhase.BENCH, event="scored", view=BenchScoredView(bench=score))
+    )
+    return score

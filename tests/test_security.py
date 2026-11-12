@@ -2455,7 +2455,7 @@ async def test_a_command_reads_one_state_on_the_account_log_through_its_retry_an
     rows = samples(30)
     solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
     starting = loop_session(
-        stores, pipeline_schema([solve], name="acts"), rows, dataset=resolve_dataset(stores, "acts")
+        stores, pipeline_schema([solve]), rows, dataset=resolve_dataset(stores, "acts")
     )
     declared = declare(starting, CampaignConfig.model_validate(unframed), purpose=Optimize())
     plan = resolve_cycle_plan(starting, declared, rows)

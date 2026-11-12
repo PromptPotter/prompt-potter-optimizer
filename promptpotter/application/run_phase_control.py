@@ -6,10 +6,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from promptpotter.domain.phases import (
-    REFUSAL_STOPS,
+    ERROR_CATEGORY_INFO,
+    CampaignPhase,
     PauseCause,
     StopReason,
 )
+from promptpotter.domain.run_records import FlightRecord, FlightWaiting, PhaseRecord
+from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.infrastructure.producer_lock import (
     cycle_held_here,
     hold_cycle,
@@ -17,11 +20,13 @@ from promptpotter.infrastructure.producer_lock import (
     release_cycle,
     release_pass,
 )
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_bench_open
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, requested_lookahead
 
 if TYPE_CHECKING:
     from promptpotter.domain.command_kinds import SubmitArmsPayload
     from promptpotter.domain.cycle_paths import CycleHop, Subject
+    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm.spend_book import SpendBook
     from promptpotter.infrastructure.store.command_log import PauseAsk
     from promptpotter.infrastructure.store.stores import Stores
@@ -43,8 +48,8 @@ class Flight:
 class FlightGauge:
     """Read at most once per ``every`` seconds: a full horizon is a bounds sweep, too dear per launch."""
 
-    def __init__(self, emit: Callable[[Flight], None], *, every: float = 0.5) -> None:
-        self._emit = emit
+    def __init__(self, ledger: CycleEventLog, *, every: float = 0.5) -> None:
+        self._ledger = ledger
         self._every = every
         self._reader: Callable[[], Flight] | None = None
         self._published = Flight()
@@ -71,7 +76,27 @@ class FlightGauge:
         reading = self._reader() if self._reader is not None else Flight()
         if reading != self._published:
             self._published = reading
-            self._emit(reading)
+            self._ledger.append(
+                FlightRecord(
+                    round=bound_round(),
+                    out=int(reading.out),
+                    allowed=int(reading.allowed),
+                    most=int(reading.most),
+                    affordable=None if reading.affordable is None else int(reading.affordable),
+                    cell_usd=None if reading.cell_usd is None else float(reading.cell_usd),
+                    waiting=None
+                    if reading.waiting is None
+                    else FlightWaiting(
+                        position=int(reading.waiting[0]), since=float(reading.waiting[1])
+                    ),
+                )
+            )
+
+
+def close_dead_bench(ledger: CycleEventLog) -> None:
+    """Every holder calls it as it takes the cycle: a bench bracket still open is a dead one's."""
+    if scan_bench_open(ledger.path):
+        ledger.append(PhaseRecord(phase=CampaignPhase.BENCH, event="exit"))
 
 
 @dataclass(frozen=True)
@@ -202,4 +227,4 @@ class CycleHold:
 def budget_stop(book: SpendBook) -> StopReason | None:
     """Read between samples and at a round boundary; whether a call may be SENT is the book's."""
     refused = book.exhausted()
-    return None if refused is None else REFUSAL_STOPS[refused]
+    return None if refused is None else ERROR_CATEGORY_INFO[refused].stops

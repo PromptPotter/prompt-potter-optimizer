@@ -7,17 +7,15 @@ import { interiorNodes, nodeSchemaReading, searchPoint } from "@/lib/derivations
 import { useConnector } from "@/lib/hooks/useConnector";
 import { draftPrompts } from "@/lib/prompt-fields";
 
-const LLM_ONLY: string[] = ["llm_only"];
-
-function isLlmOnly(steps: readonly string[]): boolean {
-  return steps.length === LLM_ONLY.length && steps.every((x, i) => x === LLM_ONLY[i]);
+function stepCount(n: number): string {
+  return n === 1 ? "1 step" : `${n} steps`;
 }
 
 export function pipelineLabel(draft: DraftCampaignWire): string {
-  return isLlmOnly(draft.active_steps) ? "LLM only" : `Research + Match · ${draft.active_steps.length} steps`;
+  return `${draft.mode ?? "custom"} · ${stepCount(draft.active_steps.length)}`;
 }
 
-// A node picked here opens the `node` view; a Mode excludes the rest of the draft's chain.
+// A node picked here opens the `node` view; a Mode sends the exclusions the server serves for it.
 export function PipelineSetupSection({
   draft,
   onApply,
@@ -30,37 +28,35 @@ export function PipelineSetupSection({
 }) {
   const read = useConnector();
   const schema = nodeSchemaReading(read);
-  const llmOnly = isLlmOnly(draft.active_steps);
-  // The chain before the draft's exclusions: what runs, and what the config excludes of it.
-  const chain = [...draft.active_steps, ...draft.config.exclude_nodes];
+  const single = draft.active_steps.length === 1;
 
   return (
     <ReadState read={read} subject="this check-in's pipeline" className="mech-empty">
       {(pipeline) => {
-        const nodes = interiorNodes(pipeline.view);
-        // The served view can hold `llm_only` itself, and picking only that is no switch at all.
-        const researchSteps = nodes.map((n) => n.id).filter((id) => !LLM_ONLY.includes(id));
-        const hasResearch = researchSteps.length > 0;
-        const llmNode = nodes.find((n) => n.kind === "llm") ?? null;
+        const llmNode =
+          interiorNodes(pipeline.view).find((n) => n.kind === "llm" && draft.active_steps.includes(n.id)) ?? null;
         // What each node runs, the dataset's own declaration and the draft's edits laid on.
         const overlay = pipeline.params;
         return (
           <>
             <p>
-              <label>
-                Mode{" "}
-                <Select
-                  value={llmOnly ? "llm" : "research"}
-                  options={[
-                    { value: "llm", label: "LLM only — one call per query" },
-                    { value: "research", label: "Research + Match", disabled: !hasResearch },
-                  ]}
-                  onChange={(mode) => {
-                    const runs = mode === "llm" ? LLM_ONLY : researchSteps;
-                    onApply({ config: { exclude_nodes: chain.filter((id) => !runs.includes(id)) } });
-                  }}
-                />
-              </label>{" "}
+              {draft.modes.length > 0 ? (
+                <label>
+                  Mode{" "}
+                  <Select
+                    value={draft.mode ?? ""}
+                    options={draft.modes.map((m) => ({
+                      value: m.name,
+                      label: `${m.name} · ${stepCount(m.steps.length)}`,
+                      disabled: m.exclude_nodes === null,
+                    }))}
+                    onChange={(name) => {
+                      const picked = draft.modes.find((m) => m.name === name);
+                      if (picked?.exclude_nodes) onApply({ config: { exclude_nodes: picked.exclude_nodes } });
+                    }}
+                  />
+                </label>
+              ) : null}{" "}
               <CopyButton
                 data={{
                   active_steps: draft.active_steps,
@@ -73,7 +69,7 @@ export function PipelineSetupSection({
 
             {children}
 
-            {llmOnly ? (
+            {single ? (
               llmNode ? (
                 <NodeSurface
                   node={llmNode}

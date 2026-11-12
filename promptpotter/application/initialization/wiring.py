@@ -19,10 +19,7 @@ from promptpotter.application.datasets.loaders import (
     resolve_bank,
     samples_from_dicts,
 )
-from promptpotter.application.datasets.prompts import (
-    pipeline_declared_nodes,
-    pipeline_node_overlay,
-)
+from promptpotter.application.datasets.prompts import pipeline_node_overlay
 from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
@@ -93,7 +90,7 @@ def _warn_if_labels_have_no_ranker(
     connector: Connector | None,
 ) -> None:
     """The converse is deliberately not warned: a ranker with no labels is no fault."""
-    if not schema.nodes or not samples:
+    if not schema.running_nodes or not samples:
         return
     if all_verifier_graded(s.ground_truth for s in samples):
         return
@@ -116,7 +113,7 @@ def _verify_required_observation_keys(
     required = connector.required_observation_keys
     if not required:
         return
-    declared = {key for node in schema.nodes for key in node.output_keys}
+    declared = {key for node in schema.running_nodes for key in node.output_keys}
     missing = [k for k in required if k not in declared]
     if missing:
         raise PayloadInvalidError(
@@ -300,7 +297,6 @@ async def _open_session(
         pipeline_read=PipelineRead(
             declaration=declaration,
             dataset_overlay=pipeline_node_overlay(definition.pipeline),
-            declared_nodes=pipeline_declared_nodes(definition.pipeline),
         ),
         backend_revision=backend_revision,
         bank=bank,

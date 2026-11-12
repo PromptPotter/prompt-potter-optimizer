@@ -7,12 +7,8 @@ call's arguments (`host_surface.py`), so a parse or a resolution lives here once
 
 from __future__ import annotations
 
-import asyncio
-import contextvars
-import functools
 import inspect
-from collections.abc import AsyncIterator, Callable
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import AsyncIterator
 from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import AfterValidator, Field
@@ -90,6 +86,7 @@ from promptpotter.application.pipeline_responses import (
     OptimizerRoster,
     optimizer_roster,
 )
+from promptpotter.application.read_workers import off_loop
 from promptpotter.application.scoring.measurement_log import (
     CellsScope,
     cells_scope,
@@ -184,18 +181,6 @@ class ReadParams(StrictModel):
         if inspect.iscoroutinefunction(type(self).answer):
             return await self.answer(caller)  # type: ignore[misc]
         return await off_loop(self.answer, caller)
-
-
-# The reads' own workers, as many as the threads a sync route had: a read never queues behind a
-# command's offloaded work on the loop's default executor.
-_READ_WORKERS = ThreadPoolExecutor(max_workers=40, thread_name_prefix="read")
-
-
-async def off_loop[*A, T](work: Callable[[*A], T], *args: *A) -> T:
-    """A read's disk work on the reads' workers, in the caller's context: every read door's one
-    offload, `answered`'s and a framed route's alike."""
-    run = functools.partial(contextvars.copy_context().run, work, *args)
-    return await asyncio.get_running_loop().run_in_executor(_READ_WORKERS, run)
 
 
 class _CycleAddressed(ReadParams):

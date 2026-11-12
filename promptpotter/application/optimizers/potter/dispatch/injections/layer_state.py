@@ -192,7 +192,7 @@ def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> tuple[str, .
         out.extend(Locus(node.name, f).name for f in node.open_prompt_fields)
         if offers_shots:
             out.append(Locus(node.name, SHOTS_KEY).name)
-    for node in schema.nodes:
+    for node in schema.running_nodes:
         out.extend(f"{node.name}.{pk}" if node.name else pk for pk in sorted(node.param_keys))
     return tuple(dict.fromkeys(out))
 

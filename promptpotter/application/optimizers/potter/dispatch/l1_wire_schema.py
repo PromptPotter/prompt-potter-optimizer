@@ -128,7 +128,7 @@ def build_l1_response_schema(
     pipeline_overlay["additionalProperties"] = False
     pp_properties = pipeline_overlay["properties"]
 
-    # The nodes the GRAPH reaches, never `active_steps`: an off-chain escalation node is what L4 tunes.
+    # The nodes the GRAPH reaches, never the chain alone: an off-chain escalation node is what L4 tunes.
     # No view means no projection to narrow by, never "narrow to nothing".
     reachable = {n.id for n in pipeline_schema.view.nodes} if pipeline_schema.view else None
     for node_name, keys in pipeline_schema.node_param_keys().items():

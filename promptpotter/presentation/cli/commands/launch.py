@@ -44,8 +44,7 @@ def prepare_launch() -> None:
 
 
 def pipeline_summary(session: Session, pipeline_params: PipelineParams) -> str:
-    ps = session.pipeline_schema
-    pipe = f"{ps.name} v{ps.version}"
+    pipe = session.backend_client.connector.name
     active = list(pipeline_params.steps or [])
     nodes = f"{len(active)} node{'s' if len(active) != 1 else ''}"
     if active:

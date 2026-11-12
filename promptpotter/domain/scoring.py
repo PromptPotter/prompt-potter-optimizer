@@ -24,6 +24,7 @@ from pydantic import (
 from pydantic_core import core_schema
 
 from promptpotter.domain.paired_reading import MeasurandUnit
+from promptpotter.domain.phases import ERROR_CATEGORY_INFO
 from promptpotter.domain.spend import StepUsage
 from promptpotter.domain.wire_record import (
     ALWAYS,
@@ -36,7 +37,6 @@ from promptpotter.domain.wire_record import (
     whole,
 )
 from promptpotter.shared.errors import (
-    ERROR_IS_CHARGED,
     BadRequestError,
     ErrorCategory,
     error_category,
@@ -316,7 +316,7 @@ class MeasuredCell:
     @property
     def charged(self) -> bool:
         """Whether it errored for a reason the configuration under test answers for."""
-        return self.error_category is not None and ERROR_IS_CHARGED[self.error_category]
+        return self.error_category is not None and ERROR_CATEGORY_INFO[self.error_category].charged
 
     @property
     def verifier_graded(self) -> bool:

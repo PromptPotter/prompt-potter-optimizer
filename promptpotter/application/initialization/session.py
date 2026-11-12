@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
+from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, PartitionRecord, restored_partition
@@ -77,6 +78,8 @@ class LaunchState:
     human_intervened: bool = False
     control: RunControl = field(default_factory=RunControl)
     flight: FlightGauge | None = None
+    # What one phase view needs of an earlier one (`views/ingress.py`); a fork's session shares it.
+    view_context: ViewContext = field(default_factory=ViewContext)
     # What admission held for this launch, set at the runner seam BEFORE the book is armed.
     held: HeldBudget | None = None
     # The cycle lock and projections the launch holds: `build_run_observers` moves them onto a fork.
@@ -160,11 +163,6 @@ class Session:
             bank=bank,
             drawn=restored_partition(bank.samples, drawn),
         )
-
-    @property
-    def index_terms(self) -> list[str]:
-        truths = {s.ground_truth for s in self.bank.samples if s.ground_truth}
-        return sorted(truths | set(self.candidate_library))
 
     @property
     def hop(self) -> CycleHop:

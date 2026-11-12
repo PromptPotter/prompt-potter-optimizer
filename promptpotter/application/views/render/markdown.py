@@ -194,13 +194,7 @@ def to_markdown(view: LogMdView) -> str:
         f"- selection: {_selection(status.standing)}",
         f"- cost so far: {_spent(status.spent)}",
     ]
-    scored_rounds = status.rounds_completed - status.gen_only_rounds
-    if status.gen_only_rounds:
-        parts.append(
-            f"- rounds completed: {scored_rounds} scored (+ {status.gen_only_rounds} gen-only)"
-        )
-    else:
-        parts.append(f"- rounds completed: {status.rounds_completed}")
+    parts.append(f"- rounds completed: {status.rounds_completed}")
     if status.started_at:
         parts.append(f"- started: {status.started_at}")
     if status.finished_at:

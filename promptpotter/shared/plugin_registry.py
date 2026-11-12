@@ -50,13 +50,10 @@ class Registry[M: _Named]:
         group: str,
         builtins: Callable[[], Iterable[tuple[str, object]]],
         validate: Callable[[object, str], M],
-        *,
-        shipped: frozenset[str] = frozenset(),
     ) -> None:
         self.group = group
         self._builtins = builtins
         self._validate = validate
-        self._shipped = shipped
 
     @functools.cached_property
     def _loaded(self) -> tuple[Mapping[str, M], Mapping[str, str]]:
@@ -75,8 +72,6 @@ class Registry[M: _Named]:
         for where, obj in self._builtins():
             origin = built_in_origin(where)
             add(self._validate(obj, origin), origin, BUILT_IN)
-        if absent := sorted(self._shipped - table.keys()):
-            raise RuntimeError(f"{self.group}: {absent} must be built-in and are not.")
         built_in = frozenset(table)
 
         for label, origin, obj in load_plugins(self.group):

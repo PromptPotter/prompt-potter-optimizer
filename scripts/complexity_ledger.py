@@ -36,7 +36,7 @@ BASELINE = {
     # Parameters annotated `Any`.
     "any_params": 35,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 45,
+    "domain_any_maps": 44,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 9,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.
@@ -48,7 +48,7 @@ BASELINE = {
     # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
     "deferred_imports": 6,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
-    "p_record": 20,
+    "p_record": 23,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 13,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
@@ -61,7 +61,7 @@ BASELINE = {
     # and the public members of each object one of its properties exposes.
     "p_member": 12,
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
-    "p_reads": 314,
+    "p_reads": 311,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.

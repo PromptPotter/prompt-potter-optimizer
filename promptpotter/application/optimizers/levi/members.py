@@ -30,7 +30,7 @@ from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.pipeline_schema import NodeKind
+from promptpotter.domain.pipeline_schema import INITIAL_POPULATION, NodeKind
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import greedy_column_subset, logistic
@@ -137,7 +137,7 @@ class ProxyCss(nodes.Sampler):
         # The proxy is chosen among the discovery set, which the search split must hold whole.
         if knobs.discovery > search:
             return nodes.PanelSize(cells=0, block_size=0)
-        cells = knobs.discovery if pipeline == nodes.INITIAL_POPULATION else knobs.size
+        cells = knobs.discovery if pipeline == INITIAL_POPULATION else knobs.size
         return nodes.PanelSize(cells=cells, block_size=cells)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:

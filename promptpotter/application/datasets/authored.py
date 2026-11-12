@@ -13,13 +13,11 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
-from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.scoring import Scorer
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     DatasetDefinition,
     ResolvedDataset,
-    declared_pipelines,
     read_dataset_definition,
     read_dataset_framing,
 )
@@ -40,10 +38,6 @@ class AuthoredDataset:
 
     task_description: str
     """``task.md``'s body, stripped; ``""`` when the definition has none."""
-
-    active_steps: list[str]
-    """``dataset_access.py::declared_pipelines``' default; ``[]`` only with no nodes. A reused
-    dataset's draft seeds the origin prompts of this chain."""
 
     candidate_library: tuple[str, ...]
     """``candidate_library.txt`` — the per-pipeline origin's target list, part of
@@ -125,12 +119,10 @@ def dataset_scorer(dataset: ResolvedDataset) -> Scorer:
 
 def read_authored_dataset(dataset: ResolvedDataset) -> AuthoredDataset:
     definition = read_dataset_definition(dataset)
-    pipeline: dict[str, Any] = {} if definition is None else definition.pipeline
     return AuthoredDataset(
         campaign_config=validated_campaign_config(
             _campaign_block(definition), path=dataset.directory / DEFINITION_FILE
         ),
         task_description=read_dataset_framing(dataset).description,
-        active_steps=declared_pipelines(pipeline).get(DEFAULT_PIPELINE, []),
         candidate_library=read_candidate_library_file(dataset.directory),
     )

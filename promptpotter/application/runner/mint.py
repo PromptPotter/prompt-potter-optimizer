@@ -35,12 +35,13 @@ from promptpotter.application.runner.inner.tasks import retarget_inner_spawn
 from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
 from promptpotter.application.views.ingress import init_enter, init_exit
+from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import CampaignPhase
-from promptpotter.domain.run_records import StandingBudgetRecord
+from promptpotter.domain.run_records import PhaseRecord, StandingBudgetRecord
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
@@ -55,13 +56,13 @@ if TYPE_CHECKING:
     from collections.abc import Collection
 
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.arms import PointContext
-    from promptpotter.domain.campaign import RunDeclaration
+    from promptpotter.domain.campaign import Campaign, RunDeclaration
     from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.run_mode import RunMode
     from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -91,11 +92,13 @@ class PreparedRun:
     origin: CampaignOrigin
     campaign_config: CampaignConfig
     dataset: list[Sample]
+    campaign: Campaign
 
 
 def start_launch(session: Session) -> None:
-    """The launch's clock and its control, fresh, keeping only the cycles it measures FOR."""
+    """The launch's clock, control and view context, fresh, keeping only the cycles it measures FOR."""
     session.state.clock = LaunchClock.now()
+    session.state.view_context = ViewContext()
     session.state.control = RunControl(
         commands=session.store.commands,
         enclosing=session.state.control.enclosing,
@@ -112,7 +115,6 @@ async def open_launch(
     budget: HeldBudget,
 ) -> PreparedRun:
     """*bank* is the whole bank; the launch walks the split its cycle drew."""
-    cb = observers.callbacks
     campaign_config = cycle.config
     partition = cycle_partition(session, bank, campaign_config)
     dataset = list(partition.search)
@@ -129,8 +131,12 @@ async def open_launch(
         }
     )
     session.state.held = budget
+    campaign = campaigns.load_campaign(session.campaign_id)
+    assert campaign is not None, "a launch runs a campaign its session is bound to"
     # Declared before origin scoring; the record is the readout, the arming below the enforcement.
-    declare_run_wiring(session, campaign_config, cb.ledger, selected=bound_optimizer())
+    declare_run_wiring(
+        session, campaign_config, observers.ledger, campaign=campaign, selected=bound_optimizer()
+    )
     # A fresh mint was admitted before its campaign existed: its ceiling is stored here.
     move_campaign_money(
         budget.standing,
@@ -152,22 +158,23 @@ async def open_launch(
         book.refuse_unpriced(
             cell, filed(CELL).kind, NEXT_CELL, session.backend_client.connector.cell_payer
         )
-    # The launch's one push of the term index, before the origin walk sends a cell.
-    if session.index_terms:
-        await session.backend_client.init_session(session.index_terms)
+    # The launch's one session open, before the origin walk sends a cell.
+    await session.backend_client.init_session(session.bank.samples, session.candidate_library)
     origin = await establish_campaign_origin(
-        session, dataset, campaign_config, cycle=cycle, listener=cb
+        session, dataset, campaign_config, cycle=cycle, ledger=observers.ledger
     )
     if origin.locked_scoring is not None:
         campaign_config = campaign_config.model_copy(update={"scoring": origin.locked_scoring})
-    return PreparedRun(origin=origin, campaign_config=campaign_config, dataset=dataset)
+    return PreparedRun(
+        origin=origin, campaign_config=campaign_config, dataset=dataset, campaign=campaign
+    )
 
 
 def arm_run_controls(session: Session, observers: RunObservers) -> None:
     """Always armed, caps or none, before origin scoring spends; a fork arms its own cycle dir."""
     if session.state.held is None:
         raise RuntimeError("a run's book is armed only over what admission held for it")
-    session.state.flight = FlightGauge(observers.callbacks.on_flight)
+    session.state.flight = FlightGauge(observers.ledger)
     book = open_spend_book(
         session.state.held,
         stores=session.store,
@@ -218,16 +225,24 @@ def onto_fork(
     parent: CycleHop,
     observers: RunObservers,
     *,
-    campaign_config: CampaignConfig,
+    prep: PreparedRun,
 ) -> RunObservers:
     _rebase_held(session, parent)
     observers = build_run_observers(
         session=session,
-        campaign_config=campaign_config,
+        campaign_config=prep.campaign_config,
         forked_from=observers,
     )
+    # A fork's config is already admitted, so it is wired as its observers open.
+    declare_run_wiring(
+        session,
+        prep.campaign_config,
+        observers.ledger,
+        campaign=prep.campaign,
+        selected=bound_optimizer(),
+    )
     # The line's every emit lands on the cycle it moved onto, under the launch's one scope.
-    rescope(ledger=observers.callbacks.ledger)
+    rescope(ledger=observers.ledger)
     arm_run_controls(session, observers)
     return observers
 
@@ -309,7 +324,7 @@ async def _enter_init(
     config: CampaignConfig,
     selected: SelectedOptimizer,
     dataset: list[Sample],
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
     session: Session,
     origin: CampaignOrigin,
     survey: CampaignSurvey,
@@ -334,16 +349,18 @@ async def _enter_init(
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
-    cb.on_phase(
-        CampaignPhase.INIT,
-        "enter",
-        view=init_enter(
-            cb.view_context,
-            config=config,
-            dataset=dataset,
-            session=session,
-            warnings=preflight_warnings,
-        ),
+    ledger.append(
+        PhaseRecord(
+            phase=CampaignPhase.INIT,
+            event="enter",
+            view=init_enter(
+                session.state.view_context,
+                config=config,
+                dataset=dataset,
+                session=session,
+                warnings=preflight_warnings,
+            ),
+        )
     )
 
 
@@ -351,7 +368,7 @@ async def open_cycle(
     prep: PreparedRun,
     *,
     session: Session,
-    cb: RunCallbacks,
+    ledger: CycleEventLog,
     mode: RunMode,
 ) -> tuple[Cycle, CycleHop | None]:
     """The cycle holds the session it runs on, and beside it the cycle a divergence forked it from.
@@ -363,7 +380,7 @@ async def open_cycle(
     _init_cycle(session, resume_from_round_override=mode.from_round)
     # The one cross-campaign read of this cycle: preflight's and every round's earned blocks.
     survey = CampaignSurvey(session.store.campaigns)
-    await _enter_init(config, selected, dataset, cb, session, origin, survey)
+    await _enter_init(config, selected, dataset, ledger, session, origin, survey)
     # A round the ledger closed, the origin's included, is replayed, never closed again; a rewind
     # keeps the round it rewinds to, so it always replays and is written once the replay proceeds.
     replays = (
@@ -382,7 +399,7 @@ async def open_cycle(
         fork = await resume_with_divergence_check(
             cycle,
             dataset,
-            cb,
+            ledger,
             skip_divergence_check=mode.no_divergence_check,
             fork_on_divergence=mode.fork_on_divergence,
             rewind=mode.from_round,
@@ -397,8 +414,8 @@ async def open_cycle(
     return cycle, forked_from
 
 
-def close_init(cycle: Cycle, cb: RunCallbacks) -> None:
-    """*cb* is the cycle's own: INIT exits on the cycle the loop runs, a fork's included."""
+def close_init(cycle: Cycle, ledger: CycleEventLog) -> None:
+    """*ledger* is the cycle's own: INIT exits on the cycle the loop runs, a fork's included."""
     session = cycle.session
     cycle.sample_index = SampleIndex.ensure_for(
         session.store,
@@ -407,10 +424,12 @@ def close_init(cycle: Cycle, cb: RunCallbacks) -> None:
         sample_ids=session.state.scoring.partition.admitted_ids,
     )
     # A RUNNING cycle's `log.md` reads its formula off this bracket (`scorer_cell_formula`).
-    cb.on_phase(
-        CampaignPhase.INIT,
-        "exit",
-        view=init_exit(cb.view_context, cycle=cycle, session=session),
+    ledger.append(
+        PhaseRecord(
+            phase=CampaignPhase.INIT,
+            event="exit",
+            view=init_exit(session.state.view_context, cycle=cycle, session=session),
+        )
     )
     # The cycle id is FINAL only here; the spawn context was published before a fork could move it.
     retarget_inner_spawn(session)

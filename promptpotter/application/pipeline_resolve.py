@@ -18,13 +18,11 @@ from promptpotter.application.datasets.draft_campaign import (
     UPLOAD_DEFINITION_KEYS,
     DraftCriterion,
     draft_criterion,
-    upload_basis_block,
     upload_pipeline_json,
 )
 from promptpotter.application.datasets.prompts import (
     declared_origin_prompts,
     has_dataset_prompts,
-    pipeline_declared_nodes,
     pipeline_node_overlay,
 )
 from promptpotter.application.datasets.startability import draft_samples
@@ -96,6 +94,7 @@ from promptpotter.domain.pipeline_schema import (
     ParamLayer,
     ParamSource,
     reach_map,
+    running_only,
 )
 from promptpotter.domain.run_records import (
     DefaultsDrift,
@@ -111,11 +110,13 @@ from promptpotter.infrastructure.llm.pricing import remembered_priced
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
+    campaign_defaults,
     dataset_connector,
     dataset_experiment,
     declared_pipelines,
     resolve_dataset,
     runnable_definition,
+    with_node_templates,
 )
 from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.infrastructure.store.read_model import derived
@@ -176,10 +177,9 @@ class FoldedParams:
 @dataclass(frozen=True)
 class ParamLayers:
     """What a subject's nodes run with, as ONE fold over `PARAM_LAYERS` in their declared order.
-    A subject picks its layers by the data it lays: an empty layer lays nothing. Only the chain's
-    steps are laid; the floors are read off the params laid before them."""
+    A subject picks its layers by the data it lays: an empty layer lays nothing. Only the running
+    set is laid, the chain's steps ride the wire; the floors are read off the params laid before them."""
 
-    steps: list[str]
     schema: PipelineSchema
     workspace: Path | None
     dataset: Mapping[str, Any] = field(default_factory=dict)
@@ -192,13 +192,14 @@ class ParamLayers:
     recorded: Mapping[str, Any] = field(default_factory=dict)
 
     def fold(self) -> FoldedParams:
-        params = PipelineParams().with_steps(list(self.steps))
+        params = PipelineParams().with_steps(list(self.schema.active_steps))
+        running = self.schema.running
         provenance: dict[str, dict[str, ParamSource]] = {}
         for source in PARAM_LAYERS:
             laid = {
                 node: dict(cfg)
                 for node, cfg in self._layer(source, params).items()
-                if node in self.steps
+                if node in running
             }
             params = params.with_nodes(
                 apply_node_overlay(
@@ -235,9 +236,9 @@ class ParamLayers:
         return out
 
     def _floors(self, params: PipelineParams) -> dict[str, dict[str, Any]]:
-        answering = schema_as_run(self.schema, params, self.steps, self.workspace)
+        answering = schema_as_run(self.schema, params, self.workspace)
         floors: dict[str, dict[str, Any]] = {}
-        for name in self.steps:
+        for name in self.schema.running:
             node = answering.get_node(name)
             cfg = params.nodes.get(name)
             if node is None or cfg is None or "reasoning_effort" in cfg.model_fields_set:
@@ -250,12 +251,10 @@ class ParamLayers:
         return floors
 
 
-def _routed_as_run(
-    schema: PipelineSchema, pipeline_params: PipelineParams, active: list[str]
-) -> PipelineSchema:
+def _routed_as_run(schema: PipelineSchema, pipeline_params: PipelineParams) -> PipelineSchema:
     running = {
         name: route
-        for name in active
+        for name in schema.running
         if (
             route := {
                 key: value
@@ -281,17 +280,15 @@ def _routed_as_run(
 def schema_as_run(
     schema: PipelineSchema,
     pipeline_params: PipelineParams,
-    active: list[str],
     workspace: Path | None,
 ) -> PipelineSchema:
-    routed = _routed_as_run(schema, pipeline_params, active)
+    routed = _routed_as_run(schema, pipeline_params)
     answered = schema.model_capabilities
     fresh = resolve_menu(
         sorted(
             (n.provider, model)
-            for n in routed.declared_nodes
-            if n.name in active
-            and isinstance(model := n.current_config.get("model"), str)
+            for n in routed.running_nodes
+            if isinstance(model := n.current_config.get("model"), str)
             and model not in answered.get(n.provider, {})
         ),
         workspace=workspace,
@@ -315,7 +312,11 @@ def overlay_dataset_pipeline(served: Mapping[str, Any], local: Mapping[str, Any]
     # The operator's model MENU bounds the L1 enum; dropped, the service's catalogue is searched.
     if local.get("available_models"):
         out["available_models"] = local["available_models"]
-    out["nodes"] = merge_node_blocks(out.get("nodes") or {}, local.get("nodes") or {})
+    # A served node the definition's walks leave on none is no node the graph fires: it leaves.
+    walked = {n for steps in declared_pipelines(out).values() for n in steps}
+    displaced = {n for steps in declared_pipelines(served).values() for n in steps} - walked
+    nodes = merge_node_blocks(out.get("nodes") or {}, local.get("nodes") or {})
+    out["nodes"] = {n: block for n, block in nodes.items() if n not in displaced}
     return out
 
 
@@ -363,8 +364,8 @@ def _draft_local(stores: Stores, draft: DraftFile) -> dict[str, Any]:
     dataset's own file."""
     match draft.basis:
         case UploadBasis() as upload:
-            half = campaign_config_over(upload_basis_block(upload), draft.config)
-            return upload_pipeline_json(upload, draft.slug, half.pipeline_overlay)
+            half = campaign_config_over(campaign_defaults(), draft.config)
+            return upload_pipeline_json(upload, half.pipeline_overlay)
         case DatasetBasis(dataset=name):
             return runnable_definition(resolve_dataset(stores, name)).pipeline
         case _:
@@ -415,7 +416,7 @@ def identity_layer(
     connector: Connector | None,
     experiment: Mapping[str, Any] | None,
     judges: Mapping[str, JudgeSpec] | None,
-    active: list[str],
+    chain: Sequence[str],
 ) -> dict[str, dict[str, Any]]:
     """The connector's and the judges' ONE channel into the archive key."""
     out: dict[str, dict[str, Any]] = {}
@@ -423,9 +424,9 @@ def identity_layer(
         if stores is None:
             raise ValueError(f"{connector.name}: its identity needs the stores")
         out.update(connector.identity_config(stores, experiment))
-    if judges and active:
+    if judges and chain:
         # The TERMINAL step: a judge grades the answer that node emits.
-        out.setdefault(active[-1], {})[JUDGE_INSTRUMENT_KEY] = judge_instrument(judges)
+        out.setdefault(chain[-1], {})[JUDGE_INSTRUMENT_KEY] = judge_instrument(judges)
     return out
 
 
@@ -434,19 +435,9 @@ def _resolve_active_schema(
     *,
     exclude: list[str],
     narrowing: dict[str, NodeSearchNarrowing],
-    declared: frozenset[str],
     workspace: Path | None = None,
-) -> tuple[list[str], PipelineSchema]:
-    active = pipeline_schema.active_steps_excluding(exclude)
-
-    filtered = pipeline_schema
-    if exclude:
-        filtered = pipeline_schema.filter_to_steps(active)
-    # Declared UNION the running chain: `promptpotter-self/panel` declares `l2_context` / `l3_plan`
-    # off-chain on purpose, and a dataset declaring fewer nodes than it runs must lose none.
-    if declared:
-        keep = declared | set(filtered.active_steps)
-        filtered = filtered.filter_to_steps(sorted(keep))
+) -> PipelineSchema:
+    filtered = running_only(pipeline_schema, exclude=exclude)
     if narrowing:
         filtered = filtered.narrow(narrowing)
     # Every run keys its cells with the pins, workspace or not.
@@ -456,19 +447,18 @@ def _resolve_active_schema(
         filtered = filtered.model_copy(
             update={"model_capabilities": resolve_schema_menu(filtered, workspace=workspace)}
         )
-    return active, filtered
+    return filtered
 
 
 def _apply_starting_prompts(
     pipeline_params: PipelineParams,
     *,
     filtered: PipelineSchema,
-    active: list[str],
     dataset: ResolvedDataset,
     dataset_name: str,
 ) -> PipelineParams:
     """Assumes the caller checked ``has_dataset_prompts``."""
-    prompt_nodes = [n for n in filtered.prompt_nodes() if n.name in active]
+    prompt_nodes = filtered.prompt_nodes()
     authored = declared_origin_prompts(dataset, prompt_nodes)
     for pnode in prompt_nodes:
         if pnode.name not in authored:
@@ -496,16 +486,16 @@ def _apply_starting_prompts(
 def _validate_prompt_reach(
     *,
     filtered: PipelineSchema,
-    active: list[str],
     has_starting_prompts: bool,
     prompt_fields_as_node_params: bool,
     dataset_name: str,
 ) -> None:
-    if any(n.name in active for n in filtered.prompt_nodes()):
+    if filtered.prompt_nodes():
         return
+    running = list(filtered.running)
     if has_starting_prompts:
         raise PayloadInvalidError(
-            f"dataset {dataset_name!r} ships starting prompts but no active node in {active} "
+            f"dataset {dataset_name!r} ships starting prompts but no running node in {running} "
             f"declares `prompt_info`, so the rendered prompt is dropped before the wire and "
             f"every cell runs with an empty system prompt. An LLM node must declare it, in "
             f"GET /pipeline or in the dataset's `dataset.yaml::pipeline`.",
@@ -513,7 +503,7 @@ def _validate_prompt_reach(
         )
     if not prompt_fields_as_node_params:
         raise PayloadInvalidError(
-            f"dataset {dataset_name!r}: no active node in {active} declares `prompt_info`, and "
+            f"dataset {dataset_name!r}: no running node in {running} declares `prompt_info`, and "
             f"this backend sends a node only the rendered prompt, so every candidate scores as "
             f"the same no-skill call and the round reports a tie it never measured. Declare "
             f"`prompt_info` with its `fields` on the node the prompt is meant for.",
@@ -525,15 +515,13 @@ def _validate_model_ownership(
     pipeline_params: PipelineParams,
     *,
     filtered: PipelineSchema,
-    active: list[str],
     dataset_name: str,
 ) -> None:
-    for name in active:
-        node_obj = filtered.get_node(name)
-        if node_obj and node_obj.is_llm and not pipeline_params.node(name).model:
+    for node in filtered.running_nodes:
+        if node.is_llm and not pipeline_params.node(node.name).model:
             raise PayloadInvalidError(
-                f"dataset {dataset_name!r}: LLM node {name!r} has no owned model. "
-                f"Declare it in the dataset's dataset.yaml::pipeline.nodes.{name}.config.model "
+                f"dataset {dataset_name!r}: LLM node {node.name!r} has no owned model. "
+                f"Declare it in the dataset's dataset.yaml::pipeline.nodes.{node.name}.config.model "
                 f"— the dataset owns its task model, never the backend default.",
                 code="pipeline_config_invalid",
             )
@@ -599,14 +587,14 @@ def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
 
 
 def draft_declared(stores: Stores, draft: DraftFile) -> CampaignConfig:
-    """The campaign half of ``draft.config``, laid over its basis: an upload's connector defaults,
+    """The campaign half of ``draft.config``, laid over its basis: an upload's `defaults.yaml` campaign,
     its definition's half (`UPLOAD_DEFINITION_KEYS`) left to `_draft_local`; a reused dataset's
     own block, every key. A draft's ``scoring`` is the criterion whole, so it replaces the
     basis's."""
     partial = draft.config
     match draft.basis:
-        case UploadBasis() as upload:
-            basis = upload_basis_block(upload)
+        case UploadBasis():
+            basis = campaign_defaults()
             partial = {k: v for k, v in partial.items() if k not in UPLOAD_DEFINITION_KEYS}
         case DatasetBasis(dataset=name):
             basis = dataset_campaign_block(resolve_dataset(stores, name))
@@ -650,7 +638,6 @@ def cycle_config(stores: Stores, campaign: Campaign, hop: CycleHop | None) -> Cy
 class _Merge:
     declared: PipelineSchema
     filtered: PipelineSchema
-    active: list[str]
     cfg: CampaignConfig
     layers: ParamLayers
     # The free tier fences the target's nodes: it is offered only the tier's task models.
@@ -682,30 +669,26 @@ class _DraftMerge(_Merge):
 
 def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> _DraftMerge:
     local = _draft_local(stores, draft)
-    declared = parse_pipeline_response(served.over(local))
+    templated = with_node_templates(local)
+    declared = parse_pipeline_response(served.over(templated))
     campaign = draft_declared(stores, draft)
     cfg = _fenced(stores, draft, campaign, declared)
-    active, filtered = _resolve_active_schema(
-        declared,
-        exclude=list(cfg.exclude_nodes),
-        narrowing=cfg.optimizer_narrowing,
-        declared=pipeline_declared_nodes(local),
+    filtered = _resolve_active_schema(
+        declared, exclude=list(cfg.exclude_nodes), narrowing=cfg.optimizer_narrowing
     )
     fence = free_fence(stores, served.connector)
     return _DraftMerge(
         # What was on OFFER before this draft narrowed it, so a menu cannot shrink to its own pick.
         declared=declared,
         filtered=filtered,
-        active=active,
         cfg=cfg,
         layers=ParamLayers(
-            steps=active,
             schema=filtered,
             workspace=stores.base_dir,
-            dataset=pipeline_node_overlay(local),
+            dataset=pipeline_node_overlay(templated),
             campaign=cfg.pipeline_overlay,
             free_tier=free_tier_overlay(cfg, declared, fence),
-            identity=identity_layer(None, None, None, cfg.judges, active),
+            identity=identity_layer(None, None, None, cfg.judges, filtered.active_steps),
         ),
         free=_task_fenced(fence),
         steer_bound=False,
@@ -727,19 +710,14 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
     schema = parse_pipeline_response(read.declaration)
     cycle = cycle_config(stores, campaign, hop)
     cfg = cycle.config
-    active, filtered = _resolve_active_schema(
-        schema,
-        exclude=list(cfg.exclude_nodes),
-        narrowing=cfg.optimizer_narrowing,
-        declared=read.declared_nodes,
+    filtered = _resolve_active_schema(
+        schema, exclude=list(cfg.exclude_nodes), narrowing=cfg.optimizer_narrowing
     )
     return _CampaignMerge(
         declared=schema,
         filtered=filtered,
-        active=active,
         cfg=cfg,
         layers=ParamLayers(
-            steps=active,
             schema=filtered,
             workspace=stores.base_dir,
             dataset=read.dataset_overlay,
@@ -775,7 +753,7 @@ def _recorded_read(resolved: ResolvedRun, hop: CycleHop) -> PipelineRead:
 
 
 def _served_menu(m: _Merge, params: PipelineParams, workspace: Path | None) -> CapabilityMenu:
-    return resolve_schema_menu(_routed_as_run(m.filtered, params, m.active), workspace=workspace)
+    return resolve_schema_menu(_routed_as_run(m.filtered, params), workspace=workspace)
 
 
 def campaign_admits(cfg: CampaignConfig, schema: PipelineSchema) -> frozenset[Presumption]:
@@ -946,7 +924,7 @@ def resolve_pipeline_for_campaign(
             connectors.CONNECTORS.get(campaign.connector),
             m.experiment,
             m.cfg.judges,
-            m.active,
+            m.filtered.active_steps,
         ),
         evolved=evolved,
         recorded=measured,
@@ -1039,11 +1017,8 @@ async def resolve_pipeline_for_dataset(
     cfg = load_dataset_campaign_config(dataset)
     definition = runnable_definition(dataset)
     schema = parse_pipeline_response(declared)
-    _, filtered = _resolve_active_schema(
-        schema,
-        exclude=list(cfg.exclude_nodes),
-        narrowing=cfg.optimizer_narrowing,
-        declared=pipeline_declared_nodes(definition.pipeline),
+    filtered = _resolve_active_schema(
+        schema, exclude=list(cfg.exclude_nodes), narrowing=cfg.optimizer_narrowing
     )
     # Declared, valueless: nothing steers it.
     rows = filtered.node_config_schema(steer_bound=False)
@@ -1139,7 +1114,6 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
             else [
                 read.declaration,
                 read.dataset_overlay,
-                sorted(read.declared_nodes),
                 read.free_tier_overlay,
             ]
         ),
@@ -1154,7 +1128,7 @@ def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
     nodes = {n.name: n for n in m.filtered.declared_nodes}
     out: list[RunsWithParam] = []
     by_vendor: dict[str, list[str]] = {}
-    for name in m.active:
+    for name in m.filtered.running:
         if (cfg := stripped.laid_nodes.get(name)) is None:
             continue
         for key in sorted(set(cfg) - {OUTPUT_SCHEMA_KEY}):
@@ -1208,11 +1182,10 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
     dataset_name = session.measured_dataset
     dataset = session.dataset
 
-    active, filtered = _resolve_active_schema(
+    filtered = _resolve_active_schema(
         session.pipeline_schema,
         exclude=exclude,
         narrowing=campaign_config.optimizer_narrowing,
-        declared=session.pipeline_read.declared_nodes,
         workspace=session.store.base_dir,
     )
     # Laid at the mint, then read off its record: an account leaving the tier moves no minted run.
@@ -1230,7 +1203,6 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
         }
     read = session.pipeline_read.model_copy(update=minted)
     folded = ParamLayers(
-        steps=active,
         schema=filtered,
         workspace=session.store.base_dir,
         dataset=read.dataset_overlay,
@@ -1242,7 +1214,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
             session.backend_client.connector,
             session.backend_client.workload.experiment,
             campaign_config.judges,
-            active,
+            filtered.active_steps,
         ),
     ).fold()
     pipeline_params = folded.params
@@ -1250,7 +1222,6 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
     ships_prompts = dataset is not None and has_dataset_prompts(dataset)
     _validate_prompt_reach(
         filtered=filtered,
-        active=active,
         has_starting_prompts=ships_prompts,
         prompt_fields_as_node_params=session.backend_client.connector.prompt_fields_as_node_params,
         dataset_name=dataset_name,
@@ -1260,23 +1231,20 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
         pipeline_params = _apply_starting_prompts(
             pipeline_params,
             filtered=filtered,
-            active=active,
             dataset=dataset,
             dataset_name=dataset_name,
         )
 
-    _validate_model_ownership(
-        pipeline_params, filtered=filtered, active=active, dataset_name=dataset_name
-    )
+    _validate_model_ownership(pipeline_params, filtered=filtered, dataset_name=dataset_name)
     # Asked here so a channel the connector cannot run stops init, not every cell of the origin.
     session.backend_client.connector.prompt_delivery(pipeline_params)
 
     excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
-    logger.info("Active nodes: %s%s", ", ".join(active), excl_str)
+    logger.info("Running nodes: %s%s", ", ".join(filtered.running), excl_str)
 
     return replace(
         session,
-        pipeline_schema=schema_as_run(filtered, pipeline_params, active, session.store.base_dir),
+        pipeline_schema=schema_as_run(filtered, pipeline_params, session.store.base_dir),
         pipeline_read=read,
         pipeline_params=pipeline_params,
         identity_keys=folded.identity_keys,

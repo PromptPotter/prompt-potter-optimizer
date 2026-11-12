@@ -569,25 +569,25 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     # reader of it finds what its run init read.
     session.record_resolved_run()
     campaigns.mint_cycle(hop)
-    # The mint's commit: a mint that dies before it leaves no campaign to list, and none without
-    # its cycle. Its wiring reads the campaign back, so it follows.
-    campaigns.create_campaign(
-        Campaign(
-            campaign_id=hop.campaign_id,
-            dataset_name=session.measured_dataset,
-            created_at=now,
-            root_cycle_id=hop.cycle_id,
-            root_content_hash=plan.origin_hash,
-            treatment=plan.treatment,
-            declaration=declaration,
-            lifecycle_status="active",
-            lifecycle_changed_at=now,
-        )
+    campaign = Campaign(
+        campaign_id=hop.campaign_id,
+        dataset_name=session.measured_dataset,
+        created_at=now,
+        root_cycle_id=hop.cycle_id,
+        root_content_hash=plan.origin_hash,
+        treatment=plan.treatment,
+        declaration=declaration,
+        lifecycle_status="active",
+        lifecycle_changed_at=now,
     )
+    ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
+    declare_run_wiring(
+        session, plan.cycle.config, ledger, campaign=campaign, selected=plan.optimizer
+    )
+    # The mint's commit, last: a mint that dies before it leaves no campaign to list.
+    campaigns.create_campaign(campaign)
     # The name labels the bank its newest campaign declares, an L4 inner cell's as every other.
     session.store.tenant_datasets.relabel(session.measured_dataset, declaration.dataset_hash)
-    ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
-    declare_run_wiring(session, plan.cycle.config, ledger, selected=plan.optimizer)
     logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
     return session
 

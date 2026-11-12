@@ -13,6 +13,7 @@ import yaml
 from pydantic import Field, TypeAdapter
 
 from promptpotter import connectors
+from promptpotter.config.paths import install_datasets_root
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
@@ -171,18 +172,47 @@ class DatasetDefinition:
         return declared.lower() if isinstance(declared, str) else ""
 
 
+def with_node_templates(pipeline: Mapping[str, Any]) -> dict[str, Any]:
+    """*pipeline* with its connector's template under each node it declares; a connector this
+    install does not register declares none."""
+    declared = pipeline.get("backend_type")
+    connector = connectors.CONNECTORS.table.get(
+        declared.lower() if isinstance(declared, str) else ""
+    )
+    nodes = pipeline.get("nodes") or {}
+    if connector is None or not nodes:
+        return dict(pipeline)
+    templates = connector.node_templates
+    return {
+        **pipeline,
+        "nodes": {
+            n: merge_node_blocks({n: dict(templates[n])}, {n: block})[n]
+            if n in templates
+            else block
+            for n, block in nodes.items()
+        },
+    }
+
+
+def campaign_defaults() -> dict[str, Any]:
+    """The shipped ``campaign`` defaults every upload's draft is laid over, as every install definition is."""
+    layer = read_file(
+        install_datasets_root() / DEFAULTS_FILE, definition_layer, FileKind.STORED_CONFIG
+    )
+    assert layer is not None, "the wheel ships `defaults.yaml`"
+    return _section(layer, "campaign")
+
+
 def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | None:
     """Per section, root first: ``pipeline`` replaces its top-level keys and merges its nodes,
     ``campaign`` layers depth-first, ``source`` and ``panel`` merge by key, and the deepest
-    ``card`` stands whole. A node in ``defaults.yaml`` is a TEMPLATE: only a node the dataset or a
-    family declares receives it. A layer that is no definition layer raises
-    ``FileUnreadableError`` by its path."""
+    ``card`` stands whole; its connector's node templates lie under the nodes (`with_node_templates`).
+    A layer that is no definition layer raises ``FileUnreadableError`` by its path."""
     if not is_dataset_dir(dataset.directory):
         return None
     layers = _layers(dataset)
     top: dict[str, Any] = {}
     nodes: dict[str, Any] = {}
-    templates: dict[str, Any] = {}
     campaign: list[dict[str, Any]] = []
     source: dict[str, Any] = {}
     panel: dict[str, Any] = {}
@@ -190,11 +220,7 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
     panel_dir: Path | None = None
     for path, layer in layers:
         pipeline = _section(layer, "pipeline")
-        declared = pipeline.get("nodes") or {}
-        if path.name == DEFAULTS_FILE:
-            templates = dict(declared)
-        else:
-            nodes = merge_node_blocks(nodes, declared)
+        nodes = merge_node_blocks(nodes, pipeline.get("nodes") or {})
         top |= {k: v for k, v in pipeline.items() if k != "nodes"}
         campaign.append(_section(layer, "campaign"))
         source |= _section(layer, "source")
@@ -204,13 +230,10 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
             panel |= _section(layer, "panel")
             panel_dir = path.parent
     if nodes:
-        top["nodes"] = {
-            n: merge_node_blocks({n: templates[n]}, {n: block})[n] if n in templates else block
-            for n, block in nodes.items()
-        }
+        top["nodes"] = nodes
     return DatasetDefinition(
         dataset.directory,
-        top,
+        with_node_templates(top),
         tuple(campaign),
         source,
         panel or None,
