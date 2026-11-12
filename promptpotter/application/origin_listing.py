@@ -80,7 +80,7 @@ class OriginEntry(StrictModel):
         default=None, description="Dataset sample count; ``null`` if unmaterialized"
     )
     n_campaigns: int = Field(description="Active campaigns minted from this origin")
-    origin_accuracy: float | None = Field(
+    origin_fitness: float | None = Field(
         default=None,
         description="The origin's C0 score, as the root cycle's standing round 0 closed",
     )
@@ -122,11 +122,11 @@ def list_origins(stores: Stores) -> list[OriginEntry]:
             continue
         # The BEST across the origin's campaigns: origin scoring is nondeterministic at the backend.
         scores = [
-            origin.accuracy
+            origin.fitness
             for c in group
             if (index := stores.campaigns.load(c.root_hop, moment=None)) is not None
             for origin in index.rounds[:1]
-            if origin.round == 0 and origin.accuracy is not None
+            if origin.round == 0 and origin.fitness is not None
         ]
         out.append(
             OriginEntry(
@@ -135,7 +135,7 @@ def list_origins(stores: Stores) -> list[OriginEntry]:
                 label=canonical.label,
                 n_samples=n_samples.get(canonical.dataset_name),
                 n_campaigns=len(group),
-                origin_accuracy=max(scores) if scores else None,
+                origin_fitness=max(scores) if scores else None,
                 created_at=canonical.created_at,
             )
         )

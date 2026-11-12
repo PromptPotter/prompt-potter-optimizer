@@ -65,7 +65,7 @@ export function MainLine({ steps }: { steps: readonly LineStep[] }) {
             <span className="cmp-line-round">R{reading.arm.round}</span>
             <span className="cmp-line-label">{s.node.label}</span>
             <span className="cmp-line-score">
-              {fmtUnit("rate", reading.own?.accuracy?.value)}
+              {reading.own ? fmtUnit(reading.own.fitness_unit, reading.own.fitness?.value) : PLACEHOLDER}
               <StepLift lift={liftOf(reading.vs_reference)} />
             </span>
             <span className="cmp-line-change" title={reading.changes_description || undefined}>
@@ -170,7 +170,7 @@ export function HeadlineFacts({ row }: { row: HeadToHeadRow }) {
               <p className="cmp-line-key">
                 The column the pick&rsquo;s round elected it on, and the one to quote it on: a pick
                 won on ability is quoted on θ unless its θ carries a caveat — there θ is not
-                ability, and the election reads on accuracy.
+                ability, and the election reads on fitness.
               </p>
             }
           >

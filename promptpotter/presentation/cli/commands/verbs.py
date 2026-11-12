@@ -1,10 +1,4 @@
-"""Imports no ``promptpotter.application`` module and no sibling: a handler is NAMED, so ``--help`` loads no verb.
-
-``new`` and ``resume`` dispatch their command as DATA (``CommandDispatcher(inline=Inline(…))``), so a
-terminal launch is a ``CommandRecord`` like the browser's; every other command verb derives from its
-payload model (``command_verb``). Run-invocation (``HeldRun.run_inline`` vs ``HeldRun.detach``) is the
-only CLI↔web difference, and each terminal-only flag says why no payload carries it.
-"""
+"""Imports no ``promptpotter.application`` module and no sibling: a handler is NAMED, so ``--help`` loads no verb. A terminal launch is a ``CommandRecord`` like the browser's."""
 
 from __future__ import annotations
 
@@ -57,8 +51,7 @@ def _read_verb(
     args: tuple[Arg, ...] = (),
     render_args: tuple[str, ...] = (),
 ) -> Verb:
-    """A read verb: its flags' dests are the row's fields, else its renderer's *render_args*,
-    answered by `read.py::cmd_read`."""
+    """A read verb: its flags' dests are the row's fields, else its renderer's *render_args*."""
     return Verb(
         name,
         "read:cmd_read",
@@ -182,7 +175,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "optimizer's knobs by their dotted path under `new --set`'s "
                 "`config.optimization` — `--arm capo=capo "
                 "--arm capo-b5=capo,nodes.<node>.config.max_blocks=5`; an arm on an earlier arm's "
-                "treatment, this act's or a standing one's, is its next replicate, on its own seed. No `halt_at_accuracy`: every arm runs the budget below to its end.",
+                "treatment, this act's or a standing one's, is its next replicate, on its own seed. No `halt_at_fitness`: every arm runs the budget below to its end.",
             ),
             *BUDGET_AXES,
         ),
@@ -889,10 +882,7 @@ def command_verb(kind: CommandKind) -> Verb:
 
 
 def _unsaid(verb: Verb) -> list[str]:
-    """What *verb* leaves unsaid: a payload field of a kind naming it (`CommandKind.cli_verb`) with
-    no `Arg` of its name
-    and no `unspelled` reason (a `Budget` is `BUDGET_AXES`), a reason for a field it spells or no
-    kind has, or a verb dispatching no kind with no `terminal_only` reason."""
+    """What *verb* leaves unsaid: a payload field with no `Arg` or `unspelled` reason, or the reverse."""
     if verb.read is not None:
         return []
     kinds = [kind for kind in CommandKind if kind.cli_verb == verb.name]

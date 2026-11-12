@@ -32,7 +32,7 @@ def extract_warning_types(facts: MeasuredCell) -> list[str]:
 
 @shapes_optimizer_prompt
 def scoreable_rows(results: Iterable[GradedCell]) -> list[GradedCell]:
-    """A DEPRECATED row stays: dropping a refusal pays the prompt accuracy for the cells it could not answer."""
+    """A DEPRECATED row stays: dropping a refusal pays the prompt fitness for the cells it could not answer."""
     return [cell for cell in results if cell.scored]
 
 

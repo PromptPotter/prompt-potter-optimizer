@@ -4,13 +4,12 @@ import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any, get_args
 
-from promptpotter.domain.arm_reading import lift_shown, lift_text
+from promptpotter.domain.arm_reading import level_text, lift_shown, lift_text
 from promptpotter.domain.bench import BenchColumn
 from promptpotter.domain.origin_panel import LineRate, overlap_line, triggered_rates
 from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -31,7 +30,9 @@ def bench_readout(bench: BenchScore) -> str:
         return READING_STATE_INFO[bench.status.state].sentence
 
     def level(reading: BenchReading) -> str:
-        return "—" if reading.level is None else f"{reading.level.value:.3f}"
+        return level_text(
+            None if reading.level is None else reading.level.value, reading.level_unit
+        )
 
     # `—` where the selection is the origin: one pass read twice compares nothing.
     read = bench.lift(bench.headline)
@@ -66,7 +67,7 @@ def overlap_series(overlap: OverlapReading) -> str:
     triggered = triggered_rates(overlap)
 
     def rate(m: LineRate) -> str:
-        return f"{m.arm.label} {m.rate:.1%} (n={m.n})"
+        return f"{m.arm.label} {level_text(m.rate, m.unit)} (n={m.n})"
 
     lead = overlap.lead
     readings = (*overlap.earlier, lead, *(t.reading for t in overlap.triggered))
@@ -85,11 +86,6 @@ def fmt_ci(lower: float | None, upper: float | None, *, spec: str) -> str:
     if lower is None or upper is None:
         return "—"
     return f"[{spec.format(lower)}, {spec.format(upper)}]"
-
-
-@shapes_optimizer_prompt
-def fmt_pct(x: float | None, spec: str = "{:.1%}") -> str:
-    return "—" if x is None else spec.format(x)
 
 
 def fmt_field_accuracy(shares: dict[str, float]) -> str:
@@ -253,19 +249,19 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
     w = 108
 
     hdr = (
-        f"{'#':<4s}{'Label':<8s}{'Cells':>7s}   {'Accuracy':>8s}   {'95% CI':>16s}   "
+        f"{'#':<4s}{'Label':<8s}{'Cells':>7s}   {'Fitness':>8s}   {'95% CI':>16s}   "
         f"{'Composite':>9s}   {'Ability θ':>9s}   {'Delta':>12s}"
     )
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
 
     for i, s in enumerate(ranked, 1):
         label = s.arm.label[:8]
-        accuracy = None if s.own is None else s.own.accuracy
+        fitness = None if s.own is None else s.own.fitness
         composite = None if s.own is None else s.own.composite
         ci_str = fmt_ci(
-            None if accuracy is None else accuracy.ci_lo,
-            None if accuracy is None else accuracy.ci_hi,
-            spec="{:.1%}",
+            None if fitness is None else fitness.ci_lo,
+            None if fitness is None else fitness.ci_hi,
+            spec="{:.3f}",
         )
         lift = s.vs_reference.on_whole_set if s.vs_reference else None
         delta_str = "---" if lift is None else lift_text(lift.estimate.value, lift.measurand.unit)
@@ -282,9 +278,13 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
             if s.panel.expected and s.panel.scored is not None
             else str(0 if s.own is None else s.own.n)
         )
-        acc_str = "—" if accuracy is None else f"{accuracy.value:.1%}"
+        fitness_str = (
+            "—"
+            if s.own is None
+            else level_text(None if fitness is None else fitness.value, s.own.fitness_unit)
+        )
         row = (
-            f"{i:<4d}{label:<8s}{cells:>7s}   {acc_str:>8s}   {ci_str:>16s}   "
+            f"{i:<4d}{label:<8s}{cells:>7s}   {fitness_str:>8s}   {ci_str:>16s}   "
             f"{fmt_fitness(None if composite is None else composite.value):>9s}   "
             f"{theta_str:>9s}   {delta_str:>12s}{winner_mark}"
         )

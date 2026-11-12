@@ -286,6 +286,7 @@ export function armReading(
     bench: null,
     verify: null,
     on_origin_panel: null,
+    fitness_terms: {},
     ...rest,
     arm: { round: 1, label: "C1.1", key: "", ...arm },
     panel: { scored: null, expected: null, cached: null, cached_share: null, cut: false, ...panel },
@@ -293,9 +294,9 @@ export function armReading(
   };
 }
 
-export function ownLevel(accuracy: number, n = 0): NonNullable<ArmReading["own"]> {
-  const banded = { value: accuracy, ci_lo: null, ci_hi: null };
-  return { accuracy: banded, composite: banded, n };
+export function ownLevel(fitness: number, n = 0): NonNullable<ArmReading["own"]> {
+  const banded = { value: fitness, ci_lo: null, ci_hi: null };
+  return { fitness: banded, composite: banded, fitness_unit: "rate", n };
 }
 
 // A candidate as the subtree read serves it, at `{course}/r{round}/{key}`; its label is its arm's.
@@ -334,7 +335,7 @@ export function hierarchyCandidate(
       gene_sources: [],
       lens_value: null,
       lens_rank_move: null,
-      sample_set_accuracy: null,
+      sample_set_fitness: null,
       sample_set_n: null,
       divergence: null,
       divergent: false,
@@ -522,7 +523,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     composite_fitness_formula: null,
     composite_fitness_weights: null,
     composite_fitness_anchors: null,
-    display_metric: "accuracy",
+    display_metric: "fitness",
     degraded_count: 0,
     error_count: 0,
     backend_retry_count: 0,

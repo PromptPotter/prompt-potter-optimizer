@@ -60,7 +60,7 @@ function lineParts(
 ): string[] {
   if (mask.kind === "expression") return [mask.lens.trim() || "no expression yet"];
   return [
-    matcher?.value || "accuracy",
+    matcher?.value || "fitness",
     ...terms.flatMap((m) => {
       const w = mask.weights[m.name];
       return w !== undefined && w > 0 ? [`${m.name} ${pct(w)}%`] : [];
@@ -153,8 +153,8 @@ export function Criterion({
               <span className="criterion-glyph" aria-hidden="true">
                 <IconTarget />
               </span>
-              <Term className="criterion-name" content={TERMS.criterion_accuracy}>
-                accuracy
+              <Term className="criterion-name" content={TERMS.criterion_fitness}>
+                fitness
               </Term>
               {matcher?.onPick ? (
                 <ValueList

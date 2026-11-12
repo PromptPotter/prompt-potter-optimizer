@@ -56,10 +56,7 @@ from promptpotter.shared.worded import Worded
 
 
 class Press(NamedTuple):
-    """Who may press a kind: the terminal verb a person presses it by, whether a host assistant
-    may press it for them, and why the browser does not, where it does not (empty: its sender is
-    in `webapp/lib/api/commands.ts::commands`, which tsc refuses to build without one). A row
-    pressed at the browser alone has none (`BROWSER`)."""
+    """Who may press a kind: the terminal verb, whether a host assistant may, and why the browser does not."""
 
     cli_verb: str
     host: bool
@@ -81,18 +78,14 @@ BROWSER = None
 
 _MINTS_THROUGH_CHECKIN = "the browser mints through a check-in"
 
-# How a door answers a kind: inline with its applied answer, or as a task its door tracks while
-# the act runs on (a launch, a paid pass, a resolver turn).
+# How a door answers a kind: inline with its applied answer, or as a task its door tracks.
 type Answering = Literal["inline", "task"]
 
 
 class CommandKind(StrEnum):
     """A row is `kind, handler, capability, press[, destructive[, answering]]`: the handler is
-    `application/commands/{module}:{attr}`, imported by the dispatch that needs it (the API imports
-    every one at app import); a `None` capability is the account's own act, open to its session;
-    `press` is who may press it beyond the browser (`Press`, or `BROWSER`); `destructive` is MCP's `destructiveHint`, true for an
-    apply that overwrites or removes what is there and false for one that only adds; `answering`
-    is how its doors answer (`Answering`)."""
+    `application/commands/{module}:{attr}`; a `None` capability is the account's own act;
+    `destructive` is MCP's `destructiveHint`, true for an apply that overwrites or removes."""
 
     handler: str
     capability: str | None
@@ -375,24 +368,18 @@ class CommandKind(StrEnum):
 # The longest command id a door sends or names; `CommandCall` mints a uuid's 36.
 COMMAND_ID_CHARS = 64
 
-# Filled as each model declares the kind it carries: the ONE kind → payload table. Keyed `str`,
-# so a `CommandRecord.kind` read back off the command log finds its row.
+# Filled as each model declares the kind it carries: the ONE kind → payload table, keyed `str`.
 PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {}
 
 
 class CommandPayload(RequestBody):
-    """Base of every payload on the generic ``POST /commands/{kind}`` route. ``StrictModel`` forbids
-    extras, so THE MODEL IS the accepted-key set — there is no list to fall out of step with it.
-    A payload's address base is the subject it is filed on: ``CyclePayload`` its cycle,
-    ``LinePayload`` its line holder, ``CampaignPayload`` its campaign, a bare one the workspace, a
-    ``DraftPayload`` its draft."""
+    """Base of every payload on the generic ``POST /commands/{kind}`` route; THE MODEL IS the accepted-key set.
+    A payload's address base is the subject it is filed on."""
 
     kind: ClassVar[CommandKind]
-    # A secret's text enters no digest, so a retry under a key cannot be matched to its act: it
-    # acts again, never answered as the first. Declared by each payload holding a `SecretStr`.
+    # A secret's text enters no digest, so a retry under a key acts again; declared by each payload holding a `SecretStr`.
     unmatched: ClassVar[bool] = False
-    # What the terminal prints after the ack, where the ack alone leaves the next step unsaid; a
-    # `{field}` in it reads that field of the applied answer.
+    # What the terminal prints after the ack; a `{field}` in it reads that field of the applied answer.
     follow_up: ClassVar[str] = ""
 
     def __init_subclass__(cls, kind: CommandKind | None = None, **kwargs: Any) -> None:
@@ -408,9 +395,7 @@ class CommandPayload(RequestBody):
         PAYLOAD_MODEL_FOR_KIND[kind] = cls
 
     def recorded(self) -> tuple[dict[str, JsonValue], str]:
-        """The act as its `CommandRecord` keeps it, and what an idempotency key names, so one key
-        never answers two acts: that one dump and the raw value of each excluded field, each hashed
-        as its bytes. A secret's text enters no stored digest, so its payload is `unmatched`."""
+        """The act as its `CommandRecord` keeps it, and what an idempotency key names; a secret's text enters no stored digest."""
         dump = self.model_dump(mode="json")
         digest = hashlib.sha256(f"{self.kind}\0".encode())
         digest.update(json.dumps(dump, ensure_ascii=False, separators=(",", ":")).encode())
@@ -440,11 +425,8 @@ class CampaignPayload(CommandPayload):
 
 
 class CyclePayload(CampaignPayload):
-    """A cycle's address: the root hop, plus the ``?descend=`` tail the reads take. Every
-    cycle-scoped kind is ADDRESSED alike; ``inner_refusal`` is each kind's own answer to whether
-    it acts on an inner run, and ``dispatcher.py::CommandDispatcher.dispatch`` is its one reader. A
-    run verb's answer is the sentence its cycle's served admission carries
-    (``domain/phases.py::RunState.inner``), so the control and the refusal say one thing."""
+    """A cycle's address: the root hop, plus the ``?descend=`` tail the reads take; ``inner_refusal`` is each
+    kind's own answer to whether it acts on an inner run."""
 
     cycle_id: str = Field(min_length=1, max_length=128)
     # Excluded: the dispatcher spends it resolving the leaf, so a recorded tail addresses it twice.
@@ -852,7 +834,7 @@ class ArmRequest(StrictModel):
     arm_key: ArmName
     optimization: OptimizationOverrides = Field(
         description="Laid over the dataset's own `optimization`: `optimizer` is required, and "
-        "`halt_at_accuracy` is refused, since every arm runs the head-to-head's budget to its end."
+        "`halt_at_fitness` is refused, since every arm runs the head-to-head's budget to its end."
     )
 
     @property
@@ -872,9 +854,9 @@ class ArmRequest(StrictModel):
         sent = self.optimization.model_fields_set
         if "optimizer" not in sent:
             raise ValueError("an arm names the optimizer it runs")
-        if "halt_at_accuracy" in sent:
+        if "halt_at_fitness" in sent:
             raise ValueError(
-                "an arm sets no halt_at_accuracy: every arm runs the head-to-head's budget to its end"
+                "an arm sets no halt_at_fitness: every arm runs the head-to-head's budget to its end"
             )
         return self
 
@@ -906,8 +888,7 @@ class HeadToHeadRequest(StrictModel):
         return {**arm.optimization_sent, **({"budget": budget} if budget else {})}
 
     def purpose(self, arm: ArmRequest) -> Compare:
-        """Replicate 1 as asked: the mint numbers it on the arms standing under its record lock
-        (`jobs/mint.py::_numbered`)."""
+        """Replicate 1 as asked: the mint numbers it on the arms standing under its record lock."""
         return Compare(
             arm=Arm(head_to_head_id=self.head_to_head_id, arm_key=arm.arm_key, replicate=1)
         )
@@ -1076,8 +1057,7 @@ class RemoveApiKeyPayload(CommandPayload, kind=CommandKind.REMOVE_API_KEY):
 # The last payload model is declared above, so a kind carrying none fails right here.
 if _unpaired := sorted(set(CommandKind) - PAYLOAD_MODEL_FOR_KIND.keys()):
     raise RuntimeError(f"command kinds carried by no payload model: {_unpaired}")
-# A tool's description is its model's docstring: it names kinds and fields, never a source path or
-# a terminal verb, which each door words its own way.
+# A tool's description is its model's docstring: it names kinds and fields, never a path or a verb.
 _TICKED = re.compile(r"`+([^`]+)`+")
 _VERBS = frozenset(k.cli_verb for k in CommandKind if k.cli_verb)
 if _worded := sorted(
@@ -1141,10 +1121,7 @@ class CommandAcceptedBody(StrictModel):
 
 
 class ReadKind(StrEnum):
-    """The read catalogue beside `CommandKind`. A row's wire inputs and its answer are the
-    `application/read_params.py::ReadParams` model that declares it, as a payload declares its kind.
-    The model also declares the row's route and method, and `presentation/api/routers/reads.py`
-    mounts every row on it, named by its kind."""
+    """The read catalogue beside `CommandKind`: a row's wire inputs and answer are its `ReadParams` model."""
 
     ME = "me"
     USER_SETTINGS = "user-settings"

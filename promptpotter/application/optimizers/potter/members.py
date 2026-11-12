@@ -106,7 +106,7 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.optimizers.potter.validators.l3_output import l3_plan_breaches
 from promptpotter.application.scoring.selection import crowning_cells
-from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct
+from promptpotter.application.views.render.primitives import fmt_fitness
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.phase_views import OptimizerStepEnterView, OptimizerStepExitView
@@ -524,7 +524,7 @@ class L2Context(LayoutNode):
             lines=(
                 f"rule={fire.cause}  |  "
                 f"L1 stalled {rounds_without_advance(ctx.read(Lineage).rounds)} rounds  |  "
-                f"acc={fmt_pct(ctx.read(Frontier).parent_accuracy)}  "
+                f"fit={ctx.read(Frontier).parent_fitness_text}  "
                 f"peak fitness={fmt_fitness(fire.best.composite_fitness)}",
                 overrides,
                 "LLM analyzing failure patterns...",

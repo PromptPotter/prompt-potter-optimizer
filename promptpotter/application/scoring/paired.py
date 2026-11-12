@@ -36,6 +36,7 @@ from promptpotter.domain.scoring import (
     CellSheet,
     GradeColumn,
     GradedCell,
+    Scorer,
     ScoringFormulaError,
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -71,15 +72,15 @@ def fresh_cells(sheet: CellSheet) -> int:
     return sum(1 for cell in sheet if not cell.facts.cached)
 
 
-def grade_measurands(scorer_id: str) -> list[Measurand]:
-    """Accuracy first: a pair's headline is its first measurand."""
+def grade_measurands(scorer: Scorer) -> list[Measurand]:
+    """Fitness first: a pair's headline is its first measurand."""
     return [
         Measurand(
             kind=MeasurandKind.GRADE,
             key=key,
-            scorer_id=scorer_id,
+            scorer_id=scorer.id,
             binary=column.binary,
-            unit=column.unit,
+            unit=scorer.fitness_unit if column.unit is None else column.unit,
         )
         for key, column in ROW_GRADES.items()
     ]

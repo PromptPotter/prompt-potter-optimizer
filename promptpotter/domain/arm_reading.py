@@ -20,7 +20,7 @@ from promptpotter.domain.arms import (
     walked_short,
 )
 from promptpotter.domain.bench import BandedValue, BenchReading, OwnLevel
-from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.cell_fold import CellFold, ScoreSummary
 from promptpotter.domain.origin_panel import LineRate
 from promptpotter.domain.paired_reading import (
     ArmKey,
@@ -48,7 +48,7 @@ ScoreboardRankKey = tuple[bool, bool, float, float, float]
 
 def scoreboard_rank_key(
     composite_fitness: float | None,
-    accuracy: float | None,
+    fitness: float | None,
     theta: float | None = None,
     *,
     is_leading: bool = False,
@@ -61,7 +61,7 @@ def scoreboard_rank_key(
         not is_partial,
         order_floor(theta),
         order_floor(composite_fitness),
-        order_floor(accuracy),
+        order_floor(fitness),
     )
 
 
@@ -72,14 +72,11 @@ class ScoreboardRow(FrozenModel):
     reading: ArmReading
 
 
-type DisplayMetric = Literal["accuracy", "composite", "ability"]
+type DisplayMetric = Literal["fitness", "composite", "ability"]
 
 
 class UnitFormat(NamedTuple):
-    """How one unit reads: a level is ``prefix``, the value times ``scale`` at ``digits``, then
-    ``suffix``; a lift is signed, times ``scale`` at ``lift_digits``, then ``lift_word``, and
-    ``lift_name`` is one of what it counts. A ``compact`` unit steps a thousand or more to one
-    digit of k or M, in both."""
+    """How one unit reads: a level is ``prefix``, the value times ``scale`` at ``digits``, then ``suffix``; a lift is signed."""
 
     scale: float
     digits: int
@@ -124,6 +121,11 @@ def level_text(value: float | None, unit: MeasurandUnit) -> str:
     return f"{fmt.prefix}{_number(value, fmt, fmt.digits, '')}{fmt.suffix}"
 
 
+@shapes_optimizer_prompt
+def fold_fitness_text(fold: CellFold | None) -> str:
+    return "—" if fold is None else level_text(fold.fitness, fold.fitness_unit)
+
+
 def _signed(value: float, fmt: UnitFormat) -> str:
     return _number(value, fmt, fmt.lift_digits, "+")
 
@@ -150,6 +152,11 @@ def lift_interval_text(lo: float, hi: float, unit: MeasurandUnit) -> str:
     return f"[{_signed(lo, fmt)},{_NBSP}{_signed(hi, fmt)}]"
 
 
+def fitness_terms_text(terms: Mapping[str, float]) -> str:
+    """Each scoring-formula term's round mean, as the composite block prints one."""
+    return "  ".join(f"{name}={value:.3f}" for name, value in terms.items())
+
+
 def lift_band_text(estimate: LiftEstimate, unit: MeasurandUnit) -> str:
     interval = lift_interval_text(estimate.ci_lo, estimate.ci_hi, unit)
     return f"{lift_text(estimate.value, unit)} {interval}"
@@ -165,11 +172,12 @@ class DisplayMetricInfo(NamedTuple):
 #: IN PICK ORDER — the tiebreak where the elected column is not among those shown.
 DISPLAY_METRIC_INFO: Worded[DisplayMetric, DisplayMetricInfo] = Worded(
     {
-        "accuracy": DisplayMetricInfo(
-            "accuracy",
-            "%",
-            "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative).",
-            "rate",
+        "fitness": DisplayMetricInfo(
+            "fitness",
+            "ƒ",
+            "Mean per-cell fitness under the scoring formula, over the candidate's measured subset "
+            "(subset-relative).",
+            "score",
         ),
         "ability": DisplayMetricInfo(
             "ability θ",
@@ -182,7 +190,7 @@ DISPLAY_METRIC_INFO: Worded[DisplayMetric, DisplayMetricInfo] = Worded(
         "composite": DisplayMetricInfo(
             "composite",
             "∑",
-            "Composite fitness under the active scoring formula (equals accuracy when no formula is "
+            "Composite fitness under the active scoring formula (equals fitness when no formula is "
             "set).",
             "score",
         ),
@@ -289,7 +297,7 @@ class ArmAbility(FrozenModel):
 
 class ElectionColumn(FrozenModel):
     """The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or
-    carries a caveat — there θ is not ability, and the election reads on accuracy."""
+    carries a caveat — there θ is not ability, and the election reads on fitness."""
 
     elects_on: DisplayMetric = Field(description="What the electing round's selector ranked on.")
     ability: ArmAbility | None = Field(description="The pick's θ on its electing round.")
@@ -300,7 +308,7 @@ class ElectionColumn(FrozenModel):
         unread = ability is None or ability.theta is None or ability.caveat is not None
         caveated = elects_on == "ability" and unread
         return cls(
-            elects_on=elects_on, ability=ability, reads_on="accuracy" if caveated else elects_on
+            elects_on=elects_on, ability=ability, reads_on="fitness" if caveated else elects_on
         )
 
 
@@ -383,22 +391,19 @@ def arm_verdict(reading: ArmReading, *, retired: bool) -> ArmVerdict:
     return "unmeasured" if reading.state in ("proposed", "measuring") else "awaiting"
 
 
-def _own_level(
-    accuracy: float | None,
-    composite: float | None,
-    band: tuple[float | None, float | None],
-    *,
-    n: int,
-) -> OwnLevel | None:
-    if accuracy is None and composite is None:
+def _own_level(fold: ScoreSummary) -> OwnLevel | None:
+    fitness, composite = fold.fitness, fold.composite_fitness
+    if fitness is None and composite is None:
         return None
+    band = (fold.mean_fitness_ci_lo, fold.mean_fitness_ci_hi)
     lo, hi = band if None not in band else (None, None)
     return OwnLevel(
-        accuracy=None if accuracy is None else BandedValue(value=accuracy, ci_lo=lo, ci_hi=hi),
+        fitness=None if fitness is None else BandedValue(value=fitness, ci_lo=lo, ci_hi=hi),
         composite=None
         if composite is None
         else BandedValue(value=composite, ci_lo=None, ci_hi=None),
-        n=n,
+        fitness_unit=fold.fitness_unit,
+        n=fold.total,
     )
 
 
@@ -433,9 +438,13 @@ class ArmReading(FrozenModel):
         "arm, which never started one."
     )
     own: OwnLevel | None = Field(
-        description="The arm's own level on its round's cells: accuracy with the band the "
+        description="The arm's own level on its round's cells: fitness with the band the "
         "gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null "
         "before the first row is graded, and on an `invalid` arm, which holds no cell."
+    )
+    fitness_terms: dict[str, float] = Field(
+        description="The round mean of each term the scoring formula reads, `fitness` aside, over "
+        "the cells that answered it: an L4 outer arm's `held_out_lift` and `floored` share."
     )
     panel: ArmPanel
     tokens: TokenAccount | None = Field(
@@ -493,14 +502,8 @@ class ArmReading(FrozenModel):
             state=arm.state,
             end=arm_end(arm),
             walked_short=walked_short(arm),
-            own=None
-            if fold is None
-            else _own_level(
-                fold.accuracy,
-                fold.composite_fitness,
-                (fold.mean_fitness_ci_lo, fold.mean_fitness_ci_hi),
-                n=fold.total,
-            ),
+            own=None if fold is None else _own_level(fold),
+            fitness_terms={} if fold is None else fold.term_means,
             panel=panel,
             tokens=tokens,
             prefix=None if tokens is None else tokens.prefix(replayed=False),

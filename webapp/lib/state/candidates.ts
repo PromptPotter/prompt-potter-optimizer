@@ -30,11 +30,11 @@ export function useCandidatesState(): CandidatesState {
   return store.useStore();
 }
 
-// The cycle's metrics: the operator's toggles on it, else accuracy and its elected metric.
+// The cycle's metrics: the operator's toggles on it, else fitness and its elected metric.
 export function useMetrics(cycleId: string | null, elected: DisplayMetric): ReadonlySet<DisplayMetric> {
   const { metrics } = store.useStore();
   const own = metrics !== null && metrics.cycleId === cycleId ? metrics.value : null;
-  return useMemo(() => own ?? new Set<DisplayMetric>(["accuracy", elected]), [own, elected]);
+  return useMemo(() => own ?? new Set<DisplayMetric>(["fitness", elected]), [own, elected]);
 }
 
 export function toggleMetric(

@@ -12,7 +12,7 @@ Rows are a recipe (`BANK_RECIPES` / `PANEL_RECIPES`) plus the cut beside it; a n
 
 ## Declarations, not defaults
 
-- **Declare `campaign_config.accuracy_ceiling` only where you can say what measured it**; unset leaves `rounds_to_ceiling` unset, the honest reading.
+- **Declare `campaign_config.fitness_ceiling` only where you can say what measured it**; unset leaves `rounds_to_ceiling` unset, the honest reading.
 - `dataset_split: {bench: N, demo: M}` holds out the only rows a node's `shots` may name.
 - **Unframed is a declaration, never an absence**: `task_framing: off` is the ablation arm. Absent front matter, the first framed mint decomposes `task.md`'s body into the tenant's task-context tree (keyed by `dataset_id_prefix`), never back here.
 

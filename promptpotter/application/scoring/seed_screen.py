@@ -62,7 +62,7 @@ class SeedReading:
     answer_modal_share: float | None = None
 
     @property
-    def origin_accuracy(self) -> float:
+    def origin_fitness(self) -> float:
         return sum(self.origin_reads) / len(self.origin_reads)
 
     @property
@@ -88,10 +88,10 @@ class SeedReading:
         """Below 3 passes the binomial at the measured rate, never a 0.0 for a single read."""
         k = len(self.origin_reads)
         if k >= 3:
-            mean = self.origin_accuracy
+            mean = self.origin_fitness
             var = sum((x - mean) ** 2 for x in self.origin_reads) / (k - 1)
             return float((var / k) ** 0.5)
-        p = self.origin_accuracy
+        p = self.origin_fitness
         return float((p * (1 - p) / self.n) ** 0.5 / (k**0.5))
 
     @property
@@ -101,11 +101,11 @@ class SeedReading:
 
     @property
     def rewards_collapse(self) -> bool | None:
-        return None if self.class_floor is None else self.class_floor > self.origin_accuracy
+        return None if self.class_floor is None else self.class_floor > self.origin_fitness
 
     @property
     def reasoning_margin(self) -> float | None:
-        return None if self.class_floor is None else self.origin_accuracy - self.class_floor
+        return None if self.class_floor is None else self.origin_fitness - self.class_floor
 
     @property
     def verdict(self) -> SeedVerdict:
@@ -132,7 +132,7 @@ class SeedReading:
             "n": self.n,
             "class_floor": self.class_floor,
             "origin_reads": list(self.origin_reads),
-            "origin_accuracy": self.origin_accuracy,
+            "origin_fitness": self.origin_fitness,
             "origin_spread": self.origin_spread,
             "margin_se": self.margin_se,
             "reasoning_margin": self.reasoning_margin,
@@ -352,7 +352,7 @@ async def _screen(
             logger.info(
                 f"seed {seed}: floor "
                 f"{'--' if reading.class_floor is None else f'{reading.class_floor:.3f}'} "
-                f"origin {reading.origin_accuracy:.3f} "
+                f"origin {reading.origin_fitness:.3f} "
                 f"(spread {reading.origin_spread:.3f} over {len(reads)}) "
                 f"margin {'--' if margin is None else f'{margin:+.3f}'} +/-{reading.margin_se:.3f} "
                 f"lat {'--' if reading.latency_median is None else f'{reading.latency_median:.1f}s'}"

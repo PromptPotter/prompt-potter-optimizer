@@ -126,8 +126,8 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
           content={
             <p className="cmp-line-key">
               Each round&rsquo;s pick, from the origin up to the highlighted searchpoint: its
-              accuracy on the cells it measured, then its lift over its parent on those same cells,
-              toned by the 95% interval. The lift is the round&rsquo;s verdict — the accuracy moves
+              fitness on the cells it measured, then its lift over its parent on those same cells,
+              toned by the 95% interval. The lift is the round&rsquo;s verdict — the fitness moves
               with the subset each round drew. A held round crowned nobody, so the line kept its
               parent.
             </p>

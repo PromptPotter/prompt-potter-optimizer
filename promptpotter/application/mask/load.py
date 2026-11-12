@@ -70,12 +70,12 @@ def _dial_anchors(
 def mask_reading(sheet: CellSheet, scorer: Scorer) -> MaskReading | None:
     """``None`` where no row carries a verdict: no reading, never a 0.0 floor."""
     graded = sheet if sheet.scorer_id == scorer.id else scorer.sheet(cell.facts for cell in sheet)
-    folded = fold_cells(graded)
+    folded = fold_cells(graded, scorer.fitness_unit)
     if folded.composite_fitness is None:
         return None
     return MaskReading(
         composite_fitness=folded.composite_fitness,
-        accuracy=folded.accuracy,
+        fitness=folded.fitness,
         n_scored=len(measured_cells(graded)),
     )
 

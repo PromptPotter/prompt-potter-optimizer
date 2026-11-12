@@ -281,7 +281,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
             options: draft.scoring_matchers,
             onPick: (matcher) => flow.applyPatch({ config: { scoring: { matcher } } }),
           }}
-          note="What this campaign optimizes for. Accuracy always counts; pull a dial up to also reward a faster, shorter or cheaper prompt. Each anchor is measured on the origin and locked there."
+          note="What this campaign optimizes for. Fitness always counts; pull a dial up to also reward a faster, shorter or cheaper prompt. Each anchor is measured on the origin and locked there."
         />
       </SetupStep>
 

@@ -255,11 +255,11 @@ export function roundsOf(dash: Record<string, unknown> | null): ServedRound[] {
   return Array.isArray(rows) ? (rows as ServedRound[]) : [];
 }
 
-/** A round that CLOSED need not have MEASURED: one whose every cell errored still closes, with `null` accuracy throughout. */
+/** A round that CLOSED need not have MEASURED: one whose every cell errored still closes, with `null` fitness throughout. */
 export function assertRoundMeasured(label: string, round: ServedRound | undefined) {
   expect(round, `${label}: no round to read`).toBeDefined();
   const graded = (round?.candidates ?? []).filter(
-    (c) => c.reading.own?.accuracy != null && c.reading.end !== "invalid",
+    (c) => c.reading.own?.fitness != null && c.reading.end !== "invalid",
   );
   expect(
     graded.length,

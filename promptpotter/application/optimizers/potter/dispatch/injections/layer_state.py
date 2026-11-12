@@ -22,6 +22,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     effective_optimizer_prompts,
 )
+from promptpotter.domain.arm_reading import level_text
 from promptpotter.domain.arms import Measured, arm_name
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.opt_search_point import Locus
@@ -318,15 +319,16 @@ _STAND_ON_TEXT = (
 
 _ELECTIONS_HEADER = (
     "ELECTIONS — each round's pick and how it won (locked in on part of its panel, or on the full "
-    "panel), its reads as the parent in the rounds after, and the arms it beat; hits/cells read."
+    "panel), its reads as the parent in the rounds after, and the arms it beat; fitness on cells "
+    "read."
 )
 
 
 def _read(rr: RoundOutcome, key: ArmKey) -> str:
     fold = rr.folds.get(key)
-    if fold is None or fold.accuracy is None or not fold.total:
+    if fold is None or fold.fitness is None or not fold.total:
         return "unscored"
-    return f"{round(fold.accuracy * fold.total)}/{fold.total}"
+    return f"{level_text(fold.fitness, fold.fitness_unit)} on {fold.total}"
 
 
 def _how_won(rr: RoundOutcome, key: ArmKey) -> str:

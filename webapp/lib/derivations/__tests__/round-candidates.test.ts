@@ -122,7 +122,7 @@ describe("roundCandidates — the in-flight round", () => {
     reading: armReading({
       // A FINISHED live row: the score report's lineage id has landed on it.
       arm: { round: 2, label: "C2.1", key: "9f2c1b7e-4a80-4d55-9c31-0b6ad2f11e03" },
-      own: { ...ownLevel(0.6, 8), accuracy: { value: 0.6, ci_lo: 0.41, ci_hi: 0.69 } },
+      own: { ...ownLevel(0.6, 8), fitness: { value: 0.6, ci_lo: 0.41, ci_hi: 0.69 } },
       panel: { scored: 8, expected: 20 },
     }),
   });

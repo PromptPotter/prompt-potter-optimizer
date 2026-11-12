@@ -148,9 +148,7 @@ def election_table_rows(rounds: Sequence[RoundOutcome]) -> list[ElectionRow]:
 
 
 def reelection_roster(rounds: Sequence[RoundOutcome], *, parent: str) -> dict[str, RoundArm]:
-    """By label, every arm the ELECTIONS panel lists, the one the line stands on now left out: a
-    `fork_proposal.stand_on` names one, and the fork continues from it. An arm two rounds list is
-    one entry, its first listing."""
+    """By label, every arm the ELECTIONS panel lists, the one the line stands on now left out."""
     roster: dict[ArmKey, tuple[str, RoundArm]] = {}
     for row in election_table_rows(rounds):
         for key in ((row.picked,) if row.picked is not None else ()) + row.unelected:
@@ -161,8 +159,7 @@ def reelection_roster(rounds: Sequence[RoundOutcome], *, parent: str) -> dict[st
 
 
 def l1_target_schema(schema: PipelineSchema) -> PipelineSchema:
-    """The target as every potter node reads it: `L1_HELD_PROMPT_FIELDS` held on each prompt node,
-    so the wire withdraws them and the parse rejects a write (`l1_prompt_fields_open`)."""
+    """The target as every potter node reads it: `L1_HELD_PROMPT_FIELDS` held on each prompt node."""
     held = NodeSearchNarrowing(prompt_fields_held=list(L1_HELD_PROMPT_FIELDS))
     return schema.narrow({node.name: held for node in schema.prompt_nodes()})
 
@@ -192,7 +189,7 @@ class _Injection:
 
 @dataclass(frozen=True)
 class CycleSlice:
-    # No accuracy: the origin panel's fixed rows are a prompt's one comparable series.
+    # No fitness: the origin panel's fixed rows are a prompt's one comparable series.
     round_num: int
     # Closed rounds since the last advance, which no fire resets — never the ladder's pacing count.
     l1_stall_depth: int

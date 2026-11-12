@@ -1,6 +1,4 @@
-"""What a landing writes to each survivor whose shape it changed, staged under the landing code and
-proven before any of it is written (`maintenance/landing.py`). A migration stages nothing once it has
-landed; its module is deleted in the release after it lands."""
+"""What a landing writes to each survivor whose shape it changed, staged and proven before any is written."""
 
 from __future__ import annotations
 
@@ -11,6 +9,7 @@ from promptpotter.application.maintenance.migrations import (
     claim_marker,
     consent_by_principal,
     consent_trail,
+    fitness_knobs,
     grant_ceiling,
     job_ending,
     job_refusal,
@@ -23,6 +22,7 @@ MIGRATIONS: dict[str, Callable[[Path], list[Staged]]] = {
     "claim marker": claim_marker.staged,
     "consent by principal": consent_by_principal.staged,
     "consent trail": consent_trail.staged,
+    "fitness knobs": fitness_knobs.staged,
     "grant ceiling": grant_ceiling.staged,
     "job ending": job_ending.staged,
     "job refusal": job_refusal.staged,

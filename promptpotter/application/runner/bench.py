@@ -46,6 +46,7 @@ from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
     CellSetName,
+    MeasurandUnit,
     MemberAddress,
     PairedReading,
     ReadingState,
@@ -133,9 +134,9 @@ def _read_pass(
         return unread(ReadingState.PAST_TOLERANCE)
     # Rows on several datasets read no level: `BenchScore.scopes` reads each apart.
     own = (
-        own_level(sheet)
+        own_level(sheet, scorer.fitness_unit)
         if len(bench_pass.by_dataset()) < 2
-        else OwnLevel(accuracy=None, composite=None, n=scored)
+        else OwnLevel(fitness=None, fitness_unit=scorer.fitness_unit, composite=None, n=scored)
     )
     reading = BenchReading.read(
         own,
@@ -231,9 +232,14 @@ def _bench_member(path: CyclePath, read: _PassReading, *, instrument_id: str) ->
 
 
 def pair_on_bench(
-    a: MemberRows, b: MemberRows, *, sample_keys: Sequence[str], instrument_id: str
+    a: MemberRows,
+    b: MemberRows,
+    *,
+    scorer: Scorer,
+    sample_keys: Sequence[str],
+    instrument_id: str,
 ) -> PairedReading:
-    """*b* over *a*, under the grades *a* was read under: a member graded under another formula is refused."""
+    """*b* over *a*, under *scorer*'s grades: a member graded under another formula is refused."""
     return read_pair(
         a=a,
         b=b,
@@ -241,14 +247,14 @@ def pair_on_bench(
         cells=sample_keys,
         masked=False,
         dataset_hash=None,
-        measurands=grade_measurands(a.sheet.scorer_id or b.sheet.scorer_id),
+        measurands=grade_measurands(scorer),
         spec=ROUND_LIFT_SPEC,
         scope=RoleScope.BENCH,
         instrument_id=instrument_id,
     )
 
 
-def own_level(sheet: CellSheet) -> OwnLevel:
+def own_level(sheet: CellSheet, fitness_unit: MeasurandUnit) -> OwnLevel:
     def column(name: BenchColumn) -> BandedValue | None:
         level, ci_lo, ci_hi = level_band(sheet, ROW_GRADES[COLUMN_GRADE[name]])
         if level is None:
@@ -256,7 +262,10 @@ def own_level(sheet: CellSheet) -> OwnLevel:
         return BandedValue(value=level, ci_lo=ci_lo, ci_hi=ci_hi)
 
     return OwnLevel(
-        accuracy=column("accuracy"), composite=column("composite"), n=len(sheet.scoreable)
+        fitness=column("fitness"),
+        fitness_unit=fitness_unit,
+        composite=column("composite"),
+        n=len(sheet.scoreable),
     )
 
 
@@ -301,7 +310,7 @@ def read_bench(
         selected=None if selected is None else selected.reading,
         vs_origin=vs_origin,
         cost=LiftCost.of(vs_origin, None if line.spend is None else line.spend.search_incurred_usd),
-        scopes=[] if graded is None else _read_scopes(graded),
+        scopes=[] if graded is None else _read_scopes(graded, scorer),
     )
 
 
@@ -310,7 +319,7 @@ def _on_rows(sheet: CellSheet, keys: Sequence[str]) -> CellSheet:
     return sheet.where(lambda cell: cell.key in held)
 
 
-def _read_scopes(graded: _Graded) -> list[BenchScope]:
+def _read_scopes(graded: _Graded, scorer: Scorer) -> list[BenchScope]:
     """Each dataset's rows read and paired apart; none where the bench measures one."""
     groups = graded.origin.bench_pass.by_dataset()
     if len(groups) < 2:
@@ -319,7 +328,7 @@ def _read_scopes(graded: _Graded) -> list[BenchScope]:
     def level(read: _PassReading | None, keys: list[str]) -> OwnLevel | None:
         if read is None or read.reading is None:
             return None
-        return own_level(_on_rows(read.sheet, keys))
+        return own_level(_on_rows(read.sheet, keys), scorer.fitness_unit)
 
     def narrowed(member: MemberRows | None, keys: list[str]) -> MemberRows | None:
         if member is None:
@@ -337,7 +346,9 @@ def _read_scopes(graded: _Graded) -> list[BenchScope]:
                 selected=level(graded.selected, keys),
                 vs_origin=None
                 if a is None or b is None or graded.vs_origin is None
-                else pair_on_bench(a, b, sample_keys=keys, instrument_id=a.instrument_id),
+                else pair_on_bench(
+                    a, b, scorer=scorer, sample_keys=keys, instrument_id=a.instrument_id
+                ),
             )
         )
     return scopes
@@ -375,7 +386,7 @@ def _grade_bench(stores: Stores, passes: BenchPasses, scorer: Scorer, line: Benc
     if a is None or b is None:
         return _Graded(origin, selected, (a, b), None)
     vs_origin = pair_on_bench(
-        a, b, sample_keys=passes.origin.sample_keys, instrument_id=instrument_id
+        a, b, scorer=scorer, sample_keys=passes.origin.sample_keys, instrument_id=instrument_id
     )
     return _Graded(origin, selected, (a, b), vs_origin)
 

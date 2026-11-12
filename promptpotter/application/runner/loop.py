@@ -55,8 +55,7 @@ async def run_round_loop(
     *,
     diagnosing: Controller | None = None,
 ) -> LoopEnd:
-    """Round 1 on, past round 0's door (`origin_gate.py::open_origin_round`). *diagnosing* is
-    ``--diag``'s controller: the run closes the round it resumes on and stops."""
+    """Round 1 on, past round 0's door. *diagnosing* is ``--diag``'s controller: the run closes the round it resumes on and stops."""
     round_num = session.state.resumed_from_round
     clean_rounds = max(session.state.resumed_from_round - 1, 0)
     open_round: int | None = None
@@ -104,7 +103,7 @@ async def run_round_loop(
                 )
                 clean_rounds += 1
 
-                target_stop = target_tripped(cycle, config.optimization.halt_at_accuracy)
+                target_stop = target_tripped(cycle, config.optimization.halt_at_fitness)
                 if target_stop is not None:
                     return LoopEnd(target_stop)
                 # A hold refusal cuts a round while the ceiling still reads clear, so the cut speaks first.

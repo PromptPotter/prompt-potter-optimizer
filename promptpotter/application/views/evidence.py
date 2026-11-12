@@ -1,6 +1,4 @@
-"""The `evidence` read on a terminal: each table is a label table (its `Column`s) and the rows the
-served `Evidence` fills in, laid out by one renderer (`_table`), so the CLI prints and decides
-nothing and no table pads its own cells."""
+"""The `evidence` read on a terminal: each table is a label table laid out by one renderer (`_table`)."""
 
 from __future__ import annotations
 
@@ -526,7 +524,7 @@ def _election_lines(rows: list[HeadToHeadRow]) -> list[str]:
     return [
         "",
         "  Each selection's election, and the column to quote it on: an `ability` election is "
-        "won on θ unless its θ carries a caveat, where θ is not ability and it reads on accuracy:",
+        "won on θ unless its θ carries a caveat, where θ is not ability and it reads on fitness:",
         *_table(_ELECTIONS, table, indent="  "),
     ]
 

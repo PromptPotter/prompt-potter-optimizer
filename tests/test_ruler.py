@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import yaml
 from factories import (
     arm_state,
     cycle_result,
@@ -24,6 +25,7 @@ from factories import (
     round_result,
     run_init_round,
     samples,
+    scorer_of,
     sheet,
     workspace,
 )
@@ -50,9 +52,14 @@ from promptpotter.application.intelligence.rasch import (
     fit_theta,
     graduate_ruler_model,
 )
+from promptpotter.application.runner.bench import own_level
+from promptpotter.application.scoring.metrics import compute_composite_fitness
+from promptpotter.application.scoring.paired import grade_measurands
 from promptpotter.application.views.render.sample import fmt_query_result
+from promptpotter.domain.arm_reading import fold_fitness_text, lift_text
 from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import (
+    OuterSampleProxies,
     compute_outer_proxies,
     inner_cell_facts,
     inner_cell_report,
@@ -168,7 +175,7 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
         "an off-ruler cell moved θ"
     )
     assert theta_of({"99": 1.0}, None)[0] > 0.0, (
-        "a COLD ruler reads plain logit-accuracy: one hit is θ > 0"
+        "a COLD ruler reads plain logit-fitness: one hit is θ > 0"
     )
 
     # θ_se is dispersion-corrected: a GRADED response varies less about its mean than Bernoulli.
@@ -459,6 +466,8 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
         span=None,
         ranking=None,
         fields=None,
+        fitness_unit="score",
+        terms=frozenset(),
         fitness=lambda _row, _grade: 0.0,
         objective=None,
     )
@@ -608,7 +617,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     def delta(levels: list[float | None], **kw: Any) -> float | None:
         return inner_cell_facts(cyc(levels, **kw)).mean_round_delta
 
-    def lift(levels: list[float | None], bench: list[float | None], **kw: Any) -> float:
+    def lift(levels: list[float | None], bench: list[float | None], **kw: Any) -> float | None:
         px = compute_outer_proxies(cyc(levels, bench_origin=0.40, bench_levels=bench, **kw))
         return px.held_out_lift
 
@@ -675,6 +684,40 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
             "the L4 tape line lost the reason its θ lift was withheld"
         )
 
+    # The L4 round reads its mean held-out lift over MEASURED cells, the floored share beside it:
+    # a floor is a typed fact on the row, never a -1 inside the mean.
+    owned = cyc([0.40], stop_reason=StopReason.OPTIMIZER_ABORT)
+    floor = OuterSampleProxies(floored=1, held_out_lift=None)
+    rows = [
+        measurement(sid, None, pipeline_data={"cell_report": report}).facts
+        for sid, report in enumerate(
+            [
+                inner_cell_report(
+                    inner_cell_facts(cyc([0.40])), OuterSampleProxies(floored=0, held_out_lift=held)
+                )
+                for held in (0.0, 0.0, 0.0, 0.05, 0.0, 0.0375)
+            ]
+            + [inner_cell_report(inner_cell_facts(owned), compute_outer_proxies(owned))]
+        )
+    ]
+    family = yaml.safe_load(
+        (Path(__file__).parents[1] / "research/datasets/promptpotter-self/family.yaml").read_text()
+    )
+    l4 = scorer_of(family["campaign"]["scoring"]["per_sample"])
+    graded = l4.sheet(rows)
+    round_fold = compute_composite_fitness(graded, l4, pipeline_schema([], name="ds"))
+    assert round_fold.term_means == pytest.approx({"floored": 1 / 7, "held_out_lift": 0.0875 / 6})
+    assert lift_text(round_fold.term_means["held_out_lift"], "rate") == "+1.5\N{NO-BREAK SPACE}pts"
+    # The L4 formula is no matcher's call, so every printer's source reads a score; a matcher's a rate.
+    l4_sources = (
+        round_fold.fitness_unit,
+        own_level(graded, l4.fitness_unit).unit_of("fitness"),
+        grade_measurands(l4)[0].unit,
+    )
+    assert l4_sources == ("score",) * 3, "a non-rate formula's fitness printed as a percent"
+    assert "%" not in fold_fitness_text(round_fold)
+    assert grade_measurands(scorer_of())[0].unit == "rate"
+
     # Ending on its own terms, a cycle none of whose L1 proposals reached a cell is FLOORED,
     # whatever its replies' failure: potter banks an empty panel, a paper optimizer Invalid arms.
     def failed(reason: str, rnd: int) -> RoundResult:
@@ -687,17 +730,16 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         [round_result(1, candidates_scored=0, no_op=1, dup=1)],
         [round_result(1, candidates_scored=0, no_op=2), failed(PARSE_FAILURE_MALFORMED, 2)],
     ):
-        assert compute_outer_proxies(cyc([0.40, 0.40], rounds=spoiled)).held_out_lift == -1.0, (
+        assert compute_outer_proxies(cyc([0.40, 0.40], rounds=spoiled)) == floor, (
             f"no proposal of {[r.round for r in spoiled]} reached a cell, yet the cell scored"
         )
-    owned = cyc([0.40], stop_reason=StopReason.OPTIMIZER_ABORT)
-    assert compute_outer_proxies(owned).held_out_lift == -1.0, (
+    assert compute_outer_proxies(owned) == floor, (
         "its optimizer's own abort was excluded or scored as a held lift"
     )
     reached = [failed(PARSE_FAILURE_MALFORMED, 1), round_result(2, no_op=1)]
-    assert compute_outer_proxies(cyc([0.40, 0.55], rounds=reached)).held_out_lift == 0.0, (
-        "a cycle one proposal of which reached a cell floored"
-    )
+    assert compute_outer_proxies(cyc([0.40, 0.55], rounds=reached)) == OuterSampleProxies(
+        floored=0, held_out_lift=0.0
+    ), "a cycle one proposal of which reached a cell floored"
     assert delta([0.40, 0.55], rounds=reached) == pytest.approx(0.175), (
         "a malformed reply is the prompt's verdict and scores"
     )

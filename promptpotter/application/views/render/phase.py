@@ -16,11 +16,15 @@ from promptpotter.application.views.render.primitives import (
     fmt_coverage,
     fmt_field_accuracy,
     fmt_fitness,
-    fmt_pct,
     overlap_series,
     render_pipeline_overlay,
 )
-from promptpotter.domain.arm_reading import lift_band_text
+from promptpotter.domain.arm_reading import (
+    fitness_terms_text,
+    fold_fitness_text,
+    level_text,
+    lift_band_text,
+)
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.origin_panel import (
@@ -44,9 +48,7 @@ if TYPE_CHECKING:
 
 
 def _spelled(act: NextAct) -> str:
-    """The terminal's spelling of *act*: its kind's verb, and the field it fills as the flag that
-    sets it (a budget axis as its `--max-` flag), *value* naming what goes there; a kind-less
-    act's field as it is set, or the file it reads."""
+    """The terminal's spelling of *act*: its kind's verb and the flag that sets its field."""
     if act.reads:
         return f"else read `{act.reads}`"
     if not act.kind:
@@ -61,8 +63,7 @@ def _spelled(act: NextAct) -> str:
 
 
 def stop_next_lines(stop_reason: StopReason) -> list[str]:
-    """The step past a stop and the terminal's commands for it: no terminal reader prints one
-    alone."""
+    """The step past a stop and the terminal's commands for it."""
     info = STOP_REASON_INFO[stop_reason]
     spelled = list(dict.fromkeys(_spelled(act) for act in info.next_acts))
     return [
@@ -72,8 +73,7 @@ def stop_next_lines(stop_reason: StopReason) -> list[str]:
 
 
 def stop_lines(stop_reason: StopReason, *, detail: str = "") -> list[str]:
-    """A stop at every surface that names one: its outcome, its label, what said so, then
-    ``stop_next_lines``."""
+    """A stop at every surface that names one: its outcome, label, what said so, then ``stop_next_lines``."""
     info = STOP_REASON_INFO[stop_reason]
     said = f" — {detail}" if detail else ""
     return [f"{info.outcome.value.upper()} · {info.label}{said}", *stop_next_lines(stop_reason)]
@@ -93,12 +93,12 @@ def render_progress_table(rounds: Sequence[RoundOutcome], series: LevelSeries) -
         return ""
 
     header = (
-        f"{'Round':<7s} {'Accuracy':>9s} {'n':>5s} {'Composite':>10s}"
+        f"{'Round':<7s} {'Fitness':>9s} {'n':>5s} {'Composite':>10s}"
         f" {'Ability θ':>10s} {'Trend':>9s}"
     )
     lines: list[str] = [_node_line(header)]
 
-    # Trend reads ABILITY, never accuracy: under `per_round_resubset` consecutive accuracies sit different exams.
+    # Trend reads ABILITY, never fitness: under `per_round_resubset` consecutive fitnesses sit different exams.
     prev: AbilityReading | None = None
     for rr in rounds:
         read = series.reading(rr.round)
@@ -110,7 +110,7 @@ def render_progress_table(rounds: Sequence[RoundOutcome], series: LevelSeries) -
             prev = level
         fold = rr.fold
         row = (
-            f"  {rr.round!s:<5s} {fmt_pct(None if fold is None else fold.accuracy):>8s} "
+            f"  {rr.round!s:<5s} {fold_fitness_text(fold):>8s} "
             f"{0 if fold is None else fold.total:>5d} "
             f"{fmt_fitness(None if fold is None else fold.composite_fitness):>9s} "
             f"{th_str:>10s} {trend:>9s}"
@@ -166,7 +166,7 @@ def render_round_stats(
 ) -> str:
     lines: list[str] = []
     fold = round_result.fold
-    accuracy = None if fold is None else fold.accuracy
+    fitness = fold_fitness_text(fold)
     total = 0 if fold is None else fold.total
     deprecated = 0 if fold is None else fold.deprecated
     if total == 0:
@@ -180,13 +180,17 @@ def render_round_stats(
             None,
         )
         if best is not None:
-            accuracy = None if best.accuracy is None else best.accuracy.value
+            fitness = level_text(
+                None if best.fitness is None else best.fitness.value, best.fitness_unit
+            )
             total, deprecated = best.n, 0
     suffix = f"  ({deprecated} deprecated)" if deprecated else ""
+    if fold is not None and (terms := fitness_terms_text(fold.term_means)):
+        suffix += f"  |  {terms}"
     lines.append(
         _node_line(
-            f"accuracy: {fmt_pct(accuracy)} of {unit_count(total, unit)}{suffix}  |  evaluated: "
-            f"{round_result.candidates_scored} candidates"
+            f"fitness: {fitness} of {unit_count(total, unit)}{suffix}  |  "
+            f"evaluated: {round_result.candidates_scored} candidates"
         )
     )
 
@@ -240,8 +244,9 @@ def render_completion(
             assert_never(info.outcome)
 
     headline = f"Rounds       {result.n_rounds_after_origin:<15d}"
-    if result.result_accuracy is not None:
-        headline += f"Selected     {result.result_accuracy:.1%} (round {result.result_round})"
+    if result.result_fitness is not None:
+        fitness = level_text(result.result_fitness, result.fitness_unit)
+        headline += f"Selected     fitness {fitness} (round {result.result_round})"
     # Repeated under a terminal's readout: a notebook cell has no readout, only this box.
     fields: list[str] = [
         *stop_lines(result.stop_reason),

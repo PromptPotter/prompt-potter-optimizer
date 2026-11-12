@@ -240,8 +240,7 @@ class _Accum:
 
 
 def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
-    """The campaigns measuring the bank *dataset_name* labels now, matched on the hash each
-    manifest declares: two banks under one name never pool, and a label naming none matches none."""
+    """The campaigns measuring the bank *dataset_name* labels now, matched on the hash each manifest declares."""
     digest = stores.tenant_datasets.hash_of(dataset_name)
     return [
         c.campaign_id
@@ -472,7 +471,9 @@ def subject_evidence(
     held_out = {r.key: r.bench_values for r in rows if r.bench_values}
     decomposition = variance(scored)
     direction = spec_metric.higher_is_better
-    reading = metric_reading(spec_metric, rows, available, members=members, measurand=measurand)
+    reading = metric_reading(
+        spec_metric, rows, available, members=members, measurand=measurand, scorer=grader.scorer
+    )
     return Evidence(
         generated_at=utcnow_iso(),
         scorer_id=grader.scorer.id,
@@ -529,8 +530,7 @@ class _Located(NamedTuple):
 
 
 def _at(stores: Stores, spec: Subject) -> _Located | None:
-    """An address that names nothing answers `None`; a manifest that will not read refuses, naming
-    its file."""
+    """An address that names nothing answers `None`; a manifest that will not read refuses."""
     try:
         leaf = descend_store(stores, spec.inside)
         campaign_dir = next(

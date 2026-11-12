@@ -84,7 +84,7 @@ def init_exit(ctx: ViewContext, *, cycle: Cycle, session: Session) -> InitExitVi
 
     partition = session.state.scoring.partition
     return InitExitView(
-        origin_acc=None if (fold := cycle.origin_round.fold) is None else fold.accuracy,
+        origin_fitness=None if (fold := cycle.origin_round.fold) is None else fold.fitness,
         cycle_id_short=session.cycle_id[:12],
         samples=len(partition.search),
         bench_samples=len(partition.bench),
@@ -105,7 +105,7 @@ def propose_enter(
     node: str,
     opening: RoundOpening,
     budget_rounds: int | None,
-    parent_accuracy: float | None,
+    parent_fitness: float | None,
     prompt_preview: str,
     model: str | None,
     pipeline_params: PipelineParams,
@@ -124,7 +124,7 @@ def propose_enter(
         round=round,
         budget_rounds=budget_rounds,
         standing=opening.standing,
-        parent_accuracy=parent_accuracy,
+        parent_fitness=parent_fitness,
         prompt_preview=preview,
         arms=opening.arms,
         note=opening.note,

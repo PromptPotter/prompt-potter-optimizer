@@ -158,7 +158,7 @@ class CourseFacts(FrozenModel):
     rounds_closed: int = Field(description="Rounds closed AFTER the origin.")
     elects_on: DisplayMetric | None = Field(
         description="The column the course's newest election elected on; null before its first. "
-        "`ability`: its rounds are won on θ, not on accuracy."
+        "`ability`: its rounds are won on θ, not on fitness."
     )
     spend: MeteredSpend = Field(description="This course's own ledger's bill, at the moment.")
     bench: BenchScore | None = Field(
@@ -240,7 +240,7 @@ class RoundFacts(FrozenModel):
     round: int
     elects_on: DisplayMetric | None = Field(
         description="The column the round's election elected on (`Election.elects_on`); null on "
-        "a round never elected. `ability`: the round is won on θ, not on accuracy."
+        "a round never elected. `ability`: the round is won on θ, not on fitness."
     )
 
 
@@ -319,8 +319,8 @@ class CandidateFacts(FrozenModel):
         "`lens_value` against its position by the reading's composite. Null without a lens, or "
         "where either value is."
     )
-    sample_set_accuracy: float | None = Field(
-        description="Accuracy over the request's `samples=` subset, served only where this "
+    sample_set_fitness: float | None = Field(
+        description="Fitness over the request's `samples=` subset, served only where this "
         "candidate carries a scoreable verdict for ALL of it. Null without a `samples=` mask."
     )
     sample_set_n: int | None = Field(
@@ -361,7 +361,8 @@ type FigureKey = Literal[
     "lift_per_candidate",
     "time_per_lift",
     "lives",
-    "accuracy",
+    "fitness",
+    "fitness_terms",
     "ability",
 ]
 

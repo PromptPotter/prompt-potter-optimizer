@@ -40,7 +40,12 @@ from promptpotter.application.views.render.primitives import (
     display_tags,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
-from promptpotter.domain.arm_reading import ScoreboardRankKey, scoreboard_rank_key
+from promptpotter.domain.arm_reading import (
+    ScoreboardRankKey,
+    level_text,
+    lift_text,
+    scoreboard_rank_key,
+)
 from promptpotter.domain.arms import (
     Concluded,
     Cut,
@@ -135,7 +140,7 @@ class ReadoutProjection(Projection):
         self._anchors = ViewAnchors()
         self._sample_lookahead_depth: int | None = None
         self._round_best_key: ScoreboardRankKey | None = None
-        self._round_best_acc: float | None = None
+        self._round_best_fitness: float | None = None
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None
         self._standing_printed_for: str = ""
@@ -206,7 +211,7 @@ class ReadoutProjection(Projection):
             self._round_num = record.round
         if isinstance(view, RoundStartView):
             self._round_best_key = None
-            self._round_best_acc = None
+            self._round_best_fitness = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
         # A `--from` retracted its rounds before INIT exits, so what stands is exactly the prior line.
@@ -543,20 +548,21 @@ class ReadoutProjection(Projection):
         else:
             self._write(f"  {_box_bottom(width=w)}")
 
-        if fold is not None and fold.accuracy is not None:
-            self._write(self._fmt_round_leader(label, fold.accuracy, fold.composite_fitness))
+        if fold is not None and fold.fitness is not None:
+            self._write(self._fmt_round_leader(label, fold.fitness, fold))
 
-    def _fmt_round_leader(self, label: str, acc: float, composite: float | None) -> str:
-        key = scoreboard_rank_key(composite, acc)
+    def _fmt_round_leader(self, label: str, fitness: float, fold: ScoreSummary) -> str:
+        key, unit = scoreboard_rank_key(fold.composite_fitness, fitness), fold.fitness_unit
         new_round_max = self._round_best_key is None or key > self._round_best_key
         if new_round_max:
             self._round_best_key = key
-            self._round_best_acc = acc
+            self._round_best_fitness = fitness
             self._round_best_label = label
-            return f"  {GREEN}★ leader: {label} {acc:.1%}{RESET}"
-        gap = acc - (self._round_best_acc or acc)
+            return f"  {GREEN}★ leader: {label} {level_text(fitness, unit)}{RESET}"
+        gap = fitness - (self._round_best_fitness or fitness)
         prior = self._round_best_label or "leader"
-        return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"
+        lead = f"{level_text(fitness, unit)}  ({lift_text(gap, unit)} from {prior})"
+        return f"  {DIM}→ {label} {lead}{RESET}"
 
     def on_round_complete(self, round_result: RoundClosedRecord) -> None:
         self.sample_counter = 0

@@ -16,8 +16,8 @@ from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits, run_said
 from promptpotter.domain.arm_reading import (
-    DISPLAY_METRIC_INFO,
     ArmReading,
+    fitness_terms_text,
     level_text,
     lift_band_text,
 )
@@ -165,7 +165,8 @@ def _course_climb(facts: CourseFacts) -> Said | None:
 
 
 def _bench_row(state: ReadingState, bench: BenchScore | None) -> Figure:
-    level = None if bench is None or bench.selected is None else bench.selected.level
+    selected = None if bench is None else bench.selected
+    level = None if selected is None else selected.level
     notes = [READING_STATE_INFO[state].sentence]
     # How far a pass got rides the sentence, where it stopped short of its rows.
     if (
@@ -179,8 +180,8 @@ def _bench_row(state: ReadingState, bench: BenchScore | None) -> Figure:
         "bench",
         "Bench",
         READING_STATE_INFO[state].label
-        if bench is None or level is None
-        else level_text(level.value, DISPLAY_METRIC_INFO[bench.headline].unit),
+        if selected is None or level is None
+        else level_text(level.value, selected.level_unit),
         " · ".join(notes),
     )
 
@@ -237,18 +238,20 @@ def candidate_lines(reading: ArmReading, standing: CandidateStanding) -> list[Sa
 
 
 def candidate_figures(reading: ArmReading) -> list[Figure]:
-    panel, ability = reading.panel, reading.ability
-    accuracy = None if reading.own is None else reading.own.accuracy
+    panel, ability, own = reading.panel, reading.ability, reading.own
+    fitness = None if own is None or own.fitness is None else own.fitness.value
     rows = [
         _figure(
-            "accuracy",
-            "Accuracy",
-            level_text(None if accuracy is None else accuracy.value, "rate"),
+            "fitness",
+            "Fitness",
+            "—" if own is None else level_text(fitness, own.fitness_unit),
             None
             if panel.scored is None
             else f"{panel.scored}{'' if panel.expected is None else f' of {panel.expected}'} scored",
         )
     ]
+    if terms := fitness_terms_text(reading.fitness_terms):
+        rows.append(_figure("fitness_terms", "Formula terms", terms))
     if ability is not None and (ability.theta is not None or ability.caveat is not None):
         theta = "—" if ability.theta is None else f"{ability.theta:.2f}"
         rows.append(
@@ -510,8 +513,7 @@ def draft_starts(stores: Stores) -> dict[str, LaunchStage]:
 def unstarted_entry(
     stores: Stores, draft: DraftFile, *, start: LaunchStage | None
 ) -> UnstartedCampaign:
-    """An open check-in as a campaign: its spend is what the check-in cost, its lifecycle word
-    the stage of a Start that holds it."""
+    """An open check-in as a campaign: its spend is what the check-in cost."""
     ledger = stores.drafts.ledger(draft.draft_id)
     spend_lifetime = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []).total)
     dataset = draft.dataset_name

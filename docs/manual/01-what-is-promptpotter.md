@@ -14,7 +14,7 @@ Everything in this manual uses these three terms.
 
 **Round** — one generate-score-critique cycle inside a campaign. Each round, the optimizer proposes several candidate configurations, scores them on samples from the dataset, and runs a critique to decide what to try next. A campaign is a sequence of rounds.
 
-**Candidate** — one proposed configuration scored during a round: a specific combination of prompt fields and pipeline parameters. The candidate that beats its parent (the configuration it was mutated from) becomes the next parent; the others are discarded. PromptPotter's own optimizer decides on ability (θ), which weighs how hard each sample is — so a winner's raw accuracy can be lower than a loser's.
+**Candidate** — one proposed configuration scored during a round: a specific combination of prompt fields and pipeline parameters. The candidate that beats its parent (the configuration it was mutated from) becomes the next parent; the others are discarded. PromptPotter's own optimizer decides on ability (θ), which weighs how hard each sample is — so a winner's raw fitness can be lower than a loser's.
 
 ---
 

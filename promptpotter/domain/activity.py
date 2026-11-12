@@ -5,9 +5,10 @@ from typing import ClassVar, Literal, NamedTuple, assert_never, get_args
 
 from pydantic import Field
 
+from promptpotter.domain.arm_reading import level_text
 from promptpotter.domain.arms import Cut, Measured, candidate_label
 from promptpotter.domain.command_kinds import CommandKind
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit
 from promptpotter.domain.phase_views import VerificationEnterView
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -131,8 +132,7 @@ class ActivityDecision(FrozenModel):
 
 
 def _arms_gate(round_num: int | None, drafts: list[Said]) -> ActivityDecision:
-    """One button keeps every draft; an arm of the operator's own is written text, so it is the
-    verb the lead names."""
+    """One button keeps every draft; an arm of the operator's own is written text."""
     held = "The round" if round_num is None else f"Round {round_num}"
     drafted = (
         "Keep a draft below with `--keep <index>`, add arms of your own in the file, or both."
@@ -170,9 +170,8 @@ def _num(value: object) -> float | None:
     return value
 
 
-def _pct(value: object) -> str | None:
-    number = _num(value)
-    return None if number is None else f"{number:.0%}"
+def _level(value: float | None, unit: MeasurandUnit) -> str | None:
+    return None if value is None else level_text(value, unit)
 
 
 def _node_label(node: str, at: int | None) -> str:
@@ -391,7 +390,7 @@ class ActivityFeed:
             kind="candidate",
             icon="◆",
             label=label,
-            detail=_pct(fold.composite_fitness)
+            detail=_level(fold.composite_fitness, "score")
             if isinstance(arm, Cut | Measured) and fold is not None
             else None,
             tone="success",
@@ -419,7 +418,7 @@ class ActivityFeed:
             arm, candidate, who, rows = self._bench
             rows = total or rows
             tally = f"bench {scored}/{'?' if rows is None else rows}"
-            so_far = None if running is None else _pct(running.accuracy)
+            so_far = None if running is None else _level(running.fitness, running.fitness_unit)
             return ActivityItem(
                 id=item_id,
                 kind="progress",
@@ -433,7 +432,7 @@ class ActivityFeed:
             kind="progress",
             icon="·",
             label=f"{label} · scoring {count}" if count else f"{label} · scoring",
-            detail=None if running is None else _pct(running.composite_fitness),
+            detail=None if running is None else _level(running.composite_fitness, "score"),
             round=at,
             arm=record.arm,
         )

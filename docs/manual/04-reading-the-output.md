@@ -33,11 +33,11 @@ A round opens with its number and the distance to the next escalation, then the 
 ROUND 3/10                                        stall 0/3 → L2
 ...
   SCOREBOARD
-  #   Label    Cells   Accuracy             95% CI   Composite   Ability θ     Delta
-  1   C3.1     50/50      74.0%     [61.0%, 84.0%]      0.7400      +0.412    +12.0%  *
-  2   C3.3     14/50      57.1%     [32.0%, 79.0%]      0.5710         ---       ---  (eliminated)
-  ✓ SELECTED C3.1  74.0% (vs reference 62.0%, +12.0%)
-  lift vs reference: +0.120 [+0.031, +0.209] on 50 shared  |  clears 0
+  #   Label    Cells    Fitness             95% CI   Composite   Ability θ     Delta
+  1   C3.1     50/50      74.0%     [0.610, 0.840]      0.7400      +0.412  +12.0 pts  *
+  2   C3.3     14/50      57.1%     [0.320, 0.790]      0.5710         ---       ---  (eliminated)
+  ✓ SELECTED C3.1  74.0% (vs reference 62.0%, +12.0 pts)
+  lift vs reference: +12.0 pts [+3.1, +20.9] on 50 shared  |  clears 0
 ```
 
 What to read:
@@ -47,8 +47,8 @@ What to read:
   - **L2** — engaged when L1 stalls; it re-aims which evidence L1 looks at and how widely it explores
   - **L3** — engaged when L2 also stalls; it replans the strategy
 - **`Cells`** — read it first: how many samples the candidate answered of those asked. A candidate cut at `14/50` is not comparable to one at `50/50`.
-- **`✓ SELECTED`** or **`· HELD`** — which candidate won, or that the best so far stands. The winner is picked on ability (θ), not on the accuracy column.
-- **`lift vs reference`** — the winner's gain over its parent, with its interval. `spans 0` means the round did not really separate them.
+- **`✓ SELECTED`** or **`· HELD`** — which candidate won, or that the best so far stands. The winner is picked on ability (θ), not on the fitness column.
+- **`lift vs reference`** — the winner's gain over its parent, with its interval, in its scorer's unit: points where the formula is one matcher's call (fitness reads as a percent), score units otherwise. `spans 0` means the round did not really separate them.
 
 Candidates are labelled `C0` for the origin and `C{round}.{n}` after it.
 

@@ -61,6 +61,10 @@ class InnerCellFacts(FrozenModel):
     rounds_ran: int = Field(description="The rounds the inner cycle closed past its origin")
     round_budget: int = Field(description="The round budget, never below the rounds it ran")
     stop_reason: StopReason = Field(description="Why the inner cycle stopped")
+    floor_reason: str | None = Field(
+        description="Why the optimizer prompt's own run was scored at the floor, measuring no "
+        "lift; null on a measured cell"
+    )
     origin_headroom: float | None = Field(
         description="The share of origin rows still missed: 0 is a cell no arm can lift, however "
         "sharply it reads"

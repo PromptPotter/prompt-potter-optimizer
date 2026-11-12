@@ -23,10 +23,10 @@ from promptpotter.shared.worded import Worded
 
 
 class IndexRound(FrozenModel):
-    """The level is ``None`` where the round's measurand is not an accuracy: an L4 outer round."""
+    """The level is ``None`` where the round folded no cell."""
 
     round: int
-    accuracy: float | None
+    fitness: float | None
     health: RoundHealth
 
 

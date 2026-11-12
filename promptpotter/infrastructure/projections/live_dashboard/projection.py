@@ -295,12 +295,12 @@ class LiveDashboardProjection(Projection):
                         self._place_bench(read)
                         ended = opened.ended(scored=read.n, level=read.level, failed_as=None)
                     case VerifyReading(fresh=fresh):
-                        ended = opened.ended(scored=fresh.n, level=fresh.accuracy, failed_as=None)
-                    case NoiseBand(fresh_accuracy=accuracy):
+                        ended = opened.ended(scored=fresh.n, level=fresh.fitness, failed_as=None)
+                    case NoiseBand(fresh_fitness=fitness):
                         # Its rows are every rescore's, as its bracket opened them.
                         ended = _opened(taken.kind, taken.arm, len(taken.cells)).ended(
                             scored=len(taken.cells),
-                            level=BandedValue(value=accuracy, ci_lo=None, ci_hi=None),
+                            level=BandedValue(value=fitness, ci_lo=None, ci_hi=None),
                             failed_as=None,
                         )
                 self._mark(ended)
@@ -387,7 +387,7 @@ class LiveDashboardProjection(Projection):
                 and held.kind == record.role.value
                 and held.arm.key == record.individual_id
             ):
-                running = None if record.running is None else record.running.accuracy
+                running = None if record.running is None else record.running.fitness
                 self._mark(held.scored_one(running))
                 return
 

@@ -14,7 +14,7 @@ _POOLABLE_UNITS: frozenset[MeasurandUnit] = frozenset({"seconds", "usd", "tokens
 
 A second is a second on any bank, so a marginal that pools an agent episode on one dataset with a
 call on another still answers "how long did this level take". A rate, a score or a θ is not:
-accuracy on two banks answers two different questions, and averaging them reports a number about
+fitness on two banks answers two different questions, and averaging them reports a number about
 no exam anyone sat. This is the same distinction ``Comparability`` draws for the roster — *"the
 roster and spend still compare, the numbers do not"* — applied to the one place a factorial read
 would otherwise smuggle it past, which is the marginal."""

@@ -109,6 +109,11 @@ row it closes.
   stores, then `run_campaign(…, stores=stores)` enters again (`embedded_run.py:130`). Action: one landing
   per embedded compile. **Rides with:** admit-2, whose Owns gain `presentation/teleprompter.py::acompile`.
   **Re-test:** `git grep -c "enter()" -- promptpotter/presentation/teleprompter.py` is 0.
+- **A retired knob refuses at the launch, not at the landing**: `store/dataset_access.py::definition_layer`
+  checks only that each section is a mapping, so a definition still naming `halt_at_accuracy` lands
+  and refuses at its next launch. Action: the landing validates each layer's `campaign` section against
+  `CampaignConfig`'s keys. **Rides with:** admit-2, whose Owns gain `store/dataset_access.py`.
+  **Re-test:** a definition naming `accuracy_ceiling` past `fitness knobs` refuses `land-data`.
 
 ### The edge tail · passb-2 (after batch/26; `chain N` is passb's link N)
 
@@ -164,6 +169,12 @@ row it closes.
   the served `BenchScore` dump in `decisions.json`, so a served field rename (`can_grade` → `can_run`)
   reads as "decisions MOVED". Action: `decisions.json` holds decisions alone. **Rides with:** passb-2.
   **Re-test:** rename a served `BenchStatus` field; the offline run reads decisions UNMOVED.
+- **A command log row is typed by no payload model**: `domain/command_events.py::CommandRecord` holds
+  its payload untyped, so a row in a retired payload shape loads and refuses only when replayed.
+  Typing it by `domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND` is blocked: `IngestUploadPayload.blob`
+  is excluded from the record yet required, so no recorded upload validates. Action: a recorded shape
+  per kind without its excluded fields. **Rides with:** passb-2, whose Owns gain
+  `domain/command_kinds.py`. **Re-test:** a command log row in a retired payload shape loads.
 
 ### batch/26 · money
 
@@ -298,12 +309,6 @@ row it closes.
   reads an arm with no shared cells as a 0.0 mean, so a replay over a round that lacks the arm confirms
   it instead of answering it absent. Action: an arm with no shared cells is absent, as in the race's
   replay. **Re-test:** `pytest tests/test_archive.py -k replays_its_decisions` covers `population_kept`.
-- **The L4 task prompt points at a deleted doc**: `research/datasets/promptpotter-self/task.md:102`
-  names `docs/specs/l4-outer-loop.md` (deleted at batch/21), kept byte-equal so the next paid L4 run
-  replays. Action: the operator notes leave the prompt body; what stays points at
-  `docs/concepts/l4.md` § Cost and `roadmap.md` § L4 closure. **Rides with:** rk-opt (the re-key
-  window). **Re-test:** `git grep -n "l4-outer-loop" -- research/datasets/promptpotter-self/task.md`
-  is empty.
 - **An optimizer node's template rides beside its config**: `llm_call.py::run_optimizer_node` takes a
   filled `template` and an `LLMCallContext` whose `config` named it (`critique.py::distil_critique`,
   `firing.py::_run_transition`, `task_context.py::run_checkin`, `generate.py:133`), so the two can
@@ -1381,4 +1386,8 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   an unrecoverable upstream fault as an abort's intended use, while `domain/l4/proxies.py::floor_reason`
   floors every `OPTIMIZER_ABORT` as prompt-owned, one after a real held-out gain included. Action: an
   abort carries who owns it, and only a prompt-owned one floors. **Held:** a decision. **Re-test:** an
-  inner run aborted on a backend fault reads `held_out_lift` -1.
+  inner run aborted on a backend fault reads `floored` 1.
+- **An archived L4 outer cell carries no `floored`**: rows banked before `floored` became a row term
+  leave the `per_sample` of `research/datasets/promptpotter-self/family.yaml` unscored; no reader reads both
+  shapes. Action: none past the landing that ships it, which re-measures C0. **Held:** that landing.
+  **Re-test:** after it, `promptpotter-self` scores every outer cell it reads.

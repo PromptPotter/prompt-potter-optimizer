@@ -258,8 +258,7 @@ _ONE_CHOICE = ("model", "provider")
 
 
 def _one_model(overrides: Overrides) -> tuple[Overrides, dict[str, str]]:
-    """The arm's edits less who answers, and the ONE model every inner node answers by: the first
-    edit naming one, on its provider where that edit names one."""
+    """The arm's edits less who answers, and the ONE model every inner node answers by: the first edit naming one."""
     edits = {
         node: {k: v for k, v in edit.items() if k not in _ONE_CHOICE}
         for node, edit in overrides.items()
@@ -273,8 +272,7 @@ def _one_model(overrides: Overrides) -> tuple[Overrides, dict[str, str]]:
 
 
 def _laid_arm(config: CampaignConfig, overrides: Overrides) -> CampaignConfig:
-    """The arm's edit laid into the cell's own overlay, last: the selection refuses what no
-    render can apply (`optimizer_manifest.py::_select`), and its treatment hashes the rest."""
+    """The arm's edit laid into the cell's own overlay, last: the selection refuses what no render can apply."""
     if not overrides:
         return config
     edits, model = _one_model(overrides)
@@ -291,8 +289,7 @@ def _laid_arm(config: CampaignConfig, overrides: Overrides) -> CampaignConfig:
 async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
     ctx, spec = cell.ctx, cell.spec
     # The campaign that exists decides, never an id its origin content derives: a drifted origin
-    # reaches the drift refusal rather than a fresh root. A continuing seat's campaign refusal is
-    # asked before its session opens, so the session binds a connector already known to agree.
+    # reaches the drift refusal rather than a fresh root.
     campaign = store.campaigns.load_campaign(cell.campaign_id)
     if campaign is not None and (refused := campaign_refusal(store, campaign)) is not None:
         raise CellUnscoreableError(str(refused), spent={}) from refused
@@ -387,20 +384,20 @@ async def _run_inner_campaign(
             with contextlib.suppress(Exception):
                 await session.backend_client.aclose()
     # Reported, never enforced: one origin pass sits inside its own error bar.
-    origin_acc = (
+    origin_fitness = (
         None
-        if result.origin is None or result.origin.accuracy is None
-        else result.origin.accuracy.value
+        if result.origin is None or result.origin.fitness is None
+        else result.origin.fitness.value
     )
     floor = opened.bank_floor
-    if origin_acc is not None and floor is not None and floor >= origin_acc:
+    if origin_fitness is not None and floor is not None and floor >= origin_fitness:
         logger.warning(
             "inner cell %s MAY REWARD COLLAPSE: constant-answer floor %.3f >= this run's origin "
             "%.3f. One pass sits inside its own error bar — re-screen the seat "
             "with a seed screen before trusting the panel.",
             cell.cell.id,
             floor,
-            origin_acc,
+            origin_fitness,
         )
     return result
 
@@ -423,7 +420,6 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
 
     # Awaited DIRECTLY, never under `asyncio.shield`/`wait`, which orphan it to keep billing.
     # The context binds no OUTER candidate, or inner optimizer calls bill under the outer cell's role.
-    # Its wait beats on the outer ledger through the measuring call's own heartbeat (`cell_hop`).
     inner_task = asyncio.create_task(
         _run_inner_campaign(cell, minted, spawned_by),
         context=measured_pass_context(None),
@@ -454,10 +450,11 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     scored = compute_outer_proxies(result)
     facts = inner_cell_facts(result)
     delta = "—" if facts.mean_round_delta is None else f"{facts.mean_round_delta:+.3f}"
+    held = "floored" if scored.held_out_lift is None else f"B{scored.held_out_lift:+.3f}"
 
     data: dict[str, Any] = {
         # A summary line, not an answer to be matched: this cell carries no label, so add no hit/miss reader.
-        INNER_RESULT_KEY: [f"inner:{query} B{scored.held_out_lift:+.3f} D{delta}"],
+        INNER_RESULT_KEY: [f"inner:{query} {held} D{delta}"],
         "reasoning_trace": inner_narrative(result, facts, scored, narrative_head(cell.spec)),
         **inner_cell_report(facts, scored),
         # An inner campaign consumes its optimizer's ENTIRE outer config, so the stamp is its terminal.

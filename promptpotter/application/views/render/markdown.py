@@ -3,14 +3,21 @@ from __future__ import annotations
 from promptpotter.application.views.render.export import winner_pointer
 from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
 from promptpotter.application.views.render.phase import stop_lines
-from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct, overlap_series
+from promptpotter.application.views.render.primitives import (
+    fmt_fitness,
+    overlap_series,
+)
 from promptpotter.application.views.view_models import (
     ForkSummaryView,
     HardSamplesView,
     LogMdView,
     RoundDigestView,
 )
-from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO
+from promptpotter.domain.arm_reading import (
+    DISPLAY_METRIC_INFO,
+    fitness_terms_text,
+    fold_fitness_text,
+)
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.run_standing import RunStanding
@@ -91,12 +98,14 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
     fold = rd.fold
     composite = None if fold is None else fold.composite_fitness
     parts: list[str] = [
-        f"### Round {rd.round} — {rd.label} ({fmt_pct(None if fold is None else fold.accuracy)})",
+        f"### Round {rd.round} — {rd.label} (fitness {fold_fitness_text(fold)})",
         "",
         f"- improved: **{'yes' if rd.improved else 'no'}**",
         f"- samples: {0 if fold is None else fold.total}",
         f"- composite_fitness: `{fmt_fitness(composite)}`",
     ]
+    if fold is not None and (terms := fitness_terms_text(fold.term_means)):
+        parts.append(f"- formula terms: `{terms}`")
     if rd.level is not None:
         parts.append(
             f"- {DISPLAY_METRIC_INFO['ability'].label}: `{rd.level.reading.theta:+.3f}` "

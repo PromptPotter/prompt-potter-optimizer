@@ -60,9 +60,12 @@ def build_cycle_result(
     return CycleResult(
         rounds=cycle_rounds,
         n_rounds_after_origin=spent,
-        result_accuracy=None if picked is None or picked.fold is None else picked.fold.accuracy,
+        result_fitness=None if picked is None or picked.fold is None else picked.fold.fitness,
+        fitness_unit=session.state.scoring.scorer.fitness_unit,
         result_round=picked.round if picked is not None else 0,
-        origin=own_level(cycle.origin_round.results) if cycle is not None else None,
+        origin=None
+        if cycle is None
+        else own_level(cycle.origin_round.results, session.state.scoring.scorer.fitness_unit),
         level_series=(
             session.store.campaigns.standing_rounds(session.hop, moment=None).level_series
             if cycle is not None
@@ -186,7 +189,7 @@ def _finalize_run(
                     optimizer_phases=selected.phases,
                 ),
                 **round_clocks(
-                    cycle_result.rounds, accuracy_ceiling=config.accuracy_ceiling
+                    cycle_result.rounds, fitness_ceiling=config.fitness_ceiling
                 )._asdict(),
                 prompt_hashes=selected.prompt_hashes(),
                 origin_composite_fitness=(

@@ -22,7 +22,7 @@ class ViewContext:
     patience: int | None = None
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
-    display_metric: DisplayMetric = "accuracy"
+    display_metric: DisplayMetric = "fitness"
     original_sp_flat: dict[str, str] = field(default_factory=dict)
     current_sp_flat: dict[str, str] = field(default_factory=dict)
     node_param_keys: dict[str, list[str]] | None = None

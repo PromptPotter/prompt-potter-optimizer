@@ -27,16 +27,16 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
       <dl className="verify-facts">
         <div>
           <dt>
-            <Term content="The hit rate on the cells this candidate's round bought, then on the fresh cells alone with their 95% band. Different cells, so the step between them is not a paired difference.">
-              accuracy
+            <Term content="The fitness on the cells this candidate's round bought, then on the fresh cells alone with their 95% band. Different cells, so the step between them is not a paired difference.">
+              fitness
             </Term>
           </dt>
           <dd>
-            {fmtUnit("rate", recorded.accuracy?.value)} →{" "}
+            {fmtUnit("score", recorded.fitness?.value)} →{" "}
             <strong>
-              {fresh.accuracy ? fmtLevelBand("rate", fresh.accuracy) : fmtUnit("rate", null)}
+              {fresh.fitness ? fmtLevelBand("score", fresh.fitness) : fmtUnit("score", null)}
             </strong>{" "}
-            ({fmtSigned(reading.accuracy_increment, 2)})
+            ({fmtSigned(reading.fitness_increment, 2)})
           </dd>
         </div>
         <div>

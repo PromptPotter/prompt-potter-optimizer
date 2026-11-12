@@ -36,7 +36,7 @@ Candidate ability × sample difficulty, fit jointly by MAP (alternating Newton, 
 fixed and solves θ alone, one arm at a time (`::fit_theta`), or the scale moves under the round it judges.
 `δ_s` selects samples and ranks hardness; `θ_c` is the **round-winner gate**.
 
-**θ is why per-round resubsetting is safe.** On different subsets raw accuracy drifts — whoever drew
+**θ is why per-round resubsetting is safe.** On different subsets raw fitness drifts — whoever drew
 the easier samples wins — but θ is subset-invariant (Rasch specific objectivity).
 
 **Responses are graded, not Bernoulli.** `Observation.response` is the continuous per-sample fitness
@@ -69,19 +69,19 @@ disk (`(ns)` beside its `p`). Degenerate candidates (a constant
 answer, a scorer-gaming shape) are caught before they count, and the layer that validates a fix is
 never the one that proposed it.
 
-**θ is the verdict; accuracy is not** — raw accuracy moves without ability:
+**θ is the verdict; fitness is not** — raw fitness moves without ability:
 
 - **The subset moves.** `per_round_resubset` is on, so consecutive rounds are different exams.
 - **Arms are truncated at different depths.** PoBB cuts a weak arm early and `build_round_order`
   front-loads the parent's misses, so a cut arm was graded on a harder prefix.
 
-So **a winner with lower accuracy than a rival or the previous round is normally correct** —
+So **a winner with lower fitness than a rival or the previous round is normally correct** —
 `elect_round_winner` ranks `P(θ_cand > θ_parent)`, the reading PoBB cuts on. When an operator calls
-the election wrong off the accuracy column, say which column it used.
+the election wrong off the fitness column, say which column it used.
 
 **No harness rule ranks rounds by their own readings.** The run has one ceiling stop: the declared
 pick's headline level over C0 on the origin panel, read at its paired interval's lower bound, never a
-point estimate of a truncated draw or each round's composite high-water. `halt_at_accuracy` is its
+point estimate of a truncated draw or each round's composite high-water. `halt_at_fitness` is its
 target; no stop sits at 1.0, which the floored SE keeps out of reach of any finite panel. Only
 potter's L2/L3 stall comparator keeps the high-water, as its own signal.
 
@@ -94,13 +94,13 @@ carry a pinned arm. In severity order:
   so every lift from it is `0.000`. Not answer-collapse (one answer everywhere, which the election refuses): an
   arm can answer differently every time and be wrong every time.
 - **A flat ruler** (`flat_ruler`). The ruler's own δ span is below `BAND_COLLAPSE_LOGITS`, so θ is
-  accuracy plus a constant. What an all-zeros fit looks like; checked before `collapsed_band`,
+  fitness plus a constant. What an all-zeros fit looks like; checked before `collapsed_band`,
   whose ratio reads ~1 on a globally flat ruler.
 - **A cold ruler** (`cold_ruler`). Too few rows from individuals outside the election: θ is
-  logit-accuracy, not a shared scale. The lift (on cells both answered) holds, the level does not.
+  logit-fitness, not a shared scale. The lift (on cells both answered) holds, the level does not.
   `calibration_model` `None` = cold; two θ are comparable only when `ruler.id` matches.
 - **A collapsed band** (`collapsed_band`). The round's cells span a sliver of the ruler (measured:
-  28 cells over 0.63 logits on a ruler spanning 11.4), so θ = `logit(accuracy) + c` and the parent's
+  28 cells over 0.63 logits on a ruler spanning 11.4), so θ = `logit(fitness) + c` and the parent's
   floor tracks the band's centre (one origin read `-0.340` on round 0, `-1.385` on the band).
   **Silent** — warm ruler, matching id, every number renders.
 - **A prior-pinned round** (`prior_pinned`). At least `PRIOR_PINNED_RATIO` of the cells share a δ

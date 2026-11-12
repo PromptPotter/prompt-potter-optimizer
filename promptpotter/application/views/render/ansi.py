@@ -16,9 +16,9 @@ from promptpotter.application.views.render.primitives import (
     _round_rule,
     _scoreboard,
     fmt_coverage,
-    fmt_pct,
+    fmt_fitness,
 )
-from promptpotter.domain.arm_reading import lift_band_text
+from promptpotter.domain.arm_reading import fold_fitness_text, level_text, lift_band_text
 from promptpotter.domain.candidate_diff import group_diff_keys
 from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.phase_views import (
@@ -61,7 +61,7 @@ def _render_init_enter(v: InitEnterView) -> str:
 
 def _render_init_exit(v: InitExitView) -> str:
     out = [
-        f"  {GREEN}✓{RESET} Initialized  origin={fmt_pct(v.origin_acc)}  "
+        f"  {GREEN}✓{RESET} Initialized  origin fitness={fmt_fitness(v.origin_fitness)}  "
         f"cycle={v.cycle_id_short}  samples={v.samples}  bench={v.bench_samples} held out"
     ]
     parts: list[str] = []
@@ -96,7 +96,7 @@ def _render_round_start(v: RoundStartView) -> str:
             "",
             _node_block(
                 "GENERATE",
-                f"Parent accuracy {fmt_pct(v.parent_accuracy)}",
+                f"Parent fitness  {fmt_fitness(v.parent_fitness)}",
                 f"Parent prompt   {v.prompt_preview}",
                 f"Candidates      {arms}" + (f"   {v.note}" if v.note else ""),
                 f"Model           {v.model}",
@@ -130,30 +130,30 @@ def render_round_verdict(
     formula = v.composite_fitness_formula_short or v.composite_fitness_formula
     show_inline = not formula
     fold = v.fold
-    accuracy = None if fold is None else fold.accuracy
+    fitness = None if fold is None else fold.fitness
     composite = None if fold is None else fold.composite_fitness
     comp_tag = (
         f"  composite_fitness={composite:.4f}"
-        if show_inline and composite is not None and composite != accuracy
+        if show_inline and composite is not None and composite != fitness
         else ""
     )
 
-    acc_txt = fmt_pct(accuracy)
-    # A cold θ is logit-accuracy, so the headline stays accuracy.
+    fitness_txt = fold_fitness_text(fold)
+    # A cold θ is logit-fitness, so the headline stays fitness.
     theta = (
         level.reading.theta
         if v.display_metric == "ability" and level is not None and not level.reading.ruler.cold
         else None
     )
-    headline = acc_txt if theta is None else f"θ {theta:+.3f}"
-    detail = [] if theta is None else [acc_txt]
+    headline = fitness_txt if theta is None else f"θ {theta:+.3f}"
+    detail = [] if theta is None else [fitness_txt]
 
     selected = next((s.vs_reference for s in v.arms if s.election.selected), None)
     if v.improved:
         # An arm that stopped short gets no reference rate: over a prefix it is a lift nobody measured.
         lift = selected.on_whole_set if selected else None
         detail.append(
-            f"vs reference {lift.rate_a:.1%}, {_fmt_delta(lift)}"
+            f"vs reference {level_text(lift.rate_a, lift.measurand.unit)}, {_fmt_delta(lift)}"
             if lift is not None
             else "no matched reference — stopped before covering its reference's cells"
         )
@@ -294,7 +294,7 @@ def render_noise_band(v: VerificationGradedView) -> str:
 
 def _render_verify_graded(r: VerifyReading) -> str:
     levels = " → ".join(
-        "—" if (level := side.accuracy) is None else f"{level.value:.3f}"
+        "—" if (level := side.fitness) is None else f"{level.value:.3f}"
         for side in (r.recorded, r.fresh)
     )
     verdict = {True: " — held", False: f" — {YELLOW}dropped{RESET}{DIM}", None: ""}[r.held]
@@ -306,7 +306,7 @@ def _render_verify_graded(r: VerifyReading) -> str:
             f"on {fmt_coverage(pair.coverage)}"
         )
     return (
-        f"  {DIM}verify {r.label}: accuracy {levels} on {r.fresh.n} unseen cells"
+        f"  {DIM}verify {r.label}: fitness {levels} on {r.fresh.n} unseen cells"
         f"{lift}{verdict}{RESET}"
     )
 

@@ -14,11 +14,11 @@ ADAPTIVE_QUEUE = (
             "cross-round comparator reads ONE anchored δ ruler in θ — the stall replayer, "
             "c0_ok, the round-winner election and PoBB elimination all via "
             "fit_theta on cycle.difficulty — and that ruler is EXTENDED to cover each "
-            "round's new cells, so the accuracy-space collision is resolved."
+            "round's new cells, so the fitness-space collision is resolved."
         ),
         consequence=(
             "Resubset is comparability-coherent in θ, with ONE residual, WARMTH: below "
-            "elimination_n_min banked samples the ruler stays flat and θ is logit-accuracy "
+            "elimination_n_min banked samples the ruler stays flat and θ is logit-fitness "
             "on each arm's OWN subset, so those rounds are subset-relative until it warms. "
             "A cell missing from a WARM ruler is not that residual — it raises."
         ),
@@ -31,12 +31,12 @@ ADAPTIVE_QUEUE = (
         bench_knobs=("display_metric",),
         estimand=Estimand.DISPLAY,
         relation=(
-            "With per_round_resubset ON, accuracy/composite are subset-relative while "
+            "With per_round_resubset ON, fitness/composite are subset-relative while "
             "the gate is θ; the number the operator reads first should be ability "
             "(θ) or carry the subset badge."
         ),
         consequence=(
-            "The views lead with accuracy/composite while θ decides the winner. Every "
+            "The views lead with fitness/composite while θ decides the winner. Every "
             "surface now prints θ beside it, so the pairing is legible rather than "
             "unexplained — but the number read first is still the subset-relative one. Set "
             "display_metric='ability' under resubset."

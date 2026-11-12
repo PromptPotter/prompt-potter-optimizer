@@ -643,7 +643,7 @@ class PopulationSelector(nodes.Selector):
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({CapoObjective})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
-    elects_on: ClassVar[DisplayMetric] = "accuracy"
+    elects_on: ClassVar[DisplayMetric] = "fitness"
     elects_partial: ClassVar[bool] = True
 
     def parent_cells(

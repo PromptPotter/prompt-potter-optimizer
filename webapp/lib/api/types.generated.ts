@@ -497,7 +497,7 @@ export interface HierarchyTag {
  * by. */
 export interface Figure {
   /** Which figure, for code to look up; never shown. */
-  key: 'state' | 'optimizer' | 'spend' | 'spend_lifetime' | 'bench' | 'rounds' | 'candidates' | 'selection' | 'lift' | 'lift_per_usd' | 'lift_per_candidate' | 'time_per_lift' | 'lives' | 'accuracy' | 'ability';
+  key: 'state' | 'optimizer' | 'spend' | 'spend_lifetime' | 'bench' | 'rounds' | 'candidates' | 'selection' | 'lift' | 'lift_per_usd' | 'lift_per_candidate' | 'time_per_lift' | 'lives' | 'fitness' | 'fitness_terms' | 'ability';
   tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
   label: string;
   value: string | null;
@@ -657,8 +657,8 @@ export interface CourseFacts {
   /** Rounds closed AFTER the origin. */
   rounds_closed: number;
   /** The column the course's newest election elected on; null before its first.
-   * `ability`: its rounds are won on θ, not on accuracy. */
-  elects_on: 'accuracy' | 'composite' | 'ability' | null;
+   * `ability`: its rounds are won on θ, not on fitness. */
+  elects_on: 'fitness' | 'composite' | 'ability' | null;
   /** This course's own ledger's bill, at the moment. */
   spend: MeteredSpend;
   /** The campaign's bench, on the course holding the line, read whole at the head;
@@ -922,7 +922,7 @@ export interface BenchScore {
    * this. */
   scorer_id: string;
   /** Which column the headline reads; `vs_origin.headline` is its lift. */
-  headline: 'accuracy' | 'composite';
+  headline: 'fitness' | 'composite';
   status: BenchStatus;
   /** The origin's own level; `None` where its pass read nothing. */
   origin: BenchReading | null;
@@ -978,7 +978,10 @@ export interface PassStop {
 export interface BenchReading {
   /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
    * 1. */
-  accuracy: BandedValue | null;
+  fitness: BandedValue | null;
+  /** The reading scorer's unit for `fitness`: a `rate` where its formula is one
+   * matcher's call, a `score` otherwise. */
+  fitness_unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
   /** Under the reading scorer's formula, which charges cost and length — so it is
    * never the change in the hit rate. */
   composite: BandedValue | null;
@@ -990,10 +993,12 @@ export interface BenchReading {
   /** The searchpoint scored — the archive's `prompt_fields_id`. */
   sp_hash: string;
   /** Which column the headline reads. */
-  headline: 'accuracy' | 'composite';
+  headline: 'fitness' | 'composite';
   /** The headline: this reading in its `headline` column, chosen here so no surface
    * selects a column of its own. Stamped by :meth:`read` alone. */
   level: BandedValue | null;
+  /** The unit `level` reads in. */
+  level_unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
 }
 
 export interface BandedValue {
@@ -1032,7 +1037,10 @@ export interface BenchScope {
 export interface OwnLevel {
   /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
    * 1. */
-  accuracy: BandedValue | null;
+  fitness: BandedValue | null;
+  /** The reading scorer's unit for `fitness`: a `rate` where its formula is one
+   * matcher's call, a `score` otherwise. */
+  fitness_unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
   /** Under the reading scorer's formula, which charges cost and length — so it is
    * never the change in the hit rate. */
   composite: BandedValue | null;
@@ -1223,8 +1231,8 @@ export interface SubtreeCourseFacts {
   /** Rounds closed AFTER the origin. */
   rounds_closed: number;
   /** The column the course's newest election elected on; null before its first.
-   * `ability`: its rounds are won on θ, not on accuracy. */
-  elects_on: 'accuracy' | 'composite' | 'ability' | null;
+   * `ability`: its rounds are won on θ, not on fitness. */
+  elects_on: 'fitness' | 'composite' | 'ability' | null;
   /** This course's own ledger's bill, at the moment. */
   spend: MeteredSpend;
   /** The campaign's bench, on the course holding the line, read whole at the head;
@@ -1281,8 +1289,8 @@ export interface HierarchyRound {
 export interface RoundFacts {
   round: number;
   /** The column the round's election elected on (`Election.elects_on`); null on a
-   * round never elected. `ability`: the round is won on θ, not on accuracy. */
-  elects_on: 'accuracy' | 'composite' | 'ability' | null;
+   * round never elected. `ability`: the round is won on θ, not on fitness. */
+  elects_on: 'fitness' | 'composite' | 'ability' | null;
 }
 
 /** One candidate a round proposed; its children are the inner campaigns it
@@ -1362,10 +1370,10 @@ export interface CandidateFacts {
    * `lens_value` against its position by the reading's composite. Null
    * without a lens, or where either value is. */
   lens_rank_move: 'up' | 'down' | 'unchanged' | null;
-  /** Accuracy over the request's `samples=` subset, served only where this
-   * candidate carries a scoreable verdict for ALL of it. Null without a
-   * `samples=` mask. */
-  sample_set_accuracy: number | null;
+  /** Fitness over the request's `samples=` subset, served only where this candidate
+   * carries a scoreable verdict for ALL of it. Null without a `samples=`
+   * mask. */
+  sample_set_fitness: number | null;
   /** How many of the `samples=` subset this candidate carries a scoreable verdict
    * for. Null without a `samples=` mask. */
   sample_set_n: number | null;
@@ -1419,11 +1427,15 @@ export interface ArmReading {
   /** `end` names a stop of its walk, for it or against it: false on an `invalid`
    * arm, which never started one. */
   walked_short: boolean;
-  /** The arm's own level on its round's cells: accuracy with the band the gateway
+  /** The arm's own level on its round's cells: fitness with the band the gateway
    * folds per cell, the composite beside it, over `n` rows carrying a
    * verdict. Null before the first row is graded, and on an `invalid` arm,
    * which holds no cell. */
   own: OwnLevel | null;
+  /** The round mean of each term the scoring formula reads, `fitness` aside, over
+   * the cells that answered it: an L4 outer arm's `held_out_lift` and
+   * `floored` share. */
+  fitness_terms: Record<string, number>;
   panel: ArmPanel;
   /** What measuring it consumed, the BACKEND bucket alone, replayed rows excluded;
    * null until its score report folds an account. */
@@ -1522,7 +1534,7 @@ export interface VerifyReading {
    * number the fresh cells are a check on. */
   recorded: OwnLevel;
   /** `fresh` minus `recorded`, hit rate. Unpaired — the two are different cells. */
-  accuracy_increment: number | null;
+  fitness_increment: number | null;
   composite_increment: number | null;
   /** This candidate over the campaign origin, on every cell the cycle measured both
    * on outside the bench — the fresh ones and the overlap pass's included.
@@ -1541,8 +1553,10 @@ export interface VerifyReading {
 /** One member of the best-so-far line as an overlap reading holds it. */
 export interface LineRate {
   arm: ArmName;
-  /** Its rate over the panel cells it and C0 both scored. */
+  /** Its level over the panel cells it and C0 both scored. */
   rate: number;
+  /** The unit `rate` reads in: its headline's. */
+  unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
   /** How many of the panel's cells it holds scoreable. */
   n: number;
 }
@@ -1596,7 +1610,7 @@ export interface ServedDashboard {
    * flight or ended; its rows are no round's cells. */
   verification: VerificationMark[];
   composite_fitness_formula: string | null;
-  display_metric: 'accuracy' | 'composite' | 'ability';
+  display_metric: 'fitness' | 'composite' | 'ability';
   degraded_count: number;
   error_count: number;
   backend_retry_count: number;
@@ -1846,7 +1860,7 @@ export interface VerificationMark {
   rows: number;
   /** Rows of it scored so far. */
   scored: number;
-  /** Accuracy over the rows scored: the running value, unbanded, while `running`;
+  /** Fitness over the rows scored: the running value, unbanded, while `running`;
    * the pass's reading once `done`. Null before the first row, and on a
    * `failed` pass, which reads nothing. */
   level: BandedValue | null;
@@ -2304,7 +2318,7 @@ export interface Election {
   ended_on: string;
   electable: number;
   fit: Record<string, ArmFit>;
-  elects_on: 'accuracy' | 'composite' | 'ability';
+  elects_on: 'fitness' | 'composite' | 'ability';
   verdict_reason: string | null;
   reelection: Reelection | null;
   ruler: RulerStamp;
@@ -2581,7 +2595,7 @@ export interface HeadToHead {
   rows: HeadToHeadRow[];
   covers_selection: boolean;
   guard: PairGuard;
-  headline: 'accuracy' | 'composite';
+  headline: 'fitness' | 'composite';
   verdict: boolean | null;
   verdict_absent: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
   /** The arm-by-arm matrix: every two treatments whose selections the bench graded,
@@ -2695,13 +2709,13 @@ export interface DeterminismClamp {
 
 /** The column a pick's election is quoted on: θ where it was won on θ, unless θ
  * is unread or carries a caveat — there θ is not ability, and the election
- * reads on accuracy. */
+ * reads on fitness. */
 export interface ElectionColumn {
   /** What the electing round's selector ranked on. */
-  elects_on: 'accuracy' | 'composite' | 'ability';
+  elects_on: 'fitness' | 'composite' | 'ability';
   /** The pick's θ on its electing round. */
   ability: ArmAbility | null;
-  reads_on: 'accuracy' | 'composite' | 'ability';
+  reads_on: 'fitness' | 'composite' | 'ability';
 }
 
 /** The bench set and grader behind a headline; two compare only where every field
@@ -3066,7 +3080,7 @@ export interface HeadToHeadRequest {
 export interface ArmRequest {
   arm_key: string;
   /** Laid over the dataset's own `optimization`: `optimizer` is required, and
-   * `halt_at_accuracy` is refused, since every arm runs the head-to-head's
+   * `halt_at_fitness` is refused, since every arm runs the head-to-head's
    * budget to its end. */
   optimization: OptimizationOverrides;
 }
@@ -3099,7 +3113,7 @@ export interface OptimizationOverrides {
    * origin's panel, reaches this at its paired interval's lower bound.
    * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
    * only on its record's rule. */
-  halt_at_accuracy: number | null;
+  halt_at_fitness: number | null;
 }
 
 /** One optimizer node's delta over its manifest's ``config``. */
@@ -3301,11 +3315,11 @@ export interface CampaignConfig {
    * state — the optimizer's selector decides on its own objective, and the
    * campaign's headline is the bench score; this only picks the number the
    * human READS, client-overridable per session. `ability` shows θ (a logit,
-   * jargon) where the selector stamps one — defaults to `accuracy` so θ is
+   * jargon) where the selector stamps one — defaults to `fitness` so θ is
    * never forced on an operator who didn't ask for it. Rides the
    * `composite_fitness_formula` serve path to
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
-  display_metric: 'accuracy' | 'composite' | 'ability';
+  display_metric: 'fitness' | 'composite' | 'ability';
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
    * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
    * the queue mechanism's acquisition score (`pick_value`: decision-
@@ -3317,7 +3331,7 @@ export interface CampaignConfig {
    * the engine scores, which is `build_round_order` and reaches no knob.
    * Client-overridable per session, like `display_metric`. */
   hard_sample_order: 'info_gain' | 'difficulty';
-  /** The accuracy a best-reachable prompt would score on this dataset at this
+  /** The fitness a best-reachable prompt would score on this dataset at this
    * campaign's model. `index.json::final.rounds_to_ceiling` counts rounds
    * against `CEILING_FRACTION` of it, and the value is banked beside that
    * count so a reader never has to guess the denominator. `None` (default) →
@@ -3326,7 +3340,7 @@ export interface CampaignConfig {
    * can declare one (`dataset.yaml::campaign`) and a guessed value makes
    * every campaign on it publish a round count nobody can defend. DISPLAY
    * config — it moves no gate, no selection and no stop. */
-  accuracy_ceiling: number | null;
+  fitness_ceiling: number | null;
   /** How run init partitions the bank into the search split every optimizer draw
    * reads, the held-out bench set the headline is scored on, and a demo pool.
    * `None` holds nothing out: the whole bank is the search split and there is
@@ -3424,7 +3438,7 @@ export interface OptimizationConfig {
    * origin's panel, reaches this at its paired interval's lower bound.
    * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
    * only on its record's rule. */
-  halt_at_accuracy: number | null;
+  halt_at_fitness: number | null;
   /** Consecutive closed rounds without an advance of the best-so-far line on the
    * origin panel (``RunStanding.rounds_without_advance``) after which the run
    * stops ``converged``, under any optimizer. A promotion resets it,
@@ -3983,11 +3997,11 @@ export interface ConfigEdit {
    * state — the optimizer's selector decides on its own objective, and the
    * campaign's headline is the bench score; this only picks the number the
    * human READS, client-overridable per session. `ability` shows θ (a logit,
-   * jargon) where the selector stamps one — defaults to `accuracy` so θ is
+   * jargon) where the selector stamps one — defaults to `fitness` so θ is
    * never forced on an operator who didn't ask for it. Rides the
    * `composite_fitness_formula` serve path to
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
-  display_metric: 'accuracy' | 'composite' | 'ability' | null;
+  display_metric: 'fitness' | 'composite' | 'ability' | null;
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
    * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
    * the queue mechanism's acquisition score (`pick_value`: decision-
@@ -3999,7 +4013,7 @@ export interface ConfigEdit {
    * the engine scores, which is `build_round_order` and reaches no knob.
    * Client-overridable per session, like `display_metric`. */
   hard_sample_order: 'info_gain' | 'difficulty' | null;
-  /** The accuracy a best-reachable prompt would score on this dataset at this
+  /** The fitness a best-reachable prompt would score on this dataset at this
    * campaign's model. `index.json::final.rounds_to_ceiling` counts rounds
    * against `CEILING_FRACTION` of it, and the value is banked beside that
    * count so a reader never has to guess the denominator. `None` (default) →
@@ -4008,7 +4022,7 @@ export interface ConfigEdit {
    * can declare one (`dataset.yaml::campaign`) and a guessed value makes
    * every campaign on it publish a round count nobody can defend. DISPLAY
    * config — it moves no gate, no selection and no stop. */
-  accuracy_ceiling: number | null;
+  fitness_ceiling: number | null;
   /** How run init partitions the bank into the search split every optimizer draw
    * reads, the held-out bench set the headline is scored on, and a demo pool.
    * `None` holds nothing out: the whole bank is the search split and there is
@@ -4251,6 +4265,8 @@ export interface CellsResponse {
   /** Graded cells across `samples` — the headline's denominator, served so the
    * reader adds nothing up. */
   total_measurements: number;
+  /** What every `fitness` here reads in: its scorer's. */
+  fitness_unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
   /** Mean graded fitness across those cells; null when the scope holds none. */
   mean_fitness: number | null;
   /** `samples` whose `hit_spread` is `never`. */
@@ -4438,7 +4454,7 @@ export interface OriginEntry {
   /** Active campaigns minted from this origin */
   n_campaigns: number;
   /** The origin's C0 score, as the root cycle's standing round 0 closed */
-  origin_accuracy: number | null;
+  origin_fitness: number | null;
   /** ISO 8601 — earliest campaign on this origin */
   created_at: string;
 }
@@ -4504,7 +4520,7 @@ export interface VerificationPass {
 export interface NoiseBand {
   raw: number[];
   band: BandedValue;
-  fresh_accuracy: number;
+  fresh_fitness: number;
   recorded: OwnLevel;
 }
 
@@ -4788,11 +4804,11 @@ export interface PartialCampaignConfig {
    * state — the optimizer's selector decides on its own objective, and the
    * campaign's headline is the bench score; this only picks the number the
    * human READS, client-overridable per session. `ability` shows θ (a logit,
-   * jargon) where the selector stamps one — defaults to `accuracy` so θ is
+   * jargon) where the selector stamps one — defaults to `fitness` so θ is
    * never forced on an operator who didn't ask for it. Rides the
    * `composite_fitness_formula` serve path to
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
-  display_metric: 'accuracy' | 'composite' | 'ability' | null;
+  display_metric: 'fitness' | 'composite' | 'ability' | null;
   /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
    * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
    * the queue mechanism's acquisition score (`pick_value`: decision-
@@ -4804,7 +4820,7 @@ export interface PartialCampaignConfig {
    * the engine scores, which is `build_round_order` and reaches no knob.
    * Client-overridable per session, like `display_metric`. */
   hard_sample_order: 'info_gain' | 'difficulty' | null;
-  /** The accuracy a best-reachable prompt would score on this dataset at this
+  /** The fitness a best-reachable prompt would score on this dataset at this
    * campaign's model. `index.json::final.rounds_to_ceiling` counts rounds
    * against `CEILING_FRACTION` of it, and the value is banked beside that
    * count so a reader never has to guess the denominator. `None` (default) →
@@ -4813,7 +4829,7 @@ export interface PartialCampaignConfig {
    * can declare one (`dataset.yaml::campaign`) and a guessed value makes
    * every campaign on it publish a round count nobody can defend. DISPLAY
    * config — it moves no gate, no selection and no stop. */
-  accuracy_ceiling: number | null;
+  fitness_ceiling: number | null;
   /** How run init partitions the bank into the search split every optimizer draw
    * reads, the held-out bench set the headline is scored on, and a demo pool.
    * `None` holds nothing out: the whole bank is the search split and there is
@@ -4872,7 +4888,7 @@ export interface PartialOptimizationConfig {
    * origin's panel, reaches this at its paired interval's lower bound.
    * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
    * only on its record's rule. */
-  halt_at_accuracy: number | null;
+  halt_at_fitness: number | null;
   /** Consecutive closed rounds without an advance of the best-so-far line on the
    * origin panel (``RunStanding.rounds_without_advance``) after which the run
    * stops ``converged``, under any optimizer. A promotion resets it,
@@ -5291,7 +5307,7 @@ export type AccountTab = 'profile' | 'usage' | 'keys' | 'activity' | 'preference
 export type CandidateCount = 'replayed';
 
 // promptpotter.domain.arm_reading::DisplayMetric
-export type DisplayMetric = 'accuracy' | 'composite' | 'ability';
+export type DisplayMetric = 'fitness' | 'composite' | 'ability';
 
 // promptpotter.domain.paired_reading::MeasurandUnit
 export type MeasurandUnit = 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
@@ -5608,7 +5624,7 @@ export const COUPLING_SEVERITY_INFO: Record<'collision' | 'inert' | 'info', Coup
 
 // Mirror of application/mask/record.py::SCORE_LENS_LABELS, in display order.
 export const SCORE_LENS_LABELS: Record<string, string> = {
-  "score:accuracy": "Accuracy",
+  "score:fitness": "Fitness",
 };
 
 // Mirror of application/optimizers/potter/pobb/checks.py::ABORT_LENS_LABELS, in display order.
@@ -5683,9 +5699,9 @@ export const CANDIDATE_COUNT_WORDS: Record<CandidateCount, string> = {
 
 // Mirror of domain/arm_reading.py::DISPLAY_METRIC_INFO, in display order.
 export const DISPLAY_METRIC_INFO: Record<DisplayMetric, DisplayMetricInfo> = {
-  "accuracy": { label: "accuracy", glyph: "%", title: "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative).", unit: "rate" },
+  "fitness": { label: "fitness", glyph: "ƒ", title: "Mean per-cell fitness under the scoring formula, over the candidate's measured subset (subset-relative).", unit: "score" },
   "ability": { label: "ability θ", glyph: "θ", title: "Difficulty-adjusted ability θ — what a selector declaring ability (potter's) elects on. A logit (not a %): comparable within a round; cross-round comparison waits on the stable δ bank.", unit: "theta" },
-  "composite": { label: "composite", glyph: "∑", title: "Composite fitness under the active scoring formula (equals accuracy when no formula is set).", unit: "score" },
+  "composite": { label: "composite", glyph: "∑", title: "Composite fitness under the active scoring formula (equals fitness when no formula is set).", unit: "score" },
 };
 
 // Mirror of domain/arm_reading.py::UNIT_FORMATS, in display order.
@@ -5975,11 +5991,11 @@ export const HEALTH_GRADE_INFO: Record<'healthy' | 'degraded' | 'critical' | 'un
 
 // Mirror of domain/ruler.py::THETA_CAVEAT_INFO, in display order.
 export const THETA_CAVEAT_INFO: Record<ThetaCaveat, ThetaCaveatInfo> = {
-  "cold_ruler": { label: "θ is plain accuracy so far", detail: "Too few earlier answers to rate how hard each sample is, so θ is accuracy on another scale. A lift against the parent holds; θ compared across rounds or candidates does not.", tone: "attention" },
-  "flat_ruler": { label: "θ is plain accuracy here", detail: "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as accuracy does. No round can change that.", tone: "attention" },
-  "collapsed_band": { label: "θ is plain accuracy this round", detail: "This round's samples were all about equally hard, so θ ranks candidates exactly as accuracy does. A round drawing harder and easier samples reads differently.", tone: "attention" },
+  "cold_ruler": { label: "θ is plain fitness so far", detail: "Too few earlier answers to rate how hard each sample is, so θ is fitness on another scale. A lift against the parent holds; θ compared across rounds or candidates does not.", tone: "attention" },
+  "flat_ruler": { label: "θ is plain fitness here", detail: "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as fitness does. No round can change that.", tone: "attention" },
+  "collapsed_band": { label: "θ is plain fitness this round", detail: "This round's samples were all about equally hard, so θ ranks candidates exactly as fitness does. A round drawing harder and easier samples reads differently.", tone: "attention" },
   "prior_pinned": { label: "θ shifts between rounds", detail: "Most samples this round got the default difficulty, because every candidate answered them alike. That default moves as rounds come in, so compare θ within a round, not across rounds.", tone: "attention" },
-  "unmeasured_delta": { label: "θ leaves some samples out", detail: "Some samples have no difficulty rating yet, so θ reads fewer samples than the accuracy beside it, and two candidates may be read on different ones. A later round includes them.", tone: "attention" },
+  "unmeasured_delta": { label: "θ leaves some samples out", detail: "Some samples have no difficulty rating yet, so θ reads fewer samples than the fitness beside it, and two candidates may be read on different ones. A later round includes them.", tone: "attention" },
   "floor_pinned": { label: "No θ for an all-wrong candidate", detail: "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift taken from it, is a placeholder. Other candidates are unaffected.", tone: "attention" },
 };
 
@@ -6072,7 +6088,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [SLOT_BOUND_WORDS, ["throttle", "machine"]],
   [LAUNCH_REFUSAL_LABELS, ["used_up", "held", "over_declared", "no_key", "unpriced"]],
   [COUPLING_SEVERITY_INFO, ["collision", "inert", "info"]],
-  [SCORE_LENS_LABELS, ["score:accuracy"]],
+  [SCORE_LENS_LABELS, ["score:fitness"]],
   [ABORT_LENS_LABELS, ["abort:epsilon_off", "abort:lock_in_off", "abort:all_off"]],
   [STEER_OUTSIDE_INFO, ["babysat", "refused"]],
   [CELL_TERM_META, ["fitness", "ground_truth_rank", "latency", "unworked", "cost", "tokens", "target_prompt_chars", "errored", "degraded", "cached", "retrieval_shortfall"]],
@@ -6080,7 +6096,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [ACCOUNT_TAB_INFO, ["profile", "usage", "keys", "activity", "preferences", "storage", "about"]],
   [ARM_VERDICT_LABELS, ["retired", "invalid", "origin", "elected", "uncontested", "selected", "not_elected", "unmeasured", "awaiting"]],
   [CANDIDATE_COUNT_WORDS, ["replayed"]],
-  [DISPLAY_METRIC_INFO, ["accuracy", "ability", "composite"]],
+  [DISPLAY_METRIC_INFO, ["fitness", "ability", "composite"]],
   [UNIT_FORMATS, ["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]],
   [ARM_END_INFO, ["invalid", "skipped", "broken", "eliminated", "locked_in"]],
   [BENCH_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "campaign_not_active", "definition_unread", "connector_moved", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection"]],

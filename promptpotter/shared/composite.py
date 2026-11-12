@@ -9,7 +9,6 @@ shapes_optimizer_prompt(__name__)
 
 
 SHORT_NAMES: dict[str, str] = {
-    "accuracy": "acc",
     "fitness": "fit",
     "error_rate": "err",
     "degraded_rate": "degr",

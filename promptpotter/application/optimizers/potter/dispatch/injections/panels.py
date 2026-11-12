@@ -40,9 +40,10 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     signal,
 )
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
-from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_accuracy
+from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_fitness
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
+from promptpotter.domain.arm_reading import level_text, lift_interval_text
 from promptpotter.domain.arms import Concluded, Cut, Measured
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
@@ -229,7 +230,7 @@ _SIDE_VERDICT: dict[LiftSide, str] = {
 
 
 def _evolution(b: InjectionBundle) -> list[Item]:
-    """On the origin panel's fixed rows, never a round's own accuracy: its cells move every round."""
+    """On the origin panel's fixed rows, never a round's own fitness: its cells move every round."""
     rounds = [rr for rr in b.measured_rounds if rr.round > 0]
     if not rounds:
         return []
@@ -253,19 +254,21 @@ def _evolution(b: InjectionBundle) -> list[Item]:
     n = len(overlap.positions)
     lines.append(
         f"  origin panel, {n} fixed rows: "
-        + " → ".join(f"{m.arm.label} {m.rate:.0%}" for m in line)
+        + " → ".join(f"{m.arm.label} {level_text(m.rate, m.unit)}" for m in line)
     )
     if (headline := overlap.lead.headline) is not None:
         est = headline.estimate
         lines.append(
-            f"  standing pick vs C0: lift [{est.ci_lo:+.2f}, {est.ci_hi:+.2f}], "
+            f"  standing pick vs C0: lift "
+            f"{lift_interval_text(est.ci_lo, est.ci_hi, headline.measurand.unit)}, "
             f"{_SIDE_VERDICT[est.side]}"
         )
     if (parent_line := _vs_parent(overlap.vs_parent)) is not None:
         lines.append(parent_line)
     if triggered := triggered_rates(overlap):
         lines.append(
-            "  read, never adopted: " + ", ".join(f"{m.arm.label} {m.rate:.0%}" for m in triggered)
+            "  read, never adopted: "
+            + ", ".join(f"{m.arm.label} {level_text(m.rate, m.unit)}" for m in triggered)
         )
     return [Item("\n".join(lines))]
 
@@ -279,7 +282,7 @@ def _vs_parent(reading: PairedReading | None) -> str | None:
         return None
     est, flips = lift.estimate, lift.flips
     moved = (
-        f"lift [{est.ci_lo:+.2f}, {est.ci_hi:+.2f}]"
+        f"lift {lift_interval_text(est.ci_lo, est.ci_hi, lift.measurand.unit)}"
         if flips is None
         else f"of {flips.gained + flips.lost + flips.unchanged} rows, wins {flips.gained} the "
         f"parent missed and misses {flips.lost} it won"
@@ -342,8 +345,7 @@ def _head_at_line(text: str, cap: int) -> str:
 
 
 def _query_excerpt(cell: GradedCell) -> str:
-    """The head, where a context-carrying query states its question, and below the cut the ONE line
-    naming the gold answer: the paragraph a miss read wrong or never reached. Several name nothing."""
+    """The head, where a context-carrying query states its question, and below the cut the ONE line naming the gold answer."""
     text = re.sub(r"\n\s*\n+", "\n", cell.facts.query.strip())
     head = _head_at_line(text, TRANSCRIPT_QUERY_CAP)
     truth = cell.facts.ground_truth.strip()
@@ -513,9 +515,9 @@ def _paired_bench(r: GradedCell, origin: GradedCell | None) -> float | None:
     """The scored term, paired the same way; it carries no SE, so the θ pair keeps the ranking."""
     own = outer_proxies_of(r.facts.pipeline)
     base = outer_proxies_of(origin.facts.pipeline) if origin is not None else None
-    if own is None or base is None:
-        return None
-    return own.held_out_lift - base.held_out_lift
+    lift = None if own is None else own.held_out_lift
+    base_lift = None if base is None else base.held_out_lift
+    return None if lift is None or base_lift is None else lift - base_lift
 
 
 class _NarratedCell(NamedTuple):
@@ -666,7 +668,7 @@ def _r_answer_distribution(b: InjectionBundle) -> list[Item]:
 
     top_label, constant = _constant_answer(truth)
     # Mean fitness, never a `fitness >= 1.0` count, which reads 0.00 on every graded scorer.
-    scored = compute_accuracy(results=rows)
+    scored = compute_fitness(results=rows)
     if scored is None:
         return [Item("")]
 
@@ -1037,8 +1039,9 @@ def _edit_row(edit: _Edit, slot_of: Mapping[str, int], *, charged: bool) -> str:
     # A verdict's reading covers the parent's whole set, so its two levels share their cells.
     reading = edit.reading
     parent = reading.reference_level("fitness") if reading else None
-    if fold is not None and fold.accuracy is not None and parent is not None:
-        scored = f"{fold.accuracy:.0%} vs parent {parent:.0%}"
+    if fold is not None and fold.fitness is not None and parent is not None:
+        unit = fold.fitness_unit
+        scored = f"{level_text(fold.fitness, unit)} vs parent {level_text(parent, unit)}"
     else:
         scored = "scored in full"
     composite = reading.reference_level("objective") if reading and charged else None
@@ -1078,7 +1081,7 @@ def _r_measurand(b: InjectionBundle) -> list[Item]:
     lines = [
         f"ELECTION — a round is won on θ lift over the parent by an arm winning more shared cells "
         f"than it loses, θ fit on each cell's composite under the formula below, not on "
-        f"accuracy{theta}.",
+        f"fitness{theta}.",
         "REPORTED FITNESS — the headline number and the degradation scale:",
         *(f"  {ln}" for ln in body),
     ]
@@ -1119,7 +1122,7 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
     caveat = a.caveat if a is not None else None
     if caveat is ThetaCaveat.COLD_RULER:
         rows.append(
-            "COLD RULER — no difficulty scale yet, so θ is logit-accuracy, each arm read beside "
+            "COLD RULER — no difficulty scale yet, so θ is logit-fitness, each arm read beside "
             "the parent on the cells both answered. Read each arm's lift, never a level."
         )
     elif a is not None and caveat in (ThetaCaveat.FLAT_RULER, ThetaCaveat.COLLAPSED_BAND):
@@ -1132,7 +1135,7 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
             f"COLLAPSED BAND — the {unit_plural(b.measured_unit)} this round's θ was read on span "
             f"{a.round_span:.2f} logits on a ruler spanning {a.ruler_span:.2f}; {cause}. Inside a "
             f"band that narrow every {b.measured_unit} is equally hard, "
-            "so θ is logit-accuracy plus a constant and ranking on it ranks on accuracy."
+            "so θ is logit-fitness plus a constant and ranking on it ranks on fitness."
         )
     elif a is not None and caveat is ThetaCaveat.UNMEASURED_DELTA:
         rows.append(

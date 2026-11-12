@@ -182,7 +182,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
                 <MenuCheck
                   on={m.showTheta}
                   onClick={m.toggleTheta}
-                  title="Why a lower-accuracy candidate can win"
+                  title="Why a lower-fitness candidate can win"
                 >
                   How candidates are ranked
                 </MenuCheck>

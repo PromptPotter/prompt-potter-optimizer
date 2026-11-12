@@ -6,18 +6,23 @@ import io
 import json
 import re
 import zipfile
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, assert_never
 
-from promptpotter.application.views.render.primitives import bench_readout, fmt_pct
-from promptpotter.domain.arm_reading import lift_band_text, lift_interval_text, lift_text
+from promptpotter.application.views.render.primitives import bench_readout
+from promptpotter.domain.arm_reading import (
+    level_text,
+    lift_band_text,
+    lift_interval_text,
+    lift_text,
+)
+from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import ExportTier, PromptExport
 from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyRound, SubtreeCourse
-from promptpotter.domain.paired_reading import READING_STATE_INFO, PairedReading
+from promptpotter.domain.paired_reading import READING_STATE_INFO, MeasurandUnit, PairedReading
 from promptpotter.domain.treatment import Treatment
 from promptpotter.domain.verification import VERIFY_STRATEGY_LABELS
 from promptpotter.shared.errors import ConflictError
@@ -168,8 +173,10 @@ def chat_text(course: SubtreeCourse, unit: MeasuredUnit) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _band(lo: float | None, hi: float | None, fmt: Callable[[float], str]) -> str:
-    return "" if lo is None or hi is None else f" [{fmt(lo)}, {fmt(hi)}]"
+def _banded(value: BandedValue, unit: MeasurandUnit) -> str:
+    lo, hi = value.ci_lo, value.ci_hi
+    band = "" if lo is None or hi is None else f" [{level_text(lo, unit)}, {level_text(hi, unit)}]"
+    return f"{level_text(value.value, unit)}{band}"
 
 
 def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUnit) -> list[str]:
@@ -191,11 +198,10 @@ def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUn
         held = f"{scored} of {unit_count(expected, unit)}" if r.panel.cut and expected else None
         cells = f" {held or unit_count(scored, unit)}"
     own = r.own
-    accuracy = (
-        "accuracy —"
-        if own is None or own.accuracy is None
-        else f"accuracy {fmt_pct(own.accuracy.value)}"
-        f"{_band(own.accuracy.ci_lo, own.accuracy.ci_hi, fmt_pct)} n={own.n}"
+    fitness = (
+        "fitness —"
+        if own is None or own.fitness is None
+        else f"fitness {_banded(own.fitness, own.fitness_unit)} n={own.n}"
     )
     composite = (
         "" if own is None or own.composite is None else f" · composite {own.composite.value:.2f}"
@@ -206,7 +212,7 @@ def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUn
         se = "" if ability.se is None else f" ± {ability.se:.2f}"
         caveat = f" ({ability.caveat})" if ability.caveat else ""
         theta = f" · θ {ability.theta:.2f}{se}{caveat}"
-    out.append(f"  {walk}{cells} · {accuracy}{composite}{theta}")
+    out.append(f"  {walk}{cells} · {fitness}{composite}{theta}")
 
     if r.vs_reference is not None:
         out.append(f"  {_pair_line(r.vs_reference, unit)}")
@@ -219,21 +225,19 @@ def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUn
 
     extras: list[str] = []
     if (bench := r.bench) is not None:
-        level = bench.level
-        shown = (
-            "—"
-            if level is None
-            else f"{fmt_pct(level.value)}{_band(level.ci_lo, level.ci_hi, fmt_pct)}"
-        )
+        shown = "—" if bench.level is None else _banded(bench.level, bench.level_unit)
         extras.append(f"bench {shown} n={bench.n} held out")
     if (verify := r.verify) is not None:
         fresh = verify.fresh
+        level = None if fresh.fitness is None else fresh.fitness.value
         extras.append(
-            f"verify {fmt_pct(None if fresh.accuracy is None else fresh.accuracy.value)} on "
+            f"verify fitness {level_text(level, fresh.fitness_unit)} on "
             f"{unit_count(fresh.n, unit)} fresh, {VERIFY_STRATEGY_LABELS[verify.strategy]}"
         )
     if (line := r.on_origin_panel) is not None:
-        extras.append(f"overlap {fmt_pct(line.rate)} on {unit_count(line.n, unit)} shared")
+        extras.append(
+            f"overlap {level_text(line.rate, line.unit)} on {unit_count(line.n, unit)} shared"
+        )
     if extras:
         out.append(f"  {' · '.join(extras)}")
     return out
@@ -246,15 +250,14 @@ def _pair_line(pair: PairedReading, unit: MeasuredUnit) -> str:
     if lift is None or coverage is None:
         return f"vs {against}: {READING_STATE_INFO[pair.state].label}"
 
-    def rate(v: float) -> str:
-        return fmt_pct(v) if lift.measurand.unit == "rate" else f"{v:.2f}"
-
+    level_unit = lift.measurand.unit
     estimate = lift.estimate
     # The flips ride the one measurand declared binary, whichever column the headline is.
     flips = next((m.flips for m in (lift, *pair.beside) if m.flips is not None), None)
     return " · ".join(
         [
-            f"vs {against} {rate(lift.rate_a)} → {rate(lift.rate_b)}",
+            f"vs {against} {level_text(lift.rate_a, level_unit)} → "
+            f"{level_text(lift.rate_b, level_unit)}",
             f"lift {lift_band_text(estimate, lift.measurand.unit)} {estimate.side}",
             *([f"flips +{flips.gained} -{flips.lost} ={flips.unchanged}"] if flips else []),
             f"on {unit_count(coverage.scored, unit)} both scored",
@@ -323,7 +326,7 @@ def dataset_card(p: Provenance, data_file: str) -> str:
             f"`{data_file}` holds one record per candidate this cycle measured, in round order, "
             "all of the one campaign and cycle below, so a record carries arm keys and no cycle "
             "address. It is keyed by the names the PromptPotter API serves (`arm.label`, "
-            "`own.accuracy.value`, "
+            "`own.fitness.value`, "
             "`vs_reference.headline.estimate.value`, …). A level is read on the candidate's own "
             "round's cells, so two rows of different rounds are compared only on "
             "`on_origin_panel.rate`, the one set of cells they share. A null is a reading not "
@@ -366,12 +369,8 @@ def skill_md(export: PromptExport, p: Provenance) -> str:
         "cycle_id": export.cycle_id,
         "tool_version": export.tool_version,
     }
-    accuracy = m.own.accuracy
-    level = (
-        "—"
-        if accuracy is None
-        else f"{fmt_pct(accuracy.value)}{_band(accuracy.ci_lo, accuracy.ci_hi, fmt_pct)}"
-    )
+    fitness = m.own.fitness
+    level = "—" if fitness is None else _banded(fitness, m.own.fitness_unit)
     run = [
         f"- `{node}`: send `prompts/{node}.md` as its prompt, on "
         f"`{export.tuned_params.get(node, {}).get('model', '—')}`; the rest of its params are "
@@ -395,7 +394,7 @@ def skill_md(export: PromptExport, p: Provenance) -> str:
             "",
             "## How good it is",
             "",
-            f"- its own level, round {m.round}, under `{m.formula or '—'}`: accuracy {level} "
+            f"- its own level, round {m.round}, under `{m.formula or '—'}`: fitness {level} "
             f"n={m.own.n}, on the rows that chose it — not an estimate",
             f"- held out: {bench_readout(export.bench)}",
             "",

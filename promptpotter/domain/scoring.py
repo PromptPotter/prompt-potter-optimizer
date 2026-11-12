@@ -55,11 +55,8 @@ ANSWER_SPACE_CAP: Annotated[int, shapes_optimizer_prompt] = 10
 class TurnRecord(TypedDict, total=False):
     """ONE turn of a multi-turn cell, a narrowed projection of an ATIF trajectory ``Step``.
 
-    A connector projects a published turn format, never authors one, and parses it as plain JSON so
-    an upstream field degrades the record instead of raising in a paid cell. A turn carries the STEP
-    it served and never becomes one: per-step rewards ride as terms beside the cell's aggregate, and
-    a turn ordinal is not an item. No ``turns`` key is no turn concept; ``[]`` is none happened.
-    ``reasoning_trace`` holds what the agent DECIDED: ``user`` turns and environment output stay out.
+    A connector parses it as plain JSON so an upstream field degrades the record instead of raising
+    in a paid cell. No ``turns`` key is no turn concept; ``[]`` is none happened.
     """
 
     index: int
@@ -192,8 +189,7 @@ class PipelineData:
     target_prompt_chars: int | None = None
     # The bare question, where the dataset declared one distinct from `query` — what a judge reads.
     question: str | None = None
-    # What the CONNECTOR reports of its cell, under the keys its declaration names
-    # (`Connector.cell_terms`, `reported_keys`): taken off the answer by that declaration alone.
+    # What the CONNECTOR reports of its cell, under the keys its declaration names.
     cell_report: Mapping[str, Any] = field(default_factory=dict)
     # What only the DATASET names: observation keys, turn scalars, banked evaluator and judge terms.
     observations: Mapping[str, Any] = field(default_factory=dict, metadata=REST)
@@ -437,8 +433,7 @@ class Grade(NamedTuple):
     unscored: str | None
     # What the matcher compared to the truth; `None` where the formula reads no answer text.
     span: str | None
-    # Where the truth sits in the ranking the formula reads, and its width; both `None` where it
-    # reads none. A `None` rank beside a width is a value: the truth was not in the ranking.
+    # Where the truth sits in the ranking the formula reads, and its width; a `None` rank beside a width is a miss.
     ground_truth_rank: int | None
     n_candidates: int | None
     # `None` where the formula grades one answer, not several fields.
@@ -637,6 +632,10 @@ class Scorer:
 
     id: str
     per_cell: str | None
+    # What the mean per-cell fitness reads in: a rate where ``per_sample`` IS one matcher's call.
+    fitness_unit: MeasurandUnit
+    # Every name either formula reads: the round means each one a cell answers.
+    terms: frozenset[str]
     # The one matcher ``per_sample`` calls, which decides what a prediction's answer is.
     matcher: str | None
     # That matcher's span: what its score reads off a reply.
@@ -717,7 +716,8 @@ class GradeColumn(NamedTuple):
 
     # DECLARED, never read off the values: a formula grading every cell 0 or 1 may grade the next 0.5.
     binary: bool
-    unit: MeasurandUnit
+    # ``None``: the grading scorer's ``fitness_unit``.
+    unit: MeasurandUnit | None
     read: Callable[[GradedCell], float]
 
 
@@ -737,7 +737,7 @@ def _stamped(cell: GradedCell, grade: CellGrade) -> float:
 
 
 ROW_GRADES: Annotated[dict[str, GradeColumn], shapes_optimizer_prompt] = {
-    "fitness": GradeColumn(False, "rate", lambda cell: _stamped(cell, "fitness")),
+    "fitness": GradeColumn(False, None, lambda cell: _stamped(cell, "fitness")),
     "objective": GradeColumn(False, "score", lambda cell: _stamped(cell, "objective")),
     # The one column every scorer's rows carry two-valued, by construction of `is_hit`.
     "hit": GradeColumn(True, "rate", lambda cell: float(is_hit(_stamped(cell, "fitness")))),

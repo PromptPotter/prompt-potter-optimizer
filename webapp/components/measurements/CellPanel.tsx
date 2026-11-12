@@ -4,6 +4,7 @@ import {
   type Cell,
   type CellRow,
   type CellSpan,
+  type MeasurandUnit,
   RATE_PRICED_LABEL,
   SAMPLE_STATUS_LABELS,
 } from "@/lib/api/types";
@@ -13,23 +14,29 @@ import { useRead } from "@/lib/hooks/useRead";
 import { cx } from "@/lib/cx";
 import { CopyButton, ReadState, SegmentedControl, SidePanel } from "@/components/ui";
 
-export function Fitness({ value }: { value: number | null | undefined }) {
+export function Fitness({ value, unit }: { value: number | null | undefined; unit: MeasurandUnit }) {
   if (value == null) return <span className="ms-dim">—</span>;
   return (
     <span className="ms-fit" style={fitnessStyle(value)}>
-      {fmtUnit("rate", value)}
+      {fmtUnit(unit, value)}
     </span>
   );
 }
 
 // A row and the opened cell say a cell's verdict one way: its word, then the grade it is the verdict of.
-export function Verdict({ cell }: { cell: Pick<CellRow, "status" | "fitness"> }) {
+export function Verdict({
+  cell,
+  unit,
+}: {
+  cell: Pick<CellRow, "status" | "fitness">;
+  unit: MeasurandUnit;
+}) {
   return (
     <span className="ms-verdict">
       <span className={cx("ms-status", `is-${cell.status.toLowerCase()}`)}>
         {SAMPLE_STATUS_LABELS[cell.status]}
       </span>
-      {cell.fitness != null && <Fitness value={cell.fitness} />}
+      {cell.fitness != null && <Fitness value={cell.fitness} unit={unit} />}
     </span>
   );
 }
@@ -98,14 +105,14 @@ function SpanBody({ span, tab }: { span: CellSpan; tab: SpanTab }) {
   );
 }
 
-function CellBody({ cell }: { cell: Cell }) {
+function CellBody({ cell, unit }: { cell: Cell; unit: MeasurandUnit }) {
   const [spanIdx, setSpanIdx] = useState(0);
   const [tab, setTab] = useState<SpanTab>("input");
   const span = cell.spans[spanIdx];
   return (
     <div className="cell-body">
       <div className="cell-summary">
-        <Verdict cell={cell} />
+        <Verdict cell={cell} unit={unit} />
         <span className="ms-dim">{fmtUnit("seconds", cell.seconds)}</span>
         {cell.cached && <span className="cell-tag">replayed</span>}
         <span className="ms-dim">{cell.role}</span>
@@ -168,6 +175,7 @@ function CellBody({ cell }: { cell: Cell }) {
 
 export function CellPanel({
   datasetName,
+  unit,
   answer,
   onClose,
   hasPrev,
@@ -175,6 +183,7 @@ export function CellPanel({
   onStep,
 }: {
   datasetName: string;
+  unit: MeasurandUnit;
   answer: string;
   onClose: () => void;
   hasPrev: boolean;
@@ -193,7 +202,7 @@ export function CellPanel({
     >
       <ReadState read={read} subject="this sample">
         {/* Keyed by the address, so a J/K step starts on the first span again. */}
-        {(data) => <CellBody key={answer} cell={data} />}
+        {(data) => <CellBody key={answer} cell={data} unit={unit} />}
       </ReadState>
     </SidePanel>
   );

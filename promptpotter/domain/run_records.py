@@ -276,11 +276,7 @@ class WalkRead(FrozenModel):
 
 
 class RoundProposedRecord(FrozenModel):
-    """Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved.
-
-    ``submitted`` is the operator's answer at the arm gate: the arms the round measures. ``walked``
-    is the state its walk left — population, slices and the round's outputs — and ``reads`` the arms
-    it read, which a replay seats and reads in place of running any proposer."""
+    """Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved."""
 
     record_type: Literal["round_proposed"] = "round_proposed"
     round: int
@@ -468,8 +464,7 @@ class TokenUsageRecord(FrozenModel):
     cost_usd: float | None = None
     # OUR rate's price of an unbilled call, stamped once: it counts against ceilings, never spent.
     rate_priced_usd: float | None = None
-    # Whose wallet paid: the one fact a ledger's path cannot name, since the path names the account.
-    # ``None`` exactly on a replay (``cached``), which no wallet paid.
+    # Whose wallet paid; ``None`` exactly on a replay (``cached``), which no wallet paid.
     key_source: KeySource | None
     # The `SpendHoldRecord` this call settles; ``None`` for a call nothing held (a replay).
     hold_id: str | None = None
@@ -613,8 +608,7 @@ class LLMCallProgressRecord(FrozenModel):
     round: int | None = None
     elapsed_s: float
     detail: str | None = None
-    # The cycle the waited-on cell runs (`Connector.cell_hop`), in THIS cycle's sandbox: the two
-    # hops are the `CyclePath` the drill-in opens. ``None`` on an ordinary call.
+    # The cycle the waited-on cell runs (`Connector.cell_hop`), in THIS cycle's sandbox; ``None`` on an ordinary call.
     inner: CycleHop | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -850,8 +844,7 @@ class ForkRemainder(FrozenModel):
         )
 
     def past_cut(self, cut_round: int) -> ForkRemainder:
-        """A superseding fork's cap re-counts the rounds it lifts below *cut_round*, so its line
-        runs only what was left."""
+        """A superseding fork's cap re-counts the rounds it lifts below *cut_round*."""
         if self.rounds is None:
             return self
         return self.model_copy(update={"rounds": max(cut_round - 1, 0) + self.rounds})
@@ -941,7 +934,7 @@ class CycleFinal(FrozenModel):
     rounds_to_separable: int | None
     rounds_to_improved: int | None
     rounds_to_ceiling: int | None
-    accuracy_ceiling: float | None
+    fitness_ceiling: float | None
     prompt_hashes: dict[str, str]
     # On the origin's OWN samples — never round 1's matched floor, a different sample basis.
     origin_composite_fitness: float | None
@@ -987,9 +980,7 @@ class CampaignCeilingRecord(FrozenModel):
 
 
 class CycleShareRecord(FrozenModel):
-    """The cycle's share of its campaign's ceiling, LAST wins and never inherited: its ONE store, which
-    the book spending on the cycle and every sibling's admission read. Every move lands through
-    `jobs/quota.py::hold_moved`; the account's reserve is the job's (`Job.reserve`)."""
+    """The cycle's share of its campaign's ceiling, LAST wins and never inherited; every move lands through `hold_moved`."""
 
     forks_inherit: ClassVar[bool] = False
     record_type: Literal["cycle_share"] = "cycle_share"
@@ -1113,8 +1104,7 @@ class ForkSpec(FrozenModel):
     trigger: ForkTrigger
     reason: str
     issued_by: Principal
-    # The parent arm the fork branches from, resolved at the mint (`fork_siblings.py::fork_edge`):
-    # the one its caller named, else the pick the parent's line stood on going into the cut round.
+    # The parent arm the fork branches from: the one its caller named, else the pick the parent's line stood on.
     from_candidate: RoundArm
     # The MEASURED direction; `None` ⇒ the trigger implies it (`FORK_DIRECTION`).
     direction: ForkDirection | None = None
@@ -1141,9 +1131,7 @@ class OriginGatePass(CheckpointInputs, kind="origin_gate_pass"):
 
 
 class SpawnedBy(StrictModel):
-    """The outer work-item an L4 inner cycle was spawned to measure. Where `role` is an arm's,
-    `cycle_id`, `round` and `individual_id` are that arm's address, which places the run under
-    the candidate that asked for it with no search."""
+    """The outer work-item an L4 inner cycle was spawned to measure; an arm's address places the run under its candidate."""
 
     round: int | None = Field(
         default=None,
@@ -1179,8 +1167,7 @@ class CycleMintedRecord(FrozenModel):
     """One per cycle's own ledger, after only the lines it adopted; a chain is walked off it alone."""
 
     record_type: Literal["cycle_minted"] = "cycle_minted"
-    # The parent's cycle dir relative to this one's, POSIX-separated (`parent_address`): `../<id>`
-    # for a sibling in this campaign, a longer path for a cycle in another tree.
+    # The parent's cycle dir relative to this one's, POSIX-separated: `../<id>` for a sibling.
     parent: str | None = None
     forked_at_offset: int | None = None
     # The first round the fork runs itself: every round below it is its parent's line's.
@@ -1208,8 +1195,7 @@ def parent_address(cycle_dir: Path, parent_dir: Path) -> str:
 
 
 def sibling_cycle_id(parent: str | None) -> str | None:
-    """The parent's cycle id where it is a sibling in the same campaign; ``None`` for a root or a
-    cycle cut from another tree, which no reader of this campaign's cycles can reach."""
+    """The parent's cycle id where it is a sibling in the same campaign; ``None`` for a root or a cycle cut from another tree."""
     if parent is None:
         return None
     parts = PurePosixPath(parent).parts
@@ -1380,8 +1366,7 @@ class RebaseRequest(FrozenModel):
     reason: str
     issued_by: Principal
     config_overrides: ConfigOverrides | None = None
-    # The round the fork hangs from, re-elected to the arm a layer named: banked on the fork's
-    # ledger as that round, so the line continues from it. ``None`` keeps the round's own pick.
+    # The round the fork hangs from, re-elected to the arm a layer named; ``None`` keeps the round's own pick.
     hangs_from: RoundStatement | None = None
 
     @model_validator(mode="after")

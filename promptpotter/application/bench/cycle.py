@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import GradedCell
+    from promptpotter.domain.scoring import GradedCell, Scorer
     from promptpotter.domain.verification import BenchPasses
 
 
@@ -88,6 +88,7 @@ def _origin_round(
     ruler: RulerStamp,
     optimizer_state: OptimizerState | None,
     elects_on: DisplayMetric,
+    scorer: Scorer,
     schema: PipelineSchema,
 ) -> RoundResult:
     key, arm, results = origin_arm.key, origin_arm.state, origin_arm.rows
@@ -96,7 +97,7 @@ def _origin_round(
         arms={key: arm},
         reference=None,
         cells={key: results},
-        folds=arm_folds({key: arm}, {key: results}, schema),
+        folds=arm_folds({key: arm}, {key: results}, scorer, schema),
         election=Election(
             selected=key,
             leading=key,
@@ -230,8 +231,7 @@ class Cycle:
         return measured_arm(self.rounds, individual_id)
 
     def measured_pool(self) -> dict[str, tuple[OptSearchPoint, list[GradedCell]]]:
-        """Every individual a CLOSED round concluded, by id in the order first measured, with its
-        cells across those rounds merged — folded once per close, never banked."""
+        """Every individual a CLOSED round concluded, by id in the order first measured, with its cells merged."""
         if self._pool is not None and self._pool[0] == self._rounds_version:
             return self._pool[1]
         closed = self.closed_rounds
@@ -248,8 +248,7 @@ class Cycle:
         return held
 
     def pooled_theta(self, individual_id: str) -> float | None:
-        """θ on the round's one judging fit over every cell the pool holds of it, read once per scale;
-        ``None`` where it is unread or a caveat says it is not ability."""
+        """θ on the round's one judging fit over every cell the pool holds of it; ``None`` where it is unread or not ability."""
         held = self.measured_pool().get(individual_id)
         memo = (self.difficulty.stamp, individual_id)
         if memo not in self._pool_theta:
@@ -258,9 +257,7 @@ class Cycle:
         return self._pool_theta[memo]
 
     def seat_origin(self, origin: ReadArm, optimizer_state: OptimizerState | None) -> None:
-        """Round 0 on *origin*'s rows, read as a floor on the scale the cycle stands on, and left
-        open so it closes in place (`round.py::emit_origin_round`). Every door filing the origin's
-        answers lands here, so the optimizer refuses an origin it cannot run here."""
+        """Round 0 on *origin*'s rows, read as a floor and left open so it closes in place."""
         self.optimizer.refuse_origin(origin.rows)
         self.restate_rounds(
             [
@@ -270,6 +267,7 @@ class Cycle:
                     ruler=self.difficulty.stamp,
                     optimizer_state=optimizer_state,
                     elects_on=self.optimizer.elects_on,
+                    scorer=self.session.state.scoring.scorer,
                     schema=self.session.pipeline_schema,
                 ),
                 *self._rounds[1:],
@@ -289,8 +287,7 @@ class Cycle:
         self.difficulty.seat(self.elected[1].ruler)
 
     def seated(self, priors: list[RoundResult]) -> Cycle:
-        """A view of this cycle as it stood once *priors* closed, which a member reads in a past
-        round: this cycle stands as it is."""
+        """A view of this cycle as it stood once *priors* closed, which a member reads in a past round."""
         view = replace(
             self,
             _rounds=list(self._rounds),
@@ -424,8 +421,7 @@ class Cycle:
         return state
 
     def round_state(self, round_num: int) -> OptimizerState:
-        """The ONE builder of a round's state: its slices as they stand, every output kind it
-        carries, the pending ones left pending. A walk banks it as its close does."""
+        """The ONE builder of a round's state: its slices as they stand and every output kind it carries."""
         selected = self.optimizer
         held = self._held(round_num)
         # A round closed again on re-measured rows (`seat_origin`) keeps what its close banked.
@@ -450,7 +446,8 @@ class Cycle:
         if self.sample_index is None:
             return None
         if self._axes is None:
-            self._axes = AxisIndex(self.sample_index, self.session.pipeline_schema)
+            unit = self.session.state.scoring.scorer.fitness_unit
+            self._axes = AxisIndex(self.sample_index, self.session.pipeline_schema, unit)
         self._axes.refresh(self.closed_rounds)
         return self._axes
 

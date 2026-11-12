@@ -51,7 +51,6 @@ from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     Measurand,
     MeasuredLift,
-    PairedReading,
     ReadingState,
 )
 from promptpotter.domain.run_records import ComparisonExit
@@ -459,11 +458,11 @@ def head_to_head(
     )
     graded = [g for g in read if g.row.bench.graded is not None]
     reference = (
-        max(graded, key=lambda g: sum(_agree(g, o, None) for o in graded), default=None)
+        max(graded, key=lambda g: sum(_agree(g, o, None, scorer) for o in graded), default=None)
         if record is None
         else None
     )
-    guard = _guard(graded, record)
+    guard = _guard(graded, record, scorer)
     ungraded_arms = [
         g.row.campaign_id
         for g in read
@@ -484,7 +483,7 @@ def head_to_head(
                 update={
                     "guard": g.row.guard
                     if reference is None or g.row.bench.graded is None
-                    else _guard([g, reference], None),
+                    else _guard([g, reference], None, scorer),
                     "swapped_in": sorted(g.walks - everywhere),
                     **_ratios(g.row, base),
                 }
@@ -516,20 +515,20 @@ def head_to_head(
     )
 
 
-def _guard(graded: Sequence[_Graded], record: HeadToHeadRecord | None) -> PairGuard:
+def _guard(graded: Sequence[_Graded], record: HeadToHeadRecord | None, scorer: Scorer) -> PairGuard:
     return pair_guard(
         [g.member for g in graded],
         record,
         origin_read_apart=any(
-            a.row.bench_set == b.row.bench_set and not _read_alike(a, b)
+            a.row.bench_set == b.row.bench_set and not _read_alike(a, b, scorer)
             for i, a in enumerate(graded)
             for b in graded[i + 1 :]
         ),
     )
 
 
-def _agree(a: _Graded, b: _Graded, record: HeadToHeadRecord | None) -> bool:
-    return _guard([a, b], record).state is not GuardState.DIFFERS
+def _agree(a: _Graded, b: _Graded, record: HeadToHeadRecord | None, scorer: Scorer) -> bool:
+    return _guard([a, b], record, scorer).state is not GuardState.DIFFERS
 
 
 def _ratios(row: HeadToHeadRow, base: HeadToHeadRow | None) -> dict[str, float | None]:
@@ -552,15 +551,17 @@ def _overlapped(a: _Graded, b: _Graded) -> bool:
     return any(sa < eb and sb < ea for sa, ea in a.windows for sb, eb in b.windows)
 
 
-def _read_alike(a: _Graded, b: _Graded) -> bool:
+def _read_alike(a: _Graded, b: _Graded, scorer: Scorer) -> bool:
     if a.origin is None or b.origin is None:
         return True
-    gap = _across(a.origin, b.origin, a.sample_keys).headline
+    gap = pair_on_bench(
+        a.origin,
+        b.origin,
+        scorer=scorer,
+        sample_keys=a.sample_keys,
+        instrument_id=a.origin.instrument_id,
+    ).headline
     return gap is None or gap.estimate.side == "spans"
-
-
-def _across(a: MemberRows, b: MemberRows, sample_keys: list[str]) -> PairedReading:
-    return pair_on_bench(a, b, sample_keys=sample_keys, instrument_id=a.instrument_id)
 
 
 def _campaign(entry: HeadToHeadEntry) -> Campaign:
@@ -698,10 +699,10 @@ def _contrasts(
     for g in graded:
         if g.selected is not None:
             arms.setdefault(g.row.treatment_digest, []).append(g)
-    headline = next(m for m in grade_measurands(scorer.id) if m.key == COLUMN_GRADE[BENCH_HEADLINE])
+    headline = next(m for m in grade_measurands(scorer) if m.key == COLUMN_GRADE[BENCH_HEADLINE])
     groups = list(arms.values())
     read = [
-        _contrast(a, b, headline, _guard([*a, *b], record))
+        _contrast(a, b, headline, _guard([*a, *b], record, scorer))
         for i, a in enumerate(groups)
         for b in groups[i + 1 :]
     ]

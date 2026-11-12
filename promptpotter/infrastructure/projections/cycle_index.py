@@ -51,7 +51,7 @@ def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | 
         rounds=[
             IndexRound(
                 round=n,
-                accuracy=None if (fold := held.close.fold) is None else fold.accuracy,
+                fitness=None if (fold := held.close.fold) is None else fold.fitness,
                 health=RoundHealth.of(n, held.close.health),
             )
             for n, held in standing.rounds.items()

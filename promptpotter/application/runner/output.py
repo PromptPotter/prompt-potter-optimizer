@@ -176,9 +176,7 @@ def _fork_summary_from_index(fork_index: CycleIndex) -> ForkSummaryView:
 
 
 class RunArtifacts(Projection):
-    """The ONE writer of a cycle's ``log.md``, ``review.md`` and ``export.json`` and its campaign's ``log.md``:
-    rendered off the ledger at each round close and once more at its drainer's close, where the
-    stop and the winner have landed; a fault is its ledger's warning."""
+    """The ONE writer of a cycle's ``log.md``, ``review.md`` and ``export.json`` and its campaign's ``log.md``."""
 
     def __init__(self, session: Session, config: CampaignConfig) -> None:
         self._session, self._config = session, config
@@ -307,7 +305,7 @@ def _render_export(session: Session, config: CampaignConfig) -> None:
         stop_reason=index.stop_reason,
         finished_at=index.finished_at,
         formula=index.scorer_cell_formula,
-        own=own_level(winner.results),
+        own=own_level(winner.results, session.state.scoring.scorer.fitness_unit),
         level=series.reading(winner.round),
         schema=session.pipeline_schema,
         framing=campaign_framing(session.store, config, session.dataset),
@@ -335,7 +333,7 @@ def _render_review_md(session: Session, config: CampaignConfig) -> None:
             framing.optimization_goals,
             framing.key_challenges,
         ],
-        accuracy_ceiling=config.accuracy_ceiling,
+        fitness_ceiling=config.fitness_ceiling,
         optimizer=select_optimizer(config.optimization),
         # Read only once the cycle has ended: nothing renders the headline before then.
         bench=read_cycle_bench(session.store, campaign, session.hop)

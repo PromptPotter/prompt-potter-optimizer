@@ -704,6 +704,8 @@ _HIT = Scorer(
     span=None,
     ranking=None,
     fields=None,
+    fitness_unit="score",
+    terms=frozenset(),
     fitness=lambda _row, _grade: 1.0,
     objective=None,
 )
@@ -2280,7 +2282,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         predicted="",
         ground_truth="",
         pipeline=PipelineData(
-            cell_report=inner_cell_report(facts, OuterSampleProxies(held_out_lift=0.0))
+            cell_report=inner_cell_report(facts, OuterSampleProxies(floored=0, held_out_lift=0.0))
         ),
     )
     assert cell_channels_of(inner_row, None)["cost"] == pytest.approx(0.02), (

@@ -123,7 +123,7 @@ const CandidateNode = memo(function CandidateNode({
           ? "\na setting was changed here or above — nothing ran at that value, so this point's numbers describe a searchpoint it no longer is"
           : ""}
         {n.crown === "elected"
-          ? `\nround winner${wonOnTheta ?" — elected on difficulty-adjusted ability θ, not raw accuracy" : ""}`
+          ? `\nround winner${wonOnTheta ?" — elected on difficulty-adjusted ability θ, not raw fitness" : ""}`
           : n.crown === "uncontested"
             ? "\nthe round's only arm — it advances without an election"
             : n.isWinner

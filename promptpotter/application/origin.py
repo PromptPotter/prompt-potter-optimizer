@@ -125,12 +125,12 @@ def try_inherit_fork_origin(
     inherited_results = parent_round.rows(key)
     logger.info(
         "Fork %s: inheriting C0 from branch-point candidate %s (parent %s round %d) "
-        "acc=%s, %d per-sample rows — skipping origin re-score, straight to L1",
+        "fitness=%s, %d per-sample rows — skipping origin re-score, straight to L1",
         session.cycle_id,
         key,
         parent,
         named.round,
-        fold.accuracy,
+        fold.fitness,
         len(inherited_results),
     )
     # The OSP object, not a prompt-field dict, so the inherited C0 keeps the seed's lineage.
@@ -150,8 +150,7 @@ def try_inherit_fork_origin(
 
 
 def standing_origin(session: Session, resolved_origin: OptSearchPoint) -> ReadArm | None:
-    """A line whose round 0 stands launches on it, never a second pass: its holes are the repair's
-    to re-send, once (`repair.py::apply_correction`)."""
+    """A line whose round 0 stands launches on it, never a second pass: its holes are the repair's to re-send."""
     origin = closed_round(session.store, session.hop, 0, session.state.scoring.scorer, moment=None)
     head = None if origin is None else origin.head
     if origin is None or origin.election is None or head is None:
@@ -238,7 +237,7 @@ async def establish_campaign_origin(
         unmeasured = measuring(proposed, sp, pipeline_schema, expected=0)
         nothing = ScoredWalk(
             NO_CELLS,
-            compute_composite_fitness(NO_CELLS, pipeline_schema),
+            compute_composite_fitness(NO_CELLS, session.state.scoring.scorer, pipeline_schema),
             signal=None,
             stopped=None,
         )
@@ -280,8 +279,9 @@ async def establish_campaign_origin(
                 campaign_config.model_copy(update={"scoring": locked_scoring}),
                 partition=session.state.scoring.partition,
             )
-            sheet = session.state.scoring.scorer.sheet(cell.facts for cell in sheet)
-            scores = compute_composite_fitness(sheet, pipeline_schema)
+            scorer = session.state.scoring.scorer
+            sheet = scorer.sheet(cell.facts for cell in sheet)
+            scores = compute_composite_fitness(sheet, scorer, pipeline_schema)
         # Both what the ledger receives and round 0's arm — never re-derive either from these rows.
         state = conclude(arm, replace(scored, sheet=sheet, scores=scores), round_num=0)
         listener.on_arm(0, key, state)

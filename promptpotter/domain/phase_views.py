@@ -23,7 +23,7 @@ from promptpotter.domain.verification import (
 class ViewAnchors(FrozenModel):
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
-    display_metric: DisplayMetric = "accuracy"
+    display_metric: DisplayMetric = "fitness"
 
 
 class WarningEntry(FrozenModel):
@@ -47,8 +47,7 @@ class InitExitView(FrozenModel):
     """``resumed_from_round`` is the NEXT L1 round; ``cached_rounds_count`` counts round artifacts."""
 
     kind: Literal["init_exit"] = "init_exit"
-    # ``None`` where the origin graded no cell on accuracy, as on an L4 outer cycle.
-    origin_acc: float | None
+    origin_fitness: float | None
     cycle_id_short: str
     samples: int
     bench_samples: int
@@ -70,7 +69,7 @@ class RoundStartView(FrozenModel):
     budget_rounds: int | None
     standing: str
     # The parent's level on the cells of the round it last ended.
-    parent_accuracy: float | None
+    parent_fitness: float | None
     prompt_preview: str
     arms: int | None
     note: str
@@ -196,7 +195,7 @@ class RoundCompleteView(FrozenModel):
     composite_fitness_formula: str | None
     composite_fitness_formula_short: str | None
     # Carried, not read from config at render: a knob resolved in the renderer does not survive a disk round-trip.
-    display_metric: DisplayMetric = "accuracy"
+    display_metric: DisplayMetric = "fitness"
 
 
 class OptimizerStepEnterView(FrozenModel):

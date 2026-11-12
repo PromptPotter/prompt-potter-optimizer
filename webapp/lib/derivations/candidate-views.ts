@@ -20,14 +20,14 @@ function courseLevel(node: HierarchyCourse): number | null {
   return standing?.read ? standing.lift.rate_b : null;
 }
 
-// A course bar's standing rate is an accuracy, so it is blank under the other metrics.
+// A course bar's standing rate is a fitness, so it is blank under the other metrics.
 export function barLevel(metric: DisplayMetric, bar: CandidateBar): number | null {
   if (bar.reading) return metricLevel(metric, bar.reading);
-  return metric === "accuracy" ? courseLevel(bar.node) : null;
+  return metric === "fitness" ? courseLevel(bar.node) : null;
 }
 
 export function barStarted(bar: CandidateBar): boolean {
-  return barLevel("accuracy", bar) != null;
+  return barLevel("fitness", bar) != null;
 }
 
 export function barValueLabel(metric: DisplayMetric, bar: CandidateBar): string {
@@ -72,7 +72,7 @@ export function candidateBars({
     const live = decided ? undefined : inflightByKey.get(reading.arm.key);
     // Both are served null short of the WHOLE basis: a rate over a shorter denominator sat another exam.
     const onLine = reading.on_origin_panel;
-    const { sample_set_accuracy: rate, sample_set_n: n } = node.facts;
+    const { sample_set_fitness: rate, sample_set_n: n } = node.facts;
     const overlap =
       sampleSet != null
         ? rate != null && n != null

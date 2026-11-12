@@ -142,8 +142,7 @@ def _task_title(task: str | None) -> str | None:
 
 
 def _recap(draft: DraftFile, connector: str, criterion: DraftCriterion) -> str:
-    """No rounds: the Start step sends them after this is said, so its blank names them
-    (`_blank_binds`)."""
+    """No rounds: the Start step sends them after this is said."""
     title = _task_title(draft.raw_task_description)
     lead = (
         f"evolve a prompt for “{title}”"
@@ -174,8 +173,7 @@ class HeldStart(FrozenModel):
 
     @classmethod
     def of(cls, stores: Stores, draft_id: str, stage: LaunchStage) -> HeldStart:
-        """Its command is the last `start-checkin` filed on the draft: a Start's claim refuses every
-        command on the draft, a second Start among them, before it is filed, until its mint closes."""
+        """Its command is the last `start-checkin` filed on the draft; a Start's claim refuses every command until its mint closes."""
         filed = [
             event.command_id
             for event in stores.commands.book().subject_events(draft_subject(draft_id))
@@ -259,8 +257,7 @@ def _launch(stores: Stores, draft: DraftFile, declared: Budget) -> tuple[Refusal
 
 
 def _field(schema: dict[str, Any], name: str, title: str) -> dict[str, Any]:
-    """One property off a model's own schema, so its bounds have one source; the null arm drops,
-    since a blank field IS the absent value."""
+    """One property off a model's own schema, so its bounds have one source; the null arm drops."""
     prop = dict(schema["properties"][name])
     arms = [arm for arm in prop.pop("anyOf", ()) if arm.get("type") != "null"]
     prop = {**(arms[0] if arms else {}), **prop}
@@ -280,15 +277,13 @@ def _column(draft: DraftFile, field_key: str, title: str) -> dict[str, Any]:
 
 
 def _cap(budget: dict[str, Any], axis: CapAxis, bound: float | None = None) -> dict[str, Any]:
-    """Bounded at what admission takes, never defaulted to it: a default below the campaign's own
-    ceiling is a clamp, and a clamped run halts mid-campaign."""
+    """Bounded at what admission takes, never defaulted to it: a clamped run halts mid-campaign."""
     field = _field(budget, axis, CAP_AXIS_INFO[axis].title)
     return field if bound is None else {**field, "maximum": bound}
 
 
 def _blank_binds(declared: Budget) -> str:
-    """What a blank launch cap leaves binding: the campaign's declared ceiling (a free account's
-    is the tier's), else the account's allowance; and its declared rounds."""
+    """What a blank launch cap leaves binding: the campaign's declared ceiling, else the account's allowance."""
     money = (
         "your account's allowance"
         if declared.usd is None and declared.tokens is None
@@ -332,8 +327,8 @@ def setup_schema(draft: DraftFile, *, launch: Budget, declared: Budget) -> dict[
                             "optimization": {
                                 "type": "object",
                                 "properties": {
-                                    "halt_at_accuracy": _field(
-                                        optimization, "halt_at_accuracy", "Halt at accuracy"
+                                    "halt_at_fitness": _field(
+                                        optimization, "halt_at_fitness", "Halt at fitness"
                                     ),
                                 },
                             },

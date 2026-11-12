@@ -5,6 +5,7 @@ from typing import Any, Literal, get_args
 
 from pydantic import Field, JsonValue
 
+from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.ruler import DELTA_STATE_LABEL, DeltaState, RulerStanding
 from promptpotter.domain.scoring import SampleStatus, is_hit
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -354,6 +355,9 @@ class CellsResponse(StrictModel):
     total_measurements: int = Field(
         description="Graded cells across `samples` — the headline's denominator, served so the "
         "reader adds nothing up."
+    )
+    fitness_unit: MeasurandUnit = Field(
+        description="What every `fitness` here reads in: its scorer's."
     )
     mean_fitness: float | None = Field(
         description="Mean graded fitness across those cells; null when the scope holds none."

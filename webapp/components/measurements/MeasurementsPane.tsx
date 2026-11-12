@@ -5,6 +5,7 @@ import {
   type CellStatus,
   type DatasetItem,
   type HardSamplesScope,
+  type MeasurandUnit,
   HARD_SAMPLE_ORDER_LABELS,
   HEATMAP_SCOPE_LABELS,
   SAMPLE_STATUS_LABELS,
@@ -70,7 +71,7 @@ const NO_CELLS: CellRow[] = [];
 
 const cellId = (c: CellRow) => `${c.candidate}\u001f${c.position}`;
 
-function SampleHeader({ it, n }: { it: DatasetItem; n: number }) {
+function SampleHeader({ it, n, unit }: { it: DatasetItem; n: number; unit: MeasurandUnit }) {
   return (
     <span className="ms-group-line">
       <span className="ms-rank">#{it.hard_sample_rank}</span>
@@ -81,7 +82,7 @@ function SampleHeader({ it, n }: { it: DatasetItem; n: number }) {
       <span className="ms-dim">
         {it.n_measured}/{n} graded
       </span>
-      <Fitness value={it.mean_fitness} />
+      <Fitness value={it.mean_fitness} unit={unit} />
       <span className="ms-dim" title="Difficulty δ on the ruler (higher = harder)">
         {it.delta == null ? it.delta_label : `δ ${fmtLogits(it.delta)}`}
       </span>
@@ -119,11 +120,12 @@ export function MeasurementsPane({
   const { datasetName, read } = useCells(preset, status === "all" ? undefined : status);
   const body = shownData(read);
   const failure = failureOf(read);
-  const { samples, candidates, cells } = useMemo(
+  const { samples, candidates, cells, unit } = useMemo(
     () => ({
       samples: body?.samples ?? NO_SAMPLES,
       candidates: body?.candidates ?? NO_CANDIDATES,
       cells: body?.cells ?? NO_CELLS,
+      unit: body?.fitness_unit ?? null,
     }),
     [body],
   );
@@ -148,7 +150,7 @@ export function MeasurementsPane({
           return <span title={label}>{label}</span>;
         },
       },
-      { id: "fitness", label: "Fitness", width: "6.5rem", cell: (c) => <Verdict cell={c} /> },
+      { id: "fitness", label: "Fitness", width: "6.5rem", cell: (c) => unit && <Verdict cell={c} unit={unit} /> },
       {
         id: "predicted",
         label: "Predicted",
@@ -157,10 +159,10 @@ export function MeasurementsPane({
       },
     ];
     return all.filter((c) => c.id !== groupBy);
-  }, [candidateOf, groupBy]);
+  }, [candidateOf, groupBy, unit]);
 
   const groups = useMemo<RowGroup<CellRow>[] | undefined>(() => {
-    if (groupBy === "none") return undefined;
+    if (groupBy === "none" || unit === null) return undefined;
     const by = new Map<string, CellRow[]>();
     const keyOf = groupBy === "sample" ? (c: CellRow) => String(c.position) : (c: CellRow) => c.candidate;
     for (const c of cells) {
@@ -174,13 +176,13 @@ export function MeasurementsPane({
         .filter((it) => !hideUnmeasured || it.n_measured > 0)
         .map((it) => {
           const rows = by.get(String(it.position)) ?? [];
-          return { key: String(it.position), header: <SampleHeader it={it} n={rows.length} />, rows };
+          return { key: String(it.position), header: <SampleHeader it={it} n={rows.length} unit={unit} />, rows };
         });
     return candidates.map((c) => {
       const rows = by.get(c.key) ?? [];
       return { key: c.key, header: <CandidateHeader c={c} n={rows.length} />, rows };
     });
-  }, [groupBy, cells, samples, candidates, hideUnmeasured]);
+  }, [groupBy, cells, samples, candidates, hideUnmeasured, unit]);
 
   const walk = useMemo(
     () => (groups ? groups.flatMap((g) => g.rows) : cells),
@@ -203,7 +205,7 @@ export function MeasurementsPane({
     ranked ? `ranked by ${HARD_SAMPLE_ORDER_LABELS[ranked].toLowerCase()}` : null,
     `${samples.length} samples`,
     body ? `${body.total_measurements} graded cells` : null,
-    body?.mean_fitness != null ? `${fmtUnit("rate", body.mean_fitness)} mean fitness` : null,
+    body?.mean_fitness != null ? `${fmtUnit(body.fitness_unit, body.mean_fitness)} mean fitness` : null,
     `${body?.measured_samples ?? 0} measured · ${body?.unmeasured_samples ?? 0} unmeasured`,
   ]
     .filter(Boolean)
@@ -289,9 +291,10 @@ export function MeasurementsPane({
           empty={read.status === "ready" ? "No measured cells here yet." : "Loading…"}
         />
       )}
-      {cell !== null && datasetName && (
+      {cell !== null && datasetName && unit && (
         <CellPanel
           datasetName={datasetName}
+          unit={unit}
           answer={cell}
           onClose={() => openView("samples", null)}
           hasPrev={openIdx > 0}

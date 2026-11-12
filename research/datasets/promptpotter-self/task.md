@@ -8,9 +8,9 @@ data_characteristics: >-
   panel layouts, and fitness is noisy numeric deltas from a small inner panel, so edits move the score but
   improvement is real and infrequent.
 optimization_goals: >-
-  Maximize held_out_lift (the MEAN, over inner rounds, of the accuracy of the prompt the inner
-  search had ADOPTED by that round on HELD-OUT rows it never searched, minus the origin prompt's
-  accuracy on the same rows). The score is the area under the inner curve: a lift bought in
+  Maximize held_out_lift (the MEAN, over inner rounds, of the headline fitness of the prompt the
+  inner search had ADOPTED by that round on HELD-OUT rows it never searched, minus the origin
+  prompt's on the same rows). A run your prompt spoils is floored and scores 0. The score is the area under the inner curve: a lift bought in
   round 1 counts in every later round, so it is worth more than the same lift bought in round 4,
   and a promotion that only held on the rows the search selected on scores zero. So winning
   edits make the inner optimizer find GENERAL fixes to its own observed failures FASTER, reading

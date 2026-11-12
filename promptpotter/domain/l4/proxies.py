@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any
+from typing import Any, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from promptpotter.domain.arms import Cut
 from promptpotter.domain.cell_terms import CellTerm
@@ -21,12 +21,19 @@ logger = logging.getLogger(__name__)
 
 
 class OuterSampleProxies(FrozenModel):
-    """Its field may not be defaulted: a cycle that cannot fill it is floored or excluded, never zeroed."""
+    """No field may be defaulted: a cycle that cannot fill them is floored or excluded, never zeroed."""
 
-    # The SCORED term: the standing selection's headline on the cell's held-out rows minus the
-    # origin's on the same rows, in accuracy points, averaged over the round budget. A promotion
-    # on the rows the search selected on is in-sample and reads here only if it holds on fresh ones.
-    held_out_lift: float = Field(ge=-1.0, le=1.0)
+    # 1 where the optimizer prompt spoiled the inner run (`floor_reason`): no lift was measured.
+    floored: Literal[0, 1]
+    # The standing selection's headline on the cell's held-out rows minus the origin's on the same
+    # rows, in headline points, averaged over the round budget; ``None`` on a floored cell.
+    held_out_lift: float | None = Field(ge=-1.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _a_floor_measured_no_lift(self) -> Self:
+        if (self.held_out_lift is None) != bool(self.floored):
+            raise ValueError("a floored cell carries no held-out lift, and a measured one does")
+        return self
 
 
 OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
@@ -45,6 +52,7 @@ def _term(name: str, direction: str, description: str, **rest: object) -> CellTe
 
 # The `promptpotter` connector's cell vocabulary (`Connector.cell_terms`).
 INNER_CELL_TERMS: tuple[CellTerm, ...] = (
+    _term("floored", "low", "1 where the optimizer prompt spoiled the inner campaign, else 0."),
     _term(
         "held_out_lift",
         "high",
@@ -87,9 +95,11 @@ assert {*OUTER_PROXY_KEYS, *_FACT_OF_KEY, INNER_FACTS_KEY} == {
 def inner_cell_report(facts: InnerCellFacts, proxies: OuterSampleProxies) -> dict[str, object]:
     """An absent value is a key left out: a bound 0 would score a measurement nobody took."""
     dumped = facts.model_dump(mode="json")
-    reported = {key: dumped[field] for key, field in _FACT_OF_KEY.items()}
-    return {
+    reported = {
         **proxies.model_dump(),
+        **{key: dumped[field] for key, field in _FACT_OF_KEY.items()},
+    }
+    return {
         **{key: value for key, value in reported.items() if value is not None},
         INNER_FACTS_KEY: {k: v for k, v in dumped.items() if k not in _FACT_OF_KEY.values()},
     }
@@ -111,12 +121,13 @@ def outer_proxies_of(pipeline: PipelineData) -> OuterSampleProxies | None:
     report = pipeline.cell_report
     if INNER_FACTS_KEY not in report:
         return None
-    return OuterSampleProxies.model_validate({key: report[key] for key in OUTER_PROXY_KEYS})
+    # A floored cell's report leaves its lift out.
+    return OuterSampleProxies.model_validate({key: report.get(key) for key in OUTER_PROXY_KEYS})
 
 
 def _origin_headroom(result: CycleResult) -> float | None:
-    accuracy = result.origin.accuracy if result.origin is not None else None
-    return None if accuracy is None else 1.0 - accuracy.value
+    fitness = result.origin.fitness if result.origin is not None else None
+    return None if fitness is None else 1.0 - fitness.value
 
 
 def unread_rounds(result: CycleResult) -> list[int]:
@@ -175,6 +186,7 @@ def inner_cell_facts(result: CycleResult) -> InnerCellFacts:
         rounds_ran=result.n_rounds_after_origin,
         round_budget=effective_round_budget(result),
         stop_reason=result.stop_reason,
+        floor_reason=floor_reason(result),
         origin_headroom=_origin_headroom(result),
         bench_origin_level=bench_origin,
         bench_final_lift=(
@@ -211,8 +223,7 @@ def spent_on_line(rnd: int, cut_round: int | None) -> bool:
 def line_round_levels(
     spans: Iterable[tuple[Sequence[tuple[int, float | None]], int | None]],
 ) -> list[float | None]:
-    """Each cycle's whole ``(round, level)`` series and its cut round, oldest first: the line's
-    `CycleResult.bench_round_levels`, every round in the order the line spent it."""
+    """Each cycle's whole ``(round, level)`` series and its cut round, oldest first."""
     return [level for series, cut in spans for rnd, level in series if spent_on_line(rnd, cut)]
 
 
@@ -274,15 +285,11 @@ def floor_reason(result: CycleResult) -> str | None:
     return None
 
 
-def _floor_proxies() -> OuterSampleProxies:
-    """``-1`` sits at or below the bottom of every re-anchoring window, so the composed fitness is exactly 0.0."""
-    return OuterSampleProxies(held_out_lift=-1.0)
-
-
 def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
+    """A floor is scored by the formula reading `floored`, never by a lift nobody measured."""
     if (floor := floor_reason(result)) is not None:
         logger.warning("inner cycle scored at the floor: %s", floor)
-        return _floor_proxies()
+        return OuterSampleProxies(floored=1, held_out_lift=None)
     if (reason := no_evidence_reason(result)) is not None:
         logger.warning("inner cycle EXCLUDED (no evidence about the optimizer prompt): %s", reason)
         # The inner cycle forwarded its own spend onto the outer ledger as it ran.
@@ -291,7 +298,8 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     # Guaranteed by no_evidence_reason.
     assert result.bench_origin_level is not None
     bench = bench_level_series(result)
-    return OuterSampleProxies(held_out_lift=sum(bench) / len(bench) - result.bench_origin_level)
+    lift = sum(bench) / len(bench) - result.bench_origin_level
+    return OuterSampleProxies(floored=0, held_out_lift=lift)
 
 
 class PanelPrecision(FrozenModel):

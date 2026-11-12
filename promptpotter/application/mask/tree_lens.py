@@ -50,8 +50,7 @@ def _abort_suppress(variant: str) -> frozenset[str]:
 def _mask_records(
     stores: Stores, root: SubtreeCampaign, samples: frozenset[int] | None, lens: Lens | None
 ) -> dict[CyclePath, MaskRecord]:
-    """One per campaign, keyed by a course's PATH: one inner campaign id sits in several sibling
-    ``.inner/`` sandboxes, so the sandbox the path names is half its identity."""
+    """One per campaign, keyed by a course's PATH: one inner campaign id sits in several sibling sandboxes."""
     out: dict[CyclePath, MaskRecord] = {}
     seen: set[tuple[CyclePath, str]] = set()
     for course in entries_under(root):
@@ -194,8 +193,8 @@ class _Overlay:
                         "divergent": key in self.dimmed,
                         "lens_value": reading.composite_fitness if reading and lensed else None,
                         # A rate over part of the subset sat a different exam: short of it, the count alone.
-                        "sample_set_accuracy": (
-                            reading.accuracy if reading and subset_n == self.subset_size else None
+                        "sample_set_fitness": (
+                            reading.fitness if reading and subset_n == self.subset_size else None
                         ),
                         "sample_set_n": subset_n if self.subset_size is not None else None,
                     }

@@ -108,7 +108,7 @@ class NoiseBand(FrozenModel):
     # One composite per rescore, in order.
     raw: list[float]
     band: BandedValue
-    fresh_accuracy: float
+    fresh_fitness: float
     recorded: OwnLevel
 
 
@@ -148,7 +148,7 @@ class VerifyReading(FrozenModel):
         "walk and each re-score as a parent — re-read under this scorer: the number the fresh "
         "cells are a check on."
     )
-    accuracy_increment: float | None = Field(
+    fitness_increment: float | None = Field(
         description="`fresh` minus `recorded`, hit rate. Unpaired — the two are different cells."
     )
     composite_increment: float | None

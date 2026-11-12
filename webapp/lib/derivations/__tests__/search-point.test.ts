@@ -196,7 +196,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
     const arm = s.point?.row?.reading.arm;
     return arm !== undefined && arm.key === s.point?.key;
   };
-  const level = (s: ObserveSubject) => s.point?.row?.reading.own?.accuracy?.value;
+  const level = (s: ObserveSubject) => s.point?.row?.reading.own?.fitness?.value;
 
   it("best: the last crown, with ITS round's reading while a later round held", () => {
     const s = resolveObserveSubject(closed, stood, false, NO_PICK);
@@ -218,7 +218,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
     expect(s.verdict).toBeNull();
   });
 
-  it("latest while live: the in-flight row, its accuracy in hand, and no closed reading", () => {
+  it("latest while live: the in-flight row, its fitness in hand, and no closed reading", () => {
     const s = resolveObserveSubject(running, stood, true, NO_PICK);
     expect(s.state).toBe("latest");
     expect(s.point).toMatchObject({ round: 3, label: "C3.2", title: "live — C3.2" });

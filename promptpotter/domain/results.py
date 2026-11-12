@@ -21,7 +21,7 @@ from promptpotter.domain.bench import BenchScore, OwnLevel
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual
-from promptpotter.domain.paired_reading import ArmKey, RoundArm
+from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit, RoundArm
 from promptpotter.domain.phases import ErrorRecord, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
@@ -141,11 +141,9 @@ class RoundOutcome(FrozenModel):
     round: int
     # Its panel arms in slot order, then each reference the round re-read: one key, one state.
     arms: dict[ArmKey, ArmState] = Field(default_factory=dict)
-    # The candidate its line stood on entering it, which the election reads every arm against
-    # (`line_reference`); none at round 0 and on a diag round, which read nothing against one.
+    # The candidate its line stood on entering it, which the election reads every arm against.
     reference: RoundArm | None
-    # Each arm's fold of the cells the round files for it, taken once as the round is measured
-    # (`MeasuredRound.folds`); none for an arm refused before a cell.
+    # Each arm's fold of the cells the round files for it; none for an arm refused before a cell.
     folds: dict[ArmKey, ScoreSummary]
     # ``None``: a diag round, its variants generated and never scored.
     election: Election | None
@@ -251,7 +249,7 @@ class RoundOutcome(FrozenModel):
             ability = reading.ability
             return scoreboard_rank_key(
                 None if own is None or own.composite is None else own.composite.value,
-                None if own is None or own.accuracy is None else own.accuracy.value,
+                None if own is None or own.fitness is None else own.fitness.value,
                 ability.theta if on_theta and ability is not None else None,
                 is_leading=reading.arm.key == leading,
                 is_partial=reading.end == "skipped",
@@ -344,16 +342,16 @@ class CycleResult(StrictModel):
     rounds: list[RoundResult]
     # The LINE's, origin-exclusive: every round its cycles ran, a rebase's discarded ones included.
     n_rounds_after_origin: int
-    result_accuracy: float | None
+    result_fitness: float | None
+    # The cycle scorer's: `result_fitness` and every fold read in it.
+    fitness_unit: MeasurandUnit
     result_round: int
     # On its OWN round-0 rows. `None`, not a 0.0 level, on a cycle that never started.
     origin: OwnLevel | None
     # The individual each round ended on, never the proposals; `None` on a cycle that never started.
     level_series: LevelSeries | None
-    # The held-out bench: the origin's headline on its rows, then per round the LINE spent, in the
-    # order spent, the STANDING selection's on the same rows, held forward across rounds that held.
-    # ``None`` in the series is a round whose selection pass read nothing or was never sent;
-    # ``None`` origin, no bench pass read.
+    # The held-out bench: the origin's headline on its rows, then per round the LINE spent and the
+    # STANDING selection's. ``None`` is a round whose pass read nothing or was never sent.
     bench_origin_level: float | None = None
     bench_round_levels: list[float | None] = Field(default_factory=list)
     # The line's, from config, never the rounds that ran: `lives` stops a stalling cycle short.

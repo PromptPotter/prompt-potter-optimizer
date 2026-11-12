@@ -13,7 +13,7 @@ test.describe("dashboard", () => {
 
   test("offers the candidates card and its bar channels", async ({ page }) => {
     await expect(page.getByRole("group", { name: "Bars" })).toBeVisible();
-    for (const name of ["accuracy", "ability θ", "composite"]) {
+    for (const name of ["fitness", "ability θ", "composite"]) {
       await expect(page.getByRole("button", { name }).first()).toBeVisible();
     }
   });

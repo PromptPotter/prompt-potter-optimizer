@@ -78,7 +78,7 @@ describe("the half choice — the tree's, once its walk is decided", () => {
       inflightByKey: new Map([["a", armReading({ own: ownLevel(0.2) })]]),
     });
     expect(bars[0]?.reading).toBe(tree.facts.reading);
-    expect(barLevel("accuracy", bars[0]!)).toBe(0.7);
+    expect(barLevel("fitness", bars[0]!)).toBe(0.7);
     expect(bars[0]).toMatchObject({ source: "history" });
   });
 
@@ -92,7 +92,7 @@ describe("the half choice — the tree's, once its walk is decided", () => {
     // A bar and its whisker can never come from two different polling clocks.
     expect(bars[0]?.reading).toBe(live);
     expect(bars[0]).toMatchObject({ source: "inflight" });
-    expect(barLevel("accuracy", bars[0]!)).toBe(0.4);
+    expect(barLevel("fitness", bars[0]!)).toBe(0.4);
   });
 
   it("keeps a decided arm's blank over a live row", () => {
@@ -103,7 +103,7 @@ describe("the half choice — the tree's, once its walk is decided", () => {
       inflightByKey: new Map([["a", armReading({ own: ownLevel(0.3) })]]),
     });
     expect(bars[0]?.reading).toBe(tree.facts.reading);
-    expect(barLevel("accuracy", bars[0]!)).toBeNull();
+    expect(barLevel("fitness", bars[0]!)).toBeNull();
     expect(bars[0]).toMatchObject({ source: "history" });
   });
 
@@ -115,7 +115,7 @@ describe("the half choice — the tree's, once its walk is decided", () => {
       inflightByKey: new Map([["f", live], ["C1.2", armReading({ own: ownLevel(0.9) })]]),
     });
     expect(bars[0]).toMatchObject({ label: "C1.2", source: "inflight" });
-    expect(barLevel("accuracy", bars[0]!)).toBe(0.4);
+    expect(barLevel("fitness", bars[0]!)).toBe(0.4);
   });
 });
 
@@ -128,7 +128,7 @@ describe("course bars carry no verdict", () => {
 
   it("draws a run at its selection's served rate against its origin, blank where no pair was read", () => {
     const bars = candidateBars({ ...EMPTY, viewedNode: runs });
-    expect(bars.map((b) => barLevel("accuracy", b))).toEqual([0.6, 0.3, null]);
+    expect(bars.map((b) => barLevel("fitness", b))).toEqual([0.6, 0.3, null]);
     expect(bars.map((b) => barLevel("composite", b))).toEqual([null, null, null]);
     expect(bars.map((b) => b.label)).toEqual(["justlogic", "seed-2", "justlogic"]);
   });
@@ -154,16 +154,16 @@ describe("the overlap channel — drawn only on the WHOLE basis", () => {
         "C1.1",
         {
           own: ownLevel(0.7, 12),
-          on_origin_panel: { arm: { round: 1, label: "C1.1", key: "a" }, rate: 0.55, n },
+          on_origin_panel: { arm: { round: 1, label: "C1.1", key: "a" }, rate: 0.55, unit: "rate", n },
         },
-        { sample_set_accuracy: onSet, sample_set_n: 6 },
+        { sample_set_fitness: onSet, sample_set_n: 6 },
       ),
     ]);
 
   it("re-bases on a picked sample set and leaves the level alone", () => {
     const bars = candidateBars({ ...EMPTY, viewedNode: onPanel(20), sampleSet: [1, 2, 3, 4, 5, 6] });
     expect(bars[0]).toMatchObject({ overlap: { rate: 0.5, n: 6 } });
-    expect(barLevel("accuracy", bars[0]!)).toBe(0.7);
+    expect(barLevel("fitness", bars[0]!)).toBe(0.7);
   });
 
   it("blanks a candidate served no rate on the picked set", () => {
@@ -174,7 +174,7 @@ describe("the overlap channel — drawn only on the WHOLE basis", () => {
     });
     // 6 of 8 is a different exam from 8 of 8, so the server holds the rate back.
     expect(bars[0]).toMatchObject({ overlap: null });
-    expect(barLevel("accuracy", bars[0]!)).toBe(0.7);
+    expect(barLevel("fitness", bars[0]!)).toBe(0.7);
   });
 
   it("draws the SERVED origin-panel rate as it came", () => {

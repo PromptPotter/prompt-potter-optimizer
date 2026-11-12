@@ -38,7 +38,7 @@ DISTINCT samples. Every optimizer node sees the search split alone — the demo 
 no node ever sees the bench set, the check-in model included. The bench scores each optimizer's result on the
 bench set with ONE evaluator; that is the headline every surface serves.
 
-**Every reading carries two columns, `accuracy` and `composite`, each with its own band and paired lift, and
+**Every reading carries two columns, `fitness` and `composite`, each with its own band and paired lift, and
 names which is the headline** (`domain/bench.py::BENCH_HEADLINE`). **The bench grades the pick the optimizer
 DECLARED** — its selector's last selection — never one the bench makes by comparing rounds read on different
 rows ([`../research/benchmarks.md`](../research/benchmarks.md) § The winner's own number is biased upward). A
@@ -111,7 +111,7 @@ divergence point, then a fork ([`../operations/persistence-and-state.md`](../ope
 Round-winner selection compares candidates on difficulty-adjusted ability — θ on the tenant's δ ruler, less
 the parent line's rows, so candidates scored on different adaptive subsets stay comparable
 ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The model — Rasch θ/δ). **θ is fit
-on the composite, not on accuracy**: each cell carries what it was WORTH (`objective`) beside whether it was
+on the composite, not on fitness**: each cell carries what it was WORTH (`objective`) beside whether it was
 RIGHT (`fitness`), so a campaign that prices latency or cost elects on that price; a cost penalty folded into
 `fitness` would render a correct-but-slow answer a MISS and send L1 to repair reasoning that was right.
 Declare one under `{dataset}/dataset.yaml::campaign.scoring.per_cell`; absent, the two are one number.
@@ -122,14 +122,14 @@ fitness 1)`, `s` = `formula/compiler.py::MISS_COST_SHARE`: a solved cell scores 
 judges. A charged error is a miss at the floor; an episode that ran out of turns and was graded is a scored
 miss.
 
-**A length charge is BOUNDED, so accuracy dominates it.** Every shipped token-charged template declares
+**A length charge is BOUNDED, so fitness dominates it.** Every shipped token-charged template declares
 `fitness * ((1 − λ) + λ · B / max(B, tokens))`, `λ = 0.08`, `B` the origin's median tokens: 1.0 up to `B`,
-never below `1 − λ`. The guarantee: **no miss beats a hit**, and **no accuracy gap above `λ / (1 − s)` can be
+never below `1 − λ`. The guarantee: **no miss beats a hit**, and **no fitness gap above `λ / (1 − s)` can be
 overturned by length** — per arm the mean composite lies in `[(1 − λ)·E(a), E(a)]`, `E(a) = s + (1 − s)·a`.
 
 **That shape is declared as DIALS, and the anchor is measured.** `scoring.dials: tokens=0.08,latency=0.05`
 beside `per_sample` (exclusive with `per_cell`) names a weight per term; once the origin is scored, it is
 realized — `B` is the origin's median of that term — and the resulting `per_cell` is written into the campaign
 manifest in place of the dials, once: a resume, a fork and every served read take the plain formula.
-**Accuracy** displays alongside as the subset-relative correctness rate, so a win with hidden costs is visible
+**Fitness** displays alongside as the subset-relative correctness, so a win with hidden costs is visible
 as a gap between the two.

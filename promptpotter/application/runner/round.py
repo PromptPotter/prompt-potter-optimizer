@@ -242,7 +242,7 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
             node=node,
             opening=opening,
             budget_rounds=cycle.config.optimization.budget.rounds,
-            parent_accuracy=None if fold is None else fold.accuracy,
+            parent_fitness=None if fold is None else fold.fitness,
             prompt_preview="\n\n".join(
                 cycle.parent.render(prompt_node)
                 for prompt_node in cycle.session.pipeline_schema.prompt_nodes()
@@ -304,8 +304,7 @@ def _one_arm_each(ctx: RoundContext, proposals: list[Proposal]) -> list[Proposal
 
 
 def bank_walk(ctx: RoundContext, proposals: list[Proposal]) -> None:
-    """Once per round, with the state the walk left and the decisions it made: a resume seats both
-    and walks no proposer."""
+    """Once per round, with the state the walk left and the decisions it made."""
     # An EMPTY bank replays as zero arms on every resume: a permanent failure to propose.
     if not proposals:
         return
@@ -551,7 +550,7 @@ async def post_round(
         stores=session.store,
         hop=session.hop,
         round_num=round_num,
-        accuracy=None if fold is None else fold.accuracy,
+        fitness=None if fold is None else fold.fitness,
         winner_id=None if election is None else election.selected,
         seed=cycle.rng(round_num, "verify").getrandbits(31),
         cb=cb,

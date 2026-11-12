@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Annotated, Any
 
+from promptpotter.domain.arm_reading import level_text
 from promptpotter.domain.arms import is_leader_eligible
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
         SampleIndex,
         SampleRecord,
     )
+    from promptpotter.domain.paired_reading import MeasurandUnit
     from promptpotter.domain.pipeline_schema import LocusKind, PipelineSchema
     from promptpotter.domain.results import RoundResult
 
@@ -80,7 +82,7 @@ def _fmt_persistent_failures(persistent: list[SampleRecord]) -> str:
 @dataclass
 class ValueRecord:
     value_preview: str
-    mean_accuracy: float
+    mean_fitness: float
     sample_count: int
 
 
@@ -105,9 +107,12 @@ class AxisIndex:
     """Ranks the loci of the cycle's own measured arms; its failure readings remember as its
     sample index does."""
 
-    def __init__(self, sample_index: SampleIndex, schema: PipelineSchema) -> None:
+    def __init__(
+        self, sample_index: SampleIndex, schema: PipelineSchema, fitness_unit: MeasurandUnit
+    ) -> None:
         self.sample_index = sample_index
         self._schema = schema
+        self._fitness_unit = fitness_unit
         self._axis_values: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list),
         )
@@ -186,7 +191,8 @@ class AxisIndex:
             )
             if impact and impact.top_values:
                 top_vals_str = "; ".join(
-                    f"{r.value_preview} (acc={r.mean_accuracy:.1%})" for r in impact.top_values[:2]
+                    f"{r.value_preview} (fit={level_text(r.mean_fitness, self._fitness_unit)})"
+                    for r in impact.top_values[:2]
                 )
 
         clusters = self.sample_index.failure_clusters(2)
@@ -220,18 +226,18 @@ class AxisIndex:
         )
 
     def refresh(self, rounds: Sequence[RoundResult]) -> None:
-        """An arm with no accuracy is skipped: folded as 0.0 it manufactures ``effect_size``."""
+        """An arm with no fitness is skipped: folded as 0.0 it manufactures ``effect_size``."""
         self._axis_values = defaultdict(lambda: defaultdict(list))
         self._axis_kinds = {}
         for rr in rounds:
             for key, arm in rr.arms.items():
                 fold = rr.folds.get(key)
-                if not is_leader_eligible(arm) or fold is None or fold.accuracy is None:
+                if not is_leader_eligible(arm) or fold is None or fold.fitness is None:
                     continue
                 for locus, value in arm.individual.loci().items():
                     self._axis_kinds[locus.name] = self._schema.locus_kind(*locus)
                     # Keyed whole: two prompts sharing a preview are two values.
-                    self._axis_values[locus.name][str(value)].append(fold.accuracy)
+                    self._axis_values[locus.name][str(value)].append(fold.fitness)
 
     @shapes_optimizer_prompt
     def _compute_axis_impact(
@@ -242,8 +248,8 @@ class AxisIndex:
         records = [
             ValueRecord(_value_preview(v), sum(a) / len(a), len(a)) for v, a in values.items() if a
         ]
-        records.sort(key=lambda r: -r.mean_accuracy)
-        means = [r.mean_accuracy for r in records]
+        records.sort(key=lambda r: -r.mean_fitness)
+        means = [r.mean_fitness for r in records]
         total = sum(r.sample_count for r in records)
         kind = self._axis_kinds[axis]
 

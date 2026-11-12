@@ -30,7 +30,7 @@ function bar(
 }
 
 const ctx = (over: Partial<SeriesCtx> = {}): SeriesCtx => ({
-  metrics: new Set(["accuracy", "ability"]),
+  metrics: new Set(["fitness", "ability"]),
   showMask: false,
   showCache: false,
   showOverlap: false,
@@ -50,7 +50,7 @@ describe("a missing value renders as a gap or a floor, never as a measurement", 
     for (const key of ["composite", "mask"]) {
       expect(seriesColumn(spec(key), started)).toEqual([0]);
     }
-    for (const key of ["accuracy", "composite", "mask"]) {
+    for (const key of ["fitness", "composite", "mask"]) {
       expect(seriesColumn(spec(key), [bar()])).toEqual([null]);
     }
   });
@@ -70,7 +70,7 @@ describe("a missing value renders as a gap or a floor, never as a measurement", 
       },
       { overlap: { rate: 0.5, n: 4 } },
     );
-    expect(seriesColumn(spec("accuracy"), [v])).toEqual([0.7]);
+    expect(seriesColumn(spec("fitness"), [v])).toEqual([0.7]);
     expect(seriesColumn(spec("ability"), [v])).toEqual([-1.5]);
     expect(seriesColumn(spec("overlap"), [v])).toEqual([0.5]);
     // 0.25, not 3/6: the served share, never the two counts beside it divided here.
@@ -95,7 +95,7 @@ describe("the axis and sign facts the chart cannot re-derive", () => {
 
   it("gives a chip only to the three metric channels", () => {
     expect(CANDIDATE_SERIES.filter((s) => s.metric).map((s) => s.key)).toEqual([
-      "accuracy",
+      "fitness",
       "ability",
       "composite",
     ]);
@@ -118,12 +118,12 @@ describe("what is on screen", () => {
 describe("the confidence band", () => {
   it("draws the served band only on the bar that produced it", () => {
     const anchors = (c: Partial<SeriesCtx>) => whiskerBands(ctx(c)).map((b) => b.anchor);
-    expect(anchors({ displayMetric: "ability" })).toEqual(["accuracy", "ability"]);
+    expect(anchors({ displayMetric: "ability" })).toEqual(["fitness", "ability"]);
     const both: Partial<SeriesCtx> = {
       displayMetric: "composite",
-      metrics: new Set(["accuracy", "composite"]),
+      metrics: new Set(["fitness", "composite"]),
     };
-    expect(anchors(both)).toEqual(["accuracy"]);
+    expect(anchors(both)).toEqual(["fitness"]);
     expect(anchors({ displayMetric: "composite", metrics: new Set(["composite"]) })).toEqual([]);
     expect(anchors({ metrics: new Set(["ability"]) })).toEqual(["ability"]);
   });

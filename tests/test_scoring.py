@@ -180,9 +180,9 @@ from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.scoring.evaluators import (
     DEFAULT_CELL_FORMULA,
     Evaluator,
-    compute_accuracy,
     compute_degraded_rate,
     compute_error_rate,
+    compute_fitness,
 )
 from promptpotter.application.scoring.formula import compiler
 from promptpotter.application.scoring.formula.compiler import (
@@ -727,7 +727,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     assert sorted(responses_of(walked).values()) == [0.5, 1.0], (
         "θ is fit on each cell's share of fields, never on one item per field"
     )
-    assert compute_composite_fitness(walked, _LLM_ONLY).field_accuracy == {
+    assert compute_composite_fitness(walked, joint, _LLM_ONLY).field_accuracy == {
         "type_of_document": 0.5,
         "requires_action": 1.0,
         "extract_depth": 0.5,
@@ -749,7 +749,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         return measurement(sid, None, pipeline_data={"step_tokens": steps}, **cell, **wire).facts
 
     def composite(scorer: Scorer, *cells: MeasuredCell) -> float | None:
-        return compute_composite_fitness(scorer.sheet(cells), _LLM_ONLY).composite_fitness
+        return compute_composite_fitness(scorer.sheet(cells), scorer, _LLM_ONLY).composite_fitness
 
     core = CELL_TERMS
     anchors = origin_anchors(
@@ -800,7 +800,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     assert solved_costly == pytest.approx(0.92 + 0.08 / 3)
     assert miss_cheap == pytest.approx(compiler.MISS_COST_SHARE), "a miss is charged its share"
     assert miss_costly == pytest.approx(compiler.MISS_COST_SHARE * solved_costly)
-    assert compute_composite_fitness(walked, _LLM_ONLY).composite_fitness == pytest.approx(
+    assert compute_composite_fitness(walked, charged, _LLM_ONLY).composite_fitness == pytest.approx(
         (solved_cheap + solved_costly + miss_cheap + miss_costly) / 4
     ), "the faulted cell left the mean"
     assert is_floor_pinned(rows[2:4]) and not is_floor_pinned(rows[1:4]), (
@@ -837,7 +837,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         parse_dials("rounds=0.1", core)
 
     def inner(sid: int, rounds: int) -> GradedCell:
-        report = {"held_out_lift": 0.0, "rounds": rounds}
+        report = {"floored": 0, "held_out_lift": 0.0, "rounds": rounds}
         row = measurement(sid, None, pipeline_data={"cell_report": report}).facts
         return GradedCell.from_wire(row.wire())
 
@@ -1041,10 +1041,10 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
     offline: Router,
 ) -> None:
     # A round that measured every sample and failed them all IS a 0.0; an unmeasured one is not.
-    for rate in (compute_accuracy, compute_error_rate, compute_degraded_rate):
+    for rate in (compute_fitness, compute_error_rate, compute_degraded_rate):
         assert rate(results=[]) is None, f"{rate.__name__} read an empty round as 0.0"
-    empty = compute_composite_fitness(sheet([]), _LLM_ONLY)
-    assert (empty.composite_fitness, empty.accuracy, empty.total) == (None, None, 0), (
+    empty = compute_composite_fitness(sheet([]), scorer_of(), _LLM_ONLY)
+    assert (empty.composite_fitness, empty.fitness, empty.total) == (None, None, 0), (
         "an EMPTY round has NO score, never a 0.0 that reads as an arm that failed every cell"
     )
     assert order_floor(None) < order_floor(0.0), "an unscored arm ranks below a failed one"
@@ -1058,15 +1058,15 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
         return measurement(sid, fitness, **(cell | wire))
 
     deprecated = asked(0, "q", 0.0, error="SCHEMA_VALIDATION_FAILED")
-    assert compute_accuracy(results=[deprecated]) == 0.0, "a deprecated row is a measured miss"
+    assert compute_fitness(results=[deprecated]) == 0.0, "a deprecated row is a measured miss"
     # A provider's fault is the ABSENCE of a verdict: out of the mean, still on the error channel.
     faulted = [asked(0, "a", 1.0), asked(0, "ERROR", error="boom", error_category="SERVER")]
-    assert compute_accuracy(results=faulted) == 1.0, "a provider fault entered the mean"
+    assert compute_fitness(results=faulted) == 1.0, "a provider fault entered the mean"
     assert compute_error_rate(results=faulted) == 0.5, "a provider fault left the error channel"
     # Every row ERRORED with no label to miss: no rate either (an L4 cell cut throughout is not 0%).
     unlabelled = asked(0, "ERROR", ground_truth="", error="boom", error_category="HALTED")
-    all_errored = compute_composite_fitness(sheet([unlabelled]), _LLM_ONLY)
-    assert (all_errored.accuracy, all_errored.composite_fitness, all_errored.total) == (
+    all_errored = compute_composite_fitness(sheet([unlabelled]), scorer_of(), _LLM_ONLY)
+    assert (all_errored.fitness, all_errored.composite_fitness, all_errored.total) == (
         None,
         None,
         0,
@@ -1081,10 +1081,12 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
         asked(10, "ERROR", **cut),
         asked(11, "ERROR", error="HTTP 502", error_category="SERVER"),
     ]
-    scores = compute_composite_fitness(labelled.sheet([c.facts for c in walked]), _LLM_ONLY)
+    scores = compute_composite_fitness(
+        labelled.sheet([c.facts for c in walked]), labelled, _LLM_ONLY
+    )
     assert (scores.total, len(walked) - scores.total) == (11, 1), "only the provider fault left"
-    assert scores.accuracy == pytest.approx(5 / 11), "the prompt's own failures left the count"
-    assert scores.composite_fitness == pytest.approx(scores.accuracy), (
+    assert scores.fitness == pytest.approx(5 / 11), "the prompt's own failures left the count"
+    assert scores.composite_fitness == pytest.approx(scores.fitness), (
         "the default formula is plain accuracy, so the decision metric and the headline agree"
     )
     assert not labelled.grade(asked(10, "ERROR", ground_truth="", **cut).facts).scored, (
@@ -1580,7 +1582,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 f"{case}: a parent's observation never reached the δ fit its election read"
             )
             [short] = [key for key in rows if len(rows[key]) == 1]
-            assert closed.folds[short].accuracy == 1.0, (
+            assert closed.folds[short].fitness == 1.0, (
                 f"{case}: the cut arm reads perfect on its one cell"
             )
             carried = [ind.id for ind in cycle.population]
@@ -1875,7 +1877,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         session = cycle.session
         picked = asyncio.run(execute_round(cycle, 1, callbacks)).result
         head, fold = picked.head, picked.fold
-        assert head is not None and fold is not None and fold.accuracy is not None
+        assert head is not None and fold is not None and fold.fitness is not None
         assert picked.election is not None
         crowned = picked.election.selected
         assert crowned is not None
@@ -1890,7 +1892,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             read.theta[crowned],
             read.theta_se[crowned],
         ), "an arm carries the θ the election takes of its rows, on the scale it stamped"
-        assert fold.total == 4 and target_tripped(cycle, fold.accuracy) is None, (
+        assert fold.total == 4 and target_tripped(cycle, fold.fitness) is None, (
             "a 4-cell point estimate met the target: the ceiling reads the paired lower bound"
         )
         origin = cycle.origin_round.origin.individual
@@ -2264,8 +2266,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         dashboard.feed(
             RunWiringRecord(
                 round_cells_ceiling=1,
-                display_metric="accuracy",
-                elects_on="accuracy",
+                display_metric="fitness",
+                elects_on="fitness",
                 max_cells_in_flight=1,
                 measured_unit="sample",
                 measurement_node="solve",
@@ -2334,9 +2336,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             ),
         )
         assert bench.selected is not None and bench.origin is not None
-        selected_accuracy, origin_accuracy = bench.selected.accuracy, bench.origin.accuracy
-        assert selected_accuracy is not None and origin_accuracy is not None
-        assert (selected_accuracy.value, origin_accuracy.value) == (1.0, 0.0)
+        selected_accuracy, origin_fitness = bench.selected.fitness, bench.origin.fitness
+        assert selected_accuracy is not None and origin_fitness is not None
+        assert (selected_accuracy.value, origin_fitness.value) == (1.0, 0.0)
         session.state.clock = LaunchClock.now()
         result = build_cycle_result(
             cycle,
@@ -3054,7 +3056,7 @@ def _line_read(
             member(label, grades),
             bank,
             scope=RoleScope.REPORT,
-            measurands=grade_measurands("s"),
+            measurands=grade_measurands(dataclasses.replace(scorer_of(), id="s")),
             spec=ROUND_LIFT_SPEC,
         )
 
@@ -3447,7 +3449,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         assert all(reading.advance is advance for advance, reading in readings.items())
 
         # One ceiling stop: the pick's level on the origin panel at its paired interval's lower
-        # bound, `halt_at_accuracy` its target; no pair, no stop.
+        # bound, `halt_at_fitness` its target; no pair, no stop.
         def outcome(reading: OverlapReading, target: float) -> StopReason | None:
             closing = round_result(1, improved=True, overlap=reading)
             folds = {key: score_summary(composite_fitness=1.0) for key in closing.folds}
@@ -4122,11 +4124,11 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     assert cells.column(ROW_GRADES["fitness"]) == standing, "a second reading is a second row"
     assert cells.column(ROW_GRADES["objective"]) == worth
     assert responses_of(cells) == worth, "the ruler read another row than the column"
-    assert cells_read("accuracy", cells, (), None) == 4
-    fold = fold_cells(cells)
-    assert (fold.total, fold.accuracy) == (4, 0.75)
+    assert cells_read("fitness", cells, (), None) == 4
+    fold = fold_cells(cells, "rate")
+    assert (fold.total, fold.fitness) == (4, 0.75)
     assert fold.composite_fitness == pytest.approx(sum(worth.values()) / 4)
-    assert level_band(cells, ROW_GRADES["fitness"])[0] == fold.accuracy
+    assert level_band(cells, ROW_GRADES["fitness"])[0] == fold.fitness
     assert {key: row.grade.fitness for key, row in twice.by_key().items()} == standing
     once = member_rows("once", measurements(list(by_slot.values())), four)
     unmoved = _read_pair(once, twice, four)
@@ -4280,6 +4282,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             dataset_hash=None,
         ),
         sample_keys=[s.key for s in seated],
+        scorer=dataclasses.replace(scorer_of(), id="s"),
         instrument_id="i",
     ).lift("fitness")
     assert on_bench is not None and on_bench.estimate.value == pytest.approx(0.5), (
@@ -4315,6 +4318,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         arm = c0 if pass_.arm.round == 0 else pass_.arm
         return verify_reading(
             pass_,
+            scorer=dataclasses.replace(scorer_of(), id="s"),
             fresh=fresh_rows,
             recorded=recorded,
             measured=verify_member(
@@ -4324,10 +4328,10 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         )
 
     verify = verified(banked())
-    assert verify.fresh.accuracy is not None and verify.recorded.accuracy is not None
-    assert verify.fresh.accuracy.value == pytest.approx(0.5), "the fresh cells, never the pool"
-    assert verify.recorded.accuracy.value == pytest.approx(1.0)
-    assert verify.accuracy_increment == pytest.approx(-0.5)
+    assert verify.fresh.fitness is not None and verify.recorded.fitness is not None
+    assert verify.fresh.fitness.value == pytest.approx(0.5), "the fresh cells, never the pool"
+    assert verify.recorded.fitness.value == pytest.approx(1.0)
+    assert verify.fitness_increment == pytest.approx(-0.5)
     pair = verify.vs_origin
     assert pair.coverage is not None and pair.headline is not None
     assert (verify.fresh.n, verify.recorded.n, pair.coverage.scored) == (10, 20, 30)
@@ -4769,8 +4773,8 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     replicated: dict[str, tuple[float, float, DisplayMetric, ArmFit | None]] = {
         "potter_s1": (0.1, 0.0, "ability", ArmFit(theta=0.42, theta_se=0.1)),
         "potter_s2": (0.2, 0.0, "ability", pinned),
-        "capo_s1": (0.1, 0.4, "accuracy", None),
-        "capo_s2": (0.0, 0.4, "accuracy", None),
+        "capo_s1": (0.1, 0.4, "fitness", None),
+        "capo_s2": (0.0, 0.4, "fitness", None),
         "gepa_s1": (0.2, 0.2, "composite", None),
     }
     replicate_arms = [
@@ -4839,9 +4843,9 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     elections = {r.campaign_id: r.election for r in matrix.rows}
     assert {cid: e and (e.elects_on, e.reads_on) for cid, e in elections.items()} == {
         "potter_s1": ("ability", "ability"),
-        "potter_s2": ("ability", "accuracy"),
-        "capo_s1": ("accuracy", "accuracy"),
-        "capo_s2": ("accuracy", "accuracy"),
+        "potter_s2": ("ability", "fitness"),
+        "capo_s1": ("fitness", "fitness"),
+        "capo_s2": ("fitness", "fitness"),
         "gepa_s1": ("composite", "composite"),
     }, "an ability pick is quoted on θ unless a caveat is served on its θ"
     quoted = elections["potter_s1"]

@@ -31,9 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class CampaignSurvey:
-    """THE cross-campaign survey: every campaign listed once, a cycle's standing rounds read through
-    the store's reader. A campaign whose ledger this build cannot read is a faulted row, named in
-    `faulted` and skipped, never a crash of the run that surveys it."""
+    """THE cross-campaign survey; a campaign whose ledger this build cannot read is a faulted row, never a crash."""
 
     def __init__(self, campaigns: CampaignStore) -> None:
         self._store = campaigns
@@ -93,7 +91,7 @@ def _answer_space_signature(stores: Stores, closed: RoundStatement, dataset: str
 
 
 def _credible_lift(reading: PairedReading | None) -> float | None:
-    """Accuracy, never the composite: blocks pool across campaigns, each pricing cells its own way."""
+    """Fitness, never the composite: blocks pool across campaigns, each pricing cells its own way."""
     lift = reading.on_whole_set if reading else None
     if lift is None or lift.estimate.ci_lo <= 0:
         return None

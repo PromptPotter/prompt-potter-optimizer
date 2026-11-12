@@ -4,7 +4,7 @@ import { unitCount } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 
 type SeriesKey =
-  | "accuracy"
+  | "fitness"
   | "ability"
   | "composite"
   | "mask"
@@ -58,14 +58,14 @@ const markLevel = (m: VerificationMark | null): number | null => m?.level?.value
 // Array order is draw order.
 export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
   {
-    key: "accuracy",
-    metric: "accuracy",
-    ink: metricInk("accuracy"),
+    key: "fitness",
+    metric: "fitness",
+    ink: metricInk("fitness"),
     kind: "bar",
     axis: "y",
     gap: "floor-when-started",
-    valueOf: (v) => barLevel("accuracy", v),
-    applies: (c) => c.metrics.has("accuracy"),
+    valueOf: (v) => barLevel("fitness", v),
+    applies: (c) => c.metrics.has("fitness"),
   },
   {
     key: "ability",
@@ -183,11 +183,11 @@ export interface WhiskerBand {
 
 export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
   const bands: WhiskerBand[] = [];
-  if (ctx.metrics.has("accuracy")) {
+  if (ctx.metrics.has("fitness")) {
     bands.push({
-      anchor: "accuracy",
-      lo: ctx.views.map((v) => v.reading?.own?.accuracy?.ci_lo ?? null),
-      hi: ctx.views.map((v) => v.reading?.own?.accuracy?.ci_hi ?? null),
+      anchor: "fitness",
+      lo: ctx.views.map((v) => v.reading?.own?.fitness?.ci_lo ?? null),
+      hi: ctx.views.map((v) => v.reading?.own?.fitness?.ci_hi ?? null),
     });
   }
   for (const spec of CANDIDATE_SERIES) {

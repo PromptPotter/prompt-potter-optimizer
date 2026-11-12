@@ -47,7 +47,8 @@ export function SearchpointDrillIn({
   onOverlay?: (next: Record<string, Record<string, unknown>>) => void;
   actions?: React.ReactNode;
 }) {
-  const accuracy = reading?.own?.accuracy ?? null;
+  const own = reading?.own ?? null;
+  const fitness = own?.fitness ?? null;
   const composite = reading?.own?.composite?.value ?? null;
   const bench = reading?.bench ?? null;
   const paired = liftOf(reading?.vs_reference ?? null);
@@ -80,16 +81,16 @@ export function SearchpointDrillIn({
         ) : (
           <>
             <Fact k="label" v={reading.arm.label} />
-            {accuracy != null && (
+            {own != null && fitness != null && (
               <Fact
-                k="accuracy"
-                v={`${fmtLevelBand("rate", accuracy)}${onPanel(reading.panel)}`}
+                k="fitness"
+                v={`${fmtLevelBand(own.fitness_unit, fitness)}${onPanel(reading.panel)}`}
               />
             )}
             {(benchPass != null || bench != null) && (
               <Fact
                 k="bench · held out"
-                hint="This same searchpoint on the held-out bench set: questions no round of the search ever read, so no candidate was chosen on them. A different set of questions from the accuracy above, so the two rates are not differenced. Any bench lift is against the ORIGIN, not the parent."
+                hint="This same searchpoint on the held-out bench set: questions no round of the search ever read, so no candidate was chosen on them. A different set of questions from the fitness above, so the two are not differenced. Any bench lift is against the ORIGIN, not the parent."
                 v={
                   benchPass?.failed_as != null
                     ? <FailedPass state={benchPass.failed_as} />
@@ -97,7 +98,7 @@ export function SearchpointDrillIn({
                     ? `${fmtUnit("rate", benchPass.level?.value)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
                     : bench?.level == null
                       ? `${PLACEHOLDER} of ${bench?.n}`
-                      : `${fmtLevelBand("rate", bench.level)} of ${bench.n}`
+                      : `${fmtLevelBand(bench.level_unit, bench.level)} of ${bench.n}`
                 }
               />
             )}
@@ -127,7 +128,7 @@ export function SearchpointDrillIn({
             {reading.ability?.theta != null && (
               <Fact
                 k="ability"
-                hint="Difficulty-adjusted Rasch ability — the metric the round winner is elected on. Clearing harder samples is worth more than more wins on easy ones, so a higher θ can beat a higher accuracy."
+                hint="Difficulty-adjusted Rasch ability — the metric the round winner is elected on. Clearing harder samples is worth more than more wins on easy ones, so a higher θ can beat a higher fitness."
                 v={fmtThetaSe(reading.ability.theta, reading.ability.se)}
               />
             )}

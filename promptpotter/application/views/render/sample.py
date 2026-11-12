@@ -111,8 +111,10 @@ def fmt_query_result(
         fit_col = f" fit {grade.fitness:.2f}" if grade.fitness is not None else ""
         lift = inner.mean_round_delta
         delta_col = " θ Δ —" if lift is None else f" θ Δ {lift:+.3f} logits"
+        held = scored.held_out_lift
+        lift_col = "floored" if held is None else f"held-out lift {held * 100:+.1f} pts"
         line = (
-            f"{indent}{time_col} {sid_col} held-out lift {scored.held_out_lift * 100:+.1f} acc pts"
+            f"{indent}{time_col} {sid_col} {lift_col}"
             f"{delta_col}{fit_col}{step_block}{tok_col} q:{q!r}"
         )
         if inner.series_reason is None:

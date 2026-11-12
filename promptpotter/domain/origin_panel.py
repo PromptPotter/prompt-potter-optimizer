@@ -9,6 +9,7 @@ from pydantic import Field
 from promptpotter.domain.paired_reading import (
     READING_STATE_KIND,
     ArmName,
+    MeasurandUnit,
     PairedReading,
     ReadingState,
     ReadingStateKind,
@@ -189,14 +190,14 @@ class LineRate(FrozenModel):
     """One member of the best-so-far line as an overlap reading holds it."""
 
     arm: ArmName
-    rate: float = Field(description="Its rate over the panel cells it and C0 both scored.")
+    rate: float = Field(description="Its level over the panel cells it and C0 both scored.")
+    unit: MeasurandUnit = Field(description="The unit `rate` reads in: its headline's.")
     n: int = Field(description="How many of the panel's cells it holds scoreable.")
 
 
 @shapes_optimizer_prompt
 def overlap_line(overlap: OverlapReading) -> list[LineRate]:
-    """C0 is on the lead's reading of it, before any pick on the first triggered one's: rates set
-    side by side must be one pair's."""
+    """C0 is on the lead's reading of it, before any pick on the first triggered one's."""
     anchor = next(
         (
             reading
@@ -212,17 +213,21 @@ def overlap_line(overlap: OverlapReading) -> list[LineRate]:
         or anchor.a.address.arm is None
     ):
         return []
-    line = [LineRate(arm=anchor.a.address.arm, rate=anchor.headline.rate_a, n=anchor.a.n)]
+    head = anchor.headline
+    line = [
+        LineRate(arm=anchor.a.address.arm, rate=head.rate_a, unit=head.measurand.unit, n=anchor.a.n)
+    ]
     for pick in (*overlap.earlier, overlap.lead):
-        if pick.headline is not None and pick.b is not None and pick.b.address.arm is not None:
-            line.append(LineRate(arm=pick.b.address.arm, rate=pick.headline.rate_b, n=pick.b.n))
+        lift, b = pick.headline, pick.b
+        if lift is not None and b is not None and (arm := b.address.arm) is not None:
+            line.append(LineRate(arm=arm, rate=lift.rate_b, unit=lift.measurand.unit, n=b.n))
     return line
 
 
 @shapes_optimizer_prompt
 def triggered_rates(overlap: OverlapReading) -> list[LineRate]:
     return [
-        LineRate(arm=arm, rate=headline.rate_b, n=b.n)
+        LineRate(arm=arm, rate=headline.rate_b, unit=headline.measurand.unit, n=b.n)
         for t in overlap.triggered
         if (headline := t.reading.headline) is not None
         and (b := t.reading.b) is not None
@@ -240,8 +245,7 @@ def line_by_individual(overlap: OverlapReading | None) -> dict[str, LineRate]:
 
 
 def election_rows(drawn: CellSheet, on_panel: CellSheet, crowned: Collection[str]) -> CellSheet:
-    """What a round elects on: an individual's draw, then the origin-panel cells it lacks, both
-    less every cell that crowned the parent."""
+    """What a round elects on: an individual's draw, then the origin-panel cells it lacks, less the parent's crowning cells."""
     skip = {cell.key for cell in drawn} | set(crowned)
     return drawn.where(lambda cell: cell.key not in crowned).merged(
         on_panel.where(lambda cell: cell.key not in skip)
@@ -256,9 +260,7 @@ def origin_panel(
     scope_of: Mapping[int, str],
     size: int,
 ) -> list[int]:
-    """*origin_cells* are the origin's own ROUND's, never every cell it was later read on. A scope
-    the line drew and the origin never sat takes the line's cells there, and the top-up seats C0 on
-    them as on any member's gap; each scope is cut to *size* alone, so none crowds another out."""
+    """*origin_cells* are the origin's own ROUND's, never every cell it was later read on."""
     by_scope: dict[str, list[int]] = {}
     for sid in sorted(set(origin_cells) & set(poolable)):
         by_scope.setdefault(scope_of[sid], []).append(sid)

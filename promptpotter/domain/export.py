@@ -103,7 +103,7 @@ class ExportMeasurement(FrozenModel):
     )
     # ``None`` on a round that crowned nobody and on the origin round: "not asked" is not "zero".
     vs_reference: PairedReading | None = Field(
-        description="The winner over its reference, paired per cell both scored: accuracy as "
+        description="The winner over its reference, paired per cell both scored: fitness as "
         "the headline, the composite beside it.",
     )
     vs_origin: PairedReading = Field(

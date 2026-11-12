@@ -1,12 +1,10 @@
-"""What the outer model reads of one inner run: hashed with the L4 instrument
-(`tasks.py::measurement_modules`), so an edit here re-keys L4's cells and no optimizer's."""
+"""What the outer model reads of one inner run: hashed with the L4 instrument, so an edit here re-keys L4's cells."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.views.render.primitives import fmt_pct
-from promptpotter.domain.arm_reading import ArmFit, order_floor
+from promptpotter.domain.arm_reading import ArmFit, fold_fitness_text, order_floor
 from promptpotter.domain.arms import Cut, Measured
 from promptpotter.domain.l4.inner_facts import SeriesGap, series_reason_head
 from promptpotter.domain.l4.proxies import (
@@ -56,9 +54,10 @@ def inner_narrative(
             f"{head}: {floor} — scored at the floor "
             f"(optimizer-prompt-owned); stop={result.stop_reason}."
         )
-    # Both guaranteed by `compute_outer_proxies`, which ran first.
+    # All three guaranteed by `compute_outer_proxies`, which ran first.
     bench_origin, bench_final = facts.bench_origin_level, facts.bench_final_lift
-    assert bench_origin is not None and bench_final is not None
+    held_out_lift = proxies.held_out_lift
+    assert bench_origin is not None and bench_final is not None and held_out_lift is not None
     held = parent_levels(result)
     levels = [] if held is None else held[1]
     origin = facts.origin_level
@@ -77,7 +76,7 @@ def inner_narrative(
         )
     lines = [
         f"{head}: held-out {result.bench.bench_size} rows:"
-        f" floor {bench_origin:.3f} -> mean-over-rounds B{proxies.held_out_lift:+.3f}"
+        f" floor {bench_origin:.3f} -> mean-over-rounds B{held_out_lift:+.3f}"
         f" (the scored lift), ended {bench_origin + bench_final:.3f} (B{bench_final:+.3f})"
         f"{search}; stop={result.stop_reason}.",
         _lift_shape(result),
@@ -121,8 +120,8 @@ def inner_narrative(
             }
             margins = {
                 key: float("-inf")
-                if (matched := floors[key]) is None or fold.accuracy is None
-                else fold.accuracy - matched
+                if (matched := floors[key]) is None or fold.fitness is None
+                else fold.fitness - matched
                 for key, _, fold in scored
             }
             top_key, top, top_fold = max(
@@ -141,7 +140,7 @@ def inner_narrative(
                 else " (stopped before it covered the origin's samples, so nothing to compare)"
             )
             parts.append(
-                f"tried {top.label} (acc {fmt_pct(top_fold.accuracy, '{:.3f}')}{versus}{theta}): "
+                f"tried {top.label} (fit {fold_fitness_text(top_fold)}{versus}{theta}): "
                 f"{_clip(top.changes_description, 100)}"
             )
         else:

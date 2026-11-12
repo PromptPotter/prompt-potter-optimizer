@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
@@ -12,7 +13,9 @@ class CellFold(FrozenModel):
     # The cells carrying a verdict, a deprecated one included as a miss.
     total: int
     # ``None`` where `total` is 0: no fitness is not a 0.0.
-    accuracy: float | None
+    fitness: float | None
+    # The grading scorer's ``fitness_unit``: every printer of `fitness` reads it.
+    fitness_unit: MeasurandUnit
     composite_fitness: float | None
     deprecated: int
     degraded: int
@@ -29,11 +32,17 @@ class ScoreSummary(CellFold):
     walked: int
     cached: int
     evaluators: dict[str, float]
+    # The `evaluators` the scoring formula reads, `fitness` aside: each one's round mean.
+    fitness_terms: list[str]
     # Student-t CI on the mean per-cell FITNESS, whatever the formula; ``None`` under two cells.
     mean_fitness_ci_lo: float | None
     mean_fitness_ci_hi: float | None
     # BACKEND tokens only, replayed rows excluded: judge and optimizer spend carry no arm.
     tokens: TokenAccount | None
+
+    @property
+    def term_means(self) -> dict[str, float]:
+        return {name: self.evaluators[name] for name in self.fitness_terms}
 
 
 def unscoreable_cells(results: Iterable[GradedCell]) -> int:

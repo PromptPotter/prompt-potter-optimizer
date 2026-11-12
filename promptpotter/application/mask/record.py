@@ -11,13 +11,13 @@ from promptpotter.shared.worded import Worded
 
 #: The `score:` formulas a picklist offers by name, keyed as the `lens=` it sends; any other is
 #: the operator's own expression.
-SCORE_LENS_LABELS: Worded[str, str] = Worded({Lens("score", "accuracy").spelling: "Accuracy"})
+SCORE_LENS_LABELS: Worded[str, str] = Worded({Lens("score", "fitness").spelling: "Fitness"})
 
 
 class MaskReading(FrozenModel):
     composite_fitness: float
-    accuracy: float | None
-    # `accuracy` is the mean over exactly these.
+    fitness: float | None
+    # `fitness` is the mean over exactly these.
     n_scored: int
 
 

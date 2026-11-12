@@ -50,11 +50,11 @@ export function HardSamplesPreview() {
 
   const rateOf = (id: number): { text: string; bucket: SampleBucket | null } => {
     const it = byId.get(id);
-    if (it === undefined) return { text: PLACEHOLDER, bucket: null };
+    if (it === undefined || !body) return { text: PLACEHOLDER, bucket: null };
     const n = it.n_measured;
     if (it.hit_spread === "unmeasured") return { text: HIT_SPREAD_LABELS.unmeasured, bucket: null };
     return {
-      text: `${fmtUnit("rate", it.mean_fitness)} of ${n} ${n === 1 ? "try" : "tries"}`,
+      text: `${fmtUnit(body.fitness_unit, it.mean_fitness)} of ${n} ${n === 1 ? "try" : "tries"}`,
       bucket: it.hit_spread,
     };
   };
@@ -134,7 +134,7 @@ export function HardSamplesPreview() {
           ) : (
             <span className="hsp-of">
               {items.length} rows, none measured here yet
-              {body?.mean_fitness != null ? ` · ${fmtUnit("rate", body.mean_fitness)} elsewhere` : ""}
+              {body?.mean_fitness != null ? ` · ${fmtUnit(body.fitness_unit, body.mean_fitness)} elsewhere` : ""}
             </span>
           )}
         </button>

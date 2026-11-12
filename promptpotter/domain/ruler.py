@@ -82,7 +82,7 @@ class RulerStamp(FrozenModel):
 # A cold id carries the OBJECTIVE: flat δ depends on no fit, so nothing else separates two readings.
 _FLAT_PREFIX = "flat"
 
-# ``None`` beside these is a third state (cold ruler, θ is logit-accuracy); never collapse it to "1PL".
+# ``None`` beside these is a third state (cold ruler, θ is logit-fitness); never collapse it to "1PL".
 CalibrationModel = Literal["1PL", "2PL"]
 
 # The share of a round's cells on a shared δ; a chosen value, unvalidated against banked rounds.
@@ -99,7 +99,7 @@ class ThetaCaveat(StrEnum):
 
     # All-miss, so θ sits on the prior's floor and every LIFT taken against it reads 0.000.
     FLOOR_PINNED = "floor_pinned"
-    # No δ scale: θ is logit-accuracy, read on the cells an arm shares with the parent it is judged against.
+    # No δ scale: θ is logit-fitness, read on the cells an arm shares with the parent it is judged against.
     COLD_RULER = "cold_ruler"
     # The INSTRUMENT: the ruler itself spans almost nothing, so no draw could have been wider.
     FLAT_RULER = "flat_ruler"
@@ -107,7 +107,7 @@ class ThetaCaveat(StrEnum):
     COLLAPSED_BAND = "collapsed_band"
     # Most cells sit on a δ shared with other cells: the prior, whose pin MOVES with the version. Silent.
     PRIOR_PINNED = "prior_pinned"
-    # θ skips cells the ruler does not carry, so it is read on fewer cells than accuracy.
+    # θ skips cells the ruler does not carry, so it is read on fewer cells than fitness.
     UNMEASURED_DELTA = "unmeasured_delta"
 
 
@@ -125,21 +125,21 @@ THETA_CAVEAT_INFO: Annotated[Worded[ThetaCaveat, ThetaCaveatInfo], shapes_optimi
     Worded(
         {
             ThetaCaveat.COLD_RULER: ThetaCaveatInfo(
-                "θ is plain accuracy so far",
-                "Too few earlier answers to rate how hard each sample is, so θ is accuracy on another "
+                "θ is plain fitness so far",
+                "Too few earlier answers to rate how hard each sample is, so θ is fitness on another "
                 "scale. A lift against the parent holds; θ compared across rounds or candidates does not.",
                 "attention",
             ),
             ThetaCaveat.FLAT_RULER: ThetaCaveatInfo(
-                "θ is plain accuracy here",
+                "θ is plain fitness here",
                 "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as "
-                "accuracy does. No round can change that.",
+                "fitness does. No round can change that.",
                 "attention",
             ),
             ThetaCaveat.COLLAPSED_BAND: ThetaCaveatInfo(
-                "θ is plain accuracy this round",
+                "θ is plain fitness this round",
                 "This round's samples were all about equally hard, so θ ranks candidates exactly as "
-                "accuracy does. A round drawing harder and easier samples reads differently.",
+                "fitness does. A round drawing harder and easier samples reads differently.",
                 "attention",
             ),
             ThetaCaveat.PRIOR_PINNED: ThetaCaveatInfo(
@@ -151,7 +151,7 @@ THETA_CAVEAT_INFO: Annotated[Worded[ThetaCaveat, ThetaCaveatInfo], shapes_optimi
             ),
             ThetaCaveat.UNMEASURED_DELTA: ThetaCaveatInfo(
                 "θ leaves some samples out",
-                "Some samples have no difficulty rating yet, so θ reads fewer samples than the accuracy "
+                "Some samples have no difficulty rating yet, so θ reads fewer samples than the fitness "
                 "beside it, and two candidates may be read on different ones. A later round includes them.",
                 "attention",
             ),
@@ -244,11 +244,11 @@ class DeltaRuler(FrozenModel):
 
     @property
     def delta_span(self) -> float:
-        """In logits; near zero, θ is logit-accuracy plus a constant, whatever the cell count."""
+        """In logits; near zero, θ is logit-fitness plus a constant, whatever the cell count."""
         return max(self.delta.values()) - min(self.delta.values()) if self.delta else 0.0
 
     def band_span(self, cells: Iterable[str]) -> tuple[float, float] | None:
-        """``(round_span, ruler_span)``. Inside a thin band 1PL reduces to ``θ = logit(accuracy) + c``."""
+        """``(round_span, ruler_span)``. Inside a thin band 1PL reduces to ``θ = logit(fitness) + c``."""
         on = [self.delta[key] for key in cells if key in self.delta]
         if len(on) < 2 or len(self.delta) < 2:
             return None
@@ -335,7 +335,7 @@ class AbilityReading(FrozenModel):
     ruler_span: float | None
     # A thin round on a wide ruler and a wide round on a thin one read identical θ. ``None`` below two cells.
     round_span: float | None
-    # ``None`` = the ruler is cold (flat δ) and θ is plain logit-accuracy — neither model.
+    # ``None`` = the ruler is cold (flat δ) and θ is plain logit-fitness — neither model.
     calibration_model: CalibrationModel | None
     # Stamped from `theta_caveat` at the one minting site, never re-derived; ``None`` = θ is ability.
     caveat: ThetaCaveat | None

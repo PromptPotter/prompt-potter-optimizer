@@ -39,7 +39,7 @@ Scope = Literal["per_sample", "per_round"]
 
 
 @shapes_optimizer_prompt
-def compute_accuracy(*, results: Sequence[GradedCell], **_: Any) -> float | None:
+def compute_fitness(*, results: Sequence[GradedCell], **_: Any) -> float | None:
     """``None``, never 0.0, with no scoreable row: a zero invents the worst measurement out of none."""
     scoreable = scoreable_rows(results)
     if not scoreable:
@@ -178,12 +178,6 @@ class Evaluator:
 
 _REGISTRY: list[Evaluator] = [
     Evaluator(
-        name="accuracy",
-        description="Mean per-sample score across the samples that carry a verdict.",
-        scope="per_round",
-        compute=compute_accuracy,
-    ),
-    Evaluator(
         name="error_rate",
         description="Fraction of queries that errored (ERROR predicted or exception).",
         scope="per_round",
@@ -275,11 +269,7 @@ _CORE_TERM = "a core cell term"
 
 
 def cell_name_owners() -> tuple[NameOwner, ...]:
-    """EVERY name the cell namespace (`compiler.py::cell_namespace`, `objective_namespace`) and
-    its channels bind, each under the ONE owner serving its value (`_validate_registry` refuses a
-    name two hold). A door admitting a name (a connector's term or reported key, a package
-    evaluator, a campaign judge, a pipeline's observation key) refuses one another owner holds,
-    so a name has one meaning and one value across channels, dials and formulas."""
+    """EVERY name the cell namespace and its channels bind, each under the ONE owner serving its value."""
     return (
         # A report answers these where the core reader cannot (an L4 cell's inner spend).
         NameOwner(_CORE_TERM, REPORTABLE_CORE_TERMS),
@@ -302,9 +292,7 @@ def cell_name_owners() -> tuple[NameOwner, ...]:
 def bound_by(
     name: str, *, feeds: str | None = None, beside: Sequence[NameOwner] = ()
 ) -> str | None:
-    """Which owner other than ``feeds`` binds ``name``, or ``None``. ``feeds`` names the owner
-    whose names this door fills (an observation a ``PipelineData`` field), so a name it alone
-    holds is admitted; ``beside`` adds a campaign's own owners."""
+    """Which owner other than ``feeds`` binds ``name``, or ``None``; ``beside`` adds a campaign's own owners."""
     holders = (o.what for o in (*cell_name_owners(), *beside) if o.holds(name))
     return next((what for what in holders if what != feeds), None)
 
@@ -333,9 +321,7 @@ _validate_registry()
 
 
 def connector_name_refusals(terms: Iterable[CellTerm], reported: Iterable[str]) -> list[str]:
-    """Each name a connector declares that another owner binds, as one sentence; asked once, as
-    the connector table completes (`wiring.py::complete_registries`). A reported key may name a
-    core cell term: it answers that channel where the core reader cannot (an L4 cell's spend)."""
+    """Each name a connector declares that another owner binds, as one sentence; a reported key may name a core cell term."""
     out = [f"cell term {t.name!r} is {owner}" for t in terms if (owner := bound_by(t.name))]
     out += [
         f"reported key {key!r} is {owner}"
@@ -354,8 +340,7 @@ def observation_owner(observation_keys: Iterable[str]) -> NameOwner:
 
 
 def observation_key_refusals(keys: Iterable[str], report: NameOwner) -> list[str]:
-    """An observation lands on ``PipelineData`` (a declared field, or a dataset observation), so
-    only another owner's name is refused: the package's, or the connector's report."""
+    """An observation lands on ``PipelineData``, so only another owner's name is refused."""
     return [
         f"observation key {key!r} is {owner}"
         for key in sorted(keys)
@@ -364,8 +349,7 @@ def observation_key_refusals(keys: Iterable[str], report: NameOwner) -> list[str
 
 
 def validate_campaign_evaluator(ev: Evaluator, origin: str, beside: Sequence[NameOwner]) -> None:
-    """A campaign judge: every owner's name is refused, the package evaluators' and the
-    campaign's (``beside``: its connector's report, its pipeline's observations) included."""
+    """A campaign judge: every owner's name is refused, the package evaluators' and the campaign's included."""
     _validate_evaluator(ev, origin)
     if owner := bound_by(ev.name, beside=beside):
         raise ValueError(

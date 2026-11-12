@@ -56,7 +56,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ## Low candidate diversity / mode collapse
 
-**What you see:** Every round produces candidates that look nearly identical. Accuracy has plateaued.
+**What you see:** Every round produces candidates that look nearly identical. Fitness has plateaued.
 
 **Why:** The optimizer is over-exploiting a small region of the search space, often because the per-round budget is too small to explore.
 

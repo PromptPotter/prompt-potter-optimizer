@@ -27,6 +27,7 @@ from promptpotter.domain.paired_reading import (
     MeasurandKind,
     PairedReading,
 )
+from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import (
@@ -242,10 +243,11 @@ def metric_reading(
     *,
     members: Mapping[str, SubjectMember],
     measurand: Measurand,
+    scorer: Scorer,
 ) -> MetricReading:
     scored = [r for r in rows if r.values]
     shared = sorted(set.intersection(*(set(r.values) for r in scored))) if scored else []
-    pairwise = _pairwise(scored, members, measurand)
+    pairwise = _pairwise(scored, members, measurand, scorer)
     return MetricReading(
         spec=spec,
         catalogue=list(catalogue_for(available)),
@@ -258,14 +260,17 @@ def metric_reading(
 
 
 def _pairwise(
-    rows: list[SubjectReading], members: Mapping[str, SubjectMember], measurand: Measurand
+    rows: list[SubjectReading],
+    members: Mapping[str, SubjectMember],
+    measurand: Measurand,
+    scorer: Scorer,
 ) -> list[PairwiseComparison]:
     pairs = [(a.key, b.key) for i, a in enumerate(rows) for b in rows[i + 1 :]]
     readings = as_family(
         [pair_subjects(members[a], members[b], measurand) for a, b in pairs],
         f"pairwise:{measurand.key}",
     )
-    (hit,) = (m for m in grade_measurands(measurand.scorer_id) if m.binary)
+    (hit,) = (m for m in grade_measurands(scorer) if m.binary)
     out: list[PairwiseComparison] = []
     for (a, b), reading in zip(pairs, readings, strict=True):
         flips = flipped_keys(members[a].rows.by_key(), members[b].rows.by_key())

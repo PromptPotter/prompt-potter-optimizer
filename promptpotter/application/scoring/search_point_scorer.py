@@ -192,7 +192,7 @@ class _ArchiveRecorder:
 
     def scores(self, results: Sequence[GradedCell]) -> ScoreSummary:
         return compute_composite_fitness(
-            self.sheet(results), pipeline_schema=self.session.pipeline_schema
+            self.sheet(results), self.session.state.scoring.scorer, self.session.pipeline_schema
         )
 
     def provenance(self, facts: MeasuredCell) -> str:
@@ -262,8 +262,7 @@ async def score_search_points[K: Hashable](
     *,
     label: str,
 ) -> dict[K, ScoredWalk]:
-    """Each point on its own rows, in ONE pass: the slowest walk sets the wall clock, never their
-    sum, and rows land as a serial walk of *points*' order lands them."""
+    """Each point on its own rows, in ONE pass: the slowest walk sets the wall clock, never their sum."""
     with filed_as(ROLE_SPEND_KIND.get(label)):
         walks = {
             key: open_walk(search_point, dataset, session, label=label, measured=measured)
@@ -295,10 +294,7 @@ def open_walk(
     skip_at: int | None = None,
     held: CellSheet = NO_CELLS,
 ) -> Walk:
-    """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace.
-
-    Its sample records are written iff ``measured`` names a role a round records; a walk continuing
-    one that holds *held* folds those rows into each record's running fold."""
+    """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace."""
     source = session.state.source
     assert source is not None, "run init or a pass opener arms the run source before any scoring"
     store = session.store

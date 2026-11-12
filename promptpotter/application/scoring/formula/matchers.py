@@ -9,6 +9,7 @@ import string
 from collections.abc import Callable
 from typing import NamedTuple
 
+from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.scoring import MeasuredCell, find_rank
 from promptpotter.shared.answer_text import (
@@ -117,8 +118,7 @@ def _squad_normalize(text: str) -> str:
 
 
 def _em_match(predicted: str, ground_truth: str) -> float:
-    """SQuAD's ``normalize_answer`` on both sides, read off the span ``label_match`` reads; a reply
-    with no span misses, where normalized it would equal a gold that is only an article."""
+    """SQuAD's ``normalize_answer`` on both sides, read off the span ``label_match`` reads; a reply with no span misses."""
     span = extract_last_bold(predicted)
     if not span:
         return 0.0
@@ -463,6 +463,13 @@ MATCHERS: dict[str, Matcher] = {
         None,
     ),
 }
+
+
+def fitness_unit_of(per_sample: str) -> MeasurandUnit:
+    """A rate where the formula IS one matcher's call, its mean that matcher's share; else a score."""
+    body = ast.parse(per_sample, mode="eval").body
+    called = body.func.id if isinstance(body, ast.Call) and isinstance(body.func, ast.Name) else ""
+    return "rate" if called in MATCHERS else "score"
 
 
 def matcher_of(per_sample: str | None) -> str | None:

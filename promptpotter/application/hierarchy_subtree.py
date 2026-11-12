@@ -1,13 +1,6 @@
 """The deep read: a campaign's courses, their rounds and candidates, and the inner campaigns under them.
 
-Every course is drawn where it spawned, at any depth. A fork IS a course, hung off the candidate it
-was cut from; ``C{round}.{n}`` is a course's private counter, so nothing is renumbered. A course's
-line is ONE resolution, pure over recorded facts (``_Read.owner``): every name resolves to an
-address on that line, never a search. A cut retires only as far as the branch actually GOT — status
-(``live`` · ``rewound`` · ``retired(by)``) is derived after every line resolves, so no fork writes
-it, and a retired candidate stays, tagged ``superseded``. Identity outranks position: two candidates
-may share an ``individual``, and ``answers_for_id`` marks the one a remembered id resolves to. An
-inner run hangs under the candidate that SPAWNED it (``SpawnedBy``, recorded at launch).
+A fork IS a course, hung off the candidate it was cut from; status is derived after every line resolves.
 """
 
 from __future__ import annotations
@@ -99,9 +92,7 @@ type _Status = Literal["live", "rewound"] | _Retired
 
 @dataclass
 class _Read:
-    """One course's record as one read saw it — at its head, or as of a fork's cut — and the line
-    it stood on then: the read owning each round. A round below the cut is its parent's as of that
-    cut, so a rewind in place after it moves no fork's line."""
+    """One course's record as one read saw it, and the line it stood on then."""
 
     course: _Course
     elections: dict[int, Election | None]
@@ -182,8 +173,7 @@ def _similarity(a: object, b: object) -> float:
 
 
 def _earlier(c: _Candidate, everyone: list[_Candidate]) -> dict[str, _Candidate]:
-    """Each individual measured in a round before *c*'s, as its newest measurement — one the line
-    *c* was read on holds before any other."""
+    """Each individual measured in a round before *c*'s, as its newest measurement."""
     latest: dict[str, _Candidate] = {}
     for x in sorted(
         (x for x in everyone if x.round < c.round),
@@ -194,9 +184,7 @@ def _earlier(c: _Candidate, everyone: list[_Candidate]) -> dict[str, _Candidate]
 
 
 def _descent(c: _Candidate, everyone: list[_Candidate]) -> None:
-    """The candidate *c* descends from — its main, the first parent, as last measured before it —
-    its donor, the second, likewise, with the loci its lineage records the donor gave, and per
-    other moved locus the earlier candidates its value there is closer to."""
+    """The candidate *c* descends from: its main (first parent), its donor (second), and the loci each gave."""
     parent_ids = c.individual.lineage.parent_ids
     earlier = _earlier(c, everyone)
     parent = earlier.get(parent_ids[0]) if parent_ids else None
@@ -288,8 +276,7 @@ class _Course:
 
 
 def _superseding(course: _Course, courses: list[_Course]) -> list[_Course]:
-    """Every fork the line was superseded through below *course*, nearest link first and, within
-    one, the newest — the one holding the line now: an offshoot link stops it."""
+    """Every fork the line was superseded through below *course*, nearest link first, then newest."""
     line: list[_Course] = []
     level = [course]
     while level := [
@@ -304,8 +291,7 @@ def _superseding(course: _Course, courses: list[_Course]) -> list[_Course]:
 
 
 def _status(c: _Candidate, superseding: list[_Course]) -> _Status:
-    """Retired iff it is off the line of a supersede fork that reached its round — the lowest cut
-    names it, the nearest link of a tie — else rewound where only a read as of a cut holds it."""
+    """Retired iff it is off the line of a supersede fork that reached its round, else rewound."""
     by = [fork for fork in superseding if c.round <= fork.reach and not fork.head.holds(c)]
     if by:
         return _Retired(min(by, key=lambda f: (f.index.cut_round or 0, by.index(f))).address)
@@ -313,9 +299,7 @@ def _status(c: _Candidate, superseding: list[_Course]) -> _Status:
 
 
 def _main_line(c: _Candidate) -> list[MainLineStep]:
-    """As it ran, on the line it was read on: the line of the candidate the course holding its
-    first round hangs from, where that course lifts no round; every elected round up to it, then
-    on to the first crown after it — a retired crown stands behind every candidate after it."""
+    """As it ran, on the line it was read on, up to the first crown after it."""
     line = c.read_in
     rounds = sorted(line.owner.keys() | {c.round})
     base = line.owner[rounds[0]].course if rounds[0] in line.owner else line.course
@@ -412,9 +396,7 @@ class _Build:
         )
 
     def _place(self, stores: Stores, courses: list[_Course], host: _Candidate | None) -> None:
-        """Every line first, off the recorded spawn alone — a read pulls its parent's as of its
-        cut — then every candidate's status as a function of those lines: no order of courses,
-        and no fork placed before another, can change one. *host* holds the root course."""
+        """Every line first, then every candidate's status as a function of those lines."""
         by_address = {c.address: c for c in courses}
         for course in courses:
             spawn = course.entry.facts.spawn
@@ -448,8 +430,7 @@ class _Build:
             _descent(c, everyone)
 
     def _read(self, stores: Stores, course: _Course, offset: int | None) -> _Read:
-        """*course* at its head, or as its ledger stood at a fork's cut — the mint record's offset,
-        read as the moment a step at that offset names — over its parent as of ITS cut."""
+        """*course* at its head, or as its ledger stood at a fork's cut, over its parent as of ITS cut."""
         if (read := course.at.get(offset)) is None:
             moment = (
                 self.moment
@@ -473,9 +454,7 @@ class _Build:
         *,
         depth: int,
     ) -> None:
-        """Each run hangs under the candidate its spawn record names — the asking course, the
-        round and the arm — looked up, never searched for: a fork asks into the sandbox it was
-        cut from."""
+        """Each run hangs under the candidate its spawn record names, looked up, never searched for."""
         by_cycle = {s.hop.cycle_id: s for s in siblings}
         for listed in sandbox.campaigns.list_campaigns(None, lifecycle="all"):
             held = campaign_courses(sandbox, listed, moment=self.moment)
@@ -597,7 +576,7 @@ class _Build:
             gene_sources=c.gene_sources,
             lens_value=None,
             lens_rank_move=None,
-            sample_set_accuracy=None,
+            sample_set_fitness=None,
             sample_set_n=None,
             divergence=None,
             divergent=False,
@@ -706,11 +685,7 @@ def hierarchy_subtree(
     *,
     moment: Moment | None,
 ) -> HierarchyEntry:
-    """The entry at *address* with everything under it; *moment* replays the ledgers only.
-
-    Built from the top-level campaign down, so an inner entry's ``parent`` is the candidate that
-    spawned it on every read, never re-derived for a direct one.
-    """
+    """The entry at *address* with everything under it; *moment* replays the ledgers only."""
     campaign = owned_campaign(stores, _top_campaign(Subject.parse_address(address)))
     held = campaign_courses(stores, campaign, moment=moment)
     root = _answering(
@@ -746,8 +721,7 @@ def subtree_moment(
 
 
 def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
-    """Every store the TOP campaign's family spans: the body is built from all of them. A pass
-    moves no file of theirs, so the passes on them are read too: a held stub is no deletable one."""
+    """Every store the TOP campaign's family spans: the body is built from all of them."""
     top = (owned_campaign(stores, _top_campaign(Subject.parse_address(address))).root_hop,)
     held = [c.store for c in iter_family_courses(stores, top)]
     workspaces = {str(s.campaigns.workspace) for s in held}
@@ -761,9 +735,7 @@ def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
 
 
 def subtree_course(stores: Stores, path: CyclePath) -> SubtreeCourse:
-    """One course and its rounds, unlensed and at the head: only its own campaign is built, so no
-    inner run hangs under its candidates, none of them answers for an id, and an inner course's
-    lines start at its own origin."""
+    """One course and its rounds, unlensed and at the head: only its own campaign is built."""
     owned_campaign(stores, path[0].campaign_id)
     inside, hop = path[:-1], path[-1]
     leaf = descend_store(stores, inside)

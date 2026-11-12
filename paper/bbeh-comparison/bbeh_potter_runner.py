@@ -133,7 +133,7 @@ async def run_bbeh_campaign(
         report_completion(cycle_result, session=session)
         origin = cycle_result.origin
         origin_train_acc = (
-            None if origin is None or origin.accuracy is None else origin.accuracy.value
+            None if origin is None or origin.fitness is None else origin.fitness.value
         )
         # Ask the outcome table, never a hand-authored string: the export below is only
         # meaningful for a run that finished, and every halted/failed/paused reason must skip it.
@@ -142,7 +142,7 @@ async def run_bbeh_campaign(
 
         export = session.store.campaigns.read_export(session.hop)
         result_pipeline_params = cycle_result.result_pipeline_params or PipelineParams()
-        train_acc = cycle_result.result_accuracy
+        train_acc = cycle_result.result_fitness
 
         print(f"\n{'=' * 60}")
         print("PER-TASK TEST EVALUATION")

@@ -74,8 +74,7 @@ async def read_origin_panel(
     *,
     buys: bool,
 ) -> dict[str, CellSheet]:
-    """Each member on the panel cells its draw left, for the election to pool: a held cell
-    replays free, and where *buys* is false the archive alone answers."""
+    """Each member on the panel cells its draw left, for the election to pool; where *buys* is false the archive alone answers."""
     want = set(panel)
     gaps = {
         step.opt_sp.id: (step, samples)
@@ -101,8 +100,7 @@ async def read_origin_panel(
 async def measure_overlap(
     cycle: Cycle, round_result: RoundResult, scoring_pool: list[Sample], panel: Sequence[int]
 ) -> tuple[OverlapReading, dict[str, CellSheet]]:
-    """After the election, on the panel it pooled; a member the election's pass read is never
-    topped up again, so a replay pools exactly what it did."""
+    """After the election, on the panel it pooled; a member the election's pass read is never topped up again."""
     passed = dict(round_result.overlap_results)
     if round_result.head is None:
         return OverlapReading.unpaired(
@@ -213,8 +211,7 @@ async def measure_overlap(
 def panel_triggers(
     rounds: Sequence[RoundResult], n_min: int
 ) -> list[tuple[LineStep, PanelTrigger]]:
-    """Every arm of the cycle walked to its draw's end a trigger fired for, by first walk: a stop
-    buys no cell after it, and a parent re-read is no walk."""
+    """Every arm of the cycle walked to its draw's end a trigger fired for, by first walk."""
     fired: dict[str, tuple[LineStep, PanelTrigger]] = {}
     for rr in rounds:
         for key, arm in rr.arms.items():
@@ -236,7 +233,7 @@ class _OriginPanelPairs:
         session = cycle.session
         self._path = (session.hop,)
         self._instrument = session.instrument_id
-        self._scorer = session.state.scoring.scorer.id
+        self._scorer = session.state.scoring.scorer
         self._dataset = session.bank.dataset_hash
         self._key_of = {int(s.id): s.key for s in scoring_pool}
         self._slot_of = session.bank.slot_of
@@ -327,8 +324,7 @@ class _OriginPanelPairs:
 async def _measure_gaps(
     cycle: Cycle, gaps: Mapping[str, tuple[LineStep, list[Sample]]]
 ) -> dict[str, ScoredWalk]:
-    """Every member's gaps in ONE pass, each on its OWN configuration, never the round subject's;
-    no sample history, so the pass re-sends no degraded cached cell."""
+    """Every member's gaps in ONE pass, each on its OWN configuration, never the round subject's."""
     if not gaps:
         return {}
     for step, samples in gaps.values():

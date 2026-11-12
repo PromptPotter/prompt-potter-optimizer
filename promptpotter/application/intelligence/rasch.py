@@ -235,7 +235,7 @@ def fit_theta(
     *,
     sigma_theta: float = _INIT_SIGMA_THETA,
 ) -> tuple[float, float] | None:
-    """``delta=None`` is the cold ruler (θ = logit-accuracy); a cell off a live ruler enters no fit, never at δ=0."""
+    """``delta=None`` is the cold ruler (θ = logit-fitness); a cell off a live ruler enters no fit, never at δ=0."""
     graded = _cell_parameters(responses.keys(), delta)
     rows = [(*graded[key], y) for key, y in responses.items() if key in graded]
     return _fit_one(rows, sigma_theta=sigma_theta, max_iter=50, tol=1e-4) if rows else None
@@ -265,8 +265,7 @@ def _fit_one(
 
 
 def _dispersion(y: NDArray[np.floating[Any]], p: NDArray[np.floating[Any]], *, dof: int) -> float:
-    """Pearson φ, shrunk toward 1 — and exactly 1 where every response is 0/1: a Bernoulli's
-    variance IS p(1−p), and residuals against a δ fit on those same rows read as underdispersion."""
+    """Pearson φ, shrunk toward 1 — and exactly 1 where every response is 0/1: a Bernoulli's variance IS p(1−p)."""
     if np.all((y == 0.0) | (y == 1.0)):
         return 1.0
     misfit = float(np.sum((y - p) ** 2 / np.clip(p * (1.0 - p), 1e-6, None)))
@@ -497,8 +496,7 @@ def build_observations(rounds: Sequence[RoundResult]) -> list[Observation]:
 def theta_cells[V](
     own: Mapping[str, V], parent: Collection[str], ruler: DeltaRuler | None
 ) -> dict[str, V]:
-    """The cells an arm's θ is read on, which every coverage floor counts: warm, those the ruler
-    carries; cold, flat δ adjusts for no difficulty, so those the parent answered too."""
+    """The cells an arm's θ is read on, which every coverage floor counts: warm, those the ruler carries; cold, those the parent answered too."""
     carried: Collection[str] = parent if ruler is None else ruler.delta
     return {key: value for key, value in own.items() if key in carried}
 
@@ -508,8 +506,7 @@ def candidate_abilities(
     parent_results: CellSheet,
     ruler: DeltaRuler | None,
 ) -> RoundAbilities:
-    """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows.
-    Cold, the bar is the parent on the arm's own cells; warm, on all of its cells."""
+    """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows."""
     entries = ruler.entries() if ruler is not None else None
     parent = responses_of(parent_results)
     whole = fit_theta(parent, entries)

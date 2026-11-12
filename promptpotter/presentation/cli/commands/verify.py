@@ -55,8 +55,8 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
 
     verdict = {True: " — held", False: " — DROPPED", None: ""}[reading.held]
     lines = [
-        f"{reading.label}: accuracy {_level(reading.recorded.accuracy)} on its round's "
-        f"{reading.recorded.n} cells → {_level(reading.fresh.accuracy)} on {reading.fresh.n} "
+        f"{reading.label}: fitness {_level(reading.recorded.fitness)} on its round's "
+        f"{reading.recorded.n} cells → {_level(reading.fresh.fitness)} on {reading.fresh.n} "
         f"unseen ({reading.strategy}){verdict}",
         f"  composite {_level(reading.recorded.composite)} → {_level(reading.fresh.composite)}",
     ]

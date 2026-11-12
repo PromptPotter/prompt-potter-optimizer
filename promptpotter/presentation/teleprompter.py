@@ -149,7 +149,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             campaign={
                 # The caller's metric already graded the sample; the formula carries it through.
                 "scoring": self.scoring,
-                "display_metric": "accuracy",
+                "display_metric": "fitness",
                 "optimization": self.loop.model_dump(mode="json", exclude_unset=True),
             },
             description=self.task_description,

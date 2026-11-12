@@ -4,7 +4,7 @@ import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { PairedLift } from "@/components/shell/PairedLift";
 import type { PairedReading, ServedArm } from "@/lib/api/types";
 import { liftVersus } from "@/lib/derivations";
-import { fmtLiftBand, fmtPct1, fmtSigned, fmtUnit } from "@/lib/format";
+import { fmtLiftBand, fmtSigned, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { failureOf, readyData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import type { CyclePath } from "@/lib/ids";
@@ -40,11 +40,11 @@ function scoreboardColumns(
       ),
     },
     {
-      id: "accuracy",
-      label: "Accuracy",
+      id: "fitness",
+      label: "Fitness",
       width: "6rem",
       align: "end",
-      cell: ({ reading: s }) => fmtPct1(s.own?.accuracy?.value),
+      cell: ({ reading: s }) => (s.own ? fmtUnit(s.own.fitness_unit, s.own.fitness?.value) : PLACEHOLDER),
     },
     {
       id: "composite",
@@ -57,7 +57,7 @@ function scoreboardColumns(
       id: "theta",
       label: (
         <Term
-          content={`Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler${wonOnTheta ? " — the metric the round winner is elected on, which is what explains a lower-accuracy winner" : ""}. Empty outside the election fit, and for every row while the ruler is cold.`}
+          content={`Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler${wonOnTheta ? " — the metric the round winner is elected on, which is what explains a lower-fitness winner" : ""}. Empty outside the election fit, and for every row while the ruler is cold.`}
         >
           θ
         </Term>
@@ -109,7 +109,12 @@ export function RoundFileView({
           <Badge className="round-file-badge">round {round}</Badge>
           {own && (
             <>
-              <span>accuracy {fmtPct1(own.accuracy?.value)}</span>
+              <span>fitness {fmtUnit(own.fitness_unit, own.fitness?.value)}</span>
+              {Object.entries(headline.fitness_terms).map(([name, value]) => (
+                <span key={name}>
+                  {name} {fmtSigned(value, 3)}
+                </span>
+              ))}
               <span>composite {fmtUnit("score", own.composite?.value)}</span>
               <span>n {own.n}</span>
             </>

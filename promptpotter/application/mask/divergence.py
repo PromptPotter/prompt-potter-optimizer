@@ -51,7 +51,7 @@ class ScenarioStep(NamedTuple):
 
 
 def _key(reading: MaskReading) -> ScoreboardRankKey:
-    return scoreboard_rank_key(reading.composite_fitness, reading.accuracy)
+    return scoreboard_rank_key(reading.composite_fitness, reading.fitness)
 
 
 def masked_election(rnd: MaskRound, parent: MaskReading | None) -> MaskedElection:

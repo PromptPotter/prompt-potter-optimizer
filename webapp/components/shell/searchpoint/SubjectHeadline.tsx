@@ -2,10 +2,10 @@ import type { ArmReading } from "@/lib/api/types";
 import { fmtUnit } from "@/lib/format";
 import { HoverCard } from "@/components/ui";
 
-// The shown searchpoint's own accuracy; the bench and the run's spend are the masthead's alone.
+// The shown searchpoint's own fitness; the bench and the run's spend are the masthead's alone.
 export function SubjectHeadline({ reading }: { reading: ArmReading | null }) {
-  const accuracy = reading?.own?.accuracy?.value;
-  if (reading == null || accuracy == null) return null;
+  const fitness = reading?.own?.fitness?.value;
+  if (reading == null || fitness == null) return null;
   const { scored, expected, cut } = reading.panel;
   return (
     <div className="subject-headline">
@@ -25,7 +25,7 @@ export function SubjectHeadline({ reading }: { reading: ArmReading | null }) {
         }
       >
         <span className="subject-headline-acc">
-          {fmtUnit("rate", accuracy)}
+          {fmtUnit("score", fitness)}
           {cut ? (
             <span className="subject-headline-cut">
               {" "}

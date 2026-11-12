@@ -30,14 +30,14 @@ export function AbilityHelp({
   return (
     <div className="ability-help">
       <p>
-        The round winner is elected on <strong>ability θ</strong>, not raw accuracy. θ is
+        The round winner is elected on <strong>ability θ</strong>, not raw fitness. θ is
         difficulty-adjusted: clearing a <em>hard</em> sample counts for more than clearing an
         easy one.
       </p>
       <p>
-        So a candidate can win with <em>lower</em> accuracy when it cleared the harder samples —
+        So a candidate can win with <em>lower</em> fitness when it cleared the harder samples —
         and two candidates scored on different sample subsets still compare fairly, which raw
-        accuracy can&rsquo;t do. Tap a candidate&rsquo;s bar to read its θ in the detail below
+        fitness can&rsquo;t do. Tap a candidate&rsquo;s bar to read its θ in the detail below
         the chart.
       </p>
       <p className="ability-help-calib">
@@ -56,7 +56,7 @@ export function AbilityHelp({
         ) : (
           <>
             Calibration: <strong>not yet calibrated</strong> — too few banked samples to fit a
-            difficulty ruler, so θ is plain accuracy on the logit scale. It calibrates itself as
+            difficulty ruler, so θ is plain fitness on the logit scale. It calibrates itself as
             rounds bank samples.
           </>
         )}

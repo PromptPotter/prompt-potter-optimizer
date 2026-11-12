@@ -15,6 +15,7 @@ from promptpotter.domain.paired_reading import (
     CellSet,
     CellSetBasis,
     CellSetName,
+    MeasurandUnit,
     MeasuredLift,
     PairedReading,
     ReadingState,
@@ -198,11 +199,11 @@ class PassStop(FrozenModel):
         return ReadingState.PENDING if paused else ReadingState.PASS_STOPPED
 
 
-BenchColumn = Literal["accuracy", "composite"]
+BenchColumn = Literal["fitness", "composite"]
 
-BENCH_HEADLINE: BenchColumn = "accuracy"
+BENCH_HEADLINE: BenchColumn = "fitness"
 
-COLUMN_GRADE: dict[BenchColumn, CellGrade] = {"accuracy": "fitness", "composite": "objective"}
+COLUMN_GRADE: dict[BenchColumn, CellGrade] = {"fitness": "fitness", "composite": "objective"}
 
 
 class BandedValue(FrozenModel):
@@ -223,9 +224,13 @@ class BandedValue(FrozenModel):
 class OwnLevel(FrozenModel):
     """One individual's own level on one set of rows, in both columns; never one side of a pair."""
 
-    accuracy: BandedValue | None = Field(
+    fitness: BandedValue | None = Field(
         description="Mean per-row fitness — the hit rate under a scorer that grades each row 0 "
         "or 1."
+    )
+    fitness_unit: MeasurandUnit = Field(
+        description="The reading scorer's unit for `fitness`: a `rate` where its formula is one "
+        "matcher's call, a `score` otherwise."
     )
     composite: BandedValue | None = Field(
         description="Under the reading scorer's formula, which charges cost and length — so it is "
@@ -240,6 +245,9 @@ class OwnLevel(FrozenModel):
         value: BandedValue | None = getattr(self, column)
         return value
 
+    def unit_of(self, column: BenchColumn) -> MeasurandUnit:
+        return self.fitness_unit if column == "fitness" else "score"
+
 
 class BenchReading(OwnLevel):
     """One individual's bench pass, read under a named scorer."""
@@ -251,6 +259,7 @@ class BenchReading(OwnLevel):
         description="The headline: this reading in its `headline` column, chosen here so no "
         "surface selects a column of its own. Stamped by :meth:`read` alone."
     )
+    level_unit: MeasurandUnit = Field(description="The unit `level` reads in.")
 
     @classmethod
     def read(cls, own: OwnLevel, *, round: int, sp_hash: str, headline: BenchColumn) -> Self:
@@ -259,7 +268,9 @@ class BenchReading(OwnLevel):
             sp_hash=sp_hash,
             headline=headline,
             level=own.of(headline),
-            accuracy=own.accuracy,
+            level_unit=own.unit_of(headline),
+            fitness=own.fitness,
+            fitness_unit=own.fitness_unit,
             composite=own.composite,
             n=own.n,
         )
@@ -388,8 +399,7 @@ def bench_status(
     selected: PassOutcome | None,
     run: LineRun,
 ) -> BenchStatus:
-    """*refused* is the campaign's own refusal, the one admission refuses a pass with
-    (`admission.py::campaign_refusal`)."""
+    """*refused* is the campaign's own refusal, the one admission refuses a pass with."""
     subject: BenchSubject | None = None
     decided: PassOutcome | None = None
     outcome = None if run.ending is None else stop_reason_outcome(run.ending)

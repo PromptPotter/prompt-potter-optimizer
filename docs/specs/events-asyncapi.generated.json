@@ -670,6 +670,14 @@
             "description": "How its walk ended short of its panel: cut against it (`invalid` refused it before a cell), or `locked_in` — settled FOR it by the eliminator. Null on a walk still running and one that ran its panel.",
             "title": "End"
           },
+          "fitness_terms": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "The round mean of each term the scoring formula reads, `fitness` aside, over the cells that answered it: an L4 outer arm's `held_out_lift` and `floored` share.",
+            "title": "Fitness Terms",
+            "type": "object"
+          },
           "on_origin_panel": {
             "anyOf": [
               {
@@ -690,7 +698,7 @@
                 "type": "null"
               }
             ],
-            "description": "The arm's own level on its round's cells: accuracy with the band the gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null before the first row is graded, and on an `invalid` arm, which holds no cell."
+            "description": "The arm's own level on its round's cells: fitness with the band the gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null before the first row is graded, and on an `invalid` arm, which holds no cell."
           },
           "panel": {
             "$ref": "#/components/schemas/ArmPanel"
@@ -780,6 +788,7 @@
           "end",
           "walked_short",
           "own",
+          "fitness_terms",
           "panel",
           "tokens",
           "prefix",
@@ -1159,17 +1168,6 @@
         "additionalProperties": false,
         "description": "One individual's bench pass, read under a named scorer.",
         "properties": {
-          "accuracy": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BandedValue"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1."
-          },
           "composite": {
             "anyOf": [
               {
@@ -1181,10 +1179,25 @@
             ],
             "description": "Under the reading scorer's formula, which charges cost and length — so it is never the change in the hit rate."
           },
+          "fitness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BandedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1."
+          },
+          "fitness_unit": {
+            "$ref": "#/components/schemas/MeasurandUnit",
+            "description": "The reading scorer's unit for `fitness`: a `rate` where its formula is one matcher's call, a `score` otherwise."
+          },
           "headline": {
             "description": "Which column the headline reads.",
             "enum": [
-              "accuracy",
+              "fitness",
               "composite"
             ],
             "title": "Headline",
@@ -1200,6 +1213,10 @@
               }
             ],
             "description": "The headline: this reading in its `headline` column, chosen here so no surface selects a column of its own. Stamped by :meth:`read` alone."
+          },
+          "level_unit": {
+            "$ref": "#/components/schemas/MeasurandUnit",
+            "description": "The unit `level` reads in."
           },
           "n": {
             "description": "Rows carrying a verdict — a miss the prompt caused included: the population both columns are read over.",
@@ -1218,13 +1235,15 @@
           }
         },
         "required": [
-          "accuracy",
+          "fitness",
+          "fitness_unit",
           "composite",
           "n",
           "round",
           "sp_hash",
           "headline",
-          "level"
+          "level",
+          "level_unit"
         ],
         "title": "BenchReading",
         "type": "object"
@@ -1326,7 +1345,7 @@
           "headline": {
             "description": "Which column the headline reads; `vs_origin.headline` is its lift.",
             "enum": [
-              "accuracy",
+              "fitness",
               "composite"
             ],
             "title": "Headline",
@@ -1967,7 +1986,7 @@
       "CycleFinal": {
         "additionalProperties": false,
         "properties": {
-          "accuracy_ceiling": {
+          "fitness_ceiling": {
             "anyOf": [
               {
                 "type": "number"
@@ -1976,7 +1995,7 @@
                 "type": "null"
               }
             ],
-            "title": "Accuracy Ceiling"
+            "title": "Fitness Ceiling"
           },
           "mode": {
             "enum": [
@@ -2079,7 +2098,7 @@
           "rounds_to_separable",
           "rounds_to_improved",
           "rounds_to_ceiling",
-          "accuracy_ceiling",
+          "fitness_ceiling",
           "prompt_hashes",
           "origin_composite_fitness",
           "scorer_id",
@@ -2492,7 +2511,7 @@
       },
       "CycleShareRecord": {
         "additionalProperties": false,
-        "description": "The cycle's share of its campaign's ceiling, LAST wins and never inherited: its ONE store, which\nthe book spending on the cycle and every sibling's admission read. Every move lands through\n`jobs/quota.py::hold_moved`; the account's reserve is the job's (`Job.reserve`).",
+        "description": "The cycle's share of its campaign's ceiling, LAST wins and never inherited; every move lands through `hold_moved`.",
         "properties": {
           "allotment": {
             "$ref": "#/components/schemas/Budget"
@@ -2801,7 +2820,7 @@
       },
       "DisplayMetric": {
         "enum": [
-          "accuracy",
+          "fitness",
           "composite",
           "ability"
         ],
@@ -3560,7 +3579,7 @@
             "title": "Kind",
             "type": "string"
           },
-          "origin_acc": {
+          "origin_fitness": {
             "anyOf": [
               {
                 "type": "number"
@@ -3569,7 +3588,7 @@
                 "type": "null"
               }
             ],
-            "title": "Origin Acc"
+            "title": "Origin Fitness"
           },
           "origin_samples": {
             "default": 0,
@@ -3592,7 +3611,7 @@
           }
         },
         "required": [
-          "origin_acc",
+          "origin_fitness",
           "cycle_id_short",
           "samples",
           "bench_samples"
@@ -4172,14 +4191,19 @@
             "type": "integer"
           },
           "rate": {
-            "description": "Its rate over the panel cells it and C0 both scored.",
+            "description": "Its level over the panel cells it and C0 both scored.",
             "title": "Rate",
             "type": "number"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/MeasurandUnit",
+            "description": "The unit `rate` reads in: its headline's."
           }
         },
         "required": [
           "arm",
           "rate",
+          "unit",
           "n"
         ],
         "title": "LineRate",
@@ -4848,8 +4872,8 @@
           "band": {
             "$ref": "#/components/schemas/BandedValue"
           },
-          "fresh_accuracy": {
-            "title": "Fresh Accuracy",
+          "fresh_fitness": {
+            "title": "Fresh Fitness",
             "type": "number"
           },
           "raw": {
@@ -4866,7 +4890,7 @@
         "required": [
           "raw",
           "band",
-          "fresh_accuracy",
+          "fresh_fitness",
           "recorded"
         ],
         "title": "NoiseBand",
@@ -5202,17 +5226,6 @@
         "additionalProperties": false,
         "description": "One individual's own level on one set of rows, in both columns; never one side of a pair.",
         "properties": {
-          "accuracy": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BandedValue"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1."
-          },
           "composite": {
             "anyOf": [
               {
@@ -5224,6 +5237,21 @@
             ],
             "description": "Under the reading scorer's formula, which charges cost and length — so it is never the change in the hit rate."
           },
+          "fitness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BandedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1."
+          },
+          "fitness_unit": {
+            "$ref": "#/components/schemas/MeasurandUnit",
+            "description": "The reading scorer's unit for `fitness`: a `rate` where its formula is one matcher's call, a `score` otherwise."
+          },
           "n": {
             "description": "Rows carrying a verdict — a miss the prompt caused included: the population both columns are read over.",
             "title": "N",
@@ -5231,7 +5259,8 @@
           }
         },
         "required": [
-          "accuracy",
+          "fitness",
+          "fitness_unit",
           "composite",
           "n"
         ],
@@ -6589,7 +6618,7 @@
           },
           "display_metric": {
             "$ref": "#/components/schemas/DisplayMetric",
-            "default": "accuracy"
+            "default": "fitness"
           },
           "ended_on": {
             "title": "Ended On",
@@ -6733,7 +6762,7 @@
       },
       "RoundProposedRecord": {
         "additionalProperties": false,
-        "description": "Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved.\n\n``submitted`` is the operator's answer at the arm gate: the arms the round measures. ``walked``\nis the state its walk left — population, slices and the round's outputs — and ``reads`` the arms\nit read, which a replay seats and reads in place of running any proposer.",
+        "description": "Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved.",
         "properties": {
           "consumed": {
             "title": "Consumed",
@@ -6983,7 +7012,7 @@
             "title": "Note",
             "type": "string"
           },
-          "parent_accuracy": {
+          "parent_fitness": {
             "anyOf": [
               {
                 "type": "number"
@@ -6992,7 +7021,7 @@
                 "type": "null"
               }
             ],
-            "title": "Parent Accuracy"
+            "title": "Parent Fitness"
           },
           "prompt_preview": {
             "title": "Prompt Preview",
@@ -7023,7 +7052,7 @@
           "round",
           "budget_rounds",
           "standing",
-          "parent_accuracy",
+          "parent_fitness",
           "prompt_preview",
           "arms",
           "note",
@@ -7983,17 +8012,6 @@
         "additionalProperties": false,
         "description": "An arm's fold of its cells: what it walked, and its level on them.",
         "properties": {
-          "accuracy": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accuracy"
-          },
           "cached": {
             "title": "Cached",
             "type": "integer"
@@ -8030,6 +8048,27 @@
             },
             "title": "Field Accuracy",
             "type": "object"
+          },
+          "fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fitness"
+          },
+          "fitness_terms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fitness Terms",
+            "type": "array"
+          },
+          "fitness_unit": {
+            "$ref": "#/components/schemas/MeasurandUnit"
           },
           "mean_fitness_ci_hi": {
             "anyOf": [
@@ -8081,7 +8120,8 @@
         },
         "required": [
           "total",
-          "accuracy",
+          "fitness",
+          "fitness_unit",
           "composite_fitness",
           "deprecated",
           "degraded",
@@ -8090,6 +8130,7 @@
           "walked",
           "cached",
           "evaluators",
+          "fitness_terms",
           "mean_fitness_ci_lo",
           "mean_fitness_ci_hi",
           "tokens"
@@ -8230,7 +8271,7 @@
       },
       "SpawnedBy": {
         "additionalProperties": false,
-        "description": "The outer work-item an L4 inner cycle was spawned to measure. Where `role` is an arm's,\n`cycle_id`, `round` and `individual_id` are that arm's address, which places the run under\nthe candidate that asked for it with no search.",
+        "description": "The outer work-item an L4 inner cycle was spawned to measure; an arm's address places the run under its candidate.",
         "properties": {
           "cycle_id": {
             "anyOf": [
@@ -9325,18 +9366,6 @@
         "additionalProperties": false,
         "description": "A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones.",
         "properties": {
-          "accuracy_increment": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`fresh` minus `recorded`, hit rate. Unpaired — the two are different cells.",
-            "title": "Accuracy Increment"
-          },
           "composite_increment": {
             "anyOf": [
               {
@@ -9347,6 +9376,18 @@
               }
             ],
             "title": "Composite Increment"
+          },
+          "fitness_increment": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`fresh` minus `recorded`, hit rate. Unpaired — the two are different cells.",
+            "title": "Fitness Increment"
           },
           "fresh": {
             "$ref": "#/components/schemas/OwnLevel",
@@ -9413,7 +9454,7 @@
           "strategy",
           "fresh",
           "recorded",
-          "accuracy_increment",
+          "fitness_increment",
           "composite_increment",
           "vs_origin",
           "held",
@@ -9451,7 +9492,7 @@
           },
           "display_metric": {
             "$ref": "#/components/schemas/DisplayMetric",
-            "default": "accuracy"
+            "default": "fitness"
           }
         },
         "title": "ViewAnchors",

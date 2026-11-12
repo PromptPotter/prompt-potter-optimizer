@@ -14,9 +14,7 @@ from promptpotter.domain.strict_model import StrictModel, UploadBytes
 def _partial(
     model: type[BaseModel], *, only: Collection[str] | None = None, **nested: type[BaseModel]
 ) -> Any:
-    """*model*'s fields, or *only* the ones named, each optional with no default and its own
-    bounds and description: a layer names only what it sets, so no unsent field states a value a
-    reader could take for one that applies. A *nested* field takes the partial named for it."""
+    """*model*'s fields, or *only* the ones named, each optional with no default: a layer names only what it sets."""
     fields: dict[str, Any] = {}
     for name, info in model.model_fields.items():
         if only is not None and name not in only:
@@ -33,7 +31,7 @@ def _partial(
 # Neither `optimization` takes `budget`: a launch's budget is its payload's own field, the one door
 # on every launch kind.
 class OptimizationOverrides(
-    _partial(OptimizationConfig, only=("optimizer", "nodes", "arm_gate", "halt_at_accuracy"))  # type: ignore[misc]
+    _partial(OptimizationConfig, only=("optimizer", "nodes", "arm_gate", "halt_at_fitness"))  # type: ignore[misc]
 ):
     """An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's,
     laid over the one it names. Every other knob is the dataset's declaration."""

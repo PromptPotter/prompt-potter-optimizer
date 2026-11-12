@@ -36,7 +36,7 @@ export function ChannelMap({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [whole, setWhole] = useState(false);
 
-  const { valueByKey, thetaByKey } = useMemo(() => nodeOverlays(index, "accuracy"), [index]);
+  const { valueByKey, thetaByKey } = useMemo(() => nodeOverlays(index, "fitness"), [index]);
 
   const viewedKey = useMemo(
     () => (reading ? encodeCyclePath(readingPath(reading)) : null),
@@ -102,7 +102,7 @@ export function ChannelMap({
             tree={root}
             valueByKey={valueByKey}
             thetaByKey={thetaByKey}
-            metric="accuracy"
+            metric="fitness"
             expanded={expanded}
             onLaneActivate={onLaneActivate}
             ctx={ctx}
@@ -116,7 +116,7 @@ export function ChannelMap({
 function ArmedActions({ armed, subject }: { armed: HierarchyCandidate; subject: string }) {
   const { hasSubject, addSubject, replace } = useCompareSelection();
   const { reading } = armed.facts;
-  const accuracy = reading.own?.accuracy?.value ?? null;
+  const fitness = reading.own?.fitness?.value ?? null;
   const path = pathOfAddress(armed.address);
   const leaf = path.at(-1);
   const top = path.at(0);
@@ -129,9 +129,9 @@ function ArmedActions({ armed, subject }: { armed: HierarchyCandidate; subject: 
       <strong>{armed.label}</strong>
       <span className="l4-dim">
         {" "}
-        R{reading.arm.round} · {fmtUnit("rate", accuracy)}
+        R{reading.arm.round} · {fmtUnit("score", fitness)}
       </span>
-      {accuracy === null && (
+      {fitness === null && (
         <span className="l4-dim">nothing scored here yet — it reads as unmeasured</span>
       )}
       <button

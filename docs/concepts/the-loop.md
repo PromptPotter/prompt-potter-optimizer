@@ -17,7 +17,7 @@ potter's loop — another optimizer is its own manifest and inherits none of it.
 | **L2 · refine context** | when L1 stalls | Rewrites *how* L1 searches: which evidence it sees and how hard it explores. |
 | **L3 · modify plan** | when L2 stalls | Rewrites the strategic plan L1 works within. |
 
-The loop exits on a **stopping rule** — `halt_at_accuracy`, a budget axis spent, or the controller's own
+The loop exits on a **stopping rule** — `halt_at_fitness`, a budget axis spent, or the controller's own
 exhaustion — not on a fixed trial count. Potter's two efficiency mechanisms ride the measurement seam every
 optimizer rides: candidate budget allocation ([`../methods/candidate-elimination.md`](../methods/candidate-elimination.md))
 and hard-sample ordering ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The round order).

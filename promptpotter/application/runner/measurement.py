@@ -75,7 +75,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.paired_reading import PairedReading
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import GradedCell
+    from promptpotter.domain.scoring import GradedCell, Scorer
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopRule
 
@@ -142,8 +142,7 @@ async def measure_population(
     def pooled(key: ArmKey, drawn: CellSheet) -> CellSheet:
         return election_rows(drawn, on_panel.get(key, NO_CELLS), crowned)
 
-    # Every cell the round bought joins the δ fit before a θ is read: a ruler carrying only cells
-    # from earlier rounds reads each arm on the handful it shares with them.
+    # Every cell the round bought joins the δ fit before a θ is read.
     cycle.difficulty.link(
         [
             (arm.sp_hash, rows[key].merged(on_panel.get(key, NO_CELLS)))
@@ -202,6 +201,7 @@ async def measure_population(
         folds=arm_folds(
             {key: read.state for key, read in filed.items()},
             {key: read.rows for key, read in filed.items()},
+            cycle.session.state.scoring.scorer,
             cycle.session.pipeline_schema,
         ),
         fit=fit,
@@ -279,7 +279,7 @@ async def _reference_readings(
 class ReferencePairs:
     path: tuple[CycleHop, ...]
     instrument_id: str
-    scorer_id: str
+    scorer: Scorer
     dataset_hash: str
     declared: Sequence[str]
     names: Mapping[ArmKey, ArmName]
@@ -302,7 +302,7 @@ class ReferencePairs:
         return cls(
             path=(session.hop,),
             instrument_id=session.instrument_id,
-            scorer_id=session.state.scoring.scorer.id,
+            scorer=session.state.scoring.scorer,
             dataset_hash=session.bank.dataset_hash,
             declared=declared,
             names=names,
@@ -322,7 +322,7 @@ class ReferencePairs:
             cells=self.declared,
             masked=False,
             dataset_hash=self.dataset_hash,
-            measurands=grade_measurands(self.scorer_id),
+            measurands=grade_measurands(self.scorer),
             spec=ROUND_LIFT_SPEC,
             scope=RoleScope.DECISION,
             instrument_id=self.instrument_id,

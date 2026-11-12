@@ -1,5 +1,4 @@
-"""A job that stopped on a retired ending no longer loads: each is staged with the stop that took its
-place, its refusal as `job_ending.kept_refusal` keeps it."""
+"""A job that stopped on a retired ending no longer loads: each is staged with the stop that took its place."""
 
 from __future__ import annotations
 
@@ -12,7 +11,7 @@ from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.phases import StopReason
 from promptpotter.infrastructure.store.data_root import Staged
 
-# `perfect_score` went for `halt_at_accuracy`, the one ceiling stop: a run that returned on it hit
+# `perfect_score` went for `halt_at_fitness`, the one ceiling stop: a run that returned on it hit
 # its target.
 RETIRED_ENDINGS = {"perfect_score": StopReason.TARGET_HIT.value}
 

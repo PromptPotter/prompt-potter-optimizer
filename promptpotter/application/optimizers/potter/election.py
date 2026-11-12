@@ -52,7 +52,7 @@ def _verdict_reason(
     cold: bool,
 ) -> str:
     scale = (
-        " (cold ruler — θ is logit-accuracy on the cells each arm shares with the parent)"
+        " (cold ruler — θ is logit-fitness on the cells each arm shares with the parent)"
         if cold
         else ""
     )
@@ -81,8 +81,7 @@ def _verdict_reason(
 def _kept_for_a_fresh_read(
     leading: ArmKey, reads: Mapping[ArmKey, float], lineage: Lineage
 ) -> bool:
-    """A held round's leader ahead of its parent, once: the cells that ranked it first are the ones
-    its luck rode, so only the next round's panel says whether it clears the bar."""
+    """A held round's leader ahead of its parent, once: only the next round's panel says whether it clears the bar."""
     return reads[leading] > 0.0 and not any(leading in rr.arms for rr in lineage.rounds)
 
 

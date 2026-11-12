@@ -107,7 +107,7 @@ export function MeasurementRun({
           const invalid = end === "invalid";
           // An invalid arm never started a walk: it renders as rejected below, never as a stop.
           const early = reading.walked_short ? end : null;
-          const accuracy = reading.own?.accuracy?.value ?? null;
+          const fitness = reading.own?.fitness?.value ?? null;
           const isCandSelected = pick?.round === arm.round && pick.arm === arm.key;
           const { cached, cached_share: cachedShare } = reading.panel;
           const verdict = verdicts.get(arm.key);
@@ -134,7 +134,7 @@ export function MeasurementRun({
                     <span className="rsv-tally-score">
                       {[
                         reading.panel.scored != null ? `${reading.panel.scored} scored` : null,
-                        accuracy != null ? fmtUnit("rate", accuracy) : null,
+                        fitness != null ? fmtUnit("score", fitness) : null,
                       ]
                         .filter((part) => part !== null)
                         .join(" · ")}
@@ -233,9 +233,9 @@ function segmentFor(c: ArmRow, verdict: CandidateVerdict | undefined): Segment<s
       title: reason ?? "Rejected by validation before it ran.",
     };
   }
-  const accuracy = own?.accuracy?.value;
+  const fitness = own?.fitness?.value;
   return {
     value: arm.key,
-    label: accuracy != null ? `${arm.label} · ${fmtUnit("rate", accuracy)}` : arm.label,
+    label: fitness != null ? `${arm.label} · ${fmtUnit("score", fitness)}` : arm.label,
   };
 }

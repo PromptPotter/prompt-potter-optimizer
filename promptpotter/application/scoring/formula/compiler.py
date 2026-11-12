@@ -11,7 +11,12 @@ from types import SimpleNamespace
 from typing import Any, NamedTuple
 
 from promptpotter import connectors
-from promptpotter.application.scoring.formula.matchers import MATCHERS, backend_rank, matcher_of
+from promptpotter.application.scoring.formula.matchers import (
+    MATCHERS,
+    backend_rank,
+    fitness_unit_of,
+    matcher_of,
+)
 from promptpotter.domain.cell_terms import CELL_BOUND_NAMES, CELL_TERMS, CellTerm
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
@@ -252,8 +257,7 @@ def _step_tokens(steps: Mapping[str, StepUsage]) -> float | None:
 
 ChannelReader = Callable[[MeasuredCell, Grade | None], float | None]
 
-# The core's own channels: where its reader cannot answer, a connector's report does (an L4
-# cell's inner spend).
+# The core's own channels: where its reader cannot answer, a connector's report does.
 _CHANNEL_READERS: dict[str, ChannelReader] = {
     "fitness": lambda _facts, grade: None if grade is None else _number(grade.fitness),
     # `cost_s`, never `total_time`: a replayed row's `total_time` is zeroed.
@@ -290,16 +294,13 @@ ROW_HEALTH_TERMS: frozenset[str] = frozenset(_ROW_HEALTH)
 
 
 def campaign_terms(backend_type: str) -> dict[str, CellTerm]:
-    """What a campaign's criterion, dial or anchor may name: the core's terms, then its
-    connector's own (`Connector.cell_terms`), which its registration refused to collide."""
+    """What a campaign's criterion, dial or anchor may name: the core's terms, then its connector's own."""
     declared = connectors.CONNECTORS.get(backend_type).cell_terms
     return {**CELL_TERMS, **{term.name: term for term in declared}}
 
 
 def cell_channels_of(facts: MeasuredCell, grade: Grade | None) -> dict[str, float]:
-    """A key absent from the result is a channel the cell cannot answer. The connector's report
-    (`PipelineData.cell_report`, taken by its declaration alone) answers its own terms, and a core
-    channel where the core reader cannot (an L4 cell's inner spend)."""
+    """A key absent from the result is a channel the cell cannot answer."""
     out: dict[str, float] = {}
     for name, read in (*_CHANNEL_READERS.items(), *_BORROWED_CHANNELS.items()):
         value = read(facts, grade)
@@ -329,9 +330,7 @@ def cell_namespace(facts: MeasuredCell, grade: Grade) -> dict[str, Any]:
 
     terms = facts.pipeline.terms()
     terms.pop("cell_report", None)
-    # The connector's report is bound key by key, as the answer named it; a key naming a core
-    # term answers that channel alone (`cell_channels_of`). Every name here has one owner
-    # (`evaluators.py::cell_name_owners`), so no key is two values.
+    # The connector's report is bound key by key; a key naming a core term answers that channel alone.
     report = {k: v for k, v in facts.pipeline.cell_report.items() if k not in CELL_TERMS}
     for key, val in {**report, **terms}.items():
         if isinstance(val, Mapping):
@@ -426,10 +425,13 @@ def compile_scorer(
         value = compiled.evaluate(cell_namespace(facts, grade), f"query {query!r}")
         return clamp_unit_score(value, formula=per_sample, subject=f"query {query!r}")
 
+    unit = fitness_unit_of(per_sample)
     if not per_cell:
         return Scorer(
             id=scorer_id,
             per_cell=None,
+            fitness_unit=unit,
+            terms=compiled.names,
             matcher=matcher,
             span=span,
             ranking=ranking,
@@ -459,6 +461,8 @@ def compile_scorer(
     return Scorer(
         id=scorer_id,
         per_cell=per_cell,
+        fitness_unit=unit,
+        terms=compiled.names | composite.names,
         matcher=matcher,
         span=span,
         ranking=ranking,

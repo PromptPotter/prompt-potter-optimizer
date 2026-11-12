@@ -33,7 +33,7 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
         f"  margin {'--    ' if r.reasoning_margin is None else f'{r.reasoning_margin:+.3f}'}"
         f" +/-{r.margin_se:.3f}"
         f"  {settled[r.verdict_settled]}"
-        f"  origin {r.origin_accuracy:.3f} (spread {r.origin_spread:.3f} over {len(r.origin_reads)})"
+        f"  origin {r.origin_fitness:.3f} (spread {r.origin_spread:.3f} over {len(r.origin_reads)})"
         f"  hedge {'--' if r.answer_modal_share is None else f'{r.answer_modal_share:.0%}'}"
         f"  floor {'--   ' if r.class_floor is None else f'{r.class_floor:.3f}'}"
         f"  {'--' if r.latency_median is None else f'{r.latency_median:.1f}s'} med"

@@ -180,30 +180,29 @@ def verify_member(
 def verify_reading(
     banked: VerificationPass,
     *,
+    scorer: Scorer,
     fresh: CellSheet,
     recorded: CellSheet,
     measured: MemberRows,
     origin: MemberRows,
 ) -> VerifyReading:
     """Fresh beside recorded, never pooled: a pooled rate moves with how many cells each holds."""
-    scorer_id = fresh.scorer_id
-    fresh_level, recorded_level = own_level(fresh), own_level(recorded)
+    unit = scorer.fitness_unit
+    fresh_level, recorded_level = own_level(fresh, unit), own_level(recorded, unit)
 
     def increment(a: BandedValue | None, b: BandedValue | None) -> float | None:
         return None if a is None or b is None else a.value - b.value
 
     strategy = banked.strategy
     assert strategy is not None, "a verify pass names its draw"
-    held, held_absent = _held(
-        strategy, fresh_level.n, fresh_level.accuracy, recorded_level.accuracy
-    )
+    held, held_absent = _held(strategy, fresh_level.n, fresh_level.fitness, recorded_level.fitness)
     return VerifyReading(
         label=banked.arm.label,
-        scorer_id=scorer_id,
+        scorer_id=scorer.id,
         strategy=strategy,
         fresh=fresh_level,
         recorded=recorded_level,
-        accuracy_increment=increment(fresh_level.accuracy, recorded_level.accuracy),
+        fitness_increment=increment(fresh_level.fitness, recorded_level.fitness),
         composite_increment=increment(fresh_level.composite, recorded_level.composite),
         vs_origin=read_pair(
             a=origin,
@@ -212,7 +211,7 @@ def verify_reading(
             cells=None,
             masked=False,
             dataset_hash=None,
-            measurands=grade_measurands(scorer_id),
+            measurands=grade_measurands(scorer),
             spec=ROUND_LIFT_SPEC,
             scope=RoleScope.REPORT,
             instrument_id=measured.instrument_id,
@@ -253,6 +252,7 @@ def read_verify(
     measured = banked.arm.key
     return verify_reading(
         banked,
+        scorer=scorer,
         fresh=fresh,
         recorded=folded(measured, RoleScope.DECISION),
         measured=verify_member(
@@ -411,7 +411,7 @@ async def verify_candidate(
                 reads_before=None,
             )
             reading = read_verify(stores, hop, banked, session.state.scoring.scorer)
-            if reading.fresh.accuracy is None:
+            if reading.fresh.fitness is None:
                 raise DiagnosticError(
                     f"the fresh cells of {label!r} produced no scoreable sample — there is "
                     "nothing to read beside the recorded measurement."
@@ -435,13 +435,13 @@ async def verify_on_saturation(
     stores: Stores,
     hop: CycleHop,
     round_num: int,
-    accuracy: float | None,
+    fitness: float | None,
     winner_id: str | None,
     seed: int,
     cb: RunCallbacks,
 ) -> None:
     """A verify the round owed and could not send banks its refusal on the pass, never stopping the run."""
-    if accuracy is None or accuracy < 1.0 or not winner_id:
+    if fitness is None or fitness < 1.0 or not winner_id:
         return
     # Asked here: the loop consults its own ceiling only at the next round boundary, after this.
     if budget_stop(require_spend_book("the saturation verify")) is not None:
@@ -535,7 +535,8 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
         kept = {s.key for s in scoring_set}
         # Re-folded on exactly the rows the band re-scores, never round 0's whole fold (bl3.B2).
         recorded = own_level(
-            walked_rows(stores, [c for c in recorded_cells if c[0] in kept], scorer).standing()
+            walked_rows(stores, [c for c in recorded_cells if c[0] in kept], scorer).standing(),
+            scorer.fitness_unit,
         )
         if recorded.composite is None:
             raise DiagnosticError(
@@ -554,7 +555,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
         )
         cells: list[WalkedCell] = []
         composites: list[float] = []
-        accuracies: list[float] = []
+        fitnesses: list[float] = []
         enter = VerificationEnterView(
             verification="noise_floor",
             subject=None,
@@ -575,15 +576,15 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
                         force_fresh=True,
                     ),
                 )
-                accuracy, composite = scored.scores.accuracy, scored.scores.composite_fitness
-                if accuracy is None or composite is None:
+                fitness, composite = scored.scores.fitness, scored.scores.composite_fitness
+                if fitness is None or composite is None:
                     raise DiagnosticError(
                         f"noise-floor rescore {i + 1}/{k} of {hop.campaign_id}/{hop.cycle_id} "
                         "measured no cell — the band would describe the outage, not the backend."
                     )
                 cells += scored.cells
                 composites.append(composite)
-                accuracies.append(accuracy)
+                fitnesses.append(fitness)
                 logger.info("noise-floor rescore %d/%d: composite=%.4f", i + 1, k, composite)
 
             band = mean_ci(composites)
@@ -609,7 +610,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
                 reading=NoiseBand(
                     raw=composites,
                     band=BandedValue(value=mean_composite, ci_lo=ci_lo, ci_hi=ci_hi),
-                    fresh_accuracy=sum(accuracies) / len(accuracies),
+                    fresh_fitness=sum(fitnesses) / len(fitnesses),
                     recorded=recorded,
                 ),
                 state=ReadingState.READ,
@@ -624,8 +625,7 @@ class BenchTriggerError(ConflictError):
 
 
 async def grade_line_bench(*, stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
-    """Admitted exactly where the served status says so (``BenchStatus.can_run``); *acting* is
-    the command it grades for, whose `cancel` stops it."""
+    """Admitted exactly where the served status says so (``BenchStatus.can_run``)."""
     async with paid_pass(
         stores=stores,
         verb="bench",

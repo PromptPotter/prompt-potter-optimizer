@@ -213,7 +213,7 @@ class VerificationMark(FrozenModel):
     rows: int = Field(description="Rows the pass sends.")
     scored: int = Field(description="Rows of it scored so far.")
     level: BandedValue | None = Field(
-        description="Accuracy over the rows scored: the running value, unbanded, while `running`; "
+        description="Fitness over the rows scored: the running value, unbanded, while `running`; "
         "the pass's reading once `done`. Null before the first row, and on a `failed` pass, "
         "which reads nothing."
     )
@@ -221,8 +221,8 @@ class VerificationMark(FrozenModel):
         description="How a `failed` pass reads, so why it ended without a reading; null otherwise."
     )
 
-    def scored_one(self, accuracy: float | None) -> VerificationMark:
-        level = None if accuracy is None else BandedValue(value=accuracy, ci_lo=None, ci_hi=None)
+    def scored_one(self, fitness: float | None) -> VerificationMark:
+        level = None if fitness is None else BandedValue(value=fitness, ci_lo=None, ci_hi=None)
         return self.model_copy(update={"scored": self.scored + 1, "level": level})
 
     def ended(

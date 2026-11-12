@@ -1596,8 +1596,8 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     running.append(
         RunWiringRecord(
             round_cells_ceiling=1,
-            display_metric="accuracy",
-            elects_on="accuracy",
+            display_metric="fitness",
+            elects_on="fitness",
             max_cells_in_flight=1,
             measured_unit="sample",
             measurement_node="l1_score",
@@ -2103,6 +2103,17 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         JOB_ADAPTER.dump_python(survivor, mode="json")
         | {"refusal": "", "holder": launch_as_written},
     )
+    # An authored definition's retired knobs land respelled, however its YAML quotes them.
+    knobbed = built_stores.tenant_datasets.dataset_dir("knobbed") / DEFINITION_FILE
+    knobbed.parent.mkdir(parents=True)
+    old_knobs = (
+        "campaign:\n  display_metric: accuracy\n  optimization:\n"
+        "    halt_at_accuracy: 0.9\n    accuracy_ceiling: 0.95\n"
+        "pipeline:\n  \"display_metric\": 'accuracy'\n"
+        'panel: {display_metric: "accuracy"}\n'
+        "source:\n  'display_metric' : accuracy\n  scoring: accuracy_given_attempted\n"
+    )
+    knobbed.write_text(old_knobs, encoding="utf-8")
     mapped = plan_landing(built_stores.projects_root, reset=False)
     assert not mapped.refused, f"the landing refused the old jobs: {mapped.refusal}"
     apply_landing(built_stores.projects_root, mapped)
@@ -2116,6 +2127,13 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         "a migrated job's refusal lost its words, or a live one read as refused"
     )
     assert landed_live.holder == CampaignLaunch("ds1"), "a live launch lost what it launched"
+    assert knobbed.read_text(encoding="utf-8") == (
+        "campaign:\n  display_metric: fitness\n  optimization:\n"
+        "    halt_at_fitness: 0.9\n    fitness_ceiling: 0.95\n"
+        "pipeline:\n  \"display_metric\": 'fitness'\n"
+        'panel: {display_metric: "fitness"}\n'
+        "source:\n  'display_metric' : fitness\n  scoring: accuracy_given_attempted\n"
+    ), "a quoted retired knob outlived the landing, or a real rate's name was respelled"
     landed_perfect = jobs.get(stopped_perfect.stem)
     assert landed_perfect and landed_perfect.ending is StopReason.TARGET_HIT, (
         "a job that stopped on the retired ending no longer loads, or lost that it hit its target"
@@ -2859,8 +2877,8 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
     )
 
     # A knob sent at its default is another act than the knob unsent: one key names one of them.
-    halting = {"dataset_name": "no-such-dataset", "optimization": {"halt_at_accuracy": 0.9}}
-    pair = [halting, {**halting, "optimization": {"halt_at_accuracy": 0.9, "optimizer": "potter"}}]
+    halting = {"dataset_name": "no-such-dataset", "optimization": {"halt_at_fitness": 0.9}}
+    pair = [halting, {**halting, "optimization": {"halt_at_fitness": 0.9, "optimizer": "potter"}}]
     dispatcher = CommandDispatcher(caller.stores)
     with pytest.raises(PotterError) as first_refusal:
         await dispatcher.dispatch(CommandCall(MintCampaignPayload.model_validate(pair[0]), "k"))

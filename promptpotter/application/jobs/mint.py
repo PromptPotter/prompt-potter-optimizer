@@ -350,9 +350,7 @@ def _revision_moved(
 
 
 def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> CyclePlan:
-    """*session* is bound to the cycle the resume runs, past the campaign's own refusals
-    (`admission.py::refuse_campaign`); the plan is that cycle's, configured, every refusal asked of
-    the selection it answers."""
+    """*session* is bound to the cycle the resume runs, past the campaign's own refusals."""
     plan = resolve_cycle_plan(session, campaign.declaration, dataset)
     checked = plan
     if session.hop != campaign.root_hop:
@@ -453,8 +451,7 @@ def _held_to_record(
     stored: HeadToHeadRecord | None,
     standing: Mapping[str, Campaign],
 ) -> HeadToHeadRecord:
-    """Every arm held to *stored*, else to this act's first arm, and to the arms *standing*; the
-    record they stand on."""
+    """Every arm held to *stored*, else to this act's first arm, and to the arms *standing*."""
     first = _arm_of(plans[0])
     arms = {key: campaign.campaign_id for key, campaign in standing.items()}
     record = _record_of(plans[0]) if stored is None else stored
@@ -465,10 +462,7 @@ def _held_to_record(
 
 
 def _numbered(plans: Sequence[CyclePlan], standing: Mapping[str, Campaign]) -> list[CyclePlan]:
-    """Each arm's replicate: 1 + the arms on its treatment before it, the *standing* ones then
-    this act's in listing order, keyed as the evidence groups them (`Campaign.treatment.digest`).
-    Arms of one replicate share a seed (common random numbers), a treatment's replicates each
-    their own (`run_clamp`)."""
+    """Each arm's replicate: 1 + the arms on its treatment before it; a replicate's arms share a seed."""
     taken = Counter(campaign.treatment.digest for campaign in standing.values())
     numbered: list[CyclePlan] = []
     for plan in plans:
@@ -495,15 +489,13 @@ async def arm_plans(
     *,
     origin_override: dict[str, NodePrompt] | None = None,
 ) -> list[CyclePlan]:
-    """THE one place an arm is planned: every refusal it owes — held to its head-to-head's record
-    as it stands now (the mint holds it again, under its lock: `_mint_all`) and priced on its own
-    budget — before any arm's key is taken, any arm admitted, or anything paid."""
+    """THE one place an arm is planned: every refusal it owes, before any arm's key is taken or anything paid."""
     plans: list[CyclePlan] = []
     for arm in request.arms:
         config = arm_config(declared, request, arm)
-        if config.optimization.halt_at_accuracy is not None:
+        if config.optimization.halt_at_fitness is not None:
             raise ConflictError(
-                "an arm stops on its budget, never on an accuracy: drop the halt accuracy",
+                "an arm stops on its budget, never on a fitness: drop the halt fitness",
                 code="arm_halt_refused",
             )
         declaration = declare(session, config, purpose=request.purpose(arm))
@@ -555,9 +547,7 @@ def _write_plan(
 
 
 def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> Session:
-    """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran;
-    *adopting* is the draft it adopts: its ledger moves in where the draft billed, and what was
-    filed on it lands on this cycle."""
+    """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran."""
     validate_path_component(hop.cycle_id)
     validate_path_component(hop.campaign_id)
     declaration = plan.declaration
@@ -603,8 +593,7 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
 
 
 def mint(plan: CyclePlan, *, campaign_id: str, adopting: str | None) -> OpenedCycle:
-    """*adopting* is a draft whose ledger paid toward this cycle before it existed, moved in as its
-    first lines."""
+    """*adopting* is a draft whose ledger paid toward this cycle before it existed."""
     # Never sweep the inner sandbox here: its key carries the campaign id, so only ANOTHER's dies.
     hop = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
     return OpenedCycle(
@@ -616,9 +605,7 @@ def mint(plan: CyclePlan, *, campaign_id: str, adopting: str | None) -> OpenedCy
 
 @contextmanager
 def _record_held(plans: Sequence[CyclePlan]) -> Iterator[HeadToHeadRecord | None]:
-    """An act's arms hold their head-to-head's record from before anything it pays (a framing)
-    through their mint, so a concurrent act on the id is refused before it pays; a run outside a
-    head-to-head holds nothing."""
+    """An act's arms hold their head-to-head's record from before anything it pays through their mint."""
     first = plans[0]
     if not isinstance(first.declaration.purpose, Compare):
         yield None
@@ -630,10 +617,7 @@ def _record_held(plans: Sequence[CyclePlan]) -> Iterator[HeadToHeadRecord | None
 def _mint_all(
     plans: Sequence[CyclePlan], *, adopting: str | None, stored: HeadToHeadRecord | None
 ) -> list[OpenedCycle]:
-    """Inside `_record_held`, whose *stored* record it is; the draft it is *adopting* lands on the
-    first cycle alone. Arms join their head-to-head on the framed plans they mint: a record this act declares
-    is its first arm's as minted, and every arm is held to the record and to the arms minted, and
-    numbered on them. Each campaign id is drawn here, past every refusal and the framing."""
+    """Arms join their head-to-head on the framed plans they mint; each campaign id is drawn here, past every refusal."""
     first = plans[0]
     if isinstance(first.declaration.purpose, Compare):
         stores = first.session.store

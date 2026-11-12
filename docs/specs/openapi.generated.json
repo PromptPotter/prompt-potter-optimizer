@@ -1160,6 +1160,14 @@
             "description": "How its walk ended short of its panel: cut against it (`invalid` refused it before a cell), or `locked_in` — settled FOR it by the eliminator. Null on a walk still running and one that ran its panel.",
             "title": "End"
           },
+          "fitness_terms": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "The round mean of each term the scoring formula reads, `fitness` aside, over the cells that answered it: an L4 outer arm's `held_out_lift` and `floored` share.",
+            "title": "Fitness Terms",
+            "type": "object"
+          },
           "on_origin_panel": {
             "anyOf": [
               {
@@ -1180,7 +1188,7 @@
                 "type": "null"
               }
             ],
-            "description": "The arm's own level on its round's cells: accuracy with the band the gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null before the first row is graded, and on an `invalid` arm, which holds no cell."
+            "description": "The arm's own level on its round's cells: fitness with the band the gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null before the first row is graded, and on an `invalid` arm, which holds no cell."
           },
           "panel": {
             "$ref": "#/components/schemas/ArmPanel"
@@ -1270,6 +1278,7 @@
           "end",
           "walked_short",
           "own",
+          "fitness_terms",
           "panel",
           "tokens",
           "prefix",
@@ -1329,7 +1338,7 @@
           },
           "optimization": {
             "$ref": "#/components/schemas/OptimizationOverrides",
-            "description": "Laid over the dataset's own `optimization`: `optimizer` is required, and `halt_at_accuracy` is refused, since every arm runs the head-to-head's budget to its end."
+            "description": "Laid over the dataset's own `optimization`: `optimizer` is required, and `halt_at_fitness` is refused, since every arm runs the head-to-head's budget to its end."
           }
         },
         "required": [
@@ -1642,17 +1651,6 @@
         "additionalProperties": false,
         "description": "One individual's bench pass, read under a named scorer.",
         "properties": {
-          "accuracy": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BandedValue"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1."
-          },
           "composite": {
             "anyOf": [
               {
@@ -1664,10 +1662,25 @@
             ],
             "description": "Under the reading scorer's formula, which charges cost and length — so it is never the change in the hit rate."
           },
+          "fitness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BandedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1."
+          },
+          "fitness_unit": {
+            "$ref": "#/components/schemas/MeasurandUnit",
+            "description": "The reading scorer's unit for `fitness`: a `rate` where its formula is one matcher's call, a `score` otherwise."
+          },
           "headline": {
             "description": "Which column the headline reads.",
             "enum": [
-              "accuracy",
+              "fitness",
               "composite"
             ],
             "title": "Headline",
@@ -1683,6 +1696,10 @@
               }
             ],
             "description": "The headline: this reading in its `headline` column, chosen here so no surface selects a column of its own. Stamped by :meth:`read` alone."
+          },
+          "level_unit": {
+            "$ref": "#/components/schemas/MeasurandUnit",
+            "description": "The unit `level` reads in."
           },
           "n": {
             "description": "Rows carrying a verdict — a miss the prompt caused included: the population both columns are read over.",
@@ -1701,13 +1718,15 @@
           }
         },
         "required": [
-          "accuracy",
+          "fitness",
+          "fitness_unit",
           "composite",
           "n",
           "round",
           "sp_hash",
           "headline",
-          "level"
+          "level",
+          "level_unit"
         ],
         "title": "BenchReading",
         "type": "object"
@@ -1809,7 +1828,7 @@
           "headline": {
             "description": "Which column the headline reads; `vs_origin.headline` is its lift.",
             "enum": [
-              "accuracy",
+              "fitness",
               "composite"
             ],
             "title": "Headline",
@@ -2140,20 +2159,6 @@
       "CampaignConfig": {
         "additionalProperties": false,
         "properties": {
-          "accuracy_ceiling": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The accuracy a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
-            "title": "Accuracy Ceiling"
-          },
           "bench_trigger": {
             "default": "manual",
             "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (CLI `bench`, command `grade-bench`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. `each_round`: that, and every round that selects a new individual is graded too. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
@@ -2178,8 +2183,8 @@
           },
           "display_metric": {
             "$ref": "#/components/schemas/DisplayMetric",
-            "default": "accuracy",
-            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `accuracy` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
+            "default": "fitness",
+            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `fitness` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
           },
           "exclude_nodes": {
             "items": {
@@ -2187,6 +2192,20 @@
             },
             "title": "Exclude Nodes",
             "type": "array"
+          },
+          "fitness_ceiling": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fitness a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
+            "title": "Fitness Ceiling"
           },
           "hard_sample_order": {
             "default": "info_gain",
@@ -2695,7 +2714,7 @@
             "$ref": "#/components/schemas/ArmReading",
             "description": "`reading.arm` is the key every per-cycle document of this course speaks; `reading.sp_hash` joins to the archive rows. A retired candidate's election wears no crown: the course that took its place re-asks it."
           },
-          "sample_set_accuracy": {
+          "sample_set_fitness": {
             "anyOf": [
               {
                 "type": "number"
@@ -2704,8 +2723,8 @@
                 "type": "null"
               }
             ],
-            "description": "Accuracy over the request's `samples=` subset, served only where this candidate carries a scoreable verdict for ALL of it. Null without a `samples=` mask.",
-            "title": "Sample Set Accuracy"
+            "description": "Fitness over the request's `samples=` subset, served only where this candidate carries a scoreable verdict for ALL of it. Null without a `samples=` mask.",
+            "title": "Sample Set Fitness"
           },
           "sample_set_n": {
             "anyOf": [
@@ -2752,7 +2771,7 @@
           "gene_sources",
           "lens_value",
           "lens_rank_move",
-          "sample_set_accuracy",
+          "sample_set_fitness",
           "sample_set_n",
           "divergence",
           "divergent"
@@ -3414,6 +3433,10 @@
             "title": "Cells",
             "type": "array"
           },
+          "fitness_unit": {
+            "$ref": "#/components/schemas/MeasurandUnit",
+            "description": "What every `fitness` here reads in: its scorer's."
+          },
           "mean_fitness": {
             "anyOf": [
               {
@@ -3494,6 +3517,7 @@
           "candidates",
           "cells",
           "total_measurements",
+          "fitness_unit",
           "mean_fitness",
           "never_hit",
           "partly_hit",
@@ -3879,20 +3903,6 @@
         "additionalProperties": false,
         "description": "A check-in edit's ``config``, by `CampaignConfig`'s own paths. Only the fields sent move\nanything: its ``exclude_unset`` dump is the layer `campaign_config.py::merge_config_layers`\nlays.",
         "properties": {
-          "accuracy_ceiling": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The accuracy a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
-            "title": "Accuracy Ceiling"
-          },
           "bench_trigger": {
             "anyOf": [
               {
@@ -3930,7 +3940,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `accuracy` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
+            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `fitness` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
           },
           "exclude_nodes": {
             "anyOf": [
@@ -3945,6 +3955,20 @@
               }
             ],
             "title": "Exclude Nodes"
+          },
+          "fitness_ceiling": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fitness a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
+            "title": "Fitness Ceiling"
           },
           "hard_sample_order": {
             "anyOf": [
@@ -4416,7 +4440,7 @@
                 "type": "null"
               }
             ],
-            "description": "The column the course's newest election elected on; null before its first. `ability`: its rounds are won on θ, not on accuracy."
+            "description": "The column the course's newest election elected on; null before its first. `ability`: its rounds are won on θ, not on fitness."
           },
           "mint": {
             "$ref": "#/components/schemas/CourseKind",
@@ -5294,7 +5318,7 @@
       },
       "DisplayMetric": {
         "enum": [
-          "accuracy",
+          "fitness",
           "composite",
           "ability"
         ],
@@ -5930,7 +5954,7 @@
       },
       "ElectionColumn": {
         "additionalProperties": false,
-        "description": "The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or\ncarries a caveat — there θ is not ability, and the election reads on accuracy.",
+        "description": "The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or\ncarries a caveat — there θ is not ability, and the election reads on fitness.",
         "properties": {
           "ability": {
             "anyOf": [
@@ -6728,7 +6752,8 @@
           "lift_per_candidate",
           "time_per_lift",
           "lives",
-          "accuracy",
+          "fitness",
+          "fitness_terms",
           "ability"
         ],
         "type": "string"
@@ -7225,7 +7250,7 @@
           },
           "headline": {
             "enum": [
-              "accuracy",
+              "fitness",
               "composite"
             ],
             "title": "Headline",
@@ -9116,14 +9141,19 @@
             "type": "integer"
           },
           "rate": {
-            "description": "Its rate over the panel cells it and C0 both scored.",
+            "description": "Its level over the panel cells it and C0 both scored.",
             "title": "Rate",
             "type": "number"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/MeasurandUnit",
+            "description": "The unit `rate` reads in: its headline's."
           }
         },
         "required": [
           "arm",
           "rate",
+          "unit",
           "n"
         ],
         "title": "LineRate",
@@ -10995,8 +11025,8 @@
           "band": {
             "$ref": "#/components/schemas/BandedValue"
           },
-          "fresh_accuracy": {
-            "title": "Fresh Accuracy",
+          "fresh_fitness": {
+            "title": "Fresh Fitness",
             "type": "number"
           },
           "raw": {
@@ -11013,7 +11043,7 @@
         "required": [
           "raw",
           "band",
-          "fresh_accuracy",
+          "fresh_fitness",
           "recorded"
         ],
         "title": "NoiseBand",
@@ -11122,7 +11152,7 @@
             "title": "Enable 2Pl Graduation",
             "type": "boolean"
           },
-          "halt_at_accuracy": {
+          "halt_at_fitness": {
             "anyOf": [
               {
                 "maximum": 1.0,
@@ -11134,7 +11164,7 @@
               }
             ],
             "description": "Stop ``target_hit`` once the declared pick's level over the origin, on the origin's panel, reaches this at its paired interval's lower bound. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
-            "title": "Halt At Accuracy"
+            "title": "Halt At Fitness"
           },
           "lift_reference": {
             "default": "best_so_far",
@@ -11221,7 +11251,7 @@
             "description": "Hold every round, before any arm is measured, until the operator answers with the arms it measures (`submit-arms`). ``off`` (default) never holds. ``review``: the proposers run, their proposals are drafts, and the operator keeps any of them by index, adds arms of their own, or both. ``author``: no proposer runs and every arm is the operator's. An arm of theirs is an edit of the round's parent — prompt fields, a pipeline overlay — and is measured and elected like any other. The hold has no deadline; a pause ends it resumably, and a resume holds again unless an answer was already banked.",
             "title": "Arm Gate"
           },
-          "halt_at_accuracy": {
+          "halt_at_fitness": {
             "anyOf": [
               {
                 "maximum": 1.0,
@@ -11233,7 +11263,7 @@
               }
             ],
             "description": "Stop ``target_hit`` once the declared pick's level over the origin, on the origin's panel, reaches this at its paired interval's lower bound. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
-            "title": "Halt At Accuracy"
+            "title": "Halt At Fitness"
           },
           "nodes": {
             "anyOf": [
@@ -11724,7 +11754,7 @@
             "description": "Dataset sample count; ``null`` if unmaterialized",
             "title": "N Samples"
           },
-          "origin_accuracy": {
+          "origin_fitness": {
             "anyOf": [
               {
                 "type": "number"
@@ -11734,7 +11764,7 @@
               }
             ],
             "description": "The origin's C0 score, as the root cycle's standing round 0 closed",
-            "title": "Origin Accuracy"
+            "title": "Origin Fitness"
           },
           "origin_id": {
             "description": "Origin content identity — its campaigns' root_content_hash",
@@ -11929,17 +11959,6 @@
         "additionalProperties": false,
         "description": "One individual's own level on one set of rows, in both columns; never one side of a pair.",
         "properties": {
-          "accuracy": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BandedValue"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1."
-          },
           "composite": {
             "anyOf": [
               {
@@ -11951,6 +11970,21 @@
             ],
             "description": "Under the reading scorer's formula, which charges cost and length — so it is never the change in the hit rate."
           },
+          "fitness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BandedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1."
+          },
+          "fitness_unit": {
+            "$ref": "#/components/schemas/MeasurandUnit",
+            "description": "The reading scorer's unit for `fitness`: a `rate` where its formula is one matcher's call, a `score` otherwise."
+          },
           "n": {
             "description": "Rows carrying a verdict — a miss the prompt caused included: the population both columns are read over.",
             "title": "N",
@@ -11958,7 +11992,8 @@
           }
         },
         "required": [
-          "accuracy",
+          "fitness",
+          "fitness_unit",
           "composite",
           "n"
         ],
@@ -12278,20 +12313,6 @@
         "additionalProperties": false,
         "description": "A mint's stand-in declaration, by `CampaignConfig`'s own paths, laid over its defaults.",
         "properties": {
-          "accuracy_ceiling": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The accuracy a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
-            "title": "Accuracy Ceiling"
-          },
           "bench_trigger": {
             "anyOf": [
               {
@@ -12329,7 +12350,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `accuracy` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
+            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `fitness` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
           },
           "exclude_nodes": {
             "anyOf": [
@@ -12344,6 +12365,20 @@
               }
             ],
             "title": "Exclude Nodes"
+          },
+          "fitness_ceiling": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fitness a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
+            "title": "Fitness Ceiling"
           },
           "hard_sample_order": {
             "anyOf": [
@@ -12568,7 +12603,7 @@
             "description": "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-discriminating dataset wins held-out cross-validation. The switch is gated — cold/non-discriminating datasets stay 1PL — so this only ever changes the ruler where 2PL provably fits better out-of-sample; it can never regress a dataset. Off → always 1PL (the slice-2 behaviour).",
             "title": "Enable 2Pl Graduation"
           },
-          "halt_at_accuracy": {
+          "halt_at_fitness": {
             "anyOf": [
               {
                 "maximum": 1.0,
@@ -12580,7 +12615,7 @@
               }
             ],
             "description": "Stop ``target_hit`` once the declared pick's level over the origin, on the origin's panel, reaches this at its paired interval's lower bound. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
-            "title": "Halt At Accuracy"
+            "title": "Halt At Fitness"
           },
           "lift_reference": {
             "anyOf": [
@@ -13913,7 +13948,7 @@
                 "type": "null"
               }
             ],
-            "description": "The column the round's election elected on (`Election.elects_on`); null on a round never elected. `ability`: the round is won on θ, not on accuracy."
+            "description": "The column the round's election elected on (`Election.elects_on`); null on a round never elected. `ability`: the round is won on θ, not on fitness."
           },
           "round": {
             "title": "Round",
@@ -16761,7 +16796,7 @@
                 "type": "null"
               }
             ],
-            "description": "The column the course's newest election elected on; null before its first. `ability`: its rounds are won on θ, not on accuracy."
+            "description": "The column the course's newest election elected on; null before its first. `ability`: its rounds are won on θ, not on fitness."
           },
           "from_candidate": {
             "anyOf": [
@@ -17465,7 +17500,7 @@
                 "type": "null"
               }
             ],
-            "description": "Accuracy over the rows scored: the running value, unbanded, while `running`; the pass's reading once `done`. Null before the first row, and on a `failed` pass, which reads nothing."
+            "description": "Fitness over the rows scored: the running value, unbanded, while `running`; the pass's reading once `done`. Null before the first row, and on a `failed` pass, which reads nothing."
           },
           "rows": {
             "description": "Rows the pass sends.",
@@ -17701,18 +17736,6 @@
         "additionalProperties": false,
         "description": "A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones.",
         "properties": {
-          "accuracy_increment": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`fresh` minus `recorded`, hit rate. Unpaired — the two are different cells.",
-            "title": "Accuracy Increment"
-          },
           "composite_increment": {
             "anyOf": [
               {
@@ -17723,6 +17746,18 @@
               }
             ],
             "title": "Composite Increment"
+          },
+          "fitness_increment": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`fresh` minus `recorded`, hit rate. Unpaired — the two are different cells.",
+            "title": "Fitness Increment"
           },
           "fresh": {
             "$ref": "#/components/schemas/OwnLevel",
@@ -17789,7 +17824,7 @@
           "strategy",
           "fresh",
           "recorded",
-          "accuracy_increment",
+          "fitness_increment",
           "composite_increment",
           "vs_origin",
           "held",

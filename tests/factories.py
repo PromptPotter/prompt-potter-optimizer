@@ -249,15 +249,17 @@ def sheet(cells: Iterable[GradedCell], scorer_id: str = "test") -> CellSheet:
 
 def score_summary(
     *,
-    accuracy: float = 0.5,
+    fitness: float = 0.5,
     composite_fitness: float | None = None,
     total: int = 4,
     walked: int | None = None,
 ) -> ScoreSummary:
     return ScoreSummary(
         total=total,
-        accuracy=accuracy,
-        composite_fitness=accuracy if composite_fitness is None else composite_fitness,
+        fitness=fitness,
+        composite_fitness=fitness if composite_fitness is None else composite_fitness,
+        fitness_unit="rate",
+        fitness_terms=[],
         deprecated=0,
         degraded=0,
         recall_at={},
@@ -480,7 +482,7 @@ def loop_session(
     )
     session.state.scoring = ScorerSetup(
         scorer=scorer or scorer_of(),
-        display_metric="accuracy",
+        display_metric="fitness",
         partition=partition or BankPartition(None, tuple(samples), (), ()),
         degradation_checks=(),
         judges=(),
@@ -1258,12 +1260,16 @@ def cycle_result(
     return CycleResult(
         rounds=rounds,
         n_rounds_after_origin=len(rounds),
-        result_accuracy=0.5,
+        result_fitness=0.5,
+        fitness_unit="rate",
         result_round=len(rounds),
         origin=None
         if origin is None
         else OwnLevel(
-            accuracy=BandedValue(value=origin, ci_lo=None, ci_hi=None), composite=None, n=1
+            fitness=BandedValue(value=origin, ci_lo=None, ci_hi=None),
+            composite=None,
+            fitness_unit="rate",
+            n=1,
         ),
         bench=bench,
         level_series=level_series(

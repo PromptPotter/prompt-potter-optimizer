@@ -8,10 +8,9 @@ from promptpotter.application.views.render.phase import stop_next_lines
 from promptpotter.application.views.render.primitives import (
     fmt_ci,
     fmt_fitness,
-    fmt_pct,
     overlap_series,
 )
-from promptpotter.domain.arm_reading import lift_band_text
+from promptpotter.domain.arm_reading import fitness_terms_text, fold_fitness_text, lift_band_text
 from promptpotter.domain.bench import (
     BandedValue,
     BenchColumn,
@@ -44,7 +43,7 @@ def render_review_md(
     *,
     round_audits: list[RoundAudit | None],
     context_object: list[str] | None = None,
-    accuracy_ceiling: float | None,
+    fitness_ceiling: float | None,
     optimizer: SelectedOptimizer,
     bench: BenchScore | None,
     spend: SpendRollup,
@@ -63,7 +62,7 @@ def render_review_md(
     parts += _render_header(index, final, review.verdict if review is not None else None, halt)
     parts += _render_bench(final, bench)
     # Counted here, never read off `final`: this renders at every round close, before one is banked.
-    clocks = round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)
+    clocks = round_clocks(rounds, fitness_ceiling=fitness_ceiling)
     parts += _render_stats_block(
         clocks,
         clock.round_ended_s if clock else {},
@@ -278,9 +277,9 @@ def _render_stats_block(
 
     # No ceiling declared and a declared one never reached are rendered apart.
     basis = (
-        "no accuracy_ceiling declared"
-        if clocks.accuracy_ceiling is None
-        else f"{CEILING_FRACTION:.0%} of {clocks.accuracy_ceiling:.2f}"
+        "no fitness_ceiling declared"
+        if clocks.fitness_ceiling is None
+        else f"{CEILING_FRACTION:.0%} of {clocks.fitness_ceiling:.2f}"
     )
     lines = [
         "## Round statistics",
@@ -400,10 +399,12 @@ def _render_round(
     head, fold, election = round_data.head, round_data.fold, round_data.election
     if not is_peek:
         parts += [
-            f"- accuracy: {fmt_pct(None if fold is None else fold.accuracy)}",
+            f"- fitness: {fold_fitness_text(fold)}",
             f"- composite_fitness: `{fmt_fitness(None if fold is None else fold.composite_fitness)}`",
             f"- improved: **{'yes' if round_data.improved else 'no'}**",
         ]
+        if fold is not None and (terms := fitness_terms_text(fold.term_means)):
+            parts.append(f"- formula terms: `{terms}`")
         if series := overlap_series(round_data.overlap):
             parts.append(f"- overlap: {series}")
         if election is not None and election.verdict_reason:
@@ -460,7 +461,7 @@ def _render_variants_table(round_data: RoundResult, *, scored: bool) -> list[str
             None,
         )
         parts.append(
-            f"| variant | composite_fitness | acc | θ | lift {lift_versus('parent', sheet)} | won "
+            f"| variant | composite_fitness | fit | θ | lift {lift_versus('parent', sheet)} | won "
             "| evidence | changes |"
         )
         parts.append("|---|---|---|---|---|---|---|---|")
@@ -490,8 +491,8 @@ def _score_cells(round_data: RoundResult, key: ArmKey) -> str:
     lift = "—" if read is None else lift_band_text(read.estimate, read.measurand.unit)
     election = round_data.election
     won = "✓" if election is not None and key == election.selected else "·"
-    fitness = fmt_fitness(fold.composite_fitness)
-    return f"`{fitness}` | {fmt_pct(fold.accuracy)} | {theta} | {lift} | {won}"
+    composite = fmt_fitness(fold.composite_fitness)
+    return f"`{composite}` | {fold_fitness_text(fold)} | {theta} | {lift} | {won}"
 
 
 def _fmt_evidence_cell(grounding: EvidenceGrounding | None) -> str:

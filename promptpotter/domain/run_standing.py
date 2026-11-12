@@ -5,7 +5,7 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.domain.arm_reading import UNIT_FORMATS, lift_text
+from promptpotter.domain.arm_reading import UNIT_FORMATS, level_text, lift_text
 from promptpotter.domain.arms import ArmSlot, Concluded, arm_name
 from promptpotter.domain.bench import COST_ABSENCE_WORDS, LiftCost
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -136,36 +136,32 @@ class RoundClocks(NamedTuple):
     rounds_to_separable: int | None
     rounds_to_improved: int | None
     rounds_to_ceiling: int | None
-    accuracy_ceiling: float | None
+    fitness_ceiling: float | None
 
 
-def round_clocks(rounds: Sequence[RoundResult], *, accuracy_ceiling: float | None) -> RoundClocks:
+def round_clocks(rounds: Sequence[RoundResult], *, fitness_ceiling: float | None) -> RoundClocks:
 
     def first(holds: Callable[[RoundResult], bool]) -> int | None:
         return next((r.round for r in rounds if holds(r)), None)
 
     to_ceiling: int | None = None
-    if accuracy_ceiling is not None:
-        target = CEILING_FRACTION * accuracy_ceiling
+    if fitness_ceiling is not None:
+        target = CEILING_FRACTION * fitness_ceiling
         to_ceiling = first(
             lambda r: (
-                (fold := r.fold) is not None
-                and fold.accuracy is not None
-                and fold.accuracy >= target
+                (fold := r.fold) is not None and fold.fitness is not None and fold.fitness >= target
             )
         )
     return RoundClocks(
         rounds_to_separable=first(lambda r: r.overlap.advance is RoundAdvance.ADVANCED),
         rounds_to_improved=first(lambda r: r.improved),
         rounds_to_ceiling=to_ceiling,
-        accuracy_ceiling=accuracy_ceiling,
+        fitness_ceiling=fitness_ceiling,
     )
 
 
 def line_reference(rounds: Sequence[RoundOutcome], *, origin: ArmKey) -> RoundArm:
-    """The candidate a line of *rounds* stands on going into the round after them, by the round
-    that crowned it — its *origin* until an election crowns another: what that round re-reads, and
-    what a fork cut there hangs from."""
+    """The candidate a line of *rounds* stands on going into the next round: its *origin* until an election crowns another."""
     return next(
         (
             RoundArm(round=rr.round, arm=picked)
@@ -218,8 +214,7 @@ class Climb(NamedTuple):
 
     @property
     def line(self) -> str:
-        """The lead line: who, both lifts as named, every rate (an absent one as `—` with its
-        reason)."""
+        """The lead line: who, both lifts as named, every rate (an absent one as `—` with its reason)."""
         parent = "" if self.vs_parent is None else f", {self.vs_parent} {self.over_parent}"
         return f"{self.candidate}: {self.lift} {self.over_origin}{parent} · " + " · ".join(
             f"— {rate.per} ({rate.sub})" if rate.value is None else f"{rate.value} {rate.per}"
@@ -352,8 +347,10 @@ class RunStanding(FrozenModel):
         pair = self.vs_origin
         if pair.headline is None or pair.coverage is None:
             return READING_STATE_INFO[pair.state].sentence
+        unit = pair.headline.measurand.unit
         return (
-            f"origin {pair.headline.rate_a:.1%} → {pair.headline.rate_b:.1%} "
+            f"origin {level_text(pair.headline.rate_a, unit)} → "
+            f"{level_text(pair.headline.rate_b, unit)} "
             f"on {pair.coverage.scored} origin-panel cells"
         )
 
@@ -365,8 +362,7 @@ class RunStanding(FrozenModel):
 
     @property
     def climb(self) -> Climb | None:
-        """The selection's lift over C0 — a bare point estimate — per search dollar, per
-        candidate tested and in worked time per unit, and over its parent; ``None`` with no pair."""
+        """The selection's lift over C0 per search dollar, per candidate tested and per unit of worked time; ``None`` with no pair."""
         return _climb(self)
 
     @classmethod
@@ -438,8 +434,7 @@ def measured_arm(rounds: Sequence[RoundOutcome], individual_id: str) -> Conclude
 
 
 def walked_slot(rounds: Sequence[RoundOutcome], key: ArmKey) -> ArmSlot | None:
-    """The candidate a re-read of *key* reads: its latest walk as a proposal, as `measured_arm`
-    reads it; ``None`` for one no round walked."""
+    """The candidate a re-read of *key* reads: its latest walk as a proposal; ``None`` for one no round walked."""
     return next(
         (
             arm.slot

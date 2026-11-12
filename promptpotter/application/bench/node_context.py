@@ -29,6 +29,7 @@ from promptpotter.application.runner.inner.spawn_context import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
 from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.opt_search_point import (
@@ -131,9 +132,7 @@ async def reread_walk(round_: RoundContext, reads: Sequence[WalkRead]) -> None:
 
 
 async def rewalk_origin(round_: RoundContext, scoring_set: list[Sample]) -> None:
-    """Round 0 closes again on ONE walk of the origin over its scoring set, under ORIGIN. The
-    archive never replays an errored cell, so the walk sends exactly the holes and the cells never
-    sent."""
+    """Round 0 closes again on ONE walk of the origin over its scoring set; the archive never replays an errored cell."""
     cycle = round_.cycle
     callbacks = round_.callbacks
     callbacks.on_phase(CampaignPhase.ORIGIN, "enter", round=0)
@@ -234,8 +233,7 @@ class Lineage(CycleRead):
 
     @property
     def measured(self) -> tuple[OptSearchPoint, ...]:
-        """The campaign's measured individuals as a pool (`Cycle.measured_pool`): a resume holds the
-        pool its banked rounds name by holding them."""
+        """The campaign's measured individuals as a pool (`Cycle.measured_pool`)."""
         return tuple(individual for individual, _ in self._cycle.measured_pool().values())
 
     def theta(self, individual_id: str) -> float | None:
@@ -248,9 +246,7 @@ class Lineage(CycleRead):
         return self._cycle.sealed_rounds
 
     def reelected(self, at: RoundArm, reelection: Reelection) -> RoundStatement:
-        """Round *at* restated as electing its arm *by* a layer, on the round's own anchors and
-        outlay: what a fork standing on an arm its round left unelected banks as the round it
-        hangs from (`runner/entry.py::_mint_and_rebase_fork`). The selector's verdict stays its own."""
+        """Round *at* restated as electing its arm *by* a layer; the selector's verdict stays its own."""
         cycle = self._cycle
         session = cycle.session
         held = next(rr for rr in cycle.rounds if rr.round == at.round)
@@ -326,10 +322,9 @@ class Frontier(CycleRead):
         return rows
 
     @property
-    def parent_accuracy(self) -> float | None:
-        """On the panel it was LAST scored on; ``None`` is unmeasured."""
-        fold = self._cycle.parent_fold
-        return None if fold is None else fold.accuracy
+    def parent_fitness_text(self) -> str:
+        """On the panel it was LAST scored on, in its scorer's unit; `—` is unmeasured."""
+        return fold_fitness_text(self._cycle.parent_fold)
 
     async def measure_parent(self, individual_id: str, cells: list[Sample]) -> CellSheet:
         arm = self._cycle.measured(individual_id)
@@ -533,8 +528,7 @@ class Children(CycleRead):
         evidence_grounding: EvidenceGrounding | None = None,
         hosted_by: str | None = None,
     ) -> Proposal:
-        """*overlay* lays config over the FIRST parent's. *hosted_by* names the LLM node whose reply
-        decided the child where another node writes it, so its lineage names who chose."""
+        """*overlay* lays config over the FIRST parent's. *hosted_by* names the LLM node whose reply decided the child."""
         schema = self._cycle.session.pipeline_schema
         variation = (
             self._variation
@@ -573,8 +567,7 @@ class Children(CycleRead):
         take: Mapping[Locus, int] | None = None,
         changes_description: str | None = None,
     ) -> Proposal:
-        """*overlay* lays config over the proposal's own, as ``child`` lays it over a first parent's;
-        *take* names each locus's donor by position in the proposal's parents, as ``child``'s does."""
+        """*overlay* lays config over the proposal's own; *take* names each locus's donor by position in its parents."""
         schema = self._cycle.session.pipeline_schema
         asked = {node: dict(keyed) for node, keyed in (overlay or {}).items()}
         prompt_loci = dict(prompt_loci or {})

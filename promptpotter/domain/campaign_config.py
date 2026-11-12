@@ -183,7 +183,7 @@ class OptimizationConfig(OptimizerChoice):
             "lives run wanting the full bank sets ``budget: {rounds: null}``."
         ),
     )
-    halt_at_accuracy: Annotated[float | None, Knob(Estimand.STOPPING)] = Field(
+    halt_at_fitness: Annotated[float | None, Knob(Estimand.STOPPING)] = Field(
         None,
         ge=0.0,
         le=1.0,
@@ -358,13 +358,13 @@ class CampaignConfig(StrictModel):
         "steered to would not be one.",
     )
     display_metric: Annotated[DisplayMetric, Knob(Estimand.DISPLAY)] = Field(
-        "accuracy",
+        "fitness",
         description="Which fitness number the operator's round and candidate views display "
         "first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — "
         "the optimizer's selector decides on its own objective, and the campaign's headline "
         "is the bench score; this only picks the number the human READS, client-overridable "
         "per session. `ability` shows θ (a logit, jargon) where the selector stamps one — "
-        "defaults to `accuracy` so θ is never forced on an operator who didn't ask for it. "
+        "defaults to `fitness` so θ is never forced on an operator who didn't ask for it. "
         "Rides the `composite_fitness_formula` serve path to "
         "`dashboard.json::display_metric`; never on `OptSearchPoint`.",
     )
@@ -380,11 +380,11 @@ class CampaignConfig(StrictModel):
         "READS and never what the engine scores, which is `build_round_order` and reaches no "
         "knob. Client-overridable per session, like `display_metric`.",
     )
-    accuracy_ceiling: Annotated[float | None, Knob(Estimand.DISPLAY)] = Field(
+    fitness_ceiling: Annotated[float | None, Knob(Estimand.DISPLAY)] = Field(
         None,
         gt=0.0,
         le=1.0,
-        description="The accuracy a best-reachable prompt would score on this dataset at this "
+        description="The fitness a best-reachable prompt would score on this dataset at this "
         "campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against "
         "`CEILING_FRACTION` of it, and the value is banked beside that count so a reader never "
         "has to guess the denominator. `None` (default) → the clock reports nothing, which is the "
@@ -421,9 +421,7 @@ class CampaignConfig(StrictModel):
     optimization: OptimizationConfig
 
     def identity(self) -> dict[str, object]:
-        """What this config adds to a cell's identity beside its optimizer's ``Treatment``, which
-        resolves ``optimizer`` and ``nodes`` against the manifest: less those, and less every
-        default, so which file states a value — or whether one restates a default — moves no cell."""
+        """What this config adds to a cell's identity beside its optimizer's ``Treatment``, less every default."""
         return self.model_dump(mode="json", exclude_defaults=True, exclude=_TREATMENT_OWNED)
 
 
@@ -586,16 +584,14 @@ class CycleConfig(FrozenModel):
         return cls(config=config, spans=tuple(spans), seed_overlay=overlay)
 
     def steers_outside(self, permitted: Mapping[str, NodeSearchNarrowing]) -> bool:
-        """The babysit act (decisions.md § 0005): a seed of the line steers outside what the nodes
-        *permitted* before any seed. Per seed, so a later steer back inside leaves its parent's act standing."""
+        """The babysit act (decisions.md § 0005): a seed of the line steers outside what the nodes *permitted*."""
         return any(
             span.seed is not None and steers_disallowed_model(permitted, span.seed.pipeline_overlay)
             for span in self.spans
         )
 
     def knob_layers(self, recorded: KnobLayers) -> dict[str, dict[str, KnobLayer]]:
-        """The layer that last set each ``optimization.nodes`` key ``config`` holds: a seed of the
-        line over what its mint *recorded* (`PipelineRead.knob_layers`), any other the draft's edit."""
+        """The layer that last set each ``optimization.nodes`` key ``config`` holds."""
         seeded = {
             (node, key)
             for span in self.spans

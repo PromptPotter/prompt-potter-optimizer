@@ -49,6 +49,7 @@ from promptpotter.domain.cells import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
+from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.ruler import RulerReach, RulerScope
 from promptpotter.domain.sample import Bank
@@ -333,8 +334,7 @@ def _drawn_rows(
 
 
 def cycle_hard_samples(stores: Stores, hop: CycleHop) -> HardSamples:
-    """A cycle's scale, folded off its ledger: its closed rounds read on the last election's stamp,
-    re-fit. A cycle no round of which closed reads none."""
+    """A cycle's scale, folded off its ledger: its closed rounds read on the last election's stamp, re-fit."""
     if not cycle_dir_for(stores.base_dir, hop).exists():
         raise NotFoundError(f"Cycle '{hop.campaign_id}/{hop.cycle_id}' not found")
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
@@ -437,6 +437,7 @@ class _LeaderboardPage:
     order: HardSampleOrder
     ranked: list[int]
     """Page positions in served order; index + 1 IS each row's ``hard_sample_rank``."""
+    fitness_unit: MeasurandUnit
 
 
 def _selected(
@@ -458,7 +459,8 @@ def _leaderboard_page(
         selected = _selected(view, range(len(bank.samples)), max_unmeasured, limit)
         shown = {sid: bank.samples[sid] for sid in selected}
         wanted = {shown[sid].key: sid for sid in selected}
-        candidates, rows = _dataset_cells(art_store, cells.name, bank, wanted)
+        graded_under = dataset_scorer(resolve_dataset(art_store, cells.name))
+        candidates, rows = _dataset_cells(art_store, graded_under, bank, wanted)
     else:
         drawn = art_store.campaigns.last(hop, PartitionRecord)
         view = cycle_hard_samples(art_store, hop)
@@ -466,9 +468,10 @@ def _leaderboard_page(
         selected = _selected(view, members, max_unmeasured, limit)
         shown = _drawn_rows(cells, drawn, selected)
         wanted = {shown[sid].key: sid for sid in selected}
-        graded_under = campaign_scorer(art_store, hop.campaign_id)
-        if graded_under is None:
+        filed_under = campaign_scorer(art_store, hop.campaign_id)
+        if filed_under is None:
             raise NotFoundError(f"Campaign '{hop.campaign_id}' not found")
+        graded_under = filed_under
         candidates, rows = _cycle_cells(art_store, hop, graded_under, wanted, cells.at)
 
     resolved, ranked = rank_hard_samples(
@@ -484,6 +487,7 @@ def _leaderboard_page(
         cells=rows,
         order=resolved,
         ranked=[wanted[key] for key in ranked],
+        fitness_unit=graded_under.fitness_unit,
     )
 
 
@@ -527,10 +531,10 @@ def _cycle_cells(
     return list(candidates.values()), cells
 
 
-def _dataset_cells(stores: Stores, name: str, bank: Bank, wanted: Mapping[str, int]) -> ScopeCells:
-    """A column is a CONFIGURATION's population: the archive names no individual or walk, so no
-    ``RoleScope``; a served read, it remembers every campaign's answers as filed."""
-    scorer = dataset_scorer(resolve_dataset(stores, name))
+def _dataset_cells(
+    stores: Stores, scorer: Scorer, bank: Bank, wanted: Mapping[str, int]
+) -> ScopeCells:
+    """A column is a CONFIGURATION's population: the archive names no individual or walk, so no ``RoleScope``."""
     archive = stores.archive
     sigs = archive.cell_signatures()
     candidates: list[CellCandidate] = []
@@ -636,6 +640,7 @@ def measurement_log(
         scope=cells.scope,
         order=page.order,
         ruler=page.view.ruler,
+        fitness_unit=page.fitness_unit,
         samples=samples,
         never_hit=spreads["never"],
         partly_hit=spreads["partly"],

@@ -11,8 +11,8 @@ from promptpotter.application.views.render.primitives import (
     YELLOW,
     fmt_ci,
     fmt_field_accuracy,
-    fmt_pct,
 )
+from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.arms import Broken, Concluded, Cut, arm_elimination, arm_end
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.cell_fold import ScoreSummary
@@ -77,8 +77,8 @@ def individual_summary(
             detail_lines=(),
         )
 
-    ci = fmt_ci(fold.mean_fitness_ci_lo, fold.mean_fitness_ci_hi, spec="{:.1%}")
-    tag = f"{fmt_pct(fold.accuracy)} {ci}"
+    ci = fmt_ci(fold.mean_fitness_ci_lo, fold.mean_fitness_ci_hi, spec="{:.3f}")
+    tag = f"fitness {fold_fitness_text(fold)} {ci}"
 
     cut = report.reason if isinstance(report, Cut) else None
     if cut is not None:

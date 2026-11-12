@@ -61,7 +61,7 @@ are the ones its luck rode. What the bar does not test is
 - potter's `pobb` `epsilon` (`0.15` in its manifest), under 0.5. A stop ends measurement; it is **not** a verdict and never removes the candidate from the election (`is_leader_eligible`). **A stopped arm buys no cell after its stop**: the election reads it on its draw (`runner/measurement.py::measure_population`) and no `PanelTrigger` seats it on the origin panel (`runner/overlap.py::panel_triggers`); only a stopped arm the election PICKS is topped up, as every line member is.
 - potter's `theta_election` `admission` (`0.85` in its manifest) — the election's own bar (§ The θ rule), and PoBB's lock-in.
 - potter's `pobb` `epsilon_floor` — ε at `elimination_n_min`, ramping linearly to `epsilon` over the next `elimination_n_min` cells read (`PoBBCheck.epsilon_at`). Equal to `epsilon` (as shipped) = a flat bar. **The bar ramps IN only, and nothing guards the tail** — else every late loser spends its budget; the price is that `PairedReading.reference_level` refuses an arm stopped short of a parent cell (`selected_by_stop`), so it ranks on θ alone. Aggression belongs here, never in `elimination_n_min`; a floor above `epsilon` goes flat and `epsilon_floor_inverted` reports it.
-- `OptimizationConfig.elimination_n_min` (default `6`) — the one min-samples floor, gating PoBB **and** ruler warmth (δ≡0 ⇒ θ = logit-accuracy until this many grade-A samples bank): difficulty and ability become trustworthy at one threshold.
+- `OptimizationConfig.elimination_n_min` (default `6`) — the one min-samples floor, gating PoBB **and** ruler warmth (δ≡0 ⇒ θ = logit-fitness until this many grade-A samples bank): difficulty and ability become trustworthy at one threshold.
 
 ## The full elimination ladder
 
@@ -69,7 +69,7 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
-| 1 | **Validation skip** — `Proposal.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `ArmState.validation_failures` → `l1_wounds` | `runner/measurement.py::_open_arm` |
+| 1 | **Validation skip** — a fatal `Proposal.validation_failures` (`Proposal.refused`) | pre-score | — | opens no walk: no cell, no backend call, keyed by its slot | `ArmState.validation_failures` → `l1_wounds` | `runner/measurement.py::_open_arm` |
 | 2 | **Stale-data protocol** — a cached result classifies infra or fatal (`is_deprecated`); a repaired, answered row replays | every degraded query | — | annotated + possibly re-measured / swapped | — | `scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |

@@ -9,7 +9,7 @@ export function primaryMetric(
   elected?: DisplayMetric,
 ): DisplayMetric {
   if (elected && metrics.has(elected)) return elected;
-  return wordKeys(DISPLAY_METRIC_INFO).find((m) => metrics.has(m)) ?? "accuracy";
+  return wordKeys(DISPLAY_METRIC_INFO).find((m) => metrics.has(m)) ?? "fitness";
 }
 
 export function metricLevel(
