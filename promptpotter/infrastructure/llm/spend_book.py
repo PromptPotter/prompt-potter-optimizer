@@ -24,7 +24,6 @@ from promptpotter.domain.spend import (
     METER_PRICES_REPLAYS,
     MONEY_AXES,
     NESTED_NODE_PREFIX,
-    NOTHING_METERED,
     Budget,
     CeilingMeter,
     KeySource,
@@ -208,6 +207,7 @@ class SpendBook(Projection):
         declared: Budget,
         share: Budget | LiveCycle,
         reserve: Budget | RunHold,
+        hold_id: str | None,
         meters: CeilingMeter,
         opened: float,
         cycle: LiveCycle | None = None,
@@ -216,12 +216,12 @@ class SpendBook(Projection):
         self.declared = declared.only(CYCLE_AXES)
         self.share = share
         self.reserve_of = reserve
+        # The job's hold its calls draw on; ``None`` on a book no job holds.
+        self.hold_id = hold_id
         self.cycle = cycle
         self.meters = meters
         # The launch's ``time.monotonic()``: a book re-armed mid-launch keeps its clock.
         self.opened = opened
-        # Keyed by node, not kind: the bucket a send files under changes who pays, not its cost.
-        self._billed_most: dict[str, tuple[float, int]] = {}
         # The cycle's OWN, in the meter's units: never a figure to print as spent.
         self.usd_metered = 0.0
         self.tokens_spent = 0
@@ -264,11 +264,6 @@ class SpendBook(Projection):
     def reserve(self) -> Budget:
         held = self.reserve_of
         return held if isinstance(held, Budget) else held.bound()
-
-    @property
-    def hold_id(self) -> str | None:
-        """The run's hold its calls draw on; ``None`` on a book no run holds."""
-        return None if isinstance(self.reserve_of, Budget) else self.reserve_of.hold_id
 
     def root(self) -> SpendBook:
         return self if self.enclosing is None else self.enclosing.root()
@@ -380,47 +375,26 @@ class SpendBook(Projection):
         return None
 
     def _room(
-        self,
-        held: SendBound,
-        bound: SendBound,
-        beside: TokenUsageKind | None,
-        paid_by: KeySource,
+        self, bound: SendBound, beside: TokenUsageKind | None, paid_by: KeySource
     ) -> Iterator[tuple[ErrorCategory, bool, int]]:
-        """The campaign's share binds every send it meters; the coupon's reserve every one on the box's key."""
+        """The campaign's share binds every send it meters; the coupon's reserve every one on the
+        box's key; each holds the send's whole bound."""
         budget = self.allotment
         reserved = self.reserve if draws_coupon(paid_by) else Budget()
-        for reserve, limit, used, out, each in (
-            (False, budget.usd, self._usd_used(), self._held_usd, held.usd),
-            (True, reserved.usd, self._coupon_usd_used(), self._out_usd, bound.usd),
+        for reserve, limit, used, out in (
+            (False, budget.usd, self._usd_used(), self._held_usd),
+            (True, reserved.usd, self._coupon_usd_used(), self._out_usd),
         ):
             if limit is not None:
                 left = limit - used - sum(v for k, v in out.items() if k != beside)
-                yield ErrorCategory.SPEND_CEILING, reserve, _admits(left, each, reserve)
-        for reserve, limit_t, used_t, out_t, each_t in (
-            (False, budget.tokens, self._tokens_used(), self._held_tokens, held.tokens),
-            (True, reserved.tokens, self._coupon_tokens_used(), self._out_tokens, bound.tokens),
+                yield ErrorCategory.SPEND_CEILING, reserve, _admits(left, bound.usd, reserve)
+        for reserve, limit_t, used_t, out_t in (
+            (False, budget.tokens, self._tokens_used(), self._held_tokens),
+            (True, reserved.tokens, self._coupon_tokens_used(), self._out_tokens),
         ):
             if limit_t is not None:
                 left_t = limit_t - used_t - sum(v for k, v in out_t.items() if k != beside)
-                yield ErrorCategory.TOKEN_CEILING, reserve, _admits(left_t, each_t, reserve)
-
-    def held_at(self, label: CallLabel, bound: SendBound) -> SendBound:
-        most = self._billed_most.get(label.node)
-        if most is None or bound.usd is None or bound.tokens is None:
-            return bound
-        return SendBound(
-            input_tokens=0,
-            output_tokens=min(bound.tokens, most[1]),
-            usd=min(bound.usd, most[0]),
-        )
-
-    def learn(self, label: CallLabel, bill: Budget) -> None:
-        usd, tokens = bill.usd_amount, bill.token_amount
-        # A bill of nothing is a send the provider never ran: it teaches nothing.
-        if usd <= 0.0 and tokens <= 0:
-            return
-        was = self._billed_most.get(label.node, (0.0, 0))
-        self._billed_most[label.node] = (max(was[0], usd), max(was[1], tokens))
+                yield ErrorCategory.TOKEN_CEILING, reserve, _admits(left_t, bound.tokens, reserve)
 
     def take_up(self, ledger: Path) -> Unreported:
         """The cycle's own prior, once at open: each bill counted as its send's was, a nested
@@ -431,52 +405,32 @@ class SpendBook(Projection):
         self.usd_unreported, self.tokens_unreported = left.usd, left.tokens
         self.off_coupon_usd += left.off_coupon_usd
         self.off_coupon_tokens += left.off_coupon_tokens
-        for label, usd, tokens in left.dearest:
-            self.learn(label, Budget.amount(usd, tokens))
         return left
 
     # These two plan cells alone, on what the cell's connector declares pays it.
     def fits(
-        self,
-        held: SendBound,
-        bound: SendBound,
-        *,
-        paid_by: KeySource,
-        kind: TokenUsageKind | None = None,
+        self, bound: SendBound, *, paid_by: KeySource, kind: TokenUsageKind | None = None
     ) -> int:
         """*kind*'s own holds out are the caller's to count; the share binds only a kind it meters,
         as `refuse_unless_room` refuses. ``None`` counts every side and every hold."""
         return min(
             (
                 n
-                for _, reserve, n in self._room(held, bound, kind, paid_by)
+                for _, reserve, n in self._room(bound, kind, paid_by)
                 if reserve or kind is None or self.binds(kind)
             ),
             default=sys.maxsize,
         )
 
-    def binding(
-        self,
-        held: SendBound,
-        bound: SendBound,
-        *,
-        paid_by: KeySource,
-        beside: TokenUsageKind | None = None,
-    ) -> SendBound:
-        sides = sorted(self._room(held, bound, beside, paid_by), key=lambda side: side[2])
-        return bound if sides and sides[0][1] else held
-
     def hold(
         self,
-        held: SendBound,
         bound: SendBound,
         kind: TokenUsageKind,
         *,
         what: str,
         reservation: CellReservation | None,
         paid_by: KeySource,
-    ) -> bool:
-        """True where an open cell reservation in this book's chain paid part of it."""
+    ) -> None:
         levels = list(self._levels(kind))
         if (fault := next((b.unmetered for b, _ in levels if b.unmetered), None)) is not None:
             raise fault
@@ -491,12 +445,11 @@ class SpendBook(Projection):
             None,
         )
         for book, filed_as in levels if at is None else levels[:at]:
-            book.refuse_unless_room(held, bound, filed_as, what, paid_by)
+            book.refuse_unless_room(bound, filed_as, what, paid_by)
         if at is not None and reservation is not None:
-            reservation.draw(held, bound, what, paid_by)
+            reservation.draw(bound, what, paid_by)
         for book, filed_as in levels:
-            book._move(filed_as, held, bound, 1, paid_by)
-        return at is not None
+            book._move(filed_as, bound, 1, paid_by)
 
     def _levels(self, kind: TokenUsageKind) -> Iterator[tuple[SpendBook, TokenUsageKind]]:
         """This book and every book enclosing it, each with the kind it files *kind* as, where it
@@ -507,41 +460,29 @@ class SpendBook(Projection):
                 yield book, kind
             book, kind = book.enclosing, _ENCLOSED
 
-    def _move(
-        self,
-        kind: TokenUsageKind,
-        held: SendBound,
-        bound: SendBound,
-        sign: int,
-        paid_by: KeySource,
-    ) -> None:
+    def _move(self, kind: TokenUsageKind, bound: SendBound, sign: int, paid_by: KeySource) -> None:
         if self.binds(kind):
-            self._held_usd[kind] = self._held_usd.get(kind, 0.0) + sign * (held.usd or 0.0)
-            self._held_tokens[kind] = self._held_tokens.get(kind, 0) + sign * (held.tokens or 0)
+            self._held_usd[kind] = self._held_usd.get(kind, 0.0) + sign * (bound.usd or 0.0)
+            self._held_tokens[kind] = self._held_tokens.get(kind, 0) + sign * (bound.tokens or 0)
         # What is out against the reserve: a send on the account's own key holds none of it.
         if draws_coupon(paid_by):
             self._out_usd[kind] = self._out_usd.get(kind, 0.0) + sign * (bound.usd or 0.0)
             self._out_tokens[kind] = self._out_tokens.get(kind, 0) + sign * (bound.tokens or 0)
 
     def refuse_in_chain(
-        self,
-        held: SendBound,
-        bound: SendBound,
-        kind: TokenUsageKind,
-        what: str,
-        paid_by: KeySource,
+        self, bound: SendBound, kind: TokenUsageKind, what: str, paid_by: KeySource
     ) -> None:
         for book, filed_as in self._levels(kind):
-            book.refuse_unless_room(held, bound, filed_as, what, paid_by)
+            book.refuse_unless_room(bound, filed_as, what, paid_by)
 
     def refuse_unless_room(
-        self, held: SendBound, bound: SendBound, kind: TokenUsageKind, what: str, paid_by: KeySource
+        self, bound: SendBound, kind: TokenUsageKind, what: str, paid_by: KeySource
     ) -> None:
         """*kind* as this book files it: the share refuses only a send it meters."""
         self.refuse_unpriced(bound, kind, what, paid_by)
-        for category, reserve, n in self._room(held, bound, None, paid_by):
+        for category, reserve, n in self._room(bound, None, paid_by):
             if n < 1 and (reserve or self.binds(kind)):
-                refusal = self._refusal(category, reserve, bound if reserve else held, what)
+                refusal = self._refusal(category, reserve, bound, what)
                 if reserve:
                     # Whether a key of the account's own would pay this send is not the book's to know.
                     raise HostAllowanceExhaustedError(
@@ -605,22 +546,16 @@ class SpendBook(Projection):
             f"{self.set_aside_tokens:,} set aside for the bench"
         )
 
-    def release(
-        self, held: SendBound, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource
-    ) -> None:
+    def release(self, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource) -> None:
         for book, filed_as in self._levels(kind):
-            book._move(filed_as, held, bound, -1, paid_by)
+            book._move(filed_as, bound, -1, paid_by)
 
-    def unpriced(
-        self, held: SendBound, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource
-    ) -> None:
-        self.release(held, bound, kind, paid_by)
+    def unpriced(self, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource) -> None:
+        self.release(bound, kind, paid_by)
         self.keep_held(_amount(bound.usd or 0.0, 0), kind, paid_by)
 
-    def unreported(
-        self, held: SendBound, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource
-    ) -> None:
-        self.release(held, bound, kind, paid_by)
+    def unreported(self, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource) -> None:
+        self.release(bound, kind, paid_by)
         self.keep_held(bound, kind, paid_by)
 
     def keep_held(self, bound: SendBound, kind: TokenUsageKind, paid_by: KeySource) -> None:
@@ -670,6 +605,7 @@ def unbounded_spend_book() -> SpendBook:
         declared=Budget(),
         share=Budget(),
         reserve=Budget(),
+        hold_id=None,
         meters="bill",
         opened=time.monotonic(),
     )
@@ -709,45 +645,26 @@ class CellReservation:
     """In memory only: a reservation is no send, so it writes no ledger record."""
 
     def __init__(
-        self,
-        book: SpendBook,
-        kind: TokenUsageKind,
-        held: SendBound,
-        bound: SendBound,
-        paid_by: KeySource,
+        self, book: SpendBook, kind: TokenUsageKind, bound: SendBound, paid_by: KeySource
     ) -> None:
         self.book = book
         self.kind = kind
         self.paid_by = paid_by
-        self.held_usd = held.usd or 0.0
-        self.held_tokens = held.tokens or 0
         self.usd = bound.usd or 0.0
         self.tokens = bound.tokens or 0
-        # ``None`` once a send inside closed without a price: nobody knows what the cell cost.
-        self.billed: Budget | None = NOTHING_METERED
 
-    def closed(self, bill: Budget | None) -> None:
-        self.billed = None if bill is None or self.billed is None else self.billed.plus(bill)
-
-    def draw(self, held: SendBound, bound: SendBound, what: str, paid_by: KeySource) -> None:
+    def draw(self, bound: SendBound, what: str, paid_by: KeySource) -> None:
         """The rest is admitted against the ceiling: it stops a cell, never the estimate."""
-        held_usd = min(self.held_usd, held.usd or 0.0)
-        held_tokens = min(self.held_tokens, held.tokens or 0)
         usd, tokens = min(self.usd, bound.usd or 0.0), min(self.tokens, bound.tokens or 0)
-        short_held = _amount((held.usd or 0.0) - held_usd, (held.tokens or 0) - held_tokens)
         short = _amount((bound.usd or 0.0) - usd, (bound.tokens or 0) - tokens)
-        if short_held.usd or short_held.tokens or short.usd or short.tokens:
+        if short.usd or short.tokens:
             self.book.refuse_in_chain(
-                short_held, short, self.kind, f"{what}, past its cell's reservation", paid_by
+                short, self.kind, f"{what}, past its cell's reservation", paid_by
             )
-        self.held_usd -= held_usd
-        self.held_tokens -= held_tokens
         self.usd -= usd
         self.tokens -= tokens
         # What the cell reserved, on its connector's payer, now held by the send that drew it.
-        self.book.release(
-            _amount(held_usd, held_tokens), _amount(usd, tokens), self.kind, self.paid_by
-        )
+        self.book.release(_amount(usd, tokens), self.kind, self.paid_by)
 
 
 def reservation_left() -> SendBound:
@@ -761,28 +678,15 @@ def reserved(label: CallLabel, bound: SendBound, *, paid_by: KeySource) -> Itera
     """``bound`` is the run a cell DECLARES, never its worst case, which fits one cell at a time."""
     label = filed(label)
     book = _bound_book(label.node)
-    held = book.held_at(label, bound)
     book.hold(
-        held,
-        bound,
-        label.kind,
-        what=label.node,
-        reservation=run_scope().reservation,
-        paid_by=paid_by,
+        bound, label.kind, what=label.node, reservation=run_scope().reservation, paid_by=paid_by
     )
-    reservation = CellReservation(book, label.kind, held, bound, paid_by)
+    reservation = CellReservation(book, label.kind, bound, paid_by)
     try:
         with scoped(reservation=reservation):
             yield
     finally:
-        book.release(
-            _amount(reservation.held_usd, reservation.held_tokens),
-            _amount(reservation.usd, reservation.tokens),
-            label.kind,
-            paid_by,
-        )
-        if reservation.billed is not None:
-            book.learn(label, reservation.billed)
+        book.release(_amount(reservation.usd, reservation.tokens), label.kind, paid_by)
 
 
 class Billed(NamedTuple):
@@ -840,13 +744,8 @@ class Admission:
         # Priced parts no ledger record carries yet, metered straight into the book at its close.
         self._unlanded: list[_Part] = []
         self.closed = False
-        # What the send closed at, once every part of it was priced; ``None`` until then.
-        self.bill: Budget | None = None
-        self._held = book.held_at(label, bound)
         what = f"{label.node} on {model}" if model else label.node
-        self.drew = book.hold(
-            self._held, bound, label.kind, what=what, reservation=reservation, paid_by=paid_by
-        )
+        book.hold(bound, label.kind, what=what, reservation=reservation, paid_by=paid_by)
         _OUT.add(self._hold_id)
         account_held = False
         try:
@@ -855,7 +754,7 @@ class Admission:
             self._emit(held)
         except BaseException:
             self._finish()
-            book.release(self._held, bound, label.kind, paid_by)
+            book.release(bound, label.kind, paid_by)
             # Nothing was sent: the account's hold closes, or the account holds its bound forever.
             if account_held:
                 self._charges.append(Release(hold_id=self._hold_id))
@@ -966,13 +865,9 @@ class Admission:
         if unknown is not None:
             self._book.keep_held(unknown, self._label.kind, self._paid_by)
         if self._priced:
-            self._book.release(self._held, self._bound, self._label.kind, self._paid_by)
-            bill = Budget.amount(self._billed_usd, self._billed_tokens)
-            self._book.learn(self._label, bill)
-            if unknown is None:
-                self.bill = bill
+            self._book.release(self._bound, self._label.kind, self._paid_by)
         else:
-            self._book.unpriced(self._held, self._bound, self._label.kind, self._paid_by)
+            self._book.unpriced(self._bound, self._label.kind, self._paid_by)
         for record in self._unseen:
             self._book.count(record)
         for one in self._unlanded:
@@ -986,7 +881,7 @@ class Admission:
     def unreported(self) -> None:
         """Writes nothing: the hold stays open on the ledger, and the book keeps its bound held."""
         self._finish()
-        self._book.unreported(self._held, self._bound, self._label.kind, self._paid_by)
+        self._book.unreported(self._bound, self._label.kind, self._paid_by)
 
     def _finish(self) -> None:
         if self.closed:
@@ -1022,15 +917,12 @@ def admitted(
     finally:
         if not admission.closed:
             admission.unreported()
-        if admission.drew and reservation is not None:
-            reservation.closed(admission.bill)
 
 
 class Unreported(NamedTuple):
     usd: float
     tokens: int
     sends: int
-    dearest: tuple[tuple[CallLabel, float, int], ...] = ()
     # The part of the above held on the account's own keys, which its coupon never counts.
     off_coupon_usd: float = 0.0
     off_coupon_tokens: int = 0
@@ -1049,7 +941,6 @@ def unreported_on(ledger: Path) -> Unreported:
         sum(hold.bound.usd or 0.0 for hold in money),
         sum(hold.bound.tokens or 0 for hold in left),
         len(money),
-        tuple((CallLabel(node, kind), usd, tokens) for node, kind, usd, tokens in trail.dearest),
         off_coupon_usd=sum(hold.bound.usd or 0.0 for hold in own_money),
         off_coupon_tokens=sum(hold.bound.tokens or 0 for hold in own_left),
     )

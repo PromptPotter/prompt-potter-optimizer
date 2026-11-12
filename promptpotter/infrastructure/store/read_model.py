@@ -40,7 +40,6 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     PaidSpend,
     SpendRollup,
-    TokenUsageKind,
     UserSpend,
     draws_coupon,
     metered,
@@ -807,8 +806,6 @@ class Money(NamedTuple):
     # The holds a bill closed in tokens alone, naming neither a provider's figure nor a rate's
     # price: the bound's money stays held.
     unpriced: tuple[Hold, ...]
-    # Each priced hold's bills, summed, by the node and kind it was held as.
-    dearest: tuple[tuple[str, TokenUsageKind, float, int], ...]
     bills: tuple[Bill, ...]
     # Every call, a replay included, as each meter counts it.
     usage: tuple[TokenUsageRecord, ...]
@@ -840,21 +837,28 @@ class Money(NamedTuple):
         )
 
     def held_back(self, excluding: str | None) -> Budget:
-        """What the open holds on the account alone still hold of its coupon: each its bound less
-        what was billed under it, never below nothing (a bill past it is drawn all the same). An
-        axis a bound leaves open holds nothing."""
-        usd, tokens = 0.0, 0
+        """What the open holds on the account still hold of its coupon, from each root but
+        *excluding*: a bounded axis its bound less what was billed under it, never below nothing
+        (a bill past it is drawn all the same); an unbounded one what its open children hold."""
+        under: dict[str | None, list[Hold]] = {}
         for hold in self.open.values():
-            if hold.parent is not None or hold.hold_id == excluding:
-                continue
-            if not draws_coupon(hold.key_source):
-                continue
+            if draws_coupon(hold.key_source) and hold.hold_id != excluding:
+                under.setdefault(hold.parent, []).append(hold)
+
+        def kept(hold: Hold) -> tuple[float, int]:
+            below = [kept(child) for child in under.get(hold.hold_id, [])]
             bound, billed = hold.bound, self.drawn.get(hold.hold_id, NOTHING_PAID).host
-            if bound.usd is not None:
-                usd += max(0.0, bound.usd - billed.at_most_usd)
-            if bound.tokens is not None:
-                tokens += max(0, bound.tokens - billed.at_most_tokens)
-        return Budget.amount(usd, tokens)
+            return (
+                sum(u for u, _ in below)
+                if bound.usd is None
+                else max(0.0, bound.usd - billed.at_most_usd),
+                sum(t for _, t in below)
+                if bound.tokens is None
+                else max(0, bound.tokens - billed.at_most_tokens),
+            )
+
+        roots = [kept(hold) for hold in under.get(None, [])]
+        return Budget.amount(sum(u for u, _ in roots), sum(t for _, t in roots))
 
 
 class _Money:
@@ -869,8 +873,6 @@ class _Money:
         self._drawn: dict[str, PaidSpend] = {}
         self._holds: dict[str, Hold] = {}
         self._unpriced: dict[str, Hold] = {}
-        self._labels: dict[str, tuple[str, TokenUsageKind]] = {}
-        self._dearest: dict[str, tuple[float, int]] = {}
         self._bills: list[Bill] = []
         self._usage: list[TokenUsageRecord] = []
         self._usd: dict[CeilingMeter, float] = dict.fromkeys(get_args(CeilingMeter), 0.0)
@@ -885,7 +887,6 @@ class _Money:
         self._view = None
         match record:
             case SpendHoldRecord():
-                self._labels[record.hold.hold_id] = (record.node, record.kind)
                 self._hold(record.hold)
             case Hold():
                 self._hold(record)
@@ -918,9 +919,6 @@ class _Money:
         self._open.pop(hold_id, None)
         if hold_id in self._holds and usd is None:
             self._unpriced[hold_id] = self._holds[hold_id]
-        if hold_id in self._labels and usd is not None:
-            usd_was, tokens_was = self._dearest.get(hold_id, (0.0, 0))
-            self._dearest[hold_id] = (usd_was + usd, tokens_was + bill.tokens)
 
     def _call(self, usage: TokenUsageRecord) -> None:
         self._usage.append(usage)
@@ -944,11 +942,6 @@ class _Money:
                 dict(self._holds),
                 dict(self._drawn),
                 tuple(self._unpriced.values()),
-                tuple(
-                    (*self._labels[hold_id], usd, tokens)
-                    for hold_id, (usd, tokens) in self._dearest.items()
-                    if hold_id not in self._unpriced
-                ),
                 tuple(self._bills),
                 tuple(self._usage),
                 {m: Budget.amount(self._usd[m], self._tokens[m]) for m in self._usd},

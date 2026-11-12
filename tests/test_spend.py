@@ -90,6 +90,7 @@ from promptpotter.application.jobs.launcher.admission import (
     RunStart,
     admit_and_share,
     open_spend_book,
+    paid_call,
     paid_pass,
     slotless_share,
 )
@@ -104,7 +105,6 @@ from promptpotter.application.jobs.quota import (
     cycle_share,
     hold_moved,
     hold_run,
-    paid_call,
 )
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
 from promptpotter.application.jobs.registry import JobRegistry
@@ -165,7 +165,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun, PaidCall
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.proxies import (
     OuterSampleProxies,
@@ -233,7 +233,7 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.domain.validators import StopSignal
 from promptpotter.domain.verification import RescoreCount
-from promptpotter.infrastructure.backend import CELL, BackendClient
+from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, pricing, telemetry
@@ -258,7 +258,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     admitted,
     replied,
     reserved,
-    unbounded_spend_book,
     unreported_on,
 )
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
@@ -443,7 +442,7 @@ async def _grade_twice(
     judge = JudgeStage(model="grader-1", provider="openai")
     (ev,) = build_evaluators({"answer": JudgeSpec(name="sealqa", stages=[judge])}, beside=())
     graded = CycleEventLog(tmp_path / "graded.jsonl")
-    with _billing_on(graded, unbounded_spend_book()), scoped(judge_cache=cache):
+    with _billing_on(graded, spend_book()), scoped(judge_cache=cache):
         for _ in range(2):
             row = MeasuredCell(sample_key="k0", query="who?", predicted="Ada", ground_truth="Ada")
             computed = ev.compute(result=row, schema=None)
@@ -584,7 +583,7 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         return RateCeiling(tiers=(PriceTier(0, 0.5, 0.25),))
 
     async def send(host: str, asked: dict[str, Any]) -> None:
-        with scoped(book=unbounded_spend_book(), send_budget=SendBudget(None, attempts=1)):
+        with scoped(book=spend_book(), send_budget=SendBudget(None, attempts=1)):
             await keyed_client(host).chat(
                 ChatRequest(_MESSAGES, "m", **asked), label=CallLabel("l1", "optimizer")
             )
@@ -617,7 +616,7 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         raise CellUnscoreableError("verifier timed out", spent=spent)
 
     cells = CycleEventLog(tmp_path / "cells.jsonl")
-    unbounded = unbounded_spend_book()
+    unbounded = spend_book()
     session = loop_session(
         workspace(tmp_path / "ungraded"),
         pipeline_schema([]),
@@ -1258,7 +1257,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
 
     # Another campaign's run banks both replies; this arm only ever replays them.
     telemetry.bind_priced(set())
-    with _billing_on(CycleEventLog(tmp_path / "other.jsonl"), unbounded_spend_book()):
+    with _billing_on(CycleEventLog(tmp_path / "other.jsonl"), spend_book()):
         await round_calls()
 
     reread = samples(4)
@@ -1714,7 +1713,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     )
     beside = _armed(built_stores, fork_b, held_b)
     eighth = SendBound(input_tokens=0, output_tokens=0, usd=0.125)
-    assert beside.fits(eighth, eighth, paid_by="host") == 4, (
+    assert beside.fits(eighth, paid_by="host") == 4, (
         "fork b's book spends what fork a still holds: two forks, two ceilings"
     )
     # A third fork is refused: its siblings hold the ceiling whole.
@@ -1774,7 +1773,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     assert (book_a.allotment.usd, share(held_a), share(held_b6)) == (1.0, 1.0, 2.0), (
         "a raised ceiling handed one cycle what its sibling holds: the two may spend past it"
     )
-    assert book_a.fits(eighth, eighth, paid_by="host") == 8, (
+    assert book_a.fits(eighth, paid_by="host") == 8, (
         "A's live book binds on another share than it holds"
     )
     # One campaign's money axis binds every live cycle or none, whichever arrived first.
@@ -2075,44 +2074,31 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "a run past its wall clock was not stopped on it"
     )
 
-    # The reserve holds a send's bound, and the ceiling what such sends bill.
-    cell = CallLabel("cell", "backend")
+    # Every level holds a send's whole bound, whatever such sends billed before.
     worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.125)
-    for reserve, depth in ((0.5, 4), (None, 16), (1.0, 8)):
+    for reserve in (0.5, None, 1.0):
         own = spend_book(0.5, usd_reserve=reserve)
-        assert own.fits(worst, worst, paid_by="host") == 4, (
-            f"reserve {reserve}: nothing billed yet, the bound holds"
-        )
-        own.learn(cell, Budget.amount(0.03125, 100))
-        own.learn(cell, Budget.amount(0.0, 0))
-        held = own.held_at(cell, worst)
-        assert own.fits(held, worst, paid_by="host") == depth, (
-            f"reserve {reserve}: held at its bound against both, a ceiling a few bounds wide "
-            "walks one cell at a time"
-        )
-        for _ in range(depth):
-            own.hold(held, worst, "backend", what="cell", reservation=None, paid_by="host")
+        assert own.fits(worst, paid_by="host") == 4, f"reserve {reserve}: the bound holds"
+        for _ in range(4):
+            own.hold(worst, "backend", what="cell", reservation=None, paid_by="host")
         with pytest.raises(SendRefusedError):
-            own.hold(held, worst, "backend", what="cell", reservation=None, paid_by="host")
+            own.hold(worst, "backend", what="cell", reservation=None, paid_by="host")
         billed = 0
         while own.exhausted() is None:
-            own.release(held, worst, "backend", "host")
+            own.release(worst, "backend", "host")
             own.usd_metered += worst.usd or 0.0
             billed += 1
         assert billed == 4, f"reserve {reserve}: the run stops on reaching its ceiling"
-        assert reserve is None or own.usd_metered + (depth - billed) * 0.125 <= reserve, (
-            f"reserve {reserve}: a burst billed past the reserve"
-        )
     owed = spend_book(0.5)
     owed.usd_unreported = 0.125
-    assert owed.fits(worst, worst, paid_by="host") == 3, "a send no bill priced left its room open"
+    assert owed.fits(worst, paid_by="host") == 3, "a send no bill priced left its room open"
     owed.set_aside(0.25, 0)
-    assert owed.fits(worst, worst, paid_by="host") == 1, (
+    assert owed.fits(worst, paid_by="host") == 1, (
         "the search could spend what the bench was set aside"
     )
     assert owed.exhausted() is None, "a set-aside read as spent"
     owed.usd_metered = 0.125
-    assert owed.fits(worst, worst, paid_by="host") == 0 and owed.exhausted() is not None, (
+    assert owed.fits(worst, paid_by="host") == 0 and owed.exhausted() is not None, (
         "a send's room is the ceiling less EVERYTHING owed: bills, unpriced sends, the set-aside"
     )
 
@@ -2128,7 +2114,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             for _ in range(2):
                 with pytest.raises(pricing.PriceListUnreachableError) as outage:
                     await base.hold_ceiling("vendor/model-x", "openrouter")
-        with scoped(book=unbounded_spend_book()):
+        with scoped(book=spend_book()):
             assert await base.hold_ceiling("vendor/model-x", "openrouter") is None, (
                 "an unbounded book refused a send over a list it never needs"
             )
@@ -2160,8 +2146,8 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     fresh.count(replay(0.09))
     pass_bound = SendBound(input_tokens=100, output_tokens=100, usd=5.0)
     # On the account's own key: one on the box's would meet the reserve (B2).
-    fresh.hold(pass_bound, pass_bound, "bench", what="bench pass", reservation=None, paid_by="user")
-    fresh.release(pass_bound, pass_bound, "bench", "user")
+    fresh.hold(pass_bound, "bench", what="bench pass", reservation=None, paid_by="user")
+    fresh.release(pass_bound, "bench", "user")
     fresh.count(billed_call(5.0, kind="bench", node="b", output_tokens=1, key_source="user"))
     assert fresh.exhausted() is None, "the bench pass ate into the arm's search budget"
     # The pass's cells are backend cells filed as bench: admitted in the bucket they bill to.
@@ -2175,7 +2161,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     fresh.count(replay(0.02))
     small = SendBound(input_tokens=1, output_tokens=1, usd=0.02)
     with pytest.raises(SendRefusedError):
-        fresh.hold(small, small, "optimizer", what="o", reservation=None, paid_by="host")
+        fresh.hold(small, "optimizer", what="o", reservation=None, paid_by="host")
 
     # No burst of sends records spend past its ceiling.
     wire = _priced_wire(offline)
@@ -2288,14 +2274,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     room = (inner.money_left(), book.money_left())
     past_root = SendBound(input_tokens=0, output_tokens=0, usd=0.06)
     with pytest.raises(SendRefusedError):
-        inner.hold(
-            past_root,
-            past_root,
-            "optimizer",
-            what="past the root",
-            reservation=None,
-            paid_by="host",
-        )
+        inner.hold(past_root, "optimizer", what="past the root", reservation=None, paid_by="host")
     assert (inner.money_left(), book.money_left()) == room, (
         "a nested send past its ROOT's ceiling was admitted on its own book's room, or held "
         "half-way"
@@ -2370,7 +2349,6 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         ).settle(Billed(TokenAccount(input=600, output=100), None))
     assert book.usd_metered == spent_usd, "a bill naming tokens and no price read as free"
     assert book.usd_unreported == pytest.approx(held_usd + hold_usd), "it was not held at its bound"
-    assert book.held_at(nitro, cut) == cut, "a priceless bill taught the book a price"
     after = unreported_on(held_ledger.path)
     assert (after.sends, after.tokens) == (before.sends + 1, before.tokens), (
         "a priceless bill's hold was not counted as out"
@@ -2388,7 +2366,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
                     )
 
     wire.down = True
-    with scoped(book=unbounded_spend_book()):
+    with scoped(book=spend_book()):
         offline.llm.sent.clear()
         jumping_clock(two_rungs())
         attempts = len(offline.llm.sent)
@@ -2676,28 +2654,16 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     assert whole.usd is not None
     assert out.sends == 1 and out.usd < whole.usd / 100, f"a cancel left ${out.usd} unreported"
     assert purse.usd_unreported == pytest.approx(out.usd), "the book held another sum than is out"
-    assert purse.fits(whole, whole, paid_by="host") == 1, "a cell's bound was not reserved whole"
-    assert purse.held_at(CELL, whole) == whole, "a cut cell taught the book a price"
+    assert purse.fits(whole, paid_by="host") == 1, "a cell's bound was not reserved whole"
     cut_short[0] = False
     with _billing_on(turns_ledger, purse):
         jumping_clock(agent_cell(1))
-    episode_usd = sum(r.price.bill_or_rate_usd or 0.0 for r in _token_bills(turns_ledger)) - cut_usd
-    assert purse.held_at(CELL, whole).usd == pytest.approx(episode_usd), (
-        "a cell that ran to its end did not teach what such a cell bills"
-    )
     episode_bills = _token_bills(turns_ledger)[len(cut_bills) :]
     assert seams[-1].spent.input == sum(r.input_tokens for r in episode_bills), (
         "the cell's row counts other tokens than its sends billed"
     )
     assert seams[-1].cost_usd is None, (
         "sends that reported no cost summed to a REPORTED price: unknown, never a smaller one"
-    )
-    turn = CallLabel("agent", "backend")
-    resumed = spend_book(1.0, usd_reserve=None)
-    assert resumed.held_at(turn, whole) == whole, "a fresh book held a turn below its bound"
-    resumed.take_up(turns_ledger.path)
-    assert resumed.held_at(turn, whole) == purse.held_at(turn, whole) != whole, (
-        "a book armed over that ledger (a resume) holds a turn at its bound, not what turns billed"
     )
     # A resume counts each prior bill as its send did: an own key's off the coupon, a kind its
     # meter skips beside it on the box's key.
@@ -2730,7 +2696,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             await seam.call("turn")
         return seam
 
-    with scoped(book=unbounded_spend_book()):
+    with scoped(book=spend_book()):
         downed = jumping_clock(downed_turn())
     wire.down = False
     # Read before the trial's result: a send's fault decides alone.
@@ -3135,21 +3101,20 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     send = SendBound(input_tokens=1, output_tokens=1, usd=0.04)
     book.count(billed_call(1.0, key_source="user"))
     assert book.exhausted() is None, "a run spending its own key stopped at the host's coupon"
-    book.hold(send, send, "optimizer", what="o", reservation=None, paid_by="host")
+    book.hold(send, "optimizer", what="o", reservation=None, paid_by="host")
     with pytest.raises(HostAllowanceExhaustedError) as past:
-        book.hold(send, send, "optimizer", what="o", reservation=None, paid_by="host")
+        book.hold(send, "optimizer", what="o", reservation=None, paid_by="host")
     assert run_stop_reason(past.value) is StopReason.HOST_ALLOWANCE, (
         "a run stopped past the coupon read as another stop"
     )
-    book.hold(send, send, "optimizer", what="o", reservation=None, paid_by="user")
+    book.hold(send, "optimizer", what="o", reservation=None, paid_by="user")
     # A Compare arm's bench sends, which its meter does not count, still draw the coupon's reserve.
     graded = spend_book(None, usd_reserve=0.05, meters="search_incurred")
     graded.count(billed_call(0.03, kind="bench"))
     with pytest.raises(HostAllowanceExhaustedError):
-        graded.hold(send, send, "bench", what="b", reservation=None, paid_by="host")
+        graded.hold(send, "bench", what="b", reservation=None, paid_by="host")
     with pytest.raises(SendRefusedError) as unpriced:
         graded.hold(
-            send,
             SendBound(input_tokens=1, output_tokens=1, usd=None),
             "diagnostic",
             what="d",
@@ -3585,6 +3550,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         declared=Budget(),
         share=Budget(),
         reserve=RunHold(biller.charges, live.job_id),
+        hold_id=live.job_id,
         meters="bill",
         opened=time.monotonic(),
     )
@@ -3608,8 +3574,17 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.15), (
         "an ended run kept its reserve, or the send it left open went unread"
     )
+    # A call on no run is held under its own job, which holds what its calls out hold.
+    chat = billing.create(
+        user_id="sub-6",
+        principal_id="sub-6",
+        workspace=biller.campaigns.workspace,
+        hop=UNRESOLVED_HOP,
+        holder=PaidCall("turn"),
+    )
+    _admitted(biller, billing, chat.job_id, Budget())
     biller.charges.append(
-        Hold(hold_id="turn", parent=None, key_source="host", bound=Budget(usd=0.04))
+        Hold(hold_id="turn", parent=chat.job_id, key_source="host", bound=Budget(usd=0.04))
     )
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.11), (
         "a call on no run held nothing of the coupon"
@@ -3624,11 +3599,16 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     )
     _admitted(biller, billing, crashed.job_id, Budget(usd=0.05))
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.06)
+    unreported = money_on(biller.charges.path).unreported.host.unreported_usd
     with monkeypatch.context() as dead:
         dead.setattr(registry_module, "producer_alive", lambda *_: False)
         assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.11), (
             "a crashed run held the coupon until a sweep"
         )
+    money = money_on(biller.charges.path)
+    assert chat.job_id not in money.open and money.unreported.host.unreported_usd == (
+        pytest.approx(unreported + 0.04)
+    ), "a dead chat turn's open send stayed held, never read as unreported"
 
     # A head-to-head is one door: every arm planned, priced and admitted before any takes a key,
     # so a refused act leaves no arm behind; each arm runs the budget it declared, and a retry
@@ -4218,7 +4198,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
             chain.append(billed_call(0.1))
         for asking, book in (("root", outer), ("nested", nested)):
             with pytest.raises(ValueError, match="no rate for it"):
-                book.hold(bound, bound, "optimizer", what="next", reservation=None, paid_by="host")
+                book.hold(bound, "optimizer", what="next", reservation=None, paid_by="host")
                 pytest.fail(f"the {asking} book sent past a bill the {folding} fold left uncounted")
 
     # A campaign id is drawn again over a live campaign's dir, a tombstone's id, and an id a

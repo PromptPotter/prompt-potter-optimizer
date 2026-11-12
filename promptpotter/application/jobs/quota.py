@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 import time
-from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import NamedTuple, assert_never, get_args
 
@@ -39,6 +38,7 @@ from promptpotter.domain.job import (
     InnerRun,
     Job,
     JobHolder,
+    PaidCall,
     ScoringPass,
 )
 from promptpotter.domain.run_records import (
@@ -68,7 +68,7 @@ from promptpotter.domain.spend import (
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.llm.registry import providers
-from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
+from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.store.account_spend import account_bill, campaign_spend
 from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.infrastructure.store.stores import Stores, tenant_stores
@@ -87,7 +87,6 @@ from promptpotter.shared.identity import (
     acting_principal,
     has_capability,
 )
-from promptpotter.shared.run_scope import scoped
 from promptpotter.shared.worded import Worded
 
 logger = logging.getLogger(__name__)
@@ -164,6 +163,8 @@ def _slot_meter(stores: Stores, holder: JobHolder, hop: CycleHop) -> _Meter | No
             )
         case ScoringPass(verb=verb):
             return _verb_meter(stores, verb)
+        case PaidCall(bucket=bucket):
+            return _verb_meter(stores, bucket)
         # Neither asks the slot door: an embedded run is a declared exemption (`slotless_share`).
         case EmbeddedRun() | InnerRun():
             return None
@@ -310,7 +311,9 @@ def read_account_wallet(
     excluding_job_id: str | None = None,
     excluding_campaign: str | None = None,
 ) -> AccountWallet:
-    """What the coupon has left past every bill, less what each live run may still draw."""
+    """What the coupon has left past every bill, less what each live run may still draw. Each
+    dead producer's job closes first, so the bill and the holds read one book."""
+    reap_dead_runs(stores.projects_root, job_registry)
     coupon = read_coupon(stores)
     if coupon.unmetered:
         return AccountWallet(coupon, coupon.face)
@@ -792,55 +795,33 @@ def move_campaign_money(
         )
 
 
-def _admit_call(*, stores: Stores, bucket: str, provider: str) -> SpendBook:
-    """Its token taken in one step, so concurrent calls never share one; a refused book gives it back."""
-    meter = _verb_meter(stores, bucket)
-    if meter is None:
-        return _call_book(stores, provider)
-    if not _consume_rate_token(
-        meter.bucket, burst=settings.USER_RATE_BURST, per_s=settings.USER_RATE_PER_MIN / 60.0
-    ):
-        raise RateLimitedError(meter.refusal, retry_after_s=60.0 / settings.USER_RATE_PER_MIN)
-    try:
-        return _call_book(stores, provider)
-    except BaseException:
-        _debit_metered(meter, tokens=-1)
-        raise
-
-
-def _call_book(stores: Stores, provider: str) -> SpendBook:
-    # Nothing is reserved, nor refused up front: `keyed_client` refuses a send no key pays or one
-    # past a used-up coupon, and the book one past its headroom.
-    user = account_of(stores)
+def call_book(
+    stores: Stores, provider: str, *, job_registry: JobRegistry, hold_id: str
+) -> SpendBook:
+    """A paid call's book, its sends held under *hold_id*; read under the admission gate.
+    Nothing is refused up front: `keyed_client` refuses a send no key pays or one past a used-up
+    coupon, and the book one past its headroom."""
+    reserve = Budget()
     key = paying_key(stores.api_keys.load(), provider)
-    if key is None or not draws_coupon(key.paid_by):
-        return unbounded_spend_book()
-    wallet = read_account_wallet(
-        user=user,
-        stores=stores,
-        job_registry=JobRegistry.attach(stores.jobs_dir),
-    )
-    if wallet.coupon.unmetered:
-        return unbounded_spend_book()
-    if wallet.contended:
-        raise _contended("what this account has left")
+    if key is not None and draws_coupon(key.paid_by):
+        wallet = read_account_wallet(
+            user=account_of(stores),
+            stores=stores,
+            job_registry=job_registry,
+            excluding_job_id=hold_id,
+        )
+        if wallet.contended:
+            raise _contended("what this account has left")
+        if not wallet.coupon.unmetered:
+            reserve = wallet.headroom
     return SpendBook(
         declared=Budget(),
         share=Budget(),
-        reserve=wallet.headroom,
+        reserve=reserve,
+        hold_id=hold_id,
         meters="bill",
         opened=time.monotonic(),
     )
-
-
-@asynccontextmanager
-async def paid_call(*, stores: Stores, bucket: str, provider: str) -> AsyncIterator[SpendBook]:
-    """ONE LLM call on *provider*, on no cycle, slotless so a chat turn never queues behind
-    campaigns."""
-    # Offloaded: admission globs every cycle ledger.
-    book = await asyncio.to_thread(_admit_call, stores=stores, bucket=bucket, provider=provider)
-    with scoped(account=stores, book=book):
-        yield book
 
 
 def declare_run_budget(
@@ -1007,10 +988,8 @@ def reap_dead_runs(projects_root: Path, job_registry: JobRegistry) -> None:
 def _live_holds(
     stores: Stores, job_registry: JobRegistry, *, user_id: str, excluding_job_id: str | None
 ) -> Budget | None:
-    """What the open holds still hold of the coupon (`Money.held_back`), each dead producer's
-    closed first, so a box no sweep runs on frees it. ``None`` fails closed on an unstamped
-    sibling, whose hold is not written yet. Exclusion is by job, never by hop."""
-    reap_dead_runs(stores.projects_root, job_registry)
+    """What the open holds still hold of the coupon (`Money.held_back`). ``None`` fails closed on
+    an unstamped sibling, whose hold is not written yet. Exclusion is by job, never by hop."""
     running = job_registry.list_holding_spend(user_id=user_id)
     own = next((j for j in running if j.job_id == excluding_job_id), None)
     mine = None if own is None else (own.created_at, own.job_id)

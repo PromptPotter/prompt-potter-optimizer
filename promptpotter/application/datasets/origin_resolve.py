@@ -21,7 +21,7 @@ from promptpotter.application.datasets.origin_readiness import (
     origin_readiness,
     patch_at,
 )
-from promptpotter.application.jobs.quota import paid_call
+from promptpotter.application.jobs.launcher.admission import paid_call
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.checkin_draft import (
     DraftFile,

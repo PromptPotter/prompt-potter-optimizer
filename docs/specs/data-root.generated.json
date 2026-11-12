@@ -1878,6 +1878,31 @@
             "title": "InnerRun",
             "type": "object"
           },
+          "PaidCall": {
+            "additionalProperties": false,
+            "description": "One LLM call outside any run (a check-in, a chat turn): a hold, never a slot.",
+            "properties": {
+              "bucket": {
+                "enum": [
+                  "checkin",
+                  "turn"
+                ],
+                "title": "Bucket",
+                "type": "string"
+              },
+              "kind": {
+                "const": "paid_call",
+                "default": "paid_call",
+                "title": "Kind",
+                "type": "string"
+              }
+            },
+            "required": [
+              "bucket"
+            ],
+            "title": "PaidCall",
+            "type": "object"
+          },
           "Refusal": {
             "additionalProperties": false,
             "description": "A refusal as served: the rest of the answer it rides in serves on beside it.",
@@ -2020,6 +2045,7 @@
                 "campaign_launch": "#/$defs/CampaignLaunch",
                 "embedded_run": "#/$defs/EmbeddedRun",
                 "inner_run": "#/$defs/InnerRun",
+                "paid_call": "#/$defs/PaidCall",
                 "scoring_pass": "#/$defs/ScoringPass"
               },
               "propertyName": "kind"
@@ -2036,6 +2062,9 @@
               },
               {
                 "$ref": "#/$defs/InnerRun"
+              },
+              {
+                "$ref": "#/$defs/PaidCall"
               }
             ],
             "title": "Holder"

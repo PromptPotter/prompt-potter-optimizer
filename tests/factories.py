@@ -369,6 +369,7 @@ def spend_book(
         declared=Budget(wall_clock_s=wall_clock_s),
         share=Budget(usd=usd_cap),
         reserve=Budget(usd=usd_cap if usd_reserve is ... else usd_reserve),
+        hold_id=None,
         meters=meters,
         **spent,
     )

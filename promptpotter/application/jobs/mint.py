@@ -20,7 +20,7 @@ from promptpotter.application.free_tier import (
     outside_free_tier,
     refuse_outside_free_tier,
 )
-from promptpotter.application.jobs.quota import paid_call
+from promptpotter.application.jobs.launcher.admission import paid_call
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point

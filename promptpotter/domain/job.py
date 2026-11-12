@@ -66,6 +66,20 @@ class InnerRun:
     kind: Literal["inner_run"] = "inner_run"
 
 
+# Each paid call outside a run is its own rate bucket.
+CallBucket = Literal["checkin", "turn"]
+
+
+@dataclass(frozen=True)
+class PaidCall:
+    """One LLM call outside any run (a check-in, a chat turn): a hold, never a slot."""
+
+    __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+
+    bucket: CallBucket
+    kind: Literal["paid_call"] = "paid_call"
+
+
 # How a released job ended where no run returned a `StopReason`, stamped by its release alone
 # (`JobRegistry.release`): `refused` was never admitted; `withdrawn` left the queue unrun;
 # `orphaned` lost its producer.
@@ -74,7 +88,7 @@ JobLapse = Literal["refused", "withdrawn", "orphaned"]
 
 SlotHolder = Annotated[CampaignLaunch | ScoringPass, Field(discriminator="kind")]
 JobHolder = Annotated[
-    CampaignLaunch | ScoringPass | EmbeddedRun | InnerRun, Field(discriminator="kind")
+    CampaignLaunch | ScoringPass | EmbeddedRun | InnerRun | PaidCall, Field(discriminator="kind")
 ]
 
 
@@ -119,7 +133,7 @@ class Job:
         if self.ending is not None and self.lapse is not None:
             raise ValueError(f"job {self.job_id}: a run's ending or a lapse, never both")
         unsaid = self.released_at is not None and self.ending is None and self.lapse is None
-        if unsaid and not isinstance(self.holder, ScoringPass):
+        if unsaid and not isinstance(self.holder, ScoringPass | PaidCall):
             raise ValueError(f"job {self.job_id}: a released run names its ending")
 
     @property
@@ -136,6 +150,8 @@ class Job:
                 return f"an embedded run on {where if resolved else dataset}"
             case InnerRun(dataset_name=dataset):
                 return f"an inner run on {where if resolved else dataset}"
+            case PaidCall(bucket=bucket):
+                return f"a {bucket} call"
             case _:
                 assert_never(self.holder)
 
@@ -172,7 +188,7 @@ class Job:
 
     @property
     def holds_slot(self) -> bool:
-        return self.holds_spend and not isinstance(self.holder, EmbeddedRun | InnerRun)
+        return self.holds_spend and not isinstance(self.holder, EmbeddedRun | InnerRun | PaidCall)
 
 
 JOB_ADAPTER = TypeAdapter(Job)

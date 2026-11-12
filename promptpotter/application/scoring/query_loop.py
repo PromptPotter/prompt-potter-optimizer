@@ -632,13 +632,10 @@ class _ScoringPhase[K: Hashable]:
 
     def affordable(self) -> int:
         # Calls out are counted here, not read off the book: a cell launched this step holds nothing yet.
-        book, cell, label = self.book, self.cell, self.label
+        book, cell = self.book, self.cell
         if book is None or cell is None or self.unbounded:
             return sys.maxsize
-        return (
-            book.fits(book.held_at(label, cell), cell, paid_by=self.payer, kind=label.kind)
-            - self.out()
-        )
+        return book.fits(cell, paid_by=self.payer, kind=self.label.kind) - self.out()
 
     def live(self) -> list[Walk]:
         return [walk for walk in self.walks if walk is not None and walk.outcome is None]
@@ -860,7 +857,7 @@ class _ScoringPhase[K: Hashable]:
             await asyncio.sleep(HELD_POLL_S)
 
     async def wait(self, walk: Walk, armed: int) -> None:
-        book, cell, label = self.book, self.cell, self.label
+        book, cell = self.book, self.cell
         calls = self.outstanding()
         if not calls:
             if book is not None and cell is not None and self.affordable() == 0:
@@ -870,8 +867,7 @@ class _ScoringPhase[K: Hashable]:
                     walk.n,
                 )
                 # Raises the refusal `hold` would, naming the ceiling that binds, and holds nothing.
-                held = book.held_at(label, cell)
-                book.refuse_unless_room(held, cell, label.kind, NEXT_CELL, "host")
+                book.refuse_unless_room(cell, self.label.kind, NEXT_CELL, "host")
             raise RuntimeError(
                 f"scoring phase stalled: nothing out and nothing to take at query "
                 f"{len(walk.results)}/{walk.n}"
@@ -959,7 +955,7 @@ class _ScoringPhase[K: Hashable]:
             self.gauge.close()
 
     def reading(self) -> Flight:
-        backfills, book, cell, label = self.backfills, self.book, self.cell, self.label
+        backfills, book, cell = self.backfills, self.book, self.cell
         walking = self.live()
         parts = [walk.flight() for walk in walking]
         winding = sum(1 for call in self.draining if not call.done())
@@ -991,11 +987,5 @@ class _ScoringPhase[K: Hashable]:
                 if book is None or cell is None or self.unbounded
                 else max(0, self.affordable())
             ),
-            cell_usd=(
-                None
-                if book is None or cell is None
-                else book.binding(
-                    book.held_at(label, cell), cell, paid_by=self.payer, beside=label.kind
-                ).usd
-            ),
+            cell_usd=None if book is None or cell is None else cell.usd,
         )

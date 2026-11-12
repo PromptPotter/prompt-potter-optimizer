@@ -13,6 +13,7 @@ from promptpotter.application.account import account_of
 from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.quota import (
     admit_launch,
+    call_book,
     check_launch_quotas,
     declare_run_budget,
     hold_moved,
@@ -33,10 +34,12 @@ from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
+    CallBucket,
     CampaignLaunch,
     EmbeddedRun,
     InnerRun,
     Job,
+    PaidCall,
     ScoringPass,
     ScoringVerb,
     SlotHolder,
@@ -584,6 +587,7 @@ def open_spend_book(
         declared=held.admitted,
         share=held.share if hop is None else LiveCycle(stores.campaigns, hop),
         reserve=RunHold(stores.charges, held.job_id),
+        hold_id=held.job_id,
         meters=meters,
         opened=opened,
         cycle=LiveCycle(stores.campaigns, hop) if live and hop is not None else None,
@@ -651,6 +655,48 @@ async def slotless_share[S](
         raise
     start.release(ran[1])
     return ran
+
+
+def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[RunStart, SpendBook]:
+    job_registry = JobRegistry.attach(stores.jobs_dir)
+    with job_registry.admission_gate(), slot_rate(stores, holder, UNRESOLVED_HOP, asked=1):
+        start = RunStart(
+            stores,
+            job_registry,
+            job_registry.create(
+                user_id=str(stores.identity.user_id),
+                principal_id=acting_principal(stores.identity).id,
+                workspace=stores.campaigns.workspace,
+                hop=UNRESOLVED_HOP,
+                holder=holder,
+            ),
+        )
+        try:
+            book = call_book(stores, provider, job_registry=job_registry, hold_id=start.job_id)
+            # Unbounded: it holds what its calls out hold (`Money.held_back`), and closes with its job.
+            hold_run(stores, start.job_id, Budget(), parent=None)
+            job_registry.mark_admitted(start.job_id)
+        except BaseException as exc:
+            start.release(exc)
+            raise
+    return start, book
+
+
+@asynccontextmanager
+async def paid_call(
+    *, stores: Stores, bucket: CallBucket, provider: str
+) -> AsyncIterator[SpendBook]:
+    """ONE LLM call on *provider*, on no cycle, slotless so a chat turn never queues behind
+    campaigns: a job whose hold its sends draw on, closed with it or by its dead producer's reap."""
+    # Offloaded: admission globs every cycle ledger.
+    start, book = await asyncio.to_thread(_admit_call, stores, PaidCall(bucket), provider)
+    try:
+        with scoped(account=stores, book=book):
+            yield book
+    except BaseException as exc:
+        start.release(exc)
+        raise
+    start.release()
 
 
 class PassStoppedError(ConflictError):

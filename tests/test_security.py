@@ -82,6 +82,7 @@ from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     RunStart,
     destroying,
+    paid_call,
     paid_pass,
     refuse_taken_cycle,
     request_jobs,
@@ -980,7 +981,7 @@ async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) 
     async def one_call() -> bool:
         await asyncio.to_thread(calls.wait)
         try:
-            async with quota.paid_call(
+            async with paid_call(
                 stores=build_stores_from_identity(writer), bucket="turn", provider="openrouter"
             ):
                 return True
