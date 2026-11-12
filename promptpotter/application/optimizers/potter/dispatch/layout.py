@@ -343,7 +343,7 @@ def validate_l1_layout(
 def resolve_layout_override(
     node: str, raw_layout: object
 ) -> tuple[L1Layout, list[ValidatorOutcome]]:
-    """ONE derivation for both boundaries (`validators/l1_strict.py` at proposal, this module at render), so they cannot disagree."""
+    """ONE derivation for both boundaries (`validators.py` at proposal, this module at render), so they cannot disagree."""
     spec = NODE_LAYOUTS[node]
     if breach := unplaceable_edit(raw_layout, spec):
         return spec.floor, [breach]

@@ -37,7 +37,6 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import node_layout
-from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
 from promptpotter.application.optimizers.potter.knobs import (
     EscalationKnobs,
     L1GenerateKnobs,
@@ -47,6 +46,7 @@ from promptpotter.application.optimizers.potter.records import (
     L2Memory,
     L3Memory,
     Ladder,
+    exploration_budget,
 )
 from promptpotter.application.optimizers.variation.members import Cross, crossable
 from promptpotter.domain import ruler

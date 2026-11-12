@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Annotated, ClassVar
 
 from pydantic import Field
@@ -19,23 +20,18 @@ from promptpotter.application.bench.node_context import (
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import cell_objectives
-from promptpotter.application.optimizers.gepa import prompts
-from promptpotter.application.optimizers.gepa.state import (
-    MinibatchBar,
-    MinibatchBars,
-    ParetoScores,
-    ParetoSet,
-    ReflectionModules,
-)
+from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
+from promptpotter.application.scoring.row_diagnostics import cell_feedback
 from promptpotter.domain.arms import Cut, Elimination, Measured
 from promptpotter.domain.campaign_config import Estimand, Knob
+from promptpotter.domain.optimizer_state import RoundOutput, StateSlice
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.run_records import CheckpointInputs
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import StopSignal
 
 if TYPE_CHECKING:
@@ -60,6 +56,73 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
+
+
+class ParetoSet(StateSlice, kind="pareto_set"):
+    # Sample keys, in the order every round walks them; empty until round 1 draws the split.
+    keys: list[str] = Field(default_factory=list)
+
+
+class ParetoScores(StateSlice, kind="pareto_scores"):
+    # By id then sample key, in the population's order; empty on the origin's document: round 1 seats it.
+    scores: dict[str, dict[str, float]] = Field(default_factory=dict)
+    # Drawn at each round's close; ``None`` until round 1 closes, the origin being the only parent.
+    parent_id: str | None = None
+
+
+class ReflectionModules(StateSlice, kind="reflection_modules"):
+    """A child takes its parent's advanced pointer (the reference's `RoundRobinReflectionComponentSelector`)."""
+
+    # By candidate id, an index into the chain's prompt nodes; absent is the first.
+    modules: dict[str, int] = Field(default_factory=dict)
+
+
+class MinibatchBar(FrozenModel):
+    parent_id: str
+    # By sample key, the parent's objective on each minibatch cell.
+    objectives: dict[str, float]
+
+
+class MinibatchBars(RoundOutput, kind="minibatch_bars"):
+    """By arm id, the bar that arm alone is tested against, as the reference's proposals each carry their parent's minibatch scores; required, so written first."""
+
+    bars: dict[str, MinibatchBar]
+
+
+_FENCE = "```"
+_LANGUAGE_TAG = re.compile(r"^\S*\n")
+
+
+def _example(n: int, cell: GradedCell) -> str:
+    # The reference implementation's layout: the paper shows only a placeholder.
+    facts = cell.facts
+    trace = facts.pipeline.reasoning_trace
+    outputs = (
+        f"### reasoning\n{trace.strip()}\n\n### answer\n{facts.predicted.strip()}"
+        if trace
+        else facts.predicted.strip()
+    )
+    return (
+        f"# Example {n}\n## Inputs\n{facts.query.strip()}\n\n"
+        f"## Generated Outputs\n{outputs}\n\n## Feedback\n{cell_feedback(cell)}"
+    )
+
+
+def reflection_prompt(ctx: NodeContext, *, instruction: str, rows: Iterable[GradedCell]) -> str:
+    examples = "\n\n".join(_example(n, row) for n, row in enumerate(rows, start=1))
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(current_instruction=instruction, examples=fence_untrusted(examples))
+    )
+
+
+def fenced(text: str) -> str | None:
+    start, end = text.find(_FENCE), text.rfind(_FENCE)
+    if start < 0 or end <= start:
+        return text.strip() or None
+    body = _LANGUAGE_TAG.sub("", text[start + len(_FENCE) : end], count=1).strip()
+    return body or None
 
 
 class MinibatchTested(Replayed, kind="minibatch_gate"):
@@ -143,7 +206,7 @@ class GepaReflect(nodes.Proposer):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
         {Calls, Children, Frontier, Lineage, Target}
     )
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
@@ -174,14 +237,14 @@ class GepaReflect(nodes.Proposer):
         at = held.get(parent.id, 0) % len(modules)
         node = modules[at]
         rows = await ctx.read(Frontier).measure_parent(parent.id, panel.order[: panel.block_size])
-        prompt = prompts.reflection_prompt(ctx, instruction=shown(ctx, parent, node), rows=rows)
+        prompt = reflection_prompt(ctx, instruction=shown(ctx, parent, node), rows=rows)
         proposal = child(
             ctx,
             node,
             [parent],
             await ctx.read(Calls).ask(prompt, 0),
             f"reflect on {parent.id[:6]}'s {node.name}",
-            parse=prompts.fenced,
+            parse=fenced,
         )
         advanced = (at + 1) % len(modules)
         ctx.put(

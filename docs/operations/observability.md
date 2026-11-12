@@ -1,6 +1,6 @@
 # Observability
 
-The cycle ledger is the trace: no external sink receives it. Phase events (`domain/phases.py::CampaignPhase`, and each optimizer's own on `LlmNode.phase` — potter's `escalation/state.py::PotterPhase`) emit `enter`/`exit` pairs into the cycle ledger; each optimizer call carries its rendered prompt, output and token counts. No per-sample backend-match span exists: [`../specs/roadmap.md`](../specs/roadmap.md) § MLflow interop owns that gap.
+The cycle ledger is the trace: no external sink receives it. Phase events (`domain/phases.py::CampaignPhase`, and each optimizer's own on `LlmNode.phase` — potter's `escalation.py::PotterPhase`) emit `enter`/`exit` pairs into the cycle ledger; each optimizer call carries its rendered prompt, output and token counts. No per-sample backend-match span exists: [`../specs/roadmap.md`](../specs/roadmap.md) § MLflow interop owns that gap.
 
 ## The wall clock, and where the claim stops
 

@@ -39,7 +39,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     signal,
 )
-from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
+from promptpotter.application.optimizers.potter.records import ExplorationBudget
 from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_fitness
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings

@@ -151,7 +151,7 @@ def build_l1_response_schema(
                 param_props[param] = {"type": declared_type}
             else:
                 param_props[param] = {}
-            # Stated, never a `maxLength`: `l1_strict.py::l1_prose_within_ceiling` rejects past it.
+            # Stated, never a `maxLength`: `validators.py::l1_prose_within_ceiling` rejects past it.
             ceiling = prose_ceiling(node, param, inner_cells=inner_cells)
             if ceiling is not None:
                 param_props[param]["description"] = f"At most {ceiling} characters."

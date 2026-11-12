@@ -7,8 +7,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
-from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
-from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
+from promptpotter.application.optimizers.potter.records import (
+    ExplorationBudget,
+    L2Memory,
+    L3Memory,
+    Ladder,
+)
 from promptpotter.domain.arms import arm_name, is_leader_eligible
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint

@@ -1,7 +1,7 @@
 """A wrong score or a wrong decision.
 
-Owns `application/scoring/`, `shared/statistics.py`, `optimizers/potter/pobb/` and
-`optimizers/potter/escalation/`, the runner's election, `scoring/passes.py` and `evidence/`.
+Owns `application/scoring/`, `shared/statistics.py`, `optimizers/potter/pobb.py` and
+`optimizers/potter/escalation.py`, the runner's election, `scoring/passes.py` and `evidence/`.
 The run completes, the dashboard looks fine, and a different candidate should have won.
 """
 
@@ -123,9 +123,12 @@ from promptpotter.application.optimizer_manifest import (
     select_optimizer,
 )
 from promptpotter.application.optimizers import nodes as node_contract
-from promptpotter.application.optimizers.capo.state import CapoObjective
-from promptpotter.application.optimizers.gepa.members import MinibatchGate
-from promptpotter.application.optimizers.gepa.state import MinibatchBar, MinibatchBars
+from promptpotter.application.optimizers.capo.members import CapoObjective
+from promptpotter.application.optimizers.gepa.members import (
+    MinibatchBar,
+    MinibatchBars,
+    MinibatchGate,
+)
 from promptpotter.application.optimizers.nodes import Panel, ReadArm, RoundContext
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, build_bundle
 from promptpotter.application.optimizers.potter.dispatch.layout import (
@@ -136,25 +139,23 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L3PlanOutput,
     fork_proposal_model,
 )
-from promptpotter.application.optimizers.potter.escalation.firing import _rebase_request
-from promptpotter.application.optimizers.potter.escalation.rules import (
+from promptpotter.application.optimizers.potter.escalation import (
     EscalationInputs,
-    NextAction,
-    decide_escalation,
-)
-from promptpotter.application.optimizers.potter.escalation.state import (
     HighWater,
     LadderAsk,
     LayerReading,
+    NextAction,
+    _rebase_request,
     as_read_by,
     ask_l2_escalation,
     bank_and_route,
+    decide_escalation,
     l2_fired,
     l3_fired,
 )
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, EscalationLadder
 from promptpotter.application.optimizers.potter.members import L1Generate
-from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
+from promptpotter.application.optimizers.potter.pobb import PoBBCheck
 from promptpotter.application.optimizers.potter.records import (
     L1Readout,
     L2Memory,

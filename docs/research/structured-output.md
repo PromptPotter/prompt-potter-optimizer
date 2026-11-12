@@ -11,7 +11,7 @@ thousands of tokens upstream. Three levers:
    same rule. *Live example:* `L1Variant` (`application/optimizers/potter/dispatch/schemas.py`) generates
    `evidence_grounding` **before** the delta slots it justifies. The required set binds as hard as the order:
    the payload generates before the prose that reports it (`changes_description`), a variant that changes
-   nothing against its parent is rejected as `no_op_variant` by `validators/l1_invariants.py` (over
+   nothing against its parent is rejected as `no_op_variant` by `validators.py` (over
    `domain/candidate_diff.py::candidate_delta`) — never at parse, where one rejection costs the whole batch —
    and no unbounded free-text identifier leads the object. The prompt's `answer_format` lists the fields in
    the same order.
@@ -69,7 +69,7 @@ all. The schema **teaches** more reliably than it **compels**, so `VariantEviden
 enforces the grafted enum. Two rules for every optimizer wire: **no prose field carries a `maxLength`** —
 where the grammar binds, every answer ends mid-sentence at the cap, unmarked; the prompt asks for the short
 form and the parse boundary cuts with a visible mark (`schemas.py::_truncate_marked`) or rejects
-(`l1_strict.py::l1_prose_within_ceiling`). **A value the loop must be able to refuse is one a check can read
+(`validators.py::l1_prose_within_ceiling`). **A value the loop must be able to refuse is one a check can read
 off the prompt** — a panel name, a row id (`L1Variant.targets_rows`) — never free text closed by a grafted enum.
 
 ## Extraction is a double seam — slot first, label second

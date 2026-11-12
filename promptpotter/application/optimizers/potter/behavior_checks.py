@@ -1,6 +1,10 @@
+"""Dataset-INDEPENDENT checks, so the metric anchors optimizer-prompt iteration across datasets."""
+
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.application.optimizers.nodes import CheckResult
@@ -12,15 +16,33 @@ from promptpotter.application.optimizers.potter.dispatch.injections.registry imp
     injection_table,
 )
 from promptpotter.application.optimizers.potter.dispatch.schemas import CLUSTER_ROWS_MIN
-from promptpotter.application.optimizers.potter.validators.behavior_base import (
-    CheckFn,
-    ValidatorContext,
-    judged,
-)
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
 from promptpotter.domain.round_audit import NodeBlock, RoundAudit
+
+
+@dataclass(frozen=True)
+class ValidatorContext:
+    """``citable`` and ``exploration_budget`` are ``None`` on a round that banked no call."""
+
+    prior_rounds: list[RoundAudit] = field(default_factory=list)
+    citable: tuple[str, ...] | None = None
+    context_object: list[str] = field(default_factory=list)
+    exploration_budget: str | None = None
+    peaked_axes: frozenset[str] = field(default_factory=frozenset)
+    # The row sets of the critique this round's generator read; empty where it read none.
+    clusters: tuple[frozenset[int], ...] = ()
+
+
+# Whether the layer's output passed, and why; the registry key it is filed under names the check.
+type CheckFn[S] = Callable[[S, RoundAudit, ValidatorContext], tuple[bool, str]]
+
+
+def judged[S](
+    registry: Mapping[str, CheckFn[S]], output: S, audit: RoundAudit, ctx: ValidatorContext
+) -> list[CheckResult]:
+    return [CheckResult(name, *check(output, audit, ctx)) for name, check in registry.items()]
 
 
 def _l1_block(audit: RoundAudit | None) -> NodeBlock | None:
@@ -125,7 +147,7 @@ def _check_param_scope_discipline(
 def _check_evidence_grounding_present(
     variants: Variants, _audit: RoundAudit, ctx: ValidatorContext
 ) -> tuple[bool, str]:
-    """Whether the quote is in its panel is `l1_strict.py::l1_citation_in_panel`'s, which rejects."""
+    """Whether the quote is in its panel is `validators.py::l1_citation_in_panel`'s, which rejects."""
     citable = ctx.citable
     offenders: list[tuple[str, str]] = []
     for i, v in enumerate(variants):
@@ -311,3 +333,61 @@ def _stale_prompt_field(ctx: ValidatorContext, shown: dict[str, bool]) -> str | 
         for v in extract_l1_variants(r):
             mutated.update(_variant_prose_written(v))
     return next((locus for locus, held in shown.items() if not held and locus not in mutated), None)
+
+
+L2_RATIONALE_FLOOR_CHARS = 40
+
+# A bare integer is not a citation: `\d` alone passes "round 2".
+_EVIDENCE_RE = re.compile(r"#\d+|\d+\.\d+|\d+\s*%|\d+\s*/\s*\d+")
+
+
+def extract_l2_output(audit: RoundAudit) -> dict[str, Any]:
+    block = audit.nodes.get("l2_context")
+    response = None if block is None else block.output.response
+    return response if isinstance(response, dict) else {}
+
+
+L2Output = dict[str, Any]
+
+
+def _check_rationale_substantive(
+    out: L2Output, _audit: RoundAudit, _ctx: ValidatorContext
+) -> tuple[bool, str]:
+    rationale = str(out.get("rationale") or "").strip()
+    if len(rationale) >= L2_RATIONALE_FLOOR_CHARS:
+        return True, f"rationale {len(rationale)} chars"
+    return False, f"rationale {len(rationale)} chars < floor {L2_RATIONALE_FLOOR_CHARS}"
+
+
+def _check_evidence_anchored(
+    out: L2Output, _audit: RoundAudit, _ctx: ValidatorContext
+) -> tuple[bool, str]:
+    if axis := str(out.get("axis_targeted") or "").strip():
+        return True, f"axis_targeted={axis!r}"
+    if _EVIDENCE_RE.search(str(out.get("rationale") or "")):
+        return True, "rationale cites a sample/number"
+    return False, "no axis_targeted and rationale cites no sample/axis/number"
+
+
+def _check_targets_l1_surface(
+    out: L2Output, _audit: RoundAudit, _ctx: ValidatorContext
+) -> tuple[bool, str]:
+    """``axis_targeted`` is not a surface: it is prose, and L1 reads its axes from measurement."""
+    if touched := [
+        name for name in ("l1_layout", "l1_overrides", "recombinations") if out.get(name)
+    ]:
+        return True, f"L2 touched: {touched}"
+    return False, "L2 fired but changed nothing L1 reads"
+
+
+L2_CHECK_REGISTRY: dict[str, CheckFn[L2Output]] = {
+    "l2_rationale_substantive": _check_rationale_substantive,
+    "l2_evidence_anchored": _check_evidence_anchored,
+    "l2_targets_l1_surface": _check_targets_l1_surface,
+}
+
+
+def run_all_l2_checks(audit: RoundAudit, ctx: ValidatorContext) -> list[CheckResult]:
+    """EMPTY when L2 did not fire: an absent fire is not a conformance failure."""
+    out = extract_l2_output(audit)
+    return judged(L2_CHECK_REGISTRY, out, audit, ctx) if out else []

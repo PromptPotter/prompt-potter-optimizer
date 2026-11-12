@@ -32,7 +32,7 @@ Every candidate, the first raced against the parent alone, once read on `elimina
 2. Fit as the election does, the prior as the bar (`rasch.py::candidate_abilities`): each `θ` and Laplace `se` on the cycle's fixed δ ruler; warm, the prior on every cell it scored, cold on the cells it shares.
 3. `P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))`, closed form; `p_best = min` over priors.
 4. Bound it by what the DISCORDANT pairs support — `shared/statistics.py::sign_posterior` over `selection.py::discordance`. Concordant cells move θ but cannot say which arm is better, and few observations do not keep the gate conservative: ties narrow both `se`. Support is DIRECTIONAL: contradicting pairs collapse the claim to 0.5 (a bare magnitude would license 0.9375 for an arm that lost 3 of 3); it can only spare an arm. **Discordance counts VERDICTS (`Grade.fitness`), never the objective** — a cost term would make a verbose arm lose every tie; cost reaches the comparison through θ alone (`selection.py::paired_grades`).
-5. Stop when `p_best < ε(n)` — eliminated (graded by depth: `epsilon_floor`; switch `epsilon_stop`) — or, with `lock_in` on, where the election would elect the arm now — locked in (`pobb/checks.py::locks_in`): `selection.py::elect_round_winner` over the round's arms before it and this one, against the parent, on the election's rows and the selector's own bar (`nodes.py::Selector.admission`), so an arm that is locked in is one the election admits. A selector with no such bar locks none in. **A locked-in arm joins the priors** (`runner/round.py::_conclude_arm`), caught up where it stopped, so every later arm races the leader; an eliminated one never does.
+5. Stop when `p_best < ε(n)` — eliminated (graded by depth: `epsilon_floor`; switch `epsilon_stop`) — or, with `lock_in` on, where the election would elect the arm now — locked in (`pobb.py::locks_in`): `selection.py::elect_round_winner` over the round's arms before it and this one, against the parent, on the election's rows and the selector's own bar (`nodes.py::Selector.admission`), so an arm that is locked in is one the election admits. A selector with no such bar locks none in. **A locked-in arm joins the priors** (`runner/round.py::_conclude_arm`), caught up where it stopped, so every later arm races the leader; an eliminated one never does.
 
 The **same ability the round election ranks by** (one pairing, `application/scoring/selection.py::prior_read`, for the live check and the resume replayer), so the two cannot disagree, valid on partial prefixes.
 
@@ -73,7 +73,7 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 | 2 | **Stale-data protocol** — a cached result classifies infra or fatal (`is_deprecated`); a repaired, answered row replays | every degraded query | — | annotated + possibly re-measured / swapped | — | `scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
-| 5 | **`PoBBCheck`** — two exits, in order, each behind its switch: leader lock-in at the selector's `admission`, paired `P(best) < ε(n)` | every query | `n_min` | eliminated, or locked in; records `elimination_cut` / `leader_lock_in` | — | `optimizers/potter/pobb/checks.py` |
+| 5 | **`PoBBCheck`** — two exits, in order, each behind its switch: leader lock-in at the selector's `admission`, paired `P(best) < ε(n)` | every query | `n_min` | eliminated, or locked in; records `elimination_cut` / `leader_lock_in` | — | `optimizers/potter/pobb.py` |
 
 The first signal ends the candidate: fatal beats rate beats PoBB.
 
@@ -145,7 +145,7 @@ GEPA (arXiv 2507.19457) races children against their parents, not each other: it
 
 | Paper | Node · config |
 |---|---|
-| Split D_train into D_feedback and D_pareto (Alg. 1 line 1) | `minibatch.pareto_size` 50, a row count as the paper states each benchmark's (App. E.1); the Pareto set rides the `pareto_set` slice (`gepa/state.py::ParetoSet`) |
+| Split D_train into D_feedback and D_pareto (Alg. 1 line 1) | `minibatch.pareto_size` 50, a row count as the paper states each benchmark's (App. E.1); the Pareto set rides the `pareto_set` slice (`gepa/members.py::ParetoSet`) |
 | P ← [Φ], Φ scored on D_pareto (lines 2-5) | round 1 mutates the incumbent, the origin; `pareto` seats it with its Pareto-set scores off the bench's re-score, which reads the Pareto set alone (`Selector.parent_cells`) |
 | SELECTCANDIDATE (line 7, Alg. 2) | `pareto`, at each round's close: per-cell fronts, the dominated removed, the next parent drawn ∝ cells led — `ParetoScores.parent_id` |
 | SELECTMODULE, round-robin (line 8, §3) | an individual renders one prompt, so the module is its whole prompt every round |

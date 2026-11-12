@@ -96,7 +96,7 @@ outer round · 4 deferred. **We push the first few rounds, not the long campaign
 
 Parse failures, no-ops and verbatim duplicates were measured absent: no edit there without `l1_yield` below 1.00.
 
-3. **Round-trace checklist**, beyond what `l1_strict.py` and `overlay_failures()` enforce: `runtime_failures`
+3. **Round-trace checklist**, beyond what `validators.py` and `overlay_failures()` enforce: `runtime_failures`
    empty in round 1 while sibling forks failed is broken inheritance; `l1_config_not_in_runtime_failures`
    catches exact `(param, value)` only (flag a near value); standing constraints (PEAKED axes, param axes
    last, numeric envelopes) read off the prompt; Jaccard ≥ 0.5 over a pair's `changes_description` →

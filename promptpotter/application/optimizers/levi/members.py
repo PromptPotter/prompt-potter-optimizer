@@ -18,20 +18,15 @@ from promptpotter.application.optimizers.descriptors import (
     behaviour_descriptor,
     cell_objectives,
 )
-from promptpotter.application.optimizers.levi import prompts
-from promptpotter.application.optimizers.levi.state import (
-    DescriptorCalibration,
-    DescriptorStats,
-    EliteArchive,
-    LeviCalibration,
-    LeviElite,
-)
+from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.nodes import RewriteKnobs
-from promptpotter.application.optimizers.paper_templates import child
+from promptpotter.application.optimizers.paper_templates import child, shown, task_description
 from promptpotter.domain.campaign_config import Estimand, Knob
+from promptpotter.domain.optimizer_state import StateSlice
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import INITIAL_POPULATION, NodeKind
 from promptpotter.domain.results import OptimizerFact
+from promptpotter.domain.scoring import ROW_GRADES
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import greedy_column_subset, logistic
 
@@ -54,7 +49,119 @@ if TYPE_CHECKING:
     from promptpotter.domain.optimizer_state import StatePart
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet
+    from promptpotter.domain.scoring import CellSheet, GradedCell
+
+
+class DescriptorStats(StrictModel):
+    """Welford's running count, mean and squared-deviation sum per descriptor dimension."""
+
+    count: int
+    mean: list[float]
+    m2: list[float]
+
+
+class LeviCalibration(StrictModel):
+    # Sample keys, in the order every later round walks them.
+    proxy: list[str]
+    centroids: list[list[float]]
+    stats: DescriptorStats
+
+
+class LeviElite(StrictModel):
+    """Holds an id, never the individual, which is one of the population the run carries."""
+
+    cell: int
+    score: float
+    # The round whose rows MEASURED it, where its feedback is read back from.
+    round: int
+    individual_id: str
+
+
+class DescriptorCalibration(StateSlice, kind="descriptor_calibration"):
+    # ``None`` on the origin's document: round 1 is the calibration round that sets it.
+    calibration: LeviCalibration | None = None
+
+
+class EliteArchive(StateSlice, kind="elite_archive"):
+    """One elite per occupied descriptor cell."""
+
+    elites: list[LeviElite] = Field(default_factory=list)
+
+
+def _prompt(ctx: NodeContext, individual: OptSearchPoint) -> str:
+    node = ctx.read(Target).prompt_node
+    return f"--- PROMPT START ---\n{shown(ctx, individual, node)}\n--- PROMPT END ---"
+
+
+def _score(score: float) -> str:
+    return f"{score:.4f}"
+
+
+def paradigm_shift_prompt(
+    ctx: NodeContext, shown: Sequence[tuple[OptSearchPoint, float | None]]
+) -> str:
+    """E.7; a calibration-round seed is shown unscored, none being measured."""
+    blocks = [
+        f"### Representative {n}"
+        + ("" if score is None else f" (score: {_score(score)})")
+        + f"\n{_prompt(ctx, individual)}"
+        for n, (individual, score) in enumerate(shown, start=1)
+    ]
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(
+            problem_description=task_description(ctx, ctx.read(Target).prompt_node),
+            representatives="\n\n".join(blocks),
+        )
+    )
+
+
+def _failures(rows: Sequence[GradedCell], n: int, rng: random.Random) -> str:
+    fitness = ROW_GRADES["fitness"]
+    failed = [r.facts for r in rows if r.scored and float(fitness.read(r)) < 1.0]
+    picked = rng.sample(failed, min(n, len(failed)))
+    if not picked:
+        return ""
+    traces = "\n\n".join(
+        f"### Failure {i}\nInput: {facts.query}\nExpected: {facts.ground_truth}\n"
+        f"Got: {facts.predicted}"
+        for i, facts in enumerate(picked, start=1)
+    )
+    return f"## Failures\n{fence_untrusted(traces)}\n\n"
+
+
+def _inspirations(ctx: NodeContext, inspirations: Sequence[tuple[OptSearchPoint, float]]) -> str:
+    return "".join(
+        f"## Inspiration\nScore: {_score(score)}\n{_prompt(ctx, individual)}\n\n"
+        for individual, score in inspirations
+    )
+
+
+def refine_prompt(
+    ctx: NodeContext,
+    *,
+    parent: tuple[OptSearchPoint, float],
+    parent_rows: Sequence[GradedCell],
+    inspirations: Sequence[tuple[OptSearchPoint, float]],
+    n_failures: int,
+    rng: random.Random,
+) -> str:
+    """E.6; meta-advice stays empty: the paper publishes no template for it (App. B)."""
+    individual, score = parent
+    node = ctx.read(Target).prompt_node
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(
+            problem_description=task_description(ctx, node),
+            parent_score=_score(score),
+            parent_prompt=shown(ctx, individual, node),
+            feedback_section=_failures(parent_rows, n_failures, rng),
+            inspirations_section=_inspirations(ctx, inspirations),
+            meta_advice_section="",
+        )
+    )
 
 
 _LLOYD_ITERATIONS = 100
@@ -393,7 +500,7 @@ class LeviSeed(nodes.Proposer):
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviSeedKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, LeviSeedKnobs).n_diverse_seeds
@@ -407,7 +514,7 @@ class LeviSeed(nodes.Proposer):
         shown: list[tuple[OptSearchPoint, float | None]] = [(origin, None)]
         seeds: list[Proposal] = []
         for i in range(ctx.knobs(LeviSeedKnobs).n_diverse_seeds):
-            raw = await calls.ask(prompts.paradigm_shift_prompt(ctx, shown), i)
+            raw = await calls.ask(paradigm_shift_prompt(ctx, shown), i)
             proposal = child(ctx, node, [origin], raw, f"diverse seed {i + 1}")
             seeds.append(proposal)
             if not proposal.validation_failures:
@@ -428,7 +535,7 @@ class LeviParadigmShift(nodes.Proposer):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
         {Calls, Children, Lineage, Replay, Target}
     )
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
@@ -478,7 +585,7 @@ class LeviParadigmShift(nodes.Proposer):
         )
         held = {ind.id: ind for ind in ctx.read(Lineage).population}
         regions = [held[e.individual_id] for e in representatives]
-        prompt = prompts.paradigm_shift_prompt(
+        prompt = paradigm_shift_prompt(
             ctx, [(ind, e.score) for ind, e in zip(regions, representatives, strict=True)]
         )
         return child(
@@ -528,7 +635,7 @@ class LeviRefine(nodes.Proposer):
         {Calls, Children, Lineage, Replay, Target}
     )
     consults: ClassVar[frozenset[type]] = frozenset({LeviParadigmShift})
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.reached_knobs(self, LeviParadigmShiftKnobs).interval - 1
@@ -572,7 +679,7 @@ class LeviRefine(nodes.Proposer):
         measured_in = next(rr for rr in lineage.rounds if rr.round == parent.round)
         rows = measured_in.sheet_of(parent.individual_id)
         held = {ind.id: ind for ind in lineage.population}
-        prompt = prompts.refine_prompt(
+        prompt = refine_prompt(
             ctx,
             parent=(held[parent.individual_id], parent.score),
             parent_rows=[cell for cell in rows if cell.facts.sample_key in proxy],

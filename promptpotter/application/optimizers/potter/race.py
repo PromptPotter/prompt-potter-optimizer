@@ -14,7 +14,7 @@ from promptpotter.application.bench.node_context import (
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
-from promptpotter.application.optimizers.potter.pobb.checks import (
+from promptpotter.application.optimizers.potter.pobb import (
     EliminationContext,
     EliminationGate,
     PoBBCheck,

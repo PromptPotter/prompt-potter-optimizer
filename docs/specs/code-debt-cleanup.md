@@ -247,17 +247,19 @@ row it closes.
 - **Potter's renderers read a hand-copied snapshot**: potter asks through `node_context.py::Calls.answer`
   now, but `dispatch/facade.py::build_bundle` copies run state into `dispatch/bundle.py::InjectionBundle`
   for every renderer (35 fields, then a `replace` for `silent_l1_panels`);
-  `escalation/firing.py::Layer` and `escalation/firing.py::TransitionResult` are a second member
-  protocol; `escalation/rules.py::_first_match` runs a fixed rule table; the fitness formula has a second
+  `escalation.py::Layer` and `escalation.py::TransitionResult` are a second member
+  protocol; `escalation.py::_first_match` runs a fixed rule table; the fitness formula has a second
   spelling (`evaluators.py::resolve_cell_formula`). Action: renderers read the node's own reads through
   a potter-owned view, and the two pure-renderer tests (`test_identity`'s rendered-prompt journey,
   `test_security`'s poisoned-panel test) drive a node context; the rules three match functions that
-  keep the name `escalation/rules.py::EscalationEvent` stamps; one formula spelling. **Rides with:**
+  keep the name `escalation.py::EscalationEvent` stamps; one formula spelling. **Rides with:**
   rk-opt's next chain. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
-- **Wave C, the optimizers in one re-key batch**: `potter/l1/` → `l1.py`, `validators/` 7 → 2, peer
-  optimizers' `prompts` + `state` into `members.py`, `pobb/` and `escalation/` flattened, and
-  `runner/inner/tasks.InnerCells` moved into `domain/l4`. **Rides with:** the rest of rk-opt link 4.
-- **The catch-up pool**: `validators.py::CatchUps` and `nodes.py::NoCatchUps` declare one protocol with
+- **`InnerCells` sits in the runner, holding application types**: `runner/inner/tasks.py::InnerCells`
+  holds `optimizer_manifest.py::SelectedOptimizer` per cell and reads its schema, manifest and levers,
+  so it cannot move into `domain/l4` (layering) until a cell holds a domain projection of its
+  optimizer. Action: decide what a cell's optimizer is in `domain/l4` terms (the chain, the levers,
+  the measurement plan), then move `InnerCells` with it. **Rides with:** the `resolve_cells` row.
+- **The catch-up pool**: `domain/validators.py::CatchUps` and `nodes.py::NoCatchUps` declare one protocol with
   one implementation, and the round reading takes a lock-in's backfills at
   `runner/round.py::_catch_up`'s commit, a second door. Action: the bench owns the pool and the
   race exposes only its priors. **Rides with:** the rest of rk-opt link 4. **Re-test:**
@@ -273,14 +275,14 @@ row it closes.
 - **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
   carry their passes beside `VerificationPass`. Action: both ride the one record. **Rides with:**
   the rest of rk-opt link 4. **Re-test:** `git grep -n "\.overlap\b" -- promptpotter` is empty.
-- **Three bars for "is this θ lift real"**: `potter/escalation/state.py::_improved` reads
+- **Three bars for "is this θ lift real"**: `potter/escalation.py::_improved` reads
   `lift > current.se`, `potter/election.py::_lift` takes `hypot` of both arms', and
   `potter/dispatch/injections/panels.py::detectable_rows` takes `a.se * sqrt(2)`. Action: all three fold
   onto the predicate `scoring/selection.py::elect_round_winner` reads (one lift test on
   `AbilityReading`). It moves decisions and the optimizer prompt: an offline run and the re-key.
   **Rides with:** the rest of rk-opt link 4. **Re-test:**
   `git grep -n -E "lift > current.se|sqrt\(2" -- promptpotter/application/optimizers/potter`.
-- **The collapse gate cuts a hedging arm on noise**: `pobb/checks.py::check` →
+- **The collapse gate cuts a hedging arm on noise**: `pobb.py::check` →
   `domain/scoring.py::is_answer_collapsed` reads one repeated label over `n_min` answered cells as "no
   measurement". Action: collapse is judged against the parent's answers on the same cells, proven by an
   offline run. **Rides with:** the rest of rk-opt link 4.
@@ -580,7 +582,7 @@ row it closes.
 - **The offline world never reaches the wound**: every heal rung failing (L1 gets no candidates, L2
   records `layer_parse_failure`) and the capo / gepa / levi form failures run no leg. Action: a scripted
   leg that drives each. **Rides with:** det 2.
-- **`PARSE_FAILURE_WRONG_TYPE` is dead**: `optimizers/potter/l1/generate.py` and
+- **`PARSE_FAILURE_WRONG_TYPE` is dead**: `optimizers/potter/l1.py` and
   `domain/optimizer_state.py` name a parse failure no path produces. Action: it goes. **Rides with:**
   det 2. **Re-test:** `git grep -c "PARSE_FAILURE_WRONG_TYPE" -- promptpotter` is 0.
 

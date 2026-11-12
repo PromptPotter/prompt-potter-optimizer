@@ -84,12 +84,15 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.application.mask.divergence import VerdictOutcome, find_divergences
 from promptpotter.application.mask.load import load_mask_record
-from promptpotter.application.optimizers.capo.members import PairedTCut, PopulationKept
-from promptpotter.application.optimizers.capo.state import CapoObjective
+from promptpotter.application.optimizers.capo.members import (
+    CapoObjective,
+    PairedTCut,
+    PopulationKept,
+)
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
 from promptpotter.application.optimizers.nodes import MeasuredRound, Panel, ReadArm
 from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
-from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
+from promptpotter.application.optimizers.potter.pobb import EliminationGate
 from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
 from promptpotter.application.origin import (
     resolve_origin_opt_search_point,

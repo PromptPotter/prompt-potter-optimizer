@@ -19,11 +19,11 @@
 - **L1 never writes `answer_format`**: every node reads the target through `dispatch/bundle.py::l1_target_schema`, rejected at parse (`forbidden_axis`). <!-- probe: git grep -cE "[^(]target\.schema|Target\)\.schema" -- promptpotter/application/optimizers/potter/*.py == 0 -->
 - **Never reorder `L1Variant` alone**: `evidence_grounding` generates before `changes_description` and the overrides.
 - **A cluster spans the detectable move, two rows at least**; a variant's edit holds for every row it `targets_rows`, no per-row patch.
-- **`repeat_variant` rejects an idea this cycle measured and lost** inside `l1_invariants`, never at parse; a round is never emptied.
+- **`repeat_variant` rejects an idea this cycle measured and lost** inside `validators.py::detect_invariants`, never at parse; a round is never emptied.
 
 ## L2 — what `l2_context` (and L3's `l3_plan`) may write
 
-**L2 fires on L1 stall, an unusable L1 reply or evidence starvation; `escalation/rules.py` routes, never diagnoses or stops.** L2 judges recoverability; `terminate_proposal` is its exit for a backend fault.
+**L2 fires on L1 stall, an unusable L1 reply or evidence starvation; `escalation.py` routes, never diagnoses or stops.** L2 judges recoverability; `terminate_proposal` is its exit for a backend fault.
 
 - **L2 writes exactly `l1_layout` and `l1_overrides`, one node overlay on `l1_generate`** (`L2Memory.steer`), never `pipeline_params`; as recombination host, `recombinations` (ids and loci only); plus the layer-control channel. Each steer cites an axis, sample or yield number.
 - **No layer writes `task_context`**: no wire schema has its field; target text is L1's alone, through `prompt_fields_updates`. <!-- probe: git grep -cE "task_context:" -- promptpotter/application/optimizers/potter/dispatch/schemas.py == 0 -->
@@ -39,7 +39,7 @@
 
 ## Editing a renderer's PROSE is a measurement change
 
-`nodes.py::source_digest` hashes the prompt-shaping set, so rewording a directive voids banked origins. A prompt-shaping constant lives in `bundle.py`; a unit reached only through an instance or registry carries `shared/hashing.py::shapes_optimizer_prompt`. A validator either REJECTS (`*_strict`, `*_output`, `l1_invariants`: a `ValidationFailure` the layer heals) or SCORES (`*_behavior`, into `review.md`), never both.
+`nodes.py::source_digest` hashes the prompt-shaping set, so rewording a directive voids banked origins. A prompt-shaping constant lives in `bundle.py`; a unit reached only through an instance or registry carries `shared/hashing.py::shapes_optimizer_prompt`. A validator either REJECTS (`validators.py`: a `ValidationFailure` the layer heals) or SCORES (`behavior_checks.py`, into `review.md`), never both.
 
 ## Add no 4th layer — L4 is a recursion
 
