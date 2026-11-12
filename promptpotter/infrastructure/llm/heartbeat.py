@@ -15,12 +15,12 @@ from promptpotter.shared.errors import (
 if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.infrastructure.llm.base import LLMClientBase
+    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 
 logger = logging.getLogger(__name__)
 
 
-def silence_detail(client: LLMClientBase, model: str | None, *, role: str) -> str:
+def silence_detail(client: OpenAICompatibleClient, model: str | None, *, role: str) -> str:
     name = model or "(unnamed)"
     held = client.pushback(model) if model else None
     if held is not None and held.since is not None:

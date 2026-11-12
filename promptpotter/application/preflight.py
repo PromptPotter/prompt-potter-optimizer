@@ -321,9 +321,11 @@ def refuse_arm_below_round(
     )
 
 
-def refuse_unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> None:
+def refuse_unfit_pipeline(
+    selected: SelectedOptimizer, schema: PipelineSchema, connector: str
+) -> None:
     """A member that cannot write the chain's prompt nodes would raise inside round 1, after the origin is paid."""
-    if (unfit := optimizers.unfit_pipeline(selected, schema)) is not None:
+    if (unfit := optimizers.unfit_pipeline(selected, schema, connector)) is not None:
         raise PayloadInvalidError(unfit, code="optimizer_unfit_pipeline")
 
 

@@ -7,9 +7,9 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.evaluators import (
-    Evaluator,
     JudgedTerm,
     NameOwner,
+    SampleEvaluator,
     validate_campaign_evaluator,
 )
 from promptpotter.application.scoring.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
@@ -91,9 +91,9 @@ def build_evaluators(
     specs: Mapping[str, JudgeSpec],
     *,
     beside: Sequence[NameOwner],
-) -> tuple[Evaluator, ...]:
+) -> tuple[SampleEvaluator, ...]:
     """``beside``: the names the campaign binds beyond the package's, refused as terms."""
-    out: list[Evaluator] = []
+    out: list[SampleEvaluator] = []
     for term, spec in specs.items():
         if not term.isidentifier():
             raise ValueError(
@@ -109,10 +109,9 @@ def build_evaluators(
                 f"stage nothing reads re-cuts every archive key and re-pays for every row while "
                 f"changing no verdict. Drop it, or declare a judge that asks it."
             )
-        ev = Evaluator(
+        ev = SampleEvaluator(
             name=term,
             description=judge.description,
-            scope="per_sample",
             compute=partial(_compute, judge=judge, spec=spec),
             # Undefined, not zero, on a verifier-graded bank: `materialize_sample_values` skips it.
             needs_labels=judge.needs_gold,

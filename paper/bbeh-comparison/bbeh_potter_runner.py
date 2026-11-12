@@ -11,8 +11,8 @@ from typing import Any
 from shared_config import Record, export_results
 
 from promptpotter.application.datasets.authored import (
-    load_dataset_campaign_config,
-    with_optimization,
+    campaign_config_over,
+    dataset_campaign_block,
 )
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import enter, run_campaign
@@ -70,7 +70,7 @@ def build_campaign_config(
     if sp_budget_round is not None:
         nodes["adaptive_queue"] = {"config": {"sp_budget_round": sp_budget_round}}
     optimization: dict[str, Any] = {"budget": {"rounds": budget_rounds or 5}, "nodes": nodes}
-    return with_optimization(load_dataset_campaign_config(dataset), optimization)
+    return campaign_config_over(dataset_campaign_block(dataset), {"optimization": optimization})
 
 
 async def run_bbeh_campaign(

@@ -50,10 +50,9 @@ nodes:
       max_tokens: 16384
       reasoning_effort: none
       provider: openrouter
-      model: qwen/qwen3.7-flash
+      model: minimax/minimax-m3.1-flash
       # The paper's prompt is one text: the reply replaces the whole prompt.
       rewrites: prompt
-      field: instruction
   # A child joins the candidate pool only if it beats its parent on the minibatch (Alg. 1 line 14).
   minibatch_gate:
     type: eliminator

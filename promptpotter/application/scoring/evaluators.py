@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
@@ -33,9 +32,6 @@ from promptpotter.shared.worded import Worded
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
     from promptpotter.domain.scoring import GradedCell, MeasuredCell
-
-
-Scope = Literal["per_sample", "per_round"]
 
 
 @shapes_optimizer_prompt
@@ -116,7 +112,7 @@ def has_limit_node(schema: PipelineSchema) -> bool:
     return bool(_limit_nodes(schema))
 
 
-def compute_retrieval_shortfall_per_sample(
+async def compute_retrieval_shortfall_per_sample(
     *, result: MeasuredCell, schema: PipelineSchema, **_: Any
 ) -> float | None:
     observed = result.pipeline.observations
@@ -155,102 +151,82 @@ class SampleTerms(NamedTuple):
 Computed = float | JudgedTerm | None
 
 
-@dataclass(frozen=True)
-class Evaluator:
+# Unenforced: no per-candidate constant (on the logistic link its θ shift varies with δ), no channel-map quantity.
+@dataclass(frozen=True, kw_only=True)
+class _Evaluator:
     name: str
     description: str
-    scope: Scope
-    # ``None`` = nothing to measure, and the key is OMITTED: a zero is a verdict, an absence is not.
-    # The awaitable arm is `per_sample` ONLY (`_validate_evaluator`).
-    compute: Callable[..., Computed | Awaitable[Computed]]
     direction: Literal["high", "low"] = "high"
-    node_role: NodeRole | None = None
-    requires: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
-
-    def applies(self, schema: PipelineSchema) -> bool:
-        if self.node_role is not None and not any(
-            n.role == self.node_role for n in schema.running_nodes
-        ):
-            return False
-        return self.requires(schema)
-
     # True ⇒ a comparison AGAINST A LABEL: undefined, not 0.0, on a verifier-graded backend.
     needs_labels: bool = False
+    requires: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
 
 
-_REGISTRY: list[Evaluator] = [
-    Evaluator(
+@dataclass(frozen=True, kw_only=True)
+class SampleEvaluator(_Evaluator):
+    # ``None`` = nothing to measure, and the key is OMITTED: a zero is a verdict, an absence is not.
+    compute: Callable[..., Awaitable[Computed]]
+
+
+@dataclass(frozen=True, kw_only=True)
+class RoundEvaluator(_Evaluator):
+    # Sync: a round materializer re-derives over archived rows, so an awaiting one re-bills every refresh.
+    compute: Callable[..., float | None]
+    node_role: NodeRole | None = None
+
+
+_ROUND_EVALUATORS: tuple[RoundEvaluator, ...] = (
+    RoundEvaluator(
         name="error_rate",
         description="Fraction of queries that errored (ERROR predicted or exception).",
-        scope="per_round",
         compute=compute_error_rate,
         direction="low",
     ),
-    Evaluator(
+    RoundEvaluator(
         name="degraded_rate",
         description="Fraction of queries where a pipeline node did not finish cleanly.",
-        scope="per_round",
         compute=compute_degraded_rate,
         direction="low",
     ),
-    Evaluator(
+    RoundEvaluator(
         name="source_recall",
         description="Fraction of queries where GT appears in a candidate_source node's output.",
-        scope="per_round",
         compute=_compute_recall,
         node_role=NodeRole.CANDIDATE_SOURCE,
         needs_labels=True,
     ),
-    Evaluator(
+    RoundEvaluator(
         name="candidate_recall",
         description="Fraction of queries where GT appears in a ranker node's output.",
-        scope="per_round",
         compute=_compute_recall,
         node_role=NodeRole.RANKER,
         needs_labels=True,
     ),
-    Evaluator(
+    RoundEvaluator(
         name="cache_hit_rate",
         description="Fraction of queries resolved by a cache node (non-null timing).",
-        scope="per_round",
         compute=compute_cache_hit_rate,
         node_role=NodeRole.CACHE,
     ),
-    Evaluator(
+    RoundEvaluator(
+        name="mean_retrieval_shortfall",
+        description="Mean of retrieval_shortfall across the round's results.",
+        compute=compute_mean_retrieval_shortfall,
+        requires=has_limit_node,
+    ),
+)
+
+_SAMPLE_EVALUATORS: tuple[SampleEvaluator, ...] = (
+    SampleEvaluator(
         name="retrieval_shortfall",
         description=(
             "Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits "
             "on list-valued outputs. 1.0 = target met or exceeded."
         ),
-        scope="per_sample",
         compute=compute_retrieval_shortfall_per_sample,
         requires=has_limit_node,
     ),
-    Evaluator(
-        name="mean_retrieval_shortfall",
-        description="Mean of retrieval_shortfall across the round's results.",
-        scope="per_round",
-        compute=compute_mean_retrieval_shortfall,
-        requires=has_limit_node,
-    ),
-]
-
-
-# Unenforced: no per-candidate constant (on the logistic link its θ shift varies with δ), no channel-map quantity.
-def _validate_evaluator(ev: Evaluator, origin: str) -> None:
-    where = f"evaluator {ev.name!r} ({origin})"
-    if not ev.name:
-        raise ValueError(f"{where}: name must be non-empty.")
-    if ev.scope not in ("per_sample", "per_round"):
-        raise ValueError(f"{where}: scope {ev.scope!r} is not 'per_sample' or 'per_round'.")
-    if not callable(ev.compute):
-        raise ValueError(f"{where}: compute is not callable.")
-    if ev.scope == "per_round" and inspect.iscoroutinefunction(ev.compute):
-        raise ValueError(
-            f"{where}: a per_round evaluator may not be async. Its materializers are sync READ "
-            f"paths that re-derive over archived rows, so an awaiting compute re-bills the whole "
-            f"measurement history on every refresh. Measure once at per_sample scope instead."
-        )
+)
 
 
 @dataclass(frozen=True)
@@ -281,12 +257,12 @@ def cell_name_owners() -> tuple[NameOwner, ...]:
         NameOwner("a matcher", frozenset(MATCHERS)),
         # `target_prompt_chars` among them: its channel reads the field.
         NameOwner(_PIPELINE_KEY, PIPELINE_BOUND_NAMES),
-        # `{step}_turns` names a step the backend's turns carry, unknown before a cell lands.
+        # `{step}_step_turns` names a step the backend's turns carry, unknown before a cell lands.
         NameOwner("a turn scalar", TURN_SCALAR_KEYS, suffix=TURN_STEP_SUFFIX),
         NameOwner("a builtin every formula may call", EVAL_BUILTIN_NAMES),
         NameOwner(
             _PACKAGE_EVALUATOR,
-            frozenset(ev.name for ev in _REGISTRY if ev.scope == "per_sample"),
+            frozenset(ev.name for ev in _SAMPLE_EVALUATORS),
         ),
     )
 
@@ -302,11 +278,10 @@ def bound_by(
 def _validate_registry() -> None:
     """At import: each package evaluator, then ONE owner per name, the package's included."""
     seen: set[str] = set()
-    for ev in _REGISTRY:
+    for ev in (*_ROUND_EVALUATORS, *_SAMPLE_EVALUATORS):
         if ev.name in seen:
             raise ValueError(f"evaluator {ev.name!r}: declared twice in the registry.")
         seen.add(ev.name)
-        _validate_evaluator(ev, "built-in")
     owners = cell_name_owners()
     for i, owner in enumerate(owners):
         for other in owners[i + 1 :]:
@@ -350,9 +325,10 @@ def observation_key_refusals(keys: Iterable[str], report: NameOwner) -> list[str
     ]
 
 
-def validate_campaign_evaluator(ev: Evaluator, origin: str, beside: Sequence[NameOwner]) -> None:
+def validate_campaign_evaluator(
+    ev: SampleEvaluator, origin: str, beside: Sequence[NameOwner]
+) -> None:
     """A campaign judge: every owner's name is refused, the package evaluators' and the campaign's included."""
-    _validate_evaluator(ev, origin)
     if owner := bound_by(ev.name, beside=beside):
         raise ValueError(
             f"evaluator {ev.name!r} ({origin}): the name is {owner}, and a cell's formula reads "
@@ -367,31 +343,18 @@ CELL_TERM_META: Worded[str, CellTerm] = Worded(
         **CELL_TERMS,
         **{
             ev.name: CellTerm(name=ev.name, direction=ev.direction, description=ev.description)
-            for ev in _REGISTRY
-            if ev.scope == "per_sample"
+            for ev in _SAMPLE_EVALUATORS
         },
     }
 )
 
 
-def _round_value(ev: Evaluator, value: Computed | Awaitable[Computed]) -> float | None:
-    if isinstance(value, Awaitable | JudgedTerm):
-        raise TypeError(
-            f"evaluator {ev.name!r}: per_round compute returned {type(value).__name__}. Only "
-            f"per_sample evaluators may reach a model; a round materializer re-derives over "
-            f"archived rows."
-        )
-    return value
-
-
 def _concrete_round_entries(
     schema: PipelineSchema,
-) -> list[tuple[str, Evaluator, PipelineNode | None]]:
-    out: list[tuple[str, Evaluator, PipelineNode | None]] = []
-    for ev in _REGISTRY:
-        if ev.scope != "per_round":
-            continue
-        if not ev.applies(schema):
+) -> list[tuple[str, RoundEvaluator, PipelineNode | None]]:
+    out: list[tuple[str, RoundEvaluator, PipelineNode | None]] = []
+    for ev in _ROUND_EVALUATORS:
+        if not ev.requires(schema):
             continue
         if ev.node_role is None:
             out.append((ev.name, ev, None))
@@ -416,7 +379,7 @@ def materialize_round_values(
         kwargs: dict[str, Any] = {"results": results, "schema": schema}
         if node is not None:
             kwargs["node"] = node
-        value = _round_value(ev, ev.compute(**kwargs))
+        value = ev.compute(**kwargs)
         if value is not None:
             values[display_name] = float(value)
     return values
@@ -425,20 +388,16 @@ def materialize_round_values(
 async def materialize_sample_values(
     schema: PipelineSchema,
     result: MeasuredCell,
-    extra: Sequence[Evaluator] = (),
+    extra: Sequence[SampleEvaluator] = (),
 ) -> SampleTerms:
-    """``extra`` is never appended to ``_REGISTRY``: that list is process-global, a campaign's judges are not."""
+    """``extra`` is never appended to ``_SAMPLE_EVALUATORS``: those are process-global, a campaign's judges are not."""
     terms = SampleTerms({}, {})
-    for ev in (*_REGISTRY, *extra):
-        if ev.scope != "per_sample":
-            continue
+    for ev in (*_SAMPLE_EVALUATORS, *extra):
         if ev.needs_labels and result.verifier_graded:
             continue
-        if not ev.applies(schema):
+        if not ev.requires(schema):
             continue
-        value = ev.compute(result=result, schema=schema)
-        if inspect.isawaitable(value):
-            value = await value
+        value = await ev.compute(result=result, schema=schema)
         if isinstance(value, JudgedTerm):
             if value.reading != JudgeReading():
                 terms.judged[ev.name] = value.reading

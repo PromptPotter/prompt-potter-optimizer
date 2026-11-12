@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, TypeAdapter, field_validator
+from pydantic import Field, field_validator
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.bench import BenchTrigger, DatasetSplit
@@ -20,7 +20,12 @@ from promptpotter.domain.cells import HardSampleOrder
 from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.paired_reading import LiftReference
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
-from promptpotter.domain.pipeline_params import apply_node_overlay
+from promptpotter.domain.pipeline_params import (
+    NodeCall,
+    apply_node_overlay,
+    laid_calls,
+    lay_node_config,
+)
 from promptpotter.domain.pipeline_schema import (
     KnobLayer,
     KnobLayers,
@@ -323,7 +328,9 @@ class CampaignConfig(StrictModel):
         "UNFRAMED on purpose — the ablation arm — even where framing exists, and the campaign "
         "manifest keeps the delta, so the result never reads as a framed one.",
     )
-    pipeline_overlay: Annotated[dict[str, Any], Knob(Estimand.SEARCH)] = Field(default_factory=dict)
+    pipeline_overlay: Annotated[dict[str, NodeCall], Knob(Estimand.SEARCH)] = Field(
+        default_factory=dict
+    )
     optimizer_narrowing: Annotated[dict[str, NodeSearchNarrowing], Knob(Estimand.SEARCH)] = Field(
         default_factory=dict,
         description="Per-node declaration over the dataset's optimizer search space — the "
@@ -426,32 +433,47 @@ class CampaignConfig(StrictModel):
 
 
 def merge_config_layers(base: dict[str, object], over: Mapping[str, object]) -> dict[str, object]:
-    """Depth-first; a layer naming another ``optimizer`` drops the base's ``nodes``, which addressed the old one."""
+    """Depth-first, a node's config by `pipeline_params.py::lay_node_config`; a layer naming another
+    ``optimizer`` drops the base's ``nodes``, which addressed the old one."""
     base_opt = base.get("optimization")
     over_opt = over.get("optimization")
     if isinstance(base_opt, dict) and isinstance(over_opt, Mapping) and "optimizer" in over_opt:
         held = base_opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
         if over_opt["optimizer"] != held:
             base = {**base, "optimization": {k: v for k, v in base_opt.items() if k != "nodes"}}
-    return _merge_dicts(base, over)
+    return _merge_dicts(base, over, ())
 
 
-def _merge_dicts(base: dict[str, object], over: Mapping[str, object]) -> dict[str, object]:
+def _is_node_config(at: tuple[str, ...]) -> bool:
+    """`pipeline_overlay.{node}` or `optimization.nodes.{node}.config`."""
+    return (len(at) == 2 and at[0] == "pipeline_overlay") or (
+        len(at) == 4 and at[:2] == ("optimization", "nodes") and at[3] == "config"
+    )
+
+
+def _merge_dicts(
+    base: dict[str, object], over: Mapping[str, object], path: tuple[str, ...]
+) -> dict[str, object]:
     out = dict(base)
     for key, value in over.items():
         current = out.get(key)
-        out[key] = (
-            _merge_dicts(current, value)
-            if isinstance(current, dict) and isinstance(value, Mapping)
-            else value
-        )
+        at = (*path, key)
+        if not (isinstance(current, dict) and isinstance(value, Mapping)):
+            out[key] = value
+        elif _is_node_config(at):
+            out[key] = lay_node_config(current, value, {})
+        else:
+            out[key] = _merge_dicts(current, value, at)
     return out
 
 
-# `optimization.nodes` as a layer of `merge_config_layers`, which lays a node's config key by key.
-NODE_OVERLAYS: TypeAdapter[dict[str, ManifestNodeOverlay]] = TypeAdapter(
-    dict[str, ManifestNodeOverlay]
-)
+def lay_node_overlays(
+    base: Mapping[str, ManifestNodeOverlay], over: Mapping[str, ManifestNodeOverlay]
+) -> dict[str, ManifestNodeOverlay]:
+    laid = apply_node_overlay(
+        {n: o.config for n, o in base.items()}, {n: o.config for n, o in over.items()}, None
+    )
+    return {n: ManifestNodeOverlay(config=cfg) for n, cfg in laid.items()}
 
 
 _TREATMENT_OWNED: dict[str, Any] = {"optimization": {"optimizer": True, "nodes": True}}
@@ -519,12 +541,7 @@ def apply_config_overrides(config: CampaignConfig, overrides: ConfigOverrides) -
         else {}
     )
     if overrides.nodes:
-        opt_updates["nodes"] = NODE_OVERLAYS.validate_python(
-            merge_config_layers(
-                NODE_OVERLAYS.dump_python(config.optimization.nodes, exclude_unset=True),
-                NODE_OVERLAYS.dump_python(overrides.nodes, exclude_unset=True),
-            )
-        )
+        opt_updates["nodes"] = lay_node_overlays(config.optimization.nodes, overrides.nodes)
     top_updates: dict[str, Any] = {}
     if isinstance(overrides.scoring, dict):
         top_updates["scoring"] = {**_scoring_block(config.scoring), **overrides.scoring}
@@ -579,19 +596,21 @@ class CycleConfig(FrozenModel):
                 config = config.model_copy(update={"optimizer_narrowing": narrowing})
                 if seed.origin_params is not None:
                     overlay = apply_node_overlay(overlay, seed.origin_params, None)
-                overlay = apply_node_overlay(overlay, seed.pipeline_overlay, None)
+                overlay = apply_node_overlay(overlay, laid_calls(seed.pipeline_overlay), None)
             config = scoring_locked(config, span.scoring_lock)
         return cls(config=config, spans=tuple(spans), seed_overlay=overlay)
 
     def steers_outside(self, permitted: Mapping[str, NodeSearchNarrowing]) -> bool:
         """The babysit act (decisions.md § 0005): a seed of the line steers outside what the nodes *permitted*."""
         return any(
-            span.seed is not None and steers_disallowed_model(permitted, span.seed.pipeline_overlay)
+            span.seed is not None
+            and steers_disallowed_model(permitted, laid_calls(span.seed.pipeline_overlay))
             for span in self.spans
         )
 
     def knob_layers(self, recorded: KnobLayers) -> dict[str, dict[str, KnobLayer]]:
-        """The layer that last set each ``optimization.nodes`` key ``config`` holds."""
+        """The layer that last set each ``optimization.nodes`` key ``config`` holds: a seed of the
+        line, else the one *recorded* at the mint."""
         seeded = {
             (node, key)
             for span in self.spans
@@ -601,9 +620,7 @@ class CycleConfig(FrozenModel):
         }
         return {
             node: {
-                key: "seed"
-                if (node, key) in seeded
-                else recorded.get(node, {}).get(key, "campaign")
+                key: "seed" if (node, key) in seeded else recorded[node][key]
                 for key in overlay.config
             }
             for node, overlay in self.config.optimization.nodes.items()

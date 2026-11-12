@@ -596,12 +596,26 @@ class ForkSeed(StrictModel):
         description="Per node, the rows as drawn; overrides the campaign's narrowing for this "
         "cycle only, and a node it does not name inherits.",
     )
+    reset: list[str] = Field(
+        default_factory=list,
+        description="Dotted `pipeline_overlay.<node>.<key>` paths of the forked candidate's own "
+        "values to drop before the edit is laid, so the layer below shows through. A path the "
+        "candidate does not set is a no-op.",
+    )
 
     @model_validator(mode="after")
     def _budget_rides_the_payload(self) -> ForkSeed:
         if self.config_overrides.budget.named:
             raise ValueError("a fork's budget is the payload's own `budget`, not the seed's")
+        parts = [p.split(".") for p in self.reset]
+        if bad := [p for p in parts if len(p) != 3 or p[0] != "pipeline_overlay"]:
+            raise ValueError(f"a reset path names `pipeline_overlay.<node>.<key>`: {bad}")
         return self
+
+    @property
+    def dropped(self) -> list[tuple[str, str]]:
+        """Each reset path as its (node, key)."""
+        return [(node, key) for _, node, key in (p.split(".") for p in self.reset)]
 
 
 class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCLE):

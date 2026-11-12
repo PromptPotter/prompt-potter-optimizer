@@ -64,6 +64,7 @@ export function SteerForkPanel({
   // Refs, not state: a blur firing just before the Confirm click is already reflected.
   const editedPrompts = useRef<Record<string, NodePrompt> | null>(null);
   const editedOverlay = useRef<Record<string, Record<string, unknown>> | null>(null);
+  const cleared = useRef<string[]>([]);
   const editedNarrowing = useRef<Record<string, ParamIntent[]>>({});
   const limits = useRef<RunLimitOverrides>({});
 
@@ -76,6 +77,7 @@ export function SteerForkPanel({
       origin_prompts: editedPrompts.current ?? seedPrompts,
       pipeline_overlay: editedOverlay.current ?? {},
       config_overrides: nodes ? { nodes } : {},
+      reset: cleared.current,
       ...(Object.keys(editedNarrowing.current).length > 0
         ? { node_narrowing: editedNarrowing.current }
         : {}),
@@ -145,9 +147,10 @@ export function SteerForkPanel({
             }),
           );
         }}
-        onConfigChange={(o) => {
+        onConfigChange={(o, reset) => {
           const edit = editOf(o, overlay);
           editedOverlay.current = edit;
+          cleared.current = reset;
           setPickedOverlay(edit);
         }}
         onNarrowing={(nodeId, n) => {

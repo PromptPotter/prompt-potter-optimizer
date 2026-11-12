@@ -42,7 +42,7 @@ def closed_answer_format(labels: tuple[str, ...]) -> str:
 
 class DraftFile(FrozenModel):
     """`draft.json`, the check-in's draft. ``config`` is a partial `CampaignConfig`: the keys the
-    draft sets, laid over its basis (`pipeline_resolve.py::draft_declared`)."""
+    draft sets, its edit layer over its basis (`pipeline_resolve.py::draft_layers`)."""
 
     # Its address, beside the file: the directory `DraftStore` keeps it in, stamped by `at`.
     _draft_id: str = PrivateAttr()

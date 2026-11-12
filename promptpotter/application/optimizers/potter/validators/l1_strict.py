@@ -22,9 +22,9 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 from promptpotter.application.optimizers.potter.dispatch.prompts import inner_template
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.search_point import SHOTS_KEY, WHO_ANSWERS_KEYS, missing_template_vars
+from promptpotter.domain.search_point import SHOTS_KEY, missing_template_vars
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 if TYPE_CHECKING:

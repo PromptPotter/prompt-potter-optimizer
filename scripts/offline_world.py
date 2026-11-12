@@ -73,33 +73,13 @@ def completion(
     }
 
 
-def message(content: str, *, model: str) -> dict[str, Any]:
-    """A `message` as Anthropic's Messages API sends it."""
-    return {
-        "id": "offline",
-        "type": "message",
-        "role": "assistant",
-        "model": model,
-        "content": [{"type": "text", "text": content}],
-        "stop_reason": "end_turn",
-        "stop_sequence": None,
-        "usage": {
-            "input_tokens": USAGE["prompt_tokens"],
-            "output_tokens": USAGE["completion_tokens"],
-        },
-    }
-
-
 type Said = str | dict[str, Any] | httpx.Response
-# Each provider wire the world answers, by the path it posts to: a text is sent back in its shape.
-LLM_WIRES: dict[str, Callable[..., dict[str, Any]]] = {
-    "/chat/completions": completion,
-    "/v1/messages": message,
-}
+# The one provider wire the world answers: a text is sent back as a completion.
+LLM_WIRE = "/chat/completions"
 
 
 class FakeLLM:
-    """The LLM edge: every provider wire in `LLM_WIRES`, every body it is sent kept in `sent`.
+    """The LLM edge: every provider's `LLM_WIRE`, every body it is sent kept in `sent`.
 
     *says* is the policy: a text, a whole reply, or a response carrying a status — sync or async,
     and it may raise an `httpx` transport error as a dropped connection does."""
@@ -127,8 +107,7 @@ def _wire(request: httpx.Request, body: dict[str, Any], said: Said) -> httpx.Res
     if isinstance(said, httpx.Response):
         return said
     if isinstance(said, str):
-        shaped = next(w for path, w in LLM_WIRES.items() if request.url.path.endswith(path))
-        said = shaped(said, model=body["model"])
+        said = completion(said, model=body["model"])
     return _json(200, said, request)
 
 
@@ -172,7 +151,7 @@ LLM_ONLY_NODE: dict[str, Any] = {
             *PROMPT_FIELDS,
         ],
         "param_allowed_values": {
-            "provider": ["openai", "groq", "openrouter", "anthropic"],
+            "provider": ["openai", "groq", "openrouter"],
             "reasoning_effort": ["none", "default", "low", "medium", "high"],
         },
         "observation_name": "llm_only",
@@ -404,7 +383,7 @@ class Router:
             answered = self.backend.respond(request, body)
         elif u.netloc == FakeHarness.AT:
             answered = self.harness.respond(request, body)
-        elif u.path.endswith(tuple(LLM_WIRES)):
+        elif u.path.endswith(LLM_WIRE):
             answered = self.llm.reply(request, json.loads(body))
         elif f"{u.netloc}{u.path}" == "openrouter.ai/api/v1/models":
             # No model claims a capability, so a run reads the measured profiles alone.

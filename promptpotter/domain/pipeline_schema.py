@@ -5,8 +5,12 @@ from typing import Annotated, Any, Literal, NamedTuple, get_args
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from promptpotter.domain.pipeline_params import RESERVED_NODE_NAMES, PipelineParams
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, SHOTS_KEY
+from promptpotter.domain.pipeline_params import (
+    PARAM_FORBIDDEN_KEYS,
+    RESERVED_NODE_NAMES,
+    PipelineParams,
+)
+from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.value_tree import Delivery, ValueLeaf, visibility_of
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
@@ -226,6 +230,8 @@ class NodePromptInfo(FrozenModel):
     template_variables: list[str] = Field(default_factory=list)
     # The node's prompt loci, IN RENDER ORDER: the order sits inside every cell key it renders.
     fields: Annotated[tuple[str, ...], shapes_optimizer_prompt]
+    # The field a whole-prompt rewrite lands in; `None` declares none, and such a rewrite is refused.
+    rewrite_slot: str | None = None
 
     @field_validator("fields")
     @classmethod
@@ -235,6 +241,12 @@ class NodePromptInfo(FrozenModel):
         if taken := sorted({SHOTS_KEY, "prompt"} & set(fields)):
             raise ValueError(f"{taken} name the node's shots and its render, never a field")
         return fields
+
+    @model_validator(mode="after")
+    def _slot_is_a_field(self) -> "NodePromptInfo":
+        if self.rewrite_slot is not None and self.rewrite_slot not in self.fields:
+            raise ValueError(f"rewrite_slot {self.rewrite_slot!r} is none of {self.fields}")
+        return self
 
 
 # Exactly what `pipeline_parsing.py::_derive_node_kind` can emit, plus the two `io` ends.
@@ -459,10 +471,15 @@ _PARAM_ROLES: dict[str, ParamRole] = {
 }
 
 
-def steer_binds(key: str) -> bool:
-    """Whether a steer moving *key* can be the babysit act (decisions.md § 0005): a cost lever by
-    any move, a model by one outside what its node permits."""
-    return key in PARAM_FORBIDDEN_KEYS or key == "model"
+Pickable = Literal["any", "permitted", "none"]
+
+
+def pickable(key: str, *, steer_bound: bool) -> Pickable:
+    """What a steer *steer_bound* may move *key* to without the babysit act (decisions.md § 0005):
+    a cost lever nothing, a model what its node permits."""
+    if not steer_bound or key not in PARAM_FORBIDDEN_KEYS | {"model"}:
+        return "any"
+    return "none" if key in PARAM_FORBIDDEN_KEYS else "permitted"
 
 
 class NodeConfigParam(FrozenModel):
@@ -520,10 +537,10 @@ class NodeConfigParam(FrozenModel):
         description="`provider` the route's host, `effort` the reasoning ladder a model answers, "
         "`answer_format` the text/json toggle, `schema_family` a registry schema the backend owns",
     )
-    editable: bool = Field(
-        description="Whether its reader may steer it past `permitted`: false where a steer that "
-        "binds the reader binds it (`steer_binds`: a cost lever, a model), on a campaign read by "
-        "an account without `campaign.babysit`; a declaration binds none"
+    pickable: Pickable = Field(
+        description="What its reader may steer it to without the babysit act: `any` value; only a "
+        "`permitted` one (a model); `none` (a cost lever, which any move steers outside). A steer "
+        "binds only a campaign read by an account without `campaign.babysit`; a declaration binds none"
     )
 
 
@@ -929,7 +946,7 @@ class PipelineSchema(FrozenModel):
         declared: "PipelineSchema | None" = None,
     ) -> dict[str, list[NodeConfigParam]]:
         """COMPLETE by contract — filter downstream. *declared* is the schema BEFORE narrowing;
-        *steer_bound* whether a steer `steer_binds` binds its reader, held then to `permitted`: a
+        *steer_bound* whether a steer binds its reader to what `pickable` leaves it: a
         campaign read by an account without `campaign.babysit`."""
         # A model row is synthesized on the carrier only when no node OWNS a model.
         model_declared = any(
@@ -1019,7 +1036,7 @@ class PipelineSchema(FrozenModel):
                     # A key that could never be an axis is never HELD: there was none to close.
                     held=not never and key in n.param_keys_held | n.prompt_fields_held,
                     role=_PARAM_ROLES.get(key, ""),
-                    editable=not (steer_bound and steer_binds(key)),
+                    pickable=pickable(key, steer_bound=steer_bound),
                 )
                 knobs = n.knob_schema
                 params.append(_knob_row(row, n) if knobs and key in knobs["properties"] else row)
@@ -1038,7 +1055,7 @@ class PipelineSchema(FrozenModel):
                         description="Optimizer model for this node — install-global by "
                         "default, operator-steerable on a fork.",
                         source=stamped.get("model", "unset"),
-                        editable=not (steer_bound and steer_binds("model")),
+                        pickable=pickable("model", steer_bound=steer_bound),
                     )
                 )
             out[n.name] = params

@@ -626,8 +626,7 @@ def running_prompt(
             f"Optimizer prompt for node {node!r} not found in resolved_prompts "
             f"(check nodes.{node}.config.prompt_family/version)."
         )
-    edits = config.prompt_edits.model_dump(exclude_none=True)
-    return manifest.resolved_prompts[key].model_copy(update=edits)
+    return manifest.resolved_prompts[key].model_copy(update=config.prompt_edits())
 
 
 def _refuse_unknown_main(selected: SelectedOptimizer) -> None:

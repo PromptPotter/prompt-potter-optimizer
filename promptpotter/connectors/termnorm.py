@@ -179,6 +179,7 @@ CONNECTOR = Connector(
             "description": "One LLM call answers each row.",
             # No `reasoning_effort`: a rung named here follows no model the tenant swaps in.
             "config": {"provider": "openrouter", "model": "openai/gpt-oss-20b", "temperature": 0.0},
+            "prompt_info": {"rewrite_slot": "instruction"},
         },
     },
 )

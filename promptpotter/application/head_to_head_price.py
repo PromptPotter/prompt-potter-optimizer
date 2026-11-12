@@ -11,10 +11,9 @@ from typing import TYPE_CHECKING
 from pydantic import Field
 
 from promptpotter import connectors
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.initialization.wiring import session_bank
-from promptpotter.application.jobs.mint import arm_config
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import merge_outside_run, served_pipeline
 from promptpotter.application.preflight import (
@@ -155,15 +154,25 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
     connector = connectors.CONNECTORS.get(definition.backend_type)
     panel = dataset_experiment(stores, dataset, connector)
     experiment = None if panel is None else panel.experiment
-    declared = load_dataset_campaign_config(dataset)
-    first = heads[0].head_to_head
-    # Every arm runs one environment (`SharedPart.environment`): the first resolves what all run.
-    config = arm_config(declared, first, first.arms[0])
     served = await served_pipeline(stores, connector, experiment=experiment)
-    merged = merge_outside_run(stores, definition.pipeline, config, served)
+    layers = ConfigLayers.of(dataset, None)
+    # Each arm's as its mint lays it (`mint.py::arm_config`), in *heads*' order.
+    merges = [
+        merge_outside_run(
+            stores,
+            definition.pipeline,
+            layers.over(head.head_to_head.declared_optimization(arm)),
+            served,
+        )
+        for head in heads
+        for arm in head.head_to_head.arms
+    ]
+    configs = [merge.cfg for merge in merges]
+    # Every arm runs one environment (`SharedPart.environment`): the first resolves what all run.
+    config = configs[0]
     bank, _ = session_bank(stores, dataset, connector=connector, experiment=experiment)
     partition = partition_bank(bank.samples, config.dataset_split, seed=config.run_seed)
-    cell = measured_cell_price(stores, bank.dataset_hash, merged.layers.fold().params)
+    cell = measured_cell_price(stores, bank.dataset_hash, merges[0].layers.fold().params)
     if cell is None:
         raise PayloadInvalidError(
             f"no archive row prices a cell of {plan.dataset_name} on the models it runs, so "
@@ -172,14 +181,10 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
             "files.",
             code="cell_unpriced",
         )
-    names = {
-        select_optimizer(arm_config(declared, head.head_to_head, arm).optimization).name
-        for head in heads
-        for arm in head.head_to_head.arms
-    }
+    names = {select_optimizer(c.optimization).name for c in configs}
     return priced_head_to_head(
         heads,
-        declared,
+        configs,
         dataset_hash=bank.dataset_hash,
         search=len(partition.search),
         bench=len(partition.bench),
@@ -191,7 +196,7 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
 
 def priced_head_to_head(
     heads: Sequence[MintHeadToHeadPayload],
-    declared: CampaignConfig,
+    configs: Sequence[CampaignConfig],
     *,
     dataset_hash: str,
     search: int,
@@ -200,19 +205,24 @@ def priced_head_to_head(
     optimizers: Mapping[str, OptimizerRoundPrice | None],
     cells_in_flight: int,
 ) -> HeadToHeadPrice:
+    """*configs*: each arm's as its mint declares it (`mint.py::arm_config`), in *heads*' order."""
+    keyed = [
+        (head.head_to_head.head_to_head_id, arm.arm_key)
+        for head in heads
+        for arm in head.head_to_head.arms
+    ]
     arms = [
         _arm_price(
-            head.head_to_head.head_to_head_id,
-            arm.arm_key,
-            arm_config(declared, head.head_to_head, arm),
+            head_to_head_id,
+            arm_key,
+            config,
             search=search,
             bench=bench,
             cell=cell,
             optimizers=optimizers,
             cells_in_flight=cells_in_flight,
         )
-        for head in heads
-        for arm in head.head_to_head.arms
+        for (head_to_head_id, arm_key), config in zip(keyed, configs, strict=True)
     ]
     return HeadToHeadPrice(
         heads=list(heads),

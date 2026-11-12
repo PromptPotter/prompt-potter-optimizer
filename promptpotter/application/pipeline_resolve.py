@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from promptpotter import connectors
 from promptpotter.application.datasets.authored import (
+    ConfigLayers,
     campaign_config_over,
     dataset_campaign_block,
     load_dataset_campaign_config,
@@ -62,6 +63,7 @@ from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, Vendor
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     CycleConfig,
+    OptimizationConfig,
     effective_config,
     scoring_locked,
 )
@@ -75,7 +77,12 @@ from promptpotter.domain.pipeline_overlay import (
     permitted_models_from_narrowing,
     steers_disallowed_model,
 )
-from promptpotter.domain.pipeline_params import PipelineParams, apply_node_overlay
+from promptpotter.domain.pipeline_params import (
+    NodeCall,
+    PipelineParams,
+    apply_node_overlay,
+    laid_calls,
+)
 from promptpotter.domain.pipeline_parsing import (
     merge_node_blocks,
     parse_pipeline_response,
@@ -87,6 +94,7 @@ from promptpotter.domain.pipeline_schema import (
     SCHEMA_TOGGLE_PARAM,
     CapabilityMenu,
     KnobLayer,
+    KnobLayers,
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
@@ -182,8 +190,8 @@ class ParamLayers:
 
     schema: PipelineSchema
     workspace: Path | None
-    dataset: Mapping[str, Any] = field(default_factory=dict)
-    campaign: Mapping[str, Any] = field(default_factory=dict)
+    dataset: Mapping[str, NodeCall] = field(default_factory=dict)
+    campaign: Mapping[str, NodeCall] = field(default_factory=dict)
     free_tier: Mapping[str, Any] = field(default_factory=dict)
     seed: Mapping[str, Any] = field(default_factory=dict)
     identity: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
@@ -211,9 +219,9 @@ class ParamLayers:
     def _layer(self, source: ParamLayer, params: PipelineParams) -> Mapping[str, Any]:
         match source:
             case "dataset":
-                return self.dataset
+                return laid_calls(self.dataset)
             case "campaign":
-                return self.campaign
+                return laid_calls(self.campaign)
             case "free_tier":
                 return self.free_tier
             case "seed":
@@ -567,42 +575,95 @@ def resolved_output_schemas(
     return out
 
 
-def _fenced(
-    stores: Stores, draft: DraftFile, config: CampaignConfig, declared: PipelineSchema | None
-) -> CampaignConfig:
-    """*config* as this account runs it, over *declared* (the draft's chain): a free account's
-    takes the tier's layer last, bound to each node's model."""
-    fence = free_fence(stores, draft_backend_type(stores, draft))
-    return config if fence is None else with_free_tier_layer(config, declared, fence)
+class LaidConfig(NamedTuple):
+    config: CampaignConfig
+    # Per optimizer-node knob `config` holds, the last layer that SET it.
+    knob_layers: dict[str, dict[str, KnobLayer]]
+
+
+def laid_config(
+    stores: Stores, layers: ConfigLayers, *, connector: str, schema: PipelineSchema | None
+) -> LaidConfig:
+    """THE read of a run's config, the draft's and the mint's: the dataset's block, the door's
+    edit, then a free account's tier, bound to each node of *schema* (``None`` binds none). The
+    edit's ``scoring`` is the criterion whole, so it replaces the dataset's."""
+    dataset = layers.laid_dataset()
+    config = campaign_config_over(dataset, layers.campaign)
+    fence = free_fence(stores, connector)
+    if fence is not None:
+        config = with_free_tier_layer(config, schema, fence)
+    tiered = fence is not None and (fence.task or bool(fence.providers))
+    set_by = _set_by(
+        [
+            ("dataset", dataset),
+            ("campaign", layers.campaign),
+            ("free_tier", free_tier().campaign if tiered else {}),
+        ]
+    )
+    held = {node: overlay.config for node, overlay in config.optimization.nodes.items()}
+    return LaidConfig(
+        config, {node: {key: set_by[node][key] for key in cfg} for node, cfg in held.items()}
+    )
+
+
+def _set_by(
+    blocks: Sequence[tuple[KnobLayer, Mapping[str, Any]]],
+) -> dict[str, dict[str, KnobLayer]]:
+    """As `merge_config_layers` lays *blocks*: a layer naming another optimizer drops every knob."""
+    held = OptimizationConfig.model_fields["optimizer"].default
+    out: dict[str, dict[str, KnobLayer]] = {}
+    for layer, block in blocks:
+        optimization = block.get("optimization") or {}
+        if "optimizer" in optimization and optimization["optimizer"] != held:
+            held, out = optimization["optimizer"], {}
+        for node, overlay in (optimization.get("nodes") or {}).items():
+            for key in (overlay or {}).get("config") or {}:
+                out.setdefault(node, {})[key] = layer
+    return out
+
+
+def laid_session(session: Session, layers: ConfigLayers) -> tuple[Session, CampaignConfig]:
+    """The mint's `laid_config`: *session* records which layer set each knob, its mint writes."""
+    laid = laid_config(
+        session.store,
+        layers,
+        connector=session.backend_client.connector.name,
+        schema=session.pipeline_schema,
+    )
+    read = session.pipeline_read.model_copy(update={"knob_layers": laid.knob_layers})
+    return replace(session, pipeline_read=read), laid.config
+
+
+def draft_layers(stores: Stores, draft: DraftFile) -> ConfigLayers:
+    """``draft.config`` over its basis: an upload's `defaults.yaml` campaign, its definition's half
+    (`UPLOAD_DEFINITION_KEYS`) left to `_draft_local`; a reused dataset's own block."""
+    match draft.basis:
+        case UploadBasis():
+            edit = {k: v for k, v in draft.config.items() if k not in UPLOAD_DEFINITION_KEYS}
+            return ConfigLayers(campaign_defaults(), edit)
+        case DatasetBasis(dataset=name):
+            return ConfigLayers(dataset_campaign_block(resolve_dataset(stores, name)), draft.config)
+        case _:
+            assert_never(draft.basis)
+
+
+def draft_config(stores: Stores, draft: DraftFile) -> CampaignConfig:
+    """The draft's config, bound to no node: what its Start admits and sends reads no pipeline."""
+    return laid_config(
+        stores,
+        draft_layers(stores, draft),
+        connector=draft_backend_type(stores, draft),
+        schema=None,
+    ).config
 
 
 def draft_budget(stores: Stores, draft: DraftFile) -> Budget:
-    """The ceiling a Start admits: no node bears on it, so it reads no pipeline."""
-    return _fenced(stores, draft, draft_declared(stores, draft), None).optimization.budget
+    return draft_config(stores, draft).optimization.budget
 
 
 def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
-    """What a Start sends, and who pays each, off its declaration: it reads no pipeline."""
-    return sends_on(stores, draft_declared(stores, draft), draft_backend_type(stores, draft))
-
-
-def draft_declared(stores: Stores, draft: DraftFile) -> CampaignConfig:
-    """The campaign half of ``draft.config``, laid over its basis: an upload's `defaults.yaml` campaign,
-    its definition's half (`UPLOAD_DEFINITION_KEYS`) left to `_draft_local`; a reused dataset's
-    own block, every key. A draft's ``scoring`` is the criterion whole, so it replaces the
-    basis's."""
-    partial = draft.config
-    match draft.basis:
-        case UploadBasis():
-            basis = campaign_defaults()
-            partial = {k: v for k, v in partial.items() if k not in UPLOAD_DEFINITION_KEYS}
-        case DatasetBasis(dataset=name):
-            basis = dataset_campaign_block(resolve_dataset(stores, name))
-        case _:
-            assert_never(draft.basis)
-    if "scoring" in partial:
-        basis = {k: v for k, v in basis.items() if k != "scoring"}
-    return campaign_config_over(basis, partial)
+    """What a Start sends, and who pays each."""
+    return sends_on(stores, draft_config(stores, draft), draft_backend_type(stores, draft))
 
 
 def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:
@@ -642,9 +703,10 @@ class _Merge:
     layers: ParamLayers
     # The free tier fences the target's nodes: it is offered only the tier's task models.
     free: bool
-    # Whether a steer `steer_binds` binds the reader, held then to `permitted`: a campaign read by
+    # Whether a steer binds the reader to what `pickable` leaves it: a campaign read by
     # an account without `campaign.babysit`; never a draft, which sets what it permits.
     steer_bound: bool
+    knob_layers: KnobLayers
 
     @functools.cached_property
     def optimizer(self) -> SelectedOptimizer:
@@ -662,25 +724,26 @@ class _CampaignMerge(_Merge):
 
 @dataclass(frozen=True)
 class OutsideRunMerge(_Merge):
-    # The two halves an upload's Start writes (`DraftPipeline`).
+    # The definition an upload's Start writes (`DraftPipeline`).
     local: dict[str, Any]
-    campaign: CampaignConfig
+    config_layers: ConfigLayers
 
 
 def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> OutsideRunMerge:
     return merge_outside_run(
-        stores, _draft_local(stores, draft), draft_declared(stores, draft), served
+        stores, _draft_local(stores, draft), draft_layers(stores, draft), served
     )
 
 
 def merge_outside_run(
-    stores: Stores, local: dict[str, Any], campaign: CampaignConfig, served: ServedPipeline
+    stores: Stores, local: dict[str, Any], config_layers: ConfigLayers, served: ServedPipeline
 ) -> OutsideRunMerge:
-    """*campaign* over *local* as a mint would lay them, opening no session."""
+    """*config_layers* over *local* as a mint would lay them, opening no session."""
     templated = with_node_templates(local)
     declared = parse_pipeline_response(served.over(templated))
+    laid = laid_config(stores, config_layers, connector=served.connector, schema=declared)
+    cfg = laid.config
     fence = free_fence(stores, served.connector)
-    cfg = campaign if fence is None else with_free_tier_layer(campaign, declared, fence)
     filtered = _resolve_active_schema(
         declared, exclude=list(cfg.exclude_nodes), narrowing=cfg.optimizer_narrowing
     )
@@ -699,8 +762,9 @@ def merge_outside_run(
         ),
         free=_task_fenced(fence),
         steer_bound=False,
+        knob_layers=laid.knob_layers,
         local=local,
-        campaign=campaign,
+        config_layers=config_layers,
     )
 
 
@@ -734,6 +798,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
         ),
         free=_task_fenced(free_fence(stores, campaign.connector)),
         steer_bound=not has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP),
+        knob_layers=cycle.knob_layers(read.knob_layers),
         hop=hop,
         experiment=resolved.experiment,
     )
@@ -842,7 +907,7 @@ def _response(
         self_optimization=is_self_optimization(connector),
         cell_terms=list(connectors.CONNECTORS.get(connector).cell_terms),
         optimizer=m.cfg.optimization.optimizer,
-        optimizer_setup=optimizer_setup(m.optimizer, mint, m.filtered, workspace),
+        optimizer_setup=optimizer_setup(m.optimizer, mint, m.filtered, workspace, m.knob_layers),
         params=folded.params.dump(),
         node_config_schema=rows,
         view=m.filtered.view,
@@ -875,16 +940,16 @@ def resolve_pipeline_for_draft(
 class DraftPipeline:
     """The draft's pipeline before Start commits any of it: what its nodes run with, their rows,
     the chain they run in, the chain as declared before the draft narrowed it, its config as this
-    account runs it, the two halves an upload's Start writes (`local`, the definition it lays;
-    `campaign`, its campaign half before the free tier's layer), and the backend that serves it."""
+    account runs it, the layers its mint lays, the definition an upload's Start writes (`local`),
+    and the backend that serves it."""
 
     params: PipelineParams
     rows: dict[str, list[NodeConfigParam]]
     chain: PipelineSchema
     declared: PipelineSchema
     config: CampaignConfig
+    layers: ConfigLayers
     local: dict[str, Any]
-    campaign: CampaignConfig
     backend_type: str
 
     @functools.cached_property
@@ -908,8 +973,8 @@ def draft_pipeline(stores: Stores, draft: DraftFile, served: ServedPipeline) -> 
         m.filtered,
         m.declared,
         m.cfg,
+        m.config_layers,
         m.local,
-        m.campaign,
         served.connector,
     )
 
@@ -1120,7 +1185,7 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
             if read is None
             else [
                 read.declaration,
-                read.dataset_overlay,
+                laid_calls(read.dataset_overlay),
                 read.free_tier_overlay,
             ]
         ),
@@ -1163,26 +1228,6 @@ def _vendor_of(model: str) -> str:
     return normalize_model_id(model).partition("/")[0]
 
 
-def _knob_layers(
-    config: CampaignConfig, dataset: ResolvedDataset | None, fence: FreeFence | None
-) -> dict[str, dict[str, KnobLayer]]:
-    """Which layer below the draft's edit laid each optimizer-node knob *config* holds: the
-    dataset's block where it holds the value laid, the free tier's over it."""
-    held = {node: overlay.config for node, overlay in config.optimization.nodes.items()}
-    tiered = fence is not None and (fence.task or bool(fence.providers))
-    below: list[tuple[KnobLayer, Mapping[str, Any]]] = [
-        ("dataset", {} if dataset is None else dataset_campaign_block(dataset)),
-        ("free_tier", free_tier().campaign if tiered else {}),
-    ]
-    out: dict[str, dict[str, KnobLayer]] = {}
-    for layer, block in below:
-        for node, overlay in ((block.get("optimization") or {}).get("nodes") or {}).items():
-            for key, value in ((overlay or {}).get("config") or {}).items():
-                if key in held.get(node, {}) and held[node][key] == value:
-                    out.setdefault(node, {})[key] = layer
-    return out
-
-
 def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Session:
     campaign_config = cycle.config
     exclude = list(campaign_config.exclude_nodes)
@@ -1206,7 +1251,6 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
         fence = free_fence(session.store, session.backend_client.connector.name)
         minted = {
             "free_tier_overlay": free_tier_overlay(campaign_config, session.pipeline_schema, fence),
-            "knob_layers": _knob_layers(campaign_config, dataset, fence),
         }
     read = session.pipeline_read.model_copy(update=minted)
     folded = ParamLayers(

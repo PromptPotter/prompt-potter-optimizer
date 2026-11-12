@@ -193,7 +193,7 @@ from promptpotter.application.scoring.classification import DegradationCheck, sc
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.scoring.evaluators import (
     DEFAULT_CELL_FORMULA,
-    Evaluator,
+    SampleEvaluator,
     compute_degraded_rate,
     compute_error_rate,
     compute_fitness,
@@ -889,10 +889,13 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     def connector_refuses(**declared: Any) -> bool:
         return table_refuses(probe=fake_connector("probe", **declared))
 
+    async def one(**_: Any) -> float:
+        return 1.0
+
     def package_evaluator_refuses(name: str) -> bool:
-        ev = Evaluator(name=name, description="A probe.", scope="per_sample", compute=lambda **_: 1)
+        ev = SampleEvaluator(name=name, description="A probe.", compute=one)
         with monkeypatch.context() as patched:
-            patched.setattr(evaluators, "_REGISTRY", [*evaluators._REGISTRY, ev])
+            patched.setattr(evaluators, "_SAMPLE_EVALUATORS", (*evaluators._SAMPLE_EVALUATORS, ev))
             try:
                 evaluators._validate_registry()
             except ValueError:
@@ -982,7 +985,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         ("total_time", {"observation key"}),  # a PipelineData key: an observation fills it
         ("n_turns", set()),  # a turn scalar
         ("n_tool_calls", set()),
-        ("retrieve_turns", set()),  # a step's turn count
+        ("retrieve_step_turns", set()),  # a step's turn count
         ("retrieval_shortfall", set()),  # a package evaluator
         # The L4 connector's term: another connector may declare it, nothing its campaigns read.
         ("rounds", {"connector term", "reported key"}),
@@ -1007,24 +1010,24 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         "a reported core channel read one value on a dial and another in a formula"
     )
 
-    # A conversation reaches the formula only as projected scalars.
+    # A conversation reaches the formula only as projected scalars; a step named `n` keeps the total.
     turns = [
         {"index": 1, "source": "agent", "step": "retrieve", "tools": ["bash", "bash"]},
         {"index": 2, "source": "agent", "step": "retrieve", "tools": []},
-        {"index": 3, "source": "agent", "step": "answer", "tools": ["bash"]},
+        {"index": 3, "source": "agent", "step": "n", "tools": ["bash"]},
     ]
     scalars = turn_scalars(turns)  # type: ignore[arg-type]
     assert scalars == {
         "n_turns": 3.0,
         "n_tool_calls": 3.0,
-        "retrieve_turns": 2.0,
-        "answer_turns": 1.0,
+        "retrieve_step_turns": 2.0,
+        "n_step_turns": 1.0,
     }
     assert turn_scalars([]) == {}, "no conversation is absence, never a zeroed count"
     talked = measurement(0, 0.0, pipeline_data={"env_reward": 1.0, "turns": turns, **scalars})
     assert (
         scorer_of(
-            "env_reward * (1.0 if n_turns <= 4 else 0.5) * min(1.0, retrieve_turns / 2.0)",
+            "env_reward * (1.0 if n_turns <= 4 else 0.5) * min(1.0, retrieve_step_turns / 2.0)",
             verifier_graded=True,
         )
         .grade(talked.facts)

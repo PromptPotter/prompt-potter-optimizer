@@ -73,12 +73,12 @@ class TurnRecord(TypedDict, total=False):
 
 # Disjoint from `CELL_INTRINSIC_NAMES` (`formula/compiler.py`): the splat drops a collision silently.
 TURN_SCALAR_KEYS: frozenset[str] = frozenset({"n_turns", "n_tool_calls"})
-# A step's own count, ``{step}_turns``: the step is one only the cell's turns name.
-TURN_STEP_SUFFIX = "_turns"
+# A step's own count, ``{step}_step_turns``: no step name can spell a total.
+TURN_STEP_SUFFIX = "_step_turns"
 
 
 def turn_scalars(turns: list[TurnRecord] | None) -> dict[str, float]:
-    """Per-step keys are ``{step}_turns``, kept only where a formula can name them."""
+    """Per-step keys are ``{step}_step_turns``, kept only where a formula can name them."""
     if not turns:
         return {}
     out: dict[str, float] = {

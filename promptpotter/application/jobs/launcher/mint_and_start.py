@@ -2,14 +2,10 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from promptpotter.application.datasets.authored import (
-    load_dataset_campaign_config,
-    with_optimization,
-)
+from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.draft_build import draft_task_context
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.initialization.wiring import bind_cycle_session, init_services
@@ -22,7 +18,7 @@ from promptpotter.application.jobs.mint import (
     resolve_resume,
 )
 from promptpotter.application.jobs.quota import sends_on
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
 from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.checkin_draft import DraftFile
@@ -68,8 +64,7 @@ class FreshMint:
     # Resolved once, where the request is built (`commands/launching.py::mint_campaign`).
     dataset: ResolvedDataset
     budget: Budget
-    optimization: Mapping[str, Any]
-    declared: CampaignConfig | None
+    layers: ConfigLayers
     task_text: str | None
 
     @property
@@ -91,15 +86,17 @@ class FreshMint:
     def backend_type(self, _stores: Stores) -> str:
         return runnable_definition(self.dataset).backend_type
 
-    def campaign_config(self) -> CampaignConfig:
-        declared = self.declared or load_dataset_campaign_config(self.dataset)
-        return with_optimization(declared, self.optimization)
+    def campaign_config(self, stores: Stores) -> CampaignConfig:
+        """Bound to no node: what the mint admits and sends reads no pipeline."""
+        return laid_config(
+            stores, self.layers, connector=self.backend_type(stores), schema=None
+        ).config
 
-    def declared_budget(self, _stores: Stores) -> Budget:
-        return self.campaign_config().optimization.budget
+    def declared_budget(self, stores: Stores) -> Budget:
+        return self.campaign_config(stores).optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
-        return sends_on(stores, self.campaign_config(), self.backend_type(stores))
+        return sends_on(stores, self.campaign_config(stores), self.backend_type(stores))
 
     async def open(self, stores: Stores) -> OpenedCycle:
         """The session, then the mint: a refused one writes nothing."""
@@ -108,9 +105,10 @@ class FreshMint:
             dataset_name=self.dataset_name, identity=stores.identity, stores=stores
         )
         logger.info("mint[%s]: init_services=%.2fs", self.dataset_name, time.perf_counter() - t0)
+        session, config = laid_session(session, self.layers)
         return await mint_framed_cycle(
             session,
-            declare(session, self.campaign_config(), purpose=Optimize()),
+            declare(session, config, purpose=Optimize()),
             session.bank.samples,
             task_text=self.task_text,
         )
@@ -162,12 +160,13 @@ def commit_upload_definition(
     pipeline: DraftPipeline,
 ) -> None:
     """Called once the cut *source* names passed every mint refusal: a refused Start takes no slug.
-    Writes the two halves its check-in read off *pipeline*."""
+    Writes the definition, its ``campaign`` the draft's layers laid (`ConfigLayers.block`): the
+    dataset's block from here on, as a shipped dataset's `dataset.yaml::campaign` is."""
     stores.write_own_definition(
         draft.slug,
         source=source,
         pipeline=pipeline.local,
-        campaign=pipeline.campaign.model_dump(mode="json", exclude_defaults=True),
+        campaign=pipeline.layers.block(),
         description=draft.confirmed_task(),
         framing=draft_task_context(draft),
         origin=draft.committed_prompts(pipeline.chain),

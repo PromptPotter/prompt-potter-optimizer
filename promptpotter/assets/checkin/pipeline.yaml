@@ -23,7 +23,7 @@ nodes:
       param_allowed_values:
         # `capabilities.py::STANDARD_EFFORT_LADDER`, cited because a YAML cannot import it.
         reasoning_effort: [none, default, low, medium, high]
-        provider: [openrouter, groq, openai, anthropic]
+        provider: [openrouter, groq, openai]
     config:
       temperature: 0.3
       prompt_family: checkin

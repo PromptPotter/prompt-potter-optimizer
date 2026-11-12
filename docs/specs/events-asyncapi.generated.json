@@ -2594,8 +2594,7 @@
           },
           "pipeline_overlay": {
             "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/NodeCall"
             },
             "title": "Pipeline Overlay",
             "type": "object"
@@ -4920,6 +4919,10 @@
         "title": "NearMiss",
         "type": "object"
       },
+      "NodeCall": {
+        "additionalProperties": true,
+        "type": "object"
+      },
       "NodePrompt": {
         "additionalProperties": false,
         "description": "One prompt node's loci: its fields by name and its shots, both written only through ``derive`` / ``edited``.",
@@ -5771,8 +5774,7 @@
         "properties": {
           "dataset_overlay": {
             "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/NodeCall"
             },
             "title": "Dataset Overlay",
             "type": "object"

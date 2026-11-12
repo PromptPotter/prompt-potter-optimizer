@@ -34,19 +34,24 @@ def task_description(ctx: NodeContext, node: PipelineNode) -> str:
 
 
 def shown(ctx: NodeContext, individual: OptSearchPoint, node: PipelineNode) -> str:
-    knobs = ctx.knobs(RewriteKnobs)
-    if knobs.rewrites == "prompt":
+    rewrites = ctx.knobs(RewriteKnobs).rewrites
+    if rewrites == "prompt":
         return individual.render(node)
-    return individual.prompt(node.name).fields.get(knobs.field, "")
+    return individual.prompt(node.name).fields.get(rewrites, "")
 
 
 def rewritten(ctx: NodeContext, node: PipelineNode, text: str) -> dict[Locus, str]:
-    """Under ``prompt`` every other field is emptied: the reply replaced the whole ``render()`` shown."""
-    knobs = ctx.knobs(RewriteKnobs)
-    written = {Locus(node.name, knobs.field): text}
-    if knobs.rewrites == "field":
-        return written
-    return {**{Locus(node.name, f): "" for f in node.prompt_fields}, **written}
+    """Under ``prompt`` the reply lands in the node's slot and every other open field is emptied:
+    it replaced the whole ``render()`` shown."""
+    rewrites = ctx.knobs(RewriteKnobs).rewrites
+    if rewrites != "prompt":
+        return {Locus(node.name, rewrites): text}
+    slot = node.prompt_info.rewrite_slot if node.prompt_info else None
+    assert slot is not None, "the preflight refuses a whole-prompt rewrite of a node with no slot"
+    return {
+        **{Locus(node.name, f): "" for f in node.open_prompt_fields},
+        Locus(node.name, slot): text,
+    }
 
 
 def marked(text: str) -> str | None:

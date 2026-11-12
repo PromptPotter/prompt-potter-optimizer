@@ -186,13 +186,20 @@ row it closes.
 - **S: a live book counts apart from the one fold** (every file's money is
   `store/read_model.py::money_on`, money-g): `spend_book.py::SpendBook` counts through its ledger
   subscription and through admission (`Admission._unseen`, `_unlanded`), and the live dashboard banks
-  its own rollup. Action: the live readers ride `_Money` as a projection. **Rides with:** money 3.
-- **`paid_call` registers no hold** (bl2.B8; B9 and B11 closed by money 2): it admits off the gate, so
-  its send is counted only once billed. Action: the call's hold is an open charge. **Rides with:** money 3.
-- **A reserved cell's bill is on no ledger** (`Connector.holds_own_sends` writes no hold), so
-  `infrastructure/llm/spend_book.py::unreported_on` can re-teach a book its sends but never the cell.
-  Action: a hold record per reserved cell. **Rides with:** money 2. **Re-test:**
-  `git grep -n -A28 "def reserved" -- promptpotter/infrastructure/llm/spend_book.py | grep -c emit_spend_hold` is 1.
+  its own rollup. Action: the live readers ride `_Money` as a projection. **Rides with:** holds nest.
+- **Money holds once per level, three ways** (operator, 2026-11-12: a backbone root, not a row):
+  - the run reserves in quota's job registry (`job.reserve`, `_outstanding_reservations`), handed to
+    its book as `spend_book.py::Hold`;
+  - a cell reserves in memory only (`spend_book.py::CellReservation`, with its own `draw` and the
+    chain index in `SpendBook.hold`), so a reserved cell's hold is on no ledger
+    (`Connector.holds_own_sends`);
+  - a call holds a `Charge`.
+
+  Action: one hold at every depth, a `Charge` with a bound and a parent hold. A draw goes against the
+  nearest open parent, and the open part is the bound less its children's holds and bills, read by
+  `read_model.py::money_on`. `CellReservation` and the job reserve go. **Rides with:** holds nest
+  (roadmap § Sequence, Phase 2). **Re-test:** `git grep -n "class CellReservation" -- promptpotter`
+  is empty.
 - **The campaign store reaches into the LLM layer for a ledger read**: `campaign_store/store.py:58`
   imports `standing_budget` from `infrastructure/llm/spend_book.py:80`, and
   `CampaignStore.read_standing_budget` answers it. Root: the read lives with the store, and the book takes
@@ -395,14 +402,14 @@ row it closes.
 - **`LLMResponse.cost_usd` omits a resend `_admitted_send` made that may have billed**, so harbor's
   `_AgentModel.cost_usd` can read below the book's. **Rides with:** rk-run 3. **Re-test:** one 5xx then
   an answer; the row's `cost_usd` against the ledger.
-- **`scoring/evaluators.py::Evaluator` is one class for two contracts** (`per_sample` async vs
+- **scoring/evaluators.py::Evaluator is one class for two contracts** (`per_sample` async vs
   `per_round` sync) held apart by runtime guards; its `Scope` collides with `data_root.Scope`. Action:
   two evaluator types. **Rides with:** rk-run 4. **Re-test:**
   `git grep -n "isawaitable\|iscoroutinefunction" -- promptpotter/application/scoring/evaluators.py`.
 - **`domain/scoring.py::turn_scalars` overwrites `n_turns` with the count of a step named `n`**, and
   `isidentifier()` drops a step like `my-step` silently. Action: the per-step terms take a namespace the
   totals cannot meet. **Rides with:** rk-run 4. **Re-test:** a turn list with a step `n` keeps its total.
-- **`infrastructure/llm/anthropic.py::AnthropicClient` cannot run a node on a current Claude model.**
+- **infrastructure/llm/anthropic.py::AnthropicClient cannot run a node on a current Claude model.**
   Decided (decision 10): it is deleted with its two `provider:` entries; Claude routes through
   OpenRouter. **Rides with:** rk-run 5. **Re-test:** `git grep -n "class AnthropicClient" -- promptpotter` is empty.
 - **A head-to-head's arms do not share one optimizer model.** Decided: every arm on one model, each
@@ -416,21 +423,12 @@ row it closes.
   (decision 19): the overlay rule — a new value replaces the old, only object-typed params merge their
   keys, a model changed without a route drops the old route — folded into `ParamLayers`. **Rides with:**
   rk-run 7. **Re-test:** `git grep -c "merge_config_layers" -- promptpotter` is 0 or holds no node rule.
-- **A knob's layer below the edit is read by value, and a draft's names none**: `optimizer_setup` rows
-  carry `unset`, and `pipeline_resolve.py::_knob_layers` names the dataset where the edit set the
-  dataset's own value. Action: the edit layer reaches the knob-layer read, which names the last layer
-  laid; `optimizer_setup` serves it. **Rides with:** rk-run 7. **Re-test:** an edit restating the
-  dataset's value reads `campaign`.
 - **A field cleared in the steer panel cannot drop a candidate's value**: a fork's seed only adds over
   the candidate it forks. Action: the steer sends `EditDraftPatch.reset`'s delete. **Rides with:**
   rk-run 7. **Re-test:** clear a field in `SteerForkPanel`; the fork launches without the candidate's value.
 - **The knob Reset writes the declared value, so the draft stays "edited"**: `OptimizerSetupSection.tsx`
   lays `NodeKnobsPanel`'s patch as `optimization.nodes` alone, where `EditDraftPatch.reset` is the
   delete. **Rides with:** rk-run 7. **Re-test:** `git grep -n "set(k.declared)" -- webapp`.
-- **The domain carrier raises a door's error**: `pipeline_params.py::PipelineParams.with_nodes` raises
-  `PayloadInvalidError` (a 422) from internal calls. Action: the carrier raises its validation error and
-  each door words it. **Rides with:** rk-run 7. **Re-test:**
-  `git grep -n "PayloadInvalidError" -- promptpotter/domain/pipeline_params.py`.
 - **The call-key rosters are read through a private name**: `domain/search_point.py:10` imports
   `pipeline_params._Roster` to derive `WHO_ANSWERS_KEYS`, `PARAM_FORBIDDEN_KEYS`, `PARAM_SCOPE_KEYS`
   and `CALL_CONFIG_KEYS`. Action: the four live beside `NodeCall`, their nine importers re-pointed.
@@ -496,6 +494,10 @@ row it closes.
   that proceeds (the halted readout says only that nobody has asked for it; the design sentence lives in
   the CHANGELOG and `offline-run.md`). Action: `False`, and the `next_step` names the owed pass.
   **Rides with:** rk-run, which holds `domain/phases.py`. **Re-test:** `git grep -n "\"origin_gate\".*grades_selection: true" -- webapp/lib/api/types.generated.ts` is empty.
+- **TermNorm serves no rewrite slot**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
+  `rewrite_slot`. Action (TermNorm repo): serve `rewrite_slot: instruction`, then
+  `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
+  `git grep -n "rewrite_slot" -- promptpotter/connectors/termnorm.py` is empty.
 
 ### batch/26 · payer (on rk-run's tip: the assembled one, beside rk-dec)
 

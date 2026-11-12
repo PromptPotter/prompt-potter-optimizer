@@ -24,6 +24,7 @@ from promptpotter.application.pipeline_resolve import configure_and_apply_pipeli
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.measurement_provenance import RunSource
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.scoring import (
     all_verifier_graded,
     is_verifier_graded,
@@ -261,11 +262,13 @@ async def _screen(
         # dataset's own node config, so a (dataset, solver) pair is screened as its cell would run.
         po = dict(campaign_config.pipeline_overlay)
         for node in solver:
-            po[node.name] = {
-                **po.get(node.name, {}),
-                "model": model,
-                **({"provider": provider} if provider else {}),
-            }
+            po[node.name] = NodeCall.model_validate(
+                {
+                    **po.get(node.name, NodeCall()).laid_keys(),
+                    "model": model,
+                    **({"provider": provider} if provider else {}),
+                }
+            )
         campaign_config = campaign_config.model_copy(update={"pipeline_overlay": po})
     session = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
     with arm_diagnostic_scoring(session, campaign_config, source=RunSource.SEED_SCREEN):

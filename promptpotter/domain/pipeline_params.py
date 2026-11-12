@@ -20,7 +20,6 @@ from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -71,6 +70,12 @@ class NodeCall(FrozenModel):
     # validates nothing, keeps its source's, and its updated keys follow.
     _laid: _LaidOrder = PrivateAttr(default_factory=_LaidOrder)
 
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        return handler(core_schema.dict_schema(core_schema.str_schema(), core_schema.any_schema()))
+
     provider: Annotated[str | None, _Roster.WHO_ANSWERS, _Roster.FORBIDDEN] = None
     model: Annotated[str | None, _Roster.WHO_ANSWERS] = None
     route_order: Annotated[list[str] | None, _Roster.WHO_ANSWERS, _Roster.FORBIDDEN] = None
@@ -87,16 +92,52 @@ class NodeCall(FrozenModel):
     @model_validator(mode="wrap")
     @classmethod
     def _keeps_order(cls, laid: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        if not isinstance(laid, Mapping):
+            return handler(laid)
+        # A null call key is unset: equality and the digest read one shape.
+        laid = {k: v for k, v in laid.items() if v is not None or k not in cls.model_fields}
         call = handler(laid)
-        if isinstance(laid, Mapping):
-            call._laid = _LaidOrder(laid)
+        call._laid = _LaidOrder(laid)
         return call
+
+    @model_serializer(mode="plain")
+    def _dump(self) -> dict[str, object]:
+        held = {
+            key: getattr(self, key)
+            for key in (*type(self).model_fields, *(self.model_extra or {}))
+            if key in self.model_fields_set
+        }
+        return {**{key: held[key] for key in self._laid if key in held}, **held}
 
     def laid_keys(self) -> dict[str, Any]:
         """Each key as laid to its value, in its laid order, the backend's beside the call keys: what
-        the wire sends."""
-        dumped = self.model_dump(exclude_unset=True)
-        return {**{key: dumped[key] for key in self._laid if key in dumped}, **dumped}
+        the wire sends, and every dump of a call."""
+        return self.model_dump()
+
+
+def laid_calls(calls: Mapping[str, NodeCall]) -> dict[str, dict[str, Any]]:
+    return {node: call.laid_keys() for node, call in calls.items()}
+
+
+def _call_keys_in(roster: _Roster) -> frozenset[str]:
+    return frozenset(
+        name for name, info in NodeCall.model_fields.items() if roster in info.metadata
+    )
+
+
+WHO_ANSWERS_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(
+    _Roster.WHO_ANSWERS
+)
+PARAM_FORBIDDEN_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(
+    _Roster.FORBIDDEN
+)
+# A forbidden key changes who answers: else a steer of one inherits a C0 measured by another host.
+assert PARAM_FORBIDDEN_KEYS <= WHO_ANSWERS_KEYS, PARAM_FORBIDDEN_KEYS - WHO_ANSWERS_KEYS
+PARAM_SCOPE_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(_Roster.SCOPE)
+# Every key an llm node's config may set beside its knobs and prompt fields.
+CALL_CONFIG_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+    NodeCall.model_fields
+)
 
 
 class PipelineParams(FrozenModel):
@@ -135,7 +176,7 @@ class PipelineParams(FrozenModel):
 
     @property
     def laid_nodes(self) -> dict[str, dict[str, Any]]:
-        return {node: cfg.laid_keys() for node, cfg in self.nodes.items()}
+        return laid_calls(self.nodes)
 
     def __bool__(self) -> bool:
         return self.steps is not None or bool(self.nodes)
@@ -148,11 +189,7 @@ class PipelineParams(FrozenModel):
         return self.model_validate({**laid, **self.nodes})
 
     def with_nodes(self, nodes: Mapping[str, NodeCall | Mapping[str, object]]) -> Self:
-        """*nodes* laid as the chain's configs: a key of the wrong type refuses, located."""
-        typed = {
-            n: PayloadInvalidError.validating(NodeCall, c, under=(n,)) for n, c in nodes.items()
-        }
-        return self.model_validate({**self._laid_steps, **typed})
+        return self.model_validate({**self._laid_steps, **nodes})
 
     def overlaid(self, overlay: Mapping[str, Mapping[str, Any]], schema: PipelineSchema) -> Self:
         """*overlay* laid over its nodes, a node *schema* does not declare dropped."""
@@ -170,6 +207,27 @@ class PipelineParams(FrozenModel):
 RESERVED_NODE_NAMES = frozenset(PipelineParams.model_fields)
 
 
+def lay_node_config(
+    existing: Mapping[str, object], cfg: Mapping[str, object], param_types: Mapping[str, str]
+) -> dict[str, object]:
+    """The one node-config merge: a new value replaces the old and only an ``object`` param merges its keys."""
+    laid = {**existing, **cfg}
+    # A route names ONE model's hosts: a new model without one takes its own default.
+    if "route_order" not in cfg and cfg.get("model", existing.get("model")) != existing.get(
+        "model"
+    ):
+        laid.pop("route_order", None)
+    for param, incoming in cfg.items():
+        prior = existing.get(param)
+        if (
+            param_types.get(param) == "object"
+            and isinstance(prior, dict)
+            and isinstance(incoming, dict)
+        ):
+            laid[param] = {**prior, **incoming}
+    return laid
+
+
 def apply_node_overlay(
     base: Mapping[str, Mapping[str, Any]],
     overlay: Mapping[str, Mapping[str, Any]],
@@ -180,26 +238,9 @@ def apply_node_overlay(
 ) -> dict[str, dict[str, Any]]:
     merged = {node: dict(cfg) for node, cfg in base.items()}
     for node, cfg in overlay.items():
-        if (existing := merged.get(node)) is None:
-            merged[node] = dict(cfg)
-        else:
-            node_obj = schema.get_node(node) if schema else None
-            param_types = node_obj.param_types if node_obj else {}
-            node_cfg = {**existing, **cfg}
-            # A route names ONE model's hosts: a new model without one takes its own default.
-            if "route_order" not in cfg and cfg.get("model", existing.get("model")) != existing.get(
-                "model"
-            ):
-                node_cfg.pop("route_order", None)
-            for param, incoming in cfg.items():
-                prior = existing.get(param)
-                if (
-                    param_types.get(param) == "object"
-                    and isinstance(prior, dict)
-                    and isinstance(incoming, dict)
-                ):
-                    node_cfg[param] = {**prior, **incoming}
-            merged[node] = node_cfg
+        node_obj = schema.get_node(node) if schema else None
+        param_types = node_obj.param_types if node_obj else {}
+        merged[node] = lay_node_config(merged.get(node, {}), cfg, param_types)
         if provenance is not None and source is not None:
             provenance.setdefault(node, {}).update(dict.fromkeys(cfg, source))
     return merged

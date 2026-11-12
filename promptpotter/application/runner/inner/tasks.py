@@ -26,17 +26,17 @@ from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.campaign_config import (
     DEFAULT_ORIGIN_BUDGET,
-    NODE_OVERLAYS,
     ArmGateMode,
     CampaignConfig,
     OptimizationConfig,
-    merge_config_layers,
+    lay_node_overlays,
 )
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
 from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import (
     DEFAULT_PIPELINE,
     ManifestNodeOverlay,
@@ -349,19 +349,15 @@ def _inner_optimization(
 ) -> OptimizationConfig:
     """An inner cycle's selection key: its nodes under the inner gate. ``n_samples=None`` leaves
     the sampler's size out, which is what the identity hashes."""
-    laid: dict[str, object] = {}
+    laid: dict[str, ManifestNodeOverlay] = {}
     for layer in (opt.nodes, nodes, depth_nodes):
-        laid = merge_config_layers(laid, NODE_OVERLAYS.dump_python(layer, exclude_unset=True))
-    inner = opt.model_copy(
-        update={"nodes": NODE_OVERLAYS.validate_python(laid), "arm_gate": INNER_ARM_GATE}
-    )
+        laid = lay_node_overlays(laid, layer)
+    inner = opt.model_copy(update={"nodes": laid, "arm_gate": INNER_ARM_GATE})
     sampler = select_optimizer(inner).sampler
     if n_samples is None or sampler.size_knob is None:
         return inner
-    size = {sampler.name: {"config": {sampler.size_knob: n_samples}}}
-    return inner.model_copy(
-        update={"nodes": NODE_OVERLAYS.validate_python(merge_config_layers(laid, size))}
-    )
+    size = {sampler.name: ManifestNodeOverlay(config={sampler.size_knob: n_samples})}
+    return inner.model_copy(update={"nodes": lay_node_overlays(laid, size)})
 
 
 # `problem_description` and `answer_format` are absent: they carry the injection slots and the output contract.
@@ -536,10 +532,10 @@ def inner_instrument_config(
         )
     if not solver:
         raise ValueError("the inner pipeline declares no prompt node: no solver to pin")
-    po: dict[str, Any] = {k: dict(v) for k, v in (base.pipeline_overlay or {}).items()}
+    po = dict(base.pipeline_overlay)
     narrowing = dict(base.optimizer_narrowing)
     for prompt_node in solver:
-        node = dict(po.get(prompt_node.name, {}))
+        node = po.get(prompt_node.name, NodeCall()).laid_keys()
         node["seed"] = spec.run_seed
         if spec.inner_model:
             node["model"] = spec.inner_model
@@ -547,7 +543,7 @@ def inner_instrument_config(
                 node["provider"] = spec.inner_provider
         if spec.inner_route_order:
             node["route_order"] = list(spec.inner_route_order)
-        po[prompt_node.name] = node
+        po[prompt_node.name] = NodeCall.model_validate(node)
         # The solver's SPEND AXES — model, effort, output cap, temperature — are the instrument, so the
         # inner generator writes prompt text alone: a lift bought with tokens is not optimizer learning.
         own = narrowing.get(prompt_node.name) or NodeSearchNarrowing()

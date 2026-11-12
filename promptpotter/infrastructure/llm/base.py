@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import functools
 import json
-import logging
 import socket
-from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import SecretStr
 
@@ -18,37 +15,13 @@ from promptpotter.infrastructure.llm.pricing import (
     RateCeiling,
     rate_ceiling,
 )
-from promptpotter.infrastructure.llm.request import ChatRequest
-from promptpotter.infrastructure.llm.response import LLMResponse
-from promptpotter.infrastructure.llm.send_failure import failed_send
-from promptpotter.infrastructure.llm.send_pacing import (
-    Backpressure,
-    RateLimiter,
-    apply_discovered_caps,
-    drawn_budget,
-    held_wait,
-    window_slot,
-)
-from promptpotter.infrastructure.llm.spend_book import (
-    FRAMING_TOKENS,
-    Billed,
-    CallLabel,
-    SendBound,
-    admitted,
-    answered,
-)
-from promptpotter.shared.errors import ErrorCategory, SendRefusedError
+from promptpotter.infrastructure.llm.send_pacing import Backpressure, RateLimiter
+from promptpotter.infrastructure.llm.spend_book import FRAMING_TOKENS, SendBound
 from promptpotter.shared.run_scope import run_scope
 from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
     import httpx
-
-    from promptpotter.domain.backend import BackpressureReading
-
-logger = logging.getLogger(__name__)
-
-_R = TypeVar("_R")
 
 # Per read gap: a reasoning model may think for minutes before its first byte.
 WIRE_TIMEOUT_S = 600.0
@@ -67,7 +40,7 @@ KEEPALIVE_OPTIONS = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)] + [
 def wire_client(base_url: str, *, timeout_s: float) -> httpx.AsyncClient:
     """One pool per host, holding no key: each send carries its own (`post_json`).
 
-    Resends nothing: `LLMClientBase._admitted_send` is the one loop, and each resend a bill."""
+    Resends nothing: `OpenAICompatibleClient._admitted_send` is the one loop, and each resend a bill."""
     import httpx
 
     return httpx.AsyncClient(
@@ -137,116 +110,3 @@ class SendPacing:
     rate_limiter: RateLimiter | None
     # Per MODEL: a gateway throttles one model's upstream while the rest answer.
     backpressure: dict[str, Backpressure] = field(default_factory=dict)
-
-
-class LLMClientBase(ABC):
-    """Lives as long as its caller's key resolution: the key is never held past it."""
-
-    SENDS: ClassVar[frozenset[str]]
-    CREDIT_REFUSAL_STATUSES: ClassVar[frozenset[int]]
-    RATE_CAP_HEADERS: ClassVar[tuple[str, str]]
-
-    def __init__(
-        self,
-        *,
-        provider: str,
-        display_name: str,
-        key: ProviderKey,
-        pacing: SendPacing,
-    ):
-        self._provider = provider
-        self._provider_name = display_name
-        self._key = key
-        self._rate_limiter = pacing.rate_limiter
-        self._backpressure = pacing.backpressure
-
-    def pushback(self, model: str) -> BackpressureReading | None:
-        held = self._backpressure.get(model)
-        return None if held is None else held.reading()
-
-    async def chat(self, request: ChatRequest, *, label: CallLabel) -> LLMResponse:
-        # A field that silently reaches no wire still scores, crediting a mutation nothing carried.
-        if unsent := sorted(request.asked() - self.SENDS):
-            raise ValueError(
-                f"{self._provider_name} cannot send {', '.join(unsent)}. Close the axis on the "
-                "node (`optimizer.param_keys`) or unset the field, so it never reads as searched."
-            )
-        return await self._chat(request, label)
-
-    @abstractmethod
-    async def _chat(self, request: ChatRequest, label: CallLabel) -> LLMResponse: ...
-
-    async def _admitted_send(
-        self,
-        label: CallLabel,
-        *,
-        model: str,
-        messages: Sequence[Mapping[str, object]],
-        sent: object,
-        max_tokens: int | None,
-        send: Callable[[], Awaitable[tuple[object | None, _R]]],
-        billed: Callable[[_R], Billed | None],
-    ) -> _R:
-        """``billed`` answers ``None`` for a reply that reports no usage, which leaves the send unreported."""
-        bound = send_bound(
-            await hold_ceiling(model, self._provider), sent=sent, max_tokens=max_tokens
-        )
-        backpressure = self._backpressure.setdefault(
-            model, Backpressure(f"{self._provider_name} {model}")
-        )
-        budget = drawn_budget()
-        while True:
-            # Queued for the window BEFORE it is held: one cancelled while it waits holds nothing.
-            async with (
-                backpressure.send() as ticket,
-                window_slot(
-                    self._rate_limiter, messages, max_tokens, provider_name=self._provider_name
-                ) as slot,
-            ):
-                with admitted(
-                    label, bound, model=model, provider=self._provider, paid_by=self._key.paid_by
-                ) as admission:
-                    slot.leaves()
-                    try:
-                        headers, reply = await send()
-                    except Exception as exc:
-                        outcome = failed_send(exc, credit_statuses=self.CREDIT_REFUSAL_STATUSES)
-                        admission.close(outcome)
-                        if outcome.failure is ErrorCategory.PROVIDER_CREDIT:
-                            raise SendRefusedError(
-                                f"{self._provider_name} refused the call for lack of credit: "
-                                f"{outcome.detail[:300]}",
-                                category=ErrorCategory.PROVIDER_CREDIT,
-                            ) from exc
-                        if outcome.failure is ErrorCategory.PROVIDER_THROTTLED and outcome.sent:
-                            backpressure.throttled(
-                                ticket, headers=outcome.headers, body=outcome.detail
-                            )
-                            continue
-                        wait = budget.resend_wait() if outcome.resendable else None
-                        if wait is None:
-                            raise
-                        logger.warning(
-                            "%s: %s on %s (attempt %d/%d); waiting %.1fs",
-                            self._provider_name,
-                            type(exc).__name__,
-                            label.node,
-                            budget.resent,
-                            budget.attempts,
-                            wait,
-                        )
-                    else:
-                        backpressure.eased(ticket)
-                        rpm_header, tpm_header = self.RATE_CAP_HEADERS
-                        apply_discovered_caps(
-                            self._rate_limiter,
-                            headers,
-                            rpm_header=rpm_header,
-                            tpm_header=tpm_header,
-                        )
-                        spent = billed(reply)
-                        admission.close(answered(spent))
-                        if spent is not None:
-                            slot.billed(spent.usage.total)
-                        return reply
-            await held_wait(wait, f"{label.node} {self._provider_name}")

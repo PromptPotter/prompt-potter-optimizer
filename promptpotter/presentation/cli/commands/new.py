@@ -123,12 +123,12 @@ def _lay(
 ) -> Any:
     head, *rest = path
     info = model.model_fields.get(head)
-    if info is None:
+    if info is None and model.model_config.get("extra") != "allow":
         raise PayloadInvalidError(
             f"{whole!r} names no field of {model.__name__}: {head!r} is not one of "
             f"{', '.join(model.model_fields)}."
         )
-    body[head] = _laid(body.get(head), info.annotation, rest, raw, whole)
+    body[head] = _laid(body.get(head), Any if info is None else info.annotation, rest, raw, whole)
     return body
 
 

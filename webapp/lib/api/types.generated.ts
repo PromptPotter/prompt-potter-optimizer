@@ -3279,7 +3279,7 @@ export interface CampaignConfig {
    * campaign manifest keeps the delta, so the result never reads as a framed
    * one. */
   task_framing: 'committed' | 'off';
-  pipeline_overlay: Record<string, unknown>;
+  pipeline_overlay: Record<string, Record<string, unknown>>;
   /** Per-node declaration over the dataset's optimizer search space — the per-
    * campaign param-lock + value-space lever beside `exclude_nodes` (whole
    * node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS
@@ -3795,11 +3795,11 @@ export interface NodeConfigParam {
    * `answer_format` the text/json toggle, `schema_family` a registry schema
    * the backend owns */
   role: '' | 'provider' | 'effort' | 'answer_format' | 'schema_family';
-  /** Whether its reader may steer it past `permitted`: false where a steer that
-   * binds the reader binds it (`steer_binds`: a cost lever, a model), on a
-   * campaign read by an account without `campaign.babysit`; a declaration
-   * binds none */
-  editable: boolean;
+  /** What its reader may steer it to without the babysit act: `any` value; only a
+   * `permitted` one (a model); `none` (a cost lever, which any move steers
+   * outside). A steer binds only a campaign read by an account without
+   * `campaign.babysit`; a declaration binds none */
+  pickable: 'any' | 'permitted' | 'none';
 }
 
 /** How far the search reaches on one node: an unmoved param is SHUT, an absent
@@ -3970,7 +3970,7 @@ export interface ConfigEdit {
    * campaign manifest keeps the delta, so the result never reads as a framed
    * one. */
   task_framing: 'committed' | 'off' | null;
-  pipeline_overlay: Record<string, unknown> | null;
+  pipeline_overlay: Record<string, Record<string, unknown>> | null;
   /** Per-node declaration over the dataset's optimizer search space — the per-
    * campaign param-lock + value-space lever beside `exclude_nodes` (whole
    * node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS
@@ -4719,6 +4719,10 @@ export interface ForkSeed {
   /** Per node, the rows as drawn; overrides the campaign's narrowing for this cycle
    * only, and a node it does not name inherits. */
   node_narrowing: Record<string, ParamIntent[]>;
+  /** Dotted `pipeline_overlay.<node>.<key>` paths of the forked candidate's own
+   * values to drop before the edit is laid, so the layer below shows through.
+   * A path the candidate does not set is a no-op. */
+  reset: string[];
 }
 
 /** A fork's campaign-config delta, in which an absent field inherits the parent's
@@ -4777,7 +4781,7 @@ export interface PartialCampaignConfig {
    * campaign manifest keeps the delta, so the result never reads as a framed
    * one. */
   task_framing: 'committed' | 'off' | null;
-  pipeline_overlay: Record<string, unknown> | null;
+  pipeline_overlay: Record<string, Record<string, unknown>> | null;
   /** Per-node declaration over the dataset's optimizer search space — the per-
    * campaign param-lock + value-space lever beside `exclude_nodes` (whole
    * node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS

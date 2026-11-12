@@ -6,7 +6,7 @@ Five steps. Takes a couple of minutes.
 
 Sign up at [openrouter.ai/keys](https://openrouter.ai/keys) and create an API key.
 
-OpenRouter is the default LLM provider. If you prefer Groq, OpenAI or Anthropic, see [Environment variables](#environment-variables) below.
+OpenRouter is the default LLM provider. If you prefer Groq or OpenAI, see [Environment variables](#environment-variables) below.
 
 ## 2. Clone the repo
 
@@ -54,7 +54,7 @@ Next: [Your first campaign](03-first-campaign.md).
 | `OPENROUTER_API_KEY` | using OpenRouter (default) |
 | `GROQ_API_KEY` | using Groq |
 | `OPENAI_API_KEY` | using OpenAI |
-| `ANTHROPIC_API_KEY` | using Anthropic |
+| `ANTHROPIC_API_KEY` | the `dbllmbench` connector's writer on `provider: anthropic` |
 | `TERMNORM_URL` | a TermNorm backend (unset: TermNorm is not configured; locally `http://127.0.0.1:8000`) |
 | `TERMNORM_TOKEN` | a TermNorm backend that requires auth |
 | `N8N_HARNESS_URL` / `N8N_HARNESS_TOKEN` | the `n8n` connector: an eval-harness webhook and its secret (`N8N_HARNESS_AUTH_HEADER`, default `X-Eval-Secret`) |

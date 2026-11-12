@@ -2,21 +2,21 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import AliasPath, BaseModel, Field, ValidationError
 
-from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
+from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import (
     WIRE_TIMEOUT_S,
-    LLMClientBase,
     ProviderKey,
     SendPacing,
     hold_ceiling,
     post_json,
+    send_bound,
     wire_client,
 )
 from promptpotter.infrastructure.llm.json_parse import (
@@ -30,20 +30,30 @@ from promptpotter.infrastructure.llm.json_parse import (
 from promptpotter.infrastructure.llm.pricing import PriceTier
 from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest, Tool, ToolCall
 from promptpotter.infrastructure.llm.response import LLMResponse
+from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
     OPENAI_RPM_HEADER,
     OPENAI_TPM_HEADER,
+    Backpressure,
+    apply_discovered_caps,
+    drawn_budget,
+    held_wait,
     raise_if_context_overflow,
     raise_if_request_too_large,
+    window_slot,
 )
-from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
+from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel, admitted, answered
 from promptpotter.shared.answer_text import truncate
-from promptpotter.shared.errors import validation_reason
+from promptpotter.shared.errors import ErrorCategory, SendRefusedError, validation_reason
 
 if TYPE_CHECKING:
     import httpx
 
+    from promptpotter.domain.backend import BackpressureReading
+
 logger = logging.getLogger(__name__)
+
+_R = TypeVar("_R")
 
 
 def _strip_titles(node: object) -> object:
@@ -305,7 +315,7 @@ def _llm_response(landed: _ParsedReply, provider_name: str) -> LLMResponse:
     )
 
 
-class OpenAICompatibleClient(LLMClientBase):
+class OpenAICompatibleClient:
     SENDS = frozenset(
         {
             "messages",
@@ -322,7 +332,6 @@ class OpenAICompatibleClient(LLMClientBase):
         }
     )
     CREDIT_REFUSAL_STATUSES = frozenset({402, 403})
-    RATE_CAP_HEADERS = (OPENAI_RPM_HEADER, OPENAI_TPM_HEADER)
 
     def __init__(
         self,
@@ -332,13 +341,100 @@ class OpenAICompatibleClient(LLMClientBase):
         provider: str,
         spec: ProviderSpec,
     ):
-        super().__init__(
-            provider=provider,
-            display_name=spec.display_name,
-            key=key,
-            pacing=pacing,
-        )
+        """Lives as long as its caller's key resolution: the key is never held past it."""
+        self._provider = provider
+        self._provider_name = spec.display_name
+        self._key = key
+        self._rate_limiter = pacing.rate_limiter
+        self._backpressure = pacing.backpressure
         self._spec = spec
+
+    def pushback(self, model: str) -> BackpressureReading | None:
+        held = self._backpressure.get(model)
+        return None if held is None else held.reading()
+
+    async def chat(self, request: ChatRequest, *, label: CallLabel) -> LLMResponse:
+        # A field that silently reaches no wire still scores, crediting a mutation nothing carried.
+        if unsent := sorted(request.asked() - self.SENDS):
+            raise ValueError(
+                f"{self._provider_name} cannot send {', '.join(unsent)}. Close the axis on the "
+                "node (`optimizer.param_keys`) or unset the field, so it never reads as searched."
+            )
+        return await self._chat(request, label)
+
+    async def _admitted_send(
+        self,
+        label: CallLabel,
+        *,
+        model: str,
+        messages: Sequence[Mapping[str, object]],
+        sent: object,
+        max_tokens: int | None,
+        send: Callable[[], Awaitable[tuple[object | None, _R]]],
+        billed: Callable[[_R], Billed | None],
+    ) -> _R:
+        """``billed`` answers ``None`` for a reply that reports no usage, which leaves the send unreported."""
+        bound = send_bound(
+            await hold_ceiling(model, self._provider), sent=sent, max_tokens=max_tokens
+        )
+        backpressure = self._backpressure.setdefault(
+            model, Backpressure(f"{self._provider_name} {model}")
+        )
+        budget = drawn_budget()
+        while True:
+            # Queued for the window BEFORE it is held: one cancelled while it waits holds nothing.
+            async with (
+                backpressure.send() as ticket,
+                window_slot(
+                    self._rate_limiter, messages, max_tokens, provider_name=self._provider_name
+                ) as slot,
+            ):
+                with admitted(
+                    label, bound, model=model, provider=self._provider, paid_by=self._key.paid_by
+                ) as admission:
+                    slot.leaves()
+                    try:
+                        headers, reply = await send()
+                    except Exception as exc:
+                        outcome = failed_send(exc, credit_statuses=self.CREDIT_REFUSAL_STATUSES)
+                        admission.close(outcome)
+                        if outcome.failure is ErrorCategory.PROVIDER_CREDIT:
+                            raise SendRefusedError(
+                                f"{self._provider_name} refused the call for lack of credit: "
+                                f"{outcome.detail[:300]}",
+                                category=ErrorCategory.PROVIDER_CREDIT,
+                            ) from exc
+                        if outcome.failure is ErrorCategory.PROVIDER_THROTTLED and outcome.sent:
+                            backpressure.throttled(
+                                ticket, headers=outcome.headers, body=outcome.detail
+                            )
+                            continue
+                        wait = budget.resend_wait() if outcome.resendable else None
+                        if wait is None:
+                            raise
+                        logger.warning(
+                            "%s: %s on %s (attempt %d/%d); waiting %.1fs",
+                            self._provider_name,
+                            type(exc).__name__,
+                            label.node,
+                            budget.resent,
+                            budget.attempts,
+                            wait,
+                        )
+                    else:
+                        backpressure.eased(ticket)
+                        apply_discovered_caps(
+                            self._rate_limiter,
+                            headers,
+                            rpm_header=OPENAI_RPM_HEADER,
+                            tpm_header=OPENAI_TPM_HEADER,
+                        )
+                        spent = billed(reply)
+                        admission.close(answered(spent))
+                        if spent is not None:
+                            slot.billed(spent.usage.total)
+                        return reply
+            await held_wait(wait, f"{label.node} {self._provider_name}")
 
     async def _post(self, body: dict[str, Any]) -> httpx.Response:
         return await post_json(

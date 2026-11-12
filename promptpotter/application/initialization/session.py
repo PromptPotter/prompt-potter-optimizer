@@ -27,7 +27,7 @@ from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.run_observers import RunObservers
-    from promptpotter.application.scoring.evaluators import Evaluator
+    from promptpotter.application.scoring.evaluators import SampleEvaluator
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.run_records import BackendRevision
     from promptpotter.domain.search_point import TaskDecomposition
@@ -43,7 +43,7 @@ class ScorerSetup:
     partition: BankPartition
     degradation_checks: tuple[StopRule, ...]
     # One per declared term, built once per run so every judge validation precedes spend.
-    judges: tuple[Evaluator, ...]
+    judges: tuple[SampleEvaluator, ...]
 
     def require_scorer(self) -> Scorer:
         return self.scorer

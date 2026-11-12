@@ -30,7 +30,8 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host
-from promptpotter.infrastructure.llm.base import LLMClientBase, ProviderKey
+from promptpotter.infrastructure.llm.base import ProviderKey
+from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 from promptpotter.infrastructure.llm.registry import (
     get_llm_client,
     host_key,
@@ -265,7 +266,7 @@ class AccountWallet(NamedTuple):
         )
 
 
-def keyed_client(provider: str) -> LLMClientBase:
+def keyed_client(provider: str) -> OpenAICompatibleClient:
     """The client a send under the bound account goes out on: `paying_key`'s, refused where the
     box's key would pay past what the run's reserve has left, or no key exists."""
     what = f"a send on {provider}"

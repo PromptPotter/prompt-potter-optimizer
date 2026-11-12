@@ -13,7 +13,7 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER, Bounds, FreeTier
 from promptpotter.domain.judges import JudgeStage
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.spend import draws_coupon
@@ -126,7 +126,8 @@ def _bounded_nodes(
     """Each llm node of *schema* on a task model the tier bounds: its config as *config* lays it,
     and its model's bounds."""
     for node in schema.declared_nodes:
-        cfg = {**node.current_config, **config.pipeline_overlay.get(node.name, {})}
+        laid = config.pipeline_overlay.get(node.name, NodeCall()).laid_keys()
+        cfg = {**node.current_config, **laid}
         if node.is_llm and (bounds := tier.task_models.get(str(cfg.get("model")))):
             yield node, cfg, bounds
 

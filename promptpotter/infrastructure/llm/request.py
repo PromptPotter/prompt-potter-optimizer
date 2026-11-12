@@ -35,7 +35,7 @@ class Tool:
 
 @dataclass(frozen=True)
 class ChatRequest:
-    """``None`` = not asked for; a client refuses an asked field it cannot send (``LLMClientBase.SENDS``)."""
+    """``None`` = not asked for; a client refuses an asked field it cannot send (``OpenAICompatibleClient.SENDS``)."""
 
     messages: list[ChatMessage]
     model: str

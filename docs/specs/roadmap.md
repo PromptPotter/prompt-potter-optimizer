@@ -41,9 +41,25 @@ before more L4, so run data stops migrating; the edge tail follows over the week
    mean held-out lift (re-keys, reshapes run data).
 8. **lb** — `runner/` as at most 8 files, pure moves, last on the tip.
 
-**Phase 2:** stream-rk with rk-run; money with rk-dec, rk-opt 5 (`ab` re-fits under the current
-scorer, regrading the other campaigns' rows off the archive) and tune 2; faults; narr, rec, rn-conn,
-ren. The re-keys end here.
+**Phase 2**, in this order (operator, 2026-11-12):
+
+- **landed 29:** stream-rk, rk-run 1–3.
+- **landing 30:**
+  - money 1–5: one charge record, one money fold, the host as one declared verified email;
+  - rk-run 4–8: one model, one node-config merge, the rewrite knob, one layered config read, typed node layers.
+- **holds nest** (backbone; operator, 2026-11-12). One hold at every depth: a `Charge` with a bound and a parent hold, for the run, a cell and a call alike.
+  - The open part is the bound less what its children hold or billed, read by the one money fold.
+  - `CellReservation` and quota's separate run reserve go.
+  - Runs beside proof.
+- **proof:** the fresh-eyes review's quick wins (gate throughput, `assert_never`, doc drifts), a typed behaviour trace, and a stronger offline world. No key moves.
+- **tests:** the test-shape charter, one function per independent fact. It runs alone, since it owns `tests/`.
+- **rk-opt 5**, with tune 2: `ab` re-fits under the current scorer, regrading the other campaigns' rows off the archive.
+- **rk-dec**, beside payer.
+- **behaviour keys:** generated keys, then the switch, which is the last re-key. §0.5's contract edit is the operator's.
+- **L4:** re-measure C0.
+- **then:** faults; narr, rec, rn-conn, ren.
+
+The re-keys end at the behaviour-key switch.
 
 9. **The edge tail**, in this order: passb-2, payer, addr, webb-4, la, lw (md if the operator says
    so); lite, xconn, mkey, then mcp on mkey's tip, tv-2 under one access review; ws, forks, the block

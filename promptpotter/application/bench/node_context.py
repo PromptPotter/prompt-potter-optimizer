@@ -588,6 +588,7 @@ class Children(CycleRead):
         asked = overlay or {}
         prompts, config, carried = carried_writes(
             schema,
+            writer=variation.mode,
             prompt_loci=prompt_loci or {},
             overlay=asked,
             demo=self._demo_keys(prompt_loci or {}),
@@ -628,7 +629,11 @@ class Children(CycleRead):
             else:
                 prompt_loci[locus] = value
         prompts, config, carried = carried_writes(
-            schema, prompt_loci=prompt_loci, overlay=asked, demo=self._demo_keys(prompt_loci)
+            schema,
+            writer=self._variation.mode,
+            prompt_loci=prompt_loci,
+            overlay=asked,
+            demo=self._demo_keys(prompt_loci),
         )
         individual = proposal.individual.edited(
             self._variation,

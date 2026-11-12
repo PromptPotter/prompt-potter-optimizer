@@ -17,7 +17,7 @@ from offline_world import FakeBackend, Router
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.bench.node_context import stated_line
-from promptpotter.application.datasets.authored import dataset_campaign_block
+from promptpotter.application.datasets.authored import ConfigLayers, dataset_campaign_block
 from promptpotter.application.datasets.loaders import definition_source
 from promptpotter.application.embedded_run import enter
 from promptpotter.application.initialization.scoring_scope import session_scope
@@ -38,6 +38,7 @@ from promptpotter.application.optimizers.potter.records import (
     L3Memory,
     Ladder,
 )
+from promptpotter.application.pipeline_resolve import laid_session
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
@@ -532,7 +533,7 @@ def loop_session(
     return session
 
 
-PROMPT_INFO = NodePromptInfo(fields=PROMPT_FIELDS)
+PROMPT_INFO = NodePromptInfo(fields=PROMPT_FIELDS, rewrite_slot="instruction")
 
 
 def samples(n: int, truth: str | None = "a", *, query: str = "q") -> list[Sample]:
@@ -646,7 +647,6 @@ async def run_init_round(
         "dataset_split": split or {"bench": 0, "demo": 0},
         "task_framing": "off",
     }
-    config = CampaignConfig.model_validate(raw)
     # The definition's chain, root-down: the defaults, the family, the leaf.
     family = LAUNCHED_DATASET.split("/")[0]
     shutil.copytree(
@@ -660,6 +660,7 @@ async def run_init_round(
     session = await init_services(
         dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=enter(stores)
     )
+    session, config = laid_session(session, ConfigLayers({}, raw))
     declaration = declare(session, config, purpose=Optimize())
     opened: list[RoundContext] = []
 

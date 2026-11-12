@@ -21,13 +21,13 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, silence_detail
 from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     extract_parsed_json,
 )
-from promptpotter.infrastructure.llm.registry import default_routes, provider_sends
+from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
+from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -99,7 +99,7 @@ def _ledger_reasoning(text: str) -> str:
 
 
 async def _chat_under_deadline(
-    llm_client: LLMClientBase, request: ChatRequest, *, node_label: str
+    llm_client: OpenAICompatibleClient, request: ChatRequest, *, node_label: str
 ) -> LLMResponse:
     """Bounds the provider WORKING: held time (throttle, rate limiter, 5xx backoff) is given back."""
     budget = SendBudget(
@@ -138,7 +138,7 @@ class _Call:
         return round(time.monotonic() - self.started, 2)
 
     @functools.cached_property
-    def client(self) -> LLMClientBase:
+    def client(self) -> OpenAICompatibleClient:
         """Resolved only for a send: a replay goes out on no key, so no coupon refuses it."""
         return keyed_client(self.merged.provider)
 
@@ -259,8 +259,7 @@ async def _provider_reply(call: _Call) -> LLMResponse:
                 response_schema=call.response_schema,
                 reasoning_effort=merged.reasoning_effort,
                 top_p=merged.top_p,
-                # The draw goes on the wire only where the provider's client sends one.
-                seed=merged.seed if "seed" in provider_sends(merged.provider) else None,
+                seed=merged.seed,
                 # An empty route pins nothing, so it is no request for one.
                 route_order=merged.route_order or None,
             ),

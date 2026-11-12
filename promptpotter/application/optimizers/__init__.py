@@ -138,8 +138,11 @@ def llm_nodes() -> Mapping[str, LlmNode]:
     return {name: found for name, found in NODE_MEMBERS.table.items() if isinstance(found, LlmNode)}
 
 
-def unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> str | None:
-    """Why *selected* cannot write *schema*'s prompt nodes, asked before a mint spends; ``None`` where it can."""
+def unfit_pipeline(
+    selected: SelectedOptimizer, schema: PipelineSchema, connector: str
+) -> str | None:
+    """Why *selected* cannot write the prompt nodes *connector* declares in *schema*, asked before
+    a mint spends; ``None`` where it can."""
     prompt_nodes = schema.prompt_nodes()
     if not any(n.open_prompt_fields for n in prompt_nodes) and not any(
         schema.node_param_keys().values()
@@ -163,14 +166,22 @@ def unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> str |
                 f"node, and this pipeline's chain has {len(roster)}: {roster}."
             )
         knobs = selected.knobs(name)
-        if (
-            arity != "none"
-            and isinstance(knobs, RewriteKnobs)
-            and (missing := [n.name for n in prompt_nodes if knobs.field not in n.prompt_fields])
-        ):
-            return (
-                f"optimizer {selected.name!r} node {name!r} rewrites the prompt field "
-                f"{knobs.field!r}, which {missing} does not declare — set the node's `field` "
-                "knob in `optimization.nodes` to one it does."
-            )
+        if arity == "none" or not isinstance(knobs, RewriteKnobs):
+            continue
+        for node in prompt_nodes:
+            if knobs.rewrites != "prompt":
+                slot: str | None = knobs.rewrites
+            elif (slot := node.prompt_info.rewrite_slot if node.prompt_info else None) is None:
+                return (
+                    f"optimizer {selected.name!r} node {name!r} rewrites node {node.name!r}'s "
+                    f"whole prompt, and connector {connector!r} declares no field it lands in "
+                    "(`prompt_info.rewrite_slot`)."
+                )
+            if slot not in node.open_prompt_fields:
+                return (
+                    f"optimizer {selected.name!r} node {name!r} writes {slot!r} into node "
+                    f"{node.name!r} on connector {connector!r}, which "
+                    f"{'holds' if slot in node.prompt_fields else 'does not declare'} it — set "
+                    f"`optimization.nodes.{name}.config.rewrites` to an open field."
+                )
     return None

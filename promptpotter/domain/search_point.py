@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.domain.optimizer_template import OptimizerPromptEdits
-from promptpotter.domain.pipeline_params import NodeCall, PipelineParams, _Roster
+from promptpotter.domain.optimizer_template import PROMPT_FIELDS, OptimizerPromptEdits
+from promptpotter.domain.pipeline_params import CALL_CONFIG_KEYS, NodeCall, PipelineParams
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import content_hash, shapes_optimizer_prompt
 
@@ -20,9 +20,10 @@ SHOTS_KEY: Annotated[str, shapes_optimizer_prompt] = "shots"
 
 
 @shapes_optimizer_prompt
-class NodeConfig(NodeCall):
-    """An llm node's resolved config: its call keys, naming its provider and model, and the prompt
-    fields it sets over its template; its member's knobs are the member's (`optimizer_manifest.py`)."""
+class NodeConfig(NodeCall, OptimizerPromptEdits):
+    """An llm node's resolved config, laid flat as the operator lays it: its call keys, naming its
+    provider and model, and the prompt fields it sets over its template (rendered, never sent); its
+    member's knobs are the member's (`optimizer_manifest.py`)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -31,37 +32,17 @@ class NodeConfig(NodeCall):
     # A float as every route keys and sends it: an int laid here is the same call.
     temperature: float | None = None
     top_p: float | None = None
-    # Rendered into the template, never sent: no call key.
-    prompt_edits: OptimizerPromptEdits = Field(default_factory=OptimizerPromptEdits)
 
     def call_settings(self) -> dict[str, str | int | float | list[str] | None]:
         """Its engine call keys as laid, each to its value: what a call is keyed and sent by."""
         return self.model_dump(include=set(CALL_CONFIG_KEYS), exclude_unset=True)
 
+    def prompt_edits(self) -> dict[str, str]:
+        return self.model_dump(include=set(PROMPT_FIELDS), exclude_none=True)
+
     def laid(self, update: Mapping[str, object]) -> NodeConfig:
         """*update* laid over it, typed as a config is: a value of the wrong type refuses."""
         return NodeConfig.model_validate({**self.model_dump(exclude_unset=True), **update})
-
-
-def _call_keys_in(roster: _Roster) -> frozenset[str]:
-    return frozenset(
-        name for name, info in NodeCall.model_fields.items() if roster in info.metadata
-    )
-
-
-WHO_ANSWERS_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(
-    _Roster.WHO_ANSWERS
-)
-PARAM_FORBIDDEN_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(
-    _Roster.FORBIDDEN
-)
-# A forbidden key changes who answers: else a steer of one inherits a C0 measured by another host.
-assert PARAM_FORBIDDEN_KEYS <= WHO_ANSWERS_KEYS, PARAM_FORBIDDEN_KEYS - WHO_ANSWERS_KEYS
-PARAM_SCOPE_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(_Roster.SCOPE)
-# Every key an llm node's config may set beside its knobs and prompt fields.
-CALL_CONFIG_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
-    NodeCall.model_fields
-)
 
 
 def missing_template_vars(

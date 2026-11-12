@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import RunStart, admit_arms, probe_backend
@@ -27,7 +27,7 @@ from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import draft_served
-from promptpotter.domain.campaign_config import CampaignConfig, effective_config
+from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import LaunchedJob
@@ -62,7 +62,7 @@ class DatasetArms:
     """Arms on a committed dataset: a framing it still owes is paid once, for every arm."""
 
     session: Session
-    declared: CampaignConfig
+    layers: ConfigLayers
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +87,7 @@ async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
     session = await init_services(
         dataset_name=dataset.name, identity=stores.identity, stores=stores
     )
-    return DatasetArms(session, load_dataset_campaign_config(dataset))
+    return DatasetArms(session, ConfigLayers.of(dataset, None))
 
 
 async def checkin_arms(
@@ -99,12 +99,12 @@ async def checkin_arms(
     return CheckinArms(claim, await open_checkin(stores, claim.draft_id, served, overlays=overlays))
 
 
-def _opened(source: ArmSource) -> tuple[Session, CampaignConfig, OpenedCheckin | None]:
+def _opened(source: ArmSource) -> tuple[Session, ConfigLayers, OpenedCheckin | None]:
     match source:
-        case DatasetArms(session=session, declared=declared):
-            return session, declared, None
+        case DatasetArms(session=session, layers=layers):
+            return session, layers, None
         case CheckinArms(opened=opened):
-            return opened.session, opened.declared, opened
+            return opened.session, opened.layers, opened
         case _:
             assert_never(source)
 
@@ -214,10 +214,10 @@ async def admit_head_to_head(
     holder: CampaignLaunch | EmbeddedRun,
 ) -> AdmittedHeadToHead:
     """Each arm's budget is its own declaration's, so an arm binds on what it declared alone."""
-    session, declared, opened = _opened(source)
+    session, layers, opened = _opened(source)
     plans = await arm_plans(
         session,
-        declared,
+        layers,
         request,
         session.bank.samples,
         origin_override=None if opened is None else opened.origin_override,

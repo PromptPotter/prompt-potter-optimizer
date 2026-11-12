@@ -66,7 +66,7 @@ from promptpotter.application.commands.dispatcher import (
     DispatchedToCycle,
 )
 from promptpotter.application.commands.limits_and_queue import change_run_limits
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.datasets.startability import offered_dataset
@@ -111,7 +111,7 @@ from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, laid_config
 from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner.bench import cycle_bench, line_run
 from promptpotter.application.runner.inner import spawn
@@ -576,9 +576,6 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
     with monkeypatch.context() as patched:
         patched.setattr(base, "rate_ceiling", ceiling)
         for host, asked, sent in (
-            ("anthropic", {"seed": 7}, False),
-            ("anthropic", {"reasoning_effort": "low"}, False),
-            ("anthropic", {"route_order": ["Alibaba"]}, False),
             ("groq", {"route_order": ["Alibaba"]}, False),
             ("openrouter", {}, True),
             ("openrouter", _EVERY_FIELD, True),
@@ -1338,7 +1335,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
             )
 
     def seed(model: str) -> None:
-        overlay = {"llm_only": {"model": model}}
+        overlay = {"llm_only": NodeCall(model=model)}
         index.append(CycleSeedRecord(seed=CycleSeed(pipeline_overlay=overlay)))
 
     def tailed() -> tuple[float, int, CycleSeed | None]:
@@ -1961,9 +1958,14 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         }
     )
     heads = plan.heads()
-    on_disk = load_dataset_campaign_config(offered_dataset(built_stores, "ds1"))
+    on_disk = ConfigLayers.of(offered_dataset(built_stores, "ds1"), None)
     configs = [
-        mint.arm_config(on_disk, head.head_to_head, arm)
+        laid_config(
+            built_stores,
+            on_disk.over(head.head_to_head.declared_optimization(arm)),
+            connector="termnorm",
+            schema=None,
+        ).config
         for head in heads
         for arm in head.head_to_head.arms
     ]
@@ -1974,7 +1976,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     ), "an arm was minted on another budget than its point's"
     price = priced_head_to_head(
         heads,
-        on_disk,
+        configs,
         dataset_hash=bank.bank.dataset_hash,
         search=30,
         bench=10,
@@ -3259,6 +3261,14 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
     with pytest.raises(PayloadInvalidError):
         free_tier.refuse_outside_free_tier(off)
+    # One node-config merge: a later layer naming another model drops the earlier layer's route.
+    routed: dict[str, object] = {
+        "pipeline_overlay": {"llm_only": {"model": "a/x", "route_order": ["Groq"]}}
+    }
+    moved = merge_config_layers(routed, {"pipeline_overlay": {"llm_only": {"model": "b/y"}}})
+    assert moved["pipeline_overlay"] == {"llm_only": {"model": "b/y"}}, (
+        "a campaign layer moved the model under a route naming the old model's hosts"
+    )
     # The fence walks every call the run sends (bl2.B4): a judge's model is fenced like a node's.
     judge = {"name": "j", "stages": [{"model": "openai/dear", "provider": "openrouter"}]}
     judged = CampaignConfig.model_validate(

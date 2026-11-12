@@ -86,7 +86,8 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
 - Potter's inner optimizer runs `minimax/minimax-m3.1-flash` (jl-optmodel-1, 2026-10-30): held-out
   **+0.073** [+0.001, +0.146] at **2.6 s** a call vs `qwen3.7-flash @ medium` +0.013 at 55 s — chosen
   on speed, the lift not separated (p 0.08); pinned to Together, since `:nitro` served it without
-  reasoning. CAPO and LEVI stay on qwen ([`../../paper/notes/model-per-method.md`](../../paper/notes/model-per-method.md)).
+  reasoning. Every head-to-head arm runs it: one model, each peer's swap from its paper's a declared
+  deviation ([`../../paper/notes/model-per-method.md`](../../paper/notes/model-per-method.md) holds the case against).
 - `justlogic-d234-held` is where potter separates: **+0.130** [+0.100, +0.160] (h2h-1007, 1,000 rows);
   paired, Holm: LEVI − potter +0.096 (p < 0.001), GEPA ns, CAPO −0.107.
 - `hotpotqa-closedbook` h2h-7 ($0.20 search per arm): potter **+0.050** [+0.007, +0.093], LEVI +0.040

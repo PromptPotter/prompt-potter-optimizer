@@ -4,13 +4,10 @@ import logging
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.opt_search_point import Locus
+from promptpotter.domain.opt_search_point import Locus, VariationMode
+from promptpotter.domain.pipeline_params import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
-from promptpotter.domain.search_point import (
-    PARAM_FORBIDDEN_KEYS,
-    SHOTS_KEY,
-    missing_template_vars,
-)
+from promptpotter.domain.search_point import SHOTS_KEY, missing_template_vars
 from promptpotter.domain.wounds import ValidationFailure
 
 if TYPE_CHECKING:
@@ -52,6 +49,7 @@ def _off_carrier(locus: Locus, value: object, allowed: list[str]) -> ValidationF
 def carried_writes(
     schema: PipelineSchema,
     *,
+    writer: VariationMode,
     prompt_loci: Mapping[Locus, Any],
     overlay: Mapping[str, Any],
     demo: Collection[str] | None,
@@ -83,7 +81,7 @@ def carried_writes(
         node = schema.get_node(locus.node)
         assert node is not None
         match schema.locus_kind(*locus):
-            case "prompt" if locus.key in node.prompt_fields_held:
+            case "prompt" if writer != "operator" and locus.key in node.prompt_fields_held:
                 failures.append(
                     ValidationFailure(
                         axis=locus.name,

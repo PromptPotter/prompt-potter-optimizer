@@ -411,6 +411,7 @@ def dataset_pipeline(
         "prompt_info": {
             "template_variables": [],
             "fields": list(PROMPT_FIELDS),
+            "rewrite_slot": "instruction",
         },
         "config": {"model": model, "temperature": temperature, **extra},
         "optimizer": {

@@ -92,21 +92,17 @@ class MemberCoupling:
 # How many of the pipeline's prompt nodes a member writes: a `one` refuses any other roster before the mint.
 PromptArity = Literal["none", "one", "each"]
 
-Rewrites = Literal["prompt", "field"]
-
 
 class RewriteKnobs(StrictModel):
-    rewrites: Annotated[Rewrites, Knob(Estimand.SEARCH)] = Field(
-        description="Which loci of a prompt node the reply replaces. `prompt`: the whole prompt "
-        "as one text — the model is shown every field rendered together, its reply rides `field` "
-        "and the node's other fields empty, as the papers' one-text prompts do. `field`: that "
-        "field alone — the model is shown it alone, and the child inherits every other locus "
-        "from its first parent."
-    )
-    field: Annotated[str, Knob(Estimand.SEARCH)] = Field(
+    rewrites: Annotated[str, Knob(Estimand.SEARCH)] = Field(
         min_length=1,
-        description="The prompt field the reply is written into; every prompt node the member "
-        "rewrites declares it, or the campaign is refused before it mints.",
+        description="Which loci of a prompt node the reply replaces. `prompt`: the whole prompt "
+        "as one text — the model is shown every field rendered together, its reply lands in the "
+        "field the node declares as its `prompt_info.rewrite_slot` and the node's other open "
+        "fields empty, as the papers' one-text prompts do. A field's name: that field alone — "
+        "the model is shown it alone, and the child inherits every other locus from its first "
+        "parent. Every prompt node the member rewrites leaves the field open, or the campaign is "
+        "refused before it mints.",
     )
 
 

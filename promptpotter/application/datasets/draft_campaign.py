@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from promptpotter.domain.cell_terms import CellTerm
+    from promptpotter.domain.pipeline_params import NodeCall
     from promptpotter.infrastructure.store.stores import Stores
 
 PREVIEW_ROWS = 10
@@ -38,14 +39,14 @@ UPLOAD_DEFINITION_KEYS = frozenset({"pipeline_overlay"})
 node overlay), never its campaign's."""
 
 
-def upload_pipeline_json(upload: UploadBasis, overlay: Mapping[str, Any]) -> dict[str, Any]:
+def upload_pipeline_json(upload: UploadBasis, overlay: Mapping[str, NodeCall]) -> dict[str, Any]:
     """An upload's ``dataset.yaml::pipeline``: its connector's upload chain, *overlay* (per node,
     its params) laid on as each node's ``config``. The one definition its Start writes, the sole
     route for a backend tunable (`assets/datasets/CLAUDE.md`); a read lays the node templates."""
     connector = connectors.CONNECTORS.get(upload.connector)
     uploads = connector.uploads
     assert uploads is not None, "`draft_patch.py` and ingest name only a connector serving uploads"
-    declared = {node: {"config": dict(params)} for node, params in overlay.items()}
+    declared = {node: {"config": call.laid_keys()} for node, call in overlay.items()}
     return {
         "backend_type": connector.name,
         "nodes": merge_node_blocks({node: {} for node in uploads.chain}, declared),

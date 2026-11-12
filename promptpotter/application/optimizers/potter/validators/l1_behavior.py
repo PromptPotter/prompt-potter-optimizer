@@ -19,8 +19,8 @@ from promptpotter.application.optimizers.potter.validators.behavior_base import 
 )
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
+from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
 from promptpotter.domain.round_audit import NodeBlock, RoundAudit
-from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 
 def _l1_block(audit: RoundAudit | None) -> NodeBlock | None:

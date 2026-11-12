@@ -13,9 +13,8 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, PipelineParams
 from promptpotter.domain.pipeline_schema import ParamKind
-from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
 

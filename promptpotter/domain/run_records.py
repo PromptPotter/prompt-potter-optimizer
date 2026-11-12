@@ -41,7 +41,12 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
-from promptpotter.domain.pipeline_params import PipelineParams, apply_node_overlay
+from promptpotter.domain.pipeline_params import (
+    NodeCall,
+    PipelineParams,
+    apply_node_overlay,
+    laid_calls,
+)
 from promptpotter.domain.pipeline_schema import (
     CapabilityMenu,
     KnobLayer,
@@ -905,7 +910,7 @@ class CycleSeed(FrozenModel):
         "candidate's record (`resolved_params`), laid under `pipeline_overlay`, the operator's "
         "edit. None on a seed off no candidate.",
     )
-    pipeline_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    pipeline_overlay: dict[str, NodeCall] = Field(default_factory=dict)
     optimizer_narrowing: dict[str, NodeSearchNarrowing] = Field(
         default_factory=dict,
         description="Per-fork search-space lock edits, laid on its parent's by part "
@@ -931,7 +936,7 @@ class CycleSeed(FrozenModel):
 
     def runs(self) -> dict[str, dict[str, Any]]:
         """Each node's config the fork runs: its candidate's record under the operator's edit."""
-        return apply_node_overlay(self.origin_params or {}, self.pipeline_overlay, None)
+        return apply_node_overlay(self.origin_params or {}, laid_calls(self.pipeline_overlay), None)
 
 
 class WallClock(FrozenModel):
@@ -1107,10 +1112,10 @@ class PipelineRead(FrozenModel):
 
     declaration: dict[str, Any]
     # The definition's half of that read, which a campaign outliving its dataset dir still folds.
-    dataset_overlay: dict[str, dict[str, Any]]
+    dataset_overlay: dict[str, NodeCall]
     # The free tier's launch defaults its mint laid (`free_tier.py::free_tier_overlay`).
     free_tier_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    # Per optimizer-node knob the declaration holds, the layer below the draft's edit that laid it.
+    # Per optimizer-node knob the declaration holds, the last layer that set it (`laid_config`).
     knob_layers: dict[str, dict[str, KnobLayer]] = Field(default_factory=dict)
 
 

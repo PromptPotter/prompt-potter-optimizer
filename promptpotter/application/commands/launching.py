@@ -22,6 +22,7 @@ from promptpotter.application.commands.dispatcher import (
     Replaying,
     replays,
 )
+from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.jobs.launcher.admission import withdraw_queued
@@ -105,10 +106,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, Any]:
+def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, NodeCall]:
     """Each steered value in its param's declared type at *schema*, as every door sends it: a
     string stays text, and a string sent for any other type is read as JSON."""
-    typed = dict(overlay)
+    typed: dict[str, NodeCall] = {}
     for node, cfg in overlay.items():
         declared = schema.get_node(node)
         if declared is None:
@@ -133,8 +134,9 @@ def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, A
                         "one (spell it as JSON)"
                     ) from None
             params[param] = value
-        PayloadInvalidError.validating(NodeCall, params, under=("seed", "pipeline_overlay", node))
-        typed[node] = params
+        typed[node] = PayloadInvalidError.validating(
+            NodeCall, params, under=("seed", "pipeline_overlay", node)
+        )
     return typed
 
 
@@ -163,9 +165,9 @@ def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop
         if sent.pipeline_overlay
         else {}
     )
-    for node, cfg in overlay.items():
+    for node, call in overlay.items():
         allowed = narrowing[node].param_allowed_values if node in narrowing else {}
-        for param, value in cfg.items():
+        for param, value in call.laid_keys().items():
             if param in allowed and str(value) not in allowed[param]:
                 raise PayloadInvalidError(
                     f"payload.seed steers {node}.{param}={value!r} outside its own "
@@ -321,6 +323,7 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
             hop=hop,
             from_round=payload.round,
             from_candidate_id=payload.candidate_id,
+            dropped=payload.seed.dropped,
             seed=seed,
             keep_rounds=payload.keep_rounds,
             reason=payload.reason,
@@ -388,15 +391,15 @@ async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[
     dispatcher, payload = dispatched.dispatcher, dispatched.payload
 
     async def _apply_mint() -> Launched:
+        dataset = offered_dataset(dispatcher.stores, payload.dataset_name)
         request = FreshMint(
-            dataset=offered_dataset(dispatcher.stores, payload.dataset_name),
+            dataset=dataset,
             budget=payload.budget,
-            optimization=payload.optimization_sent,
-            declared=payload.declared,
+            layers=ConfigLayers.of(dataset, payload.declared).over(payload.optimization_sent),
             task_text=payload.task_text,
         )
         # Refused here, before a slot is asked for: a queued mint would refuse it only later.
-        request.campaign_config()
+        request.campaign_config(dispatcher.stores)
         return await launch(
             request,
             RunMode(diag=payload.diag),

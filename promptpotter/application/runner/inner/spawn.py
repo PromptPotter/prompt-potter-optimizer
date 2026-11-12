@@ -10,6 +10,7 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import campaign_refusal, slotless_share
 from promptpotter.application.jobs.mint import (
@@ -24,6 +25,7 @@ from promptpotter.application.optimizer_manifest import (
     resolved_overrides,
     select_optimizer,
 )
+from promptpotter.application.pipeline_resolve import laid_session
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
@@ -334,7 +336,11 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
         n_search=len(search),
     )
     try:
-        config = _laid_arm(instrument, cell.overrides)
+        armed = _laid_arm(instrument, cell.overrides)
+        # The instrument stands in for the cell dataset's block: the outer campaign set every knob.
+        session, config = laid_session(
+            session, ConfigLayers({}, armed.model_dump(mode="json", exclude_unset=True))
+        )
         declaration = declare(session, config, purpose=ctx.purpose)
         if campaign is None:
             minted = mint(

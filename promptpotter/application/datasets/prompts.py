@@ -4,17 +4,21 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from promptpotter.domain.opt_search_point import NodePrompt
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset, read_dataset_origin
 from promptpotter.shared.errors import PayloadInvalidError
 
 
-def pipeline_node_overlay(pipeline: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
+def pipeline_node_overlay(pipeline: Mapping[str, Any]) -> dict[str, NodeCall]:
+    """Each node's ``config`` the definition lays, typed: a mistyped key refuses, by its node."""
+    out: dict[str, NodeCall] = {}
     for node_name, node_def in (pipeline.get("nodes") or {}).items():
         cfg = node_def.get("config") if isinstance(node_def, dict) else None
         if isinstance(cfg, dict) and cfg:
-            out[node_name] = dict(cfg)
+            out[node_name] = PayloadInvalidError.validating(
+                NodeCall, cfg, under=("pipeline", "nodes", node_name, "config")
+            )
     return out
 
 

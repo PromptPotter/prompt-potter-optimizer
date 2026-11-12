@@ -78,6 +78,7 @@ from promptpotter.application.datasets import (
     tabular_ingest,
 )
 from promptpotter.application.datasets.authored import (
+    ConfigLayers,
     campaign_file_block,
     dataset_campaign_block,
     validated_campaign_config,
@@ -157,12 +158,13 @@ from promptpotter.application.pipeline_resolve import (
     cycle_config,
     dataset_pipeline,
     defaults_drift,
-    draft_declared,
+    draft_config,
     draft_pipeline,
     draft_served,
     experiment_outside_run,
     fork_preview,
     identity_layer,
+    laid_config,
     permitted_narrowing,
     resolve_pipeline_at,
     resolved_output_schemas,
@@ -268,8 +270,8 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
     description_key,
     narrowing_of,
+    pickable,
     running_only,
-    steer_binds,
 )
 from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptPart, Snippet
@@ -921,21 +923,6 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     banked = tmp_path / "reuse" / "optimizer_reuse"
     assert len(list(banked.glob("*.json"))) == 3, (
         "the second route replayed the first route's banked answer"
-    )
-    # A call's draw keys it on every provider; it reaches the wire only where the client sends one.
-    seeded = DeterminismClamp(temperature=0.0, seed=7)
-    for draw in (None, 111, 222):
-        sent = ask(
-            "q",
-            seeded,
-            provider="anthropic",
-            model="claude-sonnet-4-5",
-            reasoning_effort=None,
-            seed=draw,
-        )
-        assert "seed" not in sent, f"draw {draw}: anthropic was sent a seed its client cannot send"
-    assert len(list(banked.glob("*.json"))) == 6, (
-        "two draws on a provider that sends no seed replayed one banked answer"
     )
 
     # A head-to-head pins one seed on every arm: an arm's replicate (numbered at the mint, § 2)
@@ -1619,7 +1606,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         headers=[],
     ).patch(config={"optimization": {"optimizer": "capo"}})
     picked = draft.patch(config={**draft.config, "exclude_nodes": ["rerank", "web_search"]})
-    chosen = draft_declared(built_stores, picked)
+    chosen = draft_config(built_stores, picked)
     assert running_only(schema, exclude=chosen.exclude_nodes).running == ("llm_only",), (
         "the excluded complement runs another chain than was picked"
     )
@@ -1663,13 +1650,13 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     assert chosen.optimization.optimizer == "capo", "the draft's optimizer did not reach the mint"
     assert chosen.scoring == pinned, "a pinned criterion lost its anchors under another edit"
-    assert draft_declared(built_stores, draft).exclude_nodes == [], (
+    assert draft_config(built_stores, draft).exclude_nodes == [], (
         "an untouched chain excluded a node"
     )
 
     def planned(on: DraftFile, **patch: Any) -> CampaignConfig:
         plan = asyncio.run(plan_draft_patch(built_stores, on, EditDraftPatch.model_validate(patch)))
-        return draft_declared(built_stores, apply_draft_patch(on, plan))
+        return draft_config(built_stores, apply_draft_patch(on, plan))
 
     # A check-in picks the criterion as the server reads it; sent back, a pinned formula's own
     # dials move nothing, and a matcher pick keeps the composite.
@@ -1776,7 +1763,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert (
         authored == frozen(config={"pipeline_overlay": {"llm_only": contract}}).pipeline_overlay
     ), "an authored output froze another contract than the overlay spells"
-    assert authored["llm_only"]["answer_fields"] == ["code"], (
+    assert authored["llm_only"].laid_keys()["answer_fields"] == ["code"], (
         "the answer slot is not the last field"
     )
     # A reused dataset's own contract is authored already: editing it reopens no axis.
@@ -1820,7 +1807,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     upload = owned_draft(built_stores, landed.draft_id).patch(
         raw_task_description="Map q to a.", column_query="q", column_ground_truth="a"
     )
-    upload_knob = {"config": {"pipeline_overlay": {"llm_only": {"temperature": 0.3}}}}
+    # The node edit is the definition's half; the halt edit is the campaign's, which a later
+    # campaign on the uploaded dataset starts from, as a shipped dataset's `campaign` block.
+    upload_knob = {
+        "config": {
+            "pipeline_overlay": {"llm_only": {"temperature": 0.3}},
+            "optimization": {"halt_at_fitness": 0.9},
+        }
+    }
     knob_plan = asyncio.run(
         plan_draft_patch(built_stores, upload, EditDraftPatch.model_validate(upload_knob))
     )
@@ -1974,10 +1968,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             options=["a", "b"],
             permitted=["a"],
             permitted_stated=True,
-            editable=True,
+            pickable="any",
         ),
-        NodeConfigParam(key="effort", kind="enum", options=["low", "mid", "high"], editable=True),
-        NodeConfigParam(key="temperature", kind="number", editable=True),
+        NodeConfigParam(key="effort", kind="enum", options=["low", "mid", "high"], pickable="any"),
+        NodeConfigParam(key="temperature", kind="number", pickable="any"),
     ]
     for key, ticks, unlocked, drawn in (
         # Every tick on declares nothing: an absent entry IS the menu.
@@ -1999,7 +1993,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         )
     # A padlocked prompt row holds that field alone and opens no config axis.
     prompt_row = narrowing_of(
-        [NodeConfigParam(key="persona", kind="prompt", editable=True)],
+        [NodeConfigParam(key="persona", kind="prompt", pickable="any")],
         [ParamIntent(key="persona", open=False, allowed=[])],
     )
     assert (prompt_row.param_keys, prompt_row.prompt_fields_held) == ([], ["persona"]), (
@@ -2066,7 +2060,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         }
     )
     steering = declare_steered_values(
-        CycleSeed(pipeline_overlay={"solve": {"model": "x"}}), probe.optimizer_narrowing
+        CycleSeed(pipeline_overlay={"solve": NodeCall(model="x")}), probe.optimizer_narrowing
     )
     laid = CycleConfig.laid(probe, [LaidSpan(seed=steering, scoring_lock=None)])
     assert laid.config.optimizer_narrowing["solve"] == NodeSearchNarrowing(
@@ -2185,12 +2179,19 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     for reader, held_keys in ((unbabysat, {"model"}), (stores, set())):
         served_rows = resolve_pipeline_at(reader, steered.campaign_id, "").node_config_schema
         row_at = {row.key: row for row in served_rows["a"]}
-        assert {k for k, row in row_at.items() if not row.editable} == held_keys, (
+        assert {k for k, row in row_at.items() if row.pickable != "any"} == held_keys, (
             "a served row let its reader steer past what babysit binds, or held one it does not"
         )
-        assert row_at["model"].permitted == ["m", "n"] and row_at["temperature"].editable
+        assert row_at["model"].permitted == ["m", "n"] and row_at["temperature"].pickable == "any"
     # An optimizer knob names the layer its mint recorded behind it, never the tier the account is
-    # on now; a key no layer below the edit recorded is the operator's edit.
+    # on now; an edit restating the dataset's value is the edit's.
+    restated = {"optimization": {"nodes": {"l1_generate": {"config": {"n_variants": 3}}}}}
+    on_dataset = {"optimization": {**restated["optimization"], "degradation_threshold": 0.4}}
+    assert laid_config(
+        stores, ConfigLayers(on_dataset, restated), connector="termnorm", schema=None
+    ).knob_layers == {"l1_generate": {"n_variants": "campaign"}}, (
+        "an edit restating the dataset's value read as the dataset's"
+    )
     knob_config = CampaignConfig.model_validate(
         {
             "optimization": {
@@ -2209,7 +2210,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     stores.campaigns.create_campaign(layered)
     stores.campaigns.mint_cycle(layered.root_hop)
     recorded: dict[str, dict[str, KnobLayer]] = {
-        "l1_generate": {"n_variants": "dataset", "k_max": "free_tier"}
+        "l1_generate": {"n_variants": "dataset", "k_max": "free_tier", "pool_window": "campaign"}
     }
     stores.campaigns.write_resolved_run(
         layered.root_hop,
@@ -2258,9 +2259,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         assert steers_disallowed_model(sanctioning, steer) is babysat, why
     assert not steers_disallowed_model({}, {}), "an empty steer is not a babysit act"
     # A served row is bound by the one predicate the verdict reads.
-    assert [steer_binds(k) for k in ("model", "provider", "temperature")] == [True, True, False], (
-        "a row a steer can take past what its node permits was served free, or a free one bound"
-    )
+    assert [pickable(k, steer_bound=True) for k in ("model", "provider", "temperature")] == [
+        "permitted",
+        "none",
+        "any",
+    ], "a bound cost lever offered its permitted values, which the verdict refuses"
 
     # Every door declares through ONE seam, and a declaration is a delta over today's defaults: a
     # moved code default leaves the minted manifest alone and is named when it moves the origin.
@@ -2324,6 +2327,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "two arms over one content, or an arm and a seat, share a run id every surface keys on"
     )
     arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
+    door_layers = ConfigLayers({}, door.model_dump(mode="json", exclude_unset=True))
 
     def arm_of(key: str, budget: Budget, *, h2h: str = "h") -> list[CyclePlan]:
         request = HeadToHeadRequest(
@@ -2336,7 +2340,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             ],
             budget=budget,
         )
-        return asyncio.run(arm_plans(arming, door, request, rows_30))
+        return asyncio.run(arm_plans(arming, door_layers, request, rows_30))
 
     # No dollar cap: a backend holding its own sends prices no cell before a run.
     mint_arms(arm_of("a", Budget(usd=None, rounds=2)), adopting=None)
@@ -2381,7 +2385,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             arms=[ArmRequest(arm_key=key, optimization=sent) for key, sent in arms],
             budget=Budget(usd=None, rounds=2),
         )
-        minted = mint_arms(asyncio.run(arm_plans(arming, door, request, rows_30)), adopting=None)
+        minted = mint_arms(
+            asyncio.run(arm_plans(arming, door_layers, request, rows_30)), adopting=None
+        )
         purposes: dict[str, Compare] = {}
         for cycle in minted:
             campaign = stores.campaigns.load_campaign(cycle.hop.campaign_id)
@@ -2652,7 +2658,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     stores.campaigns.append(steered_hop, partition)
     stores.campaigns.append(
         steered_hop,
-        CycleSeedRecord(seed=CycleSeed(pipeline_overlay={"solve": {"temperature": 0.3}})),
+        CycleSeedRecord(seed=CycleSeed(pipeline_overlay={"solve": NodeCall(temperature=0.3)})),
     )
     steered_fork = opened.bound(steered_hop, purpose=Optimize())
     steered_fork.record_resolved_run()
@@ -2806,7 +2812,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # Answering in TEXT sends no contract to answer INTO.
     d234 = read_dataset_pipeline(_install("justlogic/d234"))
     assert d234 is not None
-    text_pipeline = ServedPipeline("termnorm", {"nodes": {"llm_only": {"type": "llm"}}}).over(d234)
+    # TermNorm serves its prompt's fields and no slot: its node template declares the slot.
+    served_llm = {"type": "llm", "prompt_info": {"fields": list(PROMPT_INFO.fields)}}
+    text_pipeline = ServedPipeline("termnorm", {"nodes": {"llm_only": served_llm}}).over(d234)
     text_schema = parse_pipeline_response(text_pipeline)
     base = {n.name: dict(n.current_config) for n in text_schema.declared_nodes}
     assert {"output_schema", "answer_fields"} <= base["llm_only"].keys(), (
@@ -2841,8 +2849,12 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         assert one_call == seeded_call and one_call.model_copy(update={"seed": 4}) != seeded_call, (
             "two calls with the same fields compared unequal, or a moved field compared equal"
         )
+    nulled = PipelineParams.model_validate({"solve": {"model": "m", "seed": None}})
+    assert (
+        nulled.laid_nodes == PipelineParams.model_validate({"solve": {"model": "m"}}).laid_nodes
+    ), "a call laid `seed: null` hashed apart from one laid without it"
     for build in (PipelineParams.model_validate, PipelineParams().with_nodes):
-        with pytest.raises((ValidationError, PayloadInvalidError)):
+        with pytest.raises(ValidationError):
             build({"solve": {"max_tokens": 1024.0}})
     with pytest.raises(ValidationError, match="may not be named"):
         pipeline_schema(nodes=[PipelineNode(name="steps", tunes_llm=False)])
@@ -2980,6 +2992,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # aimed at a prompt field, and a node the pipeline lacks are all refused on the child.
     _, config, carried = carried_writes(
         graded,
+        writer="llm",
         prompt_loci={
             Locus("grade", "invented_field"): "x",
             Locus("grade", "persona"): "You grade strictly.",
@@ -3003,7 +3016,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             PipelineNode(
                 name="review",
                 kind=NodeKind.LLM,
-                prompt_info=NodePromptInfo(fields=("instruction", "rubric")),
+                prompt_info=NodePromptInfo(
+                    fields=("instruction", "rubric"), rewrite_slot="instruction"
+                ),
                 tunes_llm=True,
             ),
         ]
@@ -3052,10 +3067,12 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     off_roster = author_arm(reflected_on, origin, stray)
     assert len(off_roster.validation_failures) == 2, "an arm writing off the roster was measured"
     capo = select_optimizer(OptimizerChoice(optimizer="capo"))
-    assert optimizers.unfit_pipeline(capo, two) is not None, (
+    assert optimizers.unfit_pipeline(capo, two, "termnorm") is not None, (
         "a member rewriting the one prompt node was admitted on a chain of two"
     )
-    assert optimizers.unfit_pipeline(gepa, two) is None, "GEPA was refused a chain it can walk"
+    assert optimizers.unfit_pipeline(gepa, two, "termnorm") is None, (
+        "GEPA was refused a chain it can walk"
+    )
     # The shipped defaults' config-axis narrowing leaves every prompt field to L1; only
     # `prompt_fields_held` withdraws one, and a surface with nothing open is refused pre-spend.
     axes_only = two.narrow(
@@ -3075,16 +3092,20 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert review is not None and review.open_prompt_fields == ["instruction"], (
         "a held prompt field withdrew another than itself"
     )
-    # The child door every member's child passes refuses the held field, never writes it.
+    # The child door refuses an optimizer's child the held field; the operator who held it writes it.
+    both = {Locus("review", "rubric"): "x", Locus("review", "instruction"): "y"}
     held_writes, _, held_refusals = carried_writes(
-        one_held,
-        prompt_loci={Locus("review", "rubric"): "x", Locus("review", "instruction"): "y"},
-        overlay={},
-        demo=None,
+        one_held, writer="llm", prompt_loci=both, overlay={}, demo=None
     )
     assert list(held_writes) == [Locus("review", "instruction")], "a held field was written"
     assert [(f.axis, f.reason) for f in held_refusals] == [("review.rubric", "forbidden_axis")], (
         "a held field's write carried no refusal"
+    )
+    authored, _, authored_refusals = carried_writes(
+        one_held, writer="operator", prompt_loci=both, overlay={}, demo=None
+    )
+    assert (list(authored), authored_refusals) == (list(both), []), (
+        "the operator's own arm was refused the field they held"
     )
     all_held = two.narrow(
         {
@@ -3092,7 +3113,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             for n in two.declared_nodes
         }
     )
-    assert optimizers.unfit_pipeline(gepa, all_held) is not None, (
+    assert optimizers.unfit_pipeline(gepa, all_held, "termnorm") is not None, (
         "a campaign leaving its optimizer nothing to edit was admitted"
     )
 
@@ -3150,9 +3171,17 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             )
         ]
     )
-    assert optimizers.unfit_pipeline(gepa, rubric_only) is not None, (
-        "a peer was admitted to rewrite a field its prompt node does not declare"
+    # A whole-prompt rewrite lands in the slot the node declares: none, or a held one, refuses.
+    unslotted = optimizers.unfit_pipeline(gepa, rubric_only, "termnorm")
+    assert unslotted is not None and "'review'" in unslotted and "'termnorm'" in unslotted, (
+        "a peer was admitted on a node declaring no slot, or its refusal named no node or connector"
     )
+    slot_held = two.narrow({"review": NodeSearchNarrowing(prompt_fields_held=["instruction"])})
+    assert optimizers.unfit_pipeline(gepa, slot_held, "termnorm") is not None, (
+        "a peer was admitted to rewrite a slot its campaign holds"
+    )
+    with pytest.raises(ValidationError, match="rewrite_slot"):
+        NodePromptInfo(fields=("rubric",), rewrite_slot="instruction")
 
 
 # 3. Contamination of a scored prompt

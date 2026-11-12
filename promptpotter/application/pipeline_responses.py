@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.application.optimizers.nodes import Initializer
-    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import KnobLayers, PipelineSchema
     from promptpotter.domain.pool import Pool, PoolEntry
 
 
@@ -376,7 +376,7 @@ def _node_prompts(selected: SelectedOptimizer) -> dict[str, OptimizerNodePrompt]
         family = config.prompt_family
         out[node] = OptimizerNodePrompt(
             fields=running_prompt(node, config, selected.manifest).model_dump(),
-            edited=list(config.prompt_edits.model_dump(exclude_none=True)),
+            edited=list(config.prompt_edits()),
             version=str(config.prompt_version or ""),
             versions_declared=sum(k.partition("/")[0] == family for k in declared),
         )
@@ -406,12 +406,16 @@ def _pool_row(
 
 
 def optimizer_setup(
-    selected: SelectedOptimizer, mint: MintFacts | None, target: PipelineSchema, workspace: Path
+    selected: SelectedOptimizer,
+    mint: MintFacts | None,
+    target: PipelineSchema,
+    workspace: Path,
+    knob_layers: KnobLayers,
 ) -> OptimizerSetup:
     opened = _opened_parts(target)
     schema = selected.schema
     # An optimizer node's config is no steer: nothing binds its rows.
-    rows = schema.node_config_schema(selected.steered_axes, steer_bound=False)
+    rows = schema.node_config_schema(selected.steered_axes, steer_bound=False, sources=knob_layers)
     return OptimizerSetup(
         view=schema.view,
         measurement_node=selected.plan.measurement,

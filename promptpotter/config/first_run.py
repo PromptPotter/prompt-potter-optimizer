@@ -8,7 +8,7 @@ from promptpotter.config.paths import env_file_path
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.store.io import write_text
 
-_PROVIDER_KEYS = ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY")
+_PROVIDER_KEYS = ("GROQ_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY")
 
 
 def ensure_api_key() -> None:

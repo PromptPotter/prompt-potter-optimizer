@@ -7,8 +7,7 @@ from dataclasses import dataclass
 from promptpotter.config.settings import settings
 from promptpotter.domain.pipeline_overlay import normalize_model_id
 from promptpotter.domain.spend import KeySource, draws_coupon
-from promptpotter.infrastructure.llm.anthropic import AnthropicClient
-from promptpotter.infrastructure.llm.base import LLMClientBase, ProviderKey, SendPacing
+from promptpotter.infrastructure.llm.base import ProviderKey, SendPacing
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient, ProviderSpec
 from promptpotter.infrastructure.llm.send_pacing import build_rate_limiter
 
@@ -85,25 +84,19 @@ def openai_compat_spec(provider: str) -> ProviderSpec | None:
     return _OPENAI_COMPAT_SPECS.get(provider)
 
 
-# The `.env` name of each provider's HOST key: the box's wallet, which the coupon meters.
-_HOST_KEY_ATTRS: dict[str, str] = {
-    **{name: spec.api_key_attr for name, spec in _OPENAI_COMPAT_SPECS.items()},
-    "anthropic": "ANTHROPIC_API_KEY",
-}
-
-
 def providers() -> frozenset[str]:
     """Every provider a node may name, and so every one an account may hold a key for."""
-    return frozenset(_HOST_KEY_ATTRS)
+    return frozenset(_OPENAI_COMPAT_SPECS)
 
 
 def host_key_attr(provider: str) -> str:
-    return _HOST_KEY_ATTRS[provider]
+    """The `.env` name of *provider*'s HOST key: the box's wallet, which the coupon meters."""
+    return _OPENAI_COMPAT_SPECS[provider].api_key_attr
 
 
 def host_key(provider: str) -> ProviderKey | None:
     """``None`` where the box holds no key for *provider*."""
-    secret = getattr(settings, _HOST_KEY_ATTRS[provider])
+    secret = getattr(settings, host_key_attr(provider))
     return ProviderKey(secret, "host") if secret.get_secret_value().strip() else None
 
 
@@ -128,18 +121,6 @@ def _rate_caps(provider: str, paid_by: KeySource) -> tuple[int | None, int | Non
     return (caps[0] if len(caps) > 0 else None, caps[1] if len(caps) > 1 else None)
 
 
-# An OpenAI-compatible client is built on its provider's spec.
-_PROVIDER_CLIENTS: dict[str, type[OpenAICompatibleClient | AnthropicClient]] = {
-    **dict.fromkeys(_OPENAI_COMPAT_SPECS, OpenAICompatibleClient),
-    "anthropic": AnthropicClient,
-}
-
-
-def provider_sends(provider: str) -> frozenset[str]:
-    """What *provider*'s client puts on the wire; an asked field outside it refuses at the send."""
-    return _PROVIDER_CLIENTS[provider].SENDS
-
-
 # Bounded: under open signup each account's own key is one more account paced.
 _ACCOUNTS_PACED = 256
 
@@ -151,17 +132,15 @@ def send_pacing(provider: str, _account: str, paid_by: KeySource) -> SendPacing:
     return SendPacing(build_rate_limiter(rpm, tpm))
 
 
-def get_llm_client(provider: str, key: ProviderKey) -> LLMClientBase:
+def get_llm_client(provider: str, key: ProviderKey) -> OpenAICompatibleClient:
     """A client for one resolution, sharing its ACCOUNT's pacing across clients and cycles.
 
     The key is the caller's resolution (`application/jobs/coupon.py::paying_key`), never
     read here: which wallet a send draws is an account's question, not a provider's."""
-    client = _PROVIDER_CLIENTS.get(provider)
-    if client is None:
-        valid = ", ".join(sorted(_PROVIDER_CLIENTS))
+    spec = _OPENAI_COMPAT_SPECS.get(provider)
+    if spec is None:
+        valid = ", ".join(sorted(_OPENAI_COMPAT_SPECS))
         raise ValueError(f"Unknown LLM provider: {provider!r}. Valid: {valid}.")
     account = hashlib.sha256(key.secret.get_secret_value().encode()).hexdigest()
     pacing = send_pacing(provider, account, key.paid_by)
-    if issubclass(client, OpenAICompatibleClient):
-        return client(key, pacing, provider=provider, spec=_OPENAI_COMPAT_SPECS[provider])
-    return client(key, pacing)
+    return OpenAICompatibleClient(key, pacing, provider=provider, spec=spec)

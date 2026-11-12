@@ -7,11 +7,9 @@ from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import JsonValue
 
-from promptpotter.application.datasets.authored import with_optimization
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.loaders import Source, cut_bank, definition_source
 from promptpotter.application.datasets.startability import upload_source
-from promptpotter.application.free_tier import free_fence
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.launcher.mint_and_start import (
@@ -36,6 +34,8 @@ from promptpotter.application.pipeline_resolve import (
     draft_pipeline,
     draft_sends,
     draft_served,
+    laid_config,
+    laid_session,
 )
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile
@@ -48,8 +48,8 @@ from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
+    from promptpotter.application.datasets.authored import ConfigLayers
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.campaign_config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 
@@ -91,10 +91,10 @@ class CheckinStart:
         draft_id = self.claim.draft_id
         served = await draft_served(stores, owned_draft(stores, draft_id))
         opened = await open_checkin(stores, draft_id, served, overlays=[{}])
-        session = opened.session
+        session, config = laid_session(opened.session, opened.layers)
         plan = resolve_cycle_plan(
             session,
-            declare(session, opened.declared, purpose=Optimize()),
+            declare(session, config, purpose=Optimize()),
             session.bank.samples,
             origin_override=opened.origin_override,
         )
@@ -135,15 +135,20 @@ def _land_draft(
     )
     rows = cut_bank(stores, source)
     for overlay in overlays:
-        config = with_optimization(pipeline.config, overlay)
+        config = laid_config(
+            stores,
+            pipeline.layers.over(overlay),
+            connector=basis.connector,
+            schema=pipeline.declared,
+        ).config
         refuse_unrunnable(
             config,
             select_optimizer(config.optimization),
             rows,
             params,
             chain,
-            fence=free_fence(stores, basis.connector),
-            shelf=stores.block_packs,
+            stores=stores,
+            connector=basis.connector,
         )
     commit_upload_definition(stores, draft, source=source, pipeline=pipeline)
     return None
@@ -151,11 +156,11 @@ def _land_draft(
 
 @dataclass(frozen=True, slots=True)
 class OpenedCheckin:
-    """A Start's draft past its landing, with the session and config every arm of it declares on."""
+    """A Start's draft past its landing, with the session and layers every arm of it declares on."""
 
     draft: DraftFile
     session: Session
-    declared: CampaignConfig
+    layers: ConfigLayers
     origin_override: dict[str, NodePrompt] | None
 
 
@@ -178,4 +183,4 @@ async def open_checkin(
         stores=stores,
         served=served,
     )
-    return OpenedCheckin(draft, session, pipeline.config, origin_override)
+    return OpenedCheckin(draft, session, pipeline.layers, origin_override)

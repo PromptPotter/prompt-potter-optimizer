@@ -4,29 +4,29 @@ import copy
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
     OUTPUT_CONTRACT_KEYS,
     SCHEMA_TOGGLE_PARAM,
     described_field,
     description_path,
-    steer_binds,
+    pickable,
 )
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_KEYS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.domain.pipeline_params import PipelineParams
+    from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
     from promptpotter.domain.pipeline_schema import (
         NodeSearchNarrowing,
         PipelineSchema,
     )
 
 
-def overlay_is_locked_axis_only(overlay: Mapping[str, Mapping[str, Any]] | None) -> bool:
+def overlay_is_locked_axis_only(overlay: Mapping[str, NodeCall]) -> bool:
     """Gates the C0 inherit. :data:`WHO_ANSWERS_KEYS`, not the forbidden subset, which misses a model-only steer."""
-    keys = [k for cfg in (overlay or {}).values() for k in cfg]
+    keys = [k for call in overlay.values() for k in call.laid_keys()]
     return bool(keys) and all(k in WHO_ANSWERS_KEYS for k in keys)
 
 
@@ -43,11 +43,11 @@ def permitted_models_from_narrowing(
 def overlay_sets_model_outside_allowed(
     overlay: Mapping[str, Mapping[str, Any]] | None, permitted: Mapping[str, Sequence[str]]
 ) -> bool:
-    """The babysit trigger (decisions.md § 0005): *overlay* moves a key `steer_binds` binds past
-    *permitted*, a cost lever by any value and a model by one its node does not permit."""
+    """The babysit trigger: *overlay* moves a key past what a bound steer may pick, a model past
+    its node's *permitted*."""
     return any(
-        steer_binds(key)
-        and (key in PARAM_FORBIDDEN_KEYS or value not in (None, *permitted.get(node, ())))
+        (pick := pickable(key, steer_bound=True)) == "none"
+        or (pick == "permitted" and value not in (None, *permitted.get(node, ())))
         for node, cfg in (overlay or {}).items()
         for key, value in cfg.items()
     )

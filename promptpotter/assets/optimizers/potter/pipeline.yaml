@@ -55,7 +55,7 @@ nodes:
       param_allowed_values:
         # Mirrors `capabilities.py::STANDARD_EFFORT_LADDER`.
         reasoning_effort: [none, default, low, medium, high]
-        provider: [openrouter, groq, openai, anthropic]
+        provider: [openrouter, groq, openai]
     config:
       temperature: 0.4
       prompt_family: l1_generate

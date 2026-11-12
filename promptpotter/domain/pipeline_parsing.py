@@ -54,7 +54,7 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
 }
 
 # Every other key replaces wholesale: a shallow-merged `output_schema` keeps a `required` naming a dropped property.
-_MERGED_NODE_SUB_BLOCKS = ("config", "optimizer")
+_MERGED_NODE_SUB_BLOCKS = ("config", "optimizer", "prompt_info")
 
 # Keyed BY PARAM: merged one level up, a layer naming one axis deletes every other axis's value space.
 _MERGED_OPTIMIZER_MAPS = ("param_allowed_values", "param_descriptions")

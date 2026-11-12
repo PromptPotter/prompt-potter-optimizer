@@ -7,8 +7,9 @@ from typing import Any, Literal, Self
 from pydantic import Field, TypeAdapter, ValidationError, model_validator
 
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS, OptimizerPromptTemplate
+from promptpotter.domain.pipeline_params import CALL_CONFIG_KEYS, lay_node_config
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.search_point import CALL_CONFIG_KEYS, NodeConfig
+from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -34,7 +35,7 @@ def typed_config(cfg: Mapping[str, object]) -> NodeConfig:
     calls = {k: v for k, v in cfg.items() if k in CALL_CONFIG_KEYS}
     runs_prompt = resolved_key(calls.get("prompt_family"), calls.get("prompt_version"))
     edits = {f: cfg[f] for f in PROMPT_FIELDS if f in cfg} if runs_prompt else {}
-    return NodeConfig.model_validate({**calls, "prompt_edits": edits})
+    return NodeConfig.model_validate({**calls, **edits})
 
 
 def laid_config(
@@ -42,18 +43,15 @@ def laid_config(
 ) -> NodeConfig:
     """`typed_config`, refusing a key that is neither a call key, one of *knobs* nor, on a node
     running a prompt, a prompt field; a mistyped one is refused at the key it was laid as
-    (`optimization.nodes.{node}.config.{field}`), a prompt field's never under ``prompt_edits``."""
+    (`optimization.nodes.{node}.config.{field}`)."""
     try:
         config = typed_config(cfg)
     except ValidationError as exc:
-        laid = [
-            {**e, "loc": [p for p in e["loc"] if p != "prompt_edits"]}
-            for e in exc.errors(include_input=False, include_url=False)
-        ]
         raise PayloadInvalidError.refusing(
-            laid, under=("optimization", "nodes", node, "config")
+            exc.errors(include_input=False, include_url=False),
+            under=("optimization", "nodes", node, "config"),
         ) from exc
-    prompt = config.prompt_edits.model_fields_set
+    prompt = config.model_fields_set & set(PROMPT_FIELDS)
     if unknown := sorted(set(cfg) - CALL_CONFIG_KEYS - set(knobs) - prompt):
         raise ValueError(
             f"{owner} node {node!r} names {unknown} in its config, which is neither a call "
@@ -102,7 +100,9 @@ class PipelineManifest(FrozenModel):
 
     def laid_over(self, overlay: Mapping[str, Mapping[str, Any]]) -> PipelineManifest:
         nodes = {
-            name: node.model_copy(update={"config": {**node.config, **overlay[name]}})
+            name: node.model_copy(
+                update={"config": lay_node_config(node.config, overlay[name], {})}
+            )
             if name in overlay
             else node
             for name, node in self.nodes.items()

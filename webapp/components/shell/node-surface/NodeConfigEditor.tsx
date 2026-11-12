@@ -19,6 +19,7 @@ import {
   pickedRoute,
   rowIntents,
   seedOverlayFromRows,
+  seedResetFromRows,
   type ConfigMode,
   type ConfigRow,
   type ValueType,
@@ -39,7 +40,9 @@ export function NodeConfigEditor(props: {
   modelCapabilities: CapabilityMenu | undefined;
   onApply: ((patch: DraftPatch) => void) | undefined;
   onNarrowing: ((node: string, rows: ParamIntent[]) => void) | undefined;
-  onChange: ((overlay: Record<string, Record<string, unknown>>) => void) | undefined;
+  onChange:
+    | ((overlay: Record<string, Record<string, unknown>>, reset: string[]) => void)
+    | undefined;
   keysAskedElsewhere: readonly string[] | undefined;
 }) {
   const {
@@ -80,16 +83,12 @@ export function NodeConfigEditor(props: {
     for (const n of new Set(next.map((r) => r.node))) {
       onNarrowing?.(n, rowIntents(next.filter((r) => r.node === n)));
     }
-    onChange?.(
-      seedOverlayFromRows(
-        base,
-        Object.fromEntries(
-          next
-            .filter((r) => marks.has(flatConfigKey(r.node, r.key)))
-            .map((r) => [flatConfigKey(r.node, r.key), r.value]),
-        ),
-      ),
+    const edits = Object.fromEntries(
+      next
+        .filter((r) => marks.has(flatConfigKey(r.node, r.key)))
+        .map((r) => [flatConfigKey(r.node, r.key), r.value]),
     );
+    onChange?.(seedOverlayFromRows(base, edits), seedResetFromRows(base, edits));
   };
   const update = (i: number, patch: Partial<ConfigRow>) => {
     const next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r));
@@ -142,7 +141,7 @@ export function NodeConfigEditor(props: {
               key={`${r.node}.${r.key}`}
               row={r}
               ignoredBy={caps?.unsupported_params?.includes(r.key) ? pickedModel : undefined}
-              readOnly={readOnly || !r.editable}
+              readOnly={readOnly || r.pickable === "none"}
               onToggleLock={lockable(r) ? () => update(i, { locked: !r.locked }) : undefined}
               onValue={canSetValue ? (v) => update(i, { value: v }) : undefined}
             />
@@ -150,7 +149,8 @@ export function NodeConfigEditor(props: {
         }
         const { values, inert, userAdded } = axisMenu(r, caps);
         // Only what the editor may OFFER; the verdict is `POST /campaigns/{id}/fork-preview`'s.
-        const barred = r.editable ? [] : values.filter((v) => !r.permitted.includes(v));
+        const pickable = { any: values, permitted: r.permitted, none: [r.value] }[r.pickable];
+        const barred = values.filter((v) => !pickable.includes(v));
         return (
           <div key={`${r.node}.${r.key}`} className="config-row">
             <span className="config-label" title={r.description || undefined}>

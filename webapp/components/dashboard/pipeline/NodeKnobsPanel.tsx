@@ -4,6 +4,7 @@ import { configMapRead, optimizerRosterRead } from "@/lib/api";
 import {
   type ConfigKnob,
   type ConfigMapResponse,
+  type DraftPatch,
   type ManifestNodeOverlay,
   type NodeConfigParam,
   type OptimizerRoster,
@@ -32,18 +33,22 @@ import { cx } from "@/lib/cx";
 import { fmtValue } from "@/lib/format";
 
 type OnChange = ((patch: Record<string, ManifestNodeOverlay>) => void) | undefined;
+type OnReset = ((node: string, key: string) => void) | undefined;
 
 // The entry chips a pool shows before its "show all": a demo pool's split runs to dozens.
 const ENTRIES_INLINE = 8;
 const ENTRIES_FIRST = 10;
 
-export function NodeKnobsPanel({
-  onChange,
-}: {
+export function NodeKnobsPanel({ onApply }: { onApply?: (patch: DraftPatch) => void } = {}) {
+  const editable = onApply != null;
   // A SPARSE patch: the server merges it onto the draft's overlay key by key.
-  onChange?: (patch: Record<string, ManifestNodeOverlay>) => void;
-} = {}) {
-  const editable = onChange != null;
+  const onChange: OnChange = onApply
+    ? (patch) => onApply({ config: { optimization: { nodes: patch } } })
+    : undefined;
+  // The draft's own value dropped, so the layer below shows through.
+  const onReset: OnReset = onApply
+    ? (node, key) => onApply({ reset: [`config.optimization.nodes.${node}.config.${key}`] })
+    : undefined;
   const read = useConnector();
   const served = shownData(read);
   const { viewed } = useWorkspace();
@@ -75,6 +80,7 @@ export function NodeKnobsPanel({
       entry={readyData(rosterRead)?.optimizers.find((o) => o.name === served.optimizer)}
       setBy={knobLayers(readyData(mapRead))}
       onChange={onChange}
+      onReset={onReset}
     />
   );
 }
@@ -106,12 +112,14 @@ function KnobGroups({
   entry,
   setBy,
   onChange,
+  onReset,
 }: {
   optimizer: string;
   setup: OptimizerSetup;
   entry: OptimizerRoster["optimizers"][number] | undefined;
   setBy: Map<string, KnobLayer>;
   onChange: OnChange;
+  onReset: OnReset;
 }) {
   const declared = declaredLabel(entry);
   const layerOf = (node: string, key: string) =>
@@ -152,6 +160,7 @@ function KnobGroups({
                 setBy={layerOf(node, knob.key)}
                 showNode
                 onChange={onChange}
+                onReset={onReset && (() => onReset(node, knob.key))}
               />
             ))}
           </ul>
@@ -199,6 +208,7 @@ function KnobGroups({
                     declaredLabel={declared}
                     setBy={layerOf(group.node, k.key)}
                     onChange={onChange}
+                    onReset={onReset && (() => onReset(group.node, k.key))}
                   />
                 ))}
               </ul>
@@ -218,6 +228,7 @@ export function KnobItem({
   setBy,
   showNode = false,
   onChange,
+  onReset,
 }: {
   node: string;
   knob: NodeConfigParam;
@@ -226,6 +237,7 @@ export function KnobItem({
   setBy?: KnobLayer | undefined;
   showNode?: boolean;
   onChange: OnChange;
+  onReset: (() => void) | undefined;
 }) {
   const changed = JSON.stringify(k.value) !== JSON.stringify(k.declared);
   const set = onChange ? (next: unknown) => onChange({ [node]: { config: { [k.key]: next } } }) : null;
@@ -273,8 +285,8 @@ export function KnobItem({
             Changed from {declaredLabel} {fmtValue(k.declared)}
             {setBy && LAYER_WORDS[setBy] ? ` ${LAYER_WORDS[setBy]}` : null}
           </span>
-          {set ? (
-            <Button variant="ghost" className="mech-reset" onClick={() => set(k.declared)}>
+          {onReset ? (
+            <Button variant="ghost" className="mech-reset" onClick={onReset}>
               Reset
             </Button>
           ) : null}

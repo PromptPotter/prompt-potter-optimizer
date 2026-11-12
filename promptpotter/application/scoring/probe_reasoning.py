@@ -21,7 +21,7 @@ from promptpotter.shared.errors import ErrorCategory
 from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.llm.base import LLMClientBase
+    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
     from promptpotter.infrastructure.store.stores import Stores
 
 # The measurand is the reasoning token COUNT, never the answer.
@@ -50,7 +50,7 @@ class RungReading:
         return not self.refused
 
 
-async def _one(client: LLMClientBase, model: str, rung: str | None) -> RungReading:
+async def _one(client: OpenAICompatibleClient, model: str, rung: str | None) -> RungReading:
     try:
         with scoped(send_budget=SendBudget(None, attempts=SEND_ATTEMPTS)):
             resp = await client.chat(

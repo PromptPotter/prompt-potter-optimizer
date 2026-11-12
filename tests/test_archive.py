@@ -52,6 +52,7 @@ from factories import (
     workspace,
 )
 from offline_world import Router
+from pydantic import ValidationError
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
@@ -1231,6 +1232,25 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert panel_index is not None and not panel_index.human_intervened, (
         "a panel fork with no edit was stamped babysat"
     )
+    # A field cleared in the panel drops the candidate's value, and the layer below shows through.
+    cleared = ForkSeed(reset=["pipeline_overlay.a.route_order"])
+    reset_fork = scenario.model_copy(
+        update={
+            "cycle_id": cut_operator_fork(
+                stores=stores,
+                hop=scenario,
+                from_round=2,
+                from_candidate_id=candidate_key,
+                dropped=cleared.dropped,
+                seed=parse_cycle_seed(cleared, stores, campaign, scenario),
+            ).take(stores)
+        }
+    )
+    assert cycle_config(stores, campaign, reset_fork).seed_overlay == {
+        "a": {"model": "m", "provider": "p"}
+    }, "a cleared field forked with the candidate's value"
+    with pytest.raises(ValidationError):
+        ForkSeed(reset=["a.route_order"])
     # A fork by another issuer than the one whose launch queued on its parent goes ahead and, on
     # its own authority over the parent, withdraws that launch (bl1.B5).
     room = [0]

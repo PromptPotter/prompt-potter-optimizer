@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
@@ -36,7 +36,7 @@ from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.maintenance.landing import land_at_entry
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, laid_session
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.views.readout import StatusFn
@@ -146,11 +146,8 @@ async def run_campaign(
             session = await _dataset_session(stores, target, program=program, rows=rows)
             clients.push_async_callback(session.backend_client.aclose)
             assert session.dataset is not None, "a dataset session resolved its dataset"
-            declaration = declare(
-                session,
-                campaign_config or load_dataset_campaign_config(session.dataset),
-                purpose=Optimize(),
-            )
+            session, laid = laid_session(session, ConfigLayers.of(session.dataset, campaign_config))
+            declaration = declare(session, laid, purpose=Optimize())
             campaign_config = effective_config(declaration)
             connector, measured = declaration.environment.connector, session.measured_dataset
 
@@ -235,7 +232,10 @@ async def run_head_to_head(
 
     try:
         admitted = await admit_head_to_head(
-            DatasetArms(session, campaign_config),
+            DatasetArms(
+                session,
+                ConfigLayers({}, campaign_config.model_dump(mode="json", exclude_unset=True)),
+            ),
             request,
             job_registry=JobRegistry.attach(stores.jobs_dir),
             holder=EmbeddedRun(session.measured_dataset),

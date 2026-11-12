@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import reduce
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import ValidationError
 
@@ -95,11 +95,38 @@ def campaign_config_over(block: dict[str, Any], over: Mapping[str, Any]) -> Camp
     return out
 
 
-def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> CampaignConfig:
-    """Laid over the keys *config*'s layers SET, so a declaration off it restates no default."""
-    return campaign_config_over(
-        config.model_dump(mode="json", exclude_unset=True), {"optimization": dict(overrides)}
-    )
+class ConfigLayers(NamedTuple):
+    """A run's config as a door hands it to the mint: the dataset's ``campaign`` block, and the
+    door's edit, the keys it SETS (`pipeline_resolve.py::laid_config` lays them)."""
+
+    dataset: Mapping[str, Any]
+    campaign: Mapping[str, Any]
+
+    @classmethod
+    def of(cls, dataset: ResolvedDataset, stated: CampaignConfig | None) -> ConfigLayers:
+        """A declaration *stated* in place of the dataset's block is the edit, laid over nothing."""
+        if stated is None:
+            return cls(dataset_campaign_block(dataset), {})
+        return cls({}, stated.model_dump(mode="json", exclude_unset=True))
+
+    def over(self, optimization: Mapping[str, Any]) -> ConfigLayers:
+        """*optimization* laid into the edit, last."""
+        edit = merge_config_layers(dict(self.campaign), {"optimization": dict(optimization)})
+        return self._replace(campaign=edit)
+
+    def laid_dataset(self) -> dict[str, Any]:
+        """The dataset's block under the edit: the edit's ``scoring`` is the criterion whole, so it
+        replaces the dataset's."""
+        return {
+            k: v
+            for k, v in self.dataset.items()
+            if k != "scoring" or "scoring" not in self.campaign
+        }
+
+    def block(self) -> dict[str, Any]:
+        """Both layers' keys, the edit last: what an upload's Start records as its definition's
+        ``campaign``, so a later campaign on it starts where this one did."""
+        return merge_config_layers(self.laid_dataset(), dict(self.campaign))
 
 
 def scorer_of(config: CampaignConfig, *, verifier_graded: bool) -> Scorer:

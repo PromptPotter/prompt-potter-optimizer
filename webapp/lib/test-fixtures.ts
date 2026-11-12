@@ -79,7 +79,7 @@ export function configParam(over: Partial<NodeConfigParam> & { key: string }): N
     source: "campaign",
     permitted: [],
     permitted_stated: false,
-    editable: true,
+    pickable: "any",
     ...over,
   };
 }

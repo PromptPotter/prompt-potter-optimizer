@@ -55,7 +55,7 @@ Opt-in; a deterministic node declares none.
 
 LLM nodes additionally:
 
-- **Prompt exposure** — `prompt_info.fields` (`domain/pipeline_schema.py::NodePromptInfo`, required) names the target prompt's parts in render order, and that order sits inside the archive key.
+- **Prompt exposure** — `prompt_info.fields` (`domain/pipeline_schema.py::NodePromptInfo`, required) names the target prompt's parts in render order, and that order sits inside the archive key. `prompt_info.rewrite_slot` names the field a whole-prompt rewrite (CAPO, GEPA, LEVI's `rewrites: prompt`) lands in; a node declaring none refuses such a peer before the mint. A connector whose backend serves none declares it in its node template.
 - **Shots are part of the target prompt, carried by key and rendered last.** `shots` name demo-pool rows (`DatasetSplit.demo`) by `Sample.key`; `OptSearchPoint.scored_prompts(schema, framing, demo=)` resolves them after the fields. The individual never carries a row's text; the export carries the resolved block. A demo row is never scored and never reaches a panel or the bench set. Editors: `l1_generate`'s `shots` slot (`k_max`, `validators/l1_strict.py::l1_shots_in_demo_pool`); an `algorithm` member without a model call (`optimizers/capo/members.py::FewShot`, `cross_shots`).
 - **Optimizer-discoverable parameters** — declared accepted values become search axes, hardcoded on neither side.
 - **Self-healing** — a `ValidationFailure` at parse time (`bench/children.py::overlay_failures`), a `RuntimeFailure` mid-run (`application/scoring/arm_states.py::read_breakage`).

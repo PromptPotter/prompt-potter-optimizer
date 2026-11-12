@@ -128,8 +128,6 @@ def report_throttle_stall(seconds: float) -> None:
 
 OPENAI_RPM_HEADER = "x-ratelimit-limit-requests"
 OPENAI_TPM_HEADER = "x-ratelimit-limit-tokens"
-ANTHROPIC_RPM_HEADER = "anthropic-ratelimit-requests-limit"
-ANTHROPIC_TPM_HEADER = "anthropic-ratelimit-tokens-limit"
 
 
 def parse_retry_after(headers: object | None) -> float | None:

@@ -14,10 +14,8 @@ from promptpotter.application.bench.task_context import (
     commit_task_framing,
     committed_task_context,
 )
-from promptpotter.application.datasets.authored import with_optimization
 from promptpotter.application.datasets.draft_campaign import mint_draft_id
 from promptpotter.application.free_tier import (
-    FreeFence,
     free_fence,
     outside_free_tier,
     refuse_outside_free_tier,
@@ -31,6 +29,7 @@ from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
     cycle_config,
     defaults_drift,
+    laid_session,
     mint_facts,
 )
 from promptpotter.application.preflight import (
@@ -91,8 +90,8 @@ from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from promptpotter.application.datasets.authored import ConfigLayers
     from promptpotter.application.initialization.session import Session
-    from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
     from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -114,25 +113,26 @@ def refuse_unrunnable(
     pipeline_params: PipelineParams,
     schema: PipelineSchema,
     *,
-    fence: FreeFence | None,
-    shelf: PackShelf,
+    stores: Stores,
+    connector: str,
 ) -> BankPartition:
-    """Every refusal a run owes, before anything is paid or written; an upload's Start asks it of the draft."""
-    refuse_unfit_pipeline(selected, schema)
+    """Every refusal a run owes on *connector*, before anything is paid or written; an upload's
+    Start asks it of the draft."""
+    refuse_unfit_pipeline(selected, schema, connector)
     partition = partition_bank(
         dataset, campaign_config.dataset_split, seed=campaign_config.run_seed
     )
     refusal = check_search_split_holds_round(selected, len(partition.search))
     if refusal is not None:
         raise PayloadInvalidError(refusal, code="search_split_below_round")
-    mint = mint_facts(campaign_config, partition.demo, schema, shelf)
+    mint = mint_facts(campaign_config, partition.demo, schema, stores.block_packs)
     if pools := selected.pool_refusals(mint=mint):
         raise PayloadInvalidError("; ".join(pools), code="optimizer_overlay")
     refuse_below_reasoning_floor(
         [*pipeline_params.nodes.items(), *optimizer_node_configs(selected)]
     )
     refuse_unpriced(unpriced_routes(campaign_config, selected, pipeline_params, schema))
-    if fence is not None:
+    if (fence := free_fence(stores, connector)) is not None:
         refuse_outside_free_tier(
             outside_free_tier(campaign_config, selected, pipeline_params, schema, fence)
         )
@@ -258,8 +258,8 @@ def resolve_cycle_plan(
         dataset,
         pipeline_params,
         configured.pipeline_schema,
-        fence=free_fence(session.store, declaration.environment.connector),
-        shelf=session.store.block_packs,
+        stores=session.store,
+        connector=declaration.environment.connector,
     )
     return CyclePlan(
         declaration=declaration,
@@ -476,14 +476,14 @@ def _numbered(plans: Sequence[CyclePlan], standing: Mapping[str, Campaign]) -> l
 
 
 def arm_config(
-    declared: CampaignConfig, request: HeadToHeadRequest, arm: ArmRequest
-) -> CampaignConfig:
-    return with_optimization(declared, request.declared_optimization(arm))
+    session: Session, layers: ConfigLayers, request: HeadToHeadRequest, arm: ArmRequest
+) -> tuple[Session, CampaignConfig]:
+    return laid_session(session, layers.over(request.declared_optimization(arm)))
 
 
 async def arm_plans(
     session: Session,
-    declared: CampaignConfig,
+    layers: ConfigLayers,
     request: HeadToHeadRequest,
     dataset: Sequence[Sample],
     *,
@@ -492,15 +492,15 @@ async def arm_plans(
     """THE one place an arm is planned: every refusal it owes, before any arm's key is taken or anything paid."""
     plans: list[CyclePlan] = []
     for arm in request.arms:
-        config = arm_config(declared, request, arm)
+        armed, config = arm_config(session, layers, request, arm)
         if config.optimization.halt_at_fitness is not None:
             raise ConflictError(
                 "an arm stops on its budget, never on a fitness: drop the halt fitness",
                 code="arm_halt_refused",
             )
-        declaration = declare(session, config, purpose=request.purpose(arm))
+        declaration = declare(armed, config, purpose=request.purpose(arm))
         plans.append(
-            resolve_cycle_plan(session, declaration, dataset, origin_override=origin_override)
+            resolve_cycle_plan(armed, declaration, dataset, origin_override=origin_override)
         )
     _held_to_record(
         plans,

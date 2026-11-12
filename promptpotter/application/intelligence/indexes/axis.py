@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from promptpotter.domain.arm_reading import level_text
 from promptpotter.domain.arms import is_leader_eligible
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.pipeline_params import PARAM_FORBIDDEN_KEYS
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 

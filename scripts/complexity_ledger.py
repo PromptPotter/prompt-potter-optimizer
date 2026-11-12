@@ -30,7 +30,7 @@ BASELINE = {
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
-    "config_leaf_fields": 95,
+    "config_leaf_fields": 88,
     # `Settings` fields — what the environment can set.
     "settings_env": 38,
     # Parameters annotated `Any`.
@@ -38,7 +38,7 @@ BASELINE = {
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 44,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
-    "models_lax": 9,
+    "models_lax": 7,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.
     "injections": 32,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a

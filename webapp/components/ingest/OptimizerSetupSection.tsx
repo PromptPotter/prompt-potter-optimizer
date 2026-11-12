@@ -56,7 +56,7 @@ export function OptimizerSetupSection({ onApply }: { onApply: (patch: DraftPatch
         }}
       </ReadState>
 
-      <NodeKnobsPanel onChange={(patch) => onApply({ config: { optimization: { nodes: patch } } })} />
+      <NodeKnobsPanel onApply={onApply} />
 
       {setup && (
         <PipelineFlow

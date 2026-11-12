@@ -83,6 +83,8 @@ function ArmKnobs({
           g.knobs.map((knob) => {
             const own = arm.nodes[g.node]?.config;
             const runs = own !== undefined && knob.key in own ? own[knob.key] : knob.value;
+            const onChange = (patch: Record<string, ManifestNodeOverlay>) =>
+              onArm(moved(arm, patch, groups));
             return (
               <KnobItem
                 key={`${g.node}.${knob.key}`}
@@ -90,7 +92,8 @@ function ArmKnobs({
                 knob={{ ...knob, declared: knob.value, value: runs }}
                 declaredLabel="the setup's"
                 showNode
-                onChange={(patch) => onArm(moved(arm, patch, groups))}
+                onChange={onChange}
+                onReset={() => onChange({ [g.node]: { config: { [knob.key]: knob.value } } })}
               />
             );
           }),

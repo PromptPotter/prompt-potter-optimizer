@@ -44,8 +44,7 @@ export interface ConfigRow extends ValueType {
   neverAxis: NodeConfigParam["never_axis"];
   movableBy: NodeConfigParam["movable_by"];
   held: boolean;
-  // False: this account sets only what `permitted` names, nothing on a free-valued row.
-  editable: boolean;
+  pickable: NodeConfigParam["pickable"];
   permitted: string[];
   description: string;
 }
@@ -139,7 +138,7 @@ export function configRows(
           neverAxis: p.never_axis,
           movableBy: p.movable_by,
           held: p.held,
-          editable: p.editable,
+          pickable: p.pickable,
           permitted: p.permitted,
           description: p.description,
         });
@@ -162,7 +161,7 @@ export function configRows(
           neverAxis: p.never_axis,
           movableBy: p.movable_by,
           held: p.held,
-          editable: p.editable,
+          pickable: p.pickable,
           permitted: p.permitted,
           description: p.description,
         });
@@ -264,6 +263,13 @@ export function seedOverlayFromRows(
     (overlay[r.node] ??= {})[r.key] = value;
   }
   return overlay;
+}
+
+// Each seeded key an edit cleared, as `ForkSeed.reset` names it: the fork drops it.
+export function seedResetFromRows(rows: ConfigRow[], edits: Record<string, string>): string[] {
+  return rows
+    .filter((r) => r.kind !== "prompt" && r.inSeed && edits[flatConfigKey(r.node, r.key)] === "")
+    .map((r) => `pipeline_overlay.${r.node}.${r.key}`);
 }
 
 export interface KnobGroup {
