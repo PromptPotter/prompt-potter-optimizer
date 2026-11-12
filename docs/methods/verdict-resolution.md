@@ -39,17 +39,18 @@ fixed and solves θ alone, one arm at a time (`::fit_theta`), or the scale moves
 **θ is why per-round resubsetting is safe.** On different subsets raw fitness drifts — whoever drew
 the easier samples wins — but θ is subset-invariant (Rasch specific objectivity).
 
-**Responses are graded, not Bernoulli.** `Observation.response` is the continuous per-sample fitness
-∈ [0,1]; the cross-entropy MAP is valid for any `y ∈ [0,1]`, so a binary dataset is unchanged and a
-graded backend (reciprocal rank, the L4 outer proxy) keeps its gradient.
+**Responses are graded, not Bernoulli.** `Observation.response` is the cell's composite OBJECTIVE
+clamped to [0,1] (`intelligence/rasch.py::graded_response`), never the per-sample fitness; the
+cross-entropy MAP is valid for any `y ∈ [0,1]`, so a graded backend (reciprocal rank, the L4 outer
+proxy) keeps its gradient, and a binary dataset whose formula carries a cost term is graded too and
+fits a φ.
 
 **θ's SE is corrected for graded variance.** The logistic information `Σ a²·p(1−p)` assumes coin-flip
 variance and OVERSTATES a graded response's uncertainty — measured against θ̂'s true spread at n=28:
 ×1.02 binary, ×1.51 reciprocal-rank-of-20, ×4.66 on the L4 outer composite (which left the outer
 election unable to crown). `fit_theta` scales the SE by `√φ`, the Pearson dispersion off
 the fit's residuals (Wedderburn 1974) — **an estimate, not a knob**, shrunk toward 1.0 by an
-inverse-gamma prior so `φ→0` cannot report infinite confidence. **An all-0/1 sheet takes `φ = 1`
-exactly** (`rasch.py::_dispersion`): its residuals against a δ fit on the same rows read as
+inverse-gamma prior so `φ→0` cannot report infinite confidence. **A sheet whose every response is exactly 0 or 1 takes `φ = 1`** (`rasch.py::_dispersion`): its residuals against a δ fit on the same rows read as
 underdispersion (measured `φ = 0.10`, θ_se 0.28 where the information gives 0.89).
 
 **1PL by default; a dataset graduates to 2PL where it wins held-out CV** (`enable_2pl_graduation`, on).
@@ -174,10 +175,11 @@ contamination-resistant held-out set** (one year's AIME → the next; not a subs
 split).
 
 **Separability is read against C0, not the parent.** A round closes `advanced` only where its pick
-leads C0 on the origin panel by an interval clear of 0 and tops every earlier pick there. That resets
-L1 patience and is the clock a result quotes (`rounds_to_separable`); adoption stays `improved`, which
-reads any selection past round 0 as a promotion. A pick whose reading was not taken closes `unread`
-(neither reset nor stall); a panel with no pair lets the promotion stand alone (`advanced_unpaired`).
+leads C0 on the origin panel by an interval clear of 0 and tops every earlier pick there; it is the clock a result quotes (`rounds_to_separable`). L1 patience
+resets on `advanced`, `advanced_unpaired` and `not_separated` alike (`domain/origin_panel.py::RoundAdvance.stall`);
+adoption stays `improved`, which reads any selection past round 0 as a promotion. A pick whose reading
+was not taken closes `unread` (neither reset nor stall); a panel with no pair lets the promotion stand
+alone (`advanced_unpaired`).
 
 ---
 

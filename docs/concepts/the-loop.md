@@ -55,8 +55,8 @@ once per dataset framing.
 - **Readiness** — static, no LLM: mint is blocked until query, ground truth and framing are confirmed and every
   active LLM node owns a model. No single prompt field is gated.
 - **The round-0 origin gate** — empirical: an origin graded `critical` halts before round 1, and under the
-  default `strict` mode `degraded` halts too. Coverage is asked before any rate, so an under-measured origin is
-  reported unmeasured, not graded broken.
+  default `strict` mode `degraded` halts too. Coverage is asked before any rate, and an under-measured origin is graded `critical`
+  (cause `origin_unmeasured`, `domain/results_health.py`) and halts.
 
 ## What one round carries forward
 
