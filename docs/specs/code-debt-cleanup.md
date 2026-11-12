@@ -271,17 +271,6 @@ row it closes.
 - **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
   carry their passes beside `VerificationPass`. Action: both ride the one record. **Rides with:**
   the rest of rk-opt link 4. **Re-test:** `git grep -n "\.overlap\b" -- promptpotter` is empty.
-- **Three bars for "is this θ lift real"**: `potter/escalation.py::_improved` reads
-  `lift > current.se`, `potter/election.py::_lift` takes `hypot` of both arms', and
-  `potter/dispatch/injections/panels.py::detectable_rows` takes `a.se * sqrt(2)`. Action: all three fold
-  onto the predicate `scoring/selection.py::elect_round_winner` reads (one lift test on
-  `AbilityReading`). It moves decisions and the optimizer prompt: an offline run and the re-key.
-  **Rides with:** the rest of rk-opt link 4. **Re-test:**
-  `git grep -n -E "lift > current.se|sqrt\(2" -- promptpotter/application/optimizers/potter`.
-- **The collapse gate cuts a hedging arm on noise**: `pobb.py::check` →
-  `domain/scoring.py::is_answer_collapsed` reads one repeated label over `n_min` answered cells as "no
-  measurement". Action: collapse is judged against the parent's answers on the same cells, proven by an
-  offline run. **Rides with:** the rest of rk-opt link 4.
 - **`ab` re-fits under the current scorer on the whole ruler** (decision 21, rk-opt 5). The tenant
   ruler at a round's reach holds other campaigns' rows, so `ab` regrades those foreign rows off the
   archive too, not only the record's own cells, and with the formula unchanged its fit equals today's

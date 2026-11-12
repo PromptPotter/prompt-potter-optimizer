@@ -3617,6 +3617,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
             l1_stall_depth=0,
             ladder=Ladder(),
             exploration_budget="tight",
+            admission=0.85,
         ),
         digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
         axes=None,

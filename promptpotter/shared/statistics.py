@@ -106,14 +106,6 @@ def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) ->
     return (normal.inv_cdf(1 - alpha / 2) + normal.inv_cdf(power)) * se
 
 
-def p_exceeds(mean_a: float, se_a: float, mean_b: float, se_b: float) -> float:
-    """Divides by the noise of the DIFFERENCE, never by either side's own SE."""
-    denom = math.sqrt(se_a * se_a + se_b * se_b)
-    if denom <= 1e-12:
-        return 1.0 if mean_a > mean_b else 0.0
-    return NormalDist().cdf((mean_a - mean_b) / denom)
-
-
 @shapes_optimizer_prompt
 def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     """The SE is floored at ``1/(4n)``: 4/4 hits has variance 0 and would be a point mass."""

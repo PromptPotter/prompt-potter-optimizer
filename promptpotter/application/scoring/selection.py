@@ -4,7 +4,6 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.intelligence.rasch import (
-    FIT_SLACK,
     candidate_abilities,
     graded_response,
     theta_cells,
@@ -16,7 +15,6 @@ from promptpotter.domain.scoring import NO_CELLS, ROW_GRADES, CellSheet, GradedC
 from promptpotter.shared.statistics import (
     discordant_counts,
     mean_ci,
-    p_exceeds,
     sign_posterior,
 )
 
@@ -24,7 +22,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.ruler import DeltaRuler
+    from promptpotter.domain.ruler import DeltaRuler, ThetaLift
     from promptpotter.domain.scoring import GradeColumn
 
 
@@ -95,8 +93,8 @@ def crowning_cells(rounds: Sequence[RoundResult], parent: str) -> frozenset[str]
 
 def readable_lifts(
     keys: Sequence[ArmKey], coverage_floor: int, abilities: RoundAbilities
-) -> dict[ArmKey, float]:
-    reads: dict[ArmKey, float] = {}
+) -> dict[ArmKey, ThetaLift]:
+    reads: dict[ArmKey, ThetaLift] = {}
     for key in keys:
         # PoBB's `n_min` IS this floor: both count `theta_cells`.
         if abilities.cells.get(key, 0) < coverage_floor:
@@ -107,9 +105,11 @@ def readable_lifts(
     return reads
 
 
-def closest_to_bar(reads: Mapping[ArmKey, float], *, beside: ArmKey | None = None) -> ArmKey | None:
+def closest_to_bar(
+    reads: Mapping[ArmKey, ThetaLift], *, beside: ArmKey | None = None
+) -> ArmKey | None:
     """On the θ lift ADMISSION takes; the first walked holds a tie."""
-    return max((key for key in reads if key != beside), key=lambda k: reads[k], default=None)
+    return max((key for key in reads if key != beside), key=lambda k: reads[k].value, default=None)
 
 
 def elect_round_winner(
@@ -136,9 +136,6 @@ def elect_round_winner(
     winner: ArmKey | None = None
     reads = readable_lifts(keys, coverage_floor, abilities)
     for key, lift in reads.items():
-        # No SE margin: subtracting one turns a wide-posterior gain negative; uncertainty is the RANK's.
-        if lift <= FIT_SLACK:
-            continue
         # A θ lift the paired cells contradict is the prior's or the δ weighting's, never the arm's.
         own = paired_grades(rows[key])
         shared = [k for k in own if k in parent]
@@ -146,10 +143,9 @@ def elect_round_winner(
         if wins <= losses:
             continue
         # The bar is read off no cell that crowned the parent: `election_rows` leaves out `crowning_cells`.
-        p_better = p_exceeds(abilities.theta[key], abilities.theta_se[key], *abilities.bar[key])
-        if _capped(p_better, sign_posterior(wins, losses)) <= admission:
+        if not lift.clears(admission, support=sign_posterior(wins, losses)):
             continue
-        rank = (p_better, abilities.cells[key])
+        rank = (lift.p_better, abilities.cells[key])
         if rank > best_rank:
             best_rank = rank
             winner = key
@@ -174,19 +170,11 @@ def prior_read(
     shared = [c for c in own if c in bar]
     if len(shared) < max(min_shared, 1):
         return None
-    abilities = candidate_abilities({"read": rows}, prior, ruler)
-    if "read" not in abilities.bar:
+    lift = theta_lift_over_parent(candidate_abilities({"read": rows}, prior, ruler), "read")
+    if lift is None:
         return None
     wins, losses = discordance([own[c] for c in shared], [bar[c] for c in shared])
-    p = p_exceeds(abilities.theta["read"], abilities.theta_se["read"], *abilities.bar["read"])
-    return PriorRead(_capped(p, sign_posterior(wins, losses)), len(shared), wins + losses)
-
-
-def _capped(p: float, bound: float) -> float:
-    # The bound's mass on the SIDE θ read, not `|bound - 0.5|`, which reads 3 losses as 3 wins.
-    support = bound if p > 0.5 else 1.0 - bound
-    reach = min(abs(p - 0.5), max(0.0, support - 0.5))
-    return 0.5 + reach if p > 0.5 else 0.5 - reach
+    return PriorRead(lift.reach(sign_posterior(wins, losses)), len(shared), wins + losses)
 
 
 def capped_reach(wins: int, losses: int) -> tuple[float, float]:

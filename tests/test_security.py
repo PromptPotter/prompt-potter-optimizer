@@ -499,7 +499,11 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         framing=TaskDecomposition(),
         pipeline_schema=PipelineSchema(),
         cycle_slice=CycleSlice(
-            round_num=1, l1_stall_depth=0, ladder=Ladder(), exploration_budget="tight"
+            round_num=1,
+            l1_stall_depth=0,
+            ladder=Ladder(),
+            exploration_budget="tight",
+            admission=0.85,
         ),
         digest=RoundDigest(
             diagnostics=RoundDiagnostics(n_valid=1, samples=[sample]), critique=None

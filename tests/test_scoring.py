@@ -412,7 +412,7 @@ from promptpotter.shared.measurement_context import (
 )
 from promptpotter.shared.plugin_registry import Registry
 from promptpotter.shared.run_scope import run_scope, scoped
-from promptpotter.shared.statistics import p_exceeds, paired_mean_t
+from promptpotter.shared.statistics import paired_mean_t
 
 _H2H_FORMULA = "env_reward"
 
@@ -1361,7 +1361,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     deep = sheet(measurements([1.0] * 21 + [0.0] * 7))
     shallow = sheet(measurements([1.0] * 5 + [0.0], range(14, 20)))
     ab = candidate_abilities({"deep": deep, "shallow": shallow}, half, flat)
-    p = {c: p_exceeds(ab.theta[c], ab.theta_se[c], *ab.bar[c]) for c in ("deep", "shallow")}
+    lifts = {c: theta_lift_over_parent(ab, c) for c in ("deep", "shallow")}
+    p = {c: lift.p_better for c, lift in lifts.items() if lift is not None}
     assert ab.theta["shallow"] > ab.theta["deep"], "the thin arm's POINT lift is the larger"
     assert ab.theta_se["shallow"] > 1.8 * ab.theta_se["deep"], "on nearly twice the SE"
     assert p["deep"] > p["shallow"], "so it demonstrated less"
@@ -1375,7 +1376,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     )[0] == ("shallow"), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
     behind = sheet(measurements([1.0] * 4 + [0.0] * 2))
     behind_lift = theta_lift_over_parent(candidate_abilities({"b": behind}, half, flat), "b")
-    assert behind_lift is not None and behind_lift > 0.0
+    assert behind_lift is not None and behind_lift.value > 0.0
     assert (
         elect_round_winner(
             [ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat, admission=admission
@@ -1436,7 +1437,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         "the floor, not θ, bars thin"
     )
     assert set(reads) == {"near", "deep"}, "an arm under the floor is not readable"
-    assert reads[deep_key] < reads[near_key] <= 0.0
+    assert reads[deep_key].value < reads[near_key].value <= 0.0
     assert closest_to_bar(reads) == "near", "the lead is named on the θ lift"
     cold = candidate_abilities({"off": sheet(measurements([1.0] * 8, range(26, 34)))}, twenty, None)
     assert cold.cells["off"] == 2 and not readable_lifts([ArmKey("off")], 6, cold), (
@@ -2868,16 +2869,27 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
     assert unpaired_check.check(constant) is None, (
         "one label on an n_min prefix, read against no parent, cut an arm the panel never judged"
     )
-    assert is_answer_collapsed(constant), "a constant answerer is refused with no labels to read"
-    assert not is_answer_collapsed(answered([1.0] * 6)), (
+    # Collapse is read against the parent's answers on the same cells.
+    apart = sheet(
+        GradedCell.from_wire({**cell.wire(), "predicted": "done" if i % 2 else "other"})
+        for i, cell in enumerate(constant)
+    )
+    assert is_answer_collapsed(constant, apart), (
+        "a constant answerer is refused with no labels to read"
+    )
+    assert not is_answer_collapsed(constant, sheet(constant)), (
+        "one answer the parent gave on every same cell is the draw's, read by θ, not a collapse"
+    )
+    assert not is_answer_collapsed(constant, NO_CELLS), "with no parent answer there is no contrast"
+    assert not is_answer_collapsed(answered([1.0] * 6), apart), (
         "one answer that solves every cell is not a collapse"
     )
     assert not is_answer_collapsed(
-        answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], predicted="NO_RESULT")
+        answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], predicted="NO_RESULT"), apart
     ), "an agent that wrote no answer file answered nothing, which is not one answer"
-    assert not is_answer_collapsed(answered([0.0] * 6, error_category=ErrorCategory.PIPELINE)), (
-        "a backend that broke on every cell is not a verdict on the idea"
-    )
+    assert not is_answer_collapsed(
+        answered([0.0] * 6, error_category=ErrorCategory.PIPELINE), apart
+    ), "a backend that broke on every cell is not a verdict on the idea"
     labelled = [
         GradedCell.from_wire(
             {
@@ -2889,21 +2901,25 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
         )
         for i in range(6)
     ]
-    assert is_answer_collapsed(labelled)
+    truthful = sheet(
+        GradedCell.from_wire({**cell.wire(), "predicted": cell.facts.ground_truth})
+        for cell in labelled
+    )
+    assert is_answer_collapsed(labelled, truthful)
     reasoned = [
         GradedCell.from_wire(
             {**cell.wire(), "predicted": f"step {i}: **Uncertain**", "span": "Uncertain"}
         )
         for i, cell in enumerate(labelled)
     ]
-    assert is_answer_collapsed(reasoned), (
+    assert is_answer_collapsed(reasoned, truthful), (
         "two replies reasoning apart to one graded answer were counted as two answers"
     )
     spanless = [
         GradedCell.from_wire({**cell.wire(), "span": "" if i == 5 else "Uncertain"})
         for i, cell in enumerate(labelled)
     ]
-    assert not is_answer_collapsed(spanless), (
+    assert not is_answer_collapsed(spanless, truthful), (
         "a reply with no graded span was counted as the answer"
     )
 
@@ -3187,6 +3203,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
                 escalation_ladder=EscalationLadder.FULL,
                 l2_patience=2,
                 l3_patience=1,
+                admission=0.85,
             )
             actions.append(str(asked.next_action))
             if asked.next_action != NextAction.FIRE_L2:
@@ -3195,10 +3212,10 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         return actions
 
     assert climb() == ["fire_l2", "fire_l2", "fire_l2", "fire_l3"], (
-        "a θ step inside its own SE is a stall"
+        "a θ step inside the election's bar is a stall"
     )
-    # The SE bar applies on the θ scale only: a composite-scale verdict has no error term.
-    series = level_series(0.34, [0.35, 0.60], ses=[0.20, 0.20])
+    # The bar applies on the θ scale only: a composite-scale verdict has no error term.
+    series = level_series(0.34, [0.35, 0.60, 0.80], ses=[0.20, 0.20, 0.20])
 
     def l2_read(
         comp: float, entry_comp: float, rnd: int | None, entry_rnd: int | None
@@ -3212,11 +3229,15 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             escalation_ladder=EscalationLadder.FULL,
             l2_patience=9,
             l3_patience=None,
+            admission=0.85,
         )
         return asked.l2.stall_count, asked.l2.comparator
 
     assert l2_read(0.0, 0.0, 1, 0) == (1, "theta"), "a θ step inside its SE cleared the stall"
-    assert l2_read(0.0, 0.0, 2, 0) == (0, "theta"), "a θ step past its SE left the stall"
+    assert l2_read(0.0, 0.0, 2, 0) == (1, "theta"), (
+        "a step past the lead's own SE but inside the lift's cleared the stall"
+    )
+    assert l2_read(0.0, 0.0, 3, 0) == (0, "theta"), "a θ step past the election's bar stalled"
     assert l2_read(0.7, 0.6, None, None) == (0, "composite"), (
         "with no θ on either side the composite lift is the verdict"
     )
@@ -3252,6 +3273,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             escalation_ladder=EscalationLadder.L1,
             l2_patience=l2_patience,
             l3_patience=l3_patience,
+            admission=0.85,
         ).next_action
         for ladder in (Ladder(), l2_fired(Ladder(), LayerReading(5, 0.5, None, None)))
         for fitness in (None, 0.5)
@@ -3275,6 +3297,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
                 escalation_ladder=EscalationLadder.FULL,
                 l2_patience=2,
                 l3_patience=1,
+                admission=0.85,
             )
             asks.append(asked)
             if asked.next_action is NextAction.FIRE_L2:
@@ -3320,6 +3343,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             escalation_ladder=EscalationLadder.FULL,
             l2_patience=3,
             l3_patience=2,
+            admission=0.85,
         )
 
     landed = l2_fired(landed, ask_at(0.60).l2)

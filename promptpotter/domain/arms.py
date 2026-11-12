@@ -9,7 +9,7 @@ from pydantic import ConfigDict, Field, model_validator
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.said import Tone
-from promptpotter.domain.scoring import GradedCell, is_answer_collapsed
+from promptpotter.domain.scoring import CellSheet, GradedCell, is_answer_collapsed
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.wounds import (
@@ -296,9 +296,9 @@ def is_leader_eligible(arm: ArmState) -> bool:
     return isinstance(arm, Measured) or (isinstance(arm, Cut) and arm.kind == "eliminated")
 
 
-def is_electable(arm: ArmState, rows: Sequence[GradedCell]) -> bool:
+def is_electable(arm: ArmState, rows: Sequence[GradedCell], parent: CellSheet) -> bool:
     """NOT the whole election rule: the coverage floor is `scoring/selection.py::readable_lifts`."""
-    return is_leader_eligible(arm) and bool(rows) and not is_answer_collapsed(rows)
+    return is_leader_eligible(arm) and bool(rows) and not is_answer_collapsed(rows, parent)
 
 
 def arm_name(key: ArmKey, arm: ArmState, round_num: int) -> ArmName:

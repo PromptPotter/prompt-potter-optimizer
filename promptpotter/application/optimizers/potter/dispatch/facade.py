@@ -309,6 +309,7 @@ def build_bundle(ctx: NodeContext, ladder: Ladder) -> InjectionBundle:
         composite_formula=target.cell_formula,
         matcher=target.matcher,
         budget_rounds=bounds.budget_rounds,
+        admission=bounds.admission,
         # Both this cycle's: its share of the campaign's ceiling, and what it has metered of it.
         spend_budget_usd=bounds.spend_cap_usd(),
         spend_used_usd=bounds.spend_used_usd(),

@@ -639,7 +639,7 @@ async def measure_population(
     for key in scored:
         arm = arms[key]
         # A collapsed arm is read above and still refused entry — it keeps its reading.
-        if not is_electable(arm, rows[key].cells):
+        if not is_electable(arm, rows[key].cells, parent.rows):
             continue
         if rejects and isinstance(arm, Cut) and arm.kind == "eliminated":
             continue

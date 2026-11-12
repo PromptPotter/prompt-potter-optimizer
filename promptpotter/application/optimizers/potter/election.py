@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.node_context import Lineage, Replay, Ruler
@@ -23,6 +22,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.application.optimizers.nodes import MeasuredRound
+    from promptpotter.domain.ruler import ThetaLift
 
 
 def _theta(value: float | None) -> str:
@@ -30,11 +30,9 @@ def _theta(value: float | None) -> str:
     return "n/a" if value is None else f"{value:+.3f}"
 
 
-def _lift(key: ArmKey, lift: float, abilities: RoundAbilities) -> str:
-    """The lift's own se, the one admission divides by: never either arm's alone."""
-    se = math.hypot(abilities.theta_se[key], abilities.bar[key][1])
+def _lift(key: ArmKey, lift: ThetaLift, abilities: RoundAbilities) -> str:
     return (
-        f"θ lift {lift:+.3f} logits, se {se:.3f} "
+        f"θ lift {lift.value:+.3f} logits, se {lift.se:.3f} "
         f"(θ {_theta(abilities.theta.get(key))} vs parent {_theta(abilities.bar[key][0])})"
     )
 
@@ -43,7 +41,7 @@ def _verdict_reason(
     *,
     winner: ArmKey | None,
     leading: ArmKey | None,
-    reads: Mapping[ArmKey, float],
+    reads: Mapping[ArmKey, ThetaLift],
     electable: Sequence[ArmKey],
     abilities: RoundAbilities,
     labels: Mapping[ArmKey, str],
@@ -69,7 +67,7 @@ def _verdict_reason(
         return (
             f"{labels[winner]} won on {lift}"
             + (
-                f"; runner-up {labels[runner]} at θ lift {reads[runner]:+.3f} logits"
+                f"; runner-up {labels[runner]} at θ lift {reads[runner].value:+.3f} logits"
                 if runner is not None
                 else ""
             )
@@ -79,10 +77,10 @@ def _verdict_reason(
 
 
 def _kept_for_a_fresh_read(
-    leading: ArmKey, reads: Mapping[ArmKey, float], lineage: Lineage
+    leading: ArmKey, reads: Mapping[ArmKey, ThetaLift], lineage: Lineage
 ) -> bool:
     """A held round's leader ahead of its parent, once: only the next round's panel says whether it clears the bar."""
-    return reads[leading] > 0.0 and not any(leading in rr.arms for rr in lineage.rounds)
+    return reads[leading].value > 0.0 and not any(leading in rr.arms for rr in lineage.rounds)
 
 
 class RoundWinner(Replayed, kind="round_winner"):

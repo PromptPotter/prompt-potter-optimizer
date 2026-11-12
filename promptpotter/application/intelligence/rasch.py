@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -11,6 +12,7 @@ from promptpotter.domain.ruler import (
     CalibrationModel,
     DeltaRuler,
     Ruler,
+    ThetaLift,
     anchor_id_of,
     ruler_entry,
 )
@@ -291,10 +293,6 @@ def expected_score_gain(
     return float(np.sum(logistic(a * (theta + move - d)) - logistic(a * (theta - d))))
 
 
-# The Newton fit stops within `tol` of its root, so two fits are never compared tighter than this.
-FIT_SLACK = 1e-3
-
-
 # log(aₛ) ~ N(0, σ_a²): collapses 2PL to 1PL absent evidence and identifies a against θ/δ spread.
 _SIGMA_LOG_A = 0.5
 _LOG_A_CLIP = 3.0
@@ -525,12 +523,12 @@ def candidate_abilities(
     return abilities
 
 
-def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> float | None:
-    theta_c = abilities.theta.get(candidate_id)
+def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> ThetaLift | None:
     bar = abilities.bar.get(candidate_id)
-    if theta_c is None or bar is None:
+    if bar is None:
         return None
-    return theta_c - bar[0]
+    theta, se = abilities.theta[candidate_id], abilities.theta_se[candidate_id]
+    return ThetaLift(theta - bar[0], math.hypot(se, bar[1]))
 
 
 def build_round_order(

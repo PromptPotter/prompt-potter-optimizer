@@ -618,7 +618,7 @@ class Escalation(nodes.Controller):
     knobs: ClassVar[type[StrictModel]] = EscalationKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({L1Readout, Ladder})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Ladder})
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Replay})
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Bounds, Replay})
     fires: ClassVar[frozenset[type]] = frozenset({L2Context, L3Plan})
     priced_surface: ClassVar[Mapping[str, int]] = {
         "escalation_rules": len(DEFAULT_ESCALATION_RULES) + len(CLIMB_RULES) + len(HEAL_RULES)

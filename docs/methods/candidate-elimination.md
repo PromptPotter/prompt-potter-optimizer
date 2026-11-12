@@ -37,7 +37,7 @@ Every candidate, the first raced against the parent alone, once read on `elimina
 The **same ability the round election ranks by** (one pairing, `application/scoring/selection.py::prior_read`, for the live check and the resume replayer), so the two cannot disagree, valid on partial prefixes.
 
 **The election's bar reads step 4's posterior on its own confidence.** The election admits an arm on
-a raw θ lift above `rasch.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND step 4's
+a raw θ lift above `domain/ruler.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND step 4's
 bounded `P(θ_arm > θ_parent)` above potter's `theta_election` `admission` — never PoBB's ε, which
 says when to stop BUYING an arm, not when to promote one. An `admission` below `sign_posterior(1, 0)`
 = 0.75 is refused, so one discordant cell never promotes. Admission is bounded; the election RANKS on
@@ -81,7 +81,7 @@ The first signal ends the candidate: fatal beats rate beats PoBB.
 
 **Candidates walk at once and decide in turn**: a later candidate may measure ahead but is checked and cut only once every earlier one is decided, so its priors are a serial round's.
 
-**One comparator, one stop rule — do not add a sixth.** No unpaired answer-collapse cut: one label on a hardest-first `n_min` prefix is no reading against the parent, which the posterior already takes; a constant answerer is refused at the election instead (`domain/arms.py::is_electable`). No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
+**One comparator, one stop rule — do not add a sixth.** No unpaired answer-collapse cut: one label on a hardest-first `n_min` prefix is no reading against the parent, which the posterior already takes; one answer where the parent answered apart on the same cells is refused at the election instead (`domain/arms.py::is_electable`). No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
 
 ## CAPO's race — the `blocks` sampler and the `paired_t` eliminator
 

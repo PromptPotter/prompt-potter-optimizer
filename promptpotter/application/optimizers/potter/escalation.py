@@ -8,7 +8,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, Protocol, Self
 
-from promptpotter.application.bench.node_context import Calls, Lineage, Progress, Replay, Ruler
+from promptpotter.application.bench.node_context import (
+    Bounds,
+    Calls,
+    Lineage,
+    Progress,
+    Replay,
+    Ruler,
+)
 from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
@@ -284,15 +291,16 @@ def _improved(
     entry_comp: float,
     current: AbilityReading | None,
     entry: AbilityReading | None,
+    admission: float | None,
 ) -> tuple[bool, str]:
     """The scale is NOT fixed per cycle: a layer entered before the ruler warmed compares composites."""
-    if current is not None and entry is not None and (lift := current.minus(entry)) is not None:
-        return lift > current.se, "theta"
+    if current is not None and entry is not None and (lift := current.lift_over(entry)) is not None:
+        return lift.clears(admission, support=None), "theta"
     scale = "theta_appeared" if current is not None and entry is None else "composite"
     return current_comp > entry_comp, scale
 
 
-def _read_layer(layer: LayerCounters, best: HighWater) -> LayerReading:
+def _read_layer(layer: LayerCounters, best: HighWater, admission: float | None) -> LayerReading:
     """Each scale's ratchet is seeded by its first reading: a ruler may warm late."""
     stall_count = layer.stall_count
     entry_comp = layer.best_composite_fitness_at_entry
@@ -302,7 +310,7 @@ def _read_layer(layer: LayerCounters, best: HighWater) -> LayerReading:
     if entry_comp is None or best.composite_fitness is None:
         return LayerReading(stall_count, comp, peak, None)
     improved, comparator = _improved(
-        best.composite_fitness, entry_comp, best.level(best.theta_round), entry
+        best.composite_fitness, entry_comp, best.level(best.theta_round), entry, admission
     )
     if improved:
         return LayerReading(0, best.composite_fitness, best.theta_round, comparator)
@@ -316,10 +324,11 @@ def ask_l2_escalation(
     escalation_ladder: EscalationLadder,
     l2_patience: int,
     l3_patience: int | None,
+    admission: float | None,
 ) -> LadderAsk:
     """A fire that never parsed leaves the counters where the ledger has them."""
-    l2 = _read_layer(ladder.l2, best)
-    l3 = _read_layer(ladder.l3, best)
+    l2 = _read_layer(ladder.l2, best, admission)
+    l3 = _read_layer(ladder.l3, best, admission)
     climb = decide_climb(
         LadderInputs(
             escalation_ladder=escalation_ladder,
@@ -673,6 +682,7 @@ async def escalate_l2(
         escalation_ladder=opt.escalation_ladder,
         l2_patience=opt.l2_patience,
         l3_patience=opt.l3_patience,
+        admission=ctx.read(Bounds).admission,
     )
 
     # Recorded fired or not.

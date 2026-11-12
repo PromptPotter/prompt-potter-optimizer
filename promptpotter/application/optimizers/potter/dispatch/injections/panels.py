@@ -62,7 +62,7 @@ from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import evidence_starved_node, ran_to_output_ceiling
-from promptpotter.domain.ruler import ThetaCaveat
+from promptpotter.domain.ruler import ThetaCaveat, ThetaLift
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import (
     CellSheet,
@@ -76,7 +76,6 @@ from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.shared.answer_text import tail
 from promptpotter.shared.composite import render_composite_fitness_block
-from promptpotter.shared.statistics import min_detectable_effect
 
 
 @signal(
@@ -1089,15 +1088,17 @@ def _r_measurand(b: InjectionBundle) -> list[Item]:
 
 
 def detectable_rows(b: InjectionBundle) -> int | None:
-    """How many more of the round's rows than the parent an edit must win to separate from it (95%/80%); ``None`` with no θ or a zero se."""
+    """How many more of the round's rows than the parent an edit must win to clear the election's
+    bar at 80% power; ``None`` with no θ, a zero se or no bar."""
     a = b.digest.ability
     keys = b.digest.latest_sample_keys
-    if a is None or a.se <= 0.0 or not keys:
+    admission = b.cycle_slice.admission
+    if a is None or a.se <= 0.0 or not keys or admission is None:
         return None
-    # A contrast against the parent, so both arms' error enters; equal precision is assumed.
-    mde = min_detectable_effect(a.se * math.sqrt(2.0))
+    # A parent read as precisely as the frontier: the contrast carries both arms' error.
+    move = ThetaLift(0.0, math.hypot(a.se, a.se)).detectable(admission)
     ruler = None if b.ruler is None else b.ruler.entries()
-    return max(1, round(expected_score_gain(a.theta, mde, keys, ruler)))
+    return max(1, round(expected_score_gain(a.theta, move, keys, ruler)))
 
 
 @signal("detectable_move", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
@@ -1108,7 +1109,8 @@ def _r_detectable_move(b: InjectionBundle) -> list[Item]:
     return [
         Item(
             f"DETECTABLE MOVE — an edit must win ≈{rows} more of this round's {n} "
-            f"{unit_plural(b.measured_unit)} than the parent to separate from it (95%/80%); "
+            f"{unit_plural(b.measured_unit)} than the parent to clear the election's bar "
+            f"(P > {b.cycle_slice.admission:.0%}, 80% power); "
             "smaller is noise, so prefer one large-effect edit to several small ones."
         )
     ]

@@ -199,6 +199,8 @@ class CycleSlice:
     l1_stall_depth: int
     ladder: Ladder
     exploration_budget: str
+    # The selector's own promotion bar (`Bounds.admission`); ``None``: it promotes on no θ bar.
+    admission: float | None
     pipeline_params: PipelineParams = field(default_factory=PipelineParams)
     composite_formula: str | None = None
     matcher: str | None = None

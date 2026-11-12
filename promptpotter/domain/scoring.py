@@ -914,11 +914,20 @@ def modal_answer_share(cells: Sequence[GradedCell]) -> float | None:
     return said.most_common(1)[0][1] / total
 
 
-def is_answer_collapsed(cells: Sequence[GradedCell]) -> bool:
-    """The ABSENCE of a measurement, not a low score: θ fitted to a constant answer is an artifact."""
+def is_answer_collapsed(cells: Sequence[GradedCell], parent: CellSheet) -> bool:
+    """The ABSENCE of a measurement, not a low score: one answer where the parent, on the same
+    cells, answered apart. A parent alike there makes it the panel's draw, which θ reads."""
     answered = [c for c in cells if not c.facts.errored]
     said = {graded_answer(c.facts, c.grade) for c in answered}
     if len(said) != 1 or None in said:
+        return False
+    theirs = parent.by_key()
+    apart = {
+        graded_answer(p.facts, p.grade)
+        for c in answered
+        if (p := theirs.get(c.key)) is not None and not p.facts.errored
+    }
+    if len(apart - {None}) < 2:
         return False
     truth = enumerable_truth_labels(answered)
     if truth is not None:

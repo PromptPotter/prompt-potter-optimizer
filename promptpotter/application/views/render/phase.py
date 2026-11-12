@@ -103,8 +103,8 @@ def render_progress_table(rounds: Sequence[RoundOutcome], series: LevelSeries) -
         read = series.reading(rr.round)
         th_str = "---" if read is None else f"{read.reading.theta:+.3f}"
         level = series.level(rr.round)
-        step = None if level is None or prev is None else level.minus(prev)
-        trend = "-" if step is None else f"{step:+.3f}"
+        step = None if level is None or prev is None else level.lift_over(prev)
+        trend = "-" if step is None else f"{step.value:+.3f}"
         if level is not None:
             prev = level
         fold = rr.fold

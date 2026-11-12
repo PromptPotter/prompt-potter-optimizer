@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass
 from enum import StrEnum
 from statistics import NormalDist
 from typing import Annotated, Literal, NamedTuple
@@ -323,6 +325,45 @@ class RulerStanding(FrozenModel):
         return DeltaState.LINKED if carried else DeltaState.UNLINKED
 
 
+# The Newton fit stops within `tol` of its root, so two fits are never compared tighter than this.
+FIT_SLACK = 1e-3
+_POWER_Z = NormalDist().inv_cdf(0.8)
+
+
+@dataclass(frozen=True)
+class ThetaLift:
+    """θ over a bar's θ, and the noise of the DIFFERENCE, never either side's own SE."""
+
+    value: float
+    se: float
+
+    @property
+    def p_better(self) -> float:
+        """``P(θ > θ_bar)``, unbounded: the election ranks on it."""
+        if self.se <= 1e-12:
+            return 1.0 if self.value > 0.0 else 0.0
+        return NormalDist().cdf(self.value / self.se)
+
+    def reach(self, support: float | None) -> float:
+        """``p_better`` capped by the discordant cells' sign posterior; ``None``: no cell pairs the two."""
+        p = self.p_better
+        if support is None:
+            return p
+        # The bound's mass on the SIDE θ read, not `|bound - 0.5|`, which reads 3 losses as 3 wins.
+        side = support if p > 0.5 else 1.0 - support
+        extent = min(abs(p - 0.5), max(0.0, side - 0.5))
+        return 0.5 + extent if p > 0.5 else 0.5 - extent
+
+    def clears(self, admission: float | None, *, support: float | None) -> bool:
+        """The election's one bar: past what a fit resolves, and past *admission*; no bar clears none."""
+        # No SE margin on the value: subtracting one turns a wide-posterior gain negative.
+        return admission is not None and self.value > FIT_SLACK and self.reach(support) > admission
+
+    def detectable(self, admission: float) -> float:
+        """The true lift `clears` meets at 80% power on this se."""
+        return (NormalDist().inv_cdf(admission) + _POWER_Z) * self.se
+
+
 class AbilityReading(FrozenModel):
     """A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing."""
 
@@ -346,11 +387,11 @@ class AbilityReading(FrozenModel):
     def comparable_to(self, other: AbilityReading) -> bool:
         return self.ruler.id == other.ruler.id
 
-    def minus(self, other: AbilityReading) -> float | None:
-        """θ less `other`'s θ; ``None`` where the two sit on different scales."""
+    def lift_over(self, other: AbilityReading) -> ThetaLift | None:
+        """``None`` where the two sit on different scales."""
         if not self.comparable_to(other):
             return None
-        return self.theta - other.theta
+        return ThetaLift(self.theta - other.theta, math.hypot(self.se, other.se))
 
     def scale(self, *, named: bool = True) -> str:
         if self.ruler.cold:

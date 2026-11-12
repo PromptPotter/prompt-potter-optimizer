@@ -31,6 +31,7 @@ from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.scoring import (
+    NO_CELLS,
     CellSheet,
     GradedCell,
     Scorer,
@@ -122,10 +123,10 @@ def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
     return cycles
 
 
-def _mask_eligible(arm: ArmState, sheet: CellSheet) -> bool:
+def _mask_eligible(arm: ArmState, sheet: CellSheet, parent: CellSheet) -> bool:
     """``is_electable``, never ``is_leader_eligible``, which lets a collapsed arm top a round that refused it."""
     return (
-        is_electable(arm, sheet.cells)
+        is_electable(arm, sheet.cells, parent)
         and not (isinstance(arm, Cut) and arm.kind == "invalid")
         and not arm.validation_failures
     )
@@ -160,13 +161,13 @@ def _parent(
 
 
 def _mask_candidate(
-    key: ArmKey, arm: ArmState, sheet: CellSheet, scorer: Scorer, crowned: str
+    key: ArmKey, arm: ArmState, sheet: CellSheet, scorer: Scorer, bar: CellSheet, crowned: str
 ) -> MaskCandidate:
     return MaskCandidate(
         key=key,
         reading=mask_reading(sheet, scorer),
         is_selected=key == crowned,
-        is_eligible=_mask_eligible(arm, sheet),
+        is_eligible=_mask_eligible(arm, sheet, bar),
         abort=_abort_contributor(arm),
     )
 
@@ -243,8 +244,10 @@ def load_mask_record(
         for rn in sorted(files[cid]):
             round_file = files[cid][rn]
             crowned = crowns.get(rn, "")
+            reference = round_file.reference
+            bar = NO_CELLS if reference is None else round_file.rows(reference.arm)
             candidates = [
-                _mask_candidate(key, arm, sheet, scorer, crowned)
+                _mask_candidate(key, arm, sheet, scorer, bar, crowned)
                 for key, arm, sheet in _arm_rows(round_file, keys)
             ]
             parent_rows = _parent(round_file, keys, carried)
