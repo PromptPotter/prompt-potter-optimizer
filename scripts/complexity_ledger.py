@@ -3,9 +3,10 @@
     python scripts/complexity_ledger.py            # print the ledger
     python scripts/complexity_ledger.py --check    # the gate's `surface-ledger` check
 
-Each ``BASELINE`` row is the count itself: a row above it fails, and a raise owes a written reason in
-the COMMIT BODY (root ``CLAUDE.md`` § Working). A row below it fails too, until the commit lowers it,
-so slack a cut left can't be refilled by a later change that writes no reason.
+A row fails only where it rose above its count at the merge-base with ``origin/main``, counted by
+that commit's own script over its own tree, so a fall edits nothing and slack a cut left can't be
+refilled. A raise edits its ``BASELINE`` row, the ceiling it may reach, with a written reason in the
+COMMIT BODY (root ``CLAUDE.md`` § Working).
 
 A script and not a module of the package: it counts every layer, the suite and the generated
 contract beside them, none of which an installed wheel carries.
@@ -17,15 +18,20 @@ import ast
 import collections
 import importlib
 import inspect
+import io
 import json
 import re
+import subprocess
 import sys
+import tarfile
+import tempfile
 import typing
 from collections.abc import Iterator
 from pathlib import Path
 
-from processes import REPO
+from processes import REPO, clone_cache, git, replace_changed, run
 
+# The ceiling each row's last raise declared; a row that never rose past it in this branch ignores it.
 BASELINE = {
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
@@ -519,22 +525,79 @@ def _format(ledger: dict[str, int]) -> str:
     return "complexity ledger (count / ceiling)\n" + "\n".join(rows)
 
 
-def check(ledger: dict[str, int]) -> list[str]:
-    """Each row that moved off ``BASELINE`` — empty where every row equals its count."""
+_MAIN = "origin/main"
+# What the ledger reads, so a commit's own script counts that commit's tree.
+_COUNTED = (
+    "promptpotter",
+    "scripts",
+    "tests",
+    "docs/specs",
+    *(f"webapp/{root}" for root in _WEBAPP_SOURCE),
+    "pyproject.toml",
+)
+# A `_format` row, which every commit's script prints.
+_ROW = re.compile(r"^  (\w+)\s+(\d+)\s+/", re.MULTILINE)
+
+
+def _git(*args: str) -> str:
+    code, out = git(*args)
+    if code:
+        raise SystemExit(f"surface-ledger: git {' '.join(args)}: {out}")
+    return out
+
+
+def _counted_at(sha: str) -> dict[str, int]:
+    """The ledger *sha*'s own script prints over *sha*'s tree, kept per sha in the clone's cache."""
+    kept = clone_cache() / "surface-ledger" / f"{sha}.json"
+    if kept.is_file():
+        counts: dict[str, int] = json.loads(kept.read_text(encoding="utf-8"))
+        return counts
+    archive = subprocess.run(
+        ["git", "archive", sha, "--", *_COUNTED], cwd=REPO, capture_output=True, check=True
+    )
+    with tempfile.TemporaryDirectory(prefix="pp-ledger-", ignore_cleanup_errors=True) as tree:
+        with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+            tar.extractall(tree, filter="data")
+        code, out = run(
+            [sys.executable, "scripts/complexity_ledger.py"], Path(tree), PYTHONPATH=tree
+        )
+    if code:
+        raise SystemExit(f"surface-ledger: the ledger at {sha[:12]} did not count:\n{out}")
+    counts = {name: int(n) for name, n in _ROW.findall(out)}
+    kept.parent.mkdir(exist_ok=True)
+    replace_changed(kept, json.dumps(counts))
+    return counts
+
+
+def _baseline_at(sha: str) -> dict[str, int]:
+    tree = ast.parse(_git("show", f"{sha}:scripts/complexity_ledger.py"))
+    (value,) = (
+        stmt.value
+        for stmt in tree.body
+        if isinstance(stmt, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "BASELINE" for t in stmt.targets)
+    )
+    ceilings: dict[str, int] = ast.literal_eval(value)
+    return ceilings
+
+
+def check(ledger: dict[str, int], base: dict[str, int], ceilings: dict[str, int]) -> list[str]:
+    """Each row that rose above *base*, the merge-base's counts, past a ceiling this branch did not
+    raise from the merge-base's *ceilings* to hold it; a row new here rose from nothing."""
     if set(ledger) != set(BASELINE):
         moved = sorted(set(ledger) ^ set(BASELINE))
         return [f"complexity-ledger dimensions changed ({moved}); update BASELINE in this commit"]
-    risen = {k: (v, BASELINE[k]) for k, v in ledger.items() if v > BASELINE[k]}
-    fallen = {k: (v, BASELINE[k]) for k, v in ledger.items() if v < BASELINE[k]}
-    moved = []
-    if risen:
-        moved.append(
-            "the cost of the next change grew (dimension: actual vs ceiling): "
-            f"{risen}. Subtract instead, or raise the ceiling with a reason in the commit body."
-        )
-    if fallen:
-        moved.append(f"a row fell (dimension: actual vs ceiling): {fallen}. Lower BASELINE to it.")
-    return moved
+    risen = {
+        k: (v, base.get(k))
+        for k, v in ledger.items()
+        if (k not in base or v > base[k]) and (BASELINE[k] == ceilings.get(k) or v > BASELINE[k])
+    }
+    if not risen:
+        return []
+    return [
+        f"the cost of the next change grew (dimension: here vs the merge-base with {_MAIN}): "
+        f"{risen}. Subtract instead, or raise its ceiling with a reason in the commit body."
+    ]
 
 
 if __name__ == "__main__":
@@ -542,7 +605,8 @@ if __name__ == "__main__":
     if "--check" not in sys.argv[1:]:
         print(_format(counted))
         raise SystemExit(0)
-    risen = check(counted)
+    merge_base = _git("merge-base", "HEAD", _MAIN)
+    risen = check(counted, _counted_at(merge_base), _baseline_at(merge_base))
     if risen:
         print("\n".join(risen) + "\nBASELINE lives in scripts/complexity_ledger.py.")
     raise SystemExit(bool(risen))

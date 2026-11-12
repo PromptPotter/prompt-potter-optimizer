@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import atexit
 import contextlib
+import dataclasses
+import hashlib
 import inspect
 import json
 import os
@@ -21,7 +24,8 @@ import signal
 import subprocess
 import sys
 import time
-from collections import Counter
+import types
+from collections import Counter, defaultdict
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +38,7 @@ from offline_world import (
     MARKER,
     NOT_A_KEY,
     PROVIDER_KEYS,
+    WORLD,
     FakeBackend,
     FakeLLM,
     Router,
@@ -131,6 +136,9 @@ if TYPE_CHECKING:
 
 DATASET = "justlogic/d234"
 STAMP = "offline-run.json"
+TRACE = "trace.json"
+# Set in a leg's env under `--coverage`: the directory its process files the lines it ran into.
+COVERAGE = "PROMPTPOTTER_OFFLINE_COVERAGE"
 CONTROLLED = ("controlled", "controlled-bare")
 RESUMED = "resumed"
 DIVERGED = "diverged"
@@ -158,7 +166,7 @@ def data_root(leg: Path) -> Path:
 
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
-RESUME_APPENDS = ("phases", "run_phases", "arms", "rulers", "rounds_entered")
+RESUME_APPENDS = ("phases", "run_phases", "arms", "rounds_entered", "standings")
 # Which of a round's cells a launch paid and which it replayed, by where each count sits: a
 # reading side's `bought`, a cell row's `cached`, a fold's `cached` and `tokens` — never a key of
 # that name elsewhere, such as the fitness term `evaluators.tokens`.
@@ -752,7 +760,7 @@ async def banked(
     name: str,
     bench_trigger: BenchTrigger,
 ) -> Path:
-    """Checks one campaign's run, then writes what it decided to *out*'s `decisions.json`."""
+    """Checks one campaign's run, then writes its `BehaviourTrace` to *out*."""
     if stop_reason_outcome(result.stop_reason).exit_code:
         raise SystemExit(f"offline run: {name} ended {result.stop_reason}")
     beside = sorted(
@@ -789,15 +797,62 @@ async def banked(
         "backend_cells": searched_cells,
         "bench_cells_asked_for": backend.cells - searched_cells,
     }
-    write_decisions(out, decisions)
+    requests = {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest()[:16]
+        for p in sorted(harness.llm.capture.iterdir())
+    }
+    BehaviourTrace(world=WORLD, decisions=decisions, requests=requests).write(out)
     return cycle
 
 
-def write_decisions(out: Path, decisions: dict[str, Any]) -> None:
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "decisions.json").write_text(
-        json.dumps(decisions, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+def _moved(now: Any, then: Any, path: str, depth: int) -> list[str]:
+    """The paths, *depth* levels deep, where two traces' parts differ; a part one side lacks moved."""
+    if now == then:
+        return []
+    if depth and isinstance(now, dict) and isinstance(then, dict):
+        return [
+            moved
+            for key in sorted(now.keys() | then.keys())
+            for moved in _moved(now.get(key), then.get(key), f"{path}.{key}", depth - 1)
+        ]
+    if depth and isinstance(now, list) and isinstance(then, list) and len(now) == len(then):
+        return [
+            moved
+            for i, (a, b) in enumerate(zip(now, then, strict=True))
+            for moved in _moved(a, b, f"{path}[{i}]", depth - 1)
+        ]
+    return [path]
+
+
+@dataclass(frozen=True)
+class BehaviourTrace:
+    """What one optimizer's run decided, canonical (`extract`), the race standings among them, and
+    the hash of each optimizer request it sent, in the world `offline_world.py::WORLD` names."""
+
+    world: str
+    decisions: dict[str, Any]
+    requests: dict[str, str]
+
+    @classmethod
+    def read(cls, workspace: Path) -> BehaviourTrace:
+        return cls(**json.loads((workspace / TRACE).read_text(encoding="utf-8")))
+
+    def write(self, out: Path) -> None:
+        out.mkdir(parents=True, exist_ok=True)
+        dumped = json.dumps(dataclasses.asdict(self), indent=1, sort_keys=True, ensure_ascii=False)
+        (out / TRACE).write_text(dumped + "\n", encoding="utf-8")
+
+    def moved(self, earlier: BehaviourTrace) -> list[str]:
+        sent = [
+            n
+            for n in self.requests.keys() | earlier.requests.keys()
+            if self.requests.get(n) != earlier.requests.get(n)
+        ]
+        return [
+            *(["world"] * (self.world != earlier.world)),
+            *_moved(self.decisions, earlier.decisions, "decisions", 2),
+            *([f"requests ({len(sent)} of {len(self.requests)})"] if sent else []),
+        ]
 
 
 async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
@@ -1133,7 +1188,7 @@ def _graded(bench: dict[str, Any] | None) -> bool:
     return bench is not None and bench["status"]["state"] == "read"
 
 
-# decisions.json is read as dicts with `.get`: a dump taken before a reshape must load after it.
+# A ledger is read as dicts with `.get`: a dump taken before a reshape must load after it.
 FLOAT_DP = 6
 DROP_KEYS = {
     "timestamp", "created_at", "updated_at", "started_at", "finished_at", "at_offset", "offset",
@@ -1259,6 +1314,10 @@ LEDGER_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
     "run_phase": ("run_phases", ("run_phase", "stop_reason")),
     "llm_call": ("optimizer_calls", ("round", "node", "candidate_idx")),
     "round_warning": ("round_warnings", ("round", "kind", "severity", "detail")),
+    "race_standing": (
+        "standings",
+        ("round", "member", "current", "n_samples", "p_best", "paired_breakdown"),
+    ),
 }
 
 
@@ -1300,7 +1359,7 @@ def _ledger(ledger: list[dict[str, Any]], canon: Canon) -> dict[str, Any]:
             entry["repairs"] = len((r.get("payload") or {}).get("schema_repair_errors") or [])
         out[name].append(_as_sets(canon(entry)) if kind == "decision" else canon(entry))
     # Concurrent arms append in arrival order; the SET per round is what a comparison reads.
-    for name in ("decisions", "round_warnings", "optimizer_calls"):
+    for name in ("decisions", "round_warnings", "optimizer_calls", "standings"):
         out[name].sort(key=lambda x: (x.get("round") or 0, json.dumps(x, sort_keys=True)))
     out["arms"].sort(key=lambda x: (x.get("round") or 0, json.dumps(x, sort_keys=True)))
     return out
@@ -1351,6 +1410,63 @@ def digests() -> dict[str, str]:
             frozenset(Presumption), PackShelf(account=None)
         ).digest
     return out
+
+
+def traced(out: Path) -> None:
+    """Files into *out* at exit each package line a function of this process ran, as PEP 669
+    reports it: once a line, then disabled, so the run pays for each line once."""
+    package = str(Path(promptpotter.__file__).parent)
+    ran: dict[str, set[int]] = defaultdict(set)
+    monitoring = sys.monitoring
+
+    def line(code: types.CodeType, at: int) -> object:
+        if code.co_filename.startswith(package):
+            ran[code.co_filename].add(at)
+        return monitoring.DISABLE
+
+    def filed() -> None:
+        lines = {name: sorted(at) for name, at in ran.items()}
+        (out / f"{os.getpid()}.json").write_text(json.dumps(lines), encoding="utf-8")
+
+    monitoring.use_tool_id(monitoring.COVERAGE_ID, OFFLINE_RUN)
+    monitoring.register_callback(monitoring.COVERAGE_ID, monitoring.events.LINE, line)
+    monitoring.set_events(monitoring.COVERAGE_ID, monitoring.events.LINE)
+    atexit.register(filed)
+
+
+def _function_lines(path: Path) -> set[int]:
+    """A module or class body runs at import, which says nothing of what the run reached."""
+    todo = [(compile(path.read_text(encoding="utf-8"), str(path), "exec"), False)]
+    lines: set[int] = set()
+    while todo:
+        code, inside = todo.pop()
+        inside = inside or bool(code.co_flags & inspect.CO_NEWLOCALS)
+        if inside:
+            lines.update(at for _, _, at in code.co_lines() if at is not None)
+        todo.extend(
+            (const, inside) for const in code.co_consts if isinstance(const, types.CodeType)
+        )
+    return lines
+
+
+def coverage_by_package(out: Path) -> list[str]:
+    ran: dict[str, set[int]] = defaultdict(set)
+    for filed in out.glob("*.json"):
+        for name, lines in json.loads(filed.read_text(encoding="utf-8")).items():
+            ran[os.path.normcase(name)].update(lines)
+    root = Path(promptpotter.__file__).parent
+    counted: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for path in root.rglob("*.py"):
+        parts = path.relative_to(root).parts
+        package = "/".join(parts[: min(2, len(parts) - 1)]) or "promptpotter"
+        body = _function_lines(path)
+        counted[package][0] += len(body & ran[os.path.normcase(str(path))])
+        counted[package][1] += len(body)
+    total = [sum(hit for hit, _ in counted.values()), sum(n for _, n in counted.values())]
+    return [
+        f"coverage {package}: {hit}/{n} function-body lines ran ({100 * hit // max(n, 1)}%)"
+        for package, (hit, n) in sorted({**counted, "(all)": total}.items())
+    ]
 
 
 def named_home() -> Path:
@@ -1426,6 +1542,27 @@ def claim_home(home: Path, stamp: dict[str, object]) -> Path:
     return home
 
 
+def prepared_home(
+    home: Path, stamp: dict[str, object], due: Sequence[str], *, held: bool, coverage: bool
+) -> Path | None:
+    """*home* cleared for *due*'s workspaces, and under *coverage* the directory every leg's
+    process files the lines it ran into, named in the env each leg inherits."""
+    if held:
+        for name in due:
+            if (home / name).exists():
+                rmtree_robust(home / name)
+    else:
+        claim_home(home, stamp)
+    if not coverage:
+        return None
+    covered = home / "coverage"
+    if covered.exists():
+        rmtree_robust(covered)
+    covered.mkdir()
+    os.environ[COVERAGE] = str(covered)
+    return covered
+
+
 def child_env(home: Path) -> dict[str, str]:
     env = dict(os.environ)
     for key in [*env, *Settings.model_fields]:
@@ -1442,7 +1579,7 @@ def decided(workspace: Path, *, after: int) -> dict[str, Any]:
     it re-enters, and which of a round's cells it paid and which it replayed, by path (`READING_SIDES`, `CELL_ROWS`, `FOLDS`): a
     cell answered before a pause inside a round replays on the resume. The harness's call counts
     stay, so a resume that re-walked a banked round reads MOVED."""
-    doc: dict[str, Any] = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))
+    doc = BehaviourTrace.read(workspace).decisions
     kept = {k: v for k, v in doc["ledger"].items() if k not in RESUME_APPENDS}
 
     def less(node: Any, split: tuple[str, ...]) -> Any:
@@ -1515,21 +1652,16 @@ def crossed_legs(
 
 
 def moved_against(workspace: Path, earlier: Path) -> str:
-    if not (earlier / "decisions.json").is_file():
-        return f"no run in {earlier}"
-
-    def held(home: Path) -> dict[str, object]:
-        requests = {p.name: p.read_bytes() for p in sorted((home / "requests").iterdir())}
-        return {"decisions": (home / "decisions.json").read_bytes(), "requests": requests}
-
-    now, then = held(workspace), held(earlier)
-    return ", ".join(f"{part} {'UNMOVED' if now[part] == then[part] else 'MOVED'}" for part in now)
+    if not (earlier / TRACE).is_file():
+        return f"no trace in {earlier}"
+    moved = BehaviourTrace.read(workspace).moved(BehaviourTrace.read(earlier))
+    return f"MOVED {', '.join(moved)}" if moved else "UNMOVED"
 
 
 def read_straight_and_resumed(
     name: str, workspace: Path, resumed: Future[int] | None, pause_after: int, against: Path | None
 ) -> int:
-    ran = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
+    ran = BehaviourTrace.read(workspace).decisions["run"]
     (cycle,) = (data_root(workspace) / PROJECTS_DIR).glob("*/campaigns/*/cycles/*")
     bench = ran["bench"]
     failed = int(not _graded(bench))
@@ -1599,6 +1731,19 @@ def said_leg(
     print(f"{name}: {what}: {ended}")
 
 
+def controlled_reading(home: Path, arm_names: Sequence[str]) -> str:
+    beside, bare = (home / name for name in CONTROLLED)
+    said = []
+    for arm in (f"arm-{name}" for name in arm_names):
+        # A reading: the foreign campaign's rows are in the version the head-to-head froze.
+        same = BehaviourTrace.read(beside / arm).decisions == (
+            BehaviourTrace.read(bare / arm).decisions
+        )
+        said.append(f"{arm}: decisions {'UNMOVED' if same else 'MOVED'} by the foreign campaign")
+    lines = (beside / "run.log").read_text(encoding="utf-8").splitlines()
+    return "\n".join([*said, *(line for line in lines if line.startswith(("arm ", "head-to-")))])
+
+
 def proven_home(workspace: Path) -> None:
     """A landing's plan over what the run wrote: every file named by a row, loading as it shapes, and
     nothing for a migration to stage or the landing to drop."""
@@ -1625,6 +1770,8 @@ def refuse_another_tree() -> None:
 def run_child_leg(args: argparse.Namespace) -> None:
     if any(os.environ[k] != NOT_A_KEY for k in PROVIDER_KEYS):
         raise SystemExit("offline run: --child runs only under the env its parent builds")
+    if filed_into := os.environ.get(COVERAGE):
+        traced(Path(filed_into))
     workspace = Path(os.environ["PROMPTPOTTER_HOME"]).parent
     if args.terminal:
         run_terminal(
@@ -1701,7 +1848,12 @@ def main() -> int:
     ap.add_argument(
         "--against",
         type=Path,
-        help="an earlier run's home: print per optimizer whether its decisions and requests moved",
+        help="an earlier run's home: print per optimizer which fields of its trace moved",
+    )
+    ap.add_argument(
+        "--coverage",
+        action="store_true",
+        help="print, per package, the function-body lines every leg's process ran; keeps no green",
     )
     ap.add_argument("--child", help=argparse.SUPPRESS)
     ap.add_argument("--pause-after", type=int, help=argparse.SUPPRESS)
@@ -1731,7 +1883,7 @@ def main() -> int:
         if args.controlled
         else args.optimizer or sorted(optimizers.MANIFESTS.table)
     )
-    kept = LastGreen.open()
+    kept = None if args.coverage else LastGreen.open()
     keys = {} if kept is None else optimizer_keys(kept, names, controlled=args.controlled)
     held = args.against is None and holds_run(home, run)
     green = still_green(home, run, kept, keys) if held and kept is not None else set()
@@ -1745,12 +1897,7 @@ def main() -> int:
     if kept is not None:
         # Unfiled first, so a run killed while it rewrites a workspace leaves no green behind.
         kept.record(dict.fromkeys((f"{run} {name}" for name in due), None))
-    if held:
-        for name in due:
-            if (home / name).exists():
-                rmtree_robust(home / name)
-    else:
-        claim_home(home, stamp)
+    covered = prepared_home(home, stamp, due, held=held, coverage=args.coverage)
     end_children_with_this_process()
     # One workspace each: a shared archive and δ ruler let one optimizer's run move another's.
     child_args = ["--rows", str(args.rows), "--bench-trigger", args.bench_trigger]
@@ -1857,16 +2004,10 @@ def main() -> int:
     if crossing is not None:
         failed["potter"] += not crossed_legs(home / "potter", crossing, pause_after)
     if args.controlled and not any(failed.values()):
-        beside, bare = (home / name for name in CONTROLLED)
-        for arm in (f"arm-{name}" for name in arm_names):
-            # A reading: the foreign campaign's rows are in the version the head-to-head froze.
-            same = (beside / arm / "decisions.json").read_bytes() == (
-                bare / arm / "decisions.json"
-            ).read_bytes()
-            print(f"{arm}: decisions {'UNMOVED' if same else 'MOVED'} by the foreign campaign")
-        lines = (beside / "run.log").read_text(encoding="utf-8").splitlines()
-        print("\n".join(line for line in lines if line.startswith(("arm ", "head-to-"))))
+        print(controlled_reading(home, arm_names))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
+    if covered is not None:
+        print("\n".join(coverage_by_package(covered)))
     # Filed under the flags it ran with, and only where the sources read the same as before it.
     if kept is not None:
         now = optimizer_keys(kept, due, controlled=args.controlled)

@@ -1227,7 +1227,7 @@ def _optimizer_plugin(_: Selection) -> Outcome:
         if code:
             return code, out
         home = Path(scratch) / "home"
-        argv = [str(python), "scripts/offline_run.py", "--optimizer", "example"]
+        argv = [str(python), "scripts/offline_run.py", "--optimizer", "example", "--straight"]
         code, out = run(argv, REPO, PROMPTPOTTER_HOME=str(home))
         if code:
             return code, out

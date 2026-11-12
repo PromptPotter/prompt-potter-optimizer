@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, ClassVar, NamedTuple, assert_never
 
 from promptpotter.domain.command_events import draft_of, subject_of
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
@@ -91,6 +91,10 @@ class _Trail:
                     TrailLine(stop.at, RUN_STOPPED, stop.subject, "", record.campaign_id)
                     for stop in record.stops
                 )
+            case RunPhaseRecord():
+                pass
+            case _:
+                assert_never(record)
 
     def value(self) -> tuple[tuple[TrailLine, ...], frozenset[Subject]]:
         return tuple(self._found), frozenset(self._banked)

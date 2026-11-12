@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cache
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple, cast, get_args
+from typing import Any, ClassVar, NamedTuple, assert_never, cast, get_args
 
 from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
 from promptpotter.domain.bench import BenchReading, BenchScore, PartitionRecord
@@ -261,6 +261,8 @@ class _CycleFacts:
                 held = held._replace(formula=formula)
             case RoundClosedRecord():
                 pass
+            case _:
+                assert_never(record)
         self._held = held._replace(updated_at=record.timestamp)
 
     def value(self) -> CycleFacts:
@@ -288,6 +290,8 @@ class _LaunchClaim:
             case LaunchReleasedRecord(job_id=job_id):
                 if self._found is not None and job_id == self._found.job_id:
                     self._found = None
+            case _:
+                assert_never(record)
 
     def value(self) -> LaunchClaimRecord | None:
         return self._found
@@ -516,6 +520,8 @@ class _Standing:
                     _take(
                         held.passes.setdefault((rnd, record.individual_id, record.role), {}), cell
                     )
+            case _:
+                assert_never(record)
 
     def value(self) -> StandingRounds:
         held = self._held
@@ -577,6 +583,8 @@ class _Answers:
                 walked = banked.cells
             case PhaseRecord():
                 return
+            case _:
+                assert_never(record)
         named = [answer for _, answer, _ in walked]
         if not self._found.issuperset(named):
             self._found.update(named)
@@ -711,6 +719,10 @@ class _Timeline:
                 facts = record.result.facts
                 if not facts.cached and (seconds := facts.pipeline.unworked_s) is not None:
                     held.unworked.append((at, seconds))
+            case TokenUsageRecord():
+                pass
+            case _:
+                assert_never(record)
 
     def value(self) -> Timeline:
         held = self._held

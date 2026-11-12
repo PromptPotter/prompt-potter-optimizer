@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 
     from promptpotter.domain.sample import Sample
 
+# What the world answers, by version: an edit to any edge's answer bumps it, so a trace names its world.
+WORLD = "1"
 NOT_A_KEY = "offline-run-not-a-key"
 PROVIDER_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
 LABELS = ("TRUE", "FALSE", "Uncertain")
