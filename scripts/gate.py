@@ -1105,7 +1105,9 @@ class Check:
     # Empty is its kind's prefixes; `!prefix` is everything outside one. A callable is derived at
     # first use, so importing the gate parses nothing.
     reads: tuple[str, ...] | Callable[[], tuple[str, ...]] = ()
-    # A path it BUILDS: its verdict is kept only while that path stands.
+    # A path that stands while its product is this key's: its verdict is kept only while it
+    # stands. A green build writes it where the builder did not: `greens.json` is the clone's and
+    # a product the checkout's, so one another tree built never stands for this one.
     builds: str = ""
     # Directories it reads of what its `after` built; their content is in its key.
     product: tuple[str, ...] = ()
@@ -1441,7 +1443,8 @@ CHECKS: tuple[Check, ...] = (
         "vite-build",
         "web",
         lambda _: run(_node("npm", "run", "build"), _WEBAPP),
-        builds="webapp/out/index.html",
+        # Inside `out/`, so vite's `emptyOutDir` takes it with the product it vouched for.
+        builds="webapp/out/.built-{key}",
     ),
     # Its incremental `tsconfig.tsbuildinfo` is written only where its content moved.
     Check("tsc", "web", _tsc, on_commit=True, light=True),
@@ -1517,6 +1520,8 @@ def _verdict(check: Check, sel: Selection, store: LastGreen | None) -> Result:
             key = (
                 None  # narrowed, or edited while it ran: the verdict is for no tree anyone can name
             )
+        if not rc and key is not None and check.builds:
+            (REPO / check.builds.format(key=key)).touch()
     except Exception as exc:  # a broken check is a red check, never a silent skip
         logger.exception("check %s raised", check.name)
         rc, out, key = 1, f"{type(exc).__name__}: {exc}", None

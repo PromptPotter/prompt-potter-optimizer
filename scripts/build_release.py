@@ -27,9 +27,11 @@ def _clear(dst: Path) -> None:
 
 
 def stage_webapp() -> int:
-    """The `.js` keeps its `sourceMappingURL` comments, one silent 404 in DevTools: never "fixed" by shipping the maps."""
+    """The `.js` keeps its `sourceMappingURL` comments, one silent 404 in DevTools: never "fixed" by shipping the maps.
+    A `.built-*` file is the gate's stamp (`gate.py::Check.builds`), never the app's."""
     _clear(_WEBAPP_DST)
-    shutil.copytree(_WEBAPP_SRC, _WEBAPP_DST, ignore=shutil.ignore_patterns("*.map"))
+    ignore = shutil.ignore_patterns("*.map", ".built-*")
+    shutil.copytree(_WEBAPP_SRC, _WEBAPP_DST, ignore=ignore)
     return sum(1 for p in _WEBAPP_DST.rglob("*") if p.is_file())
 
 
