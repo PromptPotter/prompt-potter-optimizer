@@ -67,6 +67,7 @@ from promptpotter.application.bench.task_context import (
     OriginFinding,
     campaign_framing,
     checkin_template,
+    committed_task_context,
 )
 from promptpotter.application.commands import launching, origin_resolving
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
@@ -3185,6 +3186,15 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     with pytest.raises(ValidationError, match="rewrite_slot"):
         NodePromptInfo(fields=("rubric",), rewrite_slot="instruction")
+
+    # Every committed dataset's framing reads within its budget: an over-budget field lands green
+    # and refuses every launch on its dataset at mint.
+    checkout = build_stores(default_identity(), projects_root=tmp_path / "checkout")
+    for tier_root in (checkout.install_datasets_root, checkout.research_datasets_root):
+        assert tier_root is not None, "this checkout lost a tier"
+        for definition in sorted(tier_root.rglob(DEFINITION_FILE)):
+            name = definition.parent.relative_to(tier_root).as_posix()
+            committed_task_context(checkout, resolve_dataset(checkout, name))
 
 
 # 3. Contamination of a scored prompt

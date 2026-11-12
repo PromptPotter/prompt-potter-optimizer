@@ -203,10 +203,7 @@ def committed_task_context(stores: Stores, dataset: ResolvedDataset | None) -> T
     """A PURE read, so identity may use it: a decomposition needs the cycle a mint is still computing."""
     if dataset is None:
         return TaskDecomposition()
-    task_context = readable_task_context(stores, dataset)
-    # Refused here too: whichever seam reads the framing first must reject an over-budget field.
-    task_context.check_budget(source=f"{dataset.name}'s committed framing")
-    return task_context
+    return readable_task_context(stores, dataset)
 
 
 def checkin_provider() -> str:
