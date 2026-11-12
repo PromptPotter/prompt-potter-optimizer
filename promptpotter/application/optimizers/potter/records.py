@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -131,3 +132,21 @@ class L1Readout(RoundOutput, kind="l1_readout"):
     l1_parse_failure: str | None = None
     # The AxisIndex's peaked axes as L1 proposed, which no later reading of the index rebuilds.
     axis_memory_peaked: list[str] = Field(default_factory=list)
+
+
+@shapes_optimizer_prompt
+class ExplorationBudget(enum.StrEnum):
+    """ONE source for the ``escalation_panel`` signal and the review writer's ``ValidatorContext``: prompt and validator agree."""
+
+    TIGHT = "tight"  # improving — exploit the parent; speculative gambles rejected
+    NORMAL = "normal"  # stalling — stall_exploration citations permitted
+    WIDE = "wide"  # patience exhausted — explore freely; a PEAKED axis is mutable with a wide rebut
+
+
+@shapes_optimizer_prompt
+def exploration_budget(stall_count: int, l1_patience: int) -> ExplorationBudget:
+    if stall_count <= 0:
+        return ExplorationBudget.TIGHT
+    if stall_count >= l1_patience:
+        return ExplorationBudget.WIDE
+    return ExplorationBudget.NORMAL

@@ -128,8 +128,7 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
-from promptpotter.application.optimizers.gepa.members import GepaReflect
-from promptpotter.application.optimizers.gepa.state import ParetoScores
+from promptpotter.application.optimizers.gepa.members import GepaReflect, ParetoScores
 from promptpotter.application.optimizers.nodes import MintFacts, Panel, Proposals, admits
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
@@ -144,9 +143,9 @@ from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYO
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     base_optimizer_template,
 )
-from promptpotter.application.optimizers.potter.l1.population import parse_population
+from promptpotter.application.optimizers.potter.l1 import parse_population
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
-from promptpotter.application.optimizers.potter.validators.l1_strict import l1_shots_in_demo_pool
+from promptpotter.application.optimizers.potter.validators import l1_shots_in_demo_pool
 from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
     ParamLayers,
@@ -3689,7 +3688,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
         "the generator was handed no subject — it is rewriting text it cannot see"
     )
-    refused_panels = set(filled.breakdown.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
+    refused_panels = set(filled.injections.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
     assert not refused_panels, f"mandatory panel(s) refused by the budget: {sorted(refused_panels)}"
     # A panel mixing two manifests: each outer node is shown, and checked, as its own manifest's.
     capo = select_optimizer(OptimizerChoice(optimizer="capo"))

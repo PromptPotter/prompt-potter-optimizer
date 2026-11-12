@@ -57,22 +57,18 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     build_l3_response_model,
 )
 from promptpotter.application.optimizers.potter.election import elect_on_theta
-from promptpotter.application.optimizers.potter.escalation.firing import (
-    FORCED_BY_DIAG,
-    Fire,
-    LayerCall,
-    TransitionResult,
-    escalate_l2,
-)
-from promptpotter.application.optimizers.potter.escalation.rules import (
+from promptpotter.application.optimizers.potter.escalation import (
     CLIMB_RULES,
     DEFAULT_ESCALATION_RULES,
+    FORCED_BY_DIAG,
     HEAL_RULES,
+    Fire,
+    LayerCall,
     NextAction,
-)
-from promptpotter.application.optimizers.potter.escalation.state import (
     PotterPhase,
+    TransitionResult,
     bank_and_route,
+    escalate_l2,
     l2_fired,
     l3_fired,
 )
@@ -84,18 +80,16 @@ from promptpotter.application.optimizers.potter.knobs import (
     L1GenerateKnobs,
     PoBBKnobs,
 )
-from promptpotter.application.optimizers.potter.l1.candidate_source import (
+from promptpotter.application.optimizers.potter.l1 import (
+    critique_facts,
+    distil_critique,
     propose_l1_population,
     rejoining,
-    variants_this_round,
-)
-from promptpotter.application.optimizers.potter.l1.critique import distil_critique
-from promptpotter.application.optimizers.potter.l1.stats import (
-    critique_facts,
     review_reading,
+    variants_this_round,
     yield_facts,
 )
-from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_SUPPRESS
+from promptpotter.application.optimizers.potter.pobb import ABORT_LENS_SUPPRESS
 from promptpotter.application.optimizers.potter.race import PoBBRace
 from promptpotter.application.optimizers.potter.records import (
     L1Layout,
@@ -105,7 +99,7 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
     Recombination,
 )
-from promptpotter.application.optimizers.potter.validators.l3_output import l3_plan_breaches
+from promptpotter.application.optimizers.potter.validators import l3_plan_breaches
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.application.views.render.primitives import fmt_fitness
 from promptpotter.domain.dashboard_rows import OptimizerLimit
@@ -128,7 +122,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
-        CatchUpFn,
         CycleRead,
         Draw,
         MeasuredRound,
@@ -276,7 +269,7 @@ class L1Generate(LayoutNode, nodes.Proposer):
 
     def arms(self, selected: SelectedOptimizer) -> int:
         knobs = selected.knobs_of(self.name, L1GenerateKnobs)
-        # +1: the leader a held round keeps for one more read (`candidate_source.py::rejoining`).
+        # +1: the leader a held round keeps for one more read (`l1.py::rejoining`).
         return knobs.n_variants + knobs.recombine + 1
 
     def opening(self, ctx: NodeContext, bench: nodes.RoundOpening) -> nodes.RoundOpening:
@@ -342,8 +335,8 @@ class PoBB(nodes.Eliminator):
             ),
         )
 
-    def race(self, ctx: NodeContext, panel: Panel, catch_up: CatchUpFn) -> PoBBRace:
-        return PoBBRace(ctx, panel, catch_up)
+    def race(self, ctx: NodeContext, panel: Panel) -> PoBBRace:
+        return PoBBRace(ctx, panel)
 
 
 class ThetaElection(nodes.Selector):

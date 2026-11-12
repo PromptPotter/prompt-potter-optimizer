@@ -147,7 +147,7 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
     citable=True,
 )
 def _r_guard_breaches(b: InjectionBundle) -> list[Item]:
-    """Prompt evidence only: no escalation rule reads the stream (``escalation/firing.py``)."""
+    """Prompt evidence only: no escalation rule reads the stream (``escalation.py``)."""
     blocks = [
         blk
         for blk in (

@@ -85,12 +85,15 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.application.mask.divergence import VerdictOutcome, find_divergences
 from promptpotter.application.mask.load import load_mask_record
-from promptpotter.application.optimizers.capo.members import PairedTCut, PopulationKept
-from promptpotter.application.optimizers.capo.state import CapoObjective
+from promptpotter.application.optimizers.capo.members import (
+    CapoObjective,
+    PairedTCut,
+    PopulationKept,
+)
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
 from promptpotter.application.optimizers.nodes import MeasuredRound, Panel, ReadArm
 from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
-from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
+from promptpotter.application.optimizers.potter.pobb import EliminationGate
 from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
 from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
@@ -703,7 +706,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         return PoBBRace(
             NodeContext(racing, optimizers.NODE_MEMBERS.get("pobb")),
             Panel(cells=ten, order=ten, block_size=len(ten)),
-            lambda _sp, _sample, _prior_id: None,  # type: ignore[arg-type, return-value]
         )
 
     walked = sheet(

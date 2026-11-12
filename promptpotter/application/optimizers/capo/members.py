@@ -17,20 +17,24 @@ from promptpotter.application.bench.node_context import (
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizers import nodes, paper_templates
-from promptpotter.application.optimizers.capo import prompts
-from promptpotter.application.optimizers.capo.state import CapoObjective
 from promptpotter.application.optimizers.descriptors import prompt_chars
 from promptpotter.application.optimizers.nodes import RewriteKnobs
-from promptpotter.application.optimizers.paper_templates import rewrite, rewritten
+from promptpotter.application.optimizers.paper_templates import (
+    rewrite,
+    rewritten,
+    shown,
+    task_description,
+)
 from promptpotter.application.optimizers.variation.members import Survival, SurvivalKnobs
 from promptpotter.domain.arms import Cut, Elimination, Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
+from promptpotter.domain.optimizer_state import StateSlice
 from promptpotter.domain.paired_reading import ArmKey, PriorStanding
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.pool import DemoPool
 from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.scoring import NO_CELLS
+from promptpotter.domain.scoring import NO_CELLS, ROW_GRADES
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
@@ -42,7 +46,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
-        CatchUpFn,
         CycleRead,
         Draw,
         MeasuredRound,
@@ -60,7 +63,49 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
-    from promptpotter.domain.search_point import JobSearchPoint
+
+
+# The population CAPO's selector keeps is the bench's (`OptimizerState.population`), banked beside this.
+class CapoObjective(StateSlice, kind="capo_objective"):
+    """What the race and the population rank on (§4), set by the initial population, which writes it first."""
+
+    length_penalty: float
+    # The longest initial prompt's scored length, the length term's divisor.
+    length_norm: int
+
+    def of(self, cell: GradedCell, chars: int) -> float:
+        """Unclamped, so a long prompt can take a cell below zero."""
+        fitness = float(ROW_GRADES["fitness"].read(cell))
+        return fitness - self.length_penalty * chars / self.length_norm
+
+
+def init_prompt(ctx: NodeContext) -> str:
+    node = ctx.read(Target).prompt_node
+    return ctx.read(Calls).prompt().compile_prompt(task_description=task_description(ctx, node))
+
+
+def crossover_prompt(ctx: NodeContext, mother: OptSearchPoint, father: OptSearchPoint) -> str:
+    node = ctx.read(Target).prompt_node
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(
+            task_description=task_description(ctx, node),
+            mother=shown(ctx, mother, node),
+            father=shown(ctx, father, node),
+        )
+    )
+
+
+def mutation_prompt(ctx: NodeContext, individual: OptSearchPoint) -> str:
+    node = ctx.read(Target).prompt_node
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(
+            task_description=task_description(ctx, node), instruction=shown(ctx, individual, node)
+        )
+    )
 
 
 class PairedTCut(Replayed, kind="paired_t_cut"):
@@ -281,7 +326,7 @@ def _labels(labels: list[str], cap: int = 2) -> str:
     return ", ".join(labels[:cap]) + (f" (+{len(labels) - cap})" if len(labels) > cap else "")
 
 
-class PairedTRace(nodes.NoCatchUps):
+class PairedTRace:
     gate = "outscored"
     settled = "settled"
 
@@ -414,7 +459,11 @@ class PairedTRace(nodes.NoCatchUps):
         reason = f"outscored {where} by {len(outscored)} of {len(raced)}: {named}"
         return Elimination(reason=reason, context=context)
 
-    def admit(self, _key: ArmKey, _results: Sequence[GradedCell], _sp: JobSearchPoint) -> None:
+    @property
+    def priors(self) -> Mapping[ArmKey, CellSheet]:
+        return {}
+
+    def admit(self, _key: ArmKey, _results: Sequence[GradedCell]) -> None:
         return None
 
 
@@ -443,7 +492,7 @@ class PairedT(nodes.Eliminator):
             )
         ]
 
-    def race(self, ctx: NodeContext, panel: Panel, _catch_up: CatchUpFn) -> PairedTRace:
+    def race(self, ctx: NodeContext, panel: Panel) -> PairedTRace:
         return PairedTRace(
             ctx,
             survivors=ctx.knobs(SurvivalKnobs).size,
@@ -482,7 +531,7 @@ class CapoInit(nodes.Proposer):
         {Calls, Children, Lineage, Replay, Target}
     )
     draws: ClassVar[Mapping[type[Pool], Draw]] = {DemoPool: nodes.CountKnob(CapoInitKnobs, "k_max")}
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, CapoInitKnobs).size
@@ -498,7 +547,7 @@ class CapoInit(nodes.Proposer):
 
     async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         knobs = ctx.knobs(CapoInitKnobs)
-        raw = await ctx.read(Calls).ask(prompts.init_prompt(ctx))
+        raw = await ctx.read(Calls).ask(init_prompt(ctx))
         start, end = raw.find("["), raw.rfind("]")
         listed = ast.literal_eval(raw[start : end + 1]) if 0 <= start < end else None
         if not isinstance(listed, list) or not all(isinstance(s, str) for s in listed):
@@ -552,14 +601,14 @@ class CapoCrossover(nodes.Proposer):
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         pairs = _mated(ctx, proposals)
         if lone := [len(pair) for pair in pairs if len(pair) != 2]:
             raise ValueError(f"a crossover merges two parents; an offspring names {lone[0]}")
         answers = await ctx.read(Calls).ask_each(
-            {i: prompts.crossover_prompt(ctx, a, b) for i, (a, b) in enumerate(pairs)}
+            {i: crossover_prompt(ctx, a, b) for i, (a, b) in enumerate(pairs)}
         )
         return nodes.Proposals(
             [rewrite(ctx, p, raw) for p, raw in zip(proposals.proposals, answers, strict=True)]
@@ -603,12 +652,12 @@ class CapoMutate(nodes.Proposer):
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         live = [i for i, p in enumerate(proposals.proposals) if not p.refused]
         answers = await ctx.read(Calls).ask_each(
-            {i: prompts.mutation_prompt(ctx, proposals.individuals[i]) for i in live}
+            {i: mutation_prompt(ctx, proposals.individuals[i]) for i in live}
         )
         mutated = list(proposals.proposals)
         for i, raw in zip(live, answers, strict=True):

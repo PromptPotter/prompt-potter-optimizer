@@ -220,35 +220,34 @@ row it closes.
   it instead of answering it absent. Action: an arm with no shared cells is absent, as in the race's
   replay. **Re-test:** `pytest tests/test_archive.py -k replays_its_decisions` covers `population_kept`.
 - **`tests/test_identity.py` reaches the spawn's private `_laid_arm`** (`_l4_arm`, `_l4_laid`, the depth
-  step). Action: the journey drives `_open_seat` over an offline inner campaign. **Rides with:**
-  the rest of rk-opt link 4. **Re-test:** `grep -n "_laid_arm" tests/test_identity.py` is empty.
+  step). Action: `_laid_arm` and `_one_model` ride `cfg`, and the journey drives `_open_seat` over an
+  offline inner campaign. **Rides with:** rk-dec 3. **Re-test:** `grep -n "_laid_arm" tests/test_identity.py` is empty.
 - **A served prompt-field set is labelled in the browser**: `webapp/lib/prompt-fields.ts::PROMPT_FIELD`.
   Action: the served prompt-field row carries its label, and the constant goes; the ink maps
   (`sample-trajectory.ts::MOVEMENT_CLASS`, `PipelineFlow`'s `tone`) wait until a served word row carries
   its `Tone` (`domain/said.py`). **Rides with:** the rest of rk-opt link 4. **Re-test:**
   `git grep -n "PROMPT_FIELD\|MOVEMENT_CLASS" -- webapp/lib`.
-- **Potter's calls bypass the bench's call door**: the peers ask through `node_context.py::Calls`;
-  potter builds each call by hand (`dispatch/facade.py::build_bundle`, then
-  `llm_call.py::run_optimizer_node`) and handles one fault four ways, one silently under `graceful`;
-  `escalation/firing.py::Layer` and `escalation/firing.py::TransitionResult` are a second member
-  protocol; `dispatch/bundle.py::InjectionBundle` hand-copies run state for every renderer;
-  `escalation/rules.py::_first_match` runs a fixed rule table; the fitness formula has a second spelling
-  (`evaluators.py::resolve_cell_formula`). Action: `Calls.ask(prompt, reply=Model)` with one fault
-  policy; renderers read a potter-owned view in a hashed module; the rules three match functions that
-  keep the name `escalation/rules.py::EscalationEvent` stamps; one formula spelling. **Rides with:**
-  the rest of rk-opt link 4. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
-- **Wave C, the optimizers in one re-key batch**: `potter/l1/` → `l1.py`, `validators/` 7 → 2, peer
-  optimizers' `prompts` + `state` into `members.py`, `pobb/` and `escalation/` flattened, and
-  `runner/inner/tasks.InnerCells` moved into `domain/l4`. **Rides with:** the rest of rk-opt link 4.
-- **The catch-up pool**: `validators.py::CatchUps` and `nodes.py::NoCatchUps` declare one protocol with
-  one implementation, and the round reading takes a lock-in's backfills at
-  `runner/round.py::_catch_up`'s commit, a second door. Action: the bench owns the pool and the
-  race exposes only its priors. **Rides with:** the rest of rk-opt link 4. **Re-test:**
-  `git grep -c "NoCatchUps" -- promptpotter`.
+- **Potter's renderers read a hand-copied snapshot**: potter asks through `node_context.py::Calls.answer`
+  now, but `dispatch/facade.py::build_bundle` copies run state into `dispatch/bundle.py::InjectionBundle`
+  for every renderer (35 fields, then a `replace` for `silent_l1_panels`);
+  `escalation.py::Layer` and `escalation.py::TransitionResult` are a second member
+  protocol; `escalation.py::_first_match` runs a fixed rule table; the fitness formula has a second
+  spelling (`evaluators.py::resolve_cell_formula`). Action: renderers read the node's own reads through
+  a potter-owned view, and the two pure-renderer tests (`test_identity`'s rendered-prompt journey,
+  `test_security`'s poisoned-panel test) drive a node context; the rules three match functions that
+  keep the name `escalation.py::EscalationEvent` stamps; one formula spelling. **Rides with:**
+  rk-opt's next chain. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
+- **`InnerCells` sits in the runner, holding application types**: `runner/inner/tasks.py::InnerCells`
+  holds `optimizer_manifest.py::SelectedOptimizer` per cell and reads its schema, manifest and levers,
+  so it cannot move into `domain/l4` (layering) until a cell holds a domain projection of its
+  optimizer. Action: decide what a cell's optimizer is in `domain/l4` terms (the chain, the levers,
+  the measurement plan), then move `InnerCells` with it. **Rides with:** the `resolve_cells` row.
 - **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**:
-  `runner/round.py::_walk_population` merges a prior's caught-up cells after `run_walks`, and
-  `BACKFILL` is no arm role. Action: a caught-up cell is a recorded row of its prior's arm. **Rides
-  with:** the rest of rk-opt link 4. **Re-test:** in
+  `runner/round.py::_walk_population` merges `CatchUpPool.caught` after `run_walks`, a catch-up walk
+  records no pass (`BACKFILL` is no arm role), and `scoring/query_loop.py` still types the bench's
+  one pool through `domain/validators.py::CatchUps`. Action: a caught-up cell is a recorded row of
+  its prior's arm (its walk continues the prior's pass, `held` = the prior's rows), and the pool
+  moves down beside `run_walks` so the protocol goes. **Rides with:** rk-opt's next chain. **Re-test:** in
   `test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails`'s locked block, the leader's
   last `running` before the close counts the cells `rows(leader)` holds.
 - **`library.py::LibrarySnippet` flattens a cited-or-authored snippet into nullable fields**. Action:
@@ -256,21 +255,22 @@ row it closes.
 - **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
   carry their passes beside `VerificationPass`. Action: both ride the one record. **Rides with:**
   the rest of rk-opt link 4. **Re-test:** `git grep -n "\.overlap\b" -- promptpotter` is empty.
-- **Three bars for "is this θ lift real"**: `potter/escalation/state.py::_improved` reads
+- **Three bars for "is this θ lift real"**: `potter/escalation.py::_improved` reads
   `lift > current.se`, `potter/election.py::_lift` takes `hypot` of both arms', and
   `potter/dispatch/injections/panels.py::detectable_rows` takes `a.se * sqrt(2)`. Action: all three fold
   onto the predicate `scoring/selection.py::elect_round_winner` reads (one lift test on
   `AbilityReading`). It moves decisions and the optimizer prompt: an offline run and the re-key.
   **Rides with:** the rest of rk-opt link 4. **Re-test:**
   `git grep -n -E "lift > current.se|sqrt\(2" -- promptpotter/application/optimizers/potter`.
-- **The collapse gate cuts a hedging arm on noise**: `pobb/checks.py::check` →
+- **The collapse gate cuts a hedging arm on noise**: `pobb.py::check` →
   `domain/scoring.py::is_answer_collapsed` reads one repeated label over `n_min` answered cells as "no
   measurement". Action: collapse is judged against the parent's answers on the same cells, proven by an
   offline run. **Rides with:** the rest of rk-opt link 4.
 - **`ab` re-fits under the current scorer on the whole ruler** (decision 21, rk-opt 5). The tenant
   ruler at a round's reach holds other campaigns' rows, so `ab` regrades those foreign rows off the
   archive too, not only the record's own cells, and with the formula unchanged its fit equals today's
-  (operator, 2026-11-11: option (b)). Only `ab`'s output moves. **Re-test:**
+  (operator, 2026-11-11: option (b)). Only `ab`'s output moves. It needs an sp_hash → archive-entry
+  lookup keyed by dataset hash. **Re-test:**
   `git grep -ln "ab_replay" -- tests` names a test that edits the formula and re-grades.
 - **`resolve_cells` runs twice per run init**: `runner/inner/spawn.py::_inner_cells` (through
   `_identity_config`, `:53`, `:98`) and `runner/inner/tasks.py::_outer_cells` (`:59`) each parse the
@@ -563,7 +563,7 @@ row it closes.
 - **The offline world never reaches the wound**: every heal rung failing (L1 gets no candidates, L2
   records `layer_parse_failure`) and the capo / gepa / levi form failures run no leg. Action: a scripted
   leg that drives each. **Rides with:** det 2.
-- **`PARSE_FAILURE_WRONG_TYPE` is dead**: `optimizers/potter/l1/generate.py` and
+- **`PARSE_FAILURE_WRONG_TYPE` is dead**: `optimizers/potter/l1.py` and
   `domain/optimizer_state.py` name a parse failure no path produces. Action: it goes. **Rides with:**
   det 2. **Re-test:** `git grep -c "PARSE_FAILURE_WRONG_TYPE" -- promptpotter` is 0.
 
@@ -939,7 +939,8 @@ row it closes.
 - **The optimizer registry is outside `optimizers/nodes.py`.** The registry fold waits until optimizer-unit
   coverage no longer rides `optimizers/__init__.py` (`source_scan.py::optimizer_prompt_shapers`):
   `nodes.py` is a `PLUMBING_MODULES` stop, so the fold drops `llm_nodes`, `unfit_pipeline` and
-  `_members` out of every treatment digest. With the `knobs.py` fold, it **rides with:** rk-run 1.
+  `_members` out of every treatment digest, so it waits for the behaviour keys' digest walk. With the
+  `knobs.py` fold, it **rides with:** rk-run 1.
   **Re-test:** `promptpotter/application/optimizers/__init__.py` defines `NODE_MEMBERS`.
 
 ### batch/28 · faults
@@ -1134,7 +1135,10 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 - **The fastest hosts refuse the `l1_generate` schema**: Cerebras wants `properties` on every object, Groq
   strict mode wants every property `required` (`dispatch/l1_wire_schema.py::build_l1_response_schema`).
   Action: the wire goes all-required only together with `strict: True`; the flag is
-  `infrastructure/llm/openai_compat.py:418` (`"strict": False`). **Rides with:** tune 2, whose Owns gain
+  `infrastructure/llm/openai_compat.py::OpenAICompatibleClient._request_params`, shared by every node.
+  **Held:** a strict flag binds the check-in, `l1_critique`, `l2_context` and `l3_plan` too, each with
+  optional fields, and `L2ContextOutput.l1_overrides` is an open map strict cannot state; decide their
+  wire before the flag flips. **Rides with:** tune 2, whose Owns gain
   `openai_compat.py`'s flag (rk-opt's Owns held `l1_wire_schema.py` alone, and the proof is a paid call).
   **Re-test:** one `l1_generate` call pinned to Cerebras parses.
 - **The default host pin is a trial with no verdict**: `domain/pipeline_overlay.py::pin_default_routes`

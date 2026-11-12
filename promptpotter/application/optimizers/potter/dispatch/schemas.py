@@ -104,12 +104,12 @@ class VariantEvidenceGrounding(OptimizerResponseModel):
     """PERMISSIVE on ``field`` at the parse boundary: not every provider honours the grafted enum, so the validator enforces it."""
 
     field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
-    # Never truncated: `l1_strict.py::l1_citation_in_panel` matches it against the panel `field` names.
+    # Never truncated: `validators.py::l1_citation_in_panel` matches it against the panel `field` names.
     citation: str
 
 
 class L1Variant(OptimizerResponseModel):
-    """Slot keys stay loose so a backend-specific node name never fails the parse; a no-op variant parses beside one that edits, and `l1_invariants` drops that arm alone."""
+    """Slot keys stay loose so a backend-specific node name never fails the parse; a no-op variant parses beside one that edits, and `validators.py::detect_invariants` drops that arm alone."""
 
     # Field order is GENERATION order; optional at the PARSE boundary only, REQUIRED on the wire (`l1_wire_schema.py`).
     evidence_grounding: VariantEvidenceGrounding | None = None
@@ -175,7 +175,7 @@ class L1GenerateOutput(OptimizerResponseModel):
 
 def build_l1_response_model(field_names: Mapping[str, str]) -> type[L1GenerateOutput]:
     """``populate_by_name`` stays OFF: the original key must fail, never half-apply a rename. A
-    no-op variant is `l1_invariants.py::detect_invariants`' to read, on resolved node names."""
+    no-op variant is `validators.py::detect_invariants`' to read, on resolved node names."""
     variant = _renamed_variant(tuple(sorted(field_names.items())))
     # `__class_getitem__` builds `list[variant]` as a VALUE; the subscript form is a type expression mypy rejects.
     variants_field: Any = (list.__class_getitem__(variant), ...)

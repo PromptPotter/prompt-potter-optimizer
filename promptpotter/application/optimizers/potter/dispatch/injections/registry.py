@@ -21,8 +21,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     layout_levers,
     resolve_layout_override,
 )
-from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
-from promptpotter.application.optimizers.potter.records import L1Layout
+from promptpotter.application.optimizers.potter.records import ExplorationBudget, L1Layout
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 

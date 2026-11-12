@@ -179,10 +179,6 @@ class PoBBCheck:
     def extend_prior(self, key: ArmKey, rows: Iterable[GradedCell]) -> None:
         self.priors[key] = self.priors[key].merged(race_sheet(rows))
 
-    def holds(self, key: ArmKey, cell: str) -> bool:
-        """A prior holds a cell it SCORED: an errored one is caught up again."""
-        return any(row.key == cell for row in self.priors[key].scoreable)
-
     def epsilon_at(self, n: int) -> float:
         if self.epsilon <= self.epsilon_floor:
             return self.epsilon

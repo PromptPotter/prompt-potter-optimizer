@@ -517,7 +517,7 @@ class ByCallIdentity:
         v["evidence_grounding"] = {"field": field, "citation": prompt[start : start + 40]}
         # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
         # An L4 outer edits the inner optimizer's fields as its pipeline params; there a short
-        # instruction guts its contracts (`l1_strict.py::l1_prompt_field_not_gutted`).
+        # instruction guts its contracts (`validators.py::l1_prompt_field_not_gutted`).
         props = item["properties"]
         slot, edited = (
             ("prompt_fields_updates", "instruction")

@@ -133,17 +133,6 @@ def _unwrap_single_element_list(parsed: Any) -> Any:
     return parsed
 
 
-def extract_parsed_json(response: LLMResponse) -> Any:
-    if response.parsed is not None:
-        return response.parsed
-    parsed = try_parse_json(response.content, "extract_parsed_json")
-    if parsed is not None:
-        return parsed
-    raise ValueError(
-        f"LLM response could not be parsed as JSON; content: {response.content[:500]!r}"
-    )
-
-
 def parse_response_content(
     content: str,
     response_model: type[BaseModel] | None,

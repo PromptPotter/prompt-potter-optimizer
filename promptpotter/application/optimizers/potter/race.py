@@ -14,7 +14,7 @@ from promptpotter.application.bench.node_context import (
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
-from promptpotter.application.optimizers.potter.pobb.checks import (
+from promptpotter.application.optimizers.potter.pobb import (
     EliminationContext,
     EliminationGate,
     PoBBCheck,
@@ -29,17 +29,13 @@ from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.domain.arms import Elimination
 from promptpotter.domain.paired_reading import ArmKey, PriorStanding
 from promptpotter.domain.scoring import CellSheet
-from promptpotter.domain.validators import CaughtUp
 
 if TYPE_CHECKING:
-    import asyncio
-
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizers.nodes import CatchUp, CatchUpFn, Panel
+    from promptpotter.application.optimizers.nodes import Panel
     from promptpotter.application.scoring.query_loop import Walk
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
-    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopSignal
 
 
@@ -138,108 +134,40 @@ class _PriorsAhead:
         return self.pobb.earliest_stop(results, upcoming, unresolved=unresolved)
 
 
-class CatchUpPool:
-    """Every comparison the stop rule makes is on identical cells; one measurement per (prior, cell)."""
-
-    def __init__(self, check: PoBBCheck, measure: CatchUpFn, member: str) -> None:
-        self._check = check
-        self._measure = measure
-        self._member = member
-        self._sps: dict[ArmKey, JobSearchPoint] = {}
-        self._pending: dict[tuple[ArmKey, int], CatchUp] = {}
-
-    def admit(self, key: ArmKey, results: Sequence[GradedCell], sp: JobSearchPoint) -> None:
-        self._check.register_completed(results, key=key)
-        self._sps[key] = sp
-
-    def _unstarted(self, sample: Sample) -> list[ArmKey]:
-        return [
-            key
-            for key in self._check.priors
-            if not self._check.holds(key, sample.key) and (key, sample.id) not in self._pending
-        ]
-
-    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
-        """Nothing is written or graded until :meth:`commit_backfills` takes them."""
-        started: list[asyncio.Future[Any]] = []
-        for cid in self._unstarted(sample)[: max(room, 0)]:
-            backfill = self._measure(self._sps[cid], sample, cid)
-            self._pending[(cid, sample.id)] = backfill
-            started.append(backfill[0])
-        return started
-
-    def owed_backfills(self, sample: Sample) -> int:
-        return len(self._unstarted(sample))
-
-    def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
-        return [call for call, *_ in self._pending.values() if not call.done()]
-
-    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
-        return [call for (_, sid), (call, *_) in self._pending.items() if sid == sample.id]
-
-    def commit_backfills(self, sample: Sample) -> CaughtUp | None:
-        """In prior order, when a serial round would have measured them, so what reaches disk is the serial round's."""
-        taken: dict[ArmKey, Sequence[GradedCell]] = {}
-        for cid in self._check.priors:
-            backfill = self._pending.pop((cid, sample.id), None)
-            if backfill is not None:
-                taken[cid] = backfill[1]()
-                self._check.extend_prior(cid, taken[cid])
-        return CaughtUp(self._member, taken) if taken else None
-
-    def bank_backfills(self, samples: Sequence[Sample]) -> CaughtUp | None:
-        """Written UNGRADED: cells a stopped round's walks were sure to take, so the resume replays them unpaid."""
-        wanted = {s.id for s in samples}
-        taken: dict[ArmKey, list[GradedCell]] = {}
-        for key, (call, commit, _) in list(self._pending.items()):
-            landed = call.done() and not call.cancelled() and call.exception() is None
-            if key[1] in wanted and landed:
-                del self._pending[key]
-                taken.setdefault(key[0], []).extend(commit())
-        return CaughtUp(self._member, taken) if taken else None
-
-    def discard_backfills(self) -> None:
-        """Paid and never written: a serial round would never have made these."""
-        for _call, _commit, discard in self._pending.values():
-            discard()
-        self._pending.clear()
-
-
-class PoBBRace(CatchUpPool):
+class PoBBRace:
     """The parent is the first prior: on an empty pool PoBB short-circuits and the round's first arm is uneliminable."""
 
-    def __init__(
-        self,
-        ctx: NodeContext,
-        panel: Panel,
-        catch_up: CatchUpFn,
-    ) -> None:
+    def __init__(self, ctx: NodeContext, panel: Panel) -> None:
         # The one prior no arm of this round labels; a cell it never answered is caught up, never borrowed.
         lineage = ctx.read(Lineage)
         parent = ArmKey(lineage.parent.id)
-        super().__init__(
-            PoBBCheck(
-                ctx.knobs(PoBBKnobs),
-                admission=ctx.read(Bounds).admission,
-                n_min=ctx.read(Bounds).elimination_n_min,
-                n_samples=len(panel.cells),
-                ruler=ctx.read(Ruler).difficulty.ruler,
-                parent=parent,
-                # The lock-in asks the election, which reads no cell that crowned the parent.
-                crowned=crowning_cells(lineage.rounds, lineage.parent.id),
-            ),
-            catch_up,
-            ctx.node,
+        self._check = PoBBCheck(
+            ctx.knobs(PoBBKnobs),
+            admission=ctx.read(Bounds).admission,
+            n_min=ctx.read(Bounds).elimination_n_min,
+            n_samples=len(panel.cells),
+            ruler=ctx.read(Ruler).difficulty.ruler,
+            parent=parent,
+            # The lock-in asks the election, which reads no cell that crowned the parent.
+            crowned=crowning_cells(lineage.rounds, lineage.parent.id),
         )
         self._progress, self._replay = ctx.read(Progress), ctx.read(Replay)
-        frontier = ctx.read(Frontier)
-        if parent_results := frontier.parent_own_rows:
+        if parent_results := ctx.read(Frontier).parent_own_rows:
             self._check.register_completed(parent_results, key=parent)
-            self._sps[parent] = frontier.parent_point
 
     @property
     def n_priors(self) -> int:
         return len(self._check.priors)
+
+    @property
+    def priors(self) -> Mapping[ArmKey, CellSheet]:
+        return self._check.priors
+
+    def admit(self, key: ArmKey, results: Sequence[GradedCell]) -> None:
+        if key in self._check.priors:
+            self._check.extend_prior(key, results)
+        else:
+            self._check.register_completed(results, key=key)
 
     @property
     def blocks(self) -> None:

@@ -174,7 +174,7 @@ class Elimination(FrozenModel):
     """The eliminator's reading of a stop it made, for the arm or against it."""
 
     reason: str
-    # Opaque to the bench (potter's: `pobb/checks.py::EliminationContext`).
+    # Opaque to the bench (potter's: `pobb.py::EliminationContext`).
     context: dict[str, Any]
 
 

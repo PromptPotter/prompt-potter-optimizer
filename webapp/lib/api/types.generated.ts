@@ -5640,7 +5640,7 @@ export const SCORE_LENS_LABELS: Record<string, string> = {
   "score:fitness": "Fitness",
 };
 
-// Mirror of application/optimizers/potter/pobb/checks.py::ABORT_LENS_LABELS, in display order.
+// Mirror of application/optimizers/potter/pobb.py::ABORT_LENS_LABELS, in display order.
 export const ABORT_LENS_LABELS: Record<string, string> = {
   "abort:epsilon_off": "No ε-elimination",
   "abort:lock_in_off": "No lock-in",
