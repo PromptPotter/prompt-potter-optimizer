@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from promptpotter.config.paths import default_projects_root
 from promptpotter.infrastructure.identity.blocklist import check_blocklist
-from promptpotter.infrastructure.identity.default_claim import is_host_tenant_dir
+from promptpotter.infrastructure.identity.default_claim import is_declared_host
 from promptpotter.infrastructure.identity.github import GitHubProviderClient
 from promptpotter.infrastructure.identity.google import GoogleProviderClient
 from promptpotter.infrastructure.identity.grants import (
@@ -121,5 +121,5 @@ def identity_of_session(data: SessionData, bundle: IdentityBundle) -> IdentityCo
         claims={"subject": data.subject},
         capabilities=_session_capabilities(access_state),
         # A delegate (above) is never the host, whoever delegated it.
-        host=is_host_tenant_dir(data.user_id),
+        host=is_declared_host(data.email),
     )

@@ -6,12 +6,9 @@ import logging
 from functools import partial
 from typing import TYPE_CHECKING
 
-from promptpotter.infrastructure.llm.send_pacing import (
-    SendBudget,
-    set_throttle_stall_sink,
-    under_budget,
-)
+from promptpotter.infrastructure.llm.send_pacing import SendBudget
 from promptpotter.shared.errors import CellHaltedError
+from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -66,9 +63,11 @@ class CellEnvelope:
 
     async def __aenter__(self) -> CellEnvelope:
         # Bound in the cell's own task, so its resends and stall never touch a sibling's.
-        self._bound.enter_context(under_budget(self._budget))
-        set_throttle_stall_sink(
-            partial(self._give_back, cause="queued behind the shared rate limiter")
+        self._bound.enter_context(
+            scoped(
+                send_budget=self._budget,
+                stall_sink=partial(self._give_back, cause="queued behind the shared rate limiter"),
+            )
         )
         await self._deadline.__aenter__()
         return self
@@ -85,8 +84,6 @@ class CellEnvelope:
             await self._deadline.__aexit__(exc_type, exc, tb)
         except TimeoutError:
             timed_out = True
-        finally:
-            set_throttle_stall_sink(None)
         # A cancel the timeout did not convert is someone else's (a pause, a Ctrl+C) and keeps travelling.
         if not timed_out and exc_type is not None and issubclass(exc_type, asyncio.CancelledError):
             return False

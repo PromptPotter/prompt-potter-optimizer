@@ -21,7 +21,6 @@ from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Measure
 from promptpotter.domain.spend import ROLE_SPEND_KIND
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
-from promptpotter.infrastructure.llm.spend_book import bound_spend_book
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, current_round, filed_as
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.shared.clock import utcnow_iso
@@ -30,6 +29,7 @@ from promptpotter.shared.measurement_context import (
     MeasuredPass,
     measured_pass_context,
 )
+from promptpotter.shared.run_scope import run_scope
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -311,7 +311,7 @@ def open_walk(
         dataset, feed=feed, label=label
     )
     cell_keys = {} if feed is None else {s.id: feed.cell_key(s.key) for s in dataset}
-    book = bound_spend_book()
+    book = run_scope().book
     rereads = frozenset(
         s for s in cached_sample_results if book is None or book.replays_free(cell_keys[s])
     )

@@ -40,11 +40,11 @@ from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
 from promptpotter.domain.prompt_block import BlockPack
 from promptpotter.domain.ruler import RulerFold
-from promptpotter.domain.run_records import RECORD_ADAPTER
+from promptpotter.domain.run_records import RECORD_ADAPTER, Charge
 from promptpotter.domain.sample import ArchiveConfig
 from promptpotter.infrastructure.identity.blocklist import Blocklist
 from promptpotter.infrastructure.identity.grants import GrantsFile
-from promptpotter.infrastructure.identity.paths import IDENTITY_DIR, DefaultClaim, IdentityPaths
+from promptpotter.infrastructure.identity.paths import IDENTITY_DIR, IdentityPaths
 from promptpotter.infrastructure.identity.provider_config import ProviderConfigBundle
 from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.infrastructure.llm.capabilities import CAPABILITIES_CACHE, CAPABILITY_FILE
@@ -116,7 +116,6 @@ from promptpotter.infrastructure.store.wallet_store import (
     CHARGES_FILE,
     GRANT_FILE,
     HELD_KEYS,
-    ChargeRecord,
     CouponGrant,
 )
 from promptpotter.shared.errors import validation_reason
@@ -245,13 +244,6 @@ INSTALL_KINDS: tuple[Kind, ...] = (
         Fate.CACHE,
         TypeAdapter(SessionData),
     ),
-    Kind(
-        "host claim",
-        _INSTALL,
-        _IDENTITY.default_claim_marker.as_posix(),
-        _SURVIVOR,
-        TypeAdapter(DefaultClaim),
-    ),
     # The app's perimeter log, 90 days deep: no account is in it, so a reset takes it.
     Kind("app visits", _INSTALL, f"{VISIT_RECORDS_DIR}/*.jsonl", Fate.RUN, visit_record),
     Kind("install block pack", _INSTALL, _BLOCK_PACK, _SURVIVOR, TypeAdapter(BlockPack)),
@@ -319,7 +311,7 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
     Kind("consent trail", Scope.ACCOUNT, CONSENT_FILE, _SURVIVOR, TypeAdapter(ConsentLine)),
     Kind("grant", Scope.ACCOUNT, GRANT_FILE, _SURVIVOR, TypeAdapter(CouponGrant)),
     Kind("api keys", Scope.ACCOUNT, API_KEYS_FILE, _SURVIVOR, HELD_KEYS),
-    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _SURVIVOR, TypeAdapter(ChargeRecord)),
+    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _SURVIVOR, TypeAdapter(Charge)),
     Kind("bank", Scope.ACCOUNT, f"{BANKS_DIR}/*.json", Fate.CACHE, read_bank),
     # An upload definition's `source:` reads it.
     Kind(
@@ -584,6 +576,10 @@ KINDS: tuple[Kind, ...] = (
 RETIRED_KINDS: tuple[Kind, ...] = (
     Kind("retired run file", _WS, "campaigns/*/**", Fate.RUN, _retired),
     Kind("retired draft file", _WS, f"{_DRAFT}/**", Fate.RUN, _retired),
+    # Its claim moved onto the host's account (`migrations/host_account.py`).
+    Kind(
+        "retired host claim", _INSTALL, f"{IDENTITY_DIR}/default_claimed.json", Fate.RUN, _retired
+    ),
 )
 
 

@@ -370,7 +370,7 @@
             "type": "boolean"
           },
           "group_by": {
-            "description": "The colour axis: `model` is the exact model id, `api_key` the key that paid: the provider that billed the call, and whether the host's key under the coupon or the account's own sent it (`BilledCharge.key_source`).",
+            "description": "The colour axis: `model` is the exact model id, `api_key` the key that paid: the provider that billed the call, and whether the host's key under the coupon or the account's own sent it (`Charge.key_source`).",
             "enum": [
               "model",
               "api_key"
@@ -2344,10 +2344,6 @@
               }
             ],
             "description": "What the root course runs with; null where its pipeline did not resolve."
-          },
-          "spend_lifetime": {
-            "$ref": "#/components/schemas/LifetimeSpend",
-            "description": "Every cycle's bill, forks, forwarded inner spend and deleted cycles included."
           }
         },
         "required": [
@@ -2355,7 +2351,6 @@
           "root",
           "line",
           "lifecycle",
-          "spend_lifetime",
           "runs_with"
         ],
         "title": "CampaignFacts",
@@ -9007,6 +9002,11 @@
             "title": "Bill Is Floor",
             "type": "boolean"
           },
+          "billed_tokens": {
+            "description": "Every token the sends billed, priced or not: what a token allowance counts.",
+            "title": "Billed Tokens",
+            "type": "integer"
+          },
           "billed_usd": {
             "description": "What the providers REPORTED they billed, over every cycle, fork and forwarded inner run, plus what a deleted cycle banked. Never an estimate: a call priced off our rate table is `rate_priced_usd`, a send whose bill never came `unreported_usd`.",
             "title": "Billed Usd",
@@ -9044,6 +9044,7 @@
           "calls_rate_priced",
           "bill_is_floor",
           "unpriced_tokens",
+          "billed_tokens",
           "sends_unreported",
           "unreported_usd"
         ],
@@ -15311,7 +15312,8 @@
             "type": "array"
           },
           "run_limits": {
-            "$ref": "#/components/schemas/RunLimits"
+            "$ref": "#/components/schemas/RunLimits",
+            "description": "What binds the cycle (`CampaignStore.run_limits`): its launch's limits, its standing budget and its campaign's ceiling laid over; a next launch's budget where none runs."
           },
           "run_phase": {
             "$ref": "#/components/schemas/RunPhase",
@@ -15408,9 +15410,9 @@
           "measured_unit",
           "at_time",
           "round_cells_ceiling",
-          "run_limits",
           "current_round",
           "sample_coverage",
+          "run_limits",
           "campaign_id",
           "cycle_id",
           "run_phase",
@@ -16705,10 +16707,6 @@
               }
             ],
             "description": "What the root course runs with; null where its pipeline did not resolve."
-          },
-          "spend_lifetime": {
-            "$ref": "#/components/schemas/LifetimeSpend",
-            "description": "Every cycle's bill, forks, forwarded inner spend and deleted cycles included."
           }
         },
         "required": [
@@ -16716,7 +16714,6 @@
           "root",
           "line",
           "lifecycle",
-          "spend_lifetime",
           "runs_with",
           "deletable_stubs"
         ],
@@ -17233,9 +17230,6 @@
             "title": "Address",
             "type": "string"
           },
-          "facts": {
-            "$ref": "#/components/schemas/UnstartedFacts"
-          },
           "figures": {
             "description": "Its figures for a person, each composed once with a value, in the order a row shows them.",
             "items": {
@@ -17293,25 +17287,9 @@
           "tags",
           "figures",
           "lines",
-          "span",
-          "facts"
+          "span"
         ],
         "title": "UnstartedCampaign",
-        "type": "object"
-      },
-      "UnstartedFacts": {
-        "additionalProperties": false,
-        "description": "An open check-in's typed facts: it has no cycle, so no course, line or run.",
-        "properties": {
-          "spend_lifetime": {
-            "$ref": "#/components/schemas/LifetimeSpend",
-            "description": "What its check-in has cost so far."
-          }
-        },
-        "required": [
-          "spend_lifetime"
-        ],
-        "title": "UnstartedFacts",
         "type": "object"
       },
       "UserSettings": {

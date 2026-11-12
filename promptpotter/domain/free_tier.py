@@ -18,6 +18,8 @@ class FreeTier(FrozenModel):
     task_nodes: tuple[str, ...]
     task_models: dict[str, Bounds]
     optimizer_models: dict[str, Bounds]
+    # The USD one launch holds, capped at admission: a config layer setting it would be lifted.
+    ceiling_usd: float
     # The check-in's last config layer, in a dataset file's `campaign:` shape.
     campaign: dict[str, Any]
     ask: Ask

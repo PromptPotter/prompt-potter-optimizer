@@ -11,6 +11,8 @@ from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import ErrorRecord, StopReason
 from promptpotter.domain.run_records import (
     BackendWarningRecord,
+    CallPrice,
+    Charge,
     CycleRecord,
     PricedKeyRecord,
     ProviderEasedRecord,
@@ -25,7 +27,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.scoring import GradedCell, WalkedCell
-from promptpotter.domain.spend import KeySource, TokenAccount, TokenUsageKind
+from promptpotter.domain.spend import TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.shared.measurement_context import MeasurementRole, measured_pass
 from promptpotter.shared.run_scope import UNBOUND, run_scope
@@ -103,7 +105,7 @@ def bound_round() -> int:
     return round_num
 
 
-def _append_record(record: CycleRecord, ledger: CycleEventLog | None = None) -> int | None:
+def append_record(record: CycleRecord, ledger: CycleEventLog | None = None) -> int | None:
     """``None``: the bound ledger is muted. A failed append raises to the call site."""
     if ledger is None:
         ledger = bound_ledger(type(record).__name__)
@@ -132,27 +134,58 @@ def rate_priced_usd(
     )
 
 
-def emit_token_usage(
-    *,
-    node: str,
+def call_price(
     kind: TokenUsageKind,
     usage: TokenAccount,
-    duration_s: float,
-    key_source: KeySource | None,
-    model: str | None = None,
-    provider: str | None = None,
-    served_by: str | None = None,
-    cost_usd: float | None = None,
-    recorded_rate_usd: float | None = None,
-    cached: bool = False,
-    hold_id: str | None = None,
-    mirrored: bool = False,
-) -> TokenUsageRecord | None:
-    record = TokenUsageRecord(
+    *,
+    model: str | None,
+    provider: str | None,
+    cost_usd: float | None,
+    recorded: float | None,
+) -> CallPrice:
+    """Priced once, here: readers sum the stamp, so a rate refresh rewrites nothing."""
+    return CallPrice(
         kind=filed_kind(kind),
-        node=node,
         model=model,
         provider=provider,
+        cost_usd=cost_usd,
+        rate_priced_usd=rate_priced_usd(
+            usage, model=model, provider=provider, cost_usd=cost_usd, recorded=recorded
+        ),
+    )
+
+
+def emit_replay_usage(
+    *,
+    node: str,
+    usage: TokenAccount,
+    duration_s: float,
+    price: CallPrice,
+    served_by: str | None,
+) -> None:
+    append_record(
+        token_usage_record(
+            node=node,
+            usage=usage,
+            duration_s=duration_s,
+            money=price,
+            served_by=served_by,
+            mirrored=False,
+        )
+    )
+
+
+def token_usage_record(
+    *,
+    node: str,
+    usage: TokenAccount,
+    duration_s: float,
+    money: Charge | CallPrice,
+    served_by: str | None,
+    mirrored: bool,
+) -> TokenUsageRecord:
+    return TokenUsageRecord(
+        node=node,
         served_by=served_by,
         # Flat on purpose: every lifetime-spend read sums these counts off raw JSON.
         input_tokens=usage.input,
@@ -161,19 +194,11 @@ def emit_token_usage(
         cache_read_tokens=usage.cache_read or 0,
         cache_write_tokens=usage.cache_write,
         duration_s=float(duration_s),
-        cost_usd=cost_usd,
-        # Priced once, here: readers sum the stamp, so a rate refresh rewrites nothing.
-        rate_priced_usd=rate_priced_usd(
-            usage, model=model, provider=provider, cost_usd=cost_usd, recorded=recorded_rate_usd
-        ),
-        key_source=key_source,
-        hold_id=hold_id,
+        money=money,
         mirrored=mirrored,
-        cached=cached,
         round=current_round(),
         role=cand.role if (cand := measured_pass()) else None,
     )
-    return record if _append_record(record) is not None else None
 
 
 def emit_backend_warning(
@@ -188,7 +213,7 @@ def emit_backend_warning(
     status_code: int | None = None,
     final: bool = False,
 ) -> None:
-    _append_record(
+    append_record(
         BackendWarningRecord(
             kind=kind,
             attempt=attempt,
@@ -212,7 +237,7 @@ def emit_provider_hold(
     gives_up_at: float,
     reading: BackpressureReading,
 ) -> None:
-    _append_record(
+    append_record(
         ProviderHoldRecord(
             sender=sender, scope=scope, strikes=strikes, gives_up_at=gives_up_at, reading=reading
         ),
@@ -221,7 +246,7 @@ def emit_provider_hold(
 
 
 def emit_provider_eased(*, ledger: CycleEventLog, sender: str, held_s: float) -> None:
-    _append_record(ProviderEasedRecord(sender=sender, held_s=held_s), ledger)
+    append_record(ProviderEasedRecord(sender=sender, held_s=held_s), ledger)
 
 
 # Cells (`ReplayFeed.cell_key`) and calls (`call:{reuse key}`), per CAMPAIGN and never per spend
@@ -248,7 +273,7 @@ def claim_campaign_price(key: str) -> bool:
     if key in priced:
         return False
     priced.add(key)
-    _append_record(PricedKeyRecord(priced_key=key))
+    append_record(PricedKeyRecord(priced_key=key))
     return True
 
 
@@ -256,35 +281,8 @@ def claim_call_price(reuse_key: str) -> bool:
     return claim_campaign_price(f"call:{reuse_key}")
 
 
-def emit_spend_hold(
-    *,
-    hold_id: str,
-    node: str,
-    kind: TokenUsageKind,
-    input_tokens: int,
-    output_tokens: int | None,
-    cost_usd: float | None,
-    model: str | None,
-    provider: str | None,
-    key_source: KeySource,
-    ledger: CycleEventLog | None,
-) -> None:
-    """``kind`` arrives already filed (``spend_book.py::filed``)."""
-    _append_record(
-        SpendHoldRecord(
-            hold_id=hold_id,
-            kind=kind,
-            node=node,
-            model=model,
-            provider=provider,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_usd=cost_usd,
-            key_source=key_source,
-            round=current_round(),
-        ),
-        ledger,
-    )
+def emit_spend_hold(*, node: str, charge: Charge, ledger: CycleEventLog | None) -> None:
+    append_record(SpendHoldRecord(node=node, charge=charge, round=current_round()), ledger)
 
 
 def emit_error_record(
@@ -297,7 +295,7 @@ def emit_error_record(
         traceback=traceback,
         round=current_round(),
     )
-    _append_record(record)
+    append_record(record)
     return record
 
 
@@ -308,7 +306,7 @@ def emit_round_warning(
     severity: RoundWarningSeverity = "warning",
     detail: dict[str, Any] | None = None,
 ) -> None:
-    _append_record(
+    append_record(
         RoundWarningRecord(
             kind=kind,
             severity=severity,
@@ -333,7 +331,7 @@ def emit_sample_started(
     query: str,
     sample_lookahead: int,
 ) -> None:
-    _append_record(
+    append_record(
         SampleStartedRecord(
             round=bound_round(),
             individual_id=individual_id,
@@ -357,7 +355,7 @@ def emit_sample_scored(
     cell: GradedCell,
     running: ScoreSummary | None,
 ) -> None:
-    _append_record(
+    append_record(
         SampleScoredRecord(
             round=bound_round(),
             individual_id=individual_id,
@@ -379,7 +377,7 @@ def emit_race_catch_up(
     position: int,
     cells: dict[ArmKey, WalkedCell],
 ) -> None:
-    _append_record(
+    append_record(
         RaceCatchUpRecord(
             round=bound_round(),
             arm=arm,

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of
-from promptpotter.application.jobs.coupon import Send, bind_account
+from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.quota import (
     admit_launch,
     check_launch_quotas,
@@ -56,14 +56,7 @@ from promptpotter.domain.spend import (
     HeldBudget,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.send_pacing import set_abort_check
-from promptpotter.infrastructure.llm.spend_book import (
-    Hold,
-    LiveHold,
-    SpendBook,
-    bound_spend_book,
-    spending_under,
-)
+from promptpotter.infrastructure.llm.spend_book import Hold, LiveCycle, LiveHold, SpendBook
 from promptpotter.infrastructure.store.dataset_access import (
     definition_version,
     resolve_dataset,
@@ -82,6 +75,7 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
+from promptpotter.shared.run_scope import run_scope, scoped
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
@@ -581,15 +575,23 @@ def open_spend_book(
             raise RuntimeError(f"a book opens only on its own job, and {held.job_id} is gone")
         hold = Hold(held.share, job.reserve)
     else:
-        hold = LiveHold(stores.campaigns.cycle_dir(hop), job_registry.job_file(held.job_id))
-    return SpendBook(
+        hold = LiveHold(LiveCycle(stores.campaigns, hop), job_registry.job_file(held.job_id))
+    book = SpendBook(
         declared=held.admitted,
         hold=hold,
         meters=meters,
         opened=opened,
-        cycle_dir=stores.campaigns.cycle_dir(hop) if live and hop is not None else None,
-        metered=NOTHING_METERED if hop is None else stores.campaigns.cycle_metered(hop, meters),
+        cycle=LiveCycle(stores.campaigns, hop) if live and hop is not None else None,
     )
+    if hop is not None and (unreported := book.take_up(stores.campaigns.ledger(hop))).sends:
+        logger.warning(
+            "%d paid send(s) on %s ended unpriced; the ceiling holds up to $%.4f for them, and "
+            "no surface counts it as spent.",
+            unreported.sends,
+            hop,
+            unreported.usd,
+        )
+    return book
 
 
 async def slotless_share[S](
@@ -608,7 +610,7 @@ async def slotless_share[S](
     enclosing run's book has left at its spawn."""
     enclosing: Budget | None = None
     if isinstance(holder, InnerRun):
-        if (book := bound_spend_book()) is None:
+        if (book := run_scope().book) is None:
             raise RuntimeError("an inner run spawns only under its enclosing run's book")
         enclosing = book.money_left()
     job_registry = JobRegistry.attach(stores.jobs_dir)
@@ -691,8 +693,6 @@ async def paid_pass(
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
             cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
             close_dead_bench(CycleEventLog.open(cycle_dir))
-            # The rate-limit and slot waits poll it too, as a loop's do.
-            set_abort_check(holding.control.pause_requested)
             ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)
             declared = ceiling.over(declared)
         held = await asyncio.to_thread(
@@ -716,12 +716,15 @@ async def paid_pass(
             live=False,
         )
         job_registry.mark_started(job.job_id)
-        unbind = bind_account(stores)
-        try:
-            with spending_under(book):
-                yield book
-        finally:
-            unbind()
+        with scoped(
+            account=stores,
+            book=book,
+            # The rate-limit and slot waits poll the cycle's pause too, as a loop's do.
+            abort_check=run_scope().abort_check
+            if holding is None
+            else holding.control.pause_requested,
+        ):
+            yield book
     except BaseException as exc:
         start.release(exc)
         if holding is None:

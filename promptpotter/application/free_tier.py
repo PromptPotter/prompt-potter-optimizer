@@ -37,12 +37,9 @@ def on_free_tier(stores: Stores) -> bool:
 
 
 def tier_ceiling(stores: Stores) -> float | None:
-    """The USD one launch may hold on the free tier, its `campaign:` layer's own ceiling: an
-    admission bound (`quota.py::_admitted`), so no operator axis lifts it. ``None`` off it."""
-    if not on_free_tier(stores):
-        return None
-    usd = free_tier().campaign.get("optimization", {}).get("budget", {}).get("usd")
-    return None if usd is None else float(usd)
+    """The USD one launch may hold on the free tier: an admission bound (`quota.py::_admitted`),
+    so no operator axis lifts it. ``None`` off it."""
+    return free_tier().ceiling_usd if on_free_tier(stores) else None
 
 
 def model_calls(

@@ -532,6 +532,9 @@ class LifetimeSpend(StrictModel):
     unpriced_tokens: int = Field(
         description="Tokens no provider billed and no rate on file prices."
     )
+    billed_tokens: int = Field(
+        description="Every token the sends billed, priced or not: what a token allowance counts."
+    )
     sends_unreported: bool = Field(
         description="Some send ended with no bill, so up to `unreported_usd` more may have left "
         "the account than `billed_usd` says."
@@ -550,6 +553,7 @@ class LifetimeSpend(StrictModel):
             calls_rate_priced=calls_rate_priced(spent.rate_priced_usd),
             bill_is_floor=bill_is_floor(spent.unpriced_tokens),
             unpriced_tokens=spent.unpriced_tokens,
+            billed_tokens=spent.used_tokens,
             sends_unreported=spent.sends_unreported,
             unreported_usd=round(spent.unreported_usd, 6),
         )
@@ -607,7 +611,8 @@ class SpendBucket(StrictModel):
         return reading.model_copy(update={"badge": f"{reading.badge} ·w{self.cache_write_tokens}"})
 
     def bank(self, record: TokenUsageRecord) -> None:
-        usd = record.bill_or_rate_usd
+        price = record.price
+        usd = price.bill_or_rate_usd
         in_tok = int(record.input_tokens)
         out_tok = int(record.output_tokens)
 
@@ -616,17 +621,17 @@ class SpendBucket(StrictModel):
         elif in_tok or out_tok:
             self.incurred_unpriced_tokens += in_tok + out_tok
 
-        if not record.cached:
+        if record.charge is not None:
             self.input_tokens += in_tok
             self.output_tokens += out_tok
             self.reasoning_tokens += int(record.reasoning_tokens)
             # Billed side only: a replay's cache tokens would report a prefix holding on calls never made.
             self.cache_read_tokens += int(record.cache_read_tokens)
             self.cache_write_tokens += int(record.cache_write_tokens)
-            if record.cost_usd is not None:
-                self.used_usd = round(self.used_usd + record.cost_usd, 6)
-            elif record.rate_priced_usd is not None:
-                self.rate_priced_usd = round(self.rate_priced_usd + record.rate_priced_usd, 6)
+            if price.cost_usd is not None:
+                self.used_usd = round(self.used_usd + price.cost_usd, 6)
+            elif price.rate_priced_usd is not None:
+                self.rate_priced_usd = round(self.rate_priced_usd + price.rate_priced_usd, 6)
             if usd is not None:
                 self.rate_known = True
             elif in_tok or out_tok:
@@ -658,6 +663,13 @@ def spend_slot[K, M: StrictModel](held: dict[K, M], key: K, make: type[M]) -> M:
 
 def _bank_into[K](buckets: dict[K, SpendBucket], key: K, record: TokenUsageRecord) -> None:
     spend_slot(buckets, key, SpendBucket).bank(record)
+
+
+def _copied[K](buckets: dict[K, SpendBucket], key: K) -> dict[K, SpendBucket]:
+    out = dict(buckets)
+    if (bucket := out.get(key)) is not None:
+        out[key] = bucket.model_copy()
+    return out
 
 
 def _absorb_into[K](buckets: dict[K, SpendBucket], other: Mapping[K, SpendBucket]) -> None:
@@ -696,13 +708,23 @@ class SpendRollup(StrictModel):
         return _bucket_per_kind() | held
 
     def bank(self, record: TokenUsageRecord) -> None:
-        self.by_kind[record.kind].bank(record)
+        self.by_kind[record.price.kind].bank(record)
         if record.node.startswith(NESTED_NODE_PREFIX):
             _bank_into(self._by_nested_node, record.node.removeprefix(NESTED_NODE_PREFIX), record)
         else:
             _bank_into(self._by_node, record.node, record)
             _bank_into(self._by_role, record.role, record)
         self._retotal()
+
+    def banked(self, record: TokenUsageRecord) -> SpendRollup:
+        """*record* banked into a copy whose touched buckets are copied first: the rest is shared."""
+        node = record.node.removeprefix(NESTED_NODE_PREFIX)
+        out = self.model_copy(update={"by_kind": _copied(self.by_kind, record.price.kind)})
+        out._by_role = _copied(self._by_role, record.role)
+        out._by_node = _copied(self._by_node, node)
+        out._by_nested_node = _copied(self._by_nested_node, node)
+        out.bank(record)
+        return out
 
     def absorb(self, other: SpendRollup) -> None:
         _absorb_into(self.by_kind, other.by_kind)
@@ -866,11 +888,10 @@ def meter_usd[T: (float, float | None)](meter: CeilingMeter, *, sent: T, incurre
 
 def metered(record: TokenUsageRecord, meter: CeilingMeter) -> tuple[float | None, int]:
     """ONE call as a ceiling of *meter* counts it: USD ``None`` where nothing prices it."""
-    if record.kind not in METER_KINDS[meter]:
+    price = record.price
+    if price.kind not in METER_KINDS[meter]:
         return 0.0, 0
-    usd = meter_usd(
-        meter,
-        sent=0.0 if record.cached else record.bill_or_rate_usd,
-        incurred=record.bill_or_rate_usd,
-    )
-    return usd, 0 if record.cached else record.input_tokens + record.output_tokens
+    if record.charge is None:
+        return meter_usd(meter, sent=0.0, incurred=price.bill_or_rate_usd), 0
+    usd = price.bill_or_rate_usd
+    return meter_usd(meter, sent=usd, incurred=usd), record.input_tokens + record.output_tokens

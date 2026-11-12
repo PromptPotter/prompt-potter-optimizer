@@ -10,12 +10,11 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
 
 from pydantic import Field, SecretStr, TypeAdapter
 
-from promptpotter.domain.run_records import SpendHoldRecord
-from promptpotter.domain.spend import Budget, KeySource, TokenUsageKind
+from promptpotter.domain.run_records import Charge
+from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
     append_line,
@@ -114,46 +113,6 @@ class TenantApiKeyStore:
             lock.release()
 
 
-class HeldCharge(FrozenModel):
-    """A send's hold, booked as it is placed: unclosed, it is what the send may have cost."""
-
-    record_type: Literal["held"] = "held"
-    hold_id: str
-    key_source: KeySource
-    input_tokens: int
-    # ``None`` where nothing capped the reply: such a send holds no tokens.
-    output_tokens: int | None
-    cost_usd: float | None
-    # The ledger the hold landed on, relative to the account: while its producer is attached the
-    # run's reservation already holds it.
-    ledger: str
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
-class BilledCharge(FrozenModel):
-    """One answered part of a send, booked as it lands; both figures ``None`` is unpriced."""
-
-    record_type: Literal["billed"] = "billed"
-    hold_id: str
-    key_source: KeySource
-    kind: TokenUsageKind
-    # ``None`` where neither the send nor its reply named one, as on a backend cell.
-    model: str | None
-    provider: str | None
-    cost_usd: float | None
-    rate_priced_usd: float | None
-    tokens: int
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
-ChargeRecord = HeldCharge | BilledCharge
-
-
-def held_tokens(hold: SpendHoldRecord | HeldCharge) -> int:
-    """An uncapped reply holds no tokens: such a send is admitted only where no token ceiling stands."""
-    return 0 if hold.output_tokens is None else hold.input_tokens + hold.output_tokens
-
-
 class ChargeBook:
     """Written at the send by `spend_book.py::Admission`, so no delete and no reshape of run data reads a ledger to keep it."""
 
@@ -161,12 +120,12 @@ class ChargeBook:
         self.account_dir = account_dir
         self.path = account_dir / CHARGES_FILE
 
-    def append(self, charge: ChargeRecord) -> None:
+    def append(self, charge: Charge) -> None:
         self.account_dir.mkdir(parents=True, exist_ok=True)
         append_line(self.path, charge.model_dump_json().encode("utf-8"))
 
     def held_on(self, ledger: Path) -> str:
         return Path(os.path.relpath(ledger, self.account_dir)).as_posix()
 
-    def ledger_of(self, hold: HeldCharge) -> Path:
+    def ledger_of(self, hold: Charge) -> Path:
         return self.account_dir / hold.ledger

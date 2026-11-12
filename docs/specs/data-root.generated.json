@@ -595,9 +595,9 @@
       ],
       "shape": {
         "$defs": {
-          "BilledCharge": {
+          "CallPrice": {
             "additionalProperties": false,
-            "description": "One answered part of a send, booked as it lands; both figures ``None`` is unpriced.",
+            "description": "What one call cost, the one carrier of a call's price: on a send's charge, or a replay's own.",
             "properties": {
               "cost_usd": {
                 "anyOf": [
@@ -609,18 +609,6 @@
                   }
                 ],
                 "title": "Cost Usd"
-              },
-              "hold_id": {
-                "title": "Hold Id",
-                "type": "string"
-              },
-              "key_source": {
-                "enum": [
-                  "host",
-                  "user"
-                ],
-                "title": "Key Source",
-                "type": "string"
               },
               "kind": {
                 "$ref": "#/$defs/TokenUsageKind"
@@ -657,101 +645,16 @@
                   }
                 ],
                 "title": "Rate Priced Usd"
-              },
-              "record_type": {
-                "const": "billed",
-                "default": "billed",
-                "title": "Record Type",
-                "type": "string"
-              },
-              "timestamp": {
-                "title": "Timestamp",
-                "type": "string"
-              },
-              "tokens": {
-                "title": "Tokens",
-                "type": "integer"
               }
             },
             "required": [
-              "hold_id",
-              "key_source",
               "kind",
               "model",
               "provider",
               "cost_usd",
-              "rate_priced_usd",
-              "tokens"
+              "rate_priced_usd"
             ],
-            "title": "BilledCharge",
-            "type": "object"
-          },
-          "HeldCharge": {
-            "additionalProperties": false,
-            "description": "A send's hold, booked as it is placed: unclosed, it is what the send may have cost.",
-            "properties": {
-              "cost_usd": {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Cost Usd"
-              },
-              "hold_id": {
-                "title": "Hold Id",
-                "type": "string"
-              },
-              "input_tokens": {
-                "title": "Input Tokens",
-                "type": "integer"
-              },
-              "key_source": {
-                "enum": [
-                  "host",
-                  "user"
-                ],
-                "title": "Key Source",
-                "type": "string"
-              },
-              "ledger": {
-                "title": "Ledger",
-                "type": "string"
-              },
-              "output_tokens": {
-                "anyOf": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Output Tokens"
-              },
-              "record_type": {
-                "const": "held",
-                "default": "held",
-                "title": "Record Type",
-                "type": "string"
-              },
-              "timestamp": {
-                "title": "Timestamp",
-                "type": "string"
-              }
-            },
-            "required": [
-              "hold_id",
-              "key_source",
-              "input_tokens",
-              "output_tokens",
-              "cost_usd",
-              "ledger"
-            ],
-            "title": "HeldCharge",
+            "title": "CallPrice",
             "type": "object"
           },
           "TokenUsageKind": {
@@ -765,14 +668,61 @@
             "type": "string"
           }
         },
-        "anyOf": [
-          {
-            "$ref": "#/$defs/HeldCharge"
+        "additionalProperties": false,
+        "description": "One line of a send's money: its hold at the send's bound, then each answered part closing it.",
+        "properties": {
+          "hold_id": {
+            "title": "Hold Id",
+            "type": "string"
           },
-          {
-            "$ref": "#/$defs/BilledCharge"
+          "key_source": {
+            "enum": [
+              "host",
+              "user"
+            ],
+            "title": "Key Source",
+            "type": "string"
+          },
+          "ledger": {
+            "title": "Ledger",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/$defs/CallPrice"
+          },
+          "record_type": {
+            "const": "charge",
+            "default": "charge",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "held",
+              "billed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
           }
-        ]
+        },
+        "required": [
+          "state",
+          "hold_id",
+          "key_source",
+          "price",
+          "tokens",
+          "ledger"
+        ],
+        "title": "Charge",
+        "type": "object"
       }
     },
     "check-in manifest": {
@@ -1136,6 +1086,10 @@
             "title": "Campaign",
             "type": "object"
           },
+          "ceiling_usd": {
+            "title": "Ceiling Usd",
+            "type": "number"
+          },
           "optimizer_models": {
             "additionalProperties": {
               "$ref": "#/$defs/Bounds"
@@ -1162,6 +1116,7 @@
           "task_nodes",
           "task_models",
           "optimizer_models",
+          "ceiling_usd",
           "campaign",
           "ask"
         ],
@@ -1320,33 +1275,6 @@
         "identity/grants_audit.jsonl"
       ],
       "shape": null
-    },
-    "host claim": {
-      "fate": "SURVIVOR",
-      "patterns": [
-        "identity/default_claimed.json"
-      ],
-      "shape": {
-        "additionalProperties": false,
-        "description": "``default_claim_marker``: the host's account, written once its first sign-in claimed it.",
-        "properties": {
-          "claimed_at": {
-            "title": "Claimed At",
-            "type": "string"
-          },
-          "user_id": {
-            "minLength": 1,
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "claimed_at"
-        ],
-        "title": "DefaultClaim",
-        "type": "object"
-      }
     },
     "install block pack": {
       "fate": "SURVIVOR",

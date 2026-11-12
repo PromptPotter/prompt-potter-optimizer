@@ -14,7 +14,7 @@ from promptpotter.application.account import (
     blocked_emails,
     grant,
     grants,
-    registered_user_id,
+    host_user_id,
     revoke_grant,
     trail_by_email,
     unblock_email,
@@ -168,9 +168,9 @@ def _handle_grant_command(command: str, argument: str, actor: str) -> str:
     if len(parts) < 2:
         return "Usage: /grant <sub_user_id> <capabilities>  (e.g. step,create)"
     sub_user_id, caps_csv = parts[0].strip(), parts[1]
-    delegator = registered_user_id()
+    delegator = host_user_id()
     if delegator is None:
-        return "Cannot grant: no registered operator to delegate from (sign in once first)."
+        return "Cannot grant: no host account to delegate from (sign in once first)."
     caps = capabilities_from_names(caps_csv.split(","))
     if not caps:
         return f"Error: name at least one capability ({', '.join(sorted(CAMPAIGN_CAP_BY_NAME))})."

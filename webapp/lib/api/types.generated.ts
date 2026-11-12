@@ -122,6 +122,8 @@ export interface LifetimeSpend {
   bill_is_floor: boolean;
   /** Tokens no provider billed and no rate on file prices. */
   unpriced_tokens: number;
+  /** Every token the sends billed, priced or not: what a token allowance counts. */
+  billed_tokens: number;
   /** Some send ended with no bill, so up to `unreported_usd` more may have left the
    * account than `billed_usd` says. */
   sends_unreported: boolean;
@@ -153,7 +155,7 @@ export interface ActivityResponse {
   window: '15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y';
   /** The colour axis: `model` is the exact model id, `api_key` the key that paid:
    * the provider that billed the call, and whether the host's key under the
-   * coupon or the account's own sent it (`BilledCharge.key_source`). */
+   * coupon or the account's own sent it (`Charge.key_source`). */
   group_by: 'model' | 'api_key';
   buckets: ActivityBucket[];
   /** Every series in the window, in first-seen order — one colour per label, stable
@@ -575,8 +577,6 @@ export interface CampaignFacts {
    * supersede handed it to. */
   line: string;
   lifecycle: 'active' | 'archived' | 'deleted';
-  /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
-  spend_lifetime: LifetimeSpend;
   /** What the root course runs with; null where its pipeline did not resolve. */
   runs_with: CampaignRunsWith | null;
 }
@@ -1074,13 +1074,6 @@ export interface UnstartedCampaign {
   lines: Said[];
   level: 'unstarted';
   span: HierarchySpan;
-  facts: UnstartedFacts;
-}
-
-/** An open check-in's typed facts: it has no cycle, so no course, line or run. */
-export interface UnstartedFacts {
-  /** What its check-in has cost so far. */
-  spend_lifetime: LifetimeSpend;
 }
 
 /** One window of a family's chronology, oldest-first: a course, its forks and
@@ -1176,8 +1169,6 @@ export interface SubtreeCampaignFacts {
    * supersede handed it to. */
   line: string;
   lifecycle: 'active' | 'archived' | 'deleted';
-  /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
-  spend_lifetime: LifetimeSpend;
   /** What the root course runs with; null where its pipeline did not resolve. */
   runs_with: CampaignRunsWith | null;
   /** How many cycles `cleanup-empty-cycles` deletes here now
@@ -1626,7 +1617,6 @@ export interface ServedDashboard {
   measured_unit: 'sample' | 'cell';
   at_time: string;
   round_cells_ceiling: number;
-  run_limits: RunLimits;
   /** Set where the bench defaults or the treatment the campaign's declaration is a
    * delta over moved since it was declared, under an unchanged origin: this
    * launch runs today's values. */
@@ -1638,6 +1628,10 @@ export interface ServedDashboard {
   catch_up_log: CatchUpLogEntry[];
   current_round: CurrentRound;
   sample_coverage: SampleCoverage;
+  /** What binds the cycle (`CampaignStore.run_limits`): its launch's limits, its
+   * standing budget and its campaign's ceiling laid over; a next launch's
+   * budget where none runs. */
+  run_limits: RunLimits;
   campaign_id: string;
   cycle_id: string;
   /** The cycle's phase, derived at the read (`derive_run_state`) — never the
@@ -1906,39 +1900,6 @@ export interface ServedBackpressure {
   resumes_in_s: number | null;
 }
 
-/** The budget a launch declared, beside its optimizer's own bounds; a served
- * dashboard lays the standing budget over it. */
-export interface RunLimits {
-  budget: Budget;
-  optimizer: OptimizerLimit[];
-}
-
-/** What bounds a run per axis: a named axis binds, a named null lifts, an omitted
- * one inherits. */
-export interface Budget {
-  /** The campaign's USD, in its ceiling meter: one book its live cycles share. */
-  usd?: number | null;
-  /** The campaign's billed tokens, shared like `usd`; the axis that still binds
-   * where a model has no rate on file. */
-  tokens?: number | null;
-  /** Closed rounds after the origin, per cycle, read at each round boundary; 0
-   * measures the origin only. */
-  rounds?: number | null;
-  /** Seconds ONE launch runs, its clock afresh at every launch; a remote cell still
-   * open at the edge is cut and the run stops `wall_clock`. */
-  wall_clock_s?: number | null;
-}
-
-/** One knob an optimizer declares as bounding its run, which a fork may
- * reconcile. */
-export interface OptimizerLimit {
-  node: string;
-  knob: string;
-  label: string;
-  value: number | null;
-  integer: boolean;
-}
-
 /** Something the run's declaration is a delta over moved since it was declared,
  * so the launch runs today's value under the same declaration. */
 export interface DefaultsDrift {
@@ -2169,6 +2130,39 @@ export interface SampleRounds {
   sample_id: number;
   /** How many of the measuring rounds measured it */
   rounds: number;
+}
+
+/** The budget a launch declared, beside its optimizer's own bounds; a served
+ * dashboard lays the standing budget over it. */
+export interface RunLimits {
+  budget: Budget;
+  optimizer: OptimizerLimit[];
+}
+
+/** What bounds a run per axis: a named axis binds, a named null lifts, an omitted
+ * one inherits. */
+export interface Budget {
+  /** The campaign's USD, in its ceiling meter: one book its live cycles share. */
+  usd?: number | null;
+  /** The campaign's billed tokens, shared like `usd`; the axis that still binds
+   * where a model has no rate on file. */
+  tokens?: number | null;
+  /** Closed rounds after the origin, per cycle, read at each round boundary; 0
+   * measures the origin only. */
+  rounds?: number | null;
+  /** Seconds ONE launch runs, its clock afresh at every launch; a remote cell still
+   * open at the edge is cut and the run stops `wall_clock`. */
+  wall_clock_s?: number | null;
+}
+
+/** One knob an optimizer declares as bounding its run, which a fork may
+ * reconcile. */
+export interface OptimizerLimit {
+  node: string;
+  knob: string;
+  label: string;
+  value: number | null;
+  integer: boolean;
 }
 
 /** One cycle's producer as served: its state and its two server-measured clocks.

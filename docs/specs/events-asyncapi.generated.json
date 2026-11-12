@@ -1640,6 +1640,68 @@
         "title": "Budget",
         "type": "object"
       },
+      "CallPrice": {
+        "additionalProperties": false,
+        "description": "What one call cost, the one carrier of a call's price: on a send's charge, or a replay's own.",
+        "properties": {
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TokenUsageKind"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "rate_priced_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Priced Usd"
+          }
+        },
+        "required": [
+          "kind",
+          "model",
+          "provider",
+          "cost_usd",
+          "rate_priced_usd"
+        ],
+        "title": "CallPrice",
+        "type": "object"
+      },
       "CampaignCeilingRecord": {
         "additionalProperties": false,
         "description": "The money axes an operator named for the whole campaign (`set-limits`), LAST wins on its ROOT's\nledger, so every cycle of it reads one; every move lands through `jobs/quota.py::move_campaign_money`.",
@@ -1766,6 +1828,63 @@
         ],
         "title": "CellSetName",
         "type": "string"
+      },
+      "Charge": {
+        "additionalProperties": false,
+        "description": "One line of a send's money: its hold at the send's bound, then each answered part closing it.",
+        "properties": {
+          "hold_id": {
+            "title": "Hold Id",
+            "type": "string"
+          },
+          "key_source": {
+            "enum": [
+              "host",
+              "user"
+            ],
+            "title": "Key Source",
+            "type": "string"
+          },
+          "ledger": {
+            "title": "Ledger",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/CallPrice"
+          },
+          "record_type": {
+            "const": "charge",
+            "default": "charge",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "held",
+              "billed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "hold_id",
+          "key_source",
+          "price",
+          "tokens",
+          "ledger"
+        ],
+        "title": "Charge",
+        "type": "object"
       },
       "CheckpointInputs": {
         "additionalProperties": false,
@@ -8355,75 +8474,12 @@
         "additionalProperties": false,
         "description": "Written BEFORE the send, at its bound; unclosed, it binds every ceiling and is not spent.",
         "properties": {
-          "cost_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cost Usd"
-          },
-          "hold_id": {
-            "title": "Hold Id",
-            "type": "string"
-          },
-          "input_tokens": {
-            "title": "Input Tokens",
-            "type": "integer"
-          },
-          "key_source": {
-            "enum": [
-              "host",
-              "user"
-            ],
-            "title": "Key Source",
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/TokenUsageKind"
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Model"
+          "charge": {
+            "$ref": "#/components/schemas/Charge"
           },
           "node": {
             "title": "Node",
             "type": "string"
-          },
-          "output_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output Tokens"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Provider"
           },
           "record_type": {
             "const": "spend_hold",
@@ -8449,12 +8505,8 @@
           }
         },
         "required": [
-          "hold_id",
-          "kind",
           "node",
-          "input_tokens",
-          "output_tokens",
-          "key_source"
+          "charge"
         ],
         "title": "SpendHoldRecord",
         "type": "object"
@@ -8690,7 +8742,7 @@
       },
       "TokenUsageRecord": {
         "additionalProperties": false,
-        "description": "ONE answered send, or a replay (``cached``); a send that reported no usage writes none.",
+        "description": "ONE answered send, or a replay; a send that reported no usage writes none.",
         "properties": {
           "cache_read_tokens": {
             "default": 0,
@@ -8702,78 +8754,30 @@
             "title": "Cache Write Tokens",
             "type": "integer"
           },
-          "cached": {
-            "default": false,
-            "title": "Cached",
-            "type": "boolean"
-          },
-          "cost_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cost Usd"
-          },
           "duration_s": {
             "default": 0.0,
             "title": "Duration S",
             "type": "number"
           },
-          "hold_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Hold Id"
-          },
           "input_tokens": {
             "title": "Input Tokens",
             "type": "integer"
-          },
-          "key_source": {
-            "anyOf": [
-              {
-                "enum": [
-                  "host",
-                  "user"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Key Source"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/TokenUsageKind"
           },
           "mirrored": {
             "default": false,
             "title": "Mirrored",
             "type": "boolean"
           },
-          "model": {
+          "money": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/Charge"
               },
               {
-                "type": "null"
+                "$ref": "#/components/schemas/CallPrice"
               }
             ],
-            "default": null,
-            "title": "Model"
+            "title": "Money"
           },
           "node": {
             "title": "Node",
@@ -8782,30 +8786,6 @@
           "output_tokens": {
             "title": "Output Tokens",
             "type": "integer"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Provider"
-          },
-          "rate_priced_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Rate Priced Usd"
           },
           "reasoning_tokens": {
             "default": 0,
@@ -8859,11 +8839,10 @@
           }
         },
         "required": [
-          "kind",
           "node",
           "input_tokens",
           "output_tokens",
-          "key_source"
+          "money"
         ],
         "title": "TokenUsageRecord",
         "type": "object"

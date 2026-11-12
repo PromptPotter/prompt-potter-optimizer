@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.llm.response import LLMResponse
-from promptpotter.infrastructure.llm.telemetry import claim_call_price, emit_token_usage
+from promptpotter.infrastructure.llm.telemetry import (
+    call_price,
+    claim_call_price,
+    emit_replay_usage,
+)
 from promptpotter.infrastructure.store.io import read_bytes_optional, write_text
 from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
 
@@ -106,17 +110,19 @@ class LLMReuseCache:
         if (banked := self._replay(key)) is not None:
             duration_s = round(time.monotonic() - started, 2)
             if claim_call_price(key):
-                emit_token_usage(
+                emit_replay_usage(
                     node=node,
-                    kind=kind,
-                    model=banked.model or model,
-                    provider=provider,
-                    served_by=banked.served_by,
                     usage=banked.usage,
-                    cost_usd=banked.cost_usd,
                     duration_s=duration_s,
-                    key_source=None,
-                    cached=True,
+                    price=call_price(
+                        kind,
+                        banked.usage,
+                        model=banked.model or model,
+                        provider=provider,
+                        cost_usd=banked.cost_usd,
+                        recorded=None,
+                    ),
+                    served_by=banked.served_by,
                 )
             return Answered(banked, replayed=True, duration_s=duration_s)
         response = await send()

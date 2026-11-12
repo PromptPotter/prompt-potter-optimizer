@@ -67,7 +67,6 @@ from promptpotter.domain.spend import (
     Budget,
     CeilingMeter,
     SpendRollup,
-    metered,
     spend_slot,
 )
 from promptpotter.domain.strict_model import StrictModel
@@ -84,6 +83,7 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerSpan,
     LineIndex,
     RecordClasses,
+    money_on,
 )
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import IndividualWalk, MeasurementRole
@@ -646,59 +646,6 @@ class LedgerSpend(NamedTuple):
     worked_s: float
 
 
-class _RoundSpend(NamedTuple):
-    by_round: dict[int, SpendRollup]
-    calls: int
-    worked_s: float
-
-
-class _Spend:
-    records: ClassVar[RecordClasses] = (TokenUsageRecord,)
-
-    def __init__(self) -> None:
-        self._by_round: dict[int, SpendRollup] = {}
-        self._calls = 0
-        self._worked_s = 0.0
-        # A copy, since the next feed banks into the live rollups; one per feed, not per read.
-        self._view: _RoundSpend | None = None
-
-    def feed(self, usage: TokenUsageRecord) -> None:
-        self._view = None
-        spend_slot(self._by_round, usage.spend_round, SpendRollup).bank(usage)
-        if not usage.cached:
-            self._calls += 1
-            self._worked_s += usage.duration_s
-
-    def value(self) -> _RoundSpend:
-        if self._view is None:
-            self._view = _RoundSpend(
-                {n: held.model_copy(deep=True) for n, held in self._by_round.items()},
-                self._calls,
-                self._worked_s,
-            )
-        return self._view
-
-
-class _Metered:
-    """A running total per ceiling meter: a campaign's ceiling read adds one per cycle."""
-
-    records: ClassVar[RecordClasses] = (TokenUsageRecord,)
-
-    def __init__(self) -> None:
-        self._usd: dict[CeilingMeter, float] = dict.fromkeys(get_args(CeilingMeter), 0.0)
-        self._tokens: dict[CeilingMeter, int] = dict.fromkeys(get_args(CeilingMeter), 0)
-
-    def feed(self, usage: TokenUsageRecord) -> None:
-        for meter in self._usd:
-            usd, tokens = metered(usage, meter)
-            if usd is not None:
-                self._usd[meter] += usd
-            self._tokens[meter] += tokens
-
-    def value(self) -> dict[CeilingMeter, Budget]:
-        return {meter: Budget.amount(self._usd[meter], self._tokens[meter]) for meter in self._usd}
-
-
 class _BenchOpen:
     """A bench pass's bracket: entered and not yet exited, the dashboard's running bench mark."""
 
@@ -758,8 +705,8 @@ class _Timeline:
                 held.gates.append((at, record.run_phase is RunPhase.GATE))
             case RoundClosedRecord():
                 held.closes.append((at, record.round))
-            case TokenUsageRecord() if not record.cached:
-                held.calls.append((at, record.kind, record.node, record.duration_s))
+            case TokenUsageRecord() if record.charge is not None:
+                held.calls.append((at, record.price.kind, record.node, record.duration_s))
             case SampleScoredRecord():
                 facts = record.result.facts
                 if not facts.cached and (seconds := facts.pipeline.unworked_s) is not None:
@@ -798,8 +745,6 @@ LedgerIndex.readers(
     _Standing,
     _Answers,
     _Verification,
-    _Spend,
-    _Metered,
     _BenchOpen,
     _PricedKeys,
     _Timeline,
@@ -850,11 +795,6 @@ def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
         for span in spans
         for clock in LedgerIndex.of(span.path).view(_LaunchClocks, span.until)
     ]
-
-
-def scan_cycle_share(ledger_path: Path) -> CycleShareRecord | None:
-    """The cycle's own share, never inherited: a fork's ledger alone."""
-    return scan_last([LedgerSpan(ledger_path)], CycleShareRecord)
 
 
 def scan_campaign_ceiling(root_ledger: Path) -> Budget:
@@ -1086,7 +1026,7 @@ def scan_ledger_spend(spans: Iterable[LedgerSpan]) -> LedgerSpend:
     spend = SpendRollup()
     calls, worked_s = 0, 0.0
     for span in spans:
-        own = LedgerIndex.of(span.path).view(_Spend, span.until)
+        own = money_on(span.path, span.until)
         for held in own.by_round.values():
             spend.absorb(held)
         calls += own.calls
@@ -1096,14 +1036,14 @@ def scan_ledger_spend(spans: Iterable[LedgerSpan]) -> LedgerSpend:
 
 def scan_ledger_metered(ledger_path: Path) -> dict[CeilingMeter, Budget]:
     """This ledger's OWN appends, never a fork's walked prefix, in every ceiling meter."""
-    return _view(ledger_path, _Metered)
+    return money_on(ledger_path).metered
 
 
 def scan_ledger_spend_by_round(spans: Iterable[LedgerSpan]) -> dict[int, SpendRollup]:
     """Not clamped by a rewind: a round measured twice cost money both times."""
     by_round: dict[int, SpendRollup] = {}
     for span in spans:
-        own = LedgerIndex.of(span.path).view(_Spend, span.until)
+        own = money_on(span.path, span.until)
         for n, held in own.by_round.items():
             spend_slot(by_round, n, SpendRollup).absorb(held)
     return dict(sorted(by_round.items()))

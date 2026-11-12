@@ -45,12 +45,11 @@ from promptpotter.domain.run_records import PhaseRecord, StandingBudgetRecord
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
-from promptpotter.infrastructure.llm.send_pacing import set_abort_check
-from promptpotter.infrastructure.llm.spend_book import bound_spend_book, filed
+from promptpotter.infrastructure.llm.spend_book import filed
 from promptpotter.infrastructure.llm.telemetry import bind_priced
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
 from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.run_scope import rescope
+from promptpotter.shared.run_scope import rescope, run_scope
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -151,7 +150,7 @@ async def open_launch(
 
     session.state.source = RunSource.ORIGIN
     session.state.scoring = scorer_setup(session, campaign_config, partition=partition)
-    if (book := bound_spend_book()) is not None and (
+    if (book := run_scope().book) is not None and (
         cell := await cell_bound(session, session.pipeline_params)
     ) is not None:
         # After the scorer, which the stop this raises is finalized with.
@@ -190,7 +189,7 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
         session.state.control, commands=store.commands, cycle=store.subject(session.hop)
     )
     # The rate-limit countdown polls it too — the one blocking seam that otherwise ignores a pause.
-    set_abort_check(session.state.control.pause_requested)
+    rescope(abort_check=session.state.control.pause_requested)
 
 
 def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
@@ -333,7 +332,9 @@ async def _enter_init(
     target_models = tuple(v.model for _, v in target_node_configs if v.model)
 
     bound = await cell_bound(session, session.pipeline_params)
-    measured = measured_cell_price(session, session.pipeline_params)
+    measured = measured_cell_price(
+        session.store, session.bank.dataset_hash, session.pipeline_params
+    )
     instrument = inner_origin_of(session.pipeline_params)
     preflight_warnings = run_preflight_checks(
         config,

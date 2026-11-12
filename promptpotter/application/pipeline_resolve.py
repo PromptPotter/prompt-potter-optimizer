@@ -661,23 +661,30 @@ class _CampaignMerge(_Merge):
 
 
 @dataclass(frozen=True)
-class _DraftMerge(_Merge):
+class OutsideRunMerge(_Merge):
     # The two halves an upload's Start writes (`DraftPipeline`).
     local: dict[str, Any]
     campaign: CampaignConfig
 
 
-def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> _DraftMerge:
-    local = _draft_local(stores, draft)
+def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> OutsideRunMerge:
+    return merge_outside_run(
+        stores, _draft_local(stores, draft), draft_declared(stores, draft), served
+    )
+
+
+def merge_outside_run(
+    stores: Stores, local: dict[str, Any], campaign: CampaignConfig, served: ServedPipeline
+) -> OutsideRunMerge:
+    """*campaign* over *local* as a mint would lay them, opening no session."""
     templated = with_node_templates(local)
     declared = parse_pipeline_response(served.over(templated))
-    campaign = draft_declared(stores, draft)
-    cfg = _fenced(stores, draft, campaign, declared)
+    fence = free_fence(stores, served.connector)
+    cfg = campaign if fence is None else with_free_tier_layer(campaign, declared, fence)
     filtered = _resolve_active_schema(
         declared, exclude=list(cfg.exclude_nodes), narrowing=cfg.optimizer_narrowing
     )
-    fence = free_fence(stores, served.connector)
-    return _DraftMerge(
+    return OutsideRunMerge(
         # What was on OFFER before this draft narrowed it, so a menu cannot shrink to its own pick.
         declared=declared,
         filtered=filtered,

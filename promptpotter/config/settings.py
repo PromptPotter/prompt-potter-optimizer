@@ -6,7 +6,13 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    PositiveFloat,
+    SecretStr,
+    field_validator,
+)
 from pydantic_settings import BaseSettings
 
 from promptpotter.config.paths import env_file_path, source_checkout_root
@@ -157,11 +163,9 @@ class Settings(BaseSettings):
     # `own`: an account sees another's slots only as a count — a box anyone can sign up to. The host sees all.
     MACHINE_STATUS_SCOPE: Literal["own", "all"] = "own"
 
-    # Unset: no browser sign-in can claim the box, and it has no admin identity.
+    # The host's VERIFIED email, whichever provider verified it. Unset: no browser sign-in can
+    # claim the box, and it has no admin identity.
     HOST_ADMIN_EMAIL: str = ""
-
-    # Empty accepts any issuer: with two providers wired, the weakest one's email handling then grants the box.
-    HOST_ADMIN_ISSUER: str = ""
 
     # Accounts on disk, the host's included, past which no new sign-in opens one; 0 closes sign-up.
     # The host's worst-case exposure to strangers is this times the coupon's face.
@@ -184,7 +188,8 @@ class Settings(BaseSettings):
 
     # Per-user token bucket; process state, reset by a restart.
     USER_RATE_BURST: int = 5
-    USER_RATE_PER_MIN: float = 1.0
+    # Positive: a refused ask's `Retry-After` is when its bucket refills.
+    USER_RATE_PER_MIN: PositiveFloat = 1.0
 
     # The machine's ceiling, not an allowance: `jobs/capacity.py::resolve_run_capacity` may only lower it.
     MACHINE_RUN_CAPACITY: int = 3

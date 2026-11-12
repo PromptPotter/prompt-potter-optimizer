@@ -466,6 +466,7 @@ async def run_optimization(
             at_round(0),
             scoped(
                 ledger=observers.ledger,
+                account=session.store,
                 optimizer=optimizer,
                 determinism=run_clamp(campaign_config.optimization.determinism, session.purpose),
             ),

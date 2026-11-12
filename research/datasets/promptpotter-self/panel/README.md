@@ -25,13 +25,13 @@ multiply, and an arithmetic estimate was 3× under the measured rate.
 ## Reading a cost figure
 
 **An absolute campaign total is not quotable** — it depends on how many arms elimination cuts and
-how much of each cell replays. The per-cell rate is, and it comes off the ledger, never a stopwatch: group `token_usage` records by `(kind, node, cached)`
-and price them with `infrastructure/llm/pricing.py::compute_usd`.
+how much of each cell replays. The per-cell rate is, and it comes off the ledger, never a stopwatch: group `token_usage` records by their price's
+kind, their node and whether they carry a charge, and price them with `infrastructure/llm/pricing.py::compute_usd`.
 
-**`TokenUsageRecord.cached` is what makes such a figure honest.** The content-addressed caches are
-tenant-global, so a replayed cell costs $0 while doing the same search — on the banked corpus that
-was roughly half the bill. All records give the cold-equivalent (incurred) figure, `cached=False`
-alone gives what was billed; a clock cannot say which it measured, and the last figure taken that
+**A replay's record carrying its price and no charge is what makes such a figure honest.** The
+content-addressed caches are tenant-global, so a replayed cell costs $0 while doing the same search —
+on the banked corpus that was roughly half the bill. All records give the cold-equivalent (incurred)
+figure, the charged ones alone give what was billed; a clock cannot say which it measured, and the last figure taken that
 way was an order of magnitude optimistic. One trap: the duration distribution of *completing* cells
 is censored, since a cell that hits its wall-clock deadline emits no record at all.
 

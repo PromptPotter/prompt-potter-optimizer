@@ -23,7 +23,6 @@ from promptpotter.infrastructure.llm.send_pacing import (
     Backpressure,
     SendBudget,
     drawn_budget,
-    get_abort_check,
     held_wait,
     loop_now,
     report_throttle_stall,
@@ -47,6 +46,7 @@ from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,
 )
+from promptpotter.shared.run_scope import run_scope
 from promptpotter.shared.tls import tls_context
 
 _OUTAGE_POLL_S = 5.0
@@ -121,7 +121,7 @@ class MachineSlots:
         return None
 
     async def _wait(self, take: Callable[[], HeldLock | None]) -> HeldLock:
-        abort = get_abort_check()
+        abort = run_scope().abort_check
         while (held := take()) is None:
             if abort is not None and abort():
                 raise asyncio.CancelledError("machine-slot wait aborted")
@@ -200,7 +200,7 @@ class BackendClient:
             self._http = None
 
     async def _reachable_within(self, down_since: float) -> bool:
-        abort = get_abort_check()
+        abort = run_scope().abort_check
         while loop_now() - down_since < _OUTAGE_WAIT_S:
             if abort is not None and abort():
                 raise asyncio.CancelledError("backend outage wait aborted")

@@ -6,11 +6,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from promptpotter.application.maintenance.migrations import (
-    claim_marker,
     consent_by_principal,
     consent_trail,
     fitness_knobs,
     grant_ceiling,
+    host_account,
     job_ending,
     job_refusal,
     pack_tags,
@@ -19,11 +19,11 @@ from promptpotter.application.maintenance.migrations import (
 from promptpotter.infrastructure.store.data_root import Staged
 
 MIGRATIONS: dict[str, Callable[[Path], list[Staged]]] = {
-    "claim marker": claim_marker.staged,
     "consent by principal": consent_by_principal.staged,
     "consent trail": consent_trail.staged,
     "fitness knobs": fitness_knobs.staged,
     "grant ceiling": grant_ceiling.staged,
+    "host account": host_account.staged,
     "job ending": job_ending.staged,
     "job refusal": job_refusal.staged,
     "pack tags": pack_tags.staged,

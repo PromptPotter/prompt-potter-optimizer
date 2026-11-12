@@ -138,6 +138,8 @@ from promptpotter.domain.ruler import (
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     ArmRecord,
+    CallPrice,
+    Charge,
     ElectionRecord,
     PipelineRead,
     RoundClosedRecord,
@@ -150,7 +152,15 @@ from promptpotter.domain.run_standing import LineOutlay, RunStanding
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer, WalkedCell
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.spend import Budget, CeilingMeter, HeldBudget, SpendBucket, SpendRollup
+from promptpotter.domain.spend import (
+    Budget,
+    CeilingMeter,
+    HeldBudget,
+    KeySource,
+    SpendBucket,
+    SpendRollup,
+    TokenUsageKind,
+)
 from promptpotter.domain.verification import BenchPasses, VerificationPass
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
@@ -444,17 +454,37 @@ def filed(
     return [(cell.sample_key, ref, False) for cell, ref in zip(held, refs, strict=True)]
 
 
-def billed_call(cost_usd: float | None = None, **fields: Any) -> TokenUsageRecord:
-    """One optimizer call billed *cost_usd*; *fields* bend any other field of the record."""
-    record: dict[str, Any] = {
-        "kind": "optimizer",
-        "node": "l1_generate",
-        "input_tokens": 1,
-        "output_tokens": 0,
-        "cost_usd": cost_usd,
-        "key_source": "host",
-    } | fields
-    return TokenUsageRecord(**record)
+def billed_call(
+    cost_usd: float | None = None,
+    *,
+    kind: TokenUsageKind = "optimizer",
+    model: str | None = None,
+    provider: str | None = None,
+    rate_priced_usd: float | None = None,
+    key_source: KeySource = "host",
+    hold_id: str = "billed",
+    replay: bool = False,
+    **fields: Any,
+) -> TokenUsageRecord:
+    """One call billed *cost_usd*, or a *replay* priced at it; *fields* bend the rest of the record."""
+    price = CallPrice(
+        kind=kind,
+        model=model,
+        provider=provider,
+        cost_usd=cost_usd,
+        rate_priced_usd=rate_priced_usd,
+    )
+    record: dict[str, Any] = {"node": "l1_generate", "input_tokens": 1, "output_tokens": 0} | fields
+    tokens = record["input_tokens"] + record["output_tokens"]
+    charge = Charge(
+        state="billed",
+        hold_id=hold_id,
+        key_source=key_source,
+        price=price,
+        tokens=tokens,
+        ledger="",
+    )
+    return TokenUsageRecord(money=price if replay else charge, **record)
 
 
 def loop_session(
@@ -650,6 +680,7 @@ async def run_init_round(
                 at_round(0),
                 scoped(
                     ledger=observers.ledger,
+                    account=running.store,
                     optimizer=minted.optimizer,
                     determinism=run_clamp(determinism, running.purpose),
                 ),

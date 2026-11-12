@@ -10,25 +10,30 @@ from typing import TYPE_CHECKING
 
 from pydantic import Field
 
+from promptpotter import connectors
+from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.startability import offered_dataset
-from promptpotter.application.initialization.scoring_scope import cycle_partition
-from promptpotter.application.jobs.launcher.head_to_head import dataset_arms
+from promptpotter.application.initialization.wiring import session_bank
 from promptpotter.application.jobs.mint import arm_config
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.pipeline_resolve import merge_outside_run, served_pipeline
 from promptpotter.application.preflight import (
     check_cap_funds_round,
     check_search_split_holds_round,
 )
 from promptpotter.application.runner.bench import line_launches
 from promptpotter.application.scoring.sample_measurement import measured_cell_price
-from promptpotter.domain.campaign_config import CycleConfig
+from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.command_kinds import MintHeadToHeadPayload
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.spend import Budget, CellPrice
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_spend_by_round,
+)
+from promptpotter.infrastructure.store.dataset_access import (
+    dataset_experiment,
+    runnable_definition,
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.shared.errors import PayloadInvalidError
@@ -145,13 +150,20 @@ def optimizer_round_price(stores: Stores, optimizer: str) -> OptimizerRoundPrice
 
 async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHeadPrice:
     heads = plan.heads()
-    source = await dataset_arms(stores, offered_dataset(stores, plan.dataset_name))
+    dataset = offered_dataset(stores, plan.dataset_name)
+    definition = runnable_definition(dataset)
+    connector = connectors.CONNECTORS.get(definition.backend_type)
+    panel = dataset_experiment(stores, dataset, connector)
+    experiment = None if panel is None else panel.experiment
+    declared = load_dataset_campaign_config(dataset)
     first = heads[0].head_to_head
     # Every arm runs one environment (`SharedPart.environment`): the first resolves what all run.
-    config = arm_config(source.declared, first, first.arms[0])
-    session = configure_and_apply_pipeline(source.session, CycleConfig.laid(config, []))
-    partition = cycle_partition(session, session.bank.samples, config)
-    cell = measured_cell_price(session, session.pipeline_params)
+    config = arm_config(declared, first, first.arms[0])
+    served = await served_pipeline(stores, connector, experiment=experiment)
+    merged = merge_outside_run(stores, definition.pipeline, config, served)
+    bank, _ = session_bank(stores, dataset, connector=connector, experiment=experiment)
+    partition = partition_bank(bank.samples, config.dataset_split, seed=config.run_seed)
+    cell = measured_cell_price(stores, bank.dataset_hash, merged.layers.fold().params)
     if cell is None:
         raise PayloadInvalidError(
             f"no archive row prices a cell of {plan.dataset_name} on the models it runs, so "
@@ -161,19 +173,19 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
             code="cell_unpriced",
         )
     names = {
-        select_optimizer(arm_config(source.declared, head.head_to_head, arm).optimization).name
+        select_optimizer(arm_config(declared, head.head_to_head, arm).optimization).name
         for head in heads
         for arm in head.head_to_head.arms
     }
     return priced_head_to_head(
         heads,
-        source.declared,
-        dataset_hash=session.bank.dataset_hash,
+        declared,
+        dataset_hash=bank.dataset_hash,
         search=len(partition.search),
         bench=len(partition.bench),
         cell=cell,
         optimizers={name: optimizer_round_price(stores, name) for name in sorted(names)},
-        cells_in_flight=session.backend_client.connector.max_cells_in_flight,
+        cells_in_flight=connector.max_cells_in_flight,
     )
 
 

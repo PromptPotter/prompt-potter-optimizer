@@ -54,7 +54,6 @@ from promptpotter.domain.hierarchy import (
     HierarchyTag,
     ListingLifecycle,
     UnstartedCampaign,
-    UnstartedFacts,
 )
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
@@ -472,16 +471,16 @@ def campaign_entry(
         if line is None
         else line.state
     )
-    spend_lifetime = LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id).total)
+    lifetime = LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id).total)
     return HierarchyCampaign(
         address=Subject(campaign.campaign_id, inside=inside).address,
         parent=Subject.of(inside).address if inside else None,
         label=campaign.label or campaign.dataset_name,
         tags=_campaign_tags(campaign, runs_with),
         # The campaign's row reads its line course's as its own, its bill the campaign's whole life.
-        figures=[_state_row(state.status), _lifetime_row(spend_lifetime)]
+        figures=[_state_row(state.status), _lifetime_row(lifetime)]
         if line is None
-        else [_lifetime_row(spend_lifetime) if row.key == "spend" else row for row in line.figures],
+        else [_lifetime_row(lifetime) if row.key == "spend" else row for row in line.figures],
         lines=[caveat_row("unminted", _UNMINTED), *_unresolved_lines(root)]
         if line is None
         else line.lines,
@@ -498,7 +497,6 @@ def campaign_entry(
             root=Subject(campaign.campaign_id, campaign.root_cycle_id, inside=inside).address,
             line=Subject(campaign.campaign_id, holder.cycle_id, inside=inside).address,
             lifecycle=campaign.lifecycle_status,
-            spend_lifetime=spend_lifetime,
             runs_with=runs_with,
         ),
     )
@@ -515,7 +513,7 @@ def unstarted_entry(
 ) -> UnstartedCampaign:
     """An open check-in as a campaign: its spend is what the check-in cost."""
     ledger = stores.drafts.ledger(draft.draft_id)
-    spend_lifetime = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []).total)
+    spent = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []).total)
     dataset = draft.dataset_name
     lifecycle = "unstarted" if start is None else start.value
     return UnstartedCampaign(
@@ -526,10 +524,9 @@ def unstarted_entry(
             HierarchyTag(kind="dataset", value=dataset, label=dataset),
             HierarchyTag(kind="lifecycle", value=lifecycle, label=lifecycle),
         ],
-        figures=[_lifetime_row(spend_lifetime)],
+        figures=[_lifetime_row(spent)],
         lines=[],
         span=HierarchySpan(opened_at=draft.created_at, last_at=draft.updated_at),
-        facts=UnstartedFacts(spend_lifetime=spend_lifetime),
     )
 
 

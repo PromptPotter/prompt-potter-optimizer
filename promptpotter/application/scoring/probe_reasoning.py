@@ -15,9 +15,10 @@ from promptpotter.infrastructure.llm.capabilities import STANDARD_EFFORT_LADDER
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_DEFAULT_EFFORT
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.send_failure import failed_send
-from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, under_budget
+from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.shared.errors import ErrorCategory
+from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.llm.base import LLMClientBase
@@ -51,7 +52,7 @@ class RungReading:
 
 async def _one(client: LLMClientBase, model: str, rung: str | None) -> RungReading:
     try:
-        with under_budget(SendBudget(None, attempts=SEND_ATTEMPTS)):
+        with scoped(send_budget=SendBudget(None, attempts=SEND_ATTEMPTS)):
             resp = await client.chat(
                 ChatRequest(
                     messages=[{"role": "user", "content": _PROMPT}],

@@ -5,7 +5,7 @@ field, never a variable of its own."""
 from __future__ import annotations
 
 import enum
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -17,8 +17,11 @@ if TYPE_CHECKING:
     from promptpotter.application.runner.inner.tasks import InnerSpawnContext
     from promptpotter.domain.campaign import DeterminismClamp
     from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.llm.send_pacing import SendBudget
+    from promptpotter.infrastructure.llm.spend_book import CellReservation, SpendBook
     from promptpotter.infrastructure.store.archive_queries import MemoryScope
     from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 class Unbound(enum.Enum):
@@ -43,6 +46,15 @@ class RunScope:
     memory: MemoryScope | None = None
     # An L4 outer's spawn; a bound ``None`` is a run with no cycle to spawn under.
     spawn: InnerSpawnContext | None | Literal[Unbound.UNBOUND] = UNBOUND
+    # The sender: whose keys, coupon, charges and rate share a send draws, and the book admitting it.
+    account: Stores | None = None
+    book: SpendBook | None = None
+    # The run's pause flag, polled by every wait a send can sit in.
+    abort_check: Callable[[], bool] | None = None
+    # Per unit of work (a cell, an optimizer call, a grading): its resends, its stall and its hold.
+    send_budget: SendBudget | None = None
+    stall_sink: Callable[[float], None] | None = None
+    reservation: CellReservation | None = None
 
 
 class ScopeFields(TypedDict, total=False):
@@ -52,6 +64,12 @@ class ScopeFields(TypedDict, total=False):
     judge_cache: LLMReuseCache | None
     memory: MemoryScope | None
     spawn: InnerSpawnContext | None
+    account: Stores | None
+    book: SpendBook | None
+    abort_check: Callable[[], bool] | None
+    send_budget: SendBudget | None
+    stall_sink: Callable[[float], None] | None
+    reservation: CellReservation | None
 
 
 _EMPTY = RunScope()

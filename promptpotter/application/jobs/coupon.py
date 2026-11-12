@@ -8,8 +8,7 @@ the account's charges say the box's keys paid; nothing counts it down.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from contextvars import ContextVar
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import NamedTuple
 
@@ -38,8 +37,7 @@ from promptpotter.infrastructure.llm.registry import (
     host_key_attr,
     providers,
 )
-from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
-from promptpotter.infrastructure.llm.spend_book import bind_charges, reset_charges
+from promptpotter.infrastructure.llm.spend_book import bound_account, require_spend_book
 from promptpotter.infrastructure.store.account_spend import account_bill
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.wallet_store import CouponGrant, HeldKey
@@ -267,43 +265,22 @@ class AccountWallet(NamedTuple):
         )
 
 
-_ACCOUNT: ContextVar[Stores] = ContextVar("account")
-
-
-def bind_account(stores: Stores) -> Callable[[], None]:
-    """THE binder of whose wallet a task's sends draw: its keys, its coupon and its rate share.
-
-    Answers its unbinding, which an entry leaves uncalled: the task that binds owns its context,
-    and an inner cell rebinds the same account."""
-    account = _ACCOUNT.set(stores)
-    tenant = set_rate_tenant(str(stores.tenant_id))
-    charges = bind_charges(stores.charges)
-
-    def unbind() -> None:
-        reset_charges(charges)
-        tenant.var.reset(tenant)
-        _ACCOUNT.reset(account)
-
-    return unbind
-
-
 def keyed_client(provider: str) -> LLMClientBase:
     """The client a send under the bound account goes out on: `paying_key`'s, refused where the
-    box's key would pay past a used-up coupon, or no key exists."""
-    try:
-        stores = _ACCOUNT.get()
-    except LookupError:
-        raise RuntimeError(
-            "no account is bound, so no key can be chosen for this send. Every entry that sends "
-            "calls `bind_account` where it binds its spend book."
-        ) from None
+    box's key would pay past what the run's reserve has left, or no key exists."""
+    what = f"a send on {provider}"
+    stores = bound_account(what)
     key = paying_key(stores.api_keys.load(), provider)
     if key is None:
         raise unpaid(provider)
-    if draws_coupon(key.paid_by) and (coupon := read_coupon(stores)).exhausted:
-        raise AccountWallet(coupon, coupon.left).refused(
-            ProviderSend(provider, key.paid_by), what="this account"
-        )
+    if draws_coupon(key.paid_by):
+        left = require_spend_book(what).root().coupon_left()
+        if (left.usd is not None and left.usd <= 0.0) or (
+            left.tokens is not None and left.tokens <= 0
+        ):
+            raise AccountWallet(read_coupon(stores), left).refused(
+                ProviderSend(provider, key.paid_by), what="this account"
+            )
     return get_llm_client(provider, key)
 
 

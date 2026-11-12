@@ -36,9 +36,9 @@ from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
     admitted,
     answered,
-    bound_spend_book,
 )
 from promptpotter.shared.errors import ErrorCategory, SendRefusedError
+from promptpotter.shared.run_scope import run_scope
 from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
@@ -117,7 +117,7 @@ async def hold_ceiling(
         return await rate_ceiling(model, provider, hosts=hosts)
     except PriceListUnreachableError:
         # Under a USD limit an unfetched price list is an OUTAGE, never "a call no rate bounds".
-        book = bound_spend_book()
+        book = run_scope().book
         if book is not None and book.prices_sends():
             raise
         return None

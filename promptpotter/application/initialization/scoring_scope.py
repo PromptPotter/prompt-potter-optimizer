@@ -30,7 +30,6 @@ from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, StopLoop
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import bound_spend_book
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, filed_as
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -200,7 +199,7 @@ def verb_ledger(stores: Stores, hop: CycleHop | None) -> Iterator[CycleEventLog]
         else CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
     )
     # So what an L4 cell spends beneath the verb lands here, not only on the sandbox's ledger.
-    if (book := bound_spend_book()) is not None and book.ledger is None:
+    if (book := run_scope().book) is not None and book.ledger is None:
         book.ledger = ledger
     with scoped(ledger=ledger):
         yield ledger

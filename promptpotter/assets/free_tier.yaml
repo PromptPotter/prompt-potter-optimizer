@@ -22,13 +22,13 @@ optimizer_models:
   openai/gpt-oss-20b:nitro: {reasoning_effort: [low, medium]}
   # Refuses `none` (HTTP 400).
   z-ai/glm-5.3-flash: {reasoning_effort: [low, medium]}
+# A free launch's ceiling, capped at admission: past it the run stops at the next boundary, so
+# the account watches each small run and starts the next by hand.
+ceiling_usd: 0.03
 # Laid over a free account's check-in, as its last config layer.
 campaign:
   sp_budget_origin: 20
   optimization:
-    # A free campaign's ceiling: past it the run stops at the next boundary, so the account
-    # watches each small run and starts the next by hand.
-    budget: {usd: 0.03}
     nodes:
       adaptive_queue:
         config:

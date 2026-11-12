@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import logging
 import time
-from contextvars import Token
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.jobs.coupon import bind_account
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.run_phase_control import CycleHold, close_dead_bench
@@ -35,12 +33,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.spend import MONEY_AXES, Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import (
-    SpendBook,
-    bind_spend_book,
-    bound_spend_book,
-    reset_spend_book,
-)
+from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.producer_lock import held
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
@@ -49,6 +42,7 @@ from promptpotter.infrastructure.store.session_pointer import save_active_pointe
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import instrument_depth
+from promptpotter.shared.run_scope import rescope, run_scope
 
 if TYPE_CHECKING:
     from promptpotter.domain.campaign import Campaign
@@ -65,9 +59,9 @@ def declare_run_stop(
     interrupted_by: PauseCause,
 ) -> None:
     """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second record."""
-    budget = session.store.campaigns.armed_run_limits(
-        session.hop, observers.dashboard.live.state.run_limits
-    ).budget
+    limits = session.store.campaigns.run_limits(session.hop)
+    assert limits is not None, "a run stops on the wiring it declared"
+    budget = limits.budget
     meter = ceiling_meter(session.purpose)
     # The cycle's share record, which its book reads live; none lands before admission's.
     held = session.store.campaigns.last(session.hop, CycleShareRecord)
@@ -127,35 +121,24 @@ class RunObservers:
     readout: ReadoutProjection
     projecting: Projecting
     hold: CycleHold
-    _book_tokens: list[Token[SpendBook | None]] = field(default_factory=list)
 
     def arm_spend_book(self, book: SpendBook) -> None:
         ledger = self.ledger
         self.projecting.add(book)
         book.ledger = ledger
-        if self._book_tokens:
-            reset_spend_book(self._book_tokens.pop())
         # A nested run (an L4 inner cell) admits each send against its own book AND its root's.
         if instrument_depth() > 0:
-            book.enclosing = bound_spend_book()
+            book.enclosing = run_scope().book
             if book.enclosing is None:
                 raise RuntimeError("a nested run spends only under its enclosing run's book")
-        self._book_tokens.append(bind_spend_book(book))
-        unreported = book.take_up(ledger)
-        if unreported.sends:
-            logger.warning(
-                "%d paid send(s) on this run ended unpriced; the ceiling holds up to $%.4f "
-                "for them, and no surface counts it as spent.",
-                unreported.sends,
-                unreported.usd,
-            )
+        rescope(book=book)
 
     def drain_all(self) -> None:
         try:
             self.projecting.close()
             # The SSE stream is no projection — it tails the on-disk ledger — so nothing drains it.
-            if self._book_tokens:
-                reset_spend_book(self._book_tokens.pop())
+            if (book := run_scope().book) is not None and book.ledger is self.ledger:
+                rescope(book=book.enclosing)
         finally:
             self.release()
 
@@ -205,7 +188,6 @@ def build_run_observers(
         )
         # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
         observers.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
-        bind_account(session.store)
         # A launch is a run boundary; the run a gate held resumes, what it was asked standing.
         if prior is None or prior.run_phase is not RunPhase.GATE:
             session.store.void_inbox(session.hop, before=held_since)

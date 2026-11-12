@@ -32,9 +32,10 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
-from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
+from promptpotter.infrastructure.llm.spend_book import unbounded_spend_book
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset, resolve_dataset
 from promptpotter.presentation.terminal.completion import report_completion
+from promptpotter.shared.run_scope import scoped
 
 # The bbeh definition is the SoT for everything about the task — its `pipeline` section drives
 # the target-layer schema (read by run_campaign on the dataset "bbeh", which resolves it in the
@@ -158,7 +159,7 @@ async def run_bbeh_campaign(
             await attempt_bounds(session, calls),
         )
         client = session.backend_client
-        with spending_under(unbounded_spend_book()):
+        with scoped(account=session.store, book=unbounded_spend_book()):
             for i, task in enumerate(tasks, start=1):
                 test_items = test_norm_by_task[task]
                 hits = 0

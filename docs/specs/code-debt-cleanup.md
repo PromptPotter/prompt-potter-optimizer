@@ -183,84 +183,16 @@ row it closes.
   its book from its scope; the per-call round and measured vars stay; telemetry's ride rec. **Rides with:** money 1.
   **Re-test:** `git grep -c "ContextVar(" -- promptpotter` over `coupon.py`, `send_pacing.py` and
   `spend_book.py` is 0.
-- **S: spend is booked twice and folded many times.** `wallet_store.py::HeldCharge` and
-  `wallet_store.py::BilledCharge` repeat `run_records.py::SpendHoldRecord` and
-  `run_records.py::TokenUsageRecord`; `spend_book.py::SpendBook` counts through its ledger subscription
-  and through admission; `spend_book.py::Admission` writes each home differently. Action: one charge
-  value (hold id, key source, kind, model, provider, cost, rate, tokens, ledger, timestamp) the ledger
-  records embed; the account takes each send once, at the root; one fold parameterized by subject and
-  meter. `charges.jsonl` is a survivor: its migration maps each line one to one and keeps its timestamp.
-  **Rides with:** money 2. **Re-test:** `git grep -n "class HeldCharge" -- promptpotter`.
-- **The cycle share has two readers**: `last` reads `CycleShareRecord` from the cycle alone, while
-  `spend_book` folds it through `scan_cycle_share`. Action: the book reads the share through `last`.
-  **Rides with:** money 2. **Re-test:** `git grep -n "scan_cycle_share" -- promptpotter` is empty.
-- **A reserved or failed send writes a bill nobody counts** (bl2.B8, B9, B11): `paid_call` admits off the
-  gate and registers no hold; a failed part write leaves later parts uncharged; a never-sent attempt
-  writes a zero bill on two homes. Action: the call's hold is an open charge, one charge record per
-  send, and a never-sent close writes the closing line only. **Rides with:** money 2.
-- **A lost mirror loses its money**: `infrastructure/llm/spend_book.py::Admission._write` stamps the
-  nested record `mirrored=True` before carrying it to the root. Action: the root copy lands first.
-  **Rides with:** money 2. **Re-test:** a root append that raises leaves the call counted on the account.
-- **A cycle's fold does not read its line's root ledger**: the `CampaignCeilingRecord` sits on the root
-  cycle's ledger, so `campaign_store/store.py::CampaignStore.armed_run_limits` joins it in at the served
-  read and `run_limits` goes stale on `set-limits --max-usd`; one budget rule is spelled three times
-  (the fold, `jobs/quota.py::declare_run_budget`, `llm/spend_book.py`). Action: a cycle's fold reads its
-  line's root ledger; `armed_run_limits` goes. **Rides with:** money 2. **Re-test:**
-  `git grep -n "armed_run_limits" -- promptpotter` is empty.
-- **The listing folds the whole dashboard for `run_limits`**: `served_dashboard.py::binding_run_limits`
-  takes one field off `fold_at`. Action: `run_limits` is its own small fold in `live_dashboard/projection.py`
-  (the last `RunWiringRecord.run_limits`, each later `StandingBudgetRecord` laid over, seeded across a
-  fork's prefix), and the row above's root-ledger read lands on it. **Rides with:** money 2. **Re-test:**
-  `git grep -n -A6 "def binding_run_limits" -- promptpotter | grep -c fold_at` is 0.
+- **S: a live book counts apart from the one fold** (every file's money is
+  `store/read_model.py::money_on`, money-g): `spend_book.py::SpendBook` counts through its ledger
+  subscription and through admission (`Admission._unseen`, `_unlanded`), and the live dashboard banks
+  its own rollup. Action: the live readers ride `_Money` as a projection. **Rides with:** money 3.
+- **`paid_call` registers no hold** (bl2.B8; B9 and B11 closed by money 2): it admits off the gate, so
+  its send is counted only once billed. Action: the call's hold is an open charge. **Rides with:** money 3.
 - **A reserved cell's bill is on no ledger** (`Connector.holds_own_sends` writes no hold), so
   `infrastructure/llm/spend_book.py::unreported_on` can re-teach a book its sends but never the cell.
   Action: a hold record per reserved cell. **Rides with:** money 2. **Re-test:**
   `git grep -n -A28 "def reserved" -- promptpotter/infrastructure/llm/spend_book.py | grep -c emit_spend_hold` is 1.
-- **A live run's billed spend has no carrier**: `quota.py::_billed_by` re-folds the cycle ledger on every
-  wallet read. Action: the job carries it. **Rides with:** money 3. **Re-test:** `git grep -n "_billed_by" -- promptpotter`.
-- **`coupon.py::keyed_client` folds the account's charges on each send** the box's key pays. Action: the
-  run's book carries the remainder it was admitted against, folded once per run and advanced by
-  appended lines. **Rides with:** money 3. **Re-test:** time one send on an account with 100 cycles.
-- **A resumed cycle loses its unmetered coupon spend**: `spend_book.py::SpendBook.take_up` restores
-  `off_coupon_*` but not `beside_*`. Action: `unreported_on` folds it. **Rides with:** money 3.
-  **Re-test:** `git grep -n "beside_usd" -- promptpotter/infrastructure/llm/spend_book.py`.
-- **A resumed cycle's prior metering counts as the box's** in its book's coupon reserve
-  (`SpendBook.take_up` reads only unreported own-key holds): conservative, not a leak. Action: it
-  survives a resume as the run's own. **Rides with:** money 3. **Re-test:** resume an own-key cycle and
-  read its `off_coupon_usd`.
-- **`LifetimeSpend` carries no token count**, so the coupon's token side shows left / face, never used.
-  **Rides with:** money 3. **Re-test:** the Host allowance section with a token-bound grant.
-- **The dashboard fold deep-copies a spend rollup per token record**: `live_dashboard/projection.py::_handle_token_usage`
-  copies `SpendRollup` (`model_copy(deep=True)`) to stay copy-on-write, because
-  `domain/spend.py::SpendRollup.bank` mutates in place. Action: a non-mutating `SpendRollup.banked(record)`
-  the fold assigns. **Rides with:** money 3. **Re-test:**
-  `git grep -c "deep=True" -- promptpotter/infrastructure/projections/live_dashboard` is 0.
-- **The free tier's budget is both a config default and an admission bound**: `free_tier.yaml`
-  `campaign.optimization.budget.usd` is laid by `application/free_tier.py::with_free_tier_layer` and read
-  by `application/free_tier.py::tier_ceiling`. Action: one owner. **Rides with:** money 4. **Re-test:**
-  `git grep -n "tier_ceiling\|with_free_tier_layer" -- promptpotter`.
-- **A bench cell's plan reads the campaign ceiling it is not metered by**:
-  `application/scoring/query_loop.py:639` calls `fits(..., beside=label.kind)`, which counts every side
-  of `_room`. Action: `fits` skips the share's sides where the book does not bind the kind, as
-  `refuse_unless_room` does (a re-key). **Rides with:** money 4. **Re-test:**
-  `git grep -n "\.fits(" -- promptpotter/application/scoring/query_loop.py`.
-- **The $0 price opens a backend session** (`application/head_to_head_price.py::price_head_to_head`
-  through `jobs/launcher/head_to_head.py::dataset_arms`) only to resolve the node models and the
-  partition. Action: a $0 price opens nothing. **Rides with:** money 4. **Re-test:** price a plan with
-  the backend down.
-- **The host is a claim marker, not the declared account**: `infrastructure/identity/default_claim.py::is_host_tenant_dir`
-  compares a user id to the claim marker, while `HOST_ADMIN_EMAIL` is read only in `routers/auth.py`,
-  so one email holds two accounts on the box. Action: the host is the account `HOST_ADMIN_EMAIL` names;
-  what the marker owns is migrated to it at the landing (a SURVIVOR, decisions § 0011). **Rides with:**
-  money 5. **Re-test:** `git grep -n "default_claim_marker" -- promptpotter/infrastructure/identity/default_claim.py` is empty.
-- **`default_claim.py::is_host_tenant_dir` is named for a directory but is the user-id check.** Action:
-  rename it to what it decides. **Rides with:** money 5. **Re-test:** `git grep -n "is_host_tenant_dir(" -- promptpotter`.
-- **`launch_contended` is retryable but answers 409** (`quota.py::_contended`). Decided (2026-11-10): it
-  serves `retry_after`. **Rides with:** money 5. **Re-test:** `git grep -n "launch_contended" -- promptpotter`.
-- **`facts.spend_lifetime` is served and read by nothing** (`domain/hierarchy.py:121,132`) since the
-  webapp's `billOf` went; its figure row carries the same spend. Action: the field goes; the figure row
-  stays. **Rides with:** money 3. **Re-test:** the `surface-ledger` row `p_served` falls by the fields
-  that go.
 - **The campaign store reaches into the LLM layer for a ledger read**: `campaign_store/store.py:58`
   imports `standing_budget` from `infrastructure/llm/spend_book.py:80`, and
   `CampaignStore.read_standing_budget` answers it. Root: the read lives with the store, and the book takes
@@ -290,14 +222,6 @@ row it closes.
   `campaign_at` goes (`admission.py` sits above `quota.py`, so it cannot be the owner). **Rides with:**
   money 2, whose Owns gain `CampaignStore.campaign`, `admission.py::campaign_at` with its callers'
   lines, and each site's load line. **Re-test:** `git grep -n "def campaign_at" -- promptpotter` is empty.
-- **A landing that wipes the workspace ledger forgets every campaign-id tombstone and every deleted
-  campaign's banked spend**: both live in the workspace ledger (`store/data_root.py:492`, `Fate.RUN`;
-  `account_spend.py::WorkspaceBank`), not in a SURVIVOR, so the id draw mints a deleted id again and the
-  account's spend shrinks. Action: move them to a SURVIVOR row with its one-shot migration (decision
-  0011). **Rides with:** money 2 (the account's one book), whose Owns gain `data_root.py`'s
-  `workspace ledger` row and `account_spend.py::WorkspaceBank`; money 5 reads the tombstone.
-  **Re-test:** `git grep -n '"workspace ledger"' -- promptpotter/infrastructure/store/data_root.py` names
-  `Fate.SURVIVOR`.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 

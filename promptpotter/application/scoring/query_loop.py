@@ -41,7 +41,6 @@ from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.send_pacing import HELD_POLL_S
 from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
-    bound_spend_book,
     filed,
 )
 from promptpotter.infrastructure.llm.telemetry import (
@@ -57,6 +56,7 @@ from promptpotter.shared.errors import (
     SendRefusedError,
     graceful,
 )
+from promptpotter.shared.run_scope import run_scope
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
@@ -625,7 +625,7 @@ class _ScoringPhase[K: Hashable]:
         self.gauge = self.session.state.flight
         self.cancels = self.session.backend_client.connector.cancel_stops_billing
         self.payer = self.session.backend_client.connector.cell_payer
-        self.book = bound_spend_book()
+        self.book = run_scope().book
         self.label = filed(CELL)
         # A pass the book's ceilings do not meter is neither admitted against them nor stopped by them.
         self.unbounded = self.book is not None and not self.book.binds(self.label.kind)
@@ -636,7 +636,7 @@ class _ScoringPhase[K: Hashable]:
         if book is None or cell is None or self.unbounded:
             return sys.maxsize
         return (
-            book.fits(book.held_at(label, cell), cell, paid_by=self.payer, beside=label.kind)
+            book.fits(book.held_at(label, cell), cell, paid_by=self.payer, kind=label.kind)
             - self.out()
         )
 

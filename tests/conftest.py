@@ -18,7 +18,6 @@ from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router
 from pydantic import SecretStr
 
 from promptpotter.application.initialization.wiring import complete_registries
-from promptpotter.application.jobs.coupon import bind_account
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import OptimizerChoice
@@ -71,9 +70,8 @@ def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]
     restore = install_network(world)
     send_pacing.cache_clear()
     wire_client.cache_clear()
-    unbind = bind_account(workspace(tmp_path / "account"))
-    yield world
-    unbind()
+    with scoped(account=workspace(tmp_path / "account")):
+        yield world
     restore()
     send_pacing.cache_clear()
     wire_client.cache_clear()

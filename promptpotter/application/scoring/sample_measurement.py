@@ -47,8 +47,9 @@ from promptpotter.infrastructure.llm.spend_book import (
 )
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
+    call_price,
     current_round,
-    emit_token_usage,
+    emit_replay_usage,
     rate_priced_usd,
 )
 from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory, SendRefusedError
@@ -58,6 +59,7 @@ if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode, PipelineSchema
     from promptpotter.infrastructure.backend import CellBilling
+    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -171,18 +173,19 @@ def emit_replayed_step_tokens(
 ) -> None:
     """A replay states what the row RECORDED: its reported cost, else the rate stamped when measured."""
     for part in _step_parts(step_tokens, step_timings):
-        emit_token_usage(
+        emit_replay_usage(
             node=part.node or "backend",
-            kind="backend",
             usage=part.usage,
             duration_s=part.duration_s or 0.0,
-            model=part.model,
-            provider=part.provider,
+            price=call_price(
+                "backend",
+                part.usage,
+                model=part.model,
+                provider=part.provider,
+                cost_usd=part.cost_usd,
+                recorded=part.rate_priced_usd,
+            ),
             served_by=part.served_by,
-            cost_usd=part.cost_usd,
-            recorded_rate_usd=part.rate_priced_usd,
-            key_source=None,
-            cached=True,
         )
 
 
@@ -279,13 +282,15 @@ async def attempt_bounds(session: Session, calls: Mapping[str, NodeCall]) -> dic
 _PRICED_RUNS = 32
 
 
-def measured_cell_price(session: Session, wire_params: PipelineParams) -> CellPrice | None:
+def measured_cell_price(
+    stores: Stores, dataset_hash: str, wire_params: PipelineParams
+) -> CellPrice | None:
     """What a cell BILLED on these models over the archive's newest rows; ``None`` before any."""
     on_models = {name: {"model": cfg.model} for name, cfg in wire_params.nodes.items() if cfg.model}
     costs: list[float] = []
     seconds: list[float] = []
-    for m in session.store.archive.measurements_for_config(
-        on_models, dataset_hash=session.bank.dataset_hash, newest=_PRICED_RUNS
+    for m in stores.archive.measurements_for_config(
+        on_models, dataset_hash=dataset_hash, newest=_PRICED_RUNS
     ):
         # An archive row carries no grade, and the price is no formula's reading.
         channels = cell_channels_of(m.cell, None)

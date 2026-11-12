@@ -21,7 +21,7 @@ from promptpotter.domain.campaign import (
 )
 from promptpotter.domain.campaign_config import LaidSpan
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
+from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.phases import LaunchStage, StopReason
@@ -56,15 +56,21 @@ from promptpotter.domain.spend import NOTHING_METERED, Budget, CeilingMeter
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
-from promptpotter.infrastructure.llm.spend_book import standing_budget
 from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
 from promptpotter.infrastructure.projections.cycle_index import (
     CycleIndexProjection,
     read_cycle_index,
 )
-from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
+from promptpotter.infrastructure.projections.live_dashboard.projection import (
+    DashboardCheckout,
+    run_limits_at,
+)
 from promptpotter.infrastructure.runtime_flags import run_state_stamps
-from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs, workspace_bank
+from promptpotter.infrastructure.store.account_spend import (
+    ledger_bills,
+    sandbox_cycle_dirs,
+    workspace_bank,
+)
 from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ResolvedRun,
@@ -114,6 +120,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     clear_active_pointer,
     read_active_pointer,
 )
+from promptpotter.infrastructure.store.wallet_store import ChargeBook
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
@@ -161,14 +168,16 @@ class CampaignStore:
     def campaign_root_dir(self, campaign_id: str) -> Path:
         return campaign_root_dir_for(self._base_dir, campaign_id)
 
-    def claim_campaign_id(self, dataset_name: str) -> str:
+    def claim_campaign_id(self, dataset_name: str, charges: ChargeBook) -> str:
         """A mint's first write: drawn again until it takes a campaign dir exclusively and names no
-        deleted campaign, so it never writes into a live campaign, a torn mint or a tombstone's id."""
+        deleted campaign nor one the account's charges name, which outlive every landing's wipe."""
         prefix = dataset_id_prefix(dataset_name) if dataset_name else "campaign"
         bank = workspace_bank(self._base_dir)
+        charged = [PurePosixPath(ledger) for ledger in ledger_bills(charges)]
         while True:
             campaign_id = f"{prefix}__{secrets.token_hex(3)}"
-            if bank.deleted(campaign_id):
+            held = charges.held_on(self.campaign_root_dir(campaign_id))
+            if bank.deleted(campaign_id) or any(ledger.is_relative_to(held) for ledger in charged):
                 continue
             root = self.campaign_root_dir(campaign_id)
             root.parent.mkdir(parents=True, exist_ok=True)
@@ -734,7 +743,9 @@ class CampaignStore:
         ]
 
     def read_standing_budget(self, hop: CycleHop) -> StandingBudgetRecord:
-        return standing_budget(self.cycle_dir(hop))
+        """Read live by the book at each send, so a running change binds its next one."""
+        # No record stands no axis, which the empty record says.
+        return self.last(hop, StandingBudgetRecord) or StandingBudgetRecord()
 
     def read_campaign_ceiling(self, hop: CycleHop) -> Budget:
         """Off any cycle of the campaign: each reads its root's, which its manifest names."""
@@ -743,11 +754,18 @@ class CampaignStore:
             raise NotFoundError(f"Campaign not found: {hop.campaign_id}")
         return scan_campaign_ceiling(self.ledger(campaign.root_hop))
 
-    def armed_run_limits(self, hop: CycleHop, folded: RunLimits) -> RunLimits:
-        """*folded* is `LiveDashboardState.run_limits`, the cycle's standing budget laid in by the
-        fold; the campaign's ceiling rides its root's ledger, which no fold of this cycle reads."""
-        armed = folded.budget.over(self.read_campaign_ceiling(hop))
-        return folded.model_copy(update={"budget": armed})
+    def armed_budget(self, hop: CycleHop) -> Budget:
+        """The axes an operator named: the campaign's money and the cycle's own."""
+        return self.read_campaign_ceiling(hop).over(self.read_standing_budget(hop).budget)
+
+    def run_limits(self, hop: CycleHop, *, at: int | None = None) -> RunLimits | None:
+        """The cycle's fold to *at*, its line's root ceiling laid over; ``None`` before its first wiring."""
+        folded = run_limits_at(Cut(cycle=CycleDir(self.cycle_dir(hop)), hop=hop, offset=at))
+        if folded is None:
+            return None
+        return folded.model_copy(
+            update={"budget": folded.budget.over(self.read_campaign_ceiling(hop))}
+        )
 
     def _chain(self, hop: CycleHop) -> list[LedgerSpan]:
         return ledger_chain(CycleDir(self.cycle_dir(hop)), moment=None)

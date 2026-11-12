@@ -52,7 +52,7 @@ from factories import (
 from offline_world import LLM_ONLY_NODE, Router
 from pydantic import ValidationError
 
-from promptpotter.application import optimizer_manifest, optimizers, run_observers
+from promptpotter.application import optimizer_manifest, optimizers
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.children import (
     admission_failures,
@@ -294,7 +294,7 @@ from promptpotter.infrastructure.identity import blocklist, grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.registry import default_routes
-from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
+from promptpotter.infrastructure.llm.spend_book import unbounded_spend_book
 from promptpotter.infrastructure.producer_lock import cycle_held, release, take
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
@@ -885,7 +885,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
                     optimizer=select_optimizer(OptimizerChoice()),
                     determinism=clamp,
                 ),
-                spending_under(unbounded_spend_book()),
+                scoped(book=unbounded_spend_book()),
             ):
                 await call_mod.llm_call(
                     [{"role": "user", "content": content}],
@@ -2706,8 +2706,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         ),
     )
     folding: list[str] = []
+    voids = Stores.void_inbox
+
+    def void_after_a_pause(held: Stores, hop: CycleHop, *, before: float | None = None) -> None:
+        folding.append(pause("fold"))
+        voids(held, hop, before=before)
+
     with monkeypatch.context() as filing:
-        filing.setattr(run_observers, "bind_account", lambda _: folding.append(pause("fold")))
+        filing.setattr(Stores, "void_inbox", void_after_a_pause)
         observers = build_run_observers(session=opened, campaign_config=launched)
     assert read_active_pointer(stores.base_dir) == opened.hop, (
         "a run held its cycle, and the latest launch names another"
@@ -3116,7 +3122,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                 optimizer=reflected_on.cycle.optimizer,
                 determinism=reflected_on.cycle.config.optimization.determinism,
             ),
-            spending_under(unbounded_spend_book()),
+            scoped(book=unbounded_spend_book()),
             verb_ledger(built_stores, reflected_on.cycle.session.hop),
         ):
             reflection = asyncio.run(GepaReflect().propose(reflecting, no_cells, Proposals([])))

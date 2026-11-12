@@ -440,45 +440,80 @@ class RaceCatchUpRecord(FrozenModel):
         return list(self.cells)
 
 
+class CallPrice(FrozenModel):
+    """What one call cost, the one carrier of a call's price: on a send's charge, or a replay's own."""
+
+    kind: TokenUsageKind
+    # ``None`` where neither the send nor its reply named one, as on a backend cell.
+    model: str | None
+    # Who BILLED: a rate belongs to the (provider, model) pair; ``None`` ⇒ no rate prices the call.
+    provider: str | None
+    # The BILL the provider reported, never filled from a rate; on a hold, its bound's, ``None``
+    # where no rate bounds it.
+    cost_usd: float | None
+    # OUR rate's price of an unbilled call, stamped once: it counts against ceilings, never spent.
+    rate_priced_usd: float | None
+
+    @property
+    def bill_or_rate_usd(self) -> float | None:
+        return bill_or_rate_usd(self.cost_usd, self.rate_priced_usd)
+
+
+class Charge(FrozenModel):
+    """One line of a send's money: its hold at the send's bound, then each answered part closing it."""
+
+    record_type: Literal["charge"] = "charge"
+    state: Literal["held", "billed"]
+    hold_id: str
+    key_source: KeySource
+    # Both money fields ``None`` on a bill is unpriced.
+    price: CallPrice
+    # A hold's are its bound's: none where nothing capped the reply.
+    tokens: int
+    # The ledger the send landed on, relative to the account: while its producer is attached the
+    # run's reservation already holds it.
+    ledger: str
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 class TokenUsageRecord(FrozenModel):
-    """ONE answered send, or a replay (``cached``); a send that reported no usage writes none."""
+    """ONE answered send, or a replay; a send that reported no usage writes none."""
 
     record_type: Literal["token_usage"] = "token_usage"
-    kind: TokenUsageKind
     node: str
-    model: str | None = None
-    # Who BILLED: a rate belongs to the (provider, model) pair; ``None`` ⇒ no rate prices the call.
-    provider: str | None = None
-    # WHICH upstream host answered, where `provider` is a gateway; ``None`` where it is the host.
+    # WHICH upstream host answered, where the price's provider is a gateway; ``None`` where it is.
     served_by: str | None = None
     input_tokens: int
     output_tokens: int
     # A SUBSET of ``output_tokens``; 0 also means no breakdown was reported, never "did not think".
     reasoning_tokens: int = 0
-    # A SUBSET of ``input_tokens`` the PROVIDER cached; 0 also means no breakdown. Not ``cached``.
+    # A SUBSET of ``input_tokens`` the PROVIDER cached; 0 also means no breakdown. Not a replay.
     cache_read_tokens: int = 0
     # The part of ``input_tokens`` billed at a premium to POPULATE that cache.
     cache_write_tokens: int = 0
     duration_s: float = 0.0
-    # The BILL the provider reported, the only figure called spent; never filled from a rate.
-    cost_usd: float | None = None
-    # OUR rate's price of an unbilled call, stamped once: it counts against ceilings, never spent.
-    rate_priced_usd: float | None = None
-    # Whose wallet paid; ``None`` exactly on a replay (``cached``), which no wallet paid.
-    key_source: KeySource | None
-    # The `SpendHoldRecord` this call settles; ``None`` for a call nothing held (a replay).
-    hold_id: str | None = None
+    # A send's billed charge; a replay's recorded price alone, which no wallet paid.
+    money: Charge | CallPrice
     # A nested run's own view of its call; money is summed off the copy on the outer ledger.
     mirrored: bool = False
-    cached: bool = False
     round: int | None = None
     # ``None`` outside a candidate's pass; a nested run's copy keeps ITS pass: `by_role` skips it.
     role: MeasurementRole | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
-    def bill_or_rate_usd(self) -> float | None:
-        return bill_or_rate_usd(self.cost_usd, self.rate_priced_usd)
+    def charge(self) -> Charge | None:
+        """``None`` exactly on a replay."""
+        return self.money if isinstance(self.money, Charge) else None
+
+    @property
+    def price(self) -> CallPrice:
+        return self.money.price if isinstance(self.money, Charge) else self.money
+
+    def filed_as(self, kind: TokenUsageKind) -> TokenUsageRecord:
+        price = self.price.model_copy(update={"kind": kind})
+        money = price if self.charge is None else self.money.model_copy(update={"price": price})
+        return self.model_copy(update={"money": money})
 
     @property
     def spend_round(self) -> int:
@@ -490,17 +525,9 @@ class SpendHoldRecord(FrozenModel):
     """Written BEFORE the send, at its bound; unclosed, it binds every ceiling and is not spent."""
 
     record_type: Literal["spend_hold"] = "spend_hold"
-    hold_id: str
-    kind: TokenUsageKind
     node: str
-    model: str | None = None
-    provider: str | None = None
-    input_tokens: int
-    # ``None`` where nothing capped the reply: such a send holds no tokens.
-    output_tokens: int | None
-    cost_usd: float | None = None
-    # Whose wallet an unclosed hold may have drawn: its `TokenUsageRecord` never came to say.
-    key_source: KeySource
+    # The account's `held` line of the same hold.
+    charge: Charge
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -517,7 +544,7 @@ class BankedSpend(FrozenModel):
     """One wallet's `UserSpend`, as a tombstone banks it."""
 
     used_usd: float
-    # What our rate table priced the calls no provider billed (`TokenUsageRecord.rate_priced_usd`).
+    # What our rate table priced the calls no provider billed (`CallPrice.rate_priced_usd`).
     rate_priced_usd: float
     used_tokens: int
     unpriced_tokens: int

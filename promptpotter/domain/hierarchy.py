@@ -16,7 +16,7 @@ from promptpotter.domain.phases import PauseReading, RunAdmission, RunState
 from promptpotter.domain.run_records import ForkDirection, ForkTrigger
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.said import Said
-from promptpotter.domain.spend import LifetimeSpend, MeteredSpend
+from promptpotter.domain.spend import MeteredSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 type CourseKind = Literal["root", "fork", "inner"]
@@ -118,18 +118,9 @@ class CampaignFacts(FrozenModel):
         "supersede handed it to."
     )
     lifecycle: LifecycleStatus
-    spend_lifetime: LifetimeSpend = Field(
-        description="Every cycle's bill, forks, forwarded inner spend and deleted cycles included."
-    )
     runs_with: CampaignRunsWith | None = Field(
         description="What the root course runs with; null where its pipeline did not resolve."
     )
-
-
-class UnstartedFacts(FrozenModel):
-    """An open check-in's typed facts: it has no cycle, so no course, line or run."""
-
-    spend_lifetime: LifetimeSpend = Field(description="What its check-in has cost so far.")
 
 
 class CourseSpawn(FrozenModel):
@@ -520,7 +511,6 @@ class UnstartedCampaign(_HierarchyEntry):
 
     level: Literal["unstarted"] = "unstarted"
     span: HierarchySpan
-    facts: UnstartedFacts
 
 
 # What a listing filter picks: a stored lifecycle, or the open check-ins no manifest holds.

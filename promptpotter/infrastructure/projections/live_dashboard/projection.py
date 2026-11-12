@@ -3,12 +3,12 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import assert_never
+from typing import Any, assert_never
 
 from promptpotter.domain.arms import Concluded, Measuring
 from promptpotter.domain.bench import BandedValue, BenchReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
-from promptpotter.domain.dashboard_rows import RoundSummary, VerificationMark
+from promptpotter.domain.dashboard_rows import RoundSummary, RunLimits, VerificationMark
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phase_views import (
     BenchScoredView,
@@ -75,6 +75,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
+    LedgerFold,
     LedgerIndex,
     LedgerSpan,
 )
@@ -177,13 +178,6 @@ class LiveDashboardProjection(Projection):
         self.state.verification = self.state.orphaned()
         self._launch()
         self._measurement_node = record.measurement_node
-
-    def _handle_standing_budget(self, record: StandingBudgetRecord) -> None:
-        # Last wins and names every cycle axis it stands, so laying each over the last is laying the last.
-        limits = self.state.run_limits
-        self.state.run_limits = limits.model_copy(
-            update={"budget": limits.budget.over(record.budget)}
-        )
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
         if self.state.declared_phase == record.run_phase:
@@ -449,13 +443,11 @@ class LiveDashboardProjection(Projection):
             )
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
-        # Copied, then banked: a snapshot `value` served holds the rollups as they were.
+        # Assigned, never banked in place: a snapshot `value` served holds the rollups as they were.
         key = str(record.spend_round)
         held = self.state.spend_by_round.get(key)
-        rollup = SpendRollup() if held is None else held.model_copy(deep=True)
-        self.state.spend = self.state.spend.model_copy(deep=True)
-        self.state.spend.bank(record)
-        rollup.bank(record)
+        self.state.spend = self.state.spend.banked(record)
+        rollup = (SpendRollup() if held is None else held).banked(record)
         self.state.spend_by_round = {**self.state.spend_by_round, key: rollup}
 
     def spend_metered(self, meters: CeilingMeter) -> MeteredSpend:
@@ -573,7 +565,9 @@ class DashboardCheckout:
     @property
     def live(self) -> LiveDashboardProjection:
         """The run's own fold, fed on as its ledger grows."""
-        return self._index.live(LiveDashboardProjection, seed=_seed(self._prefix))
+        return self._index.live(
+            LiveDashboardProjection, seed=_seed(LiveDashboardProjection, self._prefix)
+        )
 
     def feed(self, record: CycleRecord) -> None:
         with self._lock:
@@ -613,7 +607,9 @@ class DashboardCheckout:
             self._timer.cancel()
             self._timer = None
         self._dirty = False
-        state = self._index.view(LiveDashboardProjection, seed=_seed(self._prefix))
+        state = self._index.view(
+            LiveDashboardProjection, seed=_seed(LiveDashboardProjection, self._prefix)
+        )
         if state is None:
             return
         started = time.perf_counter()
@@ -621,16 +617,49 @@ class DashboardCheckout:
         self._cost_s = time.perf_counter() - started
 
 
+class RunLimitsProjection(Projection):
+    """The limits each launch declares, every later standing budget laid over: the campaign's
+    ceiling rides its root's ledger (`CampaignStore.run_limits`)."""
+
+    def __init__(self) -> None:
+        self._limits: RunLimits | None = None
+
+    def _handle_run_wiring(self, record: RunWiringRecord) -> None:
+        self._limits = record.run_limits
+
+    def _handle_standing_budget(self, record: StandingBudgetRecord) -> None:
+        # Last wins and names every cycle axis it stands, so laying each over the last is laying the last.
+        if self._limits is not None:
+            self._limits = self._limits.model_copy(
+                update={"budget": self._limits.budget.over(record.budget)}
+            )
+
+    def value(self) -> RunLimits | None:
+        return self._limits
+
+
 def fold_at(cut: Cut) -> LiveDashboardState | None:
     """`None`: the cut holds no `RunWiringRecord` yet (a check-in still authoring its origin)."""
     *prefix, own = ledger_chain(cut.cycle, moment=None)
-    until = None if cut.offset is None else cut.offset + 1
-    return LedgerIndex.of(own.path).view(LiveDashboardProjection, until, seed=_seed(prefix))
+    return LedgerIndex.of(own.path).view(
+        LiveDashboardProjection, _until(cut), seed=_seed(LiveDashboardProjection, prefix)
+    )
 
 
-def _seed(prefix: list[LedgerSpan]) -> LiveDashboardProjection | None:
-    seed: LiveDashboardProjection | None = None
+def run_limits_at(cut: Cut) -> RunLimits | None:
+    *prefix, own = ledger_chain(cut.cycle, moment=None)
+    return LedgerIndex.of(own.path).view(
+        RunLimitsProjection, _until(cut), seed=_seed(RunLimitsProjection, prefix)
+    )
+
+
+def _until(cut: Cut) -> int | None:
+    return None if cut.offset is None else cut.offset + 1
+
+
+def _seed[F: LedgerFold[Any, Any]](fold: type[F], prefix: list[LedgerSpan]) -> F | None:
+    seed: F | None = None
     for span in prefix:
         assert span.until is not None, "a fork's parent is read to its cut"
-        seed = LedgerIndex.of(span.path).prefix(LiveDashboardProjection, span.until, seed=seed)
+        seed = LedgerIndex.of(span.path).prefix(fold, span.until, seed=seed)
     return seed

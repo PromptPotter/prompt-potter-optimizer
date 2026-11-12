@@ -199,8 +199,8 @@ from promptpotter.infrastructure.identity.bundle import (
 )
 from promptpotter.infrastructure.identity.default_claim import (
     claim_default,
+    host_user_id,
     is_host,
-    registered_user_id,
 )
 from promptpotter.infrastructure.identity.google import GoogleProviderClient
 from promptpotter.infrastructure.identity.grants import (
@@ -953,7 +953,7 @@ async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) 
     # A slot ask's rate token is debited under the gate it was read under: N asks racing on one
     # token admit exactly one, or a burst of paid passes each reads the same untouched bucket.
     monkeypatch.setattr(settings_mod.settings, "USER_RATE_BURST", 1)
-    monkeypatch.setattr(settings_mod.settings, "USER_RATE_PER_MIN", 0)
+    monkeypatch.setattr(settings_mod.settings, "USER_RATE_PER_MIN", 1e-9)
     passes = JobRegistry(home / "pass-jobs", capacity=lambda _: 8)
     racing = threading.Barrier(4)
 
@@ -1097,9 +1097,13 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     with pytest.raises(ValueError):
         grant("owner-9", "owner-9", frozenset({CAMPAIGN_STEP_CAP}))
     # The host's first sign-in takes the terminal's account in one act, and refuses while both
-    # directories stand or a run holds a cycle there: the marker waits for the next (bl4.B4).
-    marker, projects = default_identity_paths().default_claim_marker, tmp_path / "projects"
+    # directories stand or a run holds a cycle there: the next sign-in asks again (bl4.B4).
+    monkeypatch.setattr(settings_mod.settings, "HOST_ADMIN_EMAIL", "owner-9@x.com")
+    projects = tmp_path / "projects"
     terminal = workspace(tmp_path)
+    UserStore(terminal.campaigns.workspace).save(
+        User(user_id="default", tenant_id="default", created_at="2026-01-01T00:00:00Z")
+    )
     live = CycleHop(campaign_id="terminal-camp", cycle_id="cycle_terminal")
     terminal.campaigns.create_campaign(minted_campaign(live))
     terminal.campaigns.mint_cycle(live)
@@ -1107,15 +1111,15 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     (projects / "owner-9").mkdir(parents=True)
 
     def claim() -> str | None:
-        return claim_default(projects_root=projects, user_id="owner-9", marker_path=marker)
+        return claim_default(projects_root=projects, user_id="owner-9", email="owner-9@x.com")
 
     assert claim() is not None and (projects / "default").is_dir(), "a claim merged two accounts"
     (projects / "owner-9").rmdir()
     assert claim() is not None and (projects / "default").is_dir(), "a claim moved a live run"
     release_cycle(terminal.campaigns.cycle_dir(live))
-    assert not marker.exists(), "a refused claim wrote its marker"
+    assert host_user_id(projects) is None, "a refused claim named a host"
     assert claim() is None and (projects / "owner-9" / "campaigns" / "terminal-camp").is_dir()
-    assert registered_user_id(marker) == "owner-9", "the claim left no marker"
+    assert host_user_id(projects) == "owner-9", "the claimed account is not the declared host"
     # The host's delegate acts in the host's tenant and is not the host (bl4.B1).
     assert is_host(identity_of_session(session_of("owner-9"), signed_in)), (
         "the host read as a guest"
@@ -1520,7 +1524,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     ledger_bytes = ledger.read_bytes() if ledger.exists() else b""
     with monkeypatch.context() as one_token:
         one_token.setattr(settings_mod.settings, "USER_RATE_BURST", 1)
-        one_token.setattr(settings_mod.settings, "USER_RATE_PER_MIN", 0)
+        one_token.setattr(settings_mod.settings, "USER_RATE_PER_MIN", 1e-9)
         for room, capacity in ((0, lambda _live: 0), (1, lambda _live: 1)):
             refusing = JobRegistry(tmp_path / "jobs", capacity=capacity)
             for holder in (CampaignLaunch("ds1"), ScoringPass("bench")):
@@ -1889,10 +1893,12 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     users = UserStore(campaigns.workspace)
     # The identity survivors the base wrote are migrated, never wiped.
     identity = IdentityPaths(data_root / IDENTITY_DIR)
-    write_json(
-        identity.default_claim_marker,
-        {"user_id": "u", "claimed_at": "2026-01-01T00:00:00Z", "renamed": True},
-    )
+    # The host's claim marker, over the terminal's record its claim renamed under the host's id.
+    marker = data_root / IDENTITY_DIR / "default_claimed.json"
+    write_json(marker, {"user_id": "h", "claimed_at": "2026-01-01T00:00:00Z", "renamed": True})
+    host_dir = built_stores.projects_root / "h"
+    write_json(host_dir / USER_FILE, user.model_dump(mode="json") | {"user_id": "default"})
+    monkeypatch.setattr(settings_mod.settings, "HOST_ADMIN_EMAIL", "h@x.com")
     write_json(
         identity.grants,
         {
@@ -1979,13 +1985,13 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     write_json(retired, {})
     landed = plan_landing(built_stores.projects_root, reset=False)
     assert not landed.refused, f"a landing refused run data it drops itself: {landed}"
-    assert {one.path for one in landed.runs} == {events, retired}, (
+    assert {one.path for one in landed.runs} == {events, retired, marker}, (
         "run data no reader takes was kept"
     )
     since = started_since(kept_hop)
     held_runs = apply_landing(built_stores.projects_root, landed)
     on_disk = await asyncio.to_thread(lambda: events.exists() and retired.exists())
-    assert on_disk and not held_runs.runs, (
+    assert on_disk and [one.path for one in held_runs.runs] == [marker], (
         "a landing dropped the files of a run started since its plan"
     )
     unlanded = last_landing(built_stores.projects_root)
@@ -1996,7 +2002,11 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert not events.exists(), "a landing kept run data this build cannot read"
     landed_pack = BlockPack.model_validate_json(pack.read_bytes())
     assert [s.tags for s in landed_pack.snippets] == [("expert",)], "a pack lost a tag of its own"
-    assert registered_user_id(identity.default_claim_marker) == "u", "a landing lost the claim"
+    host = UserStore(host_dir).load()
+    assert not marker.exists() and host is not None, "a landing kept the claim marker"
+    assert (host.user_id, host.email) == ("h", "h@x.com") and host_user_id(
+        built_stores.projects_root
+    ) == "h", "a landing lost the host"
     regranted = read_grant(identity.grants, "sub")
     assert regranted is not None and regranted.delegated_by == "u", "a landing lost a grant"
     migrated = users.load()

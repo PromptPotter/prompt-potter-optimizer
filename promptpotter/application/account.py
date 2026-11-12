@@ -212,15 +212,6 @@ def sign_in(stores: Stores, *, device: Device | None) -> Arrival:
     return arrival
 
 
-def _is_declared_host_admin(email: str | None, issuer: str | None) -> bool:
-    """Unset `HOST_ADMIN_EMAIL` means nobody may: signing up is the grant, so "first one in wins" is unsafe."""
-    declared = settings.HOST_ADMIN_EMAIL.strip().lower()
-    if not declared or (email or "").strip().lower() != declared:
-        return False
-    declared_issuer = settings.HOST_ADMIN_ISSUER.strip()
-    return not declared_issuer or (issuer or "").strip() == declared_issuer
-
-
 class SignedIn(NamedTuple):
     session_id: str
     identity: IdentityContext
@@ -244,26 +235,25 @@ def sign_in_oidc(
     """THE browser sign-in: blocked, the box's claim, the account ceiling and the opening are
     decided here, and a session stands only for an account that does."""
     user_id = str(derive_user_id(verified.issuer, verified.subject))
-    host_admin = _is_declared_host_admin(verified.email, verified.issuer)
-    marker, rings = bundle.paths.default_claim_marker, list[str]()
+    host_admin = default_claim.is_declared_host(verified.email)
+    root, rings = default_projects_root(), list[str]()
     # A blocked account still gets a session: the session seam empties its capabilities per request.
     if resolve_access_state(verified.email, bundle) == "blocked":
         logger.info("Blocked account signed in: %s (%s)", verified.email, verified.provider)
     elif host_admin:
-        # The marker names the box's own tenant, so who writes it is declared, never inferred
-        # from arrival order.
-        root = default_projects_root()
+        # The terminal's tree is the box's own, so who takes it is declared, never inferred from
+        # arrival order.
         refused = default_claim.claim_default(
-            projects_root=root, user_id=user_id, marker_path=marker
+            projects_root=root, user_id=user_id, email=verified.email
         )
         if refused is not None:
             logger.warning("The host's sign-in did not claim this box: %s", refused)
             rings.append(f"Your sign-in did not claim this box: {refused}")
-    elif default_claim.registered_user_id(marker) is None:
+    elif default_claim.host_user_id(root) is None:
         why = (
             "HOST_ADMIN_EMAIL's account has not signed in yet"
             if settings.HOST_ADMIN_EMAIL.strip()
-            else "HOST_ADMIN_EMAIL is unset, so no browser identity may write the claim marker"
+            else "HOST_ADMIN_EMAIL is unset, so no browser identity is the host"
         )
         logger.warning(
             "Sign-in by %s did not claim this box: %s. Terminal and browser will resolve DIFFERENT "
@@ -509,14 +499,14 @@ def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail],
     return trails, unreadable
 
 
-def registered_user_id() -> str | None:
-    return default_claim.registered_user_id(default_identity_paths().default_claim_marker)
+def host_user_id() -> str | None:
+    return default_claim.host_user_id(default_projects_root())
 
 
 def registered_or_default_identity(explicit_tenant: str | None = None) -> IdentityContext:
     if explicit_tenant:
         return default_identity(tenant_id=explicit_tenant)
-    uid = registered_user_id()
+    uid = host_user_id()
     return default_identity(tenant_id=uid) if uid else default_identity()
 
 

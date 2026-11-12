@@ -15,7 +15,7 @@ from promptpotter.domain.scoring import NO_RESULT, MeasuredCell
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, silence_detail
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
-from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, under_budget
+from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
@@ -27,7 +27,7 @@ from promptpotter.shared.errors import (
     SendRefusedError,
     UngeneratedRequestError,
 )
-from promptpotter.shared.run_scope import run_scope
+from promptpotter.shared.run_scope import run_scope, scoped
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
         )
     )
     try:
-        with under_budget(SendBudget(None, attempts=SEND_ATTEMPTS)):
+        with scoped(send_budget=SendBudget(None, attempts=SEND_ATTEMPTS)):
             return await client.chat(
                 ChatRequest(
                     messages=[{"role": "user", "content": prompt}],

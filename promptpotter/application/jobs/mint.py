@@ -509,7 +509,9 @@ async def arm_plans(
     )
     for plan in plans:
         bound = await cell_bound(plan.session, plan.pipeline_params)
-        measured = measured_cell_price(plan.session, plan.pipeline_params)
+        measured = measured_cell_price(
+            plan.session.store, plan.session.bank.dataset_hash, plan.pipeline_params
+        )
         refuse_arm_below_round(
             _arm_of(plan),
             plan.cycle.config,
@@ -534,7 +536,9 @@ def _prompt_axes_only(
 
 
 def fresh_campaign_id(session: Session) -> str:
-    return session.store.campaigns.claim_campaign_id(session.measured_dataset)
+    return session.store.campaigns.claim_campaign_id(
+        session.measured_dataset, session.store.charges
+    )
 
 
 def _write_plan(

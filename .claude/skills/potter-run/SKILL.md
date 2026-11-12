@@ -51,7 +51,7 @@ are `{dataset}/dataset.yaml::campaign`, never guessed. `head-to-head` mints ever
 
 **Every ending states its next verb** (the readout's `cli:` line). A `set-limits` raise fails silently two
 ways: the ceiling is clamped to the account allowance (read the ARMED value off
-`dashboard.json::run_limits.budget`), and the counter is CUMULATIVE across resumes and cycles. A hard
+the served dashboard's `run_limits.budget`), and the counter is CUMULATIVE across resumes and cycles. A hard
 kill loses nothing: every query lands in `measurements/cells/{config_key}.jsonl` at once.
 
 ## Supervise

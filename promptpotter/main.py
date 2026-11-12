@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import math
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager
@@ -221,6 +222,11 @@ async def potter_error_handler(request: Request, exc: PotterError) -> JSONRespon
         code=refused.code,
         message=refused.message,
         details=refused.details,
+        headers=(
+            {"Retry-After": str(math.ceil(exc.retry_after_s))}
+            if isinstance(exc, RateLimitedError)
+            else None
+        ),
         banked=not isinstance(exc, RateLimitedError),
     )
 

@@ -257,6 +257,10 @@ class ServedDashboard(DashboardFacts):
     # The served rounds narrow the banked ones; nothing assigns through this list.
     rounds: list[ServedRound]  # type: ignore[assignment]
     sample_coverage: SampleCoverage
+    run_limits: RunLimits = Field(
+        description="What binds the cycle (`CampaignStore.run_limits`): its launch's limits, its "
+        "standing budget and its campaign's ceiling laid over; a next launch's budget where none runs."
+    )
     campaign_id: str
     cycle_id: str
     backpressure: ServedBackpressure | None
@@ -396,7 +400,6 @@ def run_said(
 class _Standing(NamedTuple):
     """Only the PRESENT holds these; a replay takes none — a past moment never had them."""
 
-    run_limits: RunLimits
     allotment: Budget | None
     lookahead: int
     lookahead_auto: bool
@@ -413,20 +416,19 @@ def binding_run_limits(
     stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
     """``None`` on a cycle that has declared no wiring yet."""
-    held = fold_at(Cut(cycle=CycleDir(cycle_dir_for(stores.base_dir, hop)), hop=hop, offset=None))
-    return None if held is None else _binding(stores, hop, config, run, held.run_limits)
+    limits = stores.campaigns.run_limits(hop)
+    return None if limits is None else _binding(stores, hop, config, run, limits)
 
 
 def _binding(
-    stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState, folded: RunLimits
+    stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState, limits: RunLimits
 ) -> RunLimits:
-    """*folded* carries the cycle's standing budget already; the campaign's ceiling rides its root.
-    A next launch keeps the fold's optimizer limits under the budget it would be admitted at."""
+    """A next launch keeps the run's optimizer limits under the budget it would be admitted at."""
     if config is not None and not run.producer.appending:
-        return folded.model_copy(
+        return limits.model_copy(
             update={"budget": next_launch_budget(config, stores=stores, hop=hop)}
         )
-    return stores.campaigns.armed_run_limits(hop, folded)
+    return limits
 
 
 def _allotment(stores: Stores, hop: CycleHop, run: RunState) -> Budget | None:
@@ -509,6 +511,7 @@ def _serve(
     hop: CycleHop,
     run: RunState,
     meter: CeilingMeter | None,
+    run_limits: RunLimits,
     standing: _Standing | None,
 ) -> ServedDashboard:
     """*standing* is ``None`` for a replay: the moment it folded, and nothing armed since."""
@@ -517,7 +520,6 @@ def _serve(
     # A hold is read against the clock: a past moment has none, and a dead producer holds nothing.
     banked["backpressure"] = None
     if standing is not None:
-        banked["run_limits"] = standing.run_limits
         if not run.producer.appending:
             # A killed run never publishes its closing zero, so it would go on reporting calls out.
             in_flight = allowed = 0
@@ -540,6 +542,7 @@ def _serve(
     return ServedDashboard(
         **banked | {"rounds": rounds},
         sample_coverage=SampleCoverage.of(rounds),
+        run_limits=run_limits,
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,
         run_phase=run.run_phase,
@@ -569,12 +572,12 @@ def _serve(
         else metered_line(
             meter,
             metered=state.spend.metered(meter),
-            cap=Budget() if standing is None else standing.run_limits.budget,
+            cap=Budget() if standing is None else run_limits.budget,
             share=Budget() if standing is None else standing.allotment or Budget(),
         ),
         cap_lines=[]
         if meter is None or standing is None or campaign_metered is None
-        else campaign_cap_lines(meter, campaign=campaign_metered, cap=standing.run_limits.budget),
+        else campaign_cap_lines(meter, campaign=campaign_metered, cap=run_limits.budget),
         allotment=None if standing is None else standing.allotment,
         fork_remainder=None if standing is None else standing.fork_remainder,
         observed=_observed(state, live=live),
@@ -609,18 +612,20 @@ def served_dashboard(
             admission=run.admission,
             pause=run.pause,
         )
+    folded = stores.campaigns.run_limits(hop, at=at)
+    assert folded is not None, "a folded state stands on its wiring"
     if at is not None:
-        return _serve(state, hop=hop, run=run, meter=meter, standing=None)
+        return _serve(state, hop=hop, run=run, meter=meter, run_limits=folded, standing=None)
     config = None if campaign is None else cycle_config(stores, campaign, hop).config
-    limits = _binding(stores, hop, config, run, state.run_limits)
+    limits = _binding(stores, hop, config, run, folded)
     armed = stores.inbox(hop)
     return _serve(
         state,
         hop=hop,
         run=run,
         meter=meter,
+        run_limits=limits,
         standing=_Standing(
-            run_limits=limits,
             allotment=_allotment(stores, hop, run),
             lookahead=requested_lookahead(armed),
             lookahead_auto=armed.lookahead is not None and armed.lookahead.auto,

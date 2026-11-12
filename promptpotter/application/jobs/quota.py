@@ -22,7 +22,6 @@ from promptpotter.application.jobs.coupon import (
     BackendCells,
     ProviderSend,
     Send,
-    bind_account,
     paying_key,
     provider_send,
     read_coupon,
@@ -70,17 +69,17 @@ from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.spend_book import (
     Hold,
     SpendBook,
-    spending_under,
     unbounded_spend_book,
 )
 from promptpotter.infrastructure.store.account_spend import (
     account_bill,
     campaign_spend,
-    ledger_cost,
+    ledger_bills,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
+from promptpotter.infrastructure.store.wallet_store import ChargeBook
 from promptpotter.shared.errors import (
     BudgetUnenforceableError,
     LaunchRefusalReason,
@@ -95,6 +94,7 @@ from promptpotter.shared.identity import (
     acting_principal,
     has_capability,
 )
+from promptpotter.shared.run_scope import scoped
 from promptpotter.shared.worded import Worded
 
 logger = logging.getLogger(__name__)
@@ -102,8 +102,8 @@ logger = logging.getLogger(__name__)
 
 class QuotaExceededError(PotterError):
     """A user-scoped limit refused a request — 409, a state a retry does not change, as against
-    ``PayloadInvalidError``'s 422 for a malformed or unowned request. Only the throttle passes, so only it serves
-    429 (`RateLimitedError`). Both map to one HTTP response through the ``PotterError`` seam."""
+    ``PayloadInvalidError``'s 422 for a malformed or unowned request. Only a retryable refusal
+    serves 429 (`RateLimitedError`). Both map to one HTTP response through the ``PotterError`` seam."""
 
     http_status = 409
 
@@ -193,7 +193,9 @@ def _refuse_metered(meter: _Meter | None, *, asked: int) -> None:
     with _rate_lock:
         held = _metered_held(meter, time.monotonic())
     if held < asked:
-        raise RateLimitedError(meter.refusal)
+        raise RateLimitedError(
+            meter.refusal, retry_after_s=(asked - held) * 60.0 / settings.USER_RATE_PER_MIN
+        )
 
 
 def _debit_metered(meter: _Meter | None, *, tokens: int) -> None:
@@ -215,13 +217,15 @@ def slot_rate(stores: Stores, holder: JobHolder, hop: CycleHop, *, asked: int) -
 
 
 class RateLimitedError(QuotaExceededError):
-    """A throttle: it repeats as fast as it is asked, so the trail banks none of it (`main.py::_bank_refusal`).
-    It alone serves 429: a retry after it passes."""
+    """A refusal a retry after ``retry_after_s`` passes: it repeats as fast as it is asked, so the
+    trail banks none of it (`main.py::_bank_refusal`). It alone serves 429, with `Retry-After`."""
 
     http_status = 429
 
-    def __init__(self, message: str) -> None:
-        super().__init__(code="rate_limited", message=message)
+    def __init__(self, message: str, *, retry_after_s: float, code: str = "rate_limited") -> None:
+        super().__init__(code=code, message=message)
+        self.retry_after_s = retry_after_s
+        self.details = {"retry_after_s": round(retry_after_s, 3)}
 
 
 # Sized above a person working a check-in by hand: each committed edit is one write, none on a timer.
@@ -237,12 +241,16 @@ def refuse_request_rate(identity: IdentityContext, *, read: bool) -> None:
     principal = acting_principal(identity).id
     if read and not _consume_rate_token(f"read:{principal}", burst=_READ_BURST, per_s=_READ_PER_S):
         raise RateLimitedError(
-            "Too many reads, faster than the dashboard polls; slow down and retry shortly."
+            "Too many reads, faster than the dashboard polls; slow down and retry shortly.",
+            retry_after_s=1 / _READ_PER_S,
         )
     if not read and not _consume_rate_token(
         f"write:{principal}", burst=_WRITE_BURST, per_s=_WRITE_PER_S
     ):
-        raise RateLimitedError("Too many changes in a row; slow down and retry shortly.")
+        raise RateLimitedError(
+            "Too many changes in a row; slow down and retry shortly.",
+            retry_after_s=1 / _WRITE_PER_S,
+        )
 
 
 def check_launch_quotas(
@@ -319,7 +327,7 @@ def read_account_wallet(
         else campaign_spend(stores.campaigns, excluding_campaign).host
     )
     held = _outstanding_reservations(
-        job_registry, user_id=user.user_id, excluding_job_id=excluding_job_id
+        job_registry, stores.charges, user_id=user.user_id, excluding_job_id=excluding_job_id
     )
     if held is None:
         return AccountWallet(coupon, _nothing_on(coupon.face), contended=True)
@@ -799,7 +807,7 @@ def _admit_call(*, stores: Stores, bucket: str, provider: str) -> SpendBook:
     if not _consume_rate_token(
         meter.bucket, burst=settings.USER_RATE_BURST, per_s=settings.USER_RATE_PER_MIN / 60.0
     ):
-        raise RateLimitedError(meter.refusal)
+        raise RateLimitedError(meter.refusal, retry_after_s=60.0 / settings.USER_RATE_PER_MIN)
     try:
         return _call_book(stores, provider)
     except BaseException:
@@ -837,12 +845,8 @@ async def paid_call(*, stores: Stores, bucket: str, provider: str) -> AsyncItera
     campaigns."""
     # Offloaded: admission globs every cycle ledger.
     book = await asyncio.to_thread(_admit_call, stores=stores, bucket=bucket, provider=provider)
-    unbind = bind_account(stores)
-    try:
-        with spending_under(book):
-            yield book
-    finally:
-        unbind()
+    with scoped(account=stores, book=book):
+        yield book
 
 
 def declare_run_budget(
@@ -858,9 +862,7 @@ def declare_run_budget(
     if hop is not None:
         if stores.campaigns.load_campaign(hop.campaign_id) is None:
             raise NotFoundError(f"campaign not found: {hop.campaign_id}")
-        asked = stores.campaigns.read_campaign_ceiling(hop).over(
-            stores.campaigns.read_standing_budget(hop).budget
-        )
+        asked = stores.campaigns.armed_budget(hop)
     asked = asked.over(requested)
     return declared.over(asked), asked
 
@@ -884,7 +886,7 @@ def change_budget(
     unseen. Money moves the CAMPAIGN's ceiling and re-shares it over every live cycle; holds land
     first. Whether the ceiling *hop* runs under moved: a change restating it moves nothing."""
     campaigns = stores.campaigns
-    armed = campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)
+    armed = campaigns.armed_budget(hop)
     change = requested
     with job_registry.admission_gate():
         job = job_registry.running_job_for(campaigns.workspace, hop)
@@ -907,10 +909,7 @@ def change_budget(
                 budget=prior.budget.over(cycle), pause_at_round=prior.pause_at_round
             ),
         )
-    return (
-        campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)
-        != armed
-    )
+    return campaigns.armed_budget(hop) != armed
 
 
 def _clamped(
@@ -977,26 +976,30 @@ def _reserve(budget: Budget, headroom: Budget) -> Budget:
     return Budget.model_validate(held)
 
 
-def _contended(subject: str) -> QuotaExceededError:
+def _contended(subject: str) -> RateLimitedError:
     """The ``request_slot``→``mark_admitted`` window: retryable, as an exhausted ceiling is not."""
-    return QuotaExceededError(
+    return RateLimitedError(
+        f"Another launch on this account is still being admitted, so {subject} cannot be "
+        f"quoted yet. Retry in a moment.",
+        retry_after_s=_ADMISSION_WINDOW_S,
         code="launch_contended",
-        message=(
-            f"Another launch on this account is still being admitted, so {subject} cannot be "
-            f"quoted yet. Retry in a moment."
-        ),
     )
 
 
+# One admission's slot-to-mark window holds no LLM call, so a second retries past it.
+_ADMISSION_WINDOW_S = 1.0
+
+
 def _outstanding_reservations(
-    job_registry: JobRegistry, *, user_id: str, excluding_job_id: str | None
+    job_registry: JobRegistry, charges: ChargeBook, *, user_id: str, excluding_job_id: str | None
 ) -> Budget | None:
-    """What the live runs may still draw: each its reserve less what it already billed, which the
-    coupon's bill counts. ``None`` fails closed on an unstamped sibling. Exclusion is by job,
-    never by hop."""
+    """What the live runs may still draw: each its reserve less what the account's charges say
+    its cycle's sends billed on the box's keys, a nested run's included. ``None`` fails closed on
+    an unstamped sibling. Exclusion is by job, never by hop."""
     running = job_registry.list_holding_spend(user_id=user_id)
     own = next((j for j in running if j.job_id == excluding_job_id), None)
     mine = None if own is None else (own.created_at, own.job_id)
+    bills = ledger_bills(charges)
     held = NOTHING_METERED
     for job in running:
         if job.job_id == excluding_job_id:
@@ -1008,7 +1011,17 @@ def _outstanding_reservations(
             continue
         # An axis no account bounds reserves nothing on it.
         usd, tokens = job.reserve.usd, job.reserve.tokens
-        billed = _billed_by(job)
+        # A holder whose sends land on no cycle of its own has billed nothing it can name.
+        cycle = (
+            cycle_dir_for(WorkspaceDir(Path(job.workspace)), job.hop)
+            if isinstance(job.holder, CampaignLaunch) and job.hop != UNRESOLVED_HOP
+            else None
+        )
+        billed = (
+            ZERO_SPEND
+            if cycle is None
+            else bills.get(charges.held_on(CycleLayout(cycle).ledger), ZERO_SPEND)
+        )
         held = held.plus(
             Budget.amount(
                 max(0.0, (usd or 0.0) - billed.at_most_usd),
@@ -1016,16 +1029,6 @@ def _outstanding_reservations(
             )
         )
     return held
-
-
-def _billed_by(job: Job) -> UserSpend:
-    """What a launch's cycle cost on the box's keys, every send its book counts against the
-    reserve (`SpendBook._coupon_usd_used`), a resumed cycle's prior spend and a nested run's
-    included. A holder whose sends land on no cycle of its own has billed nothing it can name."""
-    if not isinstance(job.holder, CampaignLaunch) or job.hop == UNRESOLVED_HOP:
-        return ZERO_SPEND
-    ledger = CycleLayout(cycle_dir_for(WorkspaceDir(Path(job.workspace)), job.hop)).ledger
-    return ledger_cost([ledger] if ledger.is_file() else []).host
 
 
 def _grace_bounded(remaining: float, spent: UserSpend) -> float:

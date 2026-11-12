@@ -11,7 +11,6 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     LiveCandidate,
     RoundSummary,
-    RunLimits,
     VerificationMark,
 )
 from promptpotter.domain.paired_reading import ArmKey, ArmName
@@ -132,10 +131,6 @@ class DashboardFacts(StrictModel):
 
     round_cells_ceiling: int
 
-    # As the launch declared it, the cycle's standing budget laid over; the campaign's ceiling is
-    # laid at the read (`campaign_store/store.py::CampaignStore.armed_run_limits`), so what binds is
-    # ``ServedDashboard.run_limits``.
-    run_limits: RunLimits
     defaults_drift: DefaultsDrift | None = Field(
         default=None,
         description="Set where the bench defaults or the treatment the campaign's declaration is a "
@@ -217,7 +212,6 @@ class LiveDashboardState(DashboardFacts):
             "elects_on": wiring.elects_on,
             "max_cells_in_flight": wiring.max_cells_in_flight,
             "measured_unit": wiring.measured_unit,
-            "run_limits": wiring.run_limits,
             "defaults_drift": wiring.defaults_drift,
             "backend_revision": wiring.backend_revision,
             "state": DashboardState.INIT,

@@ -34,12 +34,12 @@ from promptpotter.infrastructure.llm.send_pacing import (
     SEND_ATTEMPTS,
     SendBudget,
     throttle_stall_given_to,
-    under_budget,
 )
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.shared.errors import OptimizerTimeoutError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -107,7 +107,7 @@ async def _chat_under_deadline(
     )
     try:
         async with budget.clock:
-            with under_budget(budget), throttle_stall_given_to(budget.give_back):
+            with scoped(send_budget=budget), throttle_stall_given_to(budget.give_back):
                 return await llm_client.chat(request, label=CallLabel(node_label, "optimizer"))
     except TimeoutError as exc:
         raise OptimizerTimeoutError(

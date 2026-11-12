@@ -7,14 +7,13 @@ import threading
 import time
 import weakref
 from collections import deque
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
-from contextlib import asynccontextmanager, contextmanager
-from contextvars import ContextVar, Token
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import AbstractContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.infrastructure.llm.spend_book import bound_spend_book
+from promptpotter.infrastructure.llm.spend_book import bound_account
 from promptpotter.infrastructure.llm.telemetry import (
     bound_ledger,
     emit_provider_eased,
@@ -26,6 +25,7 @@ from promptpotter.shared.errors import (
     RequestTooLargeError,
     SendRefusedError,
 )
+from promptpotter.shared.run_scope import RunScope, run_scope, scoped
 
 if TYPE_CHECKING:
     import httpx
@@ -69,78 +69,29 @@ class SendBudget:
         self.given_back += seconds
 
 
-_SEND_BUDGET: ContextVar[SendBudget | None] = ContextVar("send_budget", default=None)
-
-
-@contextmanager
-def under_budget(budget: SendBudget) -> Iterator[SendBudget]:
-    token = _SEND_BUDGET.set(budget)
-    try:
-        yield budget
-    finally:
-        _SEND_BUDGET.reset(token)
-
-
 def drawn_budget() -> SendBudget:
     """Never minted here: a default would hand every rung of a repair ladder its own attempts."""
-    budget = _SEND_BUDGET.get()
-    if budget is None:
+    if (budget := run_scope().send_budget) is None:
         raise RuntimeError(
             "a send was made under no SendBudget — its unit of work (a cell, an optimizer call, "
-            "a grading, a probe) opens one with `under_budget` before anything under it sends"
+            "a grading, a probe) lays one with `scoped(send_budget=…)` before anything under it sends"
         )
     return budget
 
 
-# The runner binds ``RunControl.pause_requested``; per task, so concurrent cycles never cross.
-_ABORT_CHECK: ContextVar[Callable[[], bool] | None] = ContextVar("send_abort_check", default=None)
-
 _UNWAITABLE_SCOPES: frozenset[str] = frozenset({"TPD", "RPD", "TPH", "RPH", "daily", "hourly"})
 
 
-# Per task: the limiter is process-global, so an attribute would credit a stall to any cycle.
-_THROTTLE_STALL_SINK: ContextVar[Callable[[float], None] | None] = ContextVar(
-    "throttle_stall_sink", default=None
-)
-
-
-def set_throttle_stall_sink(sink: Callable[[float], None] | None) -> None:
-    _THROTTLE_STALL_SINK.set(sink)
-
-
-@contextmanager
-def throttle_stall_given_to(sink: Callable[[float], None]) -> Iterator[None]:
+def throttle_stall_given_to(sink: Callable[[float], None]) -> AbstractContextManager[RunScope]:
     """COMPOSES with the enclosing sink; a cell replaces it, or siblings on one clock each bill it."""
-    outer = _THROTTLE_STALL_SINK.get()
+    outer = run_scope().stall_sink
 
     def both(seconds: float) -> None:
         sink(seconds)
         if outer is not None:
             outer(seconds)
 
-    token = _THROTTLE_STALL_SINK.set(both)
-    try:
-        yield
-    finally:
-        _THROTTLE_STALL_SINK.reset(token)
-
-
-_RATE_TENANT: ContextVar[str] = ContextVar("rate_tenant")
-
-
-def set_rate_tenant(tenant: str) -> Token[str]:
-    """The ACCOUNT, never the campaign: N campaigns must not take one user N shares."""
-    return _RATE_TENANT.set(tenant)
-
-
-def _rate_tenant() -> str:
-    try:
-        return _RATE_TENANT.get()
-    except LookupError:
-        raise RuntimeError(
-            "no rate tenant is bound, so this send would wait on no account's share. Every entry "
-            "that sends calls `set_rate_tenant` where it binds its account's spend book."
-        ) from None
+    return scoped(stall_sink=both)
 
 
 # Locked: the reader runs in FastAPI's threadpool, every writer on the event loop.
@@ -170,17 +121,9 @@ def report_throttle_stall(seconds: float) -> None:
     with _stall_lock:
         _prune_stalls(now, _STALL_WINDOW_S)
         _stall_events.append((now, seconds))
-    sink = _THROTTLE_STALL_SINK.get()
-    if sink is not None:
+    # Per task: the limiter is process-global, so an attribute would credit a stall to any cycle.
+    if (sink := run_scope().stall_sink) is not None:
         sink(seconds)
-
-
-def set_abort_check(predicate: Callable[[], bool]) -> None:
-    _ABORT_CHECK.set(predicate)
-
-
-def get_abort_check() -> Callable[[], bool] | None:
-    return _ABORT_CHECK.get()
 
 
 OPENAI_RPM_HEADER = "x-ratelimit-limit-requests"
@@ -309,7 +252,7 @@ class Backpressure:
 
     @asynccontextmanager
     async def send(self) -> AsyncIterator[int]:
-        abort = _ABORT_CHECK.get()
+        abort = run_scope().abort_check
         self._announce()
         while (hold := self._hold()) > 0:
             if abort is not None and abort():
@@ -396,7 +339,7 @@ class Backpressure:
         if here is None:
             return
         # A nested run's book is enclosed by its root's, so the root hears what holds its cells.
-        book = bound_spend_book()
+        book = run_scope().book
         root = book.root().ledger if book is not None and book.enclosing is not None else None
         for ledger in (here,) if root is None else (here, root):
             if self._heard.get(ledger) != self._strikes:
@@ -412,7 +355,7 @@ class Backpressure:
 
 
 async def held_wait(total_sec: float, label: str) -> None:
-    abort = _ABORT_CHECK.get()
+    abort = run_scope().abort_check
     started = loop_now()
     end = started + total_sec
     # Reported on EVERY exit, abort included: waiting is not working.
@@ -574,7 +517,9 @@ class RateLimiter:
 
     async def _acquire(self, estimated_tokens: int) -> _TokenReservation:
         started = loop_now()
-        waiter = _Waiter(tenant=_rate_tenant(), tokens=estimated_tokens)
+        # The ACCOUNT, never the campaign: N campaigns must not take one user N shares.
+        tenant = str(bound_account("a rate-limited send").tenant_id)
+        waiter = _Waiter(tenant=tenant, tokens=estimated_tokens)
         self._waiting.append(waiter)
         try:
             while True:

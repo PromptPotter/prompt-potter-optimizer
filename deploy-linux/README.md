@@ -228,9 +228,9 @@ knowing:
   bounds a stranger is the host coupon `HOST_COUPON`, and how many there may be `MAX_ACCOUNTS`, not an
   approval queue.
 - **`blocklist.json` is the revoke**, re-read on every request — edits are instant, no restart.
-- **Set `HOST_ADMIN_EMAIL` and `HOST_ADMIN_ISSUER`** or nothing ever claims this box; the issuer
-  pins the claim to one provider. Unset, the terminal stays on the `default` tenant and the app logs
-  a warning.
+- **Set `HOST_ADMIN_EMAIL`** or nothing ever claims this box. Whichever provider verified that
+  email, its sign-in is the host's. Unset, the terminal stays on the `default` tenant and the app
+  logs a warning.
 - **Don't stack Cloudflare Access in front of the OIDC gate** — a double-gate; pick one.
 
 **The one rule: a control-plane change never has an inbound door open to the internet** — owned by
@@ -287,7 +287,6 @@ ADMIN_BOT_TELEGRAM_TOKEN=123456:AA...           # from BotFather
 ADMIN_BOT_CHAT_ID=987654321                      # your numeric chat id
 ADMIN_BOT_PASSPHRASE=optional-extra-word         # optional 2nd factor
 HOST_ADMIN_EMAIL=you@example.com                 # who may claim this box
-HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
 ```
 
 - **`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file** once `BOT_ENV_FILE` is split: a copy in the

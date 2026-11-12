@@ -56,8 +56,8 @@ GLOBAL_ARGS = (
         default=None,
         help=(
             "Tenant partition under .promptpotter/projects/. Unset → the "
-            "registered developer (default-tenant claim marker) or anonymous "
-            "'default' if never registered. Pass a slug to override."
+            "account HOST_ADMIN_EMAIL declares, once it signed in, else "
+            "'default'. Pass a slug to override."
         ),
     ),
     Arg(

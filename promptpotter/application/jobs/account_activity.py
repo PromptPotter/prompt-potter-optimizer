@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import Literal, NamedTuple
 
 from pydantic import Field
 
+from promptpotter.domain.run_records import Charge
 from promptpotter.domain.spend import KEY_SOURCE_LABELS, bill_is_floor, calls_rate_priced
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.account_spend import UsageRow, account_usage
+from promptpotter.infrastructure.store.account_spend import account_usage
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.worded import Worded
 
@@ -57,7 +59,7 @@ class ActivityResponse(StrictModel):
     group_by: ActivityGroupBy = Field(
         description="The colour axis: `model` is the exact model id, `api_key` the key that "
         "paid: the provider that billed the call, and whether the host's key under the coupon "
-        "or the account's own sent it (`BilledCharge.key_source`)."
+        "or the account's own sent it (`Charge.key_source`)."
     )
     buckets: list[ActivityBucket]
     series_labels: list[str] = Field(
@@ -89,13 +91,14 @@ class ActivityResponse(StrictModel):
     )
 
 
-def _series_label(row: UsageRow, group_by: ActivityGroupBy) -> str:
+def _series_label(bill: Charge, group_by: ActivityGroupBy) -> str:
+    price = bill.price
     if group_by == "model":
-        base = row.model or "unknown"
+        base = price.model or "unknown"
     else:
-        base = f"{row.provider or 'unknown'} · {KEY_SOURCE_LABELS[row.key_source]}"
+        base = f"{price.provider or 'unknown'} · {KEY_SOURCE_LABELS[bill.key_source]}"
     # A judge or backend usually shares model and biller with the optimizer: untagged, it sums into that series.
-    return base if row.kind == "optimizer" else f"{base} ({row.kind})"
+    return base if price.kind == "optimizer" else f"{base} ({price.kind})"
 
 
 def _peak[N: (int, float)](totals: list[N]) -> N | None:
@@ -116,18 +119,19 @@ def account_activity(
     rate_priced = [0.0] * _N_BUCKETS
     unpriced = [0] * _N_BUCKETS
     labels: dict[str, None] = {}
-    for row in account_usage(stores.charges, since=since, until=until):
-        i = min(_N_BUCKETS - 1, int((row.ts - since) / width))
-        label = _series_label(row, group_by)
+    for bill in account_usage(stores.charges, since=since, until=until):
+        at = datetime.fromisoformat(bill.timestamp).timestamp()
+        i = min(_N_BUCKETS - 1, int((at - since) / width))
+        label = _series_label(bill, group_by)
         labels[label] = None
         spend[i].setdefault(label, 0.0)
-        if row.billed_usd is not None:
-            spend[i][label] += row.billed_usd
-        elif row.rate_priced_usd is not None:
-            rate_priced[i] += row.rate_priced_usd
+        if bill.price.cost_usd is not None:
+            spend[i][label] += bill.price.cost_usd
+        elif bill.price.rate_priced_usd is not None:
+            rate_priced[i] += bill.price.rate_priced_usd
         else:
-            unpriced[i] += row.tokens
-        tokens[i][label] = tokens[i].get(label, 0) + row.tokens
+            unpriced[i] += bill.tokens
+        tokens[i][label] = tokens[i].get(label, 0) + bill.tokens
         requests[i][label] = requests[i].get(label, 0) + 1
     spent = [sum(s.values()) for s in spend]
     used = [sum(t.values()) for t in tokens]

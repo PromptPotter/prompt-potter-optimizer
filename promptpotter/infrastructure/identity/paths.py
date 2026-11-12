@@ -3,10 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import Field
-
 from promptpotter.config.paths import user_data_root
-from promptpotter.domain.strict_model import FrozenModel
 
 
 @dataclass(frozen=True)
@@ -30,10 +27,6 @@ class IdentityPaths:
         return self.root / "sessions"
 
     @property
-    def default_claim_marker(self) -> Path:
-        return self.root / "default_claimed.json"
-
-    @property
     def grants(self) -> Path:
         return self.root / "grants.json"
 
@@ -43,13 +36,6 @@ class IdentityPaths:
 
 
 IDENTITY_DIR = "identity"
-
-
-class DefaultClaim(FrozenModel):
-    """``default_claim_marker``: the host's account, written once its first sign-in claimed it."""
-
-    user_id: str = Field(min_length=1)
-    claimed_at: str
 
 
 def default_identity_paths() -> IdentityPaths:

@@ -372,12 +372,10 @@ from promptpotter.domain.verification import (
 from promptpotter.domain.wounds import fatal_validation_failures
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
-from promptpotter.infrastructure.llm.send_pacing import get_abort_check
 from promptpotter.infrastructure.llm.spend_book import (
     Hold,
     SpendBook,
     require_spend_book,
-    spending_under,
     unbounded_spend_book,
 )
 from promptpotter.infrastructure.llm.telemetry import at_round
@@ -414,7 +412,7 @@ from promptpotter.shared.measurement_context import (
     individual_cells,
 )
 from promptpotter.shared.plugin_registry import Registry
-from promptpotter.shared.run_scope import scoped
+from promptpotter.shared.run_scope import run_scope, scoped
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
 
 _H2H_FORMULA = "env_reward"
@@ -1267,7 +1265,7 @@ def _peer_cycle(
             determinism=cycle.config.optimization.determinism,
         ):
             run_init(cycle, ledger)
-            with spending_under(unbounded_spend_book() if book is None else book):
+            with scoped(book=unbounded_spend_book() if book is None else book):
                 yield cycle, ledger
 
 
@@ -2027,7 +2025,11 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     enclosing=(stores.subject(_PEER_HOP),),
                     acting=() if acting is None else (acting,),
                 )
-                if walk.pause_requested() and (abort := get_abort_check()) is not None and abort():
+                if (
+                    walk.pause_requested()
+                    and (abort := run_scope().abort_check) is not None
+                    and abort()
+                ):
                     raise asyncio.CancelledError("aborted")
                 raise AssertionError("a stop left the pass running")
 
@@ -4016,7 +4018,7 @@ def _evidence_campaign(
         ("backend", incurred - loop - 0.05, True),
         ("bench", 0.05, True),
     ]
-    for kind, usd, cached in calls:
+    for kind, usd, replay in calls:
         ledgers[root if kind == "optimizer" else hop].append(
             billed_call(
                 usd,
@@ -4024,7 +4026,7 @@ def _evidence_campaign(
                 node=kind,
                 input_tokens=10,
                 output_tokens=5,
-                cached=cached,
+                replay=replay,
                 timestamp=started,
             )
         )
@@ -4958,7 +4960,7 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
             with (
                 scoped(ledger=CycleEventLog(tmp_path / "harness.jsonl")),
                 at_round(1),
-                spending_under(spend_book(book_usd, usd_reserve=None)),
+                scoped(book=spend_book(book_usd, usd_reserve=None)),
             ):
                 return await measure_sample(row, session, PipelineParams.model_validate(params))
 

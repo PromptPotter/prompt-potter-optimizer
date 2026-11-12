@@ -162,7 +162,7 @@ from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
+from promptpotter.infrastructure.llm.spend_book import unbounded_spend_book
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -896,7 +896,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     resuming.cycle.session.state.resumed_from_round = stores.campaigns.rewind_enters(halted, 3)
     with (
         scoped(ledger=resuming.ledger, spawn=inner_spawn_of(resuming.cycle.session)),
-        spending_under(unbounded_spend_book()),
+        scoped(book=unbounded_spend_book()),
         pytest.raises(ResumeDivergenceError),
     ):
         asyncio.run(
@@ -1877,7 +1877,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         with (
             scoped(ledger=ledger),
             mock.patch.object(query_loop, "measure_sample", _answered),
-            spending_under(unbounded_spend_book()),
+            scoped(book=unbounded_spend_book()),
         ):
             before = round_packages(cycle, line, ledger)
             branch_id = asyncio.run(apply_correction(cycle, line, before, repair_bank, ledger))
@@ -1962,7 +1962,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
             )
             return gated or await run_round_loop(cycle, cycle.config, session, ctx.ledger)
 
-        with scoped(ledger=ctx.ledger), spending_under(unbounded_spend_book()):
+        with scoped(ledger=ctx.ledger), scoped(book=unbounded_spend_book()):
             end = asyncio.run(walk())
         if not crashes:
             ctx.ledger.append(RunPhaseRecord.stop(end.stop_reason))

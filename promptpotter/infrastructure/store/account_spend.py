@@ -3,7 +3,6 @@ cumulative-from-seed and double-counts a fork; the account's is summed from its 
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -12,9 +11,8 @@ from typing import TYPE_CHECKING, ClassVar, NamedTuple
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
 from promptpotter.domain.run_records import (
     BankedSpend,
-    SpendHoldRecord,
+    Charge,
     SpendTombstoneRecord,
-    TokenUsageRecord,
 )
 from promptpotter.domain.spend import (
     NOTHING_METERED,
@@ -24,99 +22,22 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     KeySource,
     PaidSpend,
-    TokenUsageKind,
     UserSpend,
-    bill_or_rate_usd,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import producer_attached
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
-    HOLD_TRAIL,
-    HeldSends,
-    HoldTrailRecord,
     LedgerIndex,
     RecordClasses,
+    Spent,
+    money_on,
+    still_held,
 )
-from promptpotter.infrastructure.store.wallet_store import (
-    BilledCharge,
-    ChargeBook,
-    HeldCharge,
-    held_tokens,
-)
+from promptpotter.infrastructure.store.wallet_store import ChargeBook
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-
-
-def _billed(cost_usd: float | None, rate_priced_usd: float | None, tokens: int) -> UserSpend:
-    if cost_usd is None and rate_priced_usd is None:
-        return UserSpend(0.0, tokens, tokens)
-    return UserSpend(cost_usd or 0.0, tokens, 0, rate_priced_usd=rate_priced_usd or 0.0)
-
-
-def _billed_of(usage: TokenUsageRecord) -> UserSpend:
-    tokens = usage.input_tokens + usage.output_tokens
-    if usage.cached:
-        return _billed(0.0, None, tokens)
-    return _billed(usage.cost_usd, usage.rate_priced_usd, tokens)
-
-
-type _Hold = SpendHoldRecord | HeldCharge
-
-
-def _unreported_of(hold: _Hold) -> PaidSpend:
-    """Unpriced lands in the token residue: `$0.00` would report an unpriceable send as a free one."""
-    tokens = held_tokens(hold)
-    if hold.cost_usd is None:
-        return PaidSpend.of(hold.key_source, UserSpend(0.0, 0, tokens, 0.0, tokens))
-    return PaidSpend.of(hold.key_source, UserSpend(0.0, 0, 0, hold.cost_usd, tokens))
-
-
-def _still_held(open_holds: Iterable[_Hold], unpriced: Iterable[_Hold]) -> PaidSpend:
-    total = NOTHING_PAID
-    for hold in open_holds:
-        total = total.plus(_unreported_of(hold))
-    # Its bill already filed the tokens, as residue (:func:`_billed`); only the money is kept.
-    for hold in unpriced:
-        if hold.cost_usd is not None:
-            money = UserSpend(0.0, 0, 0, hold.cost_usd, 0)
-            total = total.plus(PaidSpend.of(hold.key_source, money))
-    return total
-
-
-class _Spent(NamedTuple):
-    # What the ledger's subject COST: every answered send, a nested run's mirrored onto it included.
-    cost: PaidSpend
-    # What its own sends billed: the cost less the mirrored sends a nested run's own ledger bills.
-    billed: PaidSpend
-
-    def plus(self, spent: _Spent, held: PaidSpend) -> _Spent:
-        """*held* is the ledger's own holds, which both sums carry."""
-        return _Spent(
-            self.cost.plus(spent.cost).plus(held), self.billed.plus(spent.billed).plus(held)
-        )
-
-
-class _Spend:
-    records: ClassVar[RecordClasses] = HOLD_TRAIL
-
-    def __init__(self) -> None:
-        self._cost = self._billed = NOTHING_PAID
-        self._held: HeldSends[SpendHoldRecord] = HeldSends()
-
-    def feed(self, record: HoldTrailRecord) -> None:
-        # A replay names no payer (`key_source` is `None` exactly on one): it cost nothing.
-        if isinstance(record, TokenUsageRecord) and (paid_by := record.key_source) is not None:
-            spent = PaidSpend.of(paid_by, _billed_of(record))
-            self._cost = self._cost.plus(spent)
-            if not record.mirrored:
-                self._billed = self._billed.plus(spent)
-        self._held.track(record)
-
-    def value(self) -> tuple[_Spent, PaidSpend]:
-        held = _still_held(self._held.open.values(), self._held.unpriced.values())
-        return _Spent(self._cost, self._billed), held
 
 
 class _Tombstones:
@@ -154,7 +75,7 @@ class WorkspaceBank(NamedTuple):
         return Subject(campaign_id, "") in self.subjects
 
 
-LedgerIndex.readers(_Spend, _Tombstones)
+LedgerIndex.readers(_Tombstones)
 
 
 def _unreported_once_stopped(ledger: Path, held: PaidSpend) -> PaidSpend:
@@ -164,12 +85,12 @@ def _unreported_once_stopped(ledger: Path, held: PaidSpend) -> PaidSpend:
     return NOTHING_PAID if producer_attached(CycleLayout.of_ledger(ledger).cycle_dir) else held
 
 
-def _summed(ledgers: Iterable[Path]) -> _Spent:
-    total = _Spent(NOTHING_PAID, NOTHING_PAID)
+def _summed(ledgers: Iterable[Path]) -> Spent:
+    total = Spent(NOTHING_PAID, NOTHING_PAID)
     for ledger in ledgers:
-        spent, held = LedgerIndex.of(ledger).view(_Spend)
+        money = money_on(ledger)
         # Whether what is held is unreported moves with the run, not the file: asked per read.
-        total = total.plus(spent, _unreported_once_stopped(ledger, held))
+        total = total.plus(money.spent, _unreported_once_stopped(ledger, money.held))
     return total
 
 
@@ -200,94 +121,36 @@ def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
     return sorted(sandbox.glob("*/campaigns/*/cycles/*")) if sandbox.is_dir() else []
 
 
-class _Charges:
-    records: ClassVar[RecordClasses] = (HeldCharge, BilledCharge)
-
-    def __init__(self) -> None:
-        self._billed = NOTHING_PAID
-        self._held: HeldSends[HeldCharge] = HeldSends()
-
-    def feed(self, charge: HeldCharge | BilledCharge) -> None:
-        match charge:
-            case HeldCharge():
-                self._held.hold(charge.hold_id, charge)
-            case BilledCharge():
-                spent = _billed(charge.cost_usd, charge.rate_priced_usd, charge.tokens)
-                self._billed = self._billed.plus(PaidSpend.of(charge.key_source, spent))
-                priced = bill_or_rate_usd(charge.cost_usd, charge.rate_priced_usd) is not None
-                self._held.close(charge.hold_id, priced=priced)
-
-    def value(self) -> tuple[PaidSpend, tuple[HeldCharge, ...], tuple[HeldCharge, ...]]:
-        return self._billed, tuple(self._held.open.values()), tuple(self._held.unpriced.values())
-
-
-class UsageRow(NamedTuple):
-    ts: float
-    billed_usd: float | None
-    rate_priced_usd: float | None
-    tokens: int
-    model: str | None
-    provider: str | None
-    kind: TokenUsageKind
-    key_source: KeySource
-
-
-def _interned(value: str | None) -> str | None:
-    return None if value is None else sys.intern(value)
-
-
-class _Usage:
-    records: ClassVar[RecordClasses] = (BilledCharge,)
-
-    def __init__(self) -> None:
-        self._rows: list[UsageRow] = []
-        self._held: tuple[UsageRow, ...] | None = None
-
-    def feed(self, charge: BilledCharge) -> None:
-        self._rows.append(
-            UsageRow(
-                ts=datetime.fromisoformat(charge.timestamp).timestamp(),
-                billed_usd=charge.cost_usd,
-                rate_priced_usd=charge.rate_priced_usd,
-                tokens=charge.tokens,
-                model=_interned(charge.model),
-                provider=_interned(charge.provider),
-                kind=charge.kind,
-                key_source=charge.key_source,
-            )
-        )
-        self._held = None
-
-    def value(self) -> tuple[UsageRow, ...]:
-        if self._held is None:
-            self._held = tuple(self._rows)
-        return self._held
-
-
-LedgerIndex.readers(_Charges, _Usage)
-
-
-def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[UsageRow]:
-    rows = LedgerIndex.of(charges.path).view(_Usage)
-    return [row for row in rows if since <= row.ts < until]
+def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[Charge]:
+    return [
+        bill
+        for bill in money_on(charges.path).bills
+        if since <= datetime.fromisoformat(bill.timestamp).timestamp() < until
+    ]
 
 
 def account_bill(charges: ChargeBook) -> PaidSpend:
     """Every send the account made, a deleted campaign's and an L4 sandbox's included: no delete reaches a charge."""
-    billed, open_holds, unpriced = LedgerIndex.of(charges.path).view(_Charges)
+    money = money_on(charges.path)
     attached: dict[str, bool] = {}
 
-    def stopped(hold: HeldCharge) -> bool:
+    def stopped(hold: Charge) -> bool:
         # Whether what is held is unreported moves with the run, not the file: asked per read.
         if hold.ledger not in attached:
             cycle_dir = CycleLayout.of_ledger(charges.ledger_of(hold)).cycle_dir
             attached[hold.ledger] = producer_attached(cycle_dir)
         return not attached[hold.ledger]
 
-    held = _still_held(
-        (hold for hold in open_holds if stopped(hold)), (hold for hold in unpriced if stopped(hold))
+    held = still_held(
+        (hold for hold in money.open.values() if stopped(hold)),
+        (hold for hold in money.unpriced if stopped(hold)),
     )
-    return billed.plus(held)
+    return money.spent.billed.plus(held)
+
+
+def ledger_bills(charges: ChargeBook) -> dict[str, UserSpend]:
+    """What the box's keys billed per ledger (`Charge.ledger`): a live run's draw on its reserve."""
+    return money_on(charges.path).on_coupon
 
 
 def bank_spend(

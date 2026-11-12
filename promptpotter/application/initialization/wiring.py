@@ -165,7 +165,7 @@ def _verify_package_cache_scope(
     )
 
 
-def _session_bank(
+def session_bank(
     stores: Stores,
     dataset: ResolvedDataset,
     *,
@@ -282,7 +282,7 @@ async def _open_session(
     _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
     _verify_observation_names(pipeline_schema, connector, dataset_name)
     backend_revision = await _read_backend_revision(client, connector)
-    bank, candidate_library = _session_bank(
+    bank, candidate_library = session_bank(
         stores, dataset, connector=connector, experiment=experiment
     )
     # By hash, never a label: every answer this session files names a bank the store holds.
