@@ -5,6 +5,7 @@ run inside this one world; what it fakes and why: ``docs/developer/offline-run.m
 from __future__ import annotations
 
 import asyncio
+import enum
 import hashlib
 import inspect
 import io
@@ -78,6 +79,31 @@ def completion(
 type Said = str | dict[str, Any] | httpx.Response
 # The one provider wire the world answers: a text is sent back as a completion.
 LLM_WIRE = "/chat/completions"
+
+
+class Heal(enum.StrEnum):
+    """An invalid answer to a structured call, by the rung of the client's ladder it sends the
+    call to: a schema repair, a clean re-ask, or a refusal whose generation the client salvages."""
+
+    NONCOMPLIANT = "noncompliant"
+    EMPTY = "empty"
+    REFUSED = "refused"
+
+
+def invalid(heal: Heal, valid: str, *, model: str) -> dict[str, Any] | httpx.Response:
+    """*valid* is the answer the call heals to; only a refusal carries it."""
+    match heal:
+        case Heal.NONCOMPLIANT:
+            return completion(json.dumps({"offline": "an answer its schema rejects"}), model=model)
+        case Heal.EMPTY:
+            return completion("", model=model)
+        case Heal.REFUSED:
+            error = {
+                "message": "offline: json_validate_failed",
+                "code": "json_validate_failed",
+                "failed_generation": valid,
+            }
+            return httpx.Response(400, json={"error": error})
 
 
 class FakeLLM:
