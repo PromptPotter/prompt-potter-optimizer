@@ -3027,7 +3027,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     wire = build_l1_response_schema(two, citable_fields=["critique"], inner_cells=None)
     offered = wire["properties"]["variants"]["items"]["properties"]["prompt_fields_updates"]
-    assert set(offered["properties"]["review"]["properties"]) == {"instruction", "rubric"}, (
+    review = offered["properties"]["review"]["anyOf"][0]
+    assert set(review["properties"]) == {"instruction", "rubric"}, (
         "L1 was offered another roster than the second prompt node declares"
     )
     origin = OptSearchPoint(

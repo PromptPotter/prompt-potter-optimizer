@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.bench.llm_call import wire_closed
 from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     BLOCK_ID_INSTRUCTION,
@@ -53,6 +54,15 @@ def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
     if isinstance(node, list):
         return [_inline_refs(v, defs) for v in node]
     return node
+
+
+def _arm(slot: dict[str, Any]) -> dict[str, Any]:
+    return cast("dict[str, Any]", next(a for a in slot["anyOf"] if a.get("type") != "null"))
+
+
+def _said(slot: dict[str, Any]) -> dict[str, Any]:
+    """The slot's non-null arm alone, its description kept."""
+    return {**_arm(slot), **{k: slot[k] for k in ("description",) if k in slot}}
 
 
 def effective_l1_field_names() -> dict[str, str]:
@@ -118,15 +128,13 @@ def build_l1_response_schema(
     if recombination is None:
         del inlined["properties"]["recombinations"]
     else:
-        inlined["properties"]["recombinations"] = recombinations_schema(recombination)
+        slot = inlined["properties"]["recombinations"]
+        slot["anyOf"] = [recombinations_schema(recombination), {"type": "null"}]
 
     variant_items = inlined["properties"]["variants"]["items"]
     variant_props = variant_items["properties"]
 
-    pipeline_overlay = variant_props["pipeline_overlay"]
-    pipeline_overlay.setdefault("properties", {})
-    pipeline_overlay["additionalProperties"] = False
-    pp_properties = pipeline_overlay["properties"]
+    pp_properties = _arm(variant_props["pipeline_overlay"])["properties"]
 
     # The nodes the GRAPH reaches, never the chain alone: an off-chain escalation node is what L4 tunes.
     # No view means no projection to narrow by, never "narrow to nothing".
@@ -181,12 +189,12 @@ def build_l1_response_schema(
         }
 
     # Keyed by the roster's prompt nodes, each by ITS open fields; a node with none is write-only,
-    # so it is absent. `minLength` and `minProperties` because "" and `{}` are not edits.
+    # so it is absent.
     prompt_nodes = pipeline_schema.prompt_nodes()
     open_by_node = {
         n.name: {
             f: (
-                {"type": "string", "minLength": 1}
+                {"type": "string"}
                 if pooled_fields is None
                 else {"type": "string", "enum": list(pooled_fields[f])}
             )
@@ -195,30 +203,22 @@ def build_l1_response_schema(
         }
         for n in prompt_nodes
     }
+    # STRICTER than the parse twin on purpose: tolerated missing at the parse boundary, never OFFERED as `null`.
     if open_by_node := {node: fields for node, fields in open_by_node.items() if fields}:
-        variant_props["prompt_fields_updates"].update(
-            properties={
-                node: {
-                    "type": "object",
-                    "properties": fields,
-                    "additionalProperties": False,
-                    "minProperties": 1,
-                }
-                for node, fields in open_by_node.items()
-            },
-            additionalProperties=False,
-            minProperties=1,
+        prompt_fields = variant_props["prompt_fields_updates"] = _said(
+            variant_props["prompt_fields_updates"]
         )
+        prompt_fields["properties"] = {
+            node: {"type": "object", "properties": fields, "additionalProperties": False}
+            for node, fields in open_by_node.items()
+        }
         if pooled_fields is not None:
-            variant_props["prompt_fields_updates"]["description"] = BLOCK_ID_INSTRUCTION
+            prompt_fields["description"] = BLOCK_ID_INSTRUCTION
     else:
         del variant_props["prompt_fields_updates"]
     if prompt_nodes:
-        shot_list = variant_props["shots"]["additionalProperties"]
-        variant_props["shots"].update(
-            properties={node.name: shot_list for node in prompt_nodes},
-            additionalProperties=False,
-        )
+        shot_list = {"type": "array", "items": {"type": "integer"}}
+        _arm(variant_props["shots"])["properties"] = {node.name: shot_list for node in prompt_nodes}
     else:
         del variant_props["shots"]
 
@@ -226,24 +226,13 @@ def build_l1_response_schema(
         if panel in silent_panels:
             variant_props.pop(slot, None)
 
-    # STRICTER than the parse twin on purpose: tolerated missing at the parse boundary, never OFFERED as `null`.
-    eg = variant_props["evidence_grounding"]
-    object_arm = next(a for a in eg["anyOf"] if a.get("type") == "object")
-    object_arm["properties"]["field"]["enum"] = list(citable_fields)
-    # The null arm and its `default: null` go together: either alone still reads as skippable.
-    variant_props["evidence_grounding"] = object_arm
-    required = variant_items.setdefault("required", [])
-    if "evidence_grounding" not in required:
-        required.insert(0, "evidence_grounding")
-    required.extend(
-        slot
-        for slot in ("targets_rows", "prompt_fields_updates")
-        if slot in variant_props and slot not in required
-    )
+    grounding = variant_props["evidence_grounding"] = _said(variant_props["evidence_grounding"])
+    grounding["properties"]["field"]["enum"] = list(citable_fields)
+    variant_props["targets_rows"] = _said(variant_props["targets_rows"])
 
     # Rename LAST: every key above is addressed by its real field name.
     field_names = effective_l1_field_names()
     if field_names:
         _rename_variant_schema(variant_items, field_names)
 
-    return cast("dict[str, Any]", inlined)
+    return wire_closed(inlined)

@@ -220,7 +220,7 @@ del _node, _spec, _floor_ph, _early
 def layout_json_schema(
     spec: NodeLayoutSpec, *, description: str, withheld: frozenset[str] = frozenset()
 ) -> dict[str, Any]:
-    """Keyed by the spec's SLOTS, each an array of its legal panels, so the wire states both menus; the provider may enforce none of it (`strict: False`), so `unplaceable_edit` and `validate_l1_layout` still decide."""
+    """Keyed by the spec's SLOTS, each an array of its legal panels, so the wire states both menus; a host may enforce none of it, so `unplaceable_edit` and `validate_l1_layout` still decide."""
     panels = {"type": "string", "enum": sorted(spec.possible - withheld)}
     return {
         "type": "object",

@@ -431,10 +431,8 @@ class L2Context(LayoutNode):
         # Filtered here: a landed steer is carried forward on every later fire and never pruned.
         steer: dict[str, Any] = {
             key: value
-            for key, value in raw.l1_overrides.items()
+            for key, value in raw.l1_overrides.model_dump(exclude_none=True).items()
             if key in self.steers[L1Generate.name]
-            and isinstance(value, int | float)
-            and not isinstance(value, bool)
         }
 
         prior = node_layout("l1_generate", ctx.slice(L2Memory))

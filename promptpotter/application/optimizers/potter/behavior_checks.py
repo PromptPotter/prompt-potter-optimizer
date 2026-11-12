@@ -369,12 +369,17 @@ def _check_evidence_anchored(
     return False, "no axis_targeted and rationale cites no sample/axis/number"
 
 
+def _pulled(lever: object) -> bool:
+    # A record dumps its unset members as null: `l1_overrides` is pulled where one knob is set.
+    return any(v is not None for v in lever.values()) if isinstance(lever, dict) else bool(lever)
+
+
 def _check_targets_l1_surface(
     out: L2Output, _audit: RoundAudit, _ctx: ValidatorContext
 ) -> tuple[bool, str]:
     """``axis_targeted`` is not a surface: it is prose, and L1 reads its axes from measurement."""
     if touched := [
-        name for name in ("l1_layout", "l1_overrides", "recombinations") if out.get(name)
+        name for name in ("l1_layout", "l1_overrides", "recombinations") if _pulled(out.get(name))
     ]:
         return True, f"L2 touched: {touched}"
     return False, "L2 fired but changed nothing L1 reads"

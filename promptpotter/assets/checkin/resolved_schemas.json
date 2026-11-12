@@ -15,144 +15,272 @@
     ],
     "json_schema": {
       "name": "checkin",
-      "strict": false,
+      "strict": true,
       "schema": {
         "$defs": {
           "CheckinTaskContext": {
             "additionalProperties": false,
             "properties": {
               "domain": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "One noun phrase — the task family, e.g. 'competition mathematics'.",
-                "title": "Domain",
-                "type": "string"
+                "title": "Domain"
               },
               "pipeline_purpose": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "One sentence: what this campaign produces, for an outside reader.",
-                "title": "Pipeline Purpose",
-                "type": "string"
+                "title": "Pipeline Purpose"
               },
               "data_characteristics": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "One sentence (<=40 words): the sample properties L1 must account for — length, modality, distribution skew, known bias.",
-                "title": "Data Characteristics",
-                "type": "string"
+                "title": "Data Characteristics"
               },
               "optimization_goals": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "One sentence (<=40 words): what we optimise for, in operator vocabulary.",
-                "title": "Optimization Goals",
-                "type": "string"
+                "title": "Optimization Goals"
               },
               "key_challenges": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "One sentence (<=40 words): the 1-2 dominant failure patterns to defend against THIS round — a single current challenge, never a growing list.",
-                "title": "Key Challenges",
-                "type": "string"
+                "title": "Key Challenges"
               },
               "upstream_context": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "Short framing prepended around problem_description, or empty.",
-                "title": "Upstream Context",
-                "type": "string"
+                "title": "Upstream Context"
               },
               "downstream_context": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "Short framing appended around problem_description, or empty.",
-                "title": "Downstream Context",
-                "type": "string"
+                "title": "Downstream Context"
               }
             },
             "title": "CheckinTaskContext",
-            "type": "object"
+            "type": "object",
+            "required": [
+              "domain",
+              "pipeline_purpose",
+              "data_characteristics",
+              "optimization_goals",
+              "key_challenges",
+              "upstream_context",
+              "downstream_context"
+            ]
           },
           "OriginFinding": {
             "additionalProperties": false,
             "properties": {
               "field": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "Checklist field id, e.g. 'task_description', 'column.query'.",
-                "title": "Field",
-                "type": "string"
+                "title": "Field"
               },
               "proposed_value": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "The value proposed for this field.",
-                "title": "Proposed Value",
-                "type": "string"
+                "title": "Proposed Value"
               },
               "confidence": {
-                "default": "low",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "'high' or 'low'. Only 'high' auto-confirms.",
-                "title": "Confidence",
-                "type": "string"
+                "title": "Confidence"
               },
               "evidence": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "What in the input supports this — a header name, a sample value, or a stated operator preference. Findings with no evidence are rejected.",
-                "title": "Evidence",
-                "type": "string"
+                "title": "Evidence"
               }
             },
             "title": "OriginFinding",
-            "type": "object"
+            "type": "object",
+            "required": [
+              "field",
+              "proposed_value",
+              "confidence",
+              "evidence"
+            ]
           },
           "OriginNextAction": {
             "additionalProperties": false,
             "properties": {
               "kind": {
-                "default": "propose",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "'ask' (need operator input), 'propose' (findings applied), or 'ready' (resolver believes origin complete — re-checked).",
-                "title": "Kind",
-                "type": "string"
+                "title": "Kind"
               },
               "questions": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/$defs/OriginQuestion"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "For kind='ask': operator-facing questions, each naming the field it resolves so the answer applies directly.",
-                "items": {
-                  "$ref": "#/$defs/OriginQuestion"
-                },
-                "title": "Questions",
-                "type": "array"
+                "title": "Questions"
               }
             },
             "title": "OriginNextAction",
-            "type": "object"
+            "type": "object",
+            "required": [
+              "kind",
+              "questions"
+            ]
           },
           "OriginQuestion": {
             "additionalProperties": false,
             "properties": {
               "field": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "Checklist field id the answer resolves, e.g. 'column.query'.",
-                "title": "Field",
-                "type": "string"
+                "title": "Field"
               },
               "prompt": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "Short operator-facing question.",
-                "title": "Prompt",
-                "type": "string"
+                "title": "Prompt"
               },
               "options": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "Optional closed set of acceptable answers; empty = free text.",
-                "items": {
-                  "type": "string"
-                },
-                "title": "Options",
-                "type": "array"
+                "title": "Options"
               }
             },
             "title": "OriginQuestion",
-            "type": "object"
+            "type": "object",
+            "required": [
+              "field",
+              "prompt",
+              "options"
+            ]
           }
         },
         "additionalProperties": false,
         "properties": {
           "persona": {
-            "default": "",
-            "title": "Persona",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persona"
           },
           "task_intent": {
             "title": "Task Intent",
@@ -164,50 +292,110 @@
             "type": "string"
           },
           "problem_description": {
-            "default": "",
-            "title": "Problem Description",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem Description"
           },
           "instruction": {
-            "default": "",
-            "title": "Instruction",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instruction"
           },
           "thinking_style": {
-            "default": "",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "How to reason. Never the output shape or the scoring rule — those are answer_format's.",
-            "title": "Thinking Style",
-            "type": "string"
+            "title": "Thinking Style"
           },
           "task_context": {
-            "$ref": "#/$defs/CheckinTaskContext"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CheckinTaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "assessment": {
-            "default": "",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "One-line read of the current origin state.",
-            "title": "Assessment",
-            "type": "string"
+            "title": "Assessment"
           },
           "findings": {
-            "items": {
-              "$ref": "#/$defs/OriginFinding"
-            },
-            "title": "Findings",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/OriginFinding"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Findings"
           },
           "next_action": {
-            "$ref": "#/$defs/OriginNextAction"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OriginNextAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "recap": {
-            "default": "",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "On a 'ready' turn: a jargon-free paragraph restating what the campaign will do, for the operator to confirm intent.",
-            "title": "Recap",
-            "type": "string"
+            "title": "Recap"
           }
         },
         "required": [
+          "persona",
           "task_intent",
-          "answer_format"
+          "answer_format",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "task_context",
+          "assessment",
+          "findings",
+          "next_action",
+          "recap"
         ],
         "title": "CheckinOutput",
         "type": "object"

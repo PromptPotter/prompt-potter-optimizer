@@ -6,7 +6,7 @@
     ],
     "json_schema": {
       "name": "l1_generate",
-      "strict": false,
+      "strict": true,
       "schema": {
         "$defs": {
           "L1Recombination": {
@@ -55,48 +55,68 @@
                   {
                     "type": "null"
                   }
-                ],
-                "default": null
+                ]
               },
               "targets_rows": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "minItems": 2,
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "The rows this edit must hold for, by their `[#id]` marks — at least two, and all inside ONE critique cluster where the CRITIQUE panel lists clusters.",
-                "items": {
-                  "type": "integer"
-                },
-                "minItems": 2,
-                "title": "Targets Rows",
-                "type": "array"
+                "title": "Targets Rows"
               },
               "pipeline_overlay": {
-                "additionalProperties": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {},
+                    "type": "object",
+                    "required": []
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "Nested {node: {param: value}} — scalar backend tunables and `output_schema_descriptions.<path>` prose, each a param under ITS NODE, NEVER a top-level key beside the nodes. Scalar params (temperature, tokens, effort) are a last resort: at most one, and only where a panel or a runtime failure points there.",
-                "title": "Pipeline Overlay",
-                "type": "object"
+                "title": "Pipeline Overlay"
               },
               "prompt_fields_updates": {
-                "additionalProperties": {
-                  "additionalProperties": {
-                    "type": "string"
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {},
+                    "type": "object",
+                    "required": []
                   },
-                  "type": "object"
-                },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "Per prompt node, its prompt fields: {node: {field: new full text}}.",
-                "title": "Prompt Fields Updates",
-                "type": "object"
+                "title": "Prompt Fields Updates"
               },
               "shots": {
-                "additionalProperties": {
-                  "items": {
-                    "type": "integer"
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {},
+                    "type": "object",
+                    "required": []
                   },
-                  "type": "array"
-                },
-                "description": "Per prompt node, the shots it runs with: demo-pool ids from the DEMO POOL panel, in order. Replaces that node's list; omit a node to keep it.",
-                "title": "Shots",
-                "type": "object"
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Per prompt node, the shots it runs with: demo-pool ids from the DEMO POOL panel, in order. Replaces that node's list; null keeps it.",
+                "title": "Shots"
               },
               "changes_description": {
                 "title": "Changes Description",
@@ -104,6 +124,11 @@
               }
             },
             "required": [
+              "evidence_grounding",
+              "targets_rows",
+              "pipeline_overlay",
+              "prompt_fields_updates",
+              "shots",
               "changes_description"
             ],
             "title": "L1Variant",
@@ -140,15 +165,23 @@
             "type": "array"
           },
           "recombinations": {
-            "items": {
-              "$ref": "#/$defs/L1Recombination"
-            },
-            "title": "Recombinations",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/L1Recombination"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recombinations"
           }
         },
         "required": [
-          "variants"
+          "variants",
+          "recombinations"
         ],
         "title": "L1GenerateOutput",
         "type": "object"
@@ -163,7 +196,7 @@
     ],
     "json_schema": {
       "name": "l1_critique",
-      "strict": false,
+      "strict": true,
       "schema": {
         "$defs": {
           "FailureCluster": {
@@ -201,13 +234,20 @@
         "additionalProperties": false,
         "properties": {
           "failure_highlights": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/FailureCluster"
+                },
+                "maxItems": 3,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "One per DISTINCT failure cluster, ≤3, largest first.",
-            "items": {
-              "$ref": "#/$defs/FailureCluster"
-            },
-            "maxItems": 3,
-            "title": "Failure Highlights",
-            "type": "array"
+            "title": "Failure Highlights"
           },
           "priority_fix": {
             "description": "The single strongest steer, as `<axis>: <concrete change>`. The axis leads, before the colon, named VERBATIM from the axis list this node's prompt states. One you invent is dropped downstream and takes the steer's axis menu with it, so the next round reads a fix naming no lever it can pull.",
@@ -215,17 +255,26 @@
             "type": "string"
           },
           "suggested_axes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 4,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "≤4 axis names from the same list.",
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 4,
-            "title": "Suggested Axes",
-            "type": "array"
+            "title": "Suggested Axes"
           }
         },
         "required": [
-          "priority_fix"
+          "failure_highlights",
+          "priority_fix",
+          "suggested_axes"
         ],
         "title": "L1CritiqueOutput",
         "type": "object"
@@ -242,85 +291,171 @@
     ],
     "json_schema": {
       "name": "l2_context",
-      "strict": false,
+      "strict": true,
       "schema": {
         "$defs": {
           "ForkProposal": {
             "additionalProperties": false,
             "properties": {
               "reason": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "1-2 sentences: why this line is exhausted, and what the fork changes.",
-                "title": "Reason",
-                "type": "string"
+                "title": "Reason"
               },
               "unlock_schema_field_rename": {
-                "default": false,
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "Let the fork's L1 rename a field on the inner l1_generate's output schema (it can only describe fields today). Set ONLY when the panels show the search stalling on what a field is FOR rather than on what it says — a field whose name misdescribes its content. Default false.",
-                "title": "Unlock Schema Field Rename",
-                "type": "boolean"
+                "title": "Unlock Schema Field Rename"
               }
             },
             "title": "ForkProposal",
-            "type": "object"
+            "type": "object",
+            "required": [
+              "reason",
+              "unlock_schema_field_rename"
+            ]
+          },
+          "L1Overrides": {
+            "additionalProperties": false,
+            "properties": {
+              "temperature": {
+                "anyOf": [
+                  {
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "L1's sampling temperature.",
+                "title": "Temperature"
+              },
+              "n_variants": {
+                "anyOf": [
+                  {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "How many variants L1 writes.",
+                "title": "N Variants"
+              }
+            },
+            "title": "L1Overrides",
+            "type": "object",
+            "required": [
+              "temperature",
+              "n_variants"
+            ]
           }
         },
         "additionalProperties": false,
         "properties": {
           "axis_targeted": {
-            "default": "",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Where the failure cluster's fix lands in the TARGET prompt, as `<node>.<field>` for a semantic failure or a param for a quantitative one — even where it shares a name with an l1_layout slot. Name it on every fire; it is the anchor the lever is judged against, not a label for the lever.",
-            "title": "Axis Targeted",
-            "type": "string"
+            "title": "Axis Targeted"
           },
           "l1_layout": {
-            "additionalProperties": false,
-            "description": "Where in the reader node's own prompt each evidence panel is rendered. A slot is a position in that prompt, never the target-prompt field the evidence is about: the reader gets every placed panel whichever slot holds it. Keyed by SLOT — the properties are the only slots there are — each listing the panels to place there: a listed panel MOVES to that slot, an omitted one stays where it is, and a panel is only ever in one place.",
-            "properties": {
-              "problem_description": {
-                "items": {
-                  "enum": [
-                    "answer_distribution",
-                    "axis_memory",
-                    "block_pool",
-                    "budget_state",
-                    "confounds",
-                    "critique",
-                    "demo_pool",
-                    "detectable_move",
-                    "diagnostics",
-                    "escalation_panel",
-                    "failing_samples",
-                    "inner_narratives",
-                    "l1_wounds",
-                    "measurand",
-                    "mutation_memory",
-                    "pipeline_param_catalogue",
-                    "plan",
-                    "recombination_pool",
-                    "rendered_prompt",
-                    "sample_transcripts",
-                    "task_context"
-                  ],
-                  "type": "string"
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "problem_description": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "enum": [
+                            "answer_distribution",
+                            "axis_memory",
+                            "block_pool",
+                            "budget_state",
+                            "confounds",
+                            "critique",
+                            "demo_pool",
+                            "detectable_move",
+                            "diagnostics",
+                            "escalation_panel",
+                            "failing_samples",
+                            "inner_narratives",
+                            "l1_wounds",
+                            "measurand",
+                            "mutation_memory",
+                            "pipeline_param_catalogue",
+                            "plan",
+                            "recombination_pool",
+                            "rendered_prompt",
+                            "sample_transcripts",
+                            "task_context"
+                          ],
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
                 },
-                "type": "array"
+                "type": "object",
+                "required": [
+                  "problem_description"
+                ]
+              },
+              {
+                "type": "null"
               }
-            },
-            "title": "L1 Layout",
-            "type": "object"
+            ],
+            "description": "Where in the reader node's own prompt each evidence panel is rendered. A slot is a position in that prompt, never the target-prompt field the evidence is about: the reader gets every placed panel whichever slot holds it. Keyed by SLOT — the properties are the only slots there are — each listing the panels to place there: a listed panel MOVES to that slot, an omitted one stays where it is, and a panel is only ever in one place.",
+            "title": "L1 Layout"
           },
           "l1_overrides": {
-            "additionalProperties": true,
-            "description": "Optional runtime knobs; only 'temperature' and 'n_variants' are read.",
-            "title": "L1 Overrides",
-            "type": "object"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/L1Overrides"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "rationale": {
-            "default": "",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Why this fire, in 1-2 sentences: the failure cluster you are attacking and the named data point behind it — a sample id, a count, a yield number. Required on every fire, including one that pulls no lever; a lever with no diagnosis behind it cannot be told from a guess.",
-            "title": "Rationale",
-            "type": "string"
+            "title": "Rationale"
           },
           "fork_proposal": {
             "anyOf": [
@@ -330,12 +465,18 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null
+            ]
           }
         },
         "title": "L2ContextOutput",
-        "type": "object"
+        "type": "object",
+        "required": [
+          "axis_targeted",
+          "l1_layout",
+          "l1_overrides",
+          "rationale",
+          "fork_proposal"
+        ]
       }
     }
   },
@@ -348,27 +489,43 @@
     ],
     "json_schema": {
       "name": "l3_plan",
-      "strict": false,
+      "strict": true,
       "schema": {
         "$defs": {
           "ForkProposal": {
             "additionalProperties": false,
             "properties": {
               "reason": {
-                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "1-2 sentences: why this line is exhausted, and what the fork changes.",
-                "title": "Reason",
-                "type": "string"
+                "title": "Reason"
               },
               "unlock_schema_field_rename": {
-                "default": false,
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
                 "description": "Let the fork's L1 rename a field on the inner l1_generate's output schema (it can only describe fields today). Set ONLY when the panels show the search stalling on what a field is FOR rather than on what it says — a field whose name misdescribes its content. Default false.",
-                "title": "Unlock Schema Field Rename",
-                "type": "boolean"
+                "title": "Unlock Schema Field Rename"
               }
             },
             "title": "ForkProposal",
-            "type": "object"
+            "type": "object",
+            "required": [
+              "reason",
+              "unlock_schema_field_rename"
+            ]
           }
         },
         "additionalProperties": false,
@@ -379,14 +536,26 @@
             "type": "string"
           },
           "note": {
-            "default": "",
-            "title": "Note",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           },
           "rationale": {
-            "default": "",
-            "title": "Rationale",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
           },
           "fork_proposal": {
             "anyOf": [
@@ -396,12 +565,14 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null
+            ]
           }
         },
         "required": [
-          "plan"
+          "plan",
+          "note",
+          "rationale",
+          "fork_proposal"
         ],
         "title": "L3PlanOutput",
         "type": "object"

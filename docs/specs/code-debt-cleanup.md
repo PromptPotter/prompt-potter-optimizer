@@ -1137,15 +1137,11 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   a rebase applies. Action: decide whether a narrowed `param_allowed_values` is fork-only, and if so a
   `ForkProposal` member mapped to one `ConfigOverrides` edit. **Rides with:** tune 1. **Re-test:**
   `git grep -n "class ForkProposal" -A20 -- promptpotter`.
-- **The fastest hosts refuse the `l1_generate` schema**: Cerebras wants `properties` on every object, Groq
-  strict mode wants every property `required` (`dispatch/l1_wire_schema.py::build_l1_response_schema`).
-  Action: the wire goes all-required only together with `strict: True`; the flag is
-  `infrastructure/llm/openai_compat.py::OpenAICompatibleClient._request_params`, shared by every node.
-  **Held:** a strict flag binds the check-in, `l1_critique`, `l2_context` and `l3_plan` too, each with
-  optional fields, and `L2ContextOutput.l1_overrides` is an open map strict cannot state; decide their
-  wire before the flag flips. **Rides with:** tune 2, whose Owns gain
-  `openai_compat.py`'s flag (rk-opt's Owns held `l1_wire_schema.py` alone, and the proof is a paid call).
-  **Re-test:** one `l1_generate` call pinned to Cerebras parses.
+- **The strict wire is unproven on a paid host**: every optimizer schema passes
+  `bench/llm_call.py::wire_closed` and ships `strict: True`. An untyped pipeline param still rides as `{}`
+  (`l1_wire_schema.py`, `param_props[param] = {}`), which a strict host may refuse. Owed: one call per
+  node family (check-in, `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`), pinned to Cerebras,
+  each parsing. **Re-test:** those five calls.
 - **The default host pin is a trial with no verdict**: `domain/pipeline_overlay.py::pin_default_routes`
   writes each model's default host into every node config. Decided: a model keeps its pin only where its
   realized cache share and effective $/M beat running uncached. **Rides with:** tune 3. **Re-test:**

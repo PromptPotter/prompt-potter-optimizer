@@ -233,9 +233,9 @@ resolved_prompts:
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
         - "evidence_grounding": {field, citation}. citation is the shortest verbatim span of the panel `field` names; a quote that panel does not hold is rejected mechanically.
         - "targets_rows": the rows this variant's edit must hold for, as `[#id]` ids — at least 2, all from ONE cluster of the CRITIQUE panel where it lists clusters, else rows of one panel that fail the same way. Two variants share a cluster only as two DIFFERENT mechanisms for it.
-        - The delta slots, carrying ONLY what changes: omit a field you keep (a variant changing nothing is rejected mechanically).
+        - The delta slots, carrying ONLY what changes: null for a field you keep (a variant changing nothing is rejected mechanically).
           * "pipeline_overlay": nested {node: {param: value}}, as its schema description states.
-          * "prompt_fields_updates": nested {node: {field: new full text}}, over the prompt fields its schema offers per node. The text REPLACES the field whole: rewrite the sentence your change supersedes instead of appending beside it, and stay within the parent field's length unless changes_description names what the extra buys. A field you omit carries forward, so never restate another field's text or the framing inside one.
+          * "prompt_fields_updates": nested {node: {field: new full text}}, over the prompt fields its schema offers per node. The text REPLACES the field whole: rewrite the sentence your change supersedes instead of appending beside it, and stay within the parent field's length unless changes_description names what the extra buys. A field left null carries forward, so never restate another field's text or the framing inside one.
         - "changes_description": one short sentence REPORTING the change you just emitted — the failure pattern it targets, the concrete change, and the expected directional effect ("improve reasoning" is too vague).
   l1_critique/1:
     persona: You are a pipeline evaluation analyst.
@@ -302,11 +302,11 @@ resolved_prompts:
       first, then the L1 axis it routes to, then the lever — never the reverse. A lever picked
       before a cluster is noise wearing a rationale.
     answer_format: &l2_context_answer |-
-      Return JSON. Set only the LEVER you pull — but ALWAYS write both reason fields, on every
-      fire, including one that pulls no lever.
+      Return JSON. Set only the LEVER you pull, null for the rest — but ALWAYS write both reason
+      fields, on every fire, including one that pulls no lever.
       {
         "l1_layout": {"problem_description": ["<panel>", ...]},
-        "l1_overrides": {...},
+        "l1_overrides": {"temperature": <number or null>, "n_variants": <integer or null>},
         "axis_targeted": "<node>.<field> or <param>",   // ALWAYS — where the cluster's fix lands in the TARGET prompt, even when it shares a layout slot's name
         "rationale": "1-2 sentences"  // ALWAYS — the cluster you are attacking and the sample id / count / yield number behind it
       }

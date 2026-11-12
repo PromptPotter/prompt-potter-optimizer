@@ -28,6 +28,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     layout_json_schema,
 )
+from promptpotter.domain.strict_model import NonNegativeWireFloat, WireInt
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 logger = logging.getLogger(__name__)
@@ -108,12 +109,16 @@ class VariantEvidenceGrounding(OptimizerResponseModel):
     citation: str
 
 
+# Keyed by the pipeline's nodes, so `l1_wire_schema.py` states each slot per pipeline.
+_PER_PIPELINE: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": False}
+
+
 class L1Variant(OptimizerResponseModel):
     """Slot keys stay loose so a backend-specific node name never fails the parse; a no-op variant parses beside one that edits, and `validators.py::detect_invariants` drops that arm alone."""
 
     # Field order is GENERATION order; optional at the PARSE boundary only, REQUIRED on the wire (`l1_wire_schema.py`).
     evidence_grounding: VariantEvidenceGrounding | None = None
-    # Rows, never a label: a name is coined freely on a `strict: False` wire, an id is checked against the prompt.
+    # Rows, never a label: a name is coined freely, an id is checked against the prompt.
     targets_rows: list[int] = Field(
         default_factory=list,
         json_schema_extra={"minItems": CLUSTER_ROWS_MIN},
@@ -122,29 +127,30 @@ class L1Variant(OptimizerResponseModel):
             "inside ONE critique cluster where the CRITIQUE panel lists clusters."
         ),
     )
-    pipeline_overlay: Annotated[dict[str, dict[str, Any]], AfterValidator(_one_script_values)] = (
-        Field(
-            default_factory=dict,
-            description=(
-                "Nested {node: {param: value}} — scalar backend tunables and "
-                "`output_schema_descriptions.<path>` prose, each a param under ITS NODE, NEVER a "
-                "top-level key beside the nodes. Scalar params (temperature, tokens, effort) are a "
-                "last resort: at most one, and only where a panel or a runtime failure points there."
-            ),
-        )
+    pipeline_overlay: Annotated[
+        dict[str, dict[str, Any]], WithJsonSchema(_PER_PIPELINE), AfterValidator(_one_script_values)
+    ] = Field(
+        default_factory=dict,
+        description=(
+            "Nested {node: {param: value}} — scalar backend tunables and "
+            "`output_schema_descriptions.<path>` prose, each a param under ITS NODE, NEVER a "
+            "top-level key beside the nodes. Scalar params (temperature, tokens, effort) are a "
+            "last resort: at most one, and only where a panel or a runtime failure points there."
+        ),
     )
     prompt_fields_updates: Annotated[
         dict[str, dict[str, str]],
+        WithJsonSchema(_PER_PIPELINE),
         BeforeValidator(_drop_blank_node_values),
         AfterValidator(_one_script_values),
     ] = Field(
         default_factory=dict,
         description="Per prompt node, its prompt fields: {node: {field: new full text}}.",
     )
-    shots: dict[str, list[int]] = Field(
+    shots: Annotated[dict[str, list[int]], WithJsonSchema(_PER_PIPELINE)] = Field(
         default_factory=dict,
         description="Per prompt node, the shots it runs with: demo-pool ids from the DEMO POOL "
-        "panel, in order. Replaces that node's list; omit a node to keep it.",
+        "panel, in order. Replaces that node's list; null keeps it.",
     )
     changes_description: Annotated[
         str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX)), AfterValidator(_one_script)
@@ -204,8 +210,8 @@ def _renamed_variant(items: tuple[tuple[str, str], ...]) -> type[L1Variant]:
 
 @shapes_optimizer_prompt
 class FailureCluster(OptimizerResponseModel):
-    # GENERATION order: the ids commit the cluster to rows before the prose can name one. `minItems`
-    # is advisory on a `strict: False` wire; `critique_response_model` drops what it does not hold.
+    # GENERATION order: the ids commit the cluster to rows before the prose can name one. A host may
+    # ignore `minItems`; `critique_response_model` drops what it does not hold.
     sample_ids: list[int] = Field(
         json_schema_extra={"minItems": CLUSTER_ROWS_MIN},
         description=(
@@ -231,7 +237,7 @@ class FailureCluster(OptimizerResponseModel):
 
 class L1CritiqueOutput(OptimizerResponseModel):
     # FIRST on purpose: the tail truncates first, and the clusters are what the generator targets.
-    # `maxItems` is advisory on a `strict: False` wire: the cap is `_capped`'s, after the drop.
+    # A host may ignore `maxItems`: the cap is `_capped`'s, after the drop.
     failure_highlights: list[FailureCluster] = Field(
         default_factory=list,
         json_schema_extra={"maxItems": CLUSTERS_MAX},
@@ -361,6 +367,11 @@ class TerminateProposal(OptimizerResponseModel):
     )
 
 
+class L1Overrides(OptimizerResponseModel):
+    temperature: NonNegativeWireFloat | None = Field(None, description="L1's sampling temperature.")
+    n_variants: WireInt | None = Field(None, ge=1, description="How many variants L1 writes.")
+
+
 class L2ContextOutput(OptimizerResponseModel):
     """Carries neither ``task_context`` (operator-authored, frozen for the run) nor ``action``."""
 
@@ -380,10 +391,7 @@ class L2ContextOutput(OptimizerResponseModel):
             layout_json_schema(NODE_LAYOUTS["l1_generate"], description=LAYOUT_SCHEMA_INSTRUCTION)
         ),
     ] = Field(default_factory=dict)
-    l1_overrides: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Optional runtime knobs; only 'temperature' and 'n_variants' are read.",
-    )
+    l1_overrides: L1Overrides = Field(default_factory=L1Overrides)
     # Optional at PARSE time only, so a fire that omits it still lands its layout edit.
     rationale: Annotated[str, BeforeValidator(_truncate_marked(400))] = Field(
         default="",

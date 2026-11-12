@@ -43,8 +43,8 @@ def _entry(node: str, model: type[BaseModel]) -> dict[str, Any]:
         "fields": list(schema.get("properties", {})),
         "json_schema": {
             "name": node,
-            # The wire ships `strict: False` (`openai_compat.py`), so the manifest says so too.
-            "strict": False,
+            # The wire ships `strict: True` (`openai_compat.py`), so the manifest says so too.
+            "strict": True,
             "schema": schema,
         },
     }

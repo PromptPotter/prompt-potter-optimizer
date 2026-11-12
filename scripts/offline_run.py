@@ -269,6 +269,11 @@ class SchemaFiller:
             s = {**self.resolve(s["allOf"][0]), **{k: v for k, v in s.items() if k != "allOf"}}
         return s
 
+    def said(self, s: dict[str, Any]) -> dict[str, Any]:
+        """A nullable schema's other arm: what a model with something to say writes."""
+        s = self.resolve(s)
+        return next((self.resolve(o) for o in s.get("anyOf", ()) if o.get("type") != "null"), s)
+
     def fill(self, s: dict[str, Any], path: tuple[str, ...]) -> Any:
         s = self.resolve(s)
         if "const" in s:
@@ -278,8 +283,10 @@ class SchemaFiller:
         for key in ("anyOf", "oneOf"):
             if key in s:
                 opts = [self.resolve(o) for o in s[key]]
-                non_null = [o for o in opts if o.get("type") != "null"]
-                return self.fill((non_null or opts)[0], path)
+                # As a model with nothing to say: a nullable property is left unsaid.
+                if any(o.get("type") == "null" for o in opts):
+                    return None
+                return self.fill(opts[0], path)
         t = s.get("type")
         if isinstance(t, list):
             t = next(x for x in t if x != "null")
@@ -308,7 +315,7 @@ def _recombine(obj: dict[str, Any], props: dict[str, Any], filler: SchemaFiller,
     by the next donor apart from it."""
     if "recombinations" not in props:
         return
-    slot = filler.resolve(props["recombinations"])
+    slot = filler.said(props["recombinations"])
     spec = filler.resolve(slot["items"])["properties"]
     mains = filler.resolve(spec["main"])["enum"]
     ids = filler.resolve(spec["donor"])["enum"]
@@ -524,7 +531,10 @@ class ByCallIdentity:
             if "prompt_fields_updates" in props
             else ("pipeline_overlay", "thinking_style")
         )
-        offered = props[slot]["properties"]
+        offered = {
+            node: filler.said(fields)["properties"]
+            for node, fields in filler.said(props[slot])["properties"].items()
+        }
         second = ("thinking_style",) if self.crossing else ()
         v[slot] = {
             node: {
@@ -533,10 +543,10 @@ class ByCallIdentity:
                     random.Random(f"l1:{generation}:{i}:{node}{tag and f':{tag}'}"),
                 )
                 for field, tag in ((edited, ""), *((f, f) for f in second))
-                if field in fields["properties"]
+                if field in fields
             }
             for node, fields in offered.items()
-            if edited in fields["properties"]
+            if edited in fields
         }
         # As a model would: one cluster line of the CRITIQUE panel, else the first rows any panel marks.
         clusters = [

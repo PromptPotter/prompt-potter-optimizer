@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from promptpotter.application.jobs.coupon import keyed_client
 from promptpotter.application.optimizer_manifest import bound_determinism
@@ -52,11 +52,65 @@ def _drop_class_description(schema: dict[str, Any], _model: type[BaseModel]) -> 
     schema.pop("description", None)
 
 
+# The response model holds these after the call; a decoder held to them pads or cuts to fit.
+_HELD_AFTER = frozenset({"minLength", "minProperties"})
+
+
+@shapes_optimizer_prompt
+def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
+    if any(s.get("type") == "null" for s in (schema, *schema.get("anyOf", ()))):
+        return {k: v for k, v in schema.items() if k != "default"}
+    named = {k: schema[k] for k in ("description", "title") if k in schema}
+    inner = {k: v for k, v in schema.items() if k not in ("description", "title", "default")}
+    return {"anyOf": [inner, {"type": "null"}], **named}
+
+
+@shapes_optimizer_prompt
+def wire_closed(schema: dict[str, Any]) -> dict[str, Any]:
+    """The one wire rule a strict host enforces: every object closed, every property required, one
+    the model may leave unsaid nullable. An open map cannot be stated, so it raises."""
+    out = {k: v for k, v in schema.items() if k not in _HELD_AFTER}
+    for key in ("anyOf", "oneOf", "allOf"):
+        if key in out:
+            out[key] = [wire_closed(s) for s in out[key]]
+    if "items" in out:
+        out["items"] = wire_closed(out["items"])
+    if "$defs" in out:
+        out["$defs"] = {name: wire_closed(s) for name, s in out["$defs"].items()}
+    if out.get("type") != "object":
+        return out
+    if out.get("additionalProperties", False) is not False:
+        raise ValueError(f"an open map cannot ride a strict wire: {out!r:.200}")
+    said = set(out.get("required", ()))
+    props = {name: wire_closed(s) for name, s in out.get("properties", {}).items()}
+    out["properties"] = {n: s if n in said else _nullable(s) for n, s in props.items()}
+    out["required"] = list(props)
+    out["additionalProperties"] = False
+    return out
+
+
+def _unsaid(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    kept = {k: _unsaid(v) for k, v in value.items() if v is not None}
+    return {k: v for k, v in kept.items() if v != {} or value[k] == {}}
+
+
 @shapes_optimizer_prompt
 class OptimizerResponseModel(StrictModel):
     """Every model whose JSON Schema goes on the wire; class descriptions are dropped from it."""
 
     model_config = ConfigDict(json_schema_extra=_drop_class_description)
+
+    @classmethod
+    def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return wire_closed(super().model_json_schema(*args, **kwargs))
+
+    # A null is a key left unsaid, and a map it empties is unsaid too: the field keeps its default.
+    @model_validator(mode="before")
+    @classmethod
+    def _null_is_unsaid(cls, data: object) -> object:
+        return _unsaid(data)
 
 
 @dataclass(frozen=True)

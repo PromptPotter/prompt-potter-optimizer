@@ -511,7 +511,7 @@ class OpenAICompatibleClient:
                 "json_schema": {
                     "name": (response_model.__name__ if response_model else "response_schema"),
                     "schema": wire_schema,
-                    "strict": False,
+                    "strict": True,
                 },
             }
         return request_params
