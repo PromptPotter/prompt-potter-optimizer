@@ -129,7 +129,7 @@ overturned by length** — per arm the mean composite lies in `[(1 − λ)·E(a)
 
 **That shape is declared as DIALS, and the anchor is measured.** `scoring.dials: tokens=0.08,latency=0.05`
 beside `per_sample` (exclusive with `per_cell`) names a weight per term; once the origin is scored, it is
-realized — `B` is the origin's median of that term — and the resulting `per_cell` is written into the campaign
-manifest in place of the dials, once: a resume, a fork and every served read take the plain formula.
+realized — `B` is the origin's median of that term — and the resulting `per_cell` is appended to the ledger as a
+`ScoringLockedRecord` (`application/origin.py::lock_criterion`), once: a resume, a fork and every served read take the plain formula.
 **Fitness** displays alongside as the subset-relative correctness, so a win with hidden costs is visible
 as a gap between the two.

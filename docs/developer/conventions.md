@@ -40,5 +40,5 @@ Ask in order: what enforces the fitness contract (bounded, subset-invariant, can
 ## Git
 
 - **Conventional commits** — `feat:`, `fix:`, `docs:`, `refactor:`; title <70 chars; body: terse bullets stating deltas, ≤900 chars incl. trailer.
-- **Hand-written work carries `Hand-authored-by: operator`** in the trailer.
+- **`Hand-authored-by: operator` marks only work the operator typed himself**; an agent's commit never carries it, whatever it edits.
 - **One grep is not absence** — check a second spelling, tool, channel or tree before calling a symbol unused; a green suite after a signature change proves nothing until it was broken on purpose.

@@ -11,7 +11,7 @@ No use case writes to disk or talks to a network except through one of these sea
 - **A round IS its last `RoundStatement`**; only a `RoundClosedRecord` moves the clock, and every resume, fork and read takes standing rounds off the ledger. A scan takes the LAST close, lets an `OSError` raise and instantiates no `CycleEventLog`. <!-- probe: git grep -cE "CycleEventLog\(" -- promptpotter/infrastructure/store/campaign_store/ledger_scan.py == 0 -->
 - **A projection is held by its drainer's `store/read_model.py::Projecting`** (the run, a bench pass, one store append), never the process; every entry point holds the same set.
 - **`LiveDashboardProjection` RESOLVES; it never hands the browser scalars to join**: a live row is the closed row's shape, with no `live` flag beside it.
-- **A `RoundWarningRecord` is a self-heal only**: a halt is its `StopReason`, a decided outcome a field of its step's record, a projection's fault its `derived_file_stale`, never a raise into the append whose line landed. <!-- probe: git grep -cE "emit_round_warning\(" -- promptpotter/*.py <= 4 -->
+- **A `RoundWarningRecord` is a self-heal only**: a halt is its `StopReason`, a decided outcome a field of its step's record, a projection's fault its `derived_file_stale`, never a raise into the append whose line landed. <!-- probe: git grep -cE "emit_round_warning\(" -- promptpotter/*.py <= 3 -->
 
 ## One deleter, one poster, one docker call
 

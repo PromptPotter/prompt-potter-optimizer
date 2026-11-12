@@ -9,4 +9,4 @@
 - **A row carries who authored the point, `cached_samples` and `human_intervened`**: a babysat cycle pairs with nothing.
 - **`scored_cells` is the intersection, `covered_cells` the union; every pair is keyed on `Sample.key`**, Holm-corrected across pairs, never across metrics.
 - **A ranked edit is a searchpoint against its own campaign's origin, keyed on `sp_hash`; never pool across campaigns.**
-- **The environment table reads the roster on the variance split's cells**: `snr` over the pooled residual, Friedman on cells every subject scored, a held-out cell never pooled with search rows. Noise is `EditSpread` over a replicate ARM.
+- **The environment table reads the roster on the variance split's cells**: `snr` over the pooled residual, Friedman on cells every subject scored, a held-out cell never pooled with search rows. Noise is `comparison.py::ArmReplicate`'s over a replicate ARM.
