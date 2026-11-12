@@ -475,7 +475,9 @@ class Hold(FrozenModel):
     key_source: KeySource
     # The most it and every hold under it may draw; ``None`` on an axis nothing bounds.
     bound: Budget
-    # The ledger a call's sends land on, relative to the account; ``None`` on a job's hold.
+    # The kind a call's or a cell's hold binds, as its run's share files it; ``None`` on a job's.
+    resource: TokenUsageKind | None
+    # The ledger a call's sends land on, relative to the account; ``None`` on a job's or a cell's.
     ledger: str | None
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -502,7 +504,7 @@ class Release(FrozenModel):
 
 class Lapse(FrozenModel):
     """A send that may have billed and reported nothing: it closes its call's hold, and *bound* is
-    what it may have cost, unreported once the hold above it closes."""
+    what it may have cost, drawn on every hold above it and unreported at once."""
 
     record_type: Literal["lapse"] = "lapse"
     hold_id: str

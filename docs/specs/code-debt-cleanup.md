@@ -183,22 +183,6 @@ row it closes.
   its book from its scope; the per-call round and measured vars stay; telemetry's ride rec. **Rides with:** money 1.
   **Re-test:** `git grep -c "ContextVar(" -- promptpotter` over `coupon.py`, `send_pacing.py` and
   `spend_book.py` is 0.
-- **S: a live book counts apart from the one fold** (every file's money is
-  `store/read_model.py::money_on`, money-g): `spend_book.py::SpendBook` counts through its ledger
-  subscription and through admission (`Admission._unseen`, `_unlanded`), and the live dashboard banks
-  its own rollup. Action: the live readers ride `_Money` as a projection. **Rides with:** holds nest.
-- **Money holds once per level, three ways** (operator, 2026-11-12: a backbone root, not a row):
-  - the run holds a `Hold` on its account's charge book, closed by a `Release`;
-  - a cell reserves in memory only (`spend_book.py::CellReservation`, with its own `draw` and the
-    chain index in `SpendBook.hold`), so a reserved cell's hold is on no book
-    (`Connector.holds_own_sends`);
-  - a call's `Hold` is on the account, closed by a `Bill`, a `Release` or a `Lapse`.
-
-  Action: one `Hold` at every depth, with a bound and a parent hold, on one book. A draw goes against
-  the nearest open parent, and the open part is the bound less its children's holds and bills, read by
-  `read_model.py::money_on`. `CellReservation` goes. **Rides with:** holds nest
-  (roadmap § Sequence, Phase 2). **Re-test:** `git grep -n "class CellReservation" -- promptpotter`
-  is empty.
 - **The campaign store reaches into the LLM layer for a ledger read**: `campaign_store/store.py:58`
   imports `standing_budget` from `infrastructure/llm/spend_book.py:80`, and
   `CampaignStore.read_standing_budget` answers it. Root: the read lives with the store, and the book takes
