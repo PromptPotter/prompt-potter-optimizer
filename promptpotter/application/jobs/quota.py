@@ -704,10 +704,17 @@ def _live_on(stores: Stores, job_registry: JobRegistry, campaign_id: str) -> lis
     ]
 
 
+def _admitting_before(other: Job, mine: Job | None) -> bool:
+    """*other* is still at its gate, its hold unwritten: only one EARLIER than *mine* blocks, or two
+    simultaneous launches refuse each other."""
+    return not other.admitted and (
+        mine is None or (other.created_at, other.job_id) < (mine.created_at, mine.job_id)
+    )
+
+
 def _refuse_unshared(
     stores: Stores, job_registry: JobRegistry, money: Budget, *, hop: CycleHop, job: Job
 ) -> None:
-    mine = (job.created_at, job.job_id)
     for other in job_registry.list_holding_spend(user_id=job.user_id):
         if (
             other.job_id == job.job_id
@@ -715,10 +722,9 @@ def _refuse_unshared(
             or other.hop == hop
         ):
             continue
+        if _admitting_before(other, job):
+            raise _contended("this campaign's ceiling")
         if not other.admitted:
-            # Only an EARLIER one blocks, or two simultaneous launches refuse each other.
-            if (other.created_at, other.job_id) < mine:
-                raise _contended("this campaign's ceiling")
             continue
         held = cycle_share(stores, other)
         for axis in sorted(MONEY_AXES):
@@ -992,14 +998,7 @@ def _live_holds(
     an unstamped sibling, whose hold is not written yet. Exclusion is by job, never by hop."""
     running = job_registry.list_holding_spend(user_id=user_id)
     own = next((j for j in running if j.job_id == excluding_job_id), None)
-    mine = None if own is None else (own.created_at, own.job_id)
-    # Only an EARLIER unstamped sibling blocks, or two simultaneous launches refuse each other.
-    if any(
-        not job.admitted
-        and job.job_id != excluding_job_id
-        and (mine is None or (job.created_at, job.job_id) < mine)
-        for job in running
-    ):
+    if any(_admitting_before(job, own) for job in running if job.job_id != excluding_job_id):
         return None
     return money_on(stores.charges.path).held_back(excluding_job_id)
 

@@ -3556,7 +3556,27 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     )
     with scoped(account=biller):
         billed_ledger = CycleEventLog.open(CycleDir(biller.campaigns.cycle_dir(billed_hop)))
-        _pay(billed_ledger, 0.10, input_tokens=1_000, output_tokens=0, book=live_book)
+        _pay(billed_ledger, 0.08, input_tokens=1_000, output_tokens=0, book=live_book)
+    # A fork rebases the run onto another cycle: its bills draw its hold by the hold tree, never by
+    # the ledger they landed on.
+    biller.charges.append(
+        Hold(hold_id="forked", parent=live.job_id, key_source="host", bound=Budget(usd=0.02))
+    )
+    biller.charges.append(
+        Bill(
+            hold_id="forked",
+            key_source="host",
+            price=CallPrice(
+                kind="optimizer",
+                model="gpt-x",
+                provider="openai",
+                cost_usd=0.02,
+                rate_priced_usd=None,
+            ),
+            tokens=10,
+            ledger="campaigns/camp-6b/cycles/cycle_forked01/events.jsonl",
+        )
+    )
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.10), (
         "a live run's billed $0.10 was held twice: once billed, once inside its $0.20 reserve"
     )
