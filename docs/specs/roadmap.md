@@ -25,26 +25,37 @@ header, then the operator asked about a release.
    `origin-gate` verb gone; one hold opening every launch's cycle, the embedded launch opening its own
    session, a retired campaign refused at admission; a bench status serving `can_run`; one served arm,
    coverage, the nest and the followed `hop` served, the hash as `Subject`'s address: init-2, init-3,
-   init-4, admit (links 1–2), passb (link 1), webb-2, webb-3. admit-2 and passb-2 follow on its tip;
-   webb-4 waits on addr. The decision window opens.
-6. **batch/26** — every re-key: money, rk-opt and stream-rk on its tip (`RunCallbacks` and the
-   `declare_*` doors), then narr (one narration, the typed phase act) on stream-rk's; rk-run, addr;
-   then payer (who pays a connector's send) and rk-dec beside it, on the assembled tip, rk-run's
-   included; then rn-conn. The window closes.
-7. **batch/27** — records and layout: rec, la, lw; md if the operator says so.
-8. **batch/28** — lb, then faults on its tip.
-9. **batch/29** — lite (LiteLLM out of core), xconn, mkey, then mcp on mkey's tip; tv-2 (the host's
-   exhibit, read-only to followers) beside them under one access review.
-10. **batch/30** — ws, forks, the block picker's census.
-11. **batch/31** — tune, small, pick, box (the operator runs it).
-12. **batch/32** — ts-arch, ts-score, ts-spend; then ren; then rel and `gate.py --release`.
+   init-4, admit (links 1–2), passb (link 1), webb-2, webb-3; L4's outer cell scoring the inner run's
+   held-out lift landed beside it. webb-4 waits on addr.
+
+From batch/26 the chains are paced, backbone first. The re-keys and the backbone-entangled chains come
+before more L4, so run data stops migrating; the edge tail follows over the weeks after (operator,
+2026-11-11).
+
+**Phase 1** (then L4 resumes on a re-measured C0):
+
+6. **batch/26** — the L4 inner optimizer and admission: rk-opt 1–4, admit-2 (with passb-2's two
+   release rows and the campaign-id draw that never re-mints a deleted id), and in its fix pass each
+   narrative fact carrying its own round and each field's ceiling served to the proposer.
+7. **fit-name** — `CellFold.accuracy` becomes fitness end to end, and the L4 round summary shows the
+   mean held-out lift (re-keys, reshapes run data).
+8. **lb** — `runner/` as at most 8 files, pure moves, last on the tip.
+
+**Phase 2:** stream-rk with rk-run; money with rk-dec, rk-opt 5 (`ab` re-fits under the current
+scorer, regrading the other campaigns' rows off the archive) and tune 2; faults; narr, rec, rn-conn,
+ren. The re-keys end here.
+
+9. **The edge tail**, in this order: passb-2, payer, addr, webb-4, la, lw (md if the operator says
+   so); lite, xconn, mkey, then mcp on mkey's tip, tv-2 under one access review; ws, forks, the block
+   picker's census; tune 1 and 3, small, pick, box (the operator runs it); tests-w, ts-arch, ts-score,
+   ts-spend; rel and `gate.py --release`.
 
 **Block picker:** the pool pick already rides the draft. What is left: earned blocks offered at
 check-in, their lift and n kept, the origin field's snippet ids served, the provenance chip (wave 4, pick).
 
-**Rules.** No paid run between batch/25's start and batch/26's push. From batch/22 the landing drops
+**Rules.** L4 spends now: each re-keying landing re-measures the L4 panel's C0. From batch/22 the landing drops
 unloadable run data itself; a survivor reshape ships its migration in its landing; the live box asks.
-A short window defers from the end (pending tracks, ren, faults, the ts private-reach link, lb, la, lw),
+A short window defers from the end (pending tracks, ren, faults, the ts private-reach link, la, lw),
 never w0, the trim, stream, startb, stopb, land, admit-2, money, rk-opt, rk-run, payer or rel.
 
 **Forks left to the operator** (taste and policy; a chain leaves each as it stands): whether `log.md`
@@ -194,6 +205,10 @@ What is true of L4 is [`../concepts/l4.md`](../concepts/l4.md)'s. Owed:
    worst-case non-inferiority per family, anchor to C0 with rollback by fork, a leakage lint on the
    adopted set. It inherits #3 and #4.
 7. **Environment admission inside the run** — § Survey round.
+8. **Dataset election for the outer panel.** A dataset or seed earns a seat by a recorded screen: it has a
+   band, and its origin has headroom over its constant-answer floor. A standing leaderboard of seats ranks
+   each by how much outer signal it returns per dollar. Each panel is drawn from the top of that leaderboard;
+   below the top, a seat is retired. Spend on L4 rises only after the gain per dollar is characterized.
 
 ## Variation and pools
 

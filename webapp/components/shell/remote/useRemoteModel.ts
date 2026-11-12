@@ -26,10 +26,11 @@ export function useRemoteModel() {
       // `cells: 1` disarms; sent unclamped, the walk clamps it to `lookahead.ceiling`.
       commands["set-sample-lookahead"]({ ...cycleAddress(viewedPath), cells, auto }),
     );
+  // A depth press keeps the every-round switch where it stands; only the switch moves it.
   const armCells = (raw: string) => {
     const cells = Number(raw);
-    if (cells === lookahead.depth && !lookahead.auto) return;
-    arm(cells, false);
+    if (cells === lookahead.depth) return;
+    arm(cells, lookahead.auto);
   };
 
   return {

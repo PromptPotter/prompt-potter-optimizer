@@ -5037,7 +5037,7 @@ export interface SetSampleLookaheadPayload {
   cycle_id: string;
   /** 1 disarms. */
   cells: number;
-  /** As deep as the stop rules allow, every round, until pressed off. */
+  /** This depth stands every round, until pressed off. */
   auto: boolean;
 }
 
@@ -5661,7 +5661,7 @@ export const LOOKAHEAD_WORDS: Record<'one_at_a_time' | 'settled' | 'no_further_c
   "settled": "not available now",
   "no_further_cell": "holds no further cell",
   "more_affordable": "more affordable",
-  "holds_every_round": "Every round, scoring holds as many calls as the stop rules allow, up to {ceiling}. A cut discards at most one call. The measurement is unchanged and the cycle is NOT marked babysat.",
+  "holds_every_round": "Every round's scoring runs with this many calls in flight, up to {pick_max}, until switched off. A cut discards at most one call. The measurement is unchanged and the cycle is NOT marked babysat.",
   "holds_this_round": "Runs this round's scoring with this many calls in flight, up to {pick_max}, then resets to 1. A cut discards at most one call. The measurement is unchanged and the cycle is NOT marked babysat.",
   "discarded": "{discards} discarded so far.",
   "depth_one": "One at a time",

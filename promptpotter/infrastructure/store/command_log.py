@@ -7,7 +7,6 @@ one line and no later line moves what it reads."""
 
 from __future__ import annotations
 
-import sys
 from bisect import bisect_right
 from collections.abc import Iterator
 from pathlib import Path
@@ -74,7 +73,7 @@ def requested_lookahead(controls: Controls) -> int:
     ask = controls.lookahead
     if ask is None:
         return 1
-    return sys.maxsize if ask.auto else ask.cells
+    return ask.cells
 
 
 def effective_lookahead(requested: int, ceiling: int) -> int:

@@ -15577,7 +15577,7 @@
         "properties": {
           "auto": {
             "default": false,
-            "description": "As deep as the stop rules allow, every round, until pressed off.",
+            "description": "This depth stands every round, until pressed off.",
             "title": "Auto",
             "type": "boolean"
           },

@@ -471,7 +471,7 @@ class SetSampleLookaheadPayload(LoopPayload, kind=CommandKind.SET_SAMPLE_LOOKAHE
     cells: WireInt = Field(ge=1, description="1 disarms.")
     auto: bool = Field(
         default=False,
-        description="As deep as the stop rules allow, every round, until pressed off.",
+        description="This depth stands every round, until pressed off.",
     )
 
 

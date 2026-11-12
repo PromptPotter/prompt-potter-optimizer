@@ -98,7 +98,7 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
         <span className="val">
           <Switch
             checked={la.auto}
-            label="Hold as many as the stop rules allow, every round"
+            label="Keep this depth every round"
             locked={pending || la.auto_refusal !== null}
             lockedNote={la.auto_refusal === null ? "saving" : LOOKAHEAD_WORDS[la.auto_refusal]}
             onChange={() => m.arm(la.depth, !la.auto)}

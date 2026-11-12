@@ -407,7 +407,7 @@ resolved_prompts:
     thinking_style: ''
     answer_format: |-
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
-        - "evidence_grounding": {field, citation} — citation is the shortest verbatim span that pins the panel entry, <=160c.
+        - "evidence_grounding": {field, citation}. `field` is the panel the quote is copied from (a narrative line is `inner_narratives`); citation is its shortest verbatim span, <=160c. A quote that panel does not hold is rejected mechanically.
         - "targets_rows": the inner runs this candidate's edit must hold for, as `[#id]` ids — at least 2, all from ONE cluster of the CRITIQUE panel where it lists clusters, else narratives showing the same inner deficiency. Two candidates share a cluster only as two DIFFERENT mechanisms for it.
         - "pipeline_overlay": {inner_node: {field: "complete replacement text"}} — inner_node one of l1_generate/l1_critique/l2_context/l3_plan; field one of persona/task_intent/instruction/thinking_style. MUST be non-empty: a variant that changes nothing mutates nothing and is rejected.
         - Instead of a prose field, a variant may edit information flow: "pipeline_overlay": {inner_node: {"layout": {"<slot>": ["<panel>", ...]}}} — inner_node one of l1_critique/l2_context/l3_plan; panels from that node's `layout` description, each listed under the slot it moves to.
