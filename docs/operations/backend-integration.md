@@ -56,7 +56,7 @@ An HTTP connector's endpoint, token and header reach the wire only through the c
 | `N8N_HARNESS_AUTH_HEADER` / `N8N_HARNESS_AUTH_PREFIX` | the header it rides in and what precedes it; default `X-Eval-Secret`, no prefix |
 
 - **Request** `{case_id, input, expected, prompt, params}` — `Sample.key`, the row's query, its gold (informational), the rendered candidate (`""` asks for the production text), the node's `output_schema` / `answer_fields`. **Reply** `{case_id, answer, raw}` — `answer` is graded (a label, or the graded fields as an object or its JSON string); an HTTP error, a timeout or an empty `answer` is an errored cell, never a wrong answer.
-- **The model is the n8n node's.** Cells are keyed on a hash of `N8N_HARNESS_URL`, so a model changed inside n8n is a new dataset. **No usage is reported**, so a dollar or token ceiling refuses it (`NO_RATE`).
+- **The model is the n8n node's.** Cells are keyed on a hash of `N8N_HARNESS_URL` less any trailing `/`, so a model changed inside n8n is a new dataset. **No usage is reported**, so a dollar or token ceiling refuses it (`NO_RATE`).
 - **Each `output_schema` property's description is a search axis the harness must apply**; one answer field opens the `response_format` toggle, whose `text` arm sends no `params`. Several graded fields: [`../research/structured-output.md`](../research/structured-output.md) § Several graded fields.
 
 ```yaml
