@@ -1,18 +1,22 @@
-"""An outer dataset's ``panel``: its typed cells."""
+"""An outer dataset's ``panel``: its typed cells.
+
+The spawn context sits apart from ``spawn.py``: the runner publishes it on its way past, while a spawn reaches back DOWN into it."""
 
 from __future__ import annotations
 
 import itertools
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, ValidationError, model_validator
 
 from promptpotter import connectors
 from promptpotter.application.bench import difficulty
+from promptpotter.application.bench.difficulty import ruler_clock
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.intelligence import rasch
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
@@ -29,6 +33,7 @@ from promptpotter.domain.campaign_config import (
     merge_config_layers,
 )
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
 from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -43,22 +48,25 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.store.dataset_access import (
-    read_dataset_pipeline,
-    resolve_dataset,
-)
-from promptpotter.shared.errors import (
-    CellUnscoreableError,
-    DatasetAccessError,
-    PayloadInvalidError,
-)
-from promptpotter.shared.hashing import module_source_digest
+from promptpotter.infrastructure.llm.telemetry import current_round
+from promptpotter.infrastructure.store.archive_queries import CampaignWalks, CellOf
+from promptpotter.infrastructure.store.dataset_access import read_dataset_pipeline, resolve_dataset
+from promptpotter.infrastructure.store.layout import inner_sandbox_dir
+from promptpotter.shared.errors import CellUnscoreableError, DatasetAccessError, PayloadInvalidError
+from promptpotter.shared.hashing import module_source_digest, shapes_optimizer_prompt
+from promptpotter.shared.measurement_context import enter_instrument_mode
+from promptpotter.shared.run_scope import UNBOUND, rescope, run_scope
 
 if TYPE_CHECKING:
     from types import ModuleType
 
+    from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.campaign import Purpose
+    from promptpotter.domain.ruler import RulerReach
     from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
     from promptpotter.infrastructure.store.stores import Stores
+    from promptpotter.shared.identity import IdentityContext
 
 
 class InnerBenchmarkConfig(FrozenModel):
@@ -258,7 +266,7 @@ def parse_panel(raw: object) -> InnerTasks:
 
 
 class ResolvedPanel(FrozenModel):
-    """The panel with each cell's instrument (`connector.py::_resolve_panel`): the ONE document run
+    """The panel with each cell's instrument (`spawn.py::_resolve_panel`): the ONE document run
     init, the samples and the fingerprint read."""
 
     panel: InnerTasks
@@ -557,3 +565,109 @@ def inner_instrument_config(
             "optimizer_narrowing": narrowing,
         }
     )
+
+
+@dataclass(frozen=True)
+class InnerSpawnContext:
+    """``shared_root`` stays the REAL workspace root: sandboxing the shared caches re-scores every inner origin."""
+
+    inner_sandbox_root: Path
+    identity: IdentityContext
+    shared_root: Path
+    # The spawner's tiers, so a cell resolves its dataset where the spawner does.
+    install_datasets_root: Path
+    research_datasets_root: Path | None
+    # The chain the cell's sandbox sits in, ending at its owner: the spawner's cycle.
+    inside: CyclePath
+    # Outermost first, ending at the asker's: a pause filed on any of them stops the cell.
+    enclosing: tuple[Subject, ...]
+    # The commands the spawner's passes act for: a `cancel` of one stops the cell.
+    acting: tuple[str, ...]
+    # What the spawner is FOR: each cell declares it, so withholds what the spawner would.
+    purpose: Purpose
+    # The tenant ruler lines the spawner's open round reads, which every cell it spawns reads too.
+    ruler: RulerReach
+    # Resolved ONCE at publish: a per-cell read lets an edit split one run's cells.
+    cells: InnerCells | None = None
+
+
+def _outer_cells(session: Session) -> InnerCells | None:
+    """``None`` off the recursion. The workload's panel, never a second read of the file the
+    samples and fingerprint came from."""
+    if not session.backend_client.connector.self_optimization:
+        return None
+    return parse_resolved(session.backend_client.workload.experiment).panel.resolve_cells(
+        session.store
+    )
+
+
+def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
+    """``None`` is a run with no cycle to spawn under; the run scope carries it (`run_scope.py`)."""
+    cycle_id = session.cycle_id
+    if not cycle_id or session.dataset is None or not session.campaign_id:
+        return None
+    # Never this store's ``projects_root``, which inside a sandbox already IS the sandbox.
+    shared_root = session.store.shared_root
+    inner_root = inner_sandbox_dir(
+        shared_root,
+        session.store.tenant_id,
+        CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id),
+    )
+    cells = _outer_cells(session)
+    return InnerSpawnContext(
+        inner_sandbox_root=inner_root,
+        identity=session.store.identity,
+        shared_root=shared_root,
+        install_datasets_root=session.store.install_datasets_root,
+        research_datasets_root=session.store.research_datasets_root,
+        inside=(*session.store.inside, session.hop),
+        enclosing=(*session.state.control.enclosing, session.store.subject(session.hop)),
+        acting=session.state.control.acting,
+        purpose=session.purpose,
+        ruler=ruler_clock(session),
+        cells=cells,
+    )
+
+
+@shapes_optimizer_prompt
+def inner_spawn_context() -> InnerSpawnContext | None:
+    if (spawn := run_scope().spawn) is UNBOUND:
+        raise RuntimeError(
+            "no inner-spawn context is scoped, so whether this run is an L4 outer is unknown: "
+            "the entry driving it scopes `inner_spawn_of` first"
+        )
+    return spawn
+
+
+@shapes_optimizer_prompt
+def inner_cells() -> InnerCells | None:
+    """The cells an L4 outer's arms are measured on, each running its own manifest, never the
+    outer's own; ``None`` off the recursion."""
+    ctx = inner_spawn_context()
+    return None if ctx is None else ctx.cells
+
+
+def pin_inner_ruler(reach: RulerReach) -> None:
+    """At each outer round's open, so every cell the round spawns reads the lines it reads."""
+    ctx = inner_spawn_context()
+    if ctx is not None and ctx.ruler != reach:
+        rescope(spawn=replace(ctx, ruler=reach))
+
+
+def enter_inner_cell(ctx: InnerSpawnContext, campaigns: CampaignStore, campaign_id: str) -> CellOf:
+    """The archive stays the cell's CACHE, and MEMORY only for its campaign's walks: the scope it returns."""
+    # Before the cell's run binds its own round, so this still reads the spawner's.
+    enter_instrument_mode(spawned_in=current_round())
+    return CellOf(CampaignWalks(campaigns, campaign_id), ctx.ruler)
+
+
+def retarget_inner_spawn(session: Session) -> None:
+    """Moves only the asker; the sandbox owner never follows a fork."""
+    ctx = inner_spawn_context()
+    cycle_id = session.cycle_id
+    if ctx is None or not cycle_id:
+        return
+    asking = session.store.subject(session.hop)
+    if ctx.enclosing[-1] == asking:
+        return
+    rescope(spawn=replace(ctx, enclosing=(*ctx.enclosing[:-1], asking)))

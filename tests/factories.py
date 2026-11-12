@@ -46,7 +46,7 @@ from promptpotter.application.runner.inner.tasks import (
     InnerCells,
     InnerTaskSpec,
 )
-from promptpotter.application.runner.open_cycle import (
+from promptpotter.application.runner.mint import (
     close_init,
     open_cycle,
     open_launch,

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 if TYPE_CHECKING:
     # Annotations alone: each field's type is its owner's, and no layer below reads one it does not own.
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.runner.inner.spawn_context import InnerSpawnContext
+    from promptpotter.application.runner.inner.tasks import InnerSpawnContext
     from promptpotter.domain.campaign import DeterminismClamp
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.archive_queries import MemoryScope

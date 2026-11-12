@@ -1,7 +1,10 @@
 """Run init, one module in one order: the launch opens (`open_launch`: clock, control, the held
 budget and its book, the scorer, the origin), then each cycle its line runs on opens
 (`open_cycle`: the cycle's records, preflight and INIT, the replay and its fork) and closes INIT
-(`close_init`). A rebase's fork re-arms the launch's book on its own cycle (`onto_fork`)."""
+(`close_init`). A rebase's fork re-arms the launch's book on its own cycle (`onto_fork`).
+
+Two ``new`` calls on one measured declaration share a root cycle id under different campaign
+ids: ``measurements/`` pools their origin scores."""
 
 from __future__ import annotations
 
@@ -10,9 +13,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.bench.resume_and_fork.resume import (
-    resume_with_divergence_check,
-)
+from promptpotter.application.bench.resume_and_fork.resume import resume_with_divergence_check
 from promptpotter.application.initialization.scoring_scope import cycle_partition, scorer_setup
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
@@ -20,6 +21,7 @@ from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher.admission import open_spend_book
 from promptpotter.application.jobs.quota import cycle_share, land_job, move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.knobs import measured_address
 from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.origin import CampaignOrigin, establish_campaign_origin
 from promptpotter.application.preflight import run_preflight_checks
@@ -29,7 +31,7 @@ from promptpotter.application.run_observers import (
     declare_run_wiring,
 )
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
-from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
+from promptpotter.application.runner.inner.tasks import retarget_inner_spawn
 from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
 from promptpotter.application.views.ingress import init_enter, init_exit
@@ -46,17 +48,39 @@ from promptpotter.infrastructure.llm.send_pacing import set_abort_check
 from promptpotter.infrastructure.llm.spend_book import bound_spend_book, filed
 from promptpotter.infrastructure.llm.telemetry import bind_priced
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.run_scope import rescope
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_callbacks import RunCallbacks
+    from promptpotter.domain.arms import PointContext
+    from promptpotter.domain.campaign import RunDeclaration
     from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
+    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.run_mode import RunMode
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
+
+
+def origin_content_hash(
+    origin: OptSearchPoint,
+    points: PointContext,
+    dataset: list[Sample],
+    *,
+    candidate_library: Collection[str],
+) -> str:
+    """Config-AWARE, as the measurement key is: a connector-config edit yields a DISTINCT origin."""
+    return points.job(origin).content_hash(dataset, candidate_library=candidate_library)[:12]
+
+
+def root_cycle_id_of(origin_hash: str, declaration: RunDeclaration) -> str:
+    """Each arm of a head-to-head is its own run; declarations differing only in spend or display are one."""
+    return f"cycle_{stable_hash([origin_hash, measured_address(declaration)], length=12)}"
 
 
 @dataclass(frozen=True)

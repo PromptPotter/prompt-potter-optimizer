@@ -1,4 +1,6 @@
-"""Instrument mode is declared in ``shared/measurement_context.py`` alone; read it before changing what it binds."""
+"""Instrument mode is declared in ``shared/measurement_context.py`` alone; read it before changing what it binds.
+
+The recursion's connector; the connector table loads it by name, so no backend package imports the application."""
 
 from __future__ import annotations
 
@@ -26,23 +28,28 @@ from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.inner.narrative import inner_narrative, narrative_head
-from promptpotter.application.runner.inner.spawn_context import (
-    InnerSpawnContext,
-    enter_inner_cell,
-    inner_spawn_context,
-)
 from promptpotter.application.runner.inner.tasks import (
     InnerCells,
+    InnerSpawnContext,
     InnerTaskSpec,
+    ResolvedPanel,
+    enter_inner_cell,
     inner_instrument_config,
+    inner_spawn_context,
     panel_cell,
+    parse_panel,
+    parse_resolved,
 )
 from promptpotter.application.scoring.seed_screen import class_floor, draw_bank, draw_bench
+from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import InnerRun
+from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import (
+    INNER_CELL_TERMS,
+    INNER_REPORTED_KEYS,
     INNER_RESULT_KEY,
     compute_outer_proxies,
     inner_cell_facts,
@@ -78,10 +85,11 @@ from promptpotter.shared.measurement_context import (
 from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -171,7 +179,7 @@ def sandbox_stores(ctx: InnerSpawnContext) -> Stores:
 
 
 def claim_sandbox(ctx: InnerSpawnContext) -> Stores:
-    """Inside a cell, never at `spawn_context.py::inner_spawn_of`, which fires for EVERY cycle."""
+    """Inside a cell, never at `tasks.py::inner_spawn_of`, which fires for EVERY cycle."""
     owned_by = ctx.inside[-1]
     owner = SandboxOwner(
         tenant_id=str(ctx.identity.tenant_id),
@@ -462,3 +470,117 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
         # No `step_tokens`: every call was billed as it settled, and returning it bills the cell twice.
     }
     return {"data": data}
+
+
+# A RESOURCE ceiling (peak RSS, one shared provider key), never a scientific one.
+MAX_CELLS_IN_FLIGHT = 4
+
+
+def _inner_cells(stores: Stores, experiment: Mapping[str, Any] | None) -> InnerCells:
+    if experiment is None:
+        raise PayloadInvalidError(
+            "an outer dataset's graph and identity derive from its panel, "
+            "which this box does not hold.",
+            code="pipeline_config_invalid",
+        )
+    return parse_resolved(experiment).panel.resolve_cells(stores)
+
+
+def _pipeline_declaration(stores: Stores, experiment: Mapping[str, Any] | None) -> dict[str, Any]:
+    return _inner_cells(stores, experiment).pipeline()
+
+
+def _identity_config(
+    stores: Stores, experiment: Mapping[str, Any] | None
+) -> dict[str, dict[str, Any]]:
+    """What reads every cell's number alike; what measures ONE cell is in its pin (`_instrument`)."""
+    cells = _inner_cells(stores, experiment)
+    return {cells.chain[0]: {INNER_ORIGIN_KEY: cells.estimator}}
+
+
+def _instrument(cells: InnerCells, cell: Seat) -> str:
+    held = cells.held(cell)
+    # `config` only: widening a permission list changes nothing the origin does, so it voids no cell.
+    nodes = (
+        {n: (node or {}).get("config") for n, node in held.pipeline["nodes"].items()}
+        if held.pipeline and isinstance(held.pipeline.get("nodes"), dict)
+        else None
+    )
+    config = CampaignConfig.model_validate(held.campaign_config).identity()
+    # The spec's treatment, which subtracts the depth a seat may deepen to.
+    return stable_hash([cells.spec(cell).treatment(), nodes, config])
+
+
+def promptpotter_wire_adapter(
+    sample: Sample,
+    pipeline_params: PipelineParams,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"query": sample.query}
+
+    optimizer_prompt_overrides = {k: v for k, v in pipeline_params.laid_nodes.items() if v}
+    if optimizer_prompt_overrides:
+        payload["optimizer_prompt_overrides"] = optimizer_prompt_overrides
+
+    return payload
+
+
+def _resolve_panel(stores: Stores, panel: Mapping[str, Any]) -> dict[str, Any]:
+    """Each cell's instrument beside the panel; only what was declared survives the dump, so a
+    field that gains a default re-keys no banked cell."""
+    parsed = parse_panel(panel)
+    cells = parsed.resolve_cells(stores)
+    resolved = ResolvedPanel(
+        panel=parsed,
+        instruments={t.id: _instrument(cells, t) for t in parsed.tasks},
+        datasets={t.id: parsed.dataset_for(t) for t in parsed.tasks},
+    )
+    return resolved.model_dump(mode="json", exclude_unset=True)
+
+
+def _extract_experiment(experiment_data: dict[str, Any]) -> list[dict[str, Any]]:
+    """``ground_truth`` is ``None``: an L4 cell is graded by its outer proxies, never a label."""
+    return parse_resolved(experiment_data).samples()
+
+
+async def _in_process_run(
+    _workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]
+) -> dict[str, Any]:
+    return await run_inner_cycle(sample, payload)
+
+
+def _cell_envelope_s(sample: Sample, pipeline_params: PipelineParams) -> float:
+    """Through this connector's OWN adapter, so the envelope and the run that spends it read one payload."""
+    return inner_cell_envelope_s(sample, promptpotter_wire_adapter(sample, pipeline_params))
+
+
+def _cell_hop(sample: Sample, pipeline_params: PipelineParams) -> CycleHop | None:
+    return inner_cell_hop(sample, promptpotter_wire_adapter(sample, pipeline_params))
+
+
+CONNECTOR = Connector(
+    name="promptpotter",
+    execution="in_process",
+    wire_adapter=promptpotter_wire_adapter,
+    extract_experiment=_extract_experiment,
+    in_process_run=_in_process_run,
+    max_cells_in_flight=MAX_CELLS_IN_FLIGHT,
+    holds_own_sends=True,
+    cancel_stops_billing=True,
+    # Without it a throttle storm stretches one cell, a whole campaign, across the round measuring it.
+    cell_envelope_s=_cell_envelope_s,
+    cell_payer="host",
+    # Every inner send is admitted and billed under the enclosing run's book.
+    sent_spend_bound=None,
+    cells_priced=True,
+    cell_hop=_cell_hop,
+    measured_unit="cell",
+    required_observation_keys=(INNER_RESULT_KEY,),
+    cell_terms=INNER_CELL_TERMS,
+    reported_keys=INNER_REPORTED_KEYS,
+    resolve_experiment=_resolve_panel,
+    # The outer's graph IS the inner optimizer's, so it is served here, never mirrored in a file.
+    pipeline_declaration=_pipeline_declaration,
+    prompt_fields_as_node_params=True,
+    identity_config=_identity_config,
+    self_optimization=True,
+)

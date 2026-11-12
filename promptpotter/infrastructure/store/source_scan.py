@@ -35,7 +35,6 @@ PLUMBING_MODULES = (
     "promptpotter.application.bench.node_context",
     "promptpotter.application.bench.resume_and_fork.decisions",
     "promptpotter.application.optimizers.nodes",
-    "promptpotter.application.runner.measurement",
     "promptpotter.shared.hashing",
     "promptpotter.shared.worded",
     "promptpotter.config.paths",

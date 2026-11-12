@@ -11,13 +11,14 @@ from promptpotter.application.evidence.subjects import SubjectReading
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import cycle_config
-from promptpotter.application.runner.bench import bench_members, pair_on_bench, read_bench
-from promptpotter.application.runner.campaign_result import (
+from promptpotter.application.runner.bench import (
     bench_line,
+    bench_members,
     line_launches,
     line_passes,
     line_run,
-    read_line_spend,
+    pair_on_bench,
+    read_bench,
 )
 from promptpotter.application.scoring.paired import (
     MemberRows,
@@ -56,6 +57,8 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
+from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.statistics import bh_adjusted
@@ -628,7 +631,13 @@ def _read(
     optimization = config.optimization
     # Live off the line's ledgers once a launch has ended: before one, nothing is banked to read.
     launches = line_launches(stores, campaign)
-    cost = read_line_spend(stores, campaign) if launches else None
+    cost = (
+        scan_ledger_spend(
+            LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
+        )
+        if launches
+        else None
+    )
     spend = None if cost is None else cost.spend
     windows = [
         (start, end)

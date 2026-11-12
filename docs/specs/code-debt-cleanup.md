@@ -146,10 +146,10 @@ row it closes.
   it with the paused exit code; noise-floor's catch goes. **Rides with:** passb-2 3. **Re-test:**
   `git grep -lE "except PassStoppedError" -- promptpotter/presentation` names `campaign_runner.py` alone.
 - **`line_run` reads a paused pass as selecting**: a pass with a pause asked reads `PAUSED`
-  (`infrastructure/runtime_flags.py:88`), so `campaign_result.py::line_run` takes its hold for the loop's.
+  (`infrastructure/runtime_flags.py:88`), so `runner/bench.py::line_run` takes its hold for the loop's.
   Action: the pass's hold is read by its bracket (`producer_lock.pass_held`). **Rides with:** passb-2 3.
   **Re-test:** a bench pass with a pause asked reads `selecting=False`.
-- **A bench pass's served delta is always zero**: `campaign_result.py::_bench_counted` (`:138`, `:149`)
+- **A bench pass's served delta is always zero**: `runner/bench.py::_bench_counted` (`:138`, `:149`)
   reads the one `SpendRollup` before and after the pass, but `live_dashboard/projection.py:456` replaces
   `state.spend` on each bank, so the snapshot never moves. Action: the delta is folded off the pass's own
   charges, not two reads of one snapshot. **Rides with:** passb-2 3, whose Owns gain `_bench_counted`.
@@ -343,11 +343,11 @@ row it closes.
   `runner/inner/tasks.InnerCells` moved into `domain/l4`. **Rides with:** the rest of rk-opt link 4.
 - **The catch-up pool**: `validators.py::CatchUps` and `nodes.py::NoCatchUps` declare one protocol with
   one implementation, and the round reading takes a lock-in's backfills at
-  `runner/measurement.py::_catch_up`'s commit, a second door. Action: the bench owns the pool and the
+  `runner/round.py::_catch_up`'s commit, a second door. Action: the bench owns the pool and the
   race exposes only its priors. **Rides with:** the rest of rk-opt link 4. **Re-test:**
   `git grep -c "NoCatchUps" -- promptpotter`.
 - **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**:
-  `runner/measurement.py::_walk_population` merges a prior's caught-up cells after `run_walks`, and
+  `runner/round.py::_walk_population` merges a prior's caught-up cells after `run_walks`, and
   `BACKFILL` is no arm role. Action: a caught-up cell is a recorded row of its prior's arm. **Rides
   with:** the rest of rk-opt link 4. **Re-test:** in
   `test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails`'s locked block, the leader's
@@ -376,8 +376,8 @@ row it closes.
   archive too, not only the record's own cells, and with the formula unchanged its fit equals today's
   (operator, 2026-11-11: option (b)). Only `ab`'s output moves. **Re-test:**
   `git grep -ln "ab_replay" -- tests` names a test that edits the formula and re-grades.
-- **`resolve_cells` runs twice per run init**: `runner/inner/connector.py::_inner_cells` (through
-  `_identity_config`, `:53`, `:98`) and `runner/inner/spawn_context.py::_outer_cells` (`:59`) each parse the
+- **`resolve_cells` runs twice per run init**: `runner/inner/spawn.py::_inner_cells` (through
+  `_identity_config`, `:53`, `:98`) and `runner/inner/tasks.py::_outer_cells` (`:59`) each parse the
   experiment and resolve the panel's cells. Action: the cells are resolved once, off the panel the
   workload holds, and both read them. **Rides with:** the rest of rk-opt link 4, whose `InnerCells`
   move into `domain/l4` names both files. **Re-test:** `git grep -n "resolve_cells(" -- promptpotter`
@@ -417,7 +417,7 @@ row it closes.
 - **U3: one phase act is said three ways, and render text is banked on the ledger.**
   `run_records.py::PhaseRecord` carries a phase string, an untyped event string and a view whose kind
   repeats both; `InitEnterView` banks display text; `view_models.py::ViewContext` is a mutable bag a
-  fork inherits, held on `run_callbacks.py:76` and read by `runner/open_cycle.py:317,389`,
+  fork inherits, held on `run_callbacks.py:76` and read by `runner/mint.py:317,389`,
   `runner/round.py:245,272,414` and `run_observers.py:283`. The act's 24 `on_phase(` writers sit in 7
   modules, some hashed (`runner/round.py`, `runner/bench.py`). Action: the typed
   act is the record, text is computed at render, and the anchors a phase view needs come from
@@ -585,7 +585,7 @@ row it closes.
   and `runner/inner/tasks.py::parse_resolved` with its readers. **Re-test:**
   `git grep -n "parse_resolved(" -- promptpotter`.
 - **Core computes TermNorm's term index for every connector**: `initialization/session.py::Session.index_terms`,
-  pushed once by `runner/open_cycle.py`. Action: `init_session(bank)`, each connector deriving its own
+  pushed once by `runner/mint.py`. Action: `init_session(bank)`, each connector deriving its own
   terms. **Rides with:** rk-run 3 (core holds no TermNorm default), whose Owns gain
   `connectors/{termnorm,protocol}.py`, `domain/connector.py`, `infrastructure/backend.py` and
   `initialization/session.py::Session.index_terms`. **Re-test:** `git grep -n "index_terms" -- promptpotter` is empty.
@@ -603,7 +603,7 @@ row it closes.
 ### batch/26 · payer (on rk-run's tip: the assembled one, beside rk-dec)
 
 - **Every connector declares its cells the box's to pay**, the inner (L4) one included
-  (`runner/inner/connector.py:138`, `cell_payer="host"`), though each inner send is keyed per call
+  (`runner/inner/spawn.py:138`, `cell_payer="host"`), though each inner send is keyed per call
   (`bench/llm_call.py` → `coupon.py::keyed_client` → `paying_key`, the account's own key first). So
   `quota.py::sends_on` prices `BackendCells(…, "host")`, which draws the coupon, and an own-key account
   past its coupon is refused `host_allowance_exhausted` on `promptpotter-self`. Root: a connector whose
@@ -611,7 +611,7 @@ row it closes.
   (`connectors/protocol.py::Connector.cell_payer: KeySource | None`), and `sends_on` lists the
   providers its sends draw. **Rides with:** payer 1 (who pays a connector's send), with harbor's raise
   below. Its Owns are every holder of the widened type: `connectors/protocol.py::Connector.cell_payer`
-  (xconn's file after), `runner/inner/connector.py:138`, `runner/open_cycle.py:129`,
+  (xconn's file after), `runner/inner/spawn.py:138`, `runner/mint.py:129`,
   `application/free_tier.py:75` (`free_fence`'s `task=` read),
   `infrastructure/backend.py`'s `cell_payer` reads (`:312,422,426`), the `paid_by=CONNECTOR.cell_payer`
   lines of `connectors/{harbor,dspy_module}.py`, `scoring/query_loop.py:627` (`self.payer`), the
@@ -688,7 +688,7 @@ row it closes.
   edit's model on every llm node. Action: an L4 arm can name a model per inner node. **Rides with:**
   rk-dec 3. **Re-test:** an arm naming a model on `l1_critique` alone answers it on that node only.
 - **Round 0 is walked before the cycle's init closes**: `origin.py::establish_campaign_origin` walks it
-  outside its door, `runner/origin_gate.py::open_origin_round` holds its close and gate, and
+  outside its door, `runner/loop.py::open_origin_round` holds its close and gate, and
   `bench/node_context.py::rewalk_origin` walks it again for the repair; `origin.py::lock_criterion`
   changes the scorer's id, which keys the difficulty ruler. Walking round 0 only inside its door puts
   INIT before ORIGIN, which reorders every leg's phases (`offline_run.py::_ledger` keeps phase order), so
@@ -812,7 +812,7 @@ row it closes.
 
 ### batch/27 · rec
 
-- **One act on an arm writes two records**: `runner/arm_gate.py` and `scoring/query_loop.py` append an
+- **One act on an arm writes two records**: `runner/round.py` and `scoring/query_loop.py` append an
   `InterventionRecord` and a `LeftComparisonRecord` for one act. Action: one act record both reads derive
   from. **Rides with:** rec 1. **Re-test:** `git grep -n "LeftComparisonRecord(" -- promptpotter`.
 - **A deleted fork takes its `LeftComparisonRecord` with it**, so its arm reads `controlled` again while
@@ -930,10 +930,25 @@ row it closes.
 
 ### batch/28 · lb
 
-- **Wave B — `application/runner/` collapses** to at most 8 files: loop, round, output, entry, bench,
-  mint and inner/spawn. Delete the ledger-scan forwarders (`_spent`, `read_line_spend`); fold the
-  optimizer registry (`optimizers/__init__.py`) and `knobs.py` into `optimizers/nodes.py`. **Rides
-  with:** lb 1. **Re-test:** the `runner/` file count is 8 or fewer.
+- **Wave B — `application/runner/` is 10 modules, not 8.** lb collapsed it by phase (21 modules to
+  10) and deleted the ledger-scan forwarders. The two left over the target: `termination.py` (row
+  below) and `inner/narrative.py`, whose whole text is the L4 estimator digest
+  (`inner/tasks.py::measurement_modules`). The registry and `knobs.py` fold is the rk-run row below.
+  **Held:** the termination row. **Re-test:** `git ls-files 'promptpotter/application/runner/*.py' | grep -vc __init__` is 8 or fewer.
+- **`runner/termination.py` is a phase module that `jobs/` reads**: `jobs/registry.py` imports
+  `run_stop_reason`, so the stop vocabulary cannot join a phase module without a cycle
+  (`scoring/closed_rounds.py` → `pipeline_resolve.py` → `jobs/quota.py` → `jobs/registry.py`). Action:
+  the stop vocabulary moves to `domain/phases`. **Held:** no chain reaches `domain/phases` yet.
+  **Re-test:** `git ls-files promptpotter/application/runner/termination.py` is non-empty.
+- **A line's ledger spans are spelled at every reader**: `LedgerSpan(stores.campaigns.ledger(h)) for h
+  in stores.campaigns.line(...)` sits in `runner/bench.py` (×4), `evidence/head_to_head.py` and
+  `head_to_head_price.py`. Action: the campaign store serves a line's spans. **Held:** no chain owns
+  `campaign_store/` reads yet. **Re-test:** `git grep -c "stores.campaigns.line(" -- promptpotter/application` sums above 1.
+- **The optimizer registry is outside `optimizers/nodes.py`.** The registry fold waits until optimizer-unit
+  coverage no longer rides `optimizers/__init__.py` (`source_scan.py::optimizer_prompt_shapers`):
+  `nodes.py` is a `PLUMBING_MODULES` stop, so the fold drops `llm_nodes`, `unfit_pipeline` and
+  `_members` out of every treatment digest. With the `knobs.py` fold, it **rides with:** rk-run 1.
+  **Re-test:** `promptpotter/application/optimizers/__init__.py` defines `NODE_MEMBERS`.
 
 ### batch/28 · faults
 
@@ -1170,7 +1185,7 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   per schema, so the wait sits on the backend's network edges. Action: time `probe_backend`,
   `served_pipeline`, `ensure_model_capabilities` and the term push on the box for one paused cycle, then
   drop whichever one a resume re-does. **Rides with:** box (it needs the box measured), whose Owns gain
-  `runner/open_cycle.py` and `initialization/wiring.py`. **Re-test:** time `start-run` → its `applied`
+  `runner/mint.py` and `initialization/wiring.py`. **Re-test:** time `start-run` → its `applied`
   ack on a paused cycle.
 
 ### batch/32 · tests-w (a tests chain named at batch/25's fold; it owns `scripts/offline_world.py`)
@@ -1347,7 +1362,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **Two builders of one sandbox store**: `infrastructure/store/stores.py::inner_sandbox_store` and
   `runner/inner/spawn.py::sandbox_stores`. Action: one builder from (stores, hop). **Held:** none
   claims it. **Re-test:** `git grep -n "def inner_sandbox_store\|def sandbox_stores" -- promptpotter`.
-- **Two fits of one reading**: `runner/measurement.py::measure_population` and
+- **Two fits of one reading**: `runner/round.py::measure_population` and
   `scoring/selection.py` both fit `candidate_abilities` over the same rows. Action: the election takes
   the measured abilities. **Held:** none claims it. **Re-test:** `git grep -n "candidate_abilities(" -- promptpotter`.
 - **A sandbox writes account labels**: an inner mint relabels the account's dataset label from inside
@@ -1363,7 +1378,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   is in-sample and scores nothing, because `held_out_lift` carries no SE. Action: serve the held-out
   lift's SE (a binomial 20-row bench a pass) and rank and separate on it; θ stays a column.
   **Held:** a served SE. **Re-test:** `git grep -n "mean_round_delta" -- promptpotter/application/optimizers/potter/dispatch/injections/panels.py`.
-- **"Which benchmark a row measures" is spelled three ways**: Shape: `runner/overlap.py` (`or filed`),
+- **"Which benchmark a row measures" is spelled three ways**: Shape: `runner/round.py` (`or filed`),
   `potter/members.py::_strata` (`or ""`), `domain/verification.py` (`.get`, None = filed); and
   `origin_panel.py::origin_panel(scope_of=…)` / `BenchScope` partition by benchmark under the word
   `RulerScope` owns. Action: one `Sample` reader of its benchmark; `scope_of` → `benchmark_of`.
@@ -1379,7 +1394,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   re-key. **Re-test:** `git grep -n "domain.l4" -- promptpotter/application/optimizers`.
 - **`floor_reason` and the bench read different rounds**: Shape: `domain/l4/proxies.py::floor_reason`
   reads `result.rounds`, the last cycle only, while the bench and `n_rounds_after_origin` read the line
-  (`runner/cycle_close.py`), so after a fork "no proposal reached a cell" is judged without the rounds
+  (`runner/entry.py`), so after a fork "no proposal reached a cell" is judged without the rounds
   the rebase discarded. Action: `CycleResult` carries the line's spent rounds (`LineSpan.own`).
   **Held:** a `CycleResult` reshape. **Re-test:** a forked inner line whose pre-fork rounds all spoiled.
 - **The abort knob and the floor disagree**: Shape: `potter/knobs.py`'s `terminate_capability` names

@@ -1,6 +1,6 @@
 # connectors/ — backend-specific hook bundles
 
-**A built-in connector is one module here defining `CONNECTOR`, a `Connector(...)` binding (`protocol.py`), never a `register()` call** <!-- probe: git grep -cE "\bregister\(" -- promptpotter/connectors/*.py == 0 -->. `promptpotter` lives in `application/runner/inner/connector.py`; `llm_only` is a NODE on a `termnorm` pipeline, not a connector.
+**A built-in connector is one module here defining `CONNECTOR`, a `Connector(...)` binding (`protocol.py`), never a `register()` call** <!-- probe: git grep -cE "\bregister\(" -- promptpotter/connectors/*.py == 0 -->. `promptpotter` lives in `application/runner/inner/spawn.py`; `llm_only` is a NODE on a `termnorm` pipeline, not a connector.
 
 **Core never infers what a connector should declare**: what the next connector must reach into core to fix becomes a declaration on `Connector` or a fact derived from `extract_experiment`'s return, never a branch at the symptom site. Backend tunables ride [`datasets/CLAUDE.md`](../assets/datasets/CLAUDE.md) § Sole route. **Screen a new instrument before funding it** (`budget: {rounds: 0}`): read the spread, not the mean; a cost term needs a MEASURED anchor.
 

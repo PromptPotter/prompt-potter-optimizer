@@ -12,7 +12,7 @@ from promptpotter.application.pipeline_resolve import (
     campaign_runs_with,
     line_config,
 )
-from promptpotter.application.runner.campaign_result import cycle_bench
+from promptpotter.application.runner.bench import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits, run_said
 from promptpotter.domain.arm_reading import (

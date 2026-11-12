@@ -70,7 +70,7 @@ class LaunchState:
     # Read once at `run_optimization`'s start; every cycle its line closes reads this one.
     clock: LaunchClock | None = None
     resumed_from_round: int = 1
-    # Seated once, before any cell is read: by run init (`runner/open_cycle.py`) or a pass's opener.
+    # Seated once, before any cell is read: by run init (`runner/mint.py`) or a pass's opener.
     scoring: ScorerSetup = field(init=False)
     source: RunSource | None = None
     # Seeded off the cycle's index at init; afterwards written only by `record_intervention`.

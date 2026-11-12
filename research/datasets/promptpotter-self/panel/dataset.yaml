@@ -79,7 +79,7 @@ panel:
   #   legalbench-fods seed-1 — origin 0.392, floor 0.200, margin +0.192 +/-0.017, 3 passes.
   # The 2026-11-11 records are `diagnostics/seed-screen-{dataset}-2026-11-11.json` in the account.
   #
-  # Each task is its own sample's content address (`runner/inner/connector.py::_extract_experiment`),
+  # Each task is its own sample's content address (`runner/inner/spawn.py::_extract_experiment`),
   # so a swapped or edited seat voids only its own banked cells; every other seat replays.
   tasks:
     - kind: seat

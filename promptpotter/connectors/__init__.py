@@ -62,7 +62,7 @@ def _validate(c: object, origin: str) -> Connector:
 
 
 # Loaded by name: this package imports nothing of the application (`scripts/gate.py::_LAYERING`).
-_APPLICATION_BUILT_INS = ("promptpotter.application.runner.inner.connector",)
+_APPLICATION_BUILT_INS = ("promptpotter.application.runner.inner.spawn",)
 
 
 def _builtins() -> Iterator[tuple[str, object]]:
