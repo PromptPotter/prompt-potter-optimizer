@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
-        CatchUpFn,
         CycleRead,
         MeasuredRound,
         Panel,
@@ -55,7 +54,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
-    from promptpotter.domain.search_point import JobSearchPoint
 
 
 class ParetoSet(StateSlice, kind="pareto_set"):
@@ -269,7 +267,7 @@ def minibatch_improves(
     return sigma_prime > sigma, sigma, sigma_prime
 
 
-class _GateRace(nodes.NoCatchUps):
+class _GateRace:
     gate = "not_improved"
 
     def __init__(
@@ -367,7 +365,11 @@ class _GateRace(nodes.NoCatchUps):
             },
         )
 
-    def admit(self, _key: ArmKey, _results: Sequence[GradedCell], _sp: JobSearchPoint) -> None:
+    @property
+    def priors(self) -> Mapping[ArmKey, CellSheet]:
+        return {}
+
+    def admit(self, _key: ArmKey, _results: Sequence[GradedCell]) -> None:
         return None
 
 
@@ -379,7 +381,7 @@ class MinibatchGate(nodes.Eliminator):
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
     stop_disqualifies: ClassVar[bool] = True
 
-    def race(self, ctx: NodeContext, panel: Panel, _catch_up: CatchUpFn) -> _GateRace:
+    def race(self, ctx: NodeContext, panel: Panel) -> _GateRace:
         return _GateRace(
             ctx,
             bars=ctx.recall(MinibatchBars, ctx.round_num),

@@ -46,7 +46,6 @@ from factories import (
     minted_dataset,
     on_jumping_clock,
     pipeline_schema,
-    pobb_knobs,
     samples,
     score_summary,
     scorer_of,
@@ -59,6 +58,7 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 from promptpotter.application import free_tier
 from promptpotter.application.account import account_of, local_stores
 from promptpotter.application.bench import llm_call as call_mod
+from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.task_context import checkin_template
 from promptpotter.application.commands.dispatcher import (
     Applier,
@@ -110,14 +110,15 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
-from promptpotter.application.optimizers.potter.pobb import PoBBCheck
-from promptpotter.application.optimizers.potter.race import CatchUpPool
+from promptpotter.application.optimizers.nodes import Race
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config
 from promptpotter.application.run_phase_control import RunControl, budget_stop
+from promptpotter.application.runner import round as round_module
 from promptpotter.application.runner.bench import cycle_bench, line_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import InnerSpawnContext
 from promptpotter.application.runner.loop import round_bounds
+from promptpotter.application.runner.round import CatchUpPool
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
@@ -215,7 +216,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.scoring import GradedCell, MeasuredCell, PipelineData, Scorer
+from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, PipelineData, Scorer
 from promptpotter.domain.search_point import JobSearchPoint, NodeConfig
 from promptpotter.domain.spend import (
     CYCLE_AXES,
@@ -789,7 +790,7 @@ async def _walk(
             bill.settle(Billed(TokenAccount(), 1.0))
         return row
 
-    def _backfill(_sp: Any, sample: Sample, _prior_id: str) -> Any:
+    def _backfill(_cycle: Any, _caught: Any, _sp: Any, sample: Sample, _prior: ArmKey) -> Any:
         call = asyncio.ensure_future(backend.hold(sample, backfill_pace))
 
         def _commit() -> list[Any]:
@@ -798,27 +799,26 @@ async def _walk(
 
         return call, _commit, call.cancel
 
-    # A parent measured on none of the round's cells, so every cell owes it one catch-up call.
+    class _ParentPrior:
+        """A parent measured on none of the round's cells, so every cell owes it one catch-up call."""
+
+        def __init__(self) -> None:
+            self.priors = {ArmKey("parent"): CellSheet("", ())}
+
+        def admit(self, key: ArmKey, results: Sequence[GradedCell]) -> None:
+            self.priors[key] = self.priors[key].merged(CellSheet("", tuple(results)))
+
+    parent = ArmKey("parent")
     priors = CatchUpPool(
-        PoBBCheck(
-            pobb_knobs(),
-            n_min=6,
-            n_samples=len(dataset),
-            ruler=None,
-            parent=ArmKey("parent"),
-            admission=None,
-            crowned=frozenset(),
-        ),
-        _backfill,
-        "elimination",
+        cast("Race", _ParentPrior()), cast("Cycle", None), "elimination", {parent: sp}
     )
-    priors.admit(ArmKey("parent"), [], JobSearchPoint())
 
     # The walk's own ledger: what each launch recorded of the look-ahead it was sent under.
     started = CycleEventLog.open(CycleDir(stores.projects_root / "walks" / uuid.uuid4().hex))
     with (
         scoped(ledger=started),
         mock.patch.object(query_loop, "measure_sample", _measure),
+        mock.patch.object(round_module, "_catch_up", _backfill),
         scoped(book=book),
     ):
         session = loop_session(

@@ -36,12 +36,10 @@ from promptpotter.domain.pool import DemoPool
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.domain.validators import CatchUps
 from promptpotter.infrastructure.store.source_scan import prompt_source_digest
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
-    import asyncio
     from types import ModuleType
 
     from pydantic import BaseModel
@@ -67,13 +65,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
-    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopRule, StopSignal
     from promptpotter.infrastructure.ledger import CycleEventLog
-
-    # (the call already started, the commit writing its row once a walk takes the cell, the discard).
-    CatchUp = tuple[asyncio.Future[Any], Callable[[], Sequence[GradedCell]], Callable[[], None]]
-    CatchUpFn = Callable[[JobSearchPoint, Sample, ArmKey], CatchUp]
 
 
 @dataclass(frozen=True)
@@ -630,11 +623,16 @@ class RaceSnapshot:
     paired_breakdown: dict[ArmKey, PriorStanding]
 
 
-class Race(CatchUps, Protocol):
+class Race(Protocol):
     """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``rule`` stops one walk, ``blocks`` every live one."""
 
     @property
     def n_priors(self) -> int: ...
+
+    @property
+    def priors(self) -> Mapping[ArmKey, CellSheet]:
+        """Each prior a later arm is paired with, in prior order: the bench catches it up on a cell it lacks. Empty where every arm walks one panel."""
+        ...
 
     @property
     def blocks(self) -> BlockRace[ArmKey] | None: ...
@@ -647,32 +645,9 @@ class Race(CatchUps, Protocol):
         self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
     ) -> Elimination | None: ...
 
-    def admit(self, key: ArmKey, results: Sequence[GradedCell], sp: JobSearchPoint) -> None: ...
-
-
-class NoCatchUps:
-    """The catch-up half of a ``Race`` whose arms all walk one panel, so no prior is paired."""
-
-    def start_backfill(self, _sample: Sample, _room: int) -> list[asyncio.Future[Any]]:
-        return []
-
-    def owed_backfills(self, _sample: Sample) -> int:
-        return 0
-
-    def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
-        return []
-
-    def backfills_for(self, _sample: Sample) -> list[asyncio.Future[Any]]:
-        return []
-
-    def commit_backfills(self, _sample: Sample) -> None:
-        return None
-
-    def bank_backfills(self, _samples: Sequence[Sample]) -> None:
-        return None
-
-    def discard_backfills(self) -> None:
-        return None
+    def admit(self, key: ArmKey, results: Sequence[GradedCell]) -> None:
+        """A decided arm's rows, or a prior's caught-up cells, folded onto what it holds."""
+        ...
 
 
 class Eliminator(NodeMember, Protocol):
@@ -686,7 +661,7 @@ class Eliminator(NodeMember, Protocol):
         """False where a stop only ends the buying of an arm the selector still reads; True takes it out of ``MeasuredRound.electable``."""
         ...
 
-    def race(self, ctx: NodeContext, panel: Panel, catch_up: CatchUpFn) -> Race: ...
+    def race(self, ctx: NodeContext, panel: Panel) -> Race: ...
 
 
 class Selector(NodeMember, Protocol):

@@ -11,8 +11,7 @@ import logging
 import math
 import time
 from dataclasses import dataclass, replace
-from functools import partial
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import ruler_clock
@@ -121,6 +120,7 @@ from promptpotter.domain.run_standing import (
 )
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
+from promptpotter.domain.validators import CaughtUp
 from promptpotter.domain.wounds import ValidationFailure, collapse_counts
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
@@ -132,7 +132,6 @@ if TYPE_CHECKING:
 
     from promptpotter.application.optimizer_manifest import RoundPlan
     from promptpotter.application.optimizers.nodes import (
-        CatchUp,
         Controller,
         Eliminator,
         Panel,
@@ -840,15 +839,19 @@ async def _walk_population(
     rows: dict[ArmKey, CellSheet] = {}
     concluded: dict[ArmKey, Concluded] = {}
 
-    caught: dict[ArmKey, list[GradedCell]] = {}
     race: Race | None = (
-        eliminator.race(NodeContext(ctx, eliminator), panel, partial(_catch_up, cycle, caught))
-        if eliminator is not None
-        else None
+        eliminator.race(NodeContext(ctx, eliminator), panel) if eliminator is not None else None
     )
     labels = {key: arm.label for key, arm in proposed.items()}
     order = [int(s.id) for s in panel.order]
     sps = {key: cycle.points.job(arm.individual) for key, arm in proposed.items()}
+    pool = (
+        None
+        if eliminator is None or race is None
+        else CatchUpPool(
+            race, cycle, eliminator.name, {ArmKey(cycle.parent.id): cycle.parent_point, **sps}
+        )
+    )
     asked = {key: ctx.asked(key, panel.order) for key in proposed}
     states = {
         key: measuring(arm, sps[key], schema, expected=len(asked[key]), sample_order=order)
@@ -895,7 +898,7 @@ async def _walk_population(
         )
 
     def on_decided(key: ArmKey) -> None:
-        arm, results = _conclude_arm(ctx, states[key], sps[key], walks[key], key, race, labels)
+        arm, results = _conclude_arm(ctx, states[key], walks[key], key, race, labels)
         rows[key] = results
         concluded[key] = arm
         ctx.walked(ReadArm(key, arm, results), asked[key])
@@ -909,19 +912,89 @@ async def _walk_population(
         walks,
         cycle.session,
         keep_cut=keep_cut,
-        backfills=race,
+        backfills=pool,
         blocks=blocks,
         on_turn=on_turn,
         on_decided=on_decided,
     )
     # A prior's caught-up cells are its round reading's rows, so the race and the election read one sheet.
-    for key, cells in caught.items():
+    for key, cells in ({} if pool is None else pool.caught).items():
         if key in concluded:
             taken = CellSheet(rows[key].scorer_id, tuple(cells))
             rows[key] = rows[key].merged(taken)
             ctx.walked(ReadArm(key, concluded[key], taken), asked[key])
     ranked = [key for key in proposed if key in concluded]
     return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut
+
+
+# A started catch-up: its call, the commit writing its row once a walk takes the cell, the discard.
+type CatchUp = tuple[asyncio.Future[Any], Callable[[], Sequence[GradedCell]], Callable[[], None]]
+
+
+class CatchUpPool:
+    """Every comparison the race's stop rule makes is on identical cells; one measurement per (prior, cell)."""
+
+    def __init__(
+        self, race: Race, cycle: Cycle, member: str, sps: Mapping[ArmKey, JobSearchPoint]
+    ) -> None:
+        self._race, self._cycle, self._member, self._sps = race, cycle, member, sps
+        self._pending: dict[tuple[ArmKey, int], CatchUp] = {}
+        # Each prior's committed catch-up cells, folded into its round reading at the walk's close.
+        self.caught: dict[ArmKey, list[GradedCell]] = {}
+
+    def _unstarted(self, sample: Sample) -> list[ArmKey]:
+        # A prior holds a cell it SCORED: an errored one is caught up again.
+        return [
+            key
+            for key, held in self._race.priors.items()
+            if not any(row.key == sample.key for row in held.scoreable)
+            and (key, sample.id) not in self._pending
+        ]
+
+    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
+        """Nothing is written or graded until :meth:`commit_backfills` takes them."""
+        started: list[asyncio.Future[Any]] = []
+        for cid in self._unstarted(sample)[: max(room, 0)]:
+            backfill = _catch_up(self._cycle, self.caught, self._sps[cid], sample, cid)
+            self._pending[(cid, sample.id)] = backfill
+            started.append(backfill[0])
+        return started
+
+    def owed_backfills(self, sample: Sample) -> int:
+        return len(self._unstarted(sample))
+
+    def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
+        return [call for call, *_ in self._pending.values() if not call.done()]
+
+    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
+        return [call for (_, sid), (call, *_) in self._pending.items() if sid == sample.id]
+
+    def commit_backfills(self, sample: Sample) -> CaughtUp | None:
+        """In prior order, when a serial round would have measured them, so what reaches disk is the serial round's."""
+        taken: dict[ArmKey, Sequence[GradedCell]] = {}
+        for cid in list(self._race.priors):
+            backfill = self._pending.pop((cid, sample.id), None)
+            if backfill is not None:
+                taken[cid] = backfill[1]()
+                self._race.admit(cid, taken[cid])
+        return CaughtUp(self._member, taken) if taken else None
+
+    def bank_backfills(self, samples: Sequence[Sample]) -> CaughtUp | None:
+        """Written UNGRADED: cells a stopped round's walks were sure to take, so the resume replays them unpaid."""
+        wanted = {s.id for s in samples}
+        taken: dict[ArmKey, list[GradedCell]] = {}
+        for key, (call, commit, _) in list(self._pending.items()):
+            landed = call.done() and not call.cancelled() and call.exception() is None
+            if key[1] in wanted and landed:
+                del self._pending[key]
+                taken.setdefault(key[0], []).extend(commit())
+        return CaughtUp(self._member, taken) if taken else None
+
+    def discard_backfills(self) -> None:
+        """Paid and never written: a serial round would never have made these."""
+        for _call, _commit, discard in self._pending.values():
+            discard()
+        self._pending.clear()
 
 
 def _catch_up(
@@ -986,7 +1059,6 @@ def _open_arm(
 def _conclude_arm(
     ctx: RoundContext,
     arm: Measuring,
-    sp: JobSearchPoint,
     walk: Walk | None,
     key: ArmKey,
     race: Race | None,
@@ -1003,7 +1075,7 @@ def _conclude_arm(
     gave_up = signal is not None and signal.check_name == SCORING_ERROR_ABORT
     locked = signal is not None and signal.outcome == "locked_in"
     if race is not None and (scored.stopped is None or locked) and not gave_up:
-        race.admit(key, results.cells, sp)
+        race.admit(key, results.cells)
     return conclude(arm, scored, round_num=ctx.round_num, elimination=elimination), results
 
 

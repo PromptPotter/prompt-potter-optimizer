@@ -3028,14 +3028,10 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
     gate = MinibatchGate()
     minibatch = samples(2)
 
-    def no_catch_up(*_: Any) -> Any:
-        raise AssertionError("the gate caught up a cell")
-
     race = gate.race(
-        NodeContext(gated, gate),
-        Panel(cells=minibatch, order=minibatch, block_size=2),
-        no_catch_up,
+        NodeContext(gated, gate), Panel(cells=minibatch, order=minibatch, block_size=2)
     )
+    assert race.priors == {}, "the gate paired a prior, so the bench would catch it up"
     level = [measurement(i, 1.0, objective=0.5) for i in range(2)]
     stops = race.close({weak_child: level, strong_child: level})
     assert (

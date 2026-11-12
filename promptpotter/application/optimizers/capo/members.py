@@ -46,7 +46,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
-        CatchUpFn,
         CycleRead,
         Draw,
         MeasuredRound,
@@ -64,7 +63,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
-    from promptpotter.domain.search_point import JobSearchPoint
 
 
 # The population CAPO's selector keeps is the bench's (`OptimizerState.population`), banked beside this.
@@ -328,7 +326,7 @@ def _labels(labels: list[str], cap: int = 2) -> str:
     return ", ".join(labels[:cap]) + (f" (+{len(labels) - cap})" if len(labels) > cap else "")
 
 
-class PairedTRace(nodes.NoCatchUps):
+class PairedTRace:
     gate = "outscored"
     settled = "settled"
 
@@ -461,7 +459,11 @@ class PairedTRace(nodes.NoCatchUps):
         reason = f"outscored {where} by {len(outscored)} of {len(raced)}: {named}"
         return Elimination(reason=reason, context=context)
 
-    def admit(self, _key: ArmKey, _results: Sequence[GradedCell], _sp: JobSearchPoint) -> None:
+    @property
+    def priors(self) -> Mapping[ArmKey, CellSheet]:
+        return {}
+
+    def admit(self, _key: ArmKey, _results: Sequence[GradedCell]) -> None:
         return None
 
 
@@ -490,7 +492,7 @@ class PairedT(nodes.Eliminator):
             )
         ]
 
-    def race(self, ctx: NodeContext, panel: Panel, _catch_up: CatchUpFn) -> PairedTRace:
+    def race(self, ctx: NodeContext, panel: Panel) -> PairedTRace:
         return PairedTRace(
             ctx,
             survivors=ctx.knobs(SurvivalKnobs).size,

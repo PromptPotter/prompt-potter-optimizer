@@ -122,7 +122,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
-        CatchUpFn,
         CycleRead,
         Draw,
         MeasuredRound,
@@ -336,8 +335,8 @@ class PoBB(nodes.Eliminator):
             ),
         )
 
-    def race(self, ctx: NodeContext, panel: Panel, catch_up: CatchUpFn) -> PoBBRace:
-        return PoBBRace(ctx, panel, catch_up)
+    def race(self, ctx: NodeContext, panel: Panel) -> PoBBRace:
+        return PoBBRace(ctx, panel)
 
 
 class ThetaElection(nodes.Selector):
