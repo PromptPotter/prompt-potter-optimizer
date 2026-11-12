@@ -47,7 +47,7 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landing 30:**
   - money 1–5: one charge record, one money fold, the host as one declared verified email;
   - rk-run 4–8: one model, one node-config merge, the rewrite knob, one layered config read, typed node layers.
-- **holds nest** (backbone; operator, 2026-11-12). One hold at every depth: a `Charge` with a bound and a parent hold, for the run, a cell and a call alike.
+- **holds nest** (backbone; operator, 2026-11-12). One hold at every depth: a `Hold` with a bound and a parent hold, for the run, a cell and a call alike.
   - The open part is the bound less what its children hold or billed, read by the one money fold.
   - `CellReservation` and quota's separate run reserve go.
   - Runs beside proof.

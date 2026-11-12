@@ -188,16 +188,16 @@ row it closes.
   subscription and through admission (`Admission._unseen`, `_unlanded`), and the live dashboard banks
   its own rollup. Action: the live readers ride `_Money` as a projection. **Rides with:** holds nest.
 - **Money holds once per level, three ways** (operator, 2026-11-12: a backbone root, not a row):
-  - the run reserves in quota's job registry (`job.reserve`, `_outstanding_reservations`), handed to
-    its book as a `Hold`;
+  - the run holds a `Hold` on its account's charge book, closed by a `Release`;
   - a cell reserves in memory only (`spend_book.py::CellReservation`, with its own `draw` and the
-    chain index in `SpendBook.hold`), so a reserved cell's hold is on no ledger
+    chain index in `SpendBook.hold`), so a reserved cell's hold is on no book
     (`Connector.holds_own_sends`);
-  - a call holds a `Charge`.
+  - a call's `Hold` is written twice, on the account and inside a `SpendHoldRecord` on its ledger,
+    whose fold keeps its own liveness (`spend_book.py::_OUT`, `account_spend.py::_unreported_once_stopped`).
 
-  Action: one hold at every depth, a `Charge` with a bound and a parent hold. A draw goes against the
-  nearest open parent, and the open part is the bound less its children's holds and bills, read by
-  `read_model.py::money_on`. `CellReservation` and the job reserve go. **Rides with:** holds nest
+  Action: one `Hold` at every depth, with a bound and a parent hold, on one book. A draw goes against
+  the nearest open parent, and the open part is the bound less its children's holds and bills, read by
+  `read_model.py::money_on`. `CellReservation` and the ledger's copy go. **Rides with:** holds nest
   (roadmap § Sequence, Phase 2). **Re-test:** `git grep -n "class CellReservation" -- promptpotter`
   is empty.
 - **The campaign store reaches into the LLM layer for a ledger read**: `campaign_store/store.py:58`
