@@ -51,7 +51,12 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   fold, six contract-doc drifts, a typed behaviour trace with `--coverage`.
 - **landed 32:** proof 5: scripted invalid answers heal potter's calls, and an offline L4 leg. The
   estimator's golden corpus is held.
-- **holds nest** (backbone; operator, 2026-11-12). One hold at every depth: a `Hold` with a bound and a parent hold, for the run, a cell and a call alike.
+- **landed 33:** rk-opt 1–3: a call carries its template, the word tables on the enums, capo's absent
+  arm out of the ranking; the offline harness drops a re-keyed digest.
+- **landing 34:** the holds nest 1: `Hold` / `Bill` / `Release` / `Lapse` on the account book, a
+  worst-case hold at every level, every root hold a job's (a paid call outside a run a slotless
+  `PaidCall` job), one write per call hold, one sibling rule at the gate.
+- **holds nest 2** (backbone; operator, 2026-11-12). One hold at every depth: a `Hold` with a bound and a parent hold, for the run, a cell and a call alike.
   - The open part is the bound less what its children hold or billed, read by the one money fold.
   - `CellReservation` and quota's separate run reserve go.
   - A hold holds its worst case at every level, so a budget is never exceeded; overshoot (holds sized

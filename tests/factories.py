@@ -139,8 +139,8 @@ from promptpotter.domain.ruler import (
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     ArmRecord,
+    Bill,
     CallPrice,
-    Charge,
     ElectionRecord,
     PipelineRead,
     RoundClosedRecord,
@@ -166,7 +166,7 @@ from promptpotter.domain.verification import BenchPasses, VerificationPass
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import Hold, SpendBook
+from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import hold_cycle
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -367,7 +367,9 @@ def spend_book(
     spent.setdefault("opened", time.monotonic())
     return SpendBook(
         declared=Budget(wall_clock_s=wall_clock_s),
-        hold=Hold(Budget(usd=usd_cap), Budget(usd=usd_cap if usd_reserve is ... else usd_reserve)),
+        share=Budget(usd=usd_cap),
+        reserve=Budget(usd=usd_cap if usd_reserve is ... else usd_reserve),
+        hold_id=None,
         meters=meters,
         **spent,
     )
@@ -477,15 +479,8 @@ def billed_call(
     )
     record: dict[str, Any] = {"node": "l1_generate", "input_tokens": 1, "output_tokens": 0} | fields
     tokens = record["input_tokens"] + record["output_tokens"]
-    charge = Charge(
-        state="billed",
-        hold_id=hold_id,
-        key_source=key_source,
-        price=price,
-        tokens=tokens,
-        ledger="",
-    )
-    return TokenUsageRecord(money=price if replay else charge, **record)
+    bill = Bill(hold_id=hold_id, key_source=key_source, price=price, tokens=tokens)
+    return TokenUsageRecord(money=price if replay else bill, **record)
 
 
 def loop_session(

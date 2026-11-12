@@ -51,6 +51,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A refused host claim rings the operator.**
 - **`verify-candidate` answers a `VerificationGradedView`**: its `refusal`, the pass kind (`noise_floor` among them) and, for a noise floor, a `NoiseBand`. The `noise-floor` CLI's `data` is that view, and a saturation verify that is skipped is banked as skipped.
 - **A pause is accepted while a launch holds its claim**, QUEUED or STARTING, and the run takes it when it starts. A command log with a corrupt line answers 409 `ledger_unreadable`.
+- **BREAKING — a send is held at its worst-case bound at every level**, the run's share of its ceiling included: a budget is never exceeded. The learned hold at a node's dearest bill (0.8.x, "a low spend ceiling no longer throttles concurrency") is gone, so a low ceiling admits fewer sends at once again. Every paid call outside a run is a job whose hold its sends draw on, and a send that may have billed and reported nothing is closed on the account at its bound (`Lapse`); the cycle ledger no longer carries a `spend_hold` or `release` line.
 
 ### Fixed
 

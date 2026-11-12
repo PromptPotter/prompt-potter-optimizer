@@ -41,7 +41,6 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.refusal import Refusal
-from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import open_text_robust, unlink_robust, write_json
 from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
@@ -210,11 +209,8 @@ class JobRegistry:
             job = self.get(job_id)
             return None if job is None or not job.queued else self._end(job_id, lapse="withdrawn")
 
-    def mark_admitted(self, job_id: str, reserve: Budget) -> None:
-        self._stamp(job_id, lambda _: {"admitted_at": utcnow_iso(), "reserve": reserve})
-
-    def set_reserve(self, job_id: str, reserve: Budget) -> None:
-        self._stamp(job_id, lambda _: {"reserve": reserve})
+    def mark_admitted(self, job_id: str) -> None:
+        self._stamp(job_id, lambda _: {"admitted_at": utcnow_iso()})
 
     def update_target(self, job_id: str, *, hop: CycleHop) -> None:
         self._stamp(job_id, lambda _: {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id})
@@ -232,10 +228,6 @@ class JobRegistry:
     @property
     def jobs_dir(self) -> Path:
         return self._dir
-
-    def job_file(self, job_id: str) -> Path:
-        """What a live spend book reads its reserve off: the job is the reserve's one store."""
-        return self._path(job_id)
 
     def claimant_lock(self) -> Path:
         return this_producer_lock(self._dir)
@@ -439,12 +431,13 @@ class JobRegistry:
                     starts[job.holder.draft_id] = stage
         return starts
 
-    def reap_orphans(self) -> None:
-        """The sweep's, and no read's: releases each job whose producer is gone, reclaims that
+    def reap_orphans(self) -> list[Job]:
+        """`quota.reap_dead_runs`'s alone: releases each job whose producer is gone, reclaims that
         producer's file, moves a release launched before today among the ended, and deletes an
-        ended record released over `_ENDED_KEPT` ago."""
+        ended record released over `_ENDED_KEPT` ago. The jobs it released, as they stood."""
         today = utcnow_iso()[:10]
         kept_from = iso_z(datetime.now(UTC) - _ENDED_KEPT)
+        reaped: list[Job] = []
         with self.admission_gate():
             for path in self._dir.joinpath(ENDED_JOBS_DIR).glob("*.json"):
                 if (ended := self._read(path)) is not None and (
@@ -464,6 +457,8 @@ class JobRegistry:
                     )
                     self._end(job.job_id, lapse="orphaned")
                     reclaim_producer(self._dir, job.producer_id)
+                    reaped.append(job)
+        return reaped
 
     def _persist(self, job: Job, *, at: Path | None = None) -> None:
         write_json(at or self._path(job.job_id), JOB_ADAPTER.dump_python(job, mode="json"))

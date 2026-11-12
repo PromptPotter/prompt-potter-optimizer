@@ -16,6 +16,8 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import enter, run_campaign
+from promptpotter.application.jobs.launcher.admission import paid_pass
+from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
@@ -32,10 +34,8 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
-from promptpotter.infrastructure.llm.spend_book import unbounded_spend_book
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset, resolve_dataset
 from promptpotter.presentation.terminal.completion import report_completion
-from promptpotter.shared.run_scope import scoped
 
 # The bbeh definition is the SoT for everything about the task — its `pipeline` section drives
 # the target-layer schema (read by run_campaign on the dataset "bbeh", which resolves it in the
@@ -150,7 +150,7 @@ async def run_bbeh_campaign(
         print("=" * 60)
 
         per_task_results: dict[str, Record] = {}
-        # Outside the run, so under a book of its own: every cell is still admitted and metered.
+        # Outside the run, so a verify pass of its own: a job whose hold every cell draws on.
         bound = await cell_bound(session, result_pipeline_params)
         calls = result_pipeline_params.nodes
         billed = cell_billing(
@@ -159,7 +159,10 @@ async def run_bbeh_campaign(
             await attempt_bounds(session, calls),
         )
         client = session.backend_client
-        with scoped(account=session.store, book=unbounded_spend_book()):
+        sends = sends_on(session.store, campaign_config, client.connector.name)
+        async with paid_pass(
+            stores=session.store, verb="verify", hop=None, declared=Budget(), sends=sends
+        ):
             for i, task in enumerate(tasks, start=1):
                 test_items = test_norm_by_task[task]
                 hits = 0

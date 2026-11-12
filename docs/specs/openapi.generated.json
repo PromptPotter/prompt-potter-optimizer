@@ -370,7 +370,7 @@
             "type": "boolean"
           },
           "group_by": {
-            "description": "The colour axis: `model` is the exact model id, `api_key` the key that paid: the provider that billed the call, and whether the host's key under the coupon or the account's own sent it (`Charge.key_source`).",
+            "description": "The colour axis: `model` is the exact model id, `api_key` the key that paid: the provider that billed the call, and whether the host's key under the coupon or the account's own sent it (`Bill.key_source`).",
             "enum": [
               "model",
               "api_key"
@@ -13421,7 +13421,6 @@
               "sample_started",
               "scoring_locked",
               "spawned",
-              "spend_hold",
               "spend_tombstone",
               "standing_budget",
               "token_usage",

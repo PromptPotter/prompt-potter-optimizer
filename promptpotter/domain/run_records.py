@@ -453,8 +453,7 @@ class CallPrice(FrozenModel):
     model: str | None
     # Who BILLED: a rate belongs to the (provider, model) pair; ``None`` ⇒ no rate prices the call.
     provider: str | None
-    # The BILL the provider reported, never filled from a rate; on a hold, its bound's, ``None``
-    # where no rate bounds it.
+    # The BILL the provider reported, never filled from a rate; ``None`` on a hold, whose money is its bound.
     cost_usd: float | None
     # OUR rate's price of an unbilled call, stamped once: it counts against ceilings, never spent.
     rate_priced_usd: float | None
@@ -464,21 +463,55 @@ class CallPrice(FrozenModel):
         return bill_or_rate_usd(self.cost_usd, self.rate_priced_usd)
 
 
-class Charge(FrozenModel):
-    """One line of a send's money: its hold at the send's bound, then each answered part closing it."""
+class Hold(FrozenModel):
+    """A run's or a call's hold on the account's money, open until a bill or a release closes it; a
+    later hold of the same id restates its bound."""
 
-    record_type: Literal["charge"] = "charge"
-    state: Literal["held", "billed"]
+    record_type: Literal["hold"] = "hold"
+    hold_id: str
+    # The hold it draws on: a call's its run's, an inner run's its enclosing run's; ``None`` draws
+    # on the account alone.
+    parent: str | None
+    key_source: KeySource
+    # The most it and every hold under it may draw; ``None`` on an axis nothing bounds.
+    bound: Budget
+    # The ledger a call's sends land on, relative to the account; ``None`` on a job's hold.
+    ledger: str | None
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class Bill(FrozenModel):
+    """One answered part of a call, which closes the call's hold."""
+
+    record_type: Literal["bill"] = "bill"
     hold_id: str
     key_source: KeySource
-    # Both money fields ``None`` on a bill is unpriced.
+    # Both money fields ``None``: unpriced.
     price: CallPrice
-    # A hold's are its bound's: none where nothing capped the reply.
     tokens: int
-    # The ledger the send landed on, relative to the account: while its producer is attached the
-    # run's reservation already holds it.
-    ledger: str
     timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class Release(FrozenModel):
+    """A hold closed with nothing more billed on it: a send never made, a run ended."""
+
+    record_type: Literal["release"] = "release"
+    hold_id: str
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class Lapse(FrozenModel):
+    """A send that may have billed and reported nothing: it closes its call's hold, and *bound* is
+    what it may have cost, unreported once the hold above it closes."""
+
+    record_type: Literal["lapse"] = "lapse"
+    hold_id: str
+    bound: Budget
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+# One line of the account's charge book (`store/wallet_store.py::ChargeBook`).
+ChargeLine = Annotated[Hold | Bill | Release | Lapse, Field(discriminator="record_type")]
 
 
 class TokenUsageRecord(FrozenModel):
@@ -497,8 +530,8 @@ class TokenUsageRecord(FrozenModel):
     # The part of ``input_tokens`` billed at a premium to POPULATE that cache.
     cache_write_tokens: int = 0
     duration_s: float = 0.0
-    # A send's billed charge; a replay's recorded price alone, which no wallet paid.
-    money: Charge | CallPrice
+    # A send's bill; a replay's recorded price alone, which no wallet paid.
+    money: Bill | CallPrice
     # A nested run's own view of its call; money is summed off the copy on the outer ledger.
     mirrored: bool = False
     round: int | None = None
@@ -507,34 +540,23 @@ class TokenUsageRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
-    def charge(self) -> Charge | None:
+    def bill(self) -> Bill | None:
         """``None`` exactly on a replay."""
-        return self.money if isinstance(self.money, Charge) else None
+        return self.money if isinstance(self.money, Bill) else None
 
     @property
     def price(self) -> CallPrice:
-        return self.money.price if isinstance(self.money, Charge) else self.money
+        return self.money.price if isinstance(self.money, Bill) else self.money
 
     def filed_as(self, kind: TokenUsageKind) -> TokenUsageRecord:
         price = self.price.model_copy(update={"kind": kind})
-        money = price if self.charge is None else self.money.model_copy(update={"price": price})
+        money = price if self.bill is None else self.money.model_copy(update={"price": price})
         return self.model_copy(update={"money": money})
 
     @property
     def spend_round(self) -> int:
         """A call carrying no round ran before any closed (init, the origin score): banks at 0."""
         return 0 if self.round is None else self.round
-
-
-class SpendHoldRecord(FrozenModel):
-    """Written BEFORE the send, at its bound; unclosed, it binds every ceiling and is not spent."""
-
-    record_type: Literal["spend_hold"] = "spend_hold"
-    node: str
-    # The account's `held` line of the same hold.
-    charge: Charge
-    round: int | None = None
-    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class PricedKeyRecord(FrozenModel):
@@ -553,13 +575,16 @@ class BankedSpend(FrozenModel):
     rate_priced_usd: float
     used_tokens: int
     unpriced_tokens: int
-    # What its unreported sends may have cost (`SpendHoldRecord`) — banked apart, as it is read.
-    unreported_usd: float
-    unreported_tokens: int
 
     @classmethod
     def of(cls, spent: UserSpend) -> BankedSpend:
-        return cls(**spent._asdict())
+        """Bills alone: an unreported send's cost stays on the account (`Lapse`), past any delete."""
+        return cls(
+            used_usd=spent.used_usd,
+            rate_priced_usd=spent.rate_priced_usd,
+            used_tokens=spent.used_tokens,
+            unpriced_tokens=spent.unpriced_tokens,
+        )
 
     @property
     def spend(self) -> UserSpend:
@@ -1372,7 +1397,6 @@ CycleRecord = Annotated[
     | SampleStartedRecord
     | ScoringLockedRecord
     | SpawnedRecord
-    | SpendHoldRecord
     | SpendTombstoneRecord
     | TrailTombstoneRecord
     | TokenUsageRecord,

@@ -5,13 +5,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
 from promptpotter.domain.run_records import (
     BankedSpend,
-    Charge,
+    Bill,
+    Hold,
     SpendTombstoneRecord,
 )
 from promptpotter.domain.spend import (
@@ -25,7 +26,6 @@ from promptpotter.domain.spend import (
     UserSpend,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.runtime_flags import producer_attached
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
@@ -78,19 +78,10 @@ class WorkspaceBank(NamedTuple):
 LedgerIndex.readers(_Tombstones)
 
 
-def _unreported_once_stopped(ledger: Path, held: PaidSpend) -> PaidSpend:
-    """While a producer is attached the account wallet already reserves the run's ceiling: counting a hold too reads it twice."""
-    if held == NOTHING_PAID:
-        return held
-    return NOTHING_PAID if producer_attached(CycleLayout.of_ledger(ledger).cycle_dir) else held
-
-
 def _summed(ledgers: Iterable[Path]) -> Spent:
     total = Spent(NOTHING_PAID, NOTHING_PAID)
     for ledger in ledgers:
-        money = money_on(ledger)
-        # Whether what is held is unreported moves with the run, not the file: asked per read.
-        total = total.plus(money.spent, _unreported_once_stopped(ledger, money.held))
+        total = total.plus(money_on(ledger).spent)
     return total
 
 
@@ -102,10 +93,23 @@ def ledger_cost(ledgers: Iterable[Path]) -> PaidSpend:
     return _summed(ledgers).cost
 
 
-def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> PaidSpend:
-    """What the campaign cost, an L4 inner one too; the account's bill is :func:`billed_spend`'s."""
+def unreported_under(charges: ChargeBook, root: Path) -> PaidSpend:
+    """What the account's sends that landed under *root* (a ledger, or a campaign's dir) left
+    unreported (`Money.unreported_holds`): a deleted ledger's too."""
+    under = PurePosixPath(charges.held_on(root))
+
+    def on(hold: Hold) -> bool:
+        return hold.ledger is not None and PurePosixPath(hold.ledger).is_relative_to(under)
+
+    whole, unpriced = money_on(charges.path).unreported_holds()
+    return still_held(filter(on, whole), filter(on, unpriced))
+
+
+def campaign_spend(campaigns: CampaignStore, charges: ChargeBook, campaign_id: str) -> PaidSpend:
+    """What the campaign cost, an L4 inner one too; the account's bill is :func:`account_bill`'s."""
     bank = workspace_bank(campaigns.workspace)
-    spent = bank.spent.get(campaign_id, NOTHING_PAID)
+    root = campaigns.campaign_root_dir(campaign_id)
+    spent = bank.spent.get(campaign_id, NOTHING_PAID).plus(unreported_under(charges, root))
     if bank.deleted(campaign_id):
         return spent
     return ledger_cost(campaigns.campaign_cycle_ledgers(campaign_id)).plus(spent)
@@ -121,7 +125,7 @@ def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
     return sorted(sandbox.glob("*/campaigns/*/cycles/*")) if sandbox.is_dir() else []
 
 
-def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[Charge]:
+def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[Bill]:
     return [
         bill
         for bill in money_on(charges.path).bills
@@ -132,25 +136,7 @@ def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[Ch
 def account_bill(charges: ChargeBook) -> PaidSpend:
     """Every send the account made, a deleted campaign's and an L4 sandbox's included: no delete reaches a charge."""
     money = money_on(charges.path)
-    attached: dict[str, bool] = {}
-
-    def stopped(hold: Charge) -> bool:
-        # Whether what is held is unreported moves with the run, not the file: asked per read.
-        if hold.ledger not in attached:
-            cycle_dir = CycleLayout.of_ledger(charges.ledger_of(hold)).cycle_dir
-            attached[hold.ledger] = producer_attached(cycle_dir)
-        return not attached[hold.ledger]
-
-    held = still_held(
-        (hold for hold in money.open.values() if stopped(hold)),
-        (hold for hold in money.unpriced if stopped(hold)),
-    )
-    return money.spent.billed.plus(held)
-
-
-def ledger_bills(charges: ChargeBook) -> dict[str, UserSpend]:
-    """What the box's keys billed per ledger (`Charge.ledger`): a live run's draw on its reserve."""
-    return money_on(charges.path).on_coupon
+    return money.spent.billed.plus(money.unreported)
 
 
 def bank_spend(

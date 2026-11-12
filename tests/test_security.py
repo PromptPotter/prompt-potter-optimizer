@@ -82,6 +82,7 @@ from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     RunStart,
     destroying,
+    paid_call,
     paid_pass,
     refuse_taken_cycle,
     request_jobs,
@@ -981,7 +982,7 @@ async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) 
     async def one_call() -> bool:
         await asyncio.to_thread(calls.wait)
         try:
-            async with quota.paid_call(
+            async with paid_call(
                 stores=build_stores_from_identity(writer), bucket="turn", provider="openrouter"
             ):
                 return True
@@ -1550,7 +1551,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         hop=hop,
         holder=CampaignLaunch("ds1"),
     )
-    past.mark_admitted(handed.job_id, Budget())
+    past.mark_admitted(handed.job_id)
     RunStart(built_stores, past, handed).release(
         CampaignRefusedError(CampaignRefusal.NOT_ACTIVE, "archived past its handoff")
     )
@@ -2040,7 +2041,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert [one.path for one in minting.unloadable] == [torn_dir]
     holders.release(holding.job_id, StopReason.CONVERGED)
     release_cycle(campaigns.cycle_dir(kept_hop))
-    spent = campaign_spend(campaigns, torn_hop.campaign_id)
+    spent = campaign_spend(campaigns, built_stores.charges, torn_hop.campaign_id)
     assert spent != NOTHING_PAID
     late_hop = CycleHop(campaign_id="c__cccccc", cycle_id="y")
     campaigns.mint_cycle(late_hop)
@@ -2061,9 +2062,10 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         f"a mint that wrote its manifest since the plan was deleted: {applied.said}"
     )
     assert unlanded is not None and unlanded.key is None and unlanded.said == applied.said
-    assert not torn_dir.exists() and campaign_spend(campaigns, torn_hop.campaign_id) == spent, (
-        "a torn mint was kept, or its spend left the account's bill with it"
-    )
+    assert (
+        not torn_dir.exists()
+        and campaign_spend(campaigns, built_stores.charges, torn_hop.campaign_id) == spent
+    ), "a torn mint was kept, or its spend left the account's bill with it"
 
     # A job released before its release named an ending is migrated off its own record, ledgers
     # unread: a refusal refused, any other orphaned (no live producer speaks for it), so a run
@@ -2084,8 +2086,9 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
             for key, value in JOB_ADAPTER.dump_python(job, mode="json").items()
             if key not in ("ending", "stepped", "lapse")
         }
-        write_json(jobs.job_file(job.job_id), old | {"released_at": old["created_at"]} | bent)
-        return jobs.job_file(job.job_id)
+        written = jobs.jobs_dir / f"{job.job_id}.json"
+        write_json(written, old | {"released_at": old["created_at"]} | bent)
+        return written
 
     old_jobs = {
         released_before(stage=RunPhase.STARTING.value, refusal="over budget"): "refused",
@@ -2107,7 +2110,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         holder=CampaignLaunch("ds1"),
         stage=RunPhase.QUEUED,
     )
-    live_file = jobs.job_file(survivor.job_id)
+    live_file = jobs.jobs_dir / f"{survivor.job_id}.json"
     launch_as_written = {"dataset_name": "ds1", "draft_id": None, "kind": "campaign_launch"}
     write_json(
         live_file,
@@ -2982,7 +2985,7 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
         lapsed = registry.release(job.job_id, thrown)
         assert lapsed is not None and lapsed.lapse == lapse, f"a {lapse} launch read {lapsed}"
     spent = launch()
-    registry.mark_admitted(spent.job_id, Budget(usd=1.0))
+    registry.mark_admitted(spent.job_id)
     registry.release(spent.job_id, StopReason.CONVERGED)
     assert quota.campaigns_today(registry, user_id) == 1, (
         "the daily quota counted a launch that spent nothing, or lost one that did"

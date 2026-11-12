@@ -595,6 +595,113 @@
       ],
       "shape": {
         "$defs": {
+          "Bill": {
+            "additionalProperties": false,
+            "description": "One answered part of a call, which closes the call's hold.",
+            "properties": {
+              "hold_id": {
+                "title": "Hold Id",
+                "type": "string"
+              },
+              "key_source": {
+                "enum": [
+                  "host",
+                  "user"
+                ],
+                "title": "Key Source",
+                "type": "string"
+              },
+              "price": {
+                "$ref": "#/$defs/CallPrice"
+              },
+              "record_type": {
+                "const": "bill",
+                "default": "bill",
+                "title": "Record Type",
+                "type": "string"
+              },
+              "timestamp": {
+                "title": "Timestamp",
+                "type": "string"
+              },
+              "tokens": {
+                "title": "Tokens",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "hold_id",
+              "key_source",
+              "price",
+              "tokens"
+            ],
+            "title": "Bill",
+            "type": "object"
+          },
+          "Budget": {
+            "additionalProperties": false,
+            "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.",
+            "properties": {
+              "rounds": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Closed rounds after the origin, per cycle, read at each round boundary; 0 measures the origin only.",
+                "title": "Rounds"
+              },
+              "tokens": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The campaign's billed tokens, shared like `usd`; the axis that still binds where a model has no rate on file.",
+                "title": "Tokens"
+              },
+              "usd": {
+                "anyOf": [
+                  {
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The campaign's USD, in its ceiling meter: one book its live cycles share.",
+                "title": "Usd"
+              },
+              "wall_clock_s": {
+                "anyOf": [
+                  {
+                    "exclusiveMinimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Seconds ONE launch runs, its clock afresh at every launch; a remote cell still open at the edge is cut and the run stops `wall_clock`.",
+                "title": "Wall Clock S"
+              }
+            },
+            "title": "Budget",
+            "type": "object"
+          },
           "CallPrice": {
             "additionalProperties": false,
             "description": "What one call cost, the one carrier of a call's price: on a send's charge, or a replay's own.",
@@ -657,6 +764,122 @@
             "title": "CallPrice",
             "type": "object"
           },
+          "Hold": {
+            "additionalProperties": false,
+            "description": "A run's or a call's hold on the account's money, open until a bill or a release closes it; a\nlater hold of the same id restates its bound.",
+            "properties": {
+              "bound": {
+                "$ref": "#/$defs/Budget"
+              },
+              "hold_id": {
+                "title": "Hold Id",
+                "type": "string"
+              },
+              "key_source": {
+                "enum": [
+                  "host",
+                  "user"
+                ],
+                "title": "Key Source",
+                "type": "string"
+              },
+              "ledger": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Ledger"
+              },
+              "parent": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Parent"
+              },
+              "record_type": {
+                "const": "hold",
+                "default": "hold",
+                "title": "Record Type",
+                "type": "string"
+              },
+              "timestamp": {
+                "title": "Timestamp",
+                "type": "string"
+              }
+            },
+            "required": [
+              "hold_id",
+              "parent",
+              "key_source",
+              "bound",
+              "ledger"
+            ],
+            "title": "Hold",
+            "type": "object"
+          },
+          "Lapse": {
+            "additionalProperties": false,
+            "description": "A send that may have billed and reported nothing: it closes its call's hold, and *bound* is\nwhat it may have cost, unreported once the hold above it closes.",
+            "properties": {
+              "bound": {
+                "$ref": "#/$defs/Budget"
+              },
+              "hold_id": {
+                "title": "Hold Id",
+                "type": "string"
+              },
+              "record_type": {
+                "const": "lapse",
+                "default": "lapse",
+                "title": "Record Type",
+                "type": "string"
+              },
+              "timestamp": {
+                "title": "Timestamp",
+                "type": "string"
+              }
+            },
+            "required": [
+              "hold_id",
+              "bound"
+            ],
+            "title": "Lapse",
+            "type": "object"
+          },
+          "Release": {
+            "additionalProperties": false,
+            "description": "A hold closed with nothing more billed on it: a send never made, a run ended.",
+            "properties": {
+              "hold_id": {
+                "title": "Hold Id",
+                "type": "string"
+              },
+              "record_type": {
+                "const": "release",
+                "default": "release",
+                "title": "Record Type",
+                "type": "string"
+              },
+              "timestamp": {
+                "title": "Timestamp",
+                "type": "string"
+              }
+            },
+            "required": [
+              "hold_id"
+            ],
+            "title": "Release",
+            "type": "object"
+          },
           "TokenUsageKind": {
             "enum": [
               "optimizer",
@@ -668,61 +891,29 @@
             "type": "string"
           }
         },
-        "additionalProperties": false,
-        "description": "One line of a send's money: its hold at the send's bound, then each answered part closing it.",
-        "properties": {
-          "hold_id": {
-            "title": "Hold Id",
-            "type": "string"
+        "discriminator": {
+          "mapping": {
+            "bill": "#/$defs/Bill",
+            "hold": "#/$defs/Hold",
+            "lapse": "#/$defs/Lapse",
+            "release": "#/$defs/Release"
           },
-          "key_source": {
-            "enum": [
-              "host",
-              "user"
-            ],
-            "title": "Key Source",
-            "type": "string"
-          },
-          "ledger": {
-            "title": "Ledger",
-            "type": "string"
-          },
-          "price": {
-            "$ref": "#/$defs/CallPrice"
-          },
-          "record_type": {
-            "const": "charge",
-            "default": "charge",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "held",
-              "billed"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "tokens": {
-            "title": "Tokens",
-            "type": "integer"
-          }
+          "propertyName": "record_type"
         },
-        "required": [
-          "state",
-          "hold_id",
-          "key_source",
-          "price",
-          "tokens",
-          "ledger"
-        ],
-        "title": "Charge",
-        "type": "object"
+        "oneOf": [
+          {
+            "$ref": "#/$defs/Hold"
+          },
+          {
+            "$ref": "#/$defs/Bill"
+          },
+          {
+            "$ref": "#/$defs/Release"
+          },
+          {
+            "$ref": "#/$defs/Lapse"
+          }
+        ]
       }
     },
     "check-in manifest": {
@@ -1652,70 +1843,6 @@
       ],
       "shape": {
         "$defs": {
-          "Budget": {
-            "additionalProperties": false,
-            "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.",
-            "properties": {
-              "rounds": {
-                "anyOf": [
-                  {
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "description": "Closed rounds after the origin, per cycle, read at each round boundary; 0 measures the origin only.",
-                "title": "Rounds"
-              },
-              "tokens": {
-                "anyOf": [
-                  {
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "description": "The campaign's billed tokens, shared like `usd`; the axis that still binds where a model has no rate on file.",
-                "title": "Tokens"
-              },
-              "usd": {
-                "anyOf": [
-                  {
-                    "minimum": 0.0,
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "description": "The campaign's USD, in its ceiling meter: one book its live cycles share.",
-                "title": "Usd"
-              },
-              "wall_clock_s": {
-                "anyOf": [
-                  {
-                    "exclusiveMinimum": 0.0,
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "description": "Seconds ONE launch runs, its clock afresh at every launch; a remote cell still open at the edge is cut and the run stops `wall_clock`.",
-                "title": "Wall Clock S"
-              }
-            },
-            "title": "Budget",
-            "type": "object"
-          },
           "CampaignLaunch": {
             "additionalProperties": false,
             "description": "A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle.",
@@ -1789,6 +1916,31 @@
               "dataset_name"
             ],
             "title": "InnerRun",
+            "type": "object"
+          },
+          "PaidCall": {
+            "additionalProperties": false,
+            "description": "One LLM call outside any run (a check-in, a chat turn): a hold, never a slot.",
+            "properties": {
+              "bucket": {
+                "enum": [
+                  "checkin",
+                  "turn"
+                ],
+                "title": "Bucket",
+                "type": "string"
+              },
+              "kind": {
+                "const": "paid_call",
+                "default": "paid_call",
+                "title": "Kind",
+                "type": "string"
+              }
+            },
+            "required": [
+              "bucket"
+            ],
+            "title": "PaidCall",
             "type": "object"
           },
           "Refusal": {
@@ -1933,6 +2085,7 @@
                 "campaign_launch": "#/$defs/CampaignLaunch",
                 "embedded_run": "#/$defs/EmbeddedRun",
                 "inner_run": "#/$defs/InnerRun",
+                "paid_call": "#/$defs/PaidCall",
                 "scoring_pass": "#/$defs/ScoringPass"
               },
               "propertyName": "kind"
@@ -1949,6 +2102,9 @@
               },
               {
                 "$ref": "#/$defs/InnerRun"
+              },
+              {
+                "$ref": "#/$defs/PaidCall"
               }
             ],
             "title": "Holder"
@@ -2004,9 +2160,6 @@
               }
             ],
             "title": "Released At"
-          },
-          "reserve": {
-            "$ref": "#/$defs/Budget"
           },
           "stage": {
             "anyOf": [

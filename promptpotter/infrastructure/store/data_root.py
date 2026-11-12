@@ -40,7 +40,7 @@ from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
 from promptpotter.domain.prompt_block import BlockPack
 from promptpotter.domain.ruler import RulerFold
-from promptpotter.domain.run_records import RECORD_ADAPTER, Charge
+from promptpotter.domain.run_records import RECORD_ADAPTER, ChargeLine
 from promptpotter.domain.sample import ArchiveConfig
 from promptpotter.infrastructure.identity.blocklist import Blocklist
 from promptpotter.infrastructure.identity.grants import GrantsFile
@@ -311,7 +311,7 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
     Kind("consent trail", Scope.ACCOUNT, CONSENT_FILE, _SURVIVOR, TypeAdapter(ConsentLine)),
     Kind("grant", Scope.ACCOUNT, GRANT_FILE, _SURVIVOR, TypeAdapter(CouponGrant)),
     Kind("api keys", Scope.ACCOUNT, API_KEYS_FILE, _SURVIVOR, HELD_KEYS),
-    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _SURVIVOR, TypeAdapter(Charge)),
+    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _SURVIVOR, TypeAdapter(ChargeLine)),
     Kind("bank", Scope.ACCOUNT, f"{BANKS_DIR}/*.json", Fate.CACHE, read_bank),
     # An upload definition's `source:` reads it.
     Kind(

@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
+from promptpotter.application.jobs.quota import reap_dead_runs
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
@@ -82,10 +83,11 @@ def sweep_dead_cycles(projects_root: Path) -> int:
 
 
 def sweep(projects_root: Path) -> None:
-    """Every reclaim of what a dead producer left: no read releases, stamps or deletes any of it."""
+    """Every reclaim of what a dead producer left: no read stamps or deletes any of it, and only
+    the wallet's releases its runs (`reap_dead_runs`)."""
     sweep_dead_cycles(projects_root)
     reclaim_orphan_sandboxes(projects_root)
-    JobRegistry.attach(jobs_dir(projects_root)).reap_orphans()
+    reap_dead_runs(projects_root, JobRegistry.attach(jobs_dir(projects_root)))
 
 
 async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY_S) -> None:

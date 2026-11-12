@@ -52,7 +52,6 @@ ProjectionKind = Literal[
     "sample_started",
     "scoring_locked",
     "spawned",
-    "spend_hold",
     "spend_tombstone",
     "standing_budget",
     "token_usage",

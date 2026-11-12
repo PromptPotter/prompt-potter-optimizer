@@ -67,7 +67,11 @@ from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend, usd_text
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
-from promptpotter.infrastructure.store.account_spend import billed_spend, campaign_spend
+from promptpotter.infrastructure.store.account_spend import (
+    billed_spend,
+    campaign_spend,
+    unreported_under,
+)
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.dataset_access import definition_version
 from promptpotter.infrastructure.store.layout import sibling_kind
@@ -471,7 +475,8 @@ def campaign_entry(
         if line is None
         else line.state
     )
-    lifetime = LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id).total)
+    spent = campaign_spend(stores.campaigns, stores.charges, campaign.campaign_id)
+    lifetime = LifetimeSpend.of(spent.total)
     return HierarchyCampaign(
         address=Subject(campaign.campaign_id, inside=inside).address,
         parent=Subject.of(inside).address if inside else None,
@@ -513,7 +518,8 @@ def unstarted_entry(
 ) -> UnstartedCampaign:
     """An open check-in as a campaign: its spend is what the check-in cost."""
     ledger = stores.drafts.ledger(draft.draft_id)
-    spent = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []).total)
+    billed = billed_spend([ledger] if ledger.is_file() else [])
+    spent = LifetimeSpend.of(billed.plus(unreported_under(stores.charges, ledger)).total)
     dataset = draft.dataset_name
     lifecycle = "unstarted" if start is None else start.value
     return UnstartedCampaign(

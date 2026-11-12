@@ -1116,14 +1116,6 @@
             "title": "Unpriced Tokens",
             "type": "integer"
           },
-          "unreported_tokens": {
-            "title": "Unreported Tokens",
-            "type": "integer"
-          },
-          "unreported_usd": {
-            "title": "Unreported Usd",
-            "type": "number"
-          },
           "used_tokens": {
             "title": "Used Tokens",
             "type": "integer"
@@ -1137,9 +1129,7 @@
           "used_usd",
           "rate_priced_usd",
           "used_tokens",
-          "unpriced_tokens",
-          "unreported_usd",
-          "unreported_tokens"
+          "unpriced_tokens"
         ],
         "title": "BankedSpend",
         "type": "object"
@@ -1552,6 +1542,49 @@
         "title": "BenchStatus",
         "type": "object"
       },
+      "Bill": {
+        "additionalProperties": false,
+        "description": "One answered part of a call, which closes the call's hold.",
+        "properties": {
+          "hold_id": {
+            "title": "Hold Id",
+            "type": "string"
+          },
+          "key_source": {
+            "enum": [
+              "host",
+              "user"
+            ],
+            "title": "Key Source",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/CallPrice"
+          },
+          "record_type": {
+            "const": "bill",
+            "default": "bill",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hold_id",
+          "key_source",
+          "price",
+          "tokens"
+        ],
+        "title": "Bill",
+        "type": "object"
+      },
       "Broken": {
         "additionalProperties": false,
         "description": "The bench's run-health rules stopped it.",
@@ -1828,63 +1861,6 @@
         ],
         "title": "CellSetName",
         "type": "string"
-      },
-      "Charge": {
-        "additionalProperties": false,
-        "description": "One line of a send's money: its hold at the send's bound, then each answered part closing it.",
-        "properties": {
-          "hold_id": {
-            "title": "Hold Id",
-            "type": "string"
-          },
-          "key_source": {
-            "enum": [
-              "host",
-              "user"
-            ],
-            "title": "Key Source",
-            "type": "string"
-          },
-          "ledger": {
-            "title": "Ledger",
-            "type": "string"
-          },
-          "price": {
-            "$ref": "#/components/schemas/CallPrice"
-          },
-          "record_type": {
-            "const": "charge",
-            "default": "charge",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "held",
-              "billed"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "tokens": {
-            "title": "Tokens",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "state",
-          "hold_id",
-          "key_source",
-          "price",
-          "tokens",
-          "ledger"
-        ],
-        "title": "Charge",
-        "type": "object"
       },
       "CheckpointInputs": {
         "additionalProperties": false,
@@ -2395,7 +2371,6 @@
             "sample_started": "#/components/schemas/SampleStartedRecord",
             "scoring_locked": "#/components/schemas/ScoringLockedRecord",
             "spawned": "#/components/schemas/SpawnedRecord",
-            "spend_hold": "#/components/schemas/SpendHoldRecord",
             "spend_tombstone": "#/components/schemas/SpendTombstoneRecord",
             "standing_budget": "#/components/schemas/StandingBudgetRecord",
             "token_usage": "#/components/schemas/TokenUsageRecord",
@@ -2532,9 +2507,6 @@
           },
           {
             "$ref": "#/components/schemas/SpawnedRecord"
-          },
-          {
-            "$ref": "#/components/schemas/SpendHoldRecord"
           },
           {
             "$ref": "#/components/schemas/SpendTombstoneRecord"
@@ -5990,7 +5962,6 @@
               "sample_started",
               "scoring_locked",
               "spawned",
-              "spend_hold",
               "spend_tombstone",
               "standing_budget",
               "token_usage",
@@ -8472,47 +8443,6 @@
         "title": "SpawnedRecord",
         "type": "object"
       },
-      "SpendHoldRecord": {
-        "additionalProperties": false,
-        "description": "Written BEFORE the send, at its bound; unclosed, it binds every ceiling and is not spent.",
-        "properties": {
-          "charge": {
-            "$ref": "#/components/schemas/Charge"
-          },
-          "node": {
-            "title": "Node",
-            "type": "string"
-          },
-          "record_type": {
-            "const": "spend_hold",
-            "default": "spend_hold",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Round"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node",
-          "charge"
-        ],
-        "title": "SpendHoldRecord",
-        "type": "object"
-      },
       "SpendTombstoneRecord": {
         "additionalProperties": false,
         "description": "On the WORKSPACE ledger, so deleting a campaign's cycle cannot re-earn its ceiling; the\naccount's charges are `store/wallet_store.py::ChargeBook`'s, which no delete reaches.",
@@ -8773,7 +8703,7 @@
           "money": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Charge"
+                "$ref": "#/components/schemas/Bill"
               },
               {
                 "$ref": "#/components/schemas/CallPrice"

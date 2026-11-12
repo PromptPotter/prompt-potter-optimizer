@@ -13,12 +13,15 @@ from promptpotter.application.account import account_of
 from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.quota import (
     admit_launch,
+    call_book,
     check_launch_quotas,
     declare_run_budget,
     hold_moved,
+    hold_run,
     land_job,
     move_campaign_money,
     next_launch_budget,
+    release_run,
     sends_on,
     share_campaign_ceiling,
     slot_rate,
@@ -31,10 +34,12 @@ from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
+    CallBucket,
     CampaignLaunch,
     EmbeddedRun,
     InnerRun,
     Job,
+    PaidCall,
     ScoringPass,
     ScoringVerb,
     SlotHolder,
@@ -56,7 +61,7 @@ from promptpotter.domain.spend import (
     HeldBudget,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import Hold, LiveCycle, LiveHold, SpendBook
+from promptpotter.infrastructure.llm.spend_book import LiveCycle, RunHold, SpendBook
 from promptpotter.infrastructure.store.dataset_access import (
     definition_version,
     resolve_dataset,
@@ -108,14 +113,21 @@ class RunStart:
         self, ended: CycleResult | BaseException | None = None, *, stamps: CycleHop | None = None
     ) -> None:
         """A raise is the cycle's stop on *stamps* (a refused one ``NOT_ADMITTED``), and off a
-        cycle the claim goes; a result is what the run returned; nothing, a pass that returned."""
+        cycle the claim goes; a result is what the run returned; nothing, a pass that returned. An
+        admitted job's hold on the account closes with it."""
         match ended:
             case BaseException():
-                self._fail(ended, stamps)
+                job = self.job_registry.release(self.job_id, ended)
             case None:
-                self.job_registry.release(self.job_id)
+                job = self.job_registry.release(self.job_id)
             case _:
-                self.job_registry.release(self.job_id, ended.stop_reason, stepped=ended.stepped)
+                job = self.job_registry.release(
+                    self.job_id, ended.stop_reason, stepped=ended.stepped
+                )
+        if job is not None and job.admitted:
+            release_run(self.stores, self.job_id)
+        if isinstance(ended, BaseException):
+            self._fail(job, ended, stamps)
 
     def land(self, hop: CycleHop, held: HeldBudget) -> None:
         """The job onto the cycle its hold just minted, its share with it; a slotted job claims the
@@ -129,8 +141,7 @@ class RunStart:
             raise RuntimeError(f"job {self.job_id} was cleared while its cycle was minted")
         claim_cycle(self.stores, self.job_registry, promoted, hop)
 
-    def _fail(self, exc: BaseException, stamps: CycleHop | None) -> None:
-        job = self.job_registry.release(self.job_id, exc)
+    def _fail(self, job: Job | None, exc: BaseException, stamps: CycleHop | None) -> None:
         stop_reason = StopReason.NOT_ADMITTED if job is None or job.ending is None else job.ending
         stores = self.stores
         # Best-effort — it must never mask *exc*.
@@ -432,10 +443,10 @@ def admit_and_share(
     hop: CycleHop | None,
     step_rounds: int | None,
     sends: tuple[Send, ...],
-    enclosing: Budget | None = None,
+    enclosing: SpendBook | None = None,
 ) -> HeldBudget:
-    """THE admission of every run and pass, sending *sends*; an inner run is admitted against its
-    *enclosing* book, whose reserve binds what it sends."""
+    """THE admission of every run and pass, sending *sends*, and its hold on the account; an inner
+    run is admitted against what its *enclosing* book has left, whose hold binds what it sends."""
     meter: CeilingMeter = (
         "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
     )
@@ -462,16 +473,20 @@ def admit_and_share(
                 if hop is None
                 else stores.campaigns.metered_spend(hop.campaign_id, meter)
             )
+            left = enclosing.money_left()
             room = Budget(
-                usd=None if enclosing.usd is None else enclosing.usd + spent.usd_amount,
-                tokens=None if enclosing.tokens is None else enclosing.tokens + spent.token_amount,
+                usd=None if left.usd is None else left.usd + spent.usd_amount,
+                tokens=None if left.tokens is None else left.tokens + spent.token_amount,
             )
             admitted, reserve = declared.over(_within(declared, room)), Budget()
             ceiling = admitted
         allotment = share_campaign_ceiling(
             ceiling, stores=stores, job_registry=job_registry, job=job, hop=hop, meter=meter
         )
-        job_registry.mark_admitted(job.job_id, reserve)
+        hold_run(
+            stores, job.job_id, reserve, parent=None if enclosing is None else enclosing.hold_id
+        )
+        job_registry.mark_admitted(job.job_id)
         if hop is not None:
             hold_moved(stores, hop, allotment)
             move_campaign_money(
@@ -560,36 +575,33 @@ def open_spend_book(
     held: HeldBudget,
     *,
     stores: Stores,
-    job_registry: JobRegistry,
     hop: CycleHop | None,
     meters: CeilingMeter,
     opened: float,
     live: bool,
 ) -> SpendBook:
-    """On a cycle its share is read live off the cycle's record, which a reshare moves, and its
-    reserve off the job; off one, as admitted. A *live* book reads the cycle's standing axes too."""
-    hold: Hold | LiveHold
-    if hop is None:
-        job = job_registry.get(held.job_id)
-        if job is None:
-            raise RuntimeError(f"a book opens only on its own job, and {held.job_id} is gone")
-        hold = Hold(held.share, job.reserve)
-    else:
-        hold = LiveHold(LiveCycle(stores.campaigns, hop), job_registry.job_file(held.job_id))
+    """On a cycle its share is read live off the cycle's record, which a reshare moves; off one, as
+    admitted. Its reserve is its hold's on the account, which a set-limits restates. A *live* book
+    reads the cycle's standing axes too."""
     book = SpendBook(
         declared=held.admitted,
-        hold=hold,
+        share=held.share if hop is None else LiveCycle(stores.campaigns, hop),
+        reserve=RunHold(stores.charges, held.job_id),
+        hold_id=held.job_id,
         meters=meters,
         opened=opened,
         cycle=LiveCycle(stores.campaigns, hop) if live and hop is not None else None,
     )
-    if hop is not None and (unreported := book.take_up(stores.campaigns.ledger(hop))).sends:
+    if hop is None:
+        return book
+    left = book.take_up(stores.charges, stores.campaigns.ledger(hop)).total
+    if left.unreported_usd or left.unreported_tokens:
         logger.warning(
-            "%d paid send(s) on %s ended unpriced; the ceiling holds up to $%.4f for them, and "
-            "no surface counts it as spent.",
-            unreported.sends,
+            "paid sends on %s reported no bill; the ceiling holds up to $%.4f and %d tokens for "
+            "them as unreported.",
             hop,
-            unreported.usd,
+            left.unreported_usd,
+            left.unreported_tokens,
         )
     return book
 
@@ -608,11 +620,9 @@ async def slotless_share[S](
     """A run's admission with no slot, taken BEFORE anything paid: the job, then its hold, then
     *run* under it, whose result the job's release records. An inner run's share is of what the
     enclosing run's book has left at its spawn."""
-    enclosing: Budget | None = None
-    if isinstance(holder, InnerRun):
-        if (book := run_scope().book) is None:
-            raise RuntimeError("an inner run spawns only under its enclosing run's book")
-        enclosing = book.money_left()
+    enclosing = run_scope().book if isinstance(holder, InnerRun) else None
+    if isinstance(holder, InnerRun) and enclosing is None:
+        raise RuntimeError("an inner run spawns only under its enclosing run's book")
     job_registry = JobRegistry.attach(stores.jobs_dir)
     start = RunStart(
         stores,
@@ -648,6 +658,48 @@ async def slotless_share[S](
         raise
     start.release(ran[1])
     return ran
+
+
+def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[RunStart, SpendBook]:
+    job_registry = JobRegistry.attach(stores.jobs_dir)
+    with job_registry.admission_gate(), slot_rate(stores, holder, UNRESOLVED_HOP, asked=1):
+        start = RunStart(
+            stores,
+            job_registry,
+            job_registry.create(
+                user_id=str(stores.identity.user_id),
+                principal_id=acting_principal(stores.identity).id,
+                workspace=stores.campaigns.workspace,
+                hop=UNRESOLVED_HOP,
+                holder=holder,
+            ),
+        )
+        try:
+            book = call_book(stores, provider, job_registry=job_registry, hold_id=start.job_id)
+            # Unbounded: it holds what its calls out hold (`Money.held_back`), and closes with its job.
+            hold_run(stores, start.job_id, Budget(), parent=None)
+            job_registry.mark_admitted(start.job_id)
+        except BaseException as exc:
+            start.release(exc)
+            raise
+    return start, book
+
+
+@asynccontextmanager
+async def paid_call(
+    *, stores: Stores, bucket: CallBucket, provider: str
+) -> AsyncIterator[SpendBook]:
+    """ONE LLM call on *provider*, on no cycle, slotless so a chat turn never queues behind
+    campaigns: a job whose hold its sends draw on, closed with it or by its dead producer's reap."""
+    # Offloaded: admission globs every cycle ledger.
+    start, book = await asyncio.to_thread(_admit_call, stores, PaidCall(bucket), provider)
+    try:
+        with scoped(account=stores, book=book):
+            yield book
+    except BaseException as exc:
+        start.release(exc)
+        raise
+    start.release()
 
 
 class PassStoppedError(ConflictError):
@@ -709,7 +761,6 @@ async def paid_pass(
         book = open_spend_book(
             held,
             stores=stores,
-            job_registry=job_registry,
             hop=hop,
             meters=meters,
             opened=time.monotonic(),

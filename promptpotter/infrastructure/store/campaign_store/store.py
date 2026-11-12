@@ -67,7 +67,6 @@ from promptpotter.infrastructure.projections.live_dashboard.projection import (
 )
 from promptpotter.infrastructure.runtime_flags import run_state_stamps
 from promptpotter.infrastructure.store.account_spend import (
-    ledger_bills,
     sandbox_cycle_dirs,
     workspace_bank,
 )
@@ -113,6 +112,7 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerSpan,
     Moment,
     file_sig,
+    money_on,
     read_file,
 )
 from promptpotter.infrastructure.store.session_pointer import (
@@ -173,7 +173,8 @@ class CampaignStore:
         deleted campaign nor one the account's charges name, which outlive every landing's wipe."""
         prefix = dataset_id_prefix(dataset_name) if dataset_name else "campaign"
         bank = workspace_bank(self._base_dir)
-        charged = [PurePosixPath(ledger) for ledger in ledger_bills(charges)]
+        holds = money_on(charges.path).holds.values()
+        charged = {PurePosixPath(hold.ledger) for hold in holds if hold.ledger is not None}
         while True:
             campaign_id = f"{prefix}__{secrets.token_hex(3)}"
             held = charges.held_on(self.campaign_root_dir(campaign_id))

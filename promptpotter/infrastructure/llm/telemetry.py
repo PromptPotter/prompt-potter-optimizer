@@ -11,8 +11,8 @@ from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import ErrorRecord, StopReason
 from promptpotter.domain.run_records import (
     BackendWarningRecord,
+    Bill,
     CallPrice,
-    Charge,
     CycleRecord,
     PricedKeyRecord,
     ProviderEasedRecord,
@@ -23,7 +23,6 @@ from promptpotter.domain.run_records import (
     RoundWarningSeverity,
     SampleScoredRecord,
     SampleStartedRecord,
-    SpendHoldRecord,
     TokenUsageRecord,
 )
 from promptpotter.domain.scoring import GradedCell, WalkedCell
@@ -180,7 +179,7 @@ def token_usage_record(
     node: str,
     usage: TokenAccount,
     duration_s: float,
-    money: Charge | CallPrice,
+    money: Bill | CallPrice,
     served_by: str | None,
     mirrored: bool,
 ) -> TokenUsageRecord:
@@ -279,10 +278,6 @@ def claim_campaign_price(key: str) -> bool:
 
 def claim_call_price(reuse_key: str) -> bool:
     return claim_campaign_price(f"call:{reuse_key}")
-
-
-def emit_spend_hold(*, node: str, charge: Charge, ledger: CycleEventLog | None) -> None:
-    append_record(SpendHoldRecord(node=node, charge=charge, round=current_round()), ledger)
 
 
 def emit_error_record(

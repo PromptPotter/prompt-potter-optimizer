@@ -9,7 +9,14 @@ from promptpotter.application.jobs.capacity import SlotBound, resolve_run_capaci
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, EmbeddedRun, InnerRun, Job, SlotHolder
+from promptpotter.domain.job import (
+    UNRESOLVED_HOP,
+    EmbeddedRun,
+    InnerRun,
+    Job,
+    PaidCall,
+    SlotHolder,
+)
 from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
 from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.strict_model import StrictModel
@@ -47,7 +54,7 @@ class MachineSlot(StrictModel):
     @classmethod
     def of(cls, job: Job, *, account: str) -> MachineSlot:
         holder = job.holder
-        assert not isinstance(holder, EmbeddedRun | InnerRun), "holds no slot"
+        assert not isinstance(holder, EmbeddedRun | InnerRun | PaidCall), "holds no slot"
         return cls(
             job_id=job.job_id,
             what=job.what,
