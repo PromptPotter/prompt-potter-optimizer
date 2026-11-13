@@ -19,4 +19,44 @@
   flex: 1 1 auto;
   min-width: 8px;
 }
+
+/* A coarse pointer's 44px hit area overhangs a 24px icon chip by 10px (`responsive.css`): the row
+   holds that inset at its end, so its last control never widens the row's scroll box. */
+@media (pointer: coarse) {
+  .bar {
+    padding-inline-end: calc((var(--touch-target-min) - 24px) / 2);
+  }
+}
+
+/* The fold's one switch, at the phone breakpoint (`--bp-sm`). */
+.inline {
+  display: contents;
+}
+
+.folded,
+.phoneOnly {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .inline {
+    display: none;
+  }
+
+  .phoneOnly {
+    display: contents;
+  }
+
+  .folded {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-6);
+    padding: var(--space-4) var(--space-8);
+  }
+
+  .folded + * {
+    border-top: 0.5px solid var(--color-border);
+  }
+}
 }

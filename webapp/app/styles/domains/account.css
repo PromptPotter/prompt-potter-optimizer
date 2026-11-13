@@ -10,6 +10,7 @@
 .account-nav-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
 .account-nav-item{position:relative;width:100%;text-align:left;padding:var(--space-8) var(--space-8) var(--space-8) var(--space-12);border:0;border-radius:var(--border-radius-md);background:transparent;color:var(--color-text-secondary);cursor:pointer;font-size:var(--text-base);white-space:nowrap}
 .account-nav-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
+.account-nav-shown{display:none;width:auto;cursor:default}
 .account-nav-item.active{background:var(--color-background-primary);color:var(--color-text-primary);font-weight:600}
 .account-nav-item.active::after{content:"";position:absolute;left:0;top:var(--space-6);bottom:var(--space-6);width:3px;border-radius:2px;background:var(--color-accent)}
 .account-tab{flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden;min-width:0}
@@ -88,7 +89,8 @@
 
 @media (max-width:640px){
   .account-frame{flex-direction:column}
-  .account-nav{flex:0 0 auto;flex-direction:row;align-items:center;gap:var(--space-8);padding:var(--space-8) var(--space-10);border-right:0;border-bottom:0.5px solid var(--color-border);overflow-x:auto;overflow-y:hidden}
+  .account-nav{flex:0 0 auto;flex-direction:row;align-items:center;justify-content:space-between;gap:var(--space-8);padding:var(--space-8) var(--space-10);border-right:0;border-bottom:0.5px solid var(--color-border)}
+  .account-nav-shown{display:inline-block}
   .account-nav-head,.account-nav-group-label{display:none}
   .account-nav-group,.account-nav-list{flex-direction:row}
   .account-nav-item.active::after{left:var(--space-8);right:var(--space-8);top:auto;bottom:0;width:auto;height:2px}

@@ -9,6 +9,7 @@ import {
   SegmentedControl,
   Said,
   Toolbar,
+  ToolbarFold,
   ToolbarSep,
   type Column,
 } from "@/components/ui";
@@ -167,11 +168,16 @@ export function ComparePane() {
                       onMetric={setMetric}
                     />
                     <ToolbarSep />
-                    <SegmentedControl
-                      options={VIEWS}
-                      value={view}
-                      onChange={setView}
-                      ariaLabel="Chart form"
+                    <ToolbarFold
+                      label="Chart form"
+                      actions={
+                        <SegmentedControl
+                          options={VIEWS}
+                          value={view}
+                          onChange={setView}
+                          ariaLabel="Chart form"
+                        />
+                      }
                     />
                   </Toolbar>
                 }

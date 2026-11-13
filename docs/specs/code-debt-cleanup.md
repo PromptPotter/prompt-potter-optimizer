@@ -1047,27 +1047,21 @@ patch check spelled once, the browser's "" handling and the `steered*` memory as
   `git grep -cE "cfg\.get\(\"[a-z_]+\"\) or " -- promptpotter/connectors` is 0, and
   `git grep -c "_DB_DEFAULT_USERS" -- promptpotter/connectors` is 0.
 
-### mob (links 1-3 landed at 46; mob 2 builds the header fold)
+### mob-3 (what mob 2 left at landing 53)
 
-The touch project (390 px, `pointer: coarse`) skips with its reason the views these rows still fail:
-phone-375/393/412 × "every view fits" and × "lineage forest fits" (the Candidates header, +10 px), and
-"pinned cycle" (the masthead id). Each row turns its skip green.
+mob 2 landed the phone's ⋯ fold for a one-row toolbar, the masthead setup line as a tap-expandable
+Toolbar, and the phone walk's back step. Left:
 
-- **A one-row primitive has no overflow strategy** (✓): `Toolbar.module.css:6` `flex-wrap: nowrap`,
-  `Chip` `flex: 0 0 auto`, `.card-title` and `.cand-title` nowrap: on touch the Candidates header
-  overflows its card by ≈10 px now that the touch floor is a `::before` hit area (landing 46), Compare's
-  Levels and the account tabs likewise; `components/CLAUDE.md`'s "a card header is ONE row" states no
-  overflow. Action (operator, 2026-11-13): on a phone the primitive folds its trailing actions into ⋯,
-  so a card header stays one row. **Rides with:** mob 2.
-- **A phone never shows a run's read failures** (✓): `masthead.css:34-35` hide `.run-id` and
-  `.run-setup` at ≤880 px, and `RunMasthead.tsx:49-51` holds the only cycle-id CopyButton while
-  `.run-setup` (`:115-140`) holds the served `lines` ("what could not be read" included), the criterion,
-  the inner breadcrumb and the vendors. Action: the setup line folds under the title, clamped and
-  tap-expandable, and the id moves where the ⋯ strategy above puts actions. **Rides with:** mob 2.
-- **The phone walk never walks back from the list screen** (mob's census): one column shows the opened
-  Compare alone, so `webapp/e2e/walk/views.spec.ts`'s Compare tick skips on a phone, and no spec walks
-  from a pane back to its list. Action: the walk takes the back step the phone layout offers.
-  **Rides with:** mob 2. **Re-test:** the views spec runs its Compare tick on the touch project.
+- **A one-row toolbar's hit area overhangs its row vertically**: on a coarse pointer the 44 px
+  `::before` hit area around a 24 px control reaches past its row, so the Candidates header measures
+  9 px and the setup line 15 px of vertical overflow (`scrollHeight − clientHeight` at 375/393/412).
+  The inline overhang is reserved by the primitive's padding (landing 53); the block one is not. Root:
+  the primitive reserves both overhangs or declares that a hit area may overhang into its neighbours.
+  **Rides with:** mob-3.
+- **The walk server takes its world by a hand-set hash**: `webapp/e2e/serve.mjs` reads
+  `PP_E2E_WORLD`, a `.gate_cache/walk-world/<hash>` path a person copies from the gate, so a gate
+  rebuild removes the hash and the server exits "no workspace". Root: the server asks the gate for
+  the current world. **Rides with:** mob-3.
 
 ### webb-4 (a webb re-plan on addr's tip; its landing is not yet placed)
 

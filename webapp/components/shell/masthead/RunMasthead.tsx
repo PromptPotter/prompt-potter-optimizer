@@ -1,5 +1,14 @@
-import type { ReactNode } from "react";
-import { Badge, Button, CopyButton, Icon, Said, VendorLogo } from "@/components/ui";
+import { useState, type ReactNode } from "react";
+import {
+  Badge,
+  Button,
+  CopyButton,
+  Icon,
+  Said,
+  Toolbar,
+  ToolbarFold,
+  VendorLogo,
+} from "@/components/ui";
 import { familyOfGlance, openColumns } from "@/components/shell/families";
 import { Figure, FigureRow, ViewDoor } from "@/components/shell/FigureRow";
 import type { FamilyId } from "@/lib/address";
@@ -46,9 +55,16 @@ export function RunMasthead() {
           {/* The dataset as a chip only beside a name of the operator's own. */}
           {dataset !== null && dataset !== listing?.label && <Badge>{dataset}</Badge>}
           {viewed && (
-            <span className="run-id">
-              ID: {viewed.leaf.cycleId}
-              <CopyButton data={viewed.leaf.cycleId} title="Copy this cycle's id" />
+            <span className="run-actions">
+              <ToolbarFold
+                label="This cycle's id"
+                actions={
+                  <span className="run-id">
+                    ID: {viewed.leaf.cycleId}
+                    <CopyButton data={viewed.leaf.cycleId} title="Copy this cycle's id" />
+                  </span>
+                }
+              />
             </span>
           )}
           {pinned && (
@@ -98,6 +114,7 @@ function RunFacts({ path, campaign }: { path: CyclePath; campaign: HierarchyCamp
   const metered = dash?.spend_metered ?? null;
   const figures = course?.figures.map((row) => ({ row, opens: familyOfGlance(row.key) })) ?? [];
   const unnamed = useUnnamedViews(figures.map((f) => f.opens));
+  const [whole, setWhole] = useState(false);
   // What the masthead adds to a served figure's Term, by its key.
   const details: Partial<Record<FigureKey, ReactNode>> = {
     lift: TERMS.masthead_best,
@@ -112,32 +129,49 @@ function RunFacts({ path, campaign }: { path: CyclePath; campaign: HierarchyCamp
 
   return (
     <>
-      <div className="run-setup">
-        {innerLeaf && (
-          <span className="inner-breadcrumb">
-            <span className="inner-breadcrumb-sep" aria-hidden="true">
-              ⤷
+      <Toolbar className={cx("run-setup", whole && "is-whole")}>
+        <div className="run-setup-lines">
+          {innerLeaf && (
+            <span className="inner-breadcrumb">
+              <span className="inner-breadcrumb-sep" aria-hidden="true">
+                ⤷
+              </span>
+              <span className="inner-breadcrumb-label" title={innerLeaf.campaignId}>
+                inner: {innerLeaf.campaignId}
+              </span>
             </span>
-            <span className="inner-breadcrumb-label" title={innerLeaf.campaignId}>
-              inner: {innerLeaf.campaignId}
-            </span>
-          </span>
-        )}
-        {campaign && (
-          <>
-            <span className="run-setup-vendors">
-              {campaign.facts.runs_with?.vendors.map((v) => (
-                <VendorLogo key={v.vendor} vendor={v.vendor} models={v.models} />
-              ))}
-            </span>
-            {fmtAgo(campaign.span.last_at)}
-          </>
-        )}
-        {served.formula ? <CriterionLine mask={served.mask} /> : null}
-        {course?.lines.map((row) => (
-          <Said key={row.key} tone={row.tone} label={row.label} sub={row.sub} detail={row.detail} />
-        ))}
-      </div>
+          )}
+          {campaign && (
+            <>
+              <span className="run-setup-vendors">
+                {campaign.facts.runs_with?.vendors.map((v) => (
+                  <VendorLogo key={v.vendor} vendor={v.vendor} models={v.models} />
+                ))}
+              </span>
+              {fmtAgo(campaign.span.last_at)}
+            </>
+          )}
+          {served.formula ? <CriterionLine mask={served.mask} /> : null}
+          {course?.lines.map((row) => (
+            <Said
+              key={row.key}
+              tone={row.tone}
+              label={row.label}
+              sub={row.sub}
+              detail={row.detail}
+            />
+          ))}
+        </div>
+        {/* A phone clamps the setup to one line under the title; a tap reads it whole. */}
+        <button
+          type="button"
+          className="run-setup-toggle"
+          aria-expanded={whole}
+          onClick={() => setWhole((w) => !w)}
+        >
+          {whole ? "less" : "more"}
+        </button>
+      </Toolbar>
       <FigureRow>
         {figures.map(({ row, opens }) => (
           <Figure key={row.key} row={row} detail={hover(row)} opens={opens} />

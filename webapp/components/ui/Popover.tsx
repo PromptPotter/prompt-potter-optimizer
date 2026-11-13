@@ -54,12 +54,19 @@ export function Popover({
     setAt((prev) => (prev || !r ? null : place(r, align, over)));
   }, [anchor, align, over]);
 
+  // Inside is the React tree, not the DOM: a popover opened in this panel portals out of it, and its
+  // press still bubbles here first (React's root listens below `document`).
+  const pressed = useRef(false);
+  const press = useCallback(() => {
+    pressed.current = true;
+  }, []);
+
   useEffect(() => {
     if (!open) return;
-    const inside = (t: EventTarget | null) =>
-      t instanceof Node && (!!anchor?.contains(t) || !!panelRef.current?.contains(t));
-    const onDoc = (e: MouseEvent) => {
-      if (!inside(e.target)) setAt(null);
+    pressed.current = false;
+    const onDoc = () => {
+      if (!pressed.current) setAt(null);
+      pressed.current = false;
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setAt(null);
@@ -82,11 +89,11 @@ export function Popover({
   }, [open, anchor, align, over]);
 
   return (
-    <div className={cx(s.wrap, className)} ref={setAnchor}>
+    <div className={cx(s.wrap, className)} ref={setAnchor} onMouseDownCapture={press}>
       {renderTrigger({ open, toggle })}
       {at &&
         createPortal(
-          <div ref={panelRef} className={s.panel} style={at}>
+          <div ref={panelRef} className={s.panel} style={at} onMouseDownCapture={press}>
             {children({ close })}
           </div>,
           document.body,

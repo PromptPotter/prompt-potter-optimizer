@@ -26,11 +26,7 @@ for (const vp of WIDTHS) {
       await noSidewaysScroll(page);
     });
 
-    test("every view fits its viewport", async ({ page, rich, isMobile }) => {
-      test.skip(
-        isMobile && vp.width <= 412,
-        "held (operator): the one-row primitive's overflow strategy; the Candidates header overruns its card",
-      );
+    test("every view fits its viewport", async ({ page, rich }) => {
       for (const views of ["", DASHBOARD_VIEWS, "/compare", "/samples/files", "/samples/spend"]) {
         await open(page, `${rich.addr}${views}`);
         await noSidewaysScroll(page);
@@ -58,11 +54,7 @@ for (const vp of WIDTHS) {
       expect(box.y + box.height, "the card ends below the viewport").toBeLessThanOrEqual(vp.height);
     });
 
-    test("the lineage forest fits its viewport", async ({ page, rich, isMobile }) => {
-      test.skip(
-        isMobile && vp.width <= 412,
-        "held (operator): the one-row primitive's overflow strategy; the Candidates header overruns its card",
-      );
+    test("the lineage forest fits its viewport", async ({ page, rich }) => {
       await open(page, `${rich.addr}/candidates`);
       await page.getByRole("button", { name: /the lineage forest/i }).click();
       const cladogram = page.getByRole("img", { name: "Session lineage cladogram" });

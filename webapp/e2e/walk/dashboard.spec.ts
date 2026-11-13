@@ -27,7 +27,12 @@ test.describe("dashboard", () => {
   });
 
   test("a served object in scope can be copied", async ({ page }) => {
-    await expect(page.getByRole("button", { name: /Copy this run's candidates/ })).toBeVisible();
+    // A phone folds the card's trailing actions behind its ⋯ (`ToolbarFold`, at `--bp-sm`).
+    if (page.viewportSize()!.width <= 640) {
+      await page.getByRole("button", { name: "More candidate options" }).click();
+    }
+    const copy = page.getByRole("button", { name: /Copy this run's candidates/ });
+    await expect(copy.filter({ visible: true })).toBeVisible();
   });
 
   test("the round charts draw, and survive a poll", async ({ page }) => {

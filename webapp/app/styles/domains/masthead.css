@@ -3,11 +3,13 @@
 .run-header-inner{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-4);width:100%}
 .run-title{display:flex;align-items:baseline;gap:var(--space-8);min-width:0}
 .run-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-3xl);font-weight:700;letter-spacing:-0.015em;color:var(--color-text-primary)}
-.run-id{flex:0 0 auto;margin-left:auto;display:inline-flex;align-items:center;gap:var(--space-4);white-space:nowrap;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
+.run-actions{flex:0 0 auto;margin-left:auto;display:inline-flex;align-items:center}
+.run-id{flex:0 0 auto;display:inline-flex;align-items:center;gap:var(--space-4);white-space:nowrap;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .run-setup{min-width:0;font-size:var(--text-xs);color:var(--color-text-secondary)}
 .run-setup-vendors{display:inline-flex;align-items:baseline;gap:2px;margin-inline-end:var(--space-6)}
 .run-setup-vendors:empty{display:none}
 .run-setup .said{margin-inline-start:var(--space-8)}
+.run-setup-toggle{display:none;flex:0 0 auto;padding:0 var(--space-4);border:0;background:none;font:inherit;color:var(--color-accent);cursor:pointer}
 /* The header's own rule closes it: the figure row draws none here, and is one line that scrolls. */
 .run-header .figure-row{margin-top:var(--space-6);padding-block:0;border-block:0;grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:max-content;overflow-x:auto}
 .run-header .figure-value{white-space:nowrap}
@@ -31,6 +33,8 @@
   .run-title{align-items:center}
   .run-back{display:inline-flex;align-items:center;gap:2px;padding:var(--space-8)}
   .run-name{font-size:var(--text-md);font-weight:500}
-  .run-id{display:none}
-  .run-header:has(.figure) .run-setup{display:none}
+  .run-setup{align-items:baseline}
+  .run-setup-lines{flex:1 1 auto;min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden}
+  .run-setup.is-whole .run-setup-lines{display:block}
+  .run-setup-toggle{display:inline-flex}
 }

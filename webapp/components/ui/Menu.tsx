@@ -51,16 +51,19 @@ export function MenuItem({
   );
 }
 
+// `discloses`: checking it shows content under it in the menu, so it reads as expanded.
 export function MenuCheck({
   on,
   onClick,
   disabled,
+  discloses = false,
   title,
   children,
 }: {
   on: boolean;
   onClick: () => void;
   disabled?: boolean;
+  discloses?: boolean;
   title?: string;
   children: ReactNode;
 }) {
@@ -69,6 +72,7 @@ export function MenuCheck({
       type="button"
       role="menuitemcheckbox"
       aria-checked={on}
+      aria-expanded={discloses ? on : undefined}
       className={cx(s.item, on && s.on)}
       disabled={disabled}
       title={title}

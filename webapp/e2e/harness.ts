@@ -346,6 +346,12 @@ export async function showSidebar(page: Page) {
   if (await back.isVisible()) await back.click();
 }
 
+/** Back from a phone's list screen: the viewed campaign's row reopens the views it left. */
+export async function hideSidebar(page: Page) {
+  const row = page.locator('.mobile-list .unit-library-item[aria-current="true"]');
+  if (await row.isVisible()) await row.click();
+}
+
 // The panes, not only the page: `.main` clips and `.content` scrolls, so the document never overflows.
 // Read once no lazy pane is still `aria-busy`, or a pane not yet drawn passes.
 export async function noSidewaysScroll(page: Page) {

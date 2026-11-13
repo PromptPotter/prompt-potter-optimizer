@@ -108,9 +108,10 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   (the seed screen and probe-reasoning go); the origin serves its constant floor; a refused parameter
   cuts its arm `refused`; a retry acts once and a dead filer's command ends, by holders' death rule.
   Every treatment digest re-keys.
-- **mob 2**, beside any engine chain whose Owns hold no webapp file: on a phone a card header folds its
-  trailing actions into ⋯ (operator, 2026-11-13), the masthead id and setup line placed by it, and the
-  phone walk's back step.
+- **landed 53:** mob 2: on a phone a card header folds its trailing actions into ⋯ (operator,
+  2026-11-13), the masthead id and setup line placed by it, and the phone walk's back step. **mob-3**
+  queues behind the webapp-free chains: a one-row toolbar's hit area held to its row, and the walk
+  server's world named by the gate, not a hand-set hash.
 - **cfg-2**: the defaults' one home, the patch check spelled once after a proposal carries the
   stripped overlay, the browser's "" handling.
 - **life-2**, **holders-3** and **passes-5** after it (passes-5: a pause stamped with its hold, the

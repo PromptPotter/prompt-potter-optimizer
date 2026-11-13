@@ -8,6 +8,7 @@ import { AccountKeysTab } from "./AccountKeysTab";
 import { AccountActivityTab } from "./AccountActivityTab";
 import { AccountPreferencesTab } from "./AccountPreferencesTab";
 import { AccountStorageTab } from "./AccountStorageTab";
+import { ToolbarFold } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { meRead } from "@/lib/api";
 import { ACCOUNT_TAB_INFO, type AccountTab } from "@/lib/api/types";
@@ -48,25 +49,30 @@ export function AccountView({ tab }: { tab: string | null }) {
           <h2>Account</h2>
           <p title={who ?? undefined}>{who ?? " "}</p>
         </div>
-        {GROUPS.map((group) => (
-          <div key={group} className="account-nav-group">
-            <span className="account-nav-group-label">{group}</span>
-            <ul className="account-nav-list">
-              {TABS.filter((t) => t.group === group).map((t) => (
-                <li key={t.key}>
-                  <button
-                    type="button"
-                    className={cx("account-nav-item", t === shown && "active")}
-                    aria-current={t === shown ? "page" : undefined}
-                    onClick={() => open("account", t.key)}
-                  >
-                    {t.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        {/* A phone's one row: the open tab, the others behind ⋯. */}
+        {shown && <span className="account-nav-item active account-nav-shown">{shown.label}</span>}
+        <ToolbarFold
+          label="Account tabs"
+          actions={GROUPS.map((group) => (
+            <div key={group} className="account-nav-group">
+              <span className="account-nav-group-label">{group}</span>
+              <ul className="account-nav-list">
+                {TABS.filter((t) => t.group === group).map((t) => (
+                  <li key={t.key}>
+                    <button
+                      type="button"
+                      className={cx("account-nav-item", t === shown && "active")}
+                      aria-current={t === shown ? "page" : undefined}
+                      onClick={() => open("account", t.key)}
+                    >
+                      {t.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        />
       </nav>
       <section className="account-tab">
         <header className="account-tab-head">

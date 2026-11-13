@@ -13,9 +13,18 @@ const TABS = [
 const account = (page: import("@playwright/test").Page) =>
   page.getByRole("region", { name: "Account" });
 
-// The nav's own: a tab body may link another tab by its label.
-const navButton = (page: import("@playwright/test").Page, label: string) =>
-  account(page).getByRole("navigation", { name: "Account tabs" }).getByRole("button", { name: label, exact: true });
+// The nav's own: a tab body may link another tab by its label. A phone folds the tabs behind ⋯
+// (`ToolbarFold`, at `--bp-sm`).
+async function navButton(page: import("@playwright/test").Page, label: string) {
+  const folded = page.getByRole("group", { name: "Account tabs" });
+  if (page.viewportSize()!.width <= 640 && !(await folded.isVisible())) {
+    await account(page).getByRole("button", { name: "Account tabs" }).click();
+  }
+  return page
+    .locator('nav[aria-label="Account tabs"], [role="group"][aria-label="Account tabs"]')
+    .getByRole("button", { name: label, exact: true })
+    .filter({ visible: true });
+}
 
 test.describe("account", () => {
   test("opens from the sidebar", async ({ page }) => {
@@ -28,14 +37,14 @@ test.describe("account", () => {
   for (const [tab, label] of TABS) {
     test(`deep-links to the ${tab} tab`, async ({ page }) => {
       await open(page, `#/account=${tab}`);
-      await expect(navButton(page, label)).toBeVisible();
+      await expect(await navButton(page, label)).toBeVisible();
     });
   }
 
   test("walks every tab in one session", async ({ page }) => {
     await open(page, "#/account=profile");
     for (const [tab, label] of TABS) {
-      await navButton(page, label).click();
+      await (await navButton(page, label)).click();
       await expect.poll(() => new URL(page.url()).hash).toContain(`/account=${tab}`);
     }
   });

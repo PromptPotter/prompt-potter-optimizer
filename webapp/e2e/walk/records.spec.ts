@@ -1,16 +1,17 @@
-import { test, expect, open, ready } from "../harness";
+import { test, expect, open, ready, showSidebar, hideSidebar } from "../harness";
 
 test.describe("records", () => {
   test("Compare mounts, and a campaign can be ticked into the comparison", async ({
     page,
     rich,
-    isMobile,
   }) => {
-    test.skip(isMobile, "the tick is a sidebar row's, on a phone behind the list screen this spec does not walk back from");
     await open(page, `${rich.addr}/compare`);
+    await showSidebar(page);
     const tick = page.getByRole("button", { name: "Add to the comparison" }).first();
     await tick.click();
+    await hideSidebar(page);
     await ready(page);
+    await expect(page.locator("#view-compare")).toBeVisible();
     // Never that it found numbers: `/evidence` 400s on a campaign whose origin never ran.
     await expect(page.locator("#main-content")).toBeVisible();
   });

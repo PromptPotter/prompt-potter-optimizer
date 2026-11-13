@@ -10,17 +10,18 @@ import {
   Term,
   HoverCard,
   IconDownload,
-  IconMore,
   Menu,
   MenuCheck,
   MenuItem,
   MenuRadioGroup,
   MenuSep,
   Toolbar,
+  ToolbarFold,
   ToolbarSep,
   ToolbarSpacer,
 } from "@/components/ui";
 import { exportText, exportUrl } from "@/lib/api/reads";
+import type { CyclePath } from "@/lib/ids";
 import {
   ABORT_LENS_LABELS,
   CANDIDATE_COUNT_WORDS,
@@ -113,21 +114,12 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
         </HoverCard>
       </ChipGroup>
       <ToolbarSpacer />
-      <Menu
-        renderTrigger={({ open, toggle }) => (
-          <Chip
-            icon
-            on={open || m.lensActive || m.maskOpen || m.showCache}
-            expanded={open}
-            ariaLabel="More candidate options"
-            title="Lens, scoring mask, cache overlay, and the θ explainer"
-            onClick={toggle}
-          >
-            <IconMore />
-          </Chip>
-        )}
-      >
-        {({ close }) => (
+      <ToolbarFold
+        label="More candidate options"
+        hint="Lens, scoring mask, cache overlay, and the θ explainer"
+        lit={m.lensActive || m.maskOpen || m.showCache}
+        actions={viewedPath && <RunExports viewedPath={viewedPath} />}
+        menu={
           <>
             <MenuRadioGroup
               label={m.scoringMaskActive ? "Lens — driven by the scoring mask" : "Lens"}
@@ -136,7 +128,6 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
               onChange={(v) => {
                 if (m.scoringMaskActive) return;
                 m.setLens(v);
-                close();
               }}
             />
             <MenuSep />
@@ -174,7 +165,6 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
                 onClick={() => {
                   if (m.compareDisabled) return;
                   m.toggleCompare();
-                  close();
                 }}
               >
                 Compare this searchpoint
@@ -185,6 +175,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
                 <MenuSep />
                 <MenuCheck
                   on={m.showTheta}
+                  discloses
                   onClick={m.toggleTheta}
                   title="Why a lower-fitness candidate can win"
                 >
@@ -199,49 +190,53 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
               />
             )}
           </>
-        )}
-      </Menu>
-      {viewedPath && (
-        <>
-          <CopyButton
-            title="Copy this run's candidates"
-            choices={wordRows(EXPORT_TIER_INFO).filter(([, t]) => t.pasted).map(([id, t]) => ({
-              key: id,
-              label: t.label,
-              data: () => exportText(viewedPath, id),
-            }))}
-          />
-          <Menu
-            align="right"
-            renderTrigger={({ open, toggle }) => (
-              <Chip
-                icon
-                on={open}
-                expanded={open}
-                ariaLabel="Download this run"
-                title="Download this run"
-                onClick={toggle}
-              >
-                <IconDownload />
-              </Chip>
-            )}
-          >
-            {({ close }) =>
-              wordRows(EXPORT_TIER_INFO).filter(([, t]) => !t.pasted).map(([id, t]) => (
-                <MenuItem
-                  key={id}
-                  onClick={() => {
-                    close();
-                    window.location.assign(exportUrl(viewedPath, id));
-                  }}
-                >
-                  {t.label}
-                </MenuItem>
-              ))
-            }
-          </Menu>
-        </>
-      )}
+        }
+      />
     </Toolbar>
+  );
+}
+
+// The run's export doors: copy a pasted tier, download a filed one.
+function RunExports({ viewedPath }: { viewedPath: CyclePath }) {
+  return (
+    <>
+      <CopyButton
+        title="Copy this run's candidates"
+        choices={wordRows(EXPORT_TIER_INFO).filter(([, t]) => t.pasted).map(([id, t]) => ({
+          key: id,
+          label: t.label,
+          data: () => exportText(viewedPath, id),
+        }))}
+      />
+      <Menu
+        align="right"
+        renderTrigger={({ open, toggle }) => (
+          <Chip
+            icon
+            on={open}
+            expanded={open}
+            ariaLabel="Download this run"
+            title="Download this run"
+            onClick={toggle}
+          >
+            <IconDownload />
+          </Chip>
+        )}
+      >
+        {({ close }) =>
+          wordRows(EXPORT_TIER_INFO).filter(([, t]) => !t.pasted).map(([id, t]) => (
+            <MenuItem
+              key={id}
+              onClick={() => {
+                close();
+                window.location.assign(exportUrl(viewedPath, id));
+              }}
+            >
+              {t.label}
+            </MenuItem>
+          ))
+        }
+      </Menu>
+    </>
   );
 }

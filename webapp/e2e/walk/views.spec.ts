@@ -80,10 +80,12 @@ test.describe("the view axis", () => {
     await pressed(page, "Dashboard");
   });
 
-  test("the pinned cycle is named on screen and can be released", async ({ page, rich, isMobile }) => {
-    test.skip(isMobile, "held (operator): the masthead's id placement; the id hides at ≤880px");
+  test("the pinned cycle is named on screen and can be released", async ({ page, rich }) => {
     await open(page, rich.addr);
-    await expect(page.getByText(`ID: ${rich.cycleId}`)).toBeVisible();
+    // A phone folds the id behind the title row's ⋯.
+    const fold = page.getByRole("button", { name: "This cycle's id" });
+    if (await fold.isVisible()) await fold.click();
+    await expect(page.getByText(`ID: ${rich.cycleId}`).filter({ visible: true })).toBeVisible();
     await page.getByRole("button", { name: /Follow your run/ }).click();
     await expect.poll(() => new URL(page.url()).hash).not.toContain(rich.id);
   });
