@@ -293,6 +293,17 @@ def expected_score_gain(
     return float(np.sum(logistic(a * (theta + move - d)) - logistic(a * (theta - d))))
 
 
+@shapes_optimizer_prompt
+def expected_information(theta: float, keys: Collection[str], delta: Ruler | None) -> float:
+    """Fisher information about θ that one answer on each of *keys* carries; a cell off the ruler adds none."""
+    params = _cell_parameters(keys, delta)
+    if not params:
+        return 0.0
+    d, a = (np.array([p[k] for p in params.values()], dtype=np.float64) for k in (0, 1))
+    p = logistic(a * (theta - d))
+    return float(np.sum(a * a * p * (1.0 - p)))
+
+
 # log(aₛ) ~ N(0, σ_a²): collapses 2PL to 1PL absent evidence and identifies a against θ/δ spread.
 _SIGMA_LOG_A = 0.5
 _LOG_A_CLIP = 3.0

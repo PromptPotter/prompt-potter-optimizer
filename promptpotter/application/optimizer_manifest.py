@@ -1040,3 +1040,11 @@ def resolved_overrides(overrides: Mapping[str, Mapping[str, Any]]) -> dict[str, 
         if resolved:
             nodes[node] = resolved
     return nodes
+
+
+def base_optimizer_template(inner: SelectedOptimizer, name: str) -> OptimizerPromptTemplate:
+    """L4-override-free: the bench's check-in where it declares *name*, else *inner*'s under its overlay's edits."""
+    checkin = checkin_manifest()
+    if checkin.schema.get_node(name) is not None:
+        return running_prompt(name, checkin.config, checkin.manifest)
+    return running_prompt(name, inner.node_config(name), inner.manifest)

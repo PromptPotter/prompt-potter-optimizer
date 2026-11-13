@@ -46,11 +46,7 @@ from promptpotter.application.pipeline_resolve import laid_session
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
-from promptpotter.application.runner.inner.tasks import (
-    InnerCell,
-    InnerCells,
-    InnerTaskSpec,
-)
+from promptpotter.application.runner.inner.tasks import cell_optimizer
 from promptpotter.application.runner.mint import (
     close_init,
     open_cycle,
@@ -105,6 +101,7 @@ from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import EmbeddedRun
+from promptpotter.domain.l4.cells import InnerCell, InnerCells, InnerTaskSpec
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
@@ -957,7 +954,7 @@ def inner_cells(*optimizers: str, dataset: str | None = None) -> InnerCells:
     for name in optimizers:
         selected = select_optimizer(OptimizerChoice(optimizer=name))
         treatment = selected.treatment(frozenset(Presumption), PackShelf(account=None)).digest
-        by_dataset[on[name]] = InnerCell({}, None, selected, treatment)
+        by_dataset[on[name]] = InnerCell({}, None, cell_optimizer(selected), treatment)
         specs[name] = InnerTaskSpec(
             inner_dataset=on[name],
             optimizer_treatment=treatment,

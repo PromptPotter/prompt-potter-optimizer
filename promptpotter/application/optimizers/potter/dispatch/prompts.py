@@ -3,36 +3,17 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimizer_manifest import (
-    SelectedOptimizer,
-    checkin_manifest,
-    running_prompt,
-)
 from promptpotter.application.optimizers.potter.dispatch.layout import resolve_node_layout
 from promptpotter.application.optimizers.potter.records import L1Layout, L2Memory
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
 
 if TYPE_CHECKING:
-    from promptpotter.application.runner.inner.tasks import InnerCells
+    from promptpotter.domain.l4.cells import InnerCells
     from promptpotter.domain.pipeline_params import PipelineParams
 
 
 logger = logging.getLogger(__name__)
-
-
-def base_optimizer_template(inner: SelectedOptimizer, name: str) -> OptimizerPromptTemplate:
-    """L4-override-free: the bench's check-in where it declares *name*, else *inner*'s under its overlay's edits."""
-    checkin = checkin_manifest()
-    if checkin.schema.get_node(name) is not None:
-        return running_prompt(name, checkin.config, checkin.manifest)
-    return running_prompt(name, inner.node_config(name), inner.manifest)
-
-
-def inner_template(cells: InnerCells, name: str) -> OptimizerPromptTemplate | None:
-    """*name*'s base prompt in the manifest whose lever it is; ``None`` where no cell runs it."""
-    owner = cells.owners.get(name)
-    return None if owner is None else base_optimizer_template(owner, name)
 
 
 def effective_optimizer_prompts(
@@ -50,7 +31,7 @@ def effective_optimizer_prompts(
             for f in OptimizerPromptTemplate.RENDER_ORDER
             if f in keys_by_node.get(node_name, set())
         ]
-        base = inner_template(cells, node_name) if fields else None
+        base = cells.template(node_name) if fields else None
         if base is None:
             continue
         override = pipeline_params.node(node_name).laid_keys()

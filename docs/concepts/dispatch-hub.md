@@ -2,7 +2,7 @@
 
 Potter's `dispatch/` fills the `{{placeholders}}` of its optimizer prompts; `L1Layout` is the structural surface L2 edits, and L2 is one entry in the same hub (`potter/members.py::L2Context`). Concept role: [`the-loop.md`](the-loop.md).
 
-Every optimizer LLM node renders an `OptimizerPromptTemplate`, whose `RENDER_ORDER` is cut for the provider prefix cache; the target prompt has no class — each prompt node declares its fields in render order (`NodePromptInfo.fields`), and that order sits inside the archive key. **No prompt site summarizes its own data**: a name not in `injection_table()` does not enter a prompt. The hub is stateless: `injection_table()` (`dispatch/injections/registry.py`) is built from the `@signal("<name>", …)` decorator at each renderer's definition site, and selection refuses a `{{slot}}` not in it by the config address holding it (`LayoutNode.unknown_slots`), so a typo fails at `new`. A new injection is one pure `_r_<name>(bundle) -> list[Item]` renderer there (`[]` when its source is empty), reached through a node's `NODE_LAYOUTS[node].floor` or `.extras`.
+Every optimizer LLM node renders an `OptimizerPromptTemplate`, whose `RENDER_ORDER` is cut for the provider prefix cache; the target prompt has no class — each prompt node declares its fields in render order (`NodePromptInfo.fields`), and that order sits inside the archive key. **No prompt site summarizes its own data**: a name not in `injection_table()` does not enter a prompt. The hub is stateless: `injection_table()` (`dispatch/injections/registry.py`) is built from the `@signal("<name>", …)` decorator at each renderer's definition site, and selection refuses a `{{slot}}` not in it by the config address holding it (`LayoutNode.unknown_slots`), so a typo fails at `new`. A new injection is one pure `_r_<name>(view) -> list[Item]` renderer (`facade.py::PotterView`, the node's own reads) there (`[]` when its source is empty), reached through a node's `NODE_LAYOUTS[node].floor` or `.extras`.
 
 `citable`: may an `l1_generate` variant name this panel in `evidence_grounding`? True for panels that REPORT; False for the value-space menus and the prompt under edit — citing those grounds a mutation in its own subject. `citable_fields(layout, exploration_budget, rendered)` intersects the flag with the live layout and what rendered, fills the wire schema's enum, and the round banks it as `L1Readout.l1_citable`, which `evidence_grounding_present` reads.
 
@@ -164,7 +164,7 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 - **`diagnostics`** ← a STATUS prefix, the fenced `RoundDiagnostics` body (`compute_round_diagnostics`, least-actionable last), and EVOLUTION — the one progress view on the one comparable column (`domain/run_standing.py::rounds_without_advance`, each round's `overlap.advance`). No fitness column: a round's fitness sits on cells the next round re-picks.
 - **`l1_wounds`** [fenced] ← the last measured round's arms + `Cycle.runtime_failures`; its runtime config shows only the keys L1 may set.
 - **`guard_breaches`** ← `L2Memory.guard_breaches`, `L3Memory.guard_breaches`. Evidence values render only where they name a closed vocabulary; an LLM-authored placeholder reports its size, so no untrusted content reaches the unfenced block.
-- **`critique`** ← `bundle.digest.critique`. **A cluster spans at least two rows the panels marked as `detectable_move` names, or it is not one**: `dispatch/schemas.py::critique_response_model` drops it at parse, keeping the reply's others, against `panels.py::clustered_sample_ids` and `panels.py::detectable_rows`. The generator answers `targets_rows` as `[#id]` marks, scored by `behavior_checks.py` — an id is checkable, a label is coined freely.
+- **`critique`** ← `PotterView.critique`. **A cluster spans at least two rows the panels marked as `detectable_move` names, or it is not one**: `dispatch/schemas.py::critique_response_model` drops it at parse, keeping the reply's others, against `panels.py::clustered_sample_ids` and `panels.py::detectable_rows`. The generator answers `targets_rows` as `[#id]` marks, scored by `behavior_checks.py` — an id is checkable, a label is coined freely.
 
 **Strategic, persistent:**
 
@@ -179,10 +179,10 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 
 **Current state:**
 
-- **`rendered_prompt`** ← `parent.prompts` ⊕ `effective_optimizer_prompts(…)` — the artifact under edit. One LABELLED section per locus, `[node.field]`, in declared order (the override schema keys on those names), each carrying the field's OWN value, never a spliced one. Both halves render (target prompt and inner optimizer prompts, `runner/inner/tasks.py::InnerCells.owners`), each empty where it is not the mutation surface.
+- **`rendered_prompt`** ← `parent.prompts` ⊕ `effective_optimizer_prompts(…)` — the artifact under edit. One LABELLED section per locus, `[node.field]`, in declared order (the override schema keys on those names), each carrying the field's OWN value, never a spliced one. Both halves render (target prompt and inner optimizer prompts, `domain/l4/cells.py::InnerCells.owners`), each empty where it is not the mutation surface.
 - **`pipeline_param_catalogue`** ← the axes L1 may move and each value space, a one-value axis dropped; seated under `rendered_prompt` with the matcher's extraction contract.
-- **`block_pool`** ← the `BlockPool` slice through `InjectionBundle.block_window()`, gated by the node's `block_access`: the value space of a prompt FIELD. `closed` narrows each field's wire schema to the window (`potter/validators.py::l1_blocks_in_pool`); `off` renders empty.
-- **`demo_pool`** ← `InjectionBundle.demo_pool` + the node's `k_max`: the value space of the `shots` slot — the parent's shots first (the one place L1 sees them), then a `pool_window` rotating by round. `L1_MANDATORY`; silent with no pool or `k_max: 0`. `potter/validators.py::l1_shots_in_demo_pool` rejects an id outside the pool, a repeat, or a list past `k_max`.
+- **`block_pool`** ← the `BlockPool` slice through `PotterView.block_window()`, gated by the node's `block_access`: the value space of a prompt FIELD. `closed` narrows each field's wire schema to the window (`potter/validators.py::l1_blocks_in_pool`); `off` renders empty.
+- **`demo_pool`** ← `PotterView.demo_pool` + the node's `k_max`: the value space of the `shots` slot — the parent's shots first (the one place L1 sees them), then a `pool_window` rotating by round. `L1_MANDATORY`; silent with no pool or `k_max: 0`. `potter/validators.py::l1_shots_in_demo_pool` rejects an id outside the pool, a repeat, or a list past `k_max`.
 - **`recombination_pool`** ← `Lineage.measured` ranked on `Lineage.theta`: the top `pool_window` marked main, then the rest, and the loci a main may take — the value space of the `recombinations` slot. `L1_MANDATORY` as its one carrier; silent at `recombine: 0`, under another `recombination_host`, or with no two tradable entries, which withdraws the slot. `l2_recombination_pool` is the same pool on `l2_context`'s floor under `recombination_host: l2_context`.
 - **`plan`** ← `L3Memory.plan`, L3's strategic replan, which every layer's prompt reads until L3 writes the next one; silent before L3 first fires.
 - **`l1_overrides`** ← `L2Memory.steered("l1_generate")`, the numeric steer L2 laid over `l1_generate` key by key; silent while L2 has laid none.
@@ -209,7 +209,7 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 | `inner_narratives` | `sample_tag`🧩 `query`🧩 `held_out_lift`🧩 `mean_round_delta`🧩 `mean_parent_level_se`🧩 `paired`🧩 `reasoning_trace`🧩 |
 | `mutation_memory` | per edit `label`🧩 `fitness`🧩 against the parent's, `composite_fitness`🧩, `changed`🧩 (a param's value, a field's `changed_words`🧩, `shots`🧩), `gained`🧩 `lost`🧩, `same_idea`🧩 · the cells edits keep missing, `lost`🧩 of `tried`🧩 |
 | `measurand` | `composite_fitness`🧩 · frontier `theta`🧩 `se`🧩 · `evaluators`🧩 under a charged formula |
-| `detectable_move` | `detectable_rows`🧩 of `latest_sample_keys`🧩 at `admission`🧩 |
+| `detectable_move` | `detectable_rows`🧩: the expected information of `latest_sample_keys`🧩 at `parent_ability`🧩, both arms, at `admission`🧩 |
 | `confounds` | the frontier's `caveat`🧩 in `THETA_CAVEAT_INFO`'s `label`🧩 `detail`🧩, with its number (`round_span`🧩 `ruler_span`🧩, `unlinked`🧩, `pinned_share`🧩) · a subset moved whole (`latest_sample_keys`🧩, `prev_sample_keys`🧩) |
 | `budget_state` | `round_num`🧩 `budget_rounds`🧩 `spend_used_usd`🧩 `spend_budget_usd`🧩 |
 | `rebase_capability` | `fork_proposal`🧩 (`reason`🧩 `unlock_schema_field_rename`🧩 `stand_on`🧩) · ELECTIONS `picked`🧩 `locked_in`🧩 `unelected`🧩 |
@@ -229,7 +229,7 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 
 ## Mechanics
 
-- `InjectionBundle` is built once over the cycle's LAST round, which the bench folds in (`Cycle.absorb_round`) before its adapters run, so `l1_critique` reads the round it distils.
+- `facade.py::PotterView` reads the node's own context, whose LAST round the bench folds in (`Cycle.absorb_round`) before its adapters run, so `l1_critique` reads the round it distils.
 - Two prose tokens fill a value: `{{n_variants}}` in `l1_generate` (a caller extra) and `{{critique_axes}}` in `l1_critique`'s instruction (a signal, filled after the layout panels). Every `problem_description` body is empty: its panels come from the layout.
 - **`L1_MANDATORY` is two kinds**: a field L1 cannot OPERATE without (parent prompt, plan, framing, mutation surface, failure digest), and the sole carrier of a state L1 must not enter BLIND (`answer_distribution`, `measurand` + `confounds`, `failing_samples`). Missing after a merged edit fires `l1_layout_missing_mandatory`, a guard breach routing to L3.
 

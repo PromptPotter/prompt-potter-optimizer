@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimizer_manifest import bound_optimizer
-from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.arms import Proposal, candidate_label
 from promptpotter.domain.candidate_diff import (
@@ -29,6 +28,7 @@ from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import Budget, MeteredSpend
 from promptpotter.domain.wounds import collapse_reason
 from promptpotter.shared.answer_text import truncate
+from promptpotter.shared.composite import to_short_formula
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
@@ -58,7 +58,7 @@ def init_enter(
     ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}
 
     # Resolved at INIT.enter so the live dashboard stamps the formula before origin scoring fires.
-    full, short = resolve_cell_formula(session.state.scoring.scorer.per_cell, schema)
+    full, short = _cell_formula(session)
     ctx.composite_fitness_formula = full
     ctx.composite_fitness_formula_short = short
 
@@ -72,10 +72,15 @@ def init_enter(
     )
 
 
+def _cell_formula(session: Session) -> tuple[str, str | None]:
+    """``(full, short)``; a short form exists only for the default, never for an override."""
+    scorer = session.state.scoring.scorer
+    full = scorer.cell_formula
+    return full, None if scorer.per_cell else to_short_formula(full)
+
+
 def init_exit(ctx: ViewContext, *, cycle: Cycle, session: Session) -> InitExitView:
-    full, short = resolve_cell_formula(
-        session.state.scoring.scorer.per_cell, session.pipeline_schema
-    )
+    full, short = _cell_formula(session)
     ctx.composite_fitness_formula = full
     ctx.composite_fitness_formula_short = short
     ctx.display_metric = session.state.scoring.display_metric

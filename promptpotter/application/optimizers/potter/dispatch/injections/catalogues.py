@@ -7,7 +7,6 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     AXES_ENUM_PREVIEW,
     DEMO_QUERY_STEM,
     RECOMBINATION_VALUE_STEM,
-    InjectionBundle,
     InjectionKind,
     Item,
     prose_ceiling,
@@ -28,7 +27,8 @@ from promptpotter.domain.pool import Access
 from promptpotter.domain.sample import sample_tag
 
 if TYPE_CHECKING:
-    from promptpotter.application.runner.inner.tasks import InnerCells
+    from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
+    from promptpotter.domain.l4.cells import InnerCells
 
 
 def _schema_description_block(
@@ -69,7 +69,7 @@ def _schema_toggle_block(matcher: str | None) -> list[str]:
     # A value-space menu is what a mutation may SAY, never why it should be made.
     citable=False,
 )
-def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
+def _r_pipeline_param_catalogue(b: PotterView) -> list[Item]:
     schema = b.pipeline_schema
     npk = schema.node_param_keys()
     if not npk:
@@ -107,13 +107,13 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
             continue
         lines.append(f"  {node_name}: {', '.join(bits)}".rstrip())
         if described:
-            current = b.cycle_slice.pipeline_params.node(node_name).laid_keys()
+            current = b.pipeline_params.node(node_name).laid_keys()
             lines.extend(
                 _schema_description_block(node, described, current, inner_cells=b.inner_cells)
             )
         # Only where the other arm is reachable: the cost of a move nobody can make is prompt mass.
         if ANSWER_AS_JSON in (schema.param_options(node, SCHEMA_TOGGLE_PARAM) or ()):
-            lines.extend(_schema_toggle_block(b.cycle_slice.matcher))
+            lines.extend(_schema_toggle_block(b.matcher))
     return [Item("\n".join(lines))]
 
 
@@ -130,7 +130,7 @@ _BLOCK_POOL_HEADERS: dict[Access, str] = {
     char_cap=None,
     citable=False,
 )
-def _r_block_pool(b: InjectionBundle) -> list[Item]:
+def _r_block_pool(b: PotterView) -> list[Item]:
     window = b.block_window()
     if not window:
         return []
@@ -148,7 +148,7 @@ def _r_block_pool(b: InjectionBundle) -> list[Item]:
     char_cap=None,
     citable=False,
 )
-def _r_demo_pool(b: InjectionBundle) -> list[Item]:
+def _r_demo_pool(b: PotterView) -> list[Item]:
     if not b.offers_shots:
         return []
     by_key = {s.key: s for s in b.demo_split}
@@ -158,7 +158,7 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
     current = list({s.id: s for rows in held.values() for s in rows}.values())
     others = [s for s in b.demo_pool if s not in current]
     k = min(b.pool_window, len(others))
-    start = (b.cycle_slice.round_num - 1) * k % len(others) if others else 0
+    start = (b.round_num - 1) * k % len(others) if others else 0
     window = (others[start:] + others[:start])[:k]
     shown = "; ".join(
         f"{node}: {', '.join(sample_tag(s.id) for s in rows) or 'none'}"
@@ -182,7 +182,7 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
     ]
 
 
-def _pool_items(b: InjectionBundle, joins: str) -> list[Item]:
+def _pool_items(b: PotterView, joins: str) -> list[Item]:
     header = (
         "RECOMBINATION POOL — the campaign's measured individuals, highest θ first, an unread "
         f"θ last. `recombinations` writes up to {b.recombine} children {joins}: each continues a "
@@ -217,7 +217,7 @@ def _pool_items(b: InjectionBundle, joins: str) -> list[Item]:
     char_cap=None,
     citable=False,
 )
-def _r_recombination_pool(b: InjectionBundle) -> list[Item]:
+def _r_recombination_pool(b: PotterView) -> list[Item]:
     return _pool_items(b, "beside your variants") if b.recombines("l1_generate") else []
 
 
@@ -228,7 +228,7 @@ def _r_recombination_pool(b: InjectionBundle) -> list[Item]:
     char_cap=None,
     citable=False,
 )
-def _r_l2_recombination_pool(b: InjectionBundle) -> list[Item]:
+def _r_l2_recombination_pool(b: PotterView) -> list[Item]:
     return _pool_items(b, "that join the next round's arms") if b.recombines("l2_context") else []
 
 
@@ -238,7 +238,7 @@ def _r_l2_recombination_pool(b: InjectionBundle) -> list[Item]:
     char_cap=None,
     citable=False,
 )
-def _r_l1_signal_catalogue(b: InjectionBundle) -> list[Item]:
+def _r_l1_signal_catalogue(b: PotterView) -> list[Item]:
     """ONLY what the wire schema cannot say: a constraint ACROSS the slots, binding the MERGED layout."""
     mandatory = sorted(NODE_LAYOUTS["l1_generate"].mandatory - b.silent_l1_panels)
     return [

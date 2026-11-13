@@ -678,6 +678,11 @@ class Scorer:
     def sheet(self, facts: Iterable[MeasuredCell]) -> CellSheet:
         return CellSheet(self.id, tuple(self.grade(cell) for cell in facts))
 
+    @property
+    def cell_formula(self) -> str:
+        """What a cell's worth is read by: ``per_cell``, else its correctness alone."""
+        return self.per_cell or CRITERION_BASE
+
 
 CellGrade = Literal["fitness", "objective"]
 

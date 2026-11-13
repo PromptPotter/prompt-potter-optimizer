@@ -34,7 +34,7 @@ from promptpotter.domain.pipeline_schema import (
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.dispatch.bundle import RecombinationOffer
-    from promptpotter.application.runner.inner.tasks import InnerCells
+    from promptpotter.domain.l4.cells import InnerCells
 
 
 # A ceiling on a non-prompt field reads as a live cap while binding nothing.

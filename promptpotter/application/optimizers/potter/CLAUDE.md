@@ -27,7 +27,7 @@
 
 - **L2 writes exactly `l1_layout` and `l1_overrides`, one node overlay on `l1_generate`** (`L2Memory.steer`), never `pipeline_params`; as recombination host, `recombinations` (ids and loci only); plus the layer-control channel. Each steer cites an axis, sample or yield number.
 - **No layer writes `task_context`**: no wire schema has its field; target text is L1's alone, through `prompt_fields_updates`. <!-- probe: git grep -cE "task_context:" -- promptpotter/application/optimizers/potter/dispatch/schemas.py == 0 -->
-- **L3 fires on L2 stall, or on `l1_layout_refused` (`escalation.py::HEAL_RULES`)**, and writes a strategic replan (`L3Memory.plan`) every prompt reads.
+- **L3 fires on L2 stall, or on `l1_layout_refused` (`escalation.py::decide_heal`)**, and writes a strategic replan (`L3Memory.plan`) every prompt reads.
 
 ## The layer-control channel — `fork_proposal` + `terminate_proposal`
 

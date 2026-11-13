@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     RUNTIME_FAILURE_RECENCY_WINDOW,
     VALIDATION_RENDER_CAP,
-    InjectionBundle,
     InjectionKind,
     Item,
     signal,
@@ -17,6 +16,9 @@ from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, PipelineParams
 from promptpotter.domain.pipeline_schema import ParamKind
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
+
+if TYPE_CHECKING:
+    from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 
 # Closed vocabularies, safe in an UNFENCED panel; any other LLM-authored value reports its size.
 _PLAIN_EVIDENCE_VALUES = NODE_LAYOUTS["l1_generate"].possible | frozenset(
@@ -37,7 +39,7 @@ def _rf_matches_current_config(rf: RuntimeFailure, pipeline_params: PipelinePara
     return all(observed.get(k) == getattr(current, k) for k in WHO_ANSWERS_KEYS if k in observed)
 
 
-def _validation_block(b: InjectionBundle) -> str:
+def _validation_block(b: PotterView) -> str:
     """One round deep, because a wound heals in the round after it was made."""
     if not b.measured_rounds:
         return ""
@@ -49,7 +51,7 @@ def _validation_block(b: InjectionBundle) -> str:
             f"  axis={vf.axis} value={vf.value!r} reason={vf.reason}"
             + (f" allowed=[{allowed_str}]" if allowed_str else "")
         ] = None
-    if (parse := b.digest.l1_parse_failure) is not None:
+    if (parse := b.l1_parse_failure) is not None:
         lines[f"  axis=l1_generate.output reason={parse}"] = None
     if not lines:
         return ""
@@ -60,7 +62,7 @@ def _validation_block(b: InjectionBundle) -> str:
     return "\n".join(sec)
 
 
-def _writable(b: InjectionBundle) -> dict[str, set[str]]:
+def _writable(b: PotterView) -> dict[str, set[str]]:
     schema = b.pipeline_schema
     by_name = {n.name: n for n in schema.running_nodes}
     return {
@@ -70,12 +72,12 @@ def _writable(b: InjectionBundle) -> dict[str, set[str]]:
     }
 
 
-def _runtime_block(b: InjectionBundle) -> str:
+def _runtime_block(b: PotterView) -> str:
     """NEW entries skip the config match: they describe the failure being heard right now."""
     runtime_failures = b.runtime_failures
     if not runtime_failures:
         return ""
-    round_num = b.cycle_slice.round_num
+    round_num = b.round_num
     cutoff = round_num - RUNTIME_FAILURE_RECENCY_WINDOW + 1
     new_rfs = [rf for rf in runtime_failures if rf.first_seen_round == round_num]
     acc_rfs = [
@@ -83,7 +85,7 @@ def _runtime_block(b: InjectionBundle) -> str:
         for rf in runtime_failures
         if rf.first_seen_round != round_num
         and rf.first_seen_round >= cutoff
-        and _rf_matches_current_config(rf, b.cycle_slice.pipeline_params)
+        and _rf_matches_current_config(rf, b.pipeline_params)
     ]
     dropped = sum(1 for rf in runtime_failures if rf.first_seen_round < cutoff)
     if not (new_rfs or acc_rfs or dropped):
@@ -108,7 +110,7 @@ def _runtime_block(b: InjectionBundle) -> str:
     char_cap=None,
     citable=True,
 )
-def _r_l1_wounds(b: InjectionBundle) -> list[Item]:
+def _r_l1_wounds(b: PotterView) -> list[Item]:
     # One item per block: the composition fences the run, so no selection splits the pair across a tag.
     return [Item(blk, trusted=False) for blk in (_validation_block(b), _runtime_block(b)) if blk]
 
@@ -146,7 +148,7 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
     char_cap=None,
     citable=True,
 )
-def _r_guard_breaches(b: InjectionBundle) -> list[Item]:
+def _r_guard_breaches(b: PotterView) -> list[Item]:
     """Prompt evidence only: no escalation rule reads the stream (``escalation.py``)."""
     blocks = [
         blk

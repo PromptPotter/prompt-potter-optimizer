@@ -278,14 +278,17 @@ def _rank_survivors(
     *,
     objective: CapoObjective,
 ) -> list[ArmKey]:
-    # An arm with no graded cell is absent from the ranking, as an untested rival is from the race.
+    # An arm with no graded cell, or none its rivals share, is absent from the ranking, as an
+    # untested rival is from the race.
     readings = {
         key: read for key in survivors if (read := _cell_objectives(rows[key].cells, objective))
     }
     shared = set.intersection(*(set(r) for r in readings.values())) if readings else set()
+    if not shared:
+        return []
 
     def mean(key: ArmKey) -> float:
-        return sum(readings[key][s] for s in shared) / len(shared) if shared else 0.0
+        return sum(readings[key][s] for s in shared) / len(shared)
 
     return sorted(readings, key=mean, reverse=True)
 
@@ -309,7 +312,7 @@ def _labels(labels: list[str], cap: int = 2) -> str:
     return ", ".join(labels[:cap]) + (f" (+{len(labels) - cap})" if len(labels) > cap else "")
 
 
-class PairedTRace:
+class PairedTRace(nodes.Race):
     gate = "outscored"
     settled = "settled"
 
@@ -441,13 +444,6 @@ class PairedTRace:
         named = _labels([labels[k] for k in outscored])
         reason = f"outscored {where} by {len(outscored)} of {len(raced)}: {named}"
         return Elimination(reason=reason, context=context)
-
-    @property
-    def priors(self) -> Mapping[ArmKey, CellSheet]:
-        return {}
-
-    def admit(self, _key: ArmKey, _results: Sequence[GradedCell]) -> None:
-        return None
 
 
 class PairedT(nodes.Eliminator):

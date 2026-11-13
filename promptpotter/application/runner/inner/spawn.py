@@ -33,9 +33,7 @@ from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.inner.narrative import inner_narrative, narrative_head
 from promptpotter.application.runner.inner.tasks import (
-    InnerCells,
     InnerSpawnContext,
-    InnerTaskSpec,
     ResolvedPanel,
     enter_inner_cell,
     inner_instrument_config,
@@ -49,6 +47,7 @@ from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import InnerRun
+from promptpotter.domain.l4.cells import InnerCells, InnerTaskSpec
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import (
     INNER_CELL_TERMS,

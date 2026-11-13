@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L3_PLAN_MAX_CHARS,
     ElectionRow,
-    InjectionBundle,
     InjectionKind,
     Item,
     election_table_rows,
@@ -34,6 +33,7 @@ from promptpotter.domain.value_tree import visibility_of
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
 
+    from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
     from promptpotter.domain.optimizer_state import CritiqueReadout
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -52,7 +52,7 @@ _PLAN_HEADER = "PLAN:\n"
     char_cap=L3_PLAN_MAX_CHARS + len(_PLAN_HEADER),
     citable=True,
 )
-def _r_plan(b: InjectionBundle) -> list[Item]:
+def _r_plan(b: PotterView) -> list[Item]:
     plan = b.l3.plan
     return [Item(f"{_PLAN_HEADER}{plan}" if plan else "")]
 
@@ -63,7 +63,7 @@ def _r_plan(b: InjectionBundle) -> list[Item]:
     char_cap=400,
     citable=False,
 )
-def _r_l3_to_l2_note(b: InjectionBundle) -> list[Item]:
+def _r_l3_to_l2_note(b: PotterView) -> list[Item]:
     note = b.l3.note
     return [Item(f"L3 NOTE TO L2:\n{note}" if note else "")]
 
@@ -92,7 +92,7 @@ _OPTIMIZER_PROMPT_HEADER = (
     char_cap=16000,
     citable=False,
 )
-def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
+def _r_rendered_prompt(b: PotterView) -> list[Item]:
     sections: list[str] = []
     # Field by field: as one blob a replacement sweeps in neighbours, SPLICED it absorbs the framing.
     # A HELD field still renders: the fields replaced must fit around it.
@@ -110,9 +110,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
             f"[{locus}{HELD_PROMPT_FIELD_MARK if held else ''}]\n{text}"
             for locus, text, held in fields
         )
-    inner = effective_optimizer_prompts(
-        b.pipeline_schema, b.cycle_slice.pipeline_params, b.inner_cells
-    )
+    inner = effective_optimizer_prompts(b.pipeline_schema, b.pipeline_params, b.inner_cells)
     if inner:
         sections.append(_OPTIMIZER_PROMPT_HEADER)
         # One section per node·field, so the cap drops whole fields, never one mid-contract.
@@ -130,7 +128,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     char_cap=None,
     citable=False,
 )
-def _r_l1_overrides(b: InjectionBundle) -> list[Item]:
+def _r_l1_overrides(b: PotterView) -> list[Item]:
     overrides = b.l2.steered("l1_generate")
     return [Item(f"CURRENT L1 CONFIG: {json.dumps(overrides)}" if overrides else "")]
 
@@ -141,7 +139,7 @@ def _r_l1_overrides(b: InjectionBundle) -> list[Item]:
     char_cap=None,
     citable=False,
 )
-def _r_l1_layout(b: InjectionBundle) -> list[Item]:
+def _r_l1_layout(b: PotterView) -> list[Item]:
     """Listed slot → panels, the shape an edit takes, so each line is an edit ready to answer."""
     steered = b.l2.steered_layout("l1_generate")
     layout = resolve_node_layout("l1_generate") if steered is None else steered
@@ -170,7 +168,7 @@ def _r_l1_layout(b: InjectionBundle) -> list[Item]:
     char_cap=None,
     citable=True,
 )
-def _r_task_context(b: InjectionBundle) -> list[Item]:
+def _r_task_context(b: PotterView) -> list[Item]:
     tc = b.framing
     if not tc:
         return []
@@ -203,7 +201,7 @@ def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> tuple[str, .
     char_cap=None,
     citable=False,
 )
-def _r_critique_axes(b: InjectionBundle) -> list[Item]:
+def _r_critique_axes(b: PotterView) -> list[Item]:
     return [Item(", ".join(critique_axes(b.pipeline_schema, offers_shots=b.offers_shots)))]
 
 
@@ -249,9 +247,9 @@ def format_l1_critique_for_prompt(
     char_cap=2400,
     citable=True,
 )
-def _r_critique(b: InjectionBundle) -> list[Item]:
+def _r_critique(b: PotterView) -> list[Item]:
     axes = critique_axes(b.pipeline_schema, offers_shots=b.offers_shots)
-    return [Item(format_l1_critique_for_prompt(b.digest.critique, axes))]
+    return [Item(format_l1_critique_for_prompt(b.critique, axes))]
 
 
 _SKILL_TIERS_TEXT = (
@@ -270,7 +268,7 @@ _SKILL_TIERS_TEXT = (
     char_cap=None,
     citable=False,
 )
-def _r_skill_tiers(b: InjectionBundle) -> list[Item]:
+def _r_skill_tiers(b: PotterView) -> list[Item]:
     if visibility_of(b.prompt_delivery) != "on_demand":
         return []
     return [Item(_SKILL_TIERS_TEXT)]
@@ -296,7 +294,7 @@ _SCHEMA_RENAME_UNLOCK_TEXT = (
     char_cap=None,
     citable=False,
 )
-def _r_rebase_capability(b: InjectionBundle) -> list[Item]:
+def _r_rebase_capability(b: PotterView) -> list[Item]:
     if not b.rebase_offered:
         return []
     unlockable = not b.schema_field_rename and any(
@@ -361,7 +359,7 @@ def _election_line(row: ElectionRow, later: Sequence[RoundOutcome]) -> str:
     return "  " + " · ".join(parts)
 
 
-# Offered only where the round measured a backend fault (`InjectionBundle.terminate_offer`): a layer
+# Offered only where the round measured a backend fault (`PotterView.terminate_offer`): a layer
 # shown it on a healthy round reads rows a prompt edit did not move as a broken backend, and aborts.
 _TERMINATE_CAPABILITY_TEXT = (
     'TERMINATE PROPOSAL — terminate_proposal = {{"reason": "<what the operator must fix>"}} halts '
@@ -376,7 +374,7 @@ _TERMINATE_CAPABILITY_TEXT = (
     char_cap=None,
     citable=False,
 )
-def _r_terminate_capability(b: InjectionBundle) -> list[Item]:
+def _r_terminate_capability(b: PotterView) -> list[Item]:
     if (starved := b.terminate_offer) is None:
         return []
     return [

@@ -867,6 +867,18 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
         assert gone is not None and gone.current_outcome in (False, None, []), (
             f"{inputs.kind}: an absent arm's decision replayed"
         )
+    # Two survivors walked on disjoint cells share no reading: neither is ranked above the other.
+    chars = {"target_prompt_chars": 10}
+    apart = sheet(measurements([1.0] * 4, sample_ids=[10, 11, 12, 13], pipeline_data=chars))
+    bar = sheet(measurements([0.0] * 4, pipeline_data=chars))
+    survived = PopulationKept(objective=paired.objective, survivors=[unwalked, bar_arm])
+    disjoint = replay_decisions(
+        _round(round=3, cells={unwalked: apart, bar_arm: bar}),
+        [ResumeCheckpointRecord(kind=survived.kind, inputs_ref=survived, outcome=[unwalked])],
+    )
+    assert disjoint is not None and disjoint.current_outcome == [], (
+        "population_kept ranked arms that share no cell, reading each as a 0.0 mean"
+    )
 
 
 @pytest.mark.usefixtures("offline", "optimizing_memory")

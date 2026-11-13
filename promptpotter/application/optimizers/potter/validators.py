@@ -21,7 +21,6 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     resolve_layout_override,
 )
-from promptpotter.application.optimizers.potter.dispatch.prompts import inner_template
 from promptpotter.application.optimizers.potter.pobb import EliminationGate
 from promptpotter.domain.arms import Cut, Eliminated, Measured, Proposal
 from promptpotter.domain.candidate_diff import (
@@ -44,7 +43,7 @@ from promptpotter.domain.wounds import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.runner.inner.tasks import InnerCells
+    from promptpotter.domain.l4.cells import InnerCells
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +187,7 @@ def l1_inner_placeholders_intact(
             for k, v in cfg.items()
             if k in OptimizerPromptTemplate.model_fields and isinstance(v, str)
         }
-        base = inner_template(inner_cells, node_name) if prose else None
+        base = inner_cells.template(node_name) if prose else None
         if base is None:
             continue
         declared = sorted(base.slots())
@@ -291,7 +290,7 @@ def _parent_field_text(
     inherited = pipeline_params.node(node).laid_keys().get(field)
     if isinstance(inherited, str) and inherited:
         return inherited
-    template = inner_template(cells, node)
+    template = cells.template(node)
     current = getattr(template, field, "") if template is not None else ""
     return current if isinstance(current, str) else ""
 

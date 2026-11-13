@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass
@@ -16,45 +18,56 @@ from promptpotter.infrastructure.store.io import read_bytes_optional, write_text
 from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from promptpotter.domain.spend import TokenUsageKind
-    from promptpotter.infrastructure.llm.request import ChatMessage
+    from promptpotter.infrastructure.llm.request import ChatRequest
 
 logger = logging.getLogger(__name__)
 
 
-def hash_call(
-    *,
-    messages: list[ChatMessage],
-    model: str | None,
-    provider: str,
-    temperature: float,
-    json_schema: dict[str, Any] | None,
-    response_model: str | None = None,
-    seed: int | None = None,
-    max_tokens: int | None = None,
-    reasoning_effort: str | None = None,
-    top_p: float | None = None,
-    route_order: list[str] | None = None,
-) -> str:
+def hash_call(request: ChatRequest, *, provider: str) -> str:
+    """The request as sent: its `wire_schema`, never a class name, keys the reply."""
     payload: dict[str, Any] = {
-        "messages": messages,
-        "model": model,
+        "messages": request.messages,
+        "model": request.model,
         "provider": provider,
-        "temperature": temperature,
-        "json_schema": json_schema,
-        "response_model": response_model,
-        "seed": seed,
-        "max_tokens": max_tokens,
-        "reasoning_effort": reasoning_effort,
+        "temperature": request.temperature,
+        "json_schema": request.wire_schema,
+        "seed": request.seed,
+        "max_tokens": request.max_tokens,
+        "reasoning_effort": request.reasoning_effort,
     }
     # An optional lever joins only when set: an unconditional `null` re-keys every banked reply.
-    if route_order:
-        payload["route_order"] = route_order
-    if top_p is not None:
-        payload["top_p"] = top_p
+    if request.route_order:
+        payload["route_order"] = request.route_order
+    if request.top_p is not None:
+        payload["top_p"] = request.top_p
     return stable_hash(payload, length=ADDRESS_HEX)
+
+
+class _Claims:
+    """A miss claims its key; a second asker of it waits on the claim, then reads the bank."""
+
+    def __init__(self) -> None:
+        self._held: dict[Path, tuple[asyncio.Lock, int]] = {}
+
+    @contextlib.asynccontextmanager
+    async def claim(self, path: Path) -> AsyncIterator[None]:
+        lock, askers = self._held.get(path, (asyncio.Lock(), 0))
+        self._held[path] = (lock, askers + 1)
+        try:
+            async with lock:
+                yield
+        finally:
+            lock, askers = self._held[path]
+            if askers == 1:
+                del self._held[path]
+            else:
+                self._held[path] = (lock, askers - 1)
+
+
+_CLAIMS = _Claims()
 
 
 @dataclass(frozen=True)
@@ -107,30 +120,33 @@ class LLMReuseCache:
         cost stays invariant to cache history; a fresh reply is kept unless empty, or a transient
         failure replays tenant-wide. A send that raises keeps and meters nothing."""
         started = time.monotonic()
-        if (banked := self._replay(key)) is not None:
-            duration_s = round(time.monotonic() - started, 2)
-            if claim_call_price(key):
-                emit_replay_usage(
-                    node=node,
-                    usage=banked.usage,
-                    duration_s=duration_s,
-                    price=call_price(
-                        kind,
-                        banked.usage,
-                        model=banked.model or model,
-                        provider=provider,
-                        cost_usd=banked.cost_usd,
-                        recorded=None,
-                    ),
-                    served_by=banked.served_by,
+        async with _CLAIMS.claim(self._path(key)):
+            if (banked := self._replay(key)) is None:
+                response = await send()
+                # The send metered itself: a later replay of its reply in this campaign meters nothing.
+                claim_call_price(key)
+                if response.content.strip() or response.parsed is not None:
+                    self._save(key, response)
+                return Answered(
+                    response, replayed=False, duration_s=round(time.monotonic() - started, 2)
                 )
-            return Answered(banked, replayed=True, duration_s=duration_s)
-        response = await send()
-        # The send metered itself: a later replay of its reply in this campaign meters nothing.
-        claim_call_price(key)
-        if response.content.strip() or response.parsed is not None:
-            self._save(key, response)
-        return Answered(response, replayed=False, duration_s=round(time.monotonic() - started, 2))
+        duration_s = round(time.monotonic() - started, 2)
+        if claim_call_price(key):
+            emit_replay_usage(
+                node=node,
+                usage=banked.usage,
+                duration_s=duration_s,
+                price=call_price(
+                    kind,
+                    banked.usage,
+                    model=banked.model or model,
+                    provider=provider,
+                    cost_usd=banked.cost_usd,
+                    recorded=None,
+                ),
+                served_by=banked.served_by,
+            )
+        return Answered(banked, replayed=True, duration_s=duration_s)
 
     def _save(self, key: str, response: LLMResponse) -> None:
         write_text(self._path(key), response.model_dump_json(indent=2))

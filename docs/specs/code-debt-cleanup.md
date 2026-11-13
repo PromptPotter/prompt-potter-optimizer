@@ -251,66 +251,24 @@ row it closes.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
-- **capo's `population_kept` replays an absent arm as confirmed**: `optimizers/capo/members.py::_rank_survivors`
-  reads an arm with no shared cells as a 0.0 mean, so a replay over a round that lacks the arm confirms
-  it instead of answering it absent. Action: an arm with no shared cells is absent, as in the race's
-  replay. **Re-test:** `pytest tests/test_archive.py -k replays_its_decisions` covers `population_kept`.
 - **`tests/test_identity.py` lays the spawn's arm beside its seat** (`_l4_arm`, `_l4_laid`, the depth
   step). Action: the journey drives `_open_seat` over an offline inner campaign. **Rides with:** rk-dec 3.
 - **The browser inks a served state from its own map**: `webapp/lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`
   and `PipelineFlow`'s `tone`. Action: they go once a served word row carries its `Tone`
   (`domain/said.py`). **Re-test:** `git grep -n "MOVEMENT_CLASS" -- webapp/lib`.
-- **Potter's renderers read a hand-copied snapshot**: potter asks through `node_context.py::Calls.answer`
-  now, but `dispatch/facade.py::build_bundle` copies run state into `dispatch/bundle.py::InjectionBundle`
-  for every renderer (35 fields, then a `replace` for `silent_l1_panels`);
-  `escalation.py::Layer` and `escalation.py::TransitionResult` are a second member
-  protocol; `escalation.py::_first_match` runs a fixed rule table; the fitness formula has a second
-  spelling (`evaluators.py::resolve_cell_formula`). Action: renderers read the node's own reads through
-  a potter-owned view, and the two pure-renderer tests (`test_identity`'s rendered-prompt journey,
-  `test_security`'s poisoned-panel test) drive a node context; the rules three match functions that
-  keep the name `escalation.py::EscalationEvent` stamps; one formula spelling. **Rides with:**
-  rk-opt's next chain. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
-- **`InnerCells` sits in the runner, holding application types**: `runner/inner/tasks.py::InnerCells`
-  holds `optimizer_manifest.py::SelectedOptimizer` per cell and reads its schema, manifest and levers,
-  so it cannot move into `domain/l4` (layering) until a cell holds a domain projection of its
-  optimizer. Action: decide what a cell's optimizer is in `domain/l4` terms (the chain, the levers,
-  the measurement plan), then move `InnerCells` with it. **Rides with:** the `resolve_cells` row.
+- **Potter's layers keep a second member protocol**: `escalation.py::Layer` and
+  `escalation.py::TransitionResult` carry L2 and L3 beside `nodes.py`'s member protocol, so a layer
+  fired by the `escalation` controller parses, lands and reports through its own door. **Re-test:**
+  `git grep -n "class Layer(Protocol)" -- promptpotter`.
 - **A locked-in leader's caught-up cells reach the scoreboard only at the round's close**:
-  `runner/round.py::_walk_population` merges `CatchUpPool.caught` after `run_walks`, a catch-up walk
-  records no pass (`BACKFILL` is no arm role), and `scoring/query_loop.py` still types the bench's
-  one pool through `domain/validators.py::CatchUps`. Action: a caught-up cell is a recorded row of
-  its prior's arm (its walk continues the prior's pass, `held` = the prior's rows), and the pool
-  moves down beside `run_walks` so the protocol goes. **Rides with:** rk-opt's next chain. **Re-test:** in
-  `test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails`'s locked block, the leader's
-  last `running` before the close counts the cells `rows(leader)` holds.
-- **The catch-up pool's review (reported against 1a064d901; verify each at its line first)**:
-  `runner/round.py:921` a kept budget cut banks catch-up cells the race never admitted, so the election
-  reads a sheet PoBB never compared; `race.py:166` `admit` merges onto an existing prior where
-  `register_completed` replaced it, and `Race.admit` is two doors (a decided arm, a catch-up) told apart
-  by prior membership; capo `:463` and gepa `:369` carry duplicated no-op race halves; `round.py:945`
-  `_unstarted` costs walks × samples × priors × cells per scheduler turn; `round.py:848` a dead
-  disjunct. Action: one admit door per arm role, beside the row above. **Rides with:** rk-opt's next chain.
-- **The reply cache keys a schema by its class name** (✓): `bench/llm_call.py:195` passes
-  `response_model.__name__` into `hash_call`, while `openai_compat.py:503-504` sends
-  `response_model.model_json_schema()`. The check-in's `checkin_output()` builds a different schema per
-  chain shape, always named `CheckinOutput` (`task_context.py:187`), sent with no seed (`:261`) and
-  messages carrying only the description (`:279-282`); the cache is the archive home's, shared across
-  campaigns and tenants. So two chains with one description and different prompt fields, or any
-  check-in after an edit to `CheckinOutput`, replay the old reply: hidden slots read non-empty, or the
-  reply fails to parse. Action: one `ChatRequest.wire_schema` (the schema sent, titles stripped), which
-  the client sends and `hash_call` keys on. Beside it (reported): the cache claims nothing on a miss
-  (`llm_reuse_cache.py:110-133`), so concurrent identical misses each pay; a miss claims its key and a
-  second asker waits on it. **Rides with:** rk-opt's next chain. **Re-test:** two check-ins over one
-  description and different prompt fields miss each other's cache.
-- **L1 is told the wrong number of rows to win** (✓, a statistics pass): `panels.py:1093-1101`'s
-  `detectable_rows` takes its SE from `digest.ability`, the frontier pool (each sample's latest cell from
-  any individual, a pool `cell_fold.py:76` says to "never score"), and doubles it with
-  `hypot(a.se, a.se)`: SE 0.256 on 80 cells vs 0.495 on 20, so L1 reads "win ≈2 more rows" where 5 is
-  right, at power 0.44, not 0.80. Root: the expected information over `latest_sample_keys` at the
-  parent's own θ (`parent_own_rows` exists), for both sides of the contrast. Beside it (reported):
-  `SampleIndex.refresh` re-folds the bank's whole archive history at every round close for compare arms
-  and L4 cells (`sample.py:195-248`), and the local archive sits at 29.96 MB of `_CellFile`'s 32 MB cap.
-  **Rides with:** rk-opt's next chain (potter's prompts move: a re-key).
+  `runner/round.py::_walk_population` merges `CatchUpPool.caught` after `run_walks`, and a catch-up
+  walk records no pass (`BACKFILL` is no arm role). Action: a caught-up cell is a recorded row of its
+  prior's arm (its walk continues the prior's pass, `held` = the prior's rows). **Rides with:** rk-opt's
+  next chain. **Re-test:** in `test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails`'s
+  locked block, the leader's last `running` before the close counts the cells `rows(leader)` holds.
+- **A round close re-folds the bank's whole archive**: `SampleIndex.refresh` re-folds the bank's
+  whole archive history at every round close for compare arms and L4 cells (`sample.py:195-248`), and
+  the local archive sits at 29.96 MB of `_CellFile`'s 32 MB cap. **Rides with:** rk-opt's next chain.
 - **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
   carry their passes beside `VerificationPass`. Action: both ride the one record. **Held (design
   fork):** (a) each overlap top-up is a `VerificationPass` of a new `overlap` kind on the round, and
@@ -318,17 +276,11 @@ row it closes.
   17 files) stays; or (b) the reading and its cells are one origin-panel record the round and its
   restatement carry, so `.overlap` goes whole. Both reshape `RoundStatement` (a wipe). **Re-test:**
   `git grep -n "\.overlap\b" -- promptpotter` is empty.
-- **`ab` re-fits under the current scorer on the whole ruler** (decision 21, rk-opt 5). The tenant
-  ruler at a round's reach holds other campaigns' rows, so `ab` regrades those foreign rows off the
-  archive too, not only the record's own cells, and with the formula unchanged its fit equals today's
-  (operator, 2026-11-11: option (b)). Only `ab`'s output moves. It needs an sp_hash → archive-entry
-  lookup keyed by dataset hash. **Re-test:**
-  `git grep -ln "ab_replay" -- tests` names a test that edits the formula and re-grades.
 - **`resolve_cells` runs twice per run init**: `runner/inner/spawn.py::_inner_cells` (through
   `_identity_config`, `:53`, `:98`) and `runner/inner/tasks.py::_outer_cells` (`:59`) each parse the
   experiment and resolve the panel's cells. Action: the cells are resolved once, off the panel the
-  workload holds, and both read them. **Rides with:** the rest of rk-opt link 4, whose `InnerCells`
-  move into `domain/l4` names both files. **Re-test:** `git grep -n "resolve_cells(" -- promptpotter`
+  workload holds, and both read them; `identity_config` takes `(stores, experiment)`, so the connector
+  protocol moves with it. **Rides with:** rk-opt's next chain. **Re-test:** `git grep -n "resolve_cells(" -- promptpotter`
   lists one call per init.
 
 ### batch/26 · stream-rk
@@ -1346,7 +1298,7 @@ Toolbar, and the phone walk's back step. Left:
   (`main.py:270-279`) (root: `Source.of` raises a refusal naming the field); ✓ `OPTIMIZER_ABORT` has an
   empty `next_step` and no acts (`phases.py:614-616`) and its reason is only logged (`escalation.py:516-531`),
   a state the system enters but cannot report. **Rides with:** faults 1.
-- **The LLM layer's wire faults**: `infrastructure/llm/openai_compat.py::_strip_titles` drops every key
+- **The LLM layer's wire faults**: `infrastructure/llm/request.py::strip_titles` drops every key
   named `title`, so a property called `title` leaves `properties` while `required` still names it
   (latent: no wire schema has one yet); `send_pacing.py:302` reads `Retry-After: 0` as absent and takes
   the 15–300 s cooldown. Reported, verify first: `json_parse.py:178` a ValidationError from Groq's

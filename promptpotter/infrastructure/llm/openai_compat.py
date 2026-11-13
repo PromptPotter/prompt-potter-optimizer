@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import AliasPath, BaseModel, Field, ValidationError
 
@@ -28,7 +28,13 @@ from promptpotter.infrastructure.llm.json_parse import (
     try_groq_json_validate_repair,
 )
 from promptpotter.infrastructure.llm.pricing import PriceTier
-from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest, Tool, ToolCall
+from promptpotter.infrastructure.llm.request import (
+    ChatMessage,
+    ChatRequest,
+    Tool,
+    ToolCall,
+    strip_titles,
+)
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -54,14 +60,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _R = TypeVar("_R")
-
-
-def _strip_titles(node: object) -> object:
-    if isinstance(node, dict):
-        return {k: _strip_titles(v) for k, v in node.items() if k != "title"}
-    if isinstance(node, list):
-        return [_strip_titles(v) for v in node]
-    return node
 
 
 class _WireToolCall(BaseModel):
@@ -302,7 +300,7 @@ def _wire_tools(tools: tuple[Tool, ...]) -> list[dict[str, Any]]:
             "function": {
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": _strip_titles(tool.parameters),
+                "parameters": strip_titles(tool.parameters),
             },
         }
         for tool in tools
@@ -482,7 +480,6 @@ class OpenAICompatibleClient:
 
     async def _request_params(self, request: ChatRequest) -> dict[str, Any]:
         seed, top_p = request.seed, request.top_p
-        response_model, response_schema = request.response_model, request.response_schema
         request_params: dict[str, Any] = {
             "model": request.model,
             "messages": _wire_messages(request.messages),
@@ -512,16 +509,15 @@ class OpenAICompatibleClient:
         if body is not None:
             request_params |= body
 
-        wire_schema = response_schema or (
-            response_model.model_json_schema() if response_model else None
-        )
-        if wire_schema is not None:
-            # The schema is serialized into the INPUT, so Pydantic's auto `title`s are prompt tokens.
-            wire_schema = cast("dict[str, Any]", _strip_titles(wire_schema))
+        if (wire_schema := request.wire_schema) is not None:
             request_params["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": (response_model.__name__ if response_model else "response_schema"),
+                    "name": (
+                        request.response_model.__name__
+                        if request.response_model
+                        else "response_schema"
+                    ),
                     "schema": wire_schema,
                     "strict": True,
                 },

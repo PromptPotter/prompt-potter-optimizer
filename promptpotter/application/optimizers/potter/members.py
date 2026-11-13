@@ -27,9 +27,9 @@ from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, LADDER, POBB
 from promptpotter.application.optimizers.potter.dispatch.bundle import injection_registry
 from promptpotter.application.optimizers.potter.dispatch.facade import (
-    BUNDLE_READS,
-    BUNDLE_SEES,
-    build_bundle,
+    VIEW_READS,
+    VIEW_SEES,
+    PotterView,
     fingerprinted_modules,
     node_packages,
 )
@@ -58,9 +58,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
 )
 from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.escalation import (
-    CLIMB_RULES,
-    DEFAULT_ESCALATION_RULES,
-    HEAL_RULES,
+    ESCALATION_RULES,
     Fire,
     LayerCall,
     NextAction,
@@ -130,7 +128,7 @@ if TYPE_CHECKING:
         ReviewReading,
         Selection,
     )
-    from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
+    from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.optimizer_state import StatePart
@@ -216,10 +214,10 @@ class L1Generate(LayoutNode, nodes.Proposer):
     proposes: ClassVar[nodes.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = L1GenerateKnobs
-    reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
+    reads: ClassVar[frozenset[type[StatePart]]] = VIEW_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L1Readout})
-    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Children}
-    # Every bundle member reads the pools through this draw (`NodeContext.drawn`), so L2 lays out
+    sees: ClassVar[frozenset[type[CycleRead]]] = VIEW_SEES | {Calls, Children}
+    # Every view member reads the pools through this draw (`NodeContext.drawn`), so L2 lays out
     # what L1 is shown.
     draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType(
         {
@@ -370,9 +368,9 @@ class L1Critique(LayoutNode, nodes.Adapter):
     """A malformed response is survived: the next walk re-runs it (`round.py::settle_owed_outputs`)."""
 
     name: ClassVar[str] = "l1_critique"
-    reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
+    reads: ClassVar[frozenset[type[StatePart]]] = VIEW_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Critique})
-    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls}
+    sees: ClassVar[frozenset[type[CycleRead]]] = VIEW_SEES | {Calls}
     response_model: ClassVar[type[BaseModel] | None] = L1CritiqueOutput
     prompt_sources: ClassVar[tuple[ModuleType, ...]] = _HUB
 
@@ -386,8 +384,8 @@ class L1Critique(LayoutNode, nodes.Adapter):
         return critique_facts(round_result)
 
     def round_packages(self, ctx: NodeContext) -> dict[str, str]:
-        """Every layout node's: one bundle feeds them all, and it carries the trajectory up to *ctx*'s round."""
-        return node_packages(ctx, build_bundle(ctx, ctx.slice(Ladder)))
+        """Every layout node's: one view feeds them all, and it carries the trajectory up to *ctx*'s round."""
+        return node_packages(PotterView(ctx, ctx.slice(Ladder)))
 
     async def rederive(self, ctx: NodeContext) -> tuple[StatePart, ...]:
         if ctx.recall(Critique, ctx.round_num).readout is None:
@@ -401,9 +399,9 @@ class L1Critique(LayoutNode, nodes.Adapter):
 class L2Context(LayoutNode):
     name: ClassVar[str] = "l2_context"
     layer_id: ClassVar[Literal["L2", "L3"]] = "L2"
-    reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
+    reads: ClassVar[frozenset[type[StatePart]]] = VIEW_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L2Memory})
-    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Progress}
+    sees: ClassVar[frozenset[type[CycleRead]]] = VIEW_SEES | {Calls, Progress}
     response_model: ClassVar[type[BaseModel] | None] = L2ContextOutput
     prompt_sources: ClassVar[tuple[ModuleType, ...]] = _HUB
     phase: ClassVar[OptimizerPhase] = OptimizerPhase(
@@ -418,12 +416,12 @@ class L2Context(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation, L1Generate})
 
-    def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
+    def reply_model(self, view: PotterView) -> type[BaseModel]:
         return build_l2_response_model(
-            bundle.silent_l1_panels,
-            bundle.recombination_offer(self.name),
-            terminating=bundle.terminate_offer is not None,
-            stand_on=tuple(bundle.reelect_offer),
+            view.silent_l1_panels,
+            view.recombination_offer(self.name),
+            terminating=view.terminate_offer is not None,
+            stand_on=tuple(view.reelect_offer),
         )
 
     def parse(self, ctx: NodeContext, raw: L2ContextOutput) -> TransitionResult:
@@ -478,7 +476,7 @@ class L2Context(LayoutNode):
                 Recombination.model_validate(spec.model_dump())
                 for spec in named[: ctx.knobs(L1GenerateKnobs).recombine]
             ],
-            # The round the bundle renders for, as the next round's L1 reads it.
+            # The round the view renders for, as the next round's L1 reads it.
             for_round=ctx.read(Lineage).rounds[-1].round + 1,
         )
 
@@ -537,9 +535,9 @@ class L2Context(LayoutNode):
 class L3Plan(LayoutNode):
     name: ClassVar[str] = "l3_plan"
     layer_id: ClassVar[Literal["L2", "L3"]] = "L3"
-    reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
+    reads: ClassVar[frozenset[type[StatePart]]] = VIEW_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L3Memory})
-    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Progress}
+    sees: ClassVar[frozenset[type[CycleRead]]] = VIEW_SEES | {Calls, Progress}
     response_model: ClassVar[type[BaseModel] | None] = L3PlanOutput
     prompt_sources: ClassVar[tuple[ModuleType, ...]] = _HUB
     phase: ClassVar[OptimizerPhase] = OptimizerPhase(
@@ -550,9 +548,9 @@ class L3Plan(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation, L1Generate})
 
-    def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
+    def reply_model(self, view: PotterView) -> type[BaseModel]:
         return build_l3_response_model(
-            terminating=bundle.terminate_offer is not None, stand_on=tuple(bundle.reelect_offer)
+            terminating=view.terminate_offer is not None, stand_on=tuple(view.reelect_offer)
         )
 
     def parse(self, ctx: NodeContext, raw: L3PlanOutput) -> TransitionResult:
@@ -620,9 +618,7 @@ class Escalation(nodes.Controller):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Bounds, Replay})
     fires: ClassVar[frozenset[type]] = frozenset({L2Context, L3Plan})
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = LADDER
-    priced_surface: ClassVar[Mapping[str, int]] = {
-        "escalation_rules": len(DEFAULT_ESCALATION_RULES) + len(CLIMB_RULES) + len(HEAL_RULES)
-    }
+    priced_surface: ClassVar[Mapping[str, int]] = {"escalation_rules": len(ESCALATION_RULES)}
 
     def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
         esc = selected.knobs_of(self.name, EscalationKnobs)

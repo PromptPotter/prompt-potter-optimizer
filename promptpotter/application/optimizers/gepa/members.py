@@ -267,7 +267,7 @@ def minibatch_improves(
     return sigma_prime > sigma, sigma, sigma_prime
 
 
-class _GateRace:
+class _GateRace(nodes.Race):
     gate = "not_improved"
 
     def __init__(
@@ -364,13 +364,6 @@ class _GateRace:
                 "sigma_prime": cr["sigma_prime"],
             },
         )
-
-    @property
-    def priors(self) -> Mapping[ArmKey, CellSheet]:
-        return {}
-
-    def admit(self, _key: ArmKey, _results: Sequence[GradedCell]) -> None:
-        return None
 
 
 class MinibatchGate(nodes.Eliminator):
