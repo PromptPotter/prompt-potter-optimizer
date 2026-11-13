@@ -35,6 +35,7 @@ from promptpotter.application.scoring.search_point_scorer import score_search_po
 from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
 from promptpotter.domain.cell_fold import merge_known_outcomes
+from promptpotter.domain.crowning_bar import BarRead, CrowningBar
 from promptpotter.domain.opt_search_point import (
     OPERATOR_SOURCE,
     Locus,
@@ -174,21 +175,20 @@ async def reread_walk(round_: RoundContext, reads: Sequence[WalkRead]) -> None:
         )
 
 
-async def rewalk_origin(round_: RoundContext, scoring_set: list[Sample]) -> None:
-    """Round 0 closes again on ONE walk of the origin over its scoring set; the archive never replays an errored cell."""
+async def walk_origin(round_: RoundContext, cells: list[Sample]) -> ReadArm:
+    """Round 0's ONE walk of the origin over *cells*; the archive never replays an errored cell."""
     cycle = round_.cycle
     round_.ledger.append(PhaseRecord(phase=CampaignPhase.ORIGIN, event="enter", round=0))
     try:
-        read = await measure_as_parent(
+        return await measure_as_parent(
             round_,
             cycle.parent,
             cycle.parent_point,
-            scoring_set,
+            cells,
             role=MeasurementRole.ORIGIN,
         )
     finally:
         round_.ledger.append(PhaseRecord(phase=CampaignPhase.ORIGIN, event="exit", round=0))
-    cycle.seat_origin(read, cycle.origin_round.optimizer_state)
 
 
 async def measure_as_parent(
@@ -313,6 +313,12 @@ class Lineage(CycleRead):
                 "leading": at.arm,
                 "ended_on": at.arm,
                 "reelection": reelection,
+                # A layer's promotion, which no bar judged: the round promotes as the layer named.
+                "bar": BarRead(
+                    statistic=cycle.config.optimization.crowning_bar,
+                    clears=True,
+                    quote="re-elected by a layer",
+                ),
             }
         )
         stated = ended_on(
@@ -432,6 +438,9 @@ class Bounds(CycleRead):
     @property
     def admission(self) -> float | None:
         return self._cycle.optimizer.admission
+
+    def crowning_bar(self, admission: float) -> CrowningBar:
+        return self._cycle.crowning_bar(admission)
 
     @property
     def budget_rounds(self) -> int | None:

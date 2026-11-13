@@ -167,15 +167,6 @@ class PoBBKnobs(StrictModel):
             "the round's best falls below ε(n). Off → no candidate is cut for futility."
         ),
     )
-    lock_in: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
-        description=(
-            "Lock-in: a candidate stops measuring once its posterior probability of being the "
-            "round's best reaches the selector's own admission bar against the parent and every "
-            "earlier arm, and joins the priors every later arm races. The bar is re-read after "
-            "every cell (optional stopping), which inflates false locks. A selector with no "
-            "such bar locks none in. Off → every candidate not cut runs its full budget."
-        ),
-    )
 
 
 class ElectionKnobs(StrictModel):

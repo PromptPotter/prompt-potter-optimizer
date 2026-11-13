@@ -191,6 +191,60 @@ def sign_posterior(wins: int, losses: int) -> float:
     return 1.0 - _beta_cdf(0.5, wins + 1, losses + 1)
 
 
+def sign_test_p(wins: int, losses: int) -> float:
+    """The exact one-sided sign test on the discordant cells: ``P(X >= wins)``, ``X ~ Bin(n, 1/2)``."""
+    if wins <= 0:
+        return 1.0
+    return _beta_cdf(0.5, wins, losses + 1)
+
+
+def discordance_e_value(wins: int, losses: int) -> float:
+    """An anytime-valid e-process on the paired discordance: the likelihood ratio of a win rate
+    mixed uniformly over ``[1/2, 1]`` against ``1/2``, a supermartingale under every rate at most
+    ``1/2``, so it may be read wherever the race stops."""
+    n = wins + losses
+    if n == 0:
+        return 1.0
+    log_beta = math.lgamma(wins + 1) + math.lgamma(losses + 1) - math.lgamma(n + 2)
+    return math.exp((n + 1) * math.log(2.0) + log_beta) * sign_posterior(wins, losses)
+
+
+def anytime_level_lower(total: float, n: int, alpha: float) -> float | None:
+    """A one-sided lower bound on the mean of *n* values in ``[0, 1]`` summing to *total*, valid at
+    every look: the least level a mixture e-process (uniform over the rates above it) keeps
+    under ``1/alpha``. ``None`` on no value."""
+    if n < 1:
+        return None
+    rest = n - total
+
+    def log_e(level: float) -> float:
+        a, b = total + 1.0, rest + 1.0
+        log_beta = math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
+        upper = 1.0 - _beta_cdf(level, a, b)
+        if upper <= 0.0:
+            return -math.inf
+        return (
+            log_beta
+            + math.log(upper)
+            - math.log1p(-level)
+            - total * math.log(level)
+            - rest * math.log1p(-level)
+        )
+
+    bar, lo, hi = -math.log(alpha), 0.0, total / n
+    if hi <= 0.0:
+        return 0.0
+    if log_e(hi) >= bar:
+        return hi
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        if log_e(mid) >= bar:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
 def holm_adjusted(p_values: list[float]) -> list[float]:
     """In INPUT order. What a claim gates on: it holds under any dependence, and pairs that SHARE
     arms are dependent."""

@@ -291,8 +291,12 @@ async def _run_single_cycle(
         declare_round_allowance(session, step_rounds)
         book = require_spend_book("the bench's set-aside")
         ended = await open_origin_round(
-            cycle, dataset, observers.ledger, spend=observers.dashboard.spend
-        ) or await run_round_loop(cycle, campaign_config, session, observers.ledger)
+            cycle,
+            dataset,
+            observers.ledger,
+            spend=observers.dashboard.spend,
+            resumed_ending=prep.resumed_ending,
+        ) or await run_round_loop(cycle, cycle.config, session, observers.ledger)
         stop_reason, cycle_error, fork, open_round, cancel_exc, stepped = ended
         if stepped:
             pause_cause = PauseCause.STEP

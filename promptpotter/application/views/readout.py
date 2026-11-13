@@ -18,7 +18,7 @@ from promptpotter.application.views.render.candidate import (
 )
 from promptpotter.application.views.render.phase import (
     fmt_elapsed,
-    render_patience_status,
+    render_advance_status,
     render_progress_table,
     render_round_stats,
     round_verdict_basis,
@@ -103,7 +103,6 @@ from promptpotter.shared.measurement_context import MeasurementRole
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import Grade, MeasuredCell
 
@@ -125,13 +124,11 @@ class ReadoutProjection(Projection):
         self,
         *,
         sink: StatusFn | None,
-        patience: int | None,
         pipeline_schema: PipelineSchema | None,
         measured_unit: MeasuredUnit = "sample",
     ) -> None:
         self._round_num = 0
         self._sink = sink
-        self.patience = patience
         self._display_tags = display_tags(pipeline_schema)
         self.measured_unit = measured_unit
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
@@ -163,13 +160,11 @@ class ReadoutProjection(Projection):
     def for_campaign(
         cls,
         session: Session,
-        campaign_config: CampaignConfig,
         *,
         sink: StatusFn | None,
     ) -> ReadoutProjection:
         return cls(
             sink=sink,
-            patience=campaign_config.optimization.convergence_patience,
             pipeline_schema=session.pipeline_schema,
             measured_unit=session.backend_client.connector.measured_unit,
         )
@@ -622,10 +617,7 @@ class ReadoutProjection(Projection):
                     self._write(line)
         for fact in (f for f in round_result.optimizer_facts if f.kind == "stat"):
             self._write(_node_line(f"{fact.label}: {fact.text}"))
-        for line in render_patience_status(
-            round_result.overlap.advance,
-            standing.rounds_without_advance,
-            self.patience,
-        ).split("\n"):
-            self._write(line)
+        self._write(
+            render_advance_status(round_result.overlap.advance, standing.rounds_without_advance)
+        )
         self._write(_node_bottom())

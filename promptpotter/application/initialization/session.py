@@ -44,12 +44,6 @@ class ScorerSetup:
     # One per declared term, built once per run so every judge validation precedes spend.
     judges: tuple[SampleEvaluator, ...]
 
-    def require_scorer(self) -> Scorer:
-        return self.scorer
-
-    def require_partition(self) -> BankPartition:
-        return self.partition
-
 
 @dataclass(frozen=True)
 class LaunchClock:

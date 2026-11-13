@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.bench.node_context import Lineage, Replay, Ruler
+from promptpotter.application.bench.node_context import Bounds, Lineage, Replay, Ruler
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizers.nodes import Selection
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs
@@ -11,6 +11,7 @@ from promptpotter.application.scoring.selection import (
     elect_round_winner,
     readable_lifts,
 )
+from promptpotter.domain.crowning_bar import CrowningBar
 from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.ruler import DeltaRuler
@@ -86,7 +87,7 @@ def _kept_for_a_fresh_read(
 class RoundWinner(Replayed, kind="round_winner"):
     arms: list[ArmKey]
     coverage_floor: int
-    admission: float
+    bar: CrowningBar
     # Names which of the round's banked references the bar was; its rows are the close's.
     parent: ArmKey
     crowned: list[str]
@@ -100,7 +101,7 @@ class RoundWinner(Replayed, kind="round_winner"):
             pooled(self.parent),
             self.coverage_floor,
             ruler,
-            admission=self.admission,
+            bar=self.bar,
         )
 
     def replay(self, ctx: ReplayContext) -> ArmKey | None:
@@ -120,7 +121,7 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
     inputs = RoundWinner(
         arms=electable,
         coverage_floor=measured.coverage_floor,
-        admission=ctx.knobs(ElectionKnobs).admission,
+        bar=ctx.read(Bounds).crowning_bar(ctx.knobs(ElectionKnobs).admission),
         parent=measured.parent.key,
         crowned=sorted(measured.crowned),
     )

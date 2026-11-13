@@ -521,17 +521,41 @@ def candidate_abilities(
     whole = fit_theta(parent, entries)
     abilities = RoundAbilities(theta={}, theta_se={}, bar={}, cells={})
     for cid, sheet in results_by_id.items():
-        own = theta_cells(responses_of(sheet), parent, ruler)
-        if (read := fit_theta(own, entries)) is None:
+        if (fit := _arm_fit(sheet, parent, whole, entries, ruler)) is None:
             continue
-        abilities.theta[cid], abilities.theta_se[cid] = read
-        abilities.cells[cid] = len(own)
-        against = (
-            whole if entries is not None else fit_theta({key: parent[key] for key in own}, None)
-        )
+        (abilities.theta[cid], abilities.theta_se[cid]), abilities.cells[cid], against = fit
         if against is not None:
             abilities.bar[cid] = against
     return abilities
+
+
+def _arm_fit(
+    sheet: CellSheet,
+    parent: Mapping[str, float],
+    whole: tuple[float, float] | None,
+    entries: Ruler | None,
+    ruler: DeltaRuler | None,
+) -> tuple[tuple[float, float], int, tuple[float, float] | None] | None:
+    """One arm on the election's fit: its ``(θ, se)``, the cells read, and its bar's ``(θ, se)``."""
+    own = theta_cells(responses_of(sheet), parent, ruler)
+    if (read := fit_theta(own, entries)) is None:
+        return None
+    against = whole if entries is not None else fit_theta({key: parent[key] for key in own}, None)
+    return read, len(own), against
+
+
+def arm_lift(sheet: CellSheet, bar: CellSheet, ruler: DeltaRuler | None) -> ThetaLift | None:
+    """One arm's θ lift over *bar*, on the fit the election takes."""
+    entries = ruler.entries() if ruler is not None else None
+    parent = responses_of(bar)
+    fit = _arm_fit(sheet, parent, fit_theta(parent, entries), entries, ruler)
+    if fit is None:
+        return None
+    (theta, se), _, against = fit
+    if against is None:
+        return None
+    bar_theta, bar_se = against
+    return ThetaLift(theta - bar_theta, math.hypot(se, bar_se))
 
 
 def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> ThetaLift | None:

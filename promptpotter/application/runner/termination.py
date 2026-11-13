@@ -7,6 +7,7 @@ import logging
 import traceback
 from typing import TYPE_CHECKING
 
+from promptpotter.domain.crowning_bar import BAR_ADMISSION
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
     STOP_REASON_INFO,
@@ -24,14 +25,18 @@ from promptpotter.shared.errors import (
     ResumeDivergenceError,
     SendRefusedError,
 )
+from promptpotter.shared.statistics import anytime_level_lower
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.campaign_config import OriginGateMode, PanelGateMode
+    from promptpotter.domain.campaign_config import (
+        GateMode,
+        OptimizationConfig,
+    )
     from promptpotter.domain.round_health import DegradationHealth
+    from promptpotter.domain.run_standing import RunStanding
     from promptpotter.domain.scoring import GradedCell
 
 logger = logging.getLogger(__name__)
@@ -89,18 +94,14 @@ def end_run_on(
     return reason, emit_error_record(exc, stop_reason=reason, traceback=tb)
 
 
-def origin_gate_tripped(health: DegradationHealth, mode: OriginGateMode) -> StopReason | None:
-    if mode == "off":
-        return None
-    if health.grade == "critical":
-        return StopReason.ORIGIN_GATE
-    if mode == "strict" and health.grade == "degraded":
+def origin_gate_tripped(health: DegradationHealth, mode: GateMode) -> StopReason | None:
+    if mode == "strict" and health.grade in ("degraded", "critical"):
         return StopReason.ORIGIN_GATE
     return None
 
 
 def panel_gate_tripped(
-    holed_rows: Sequence[GradedCell], cut: StopReason | None, mode: PanelGateMode
+    holed_rows: Sequence[GradedCell], cut: StopReason | None, mode: GateMode
 ) -> StopReason | None:
     """The stop names the bound that made the hole: a budget's own, or ``PANEL_CUT``; a resume re-cuts both, unlike ``PAUSED``."""
     if mode == "off":
@@ -114,23 +115,17 @@ def panel_gate_tripped(
     return StopReason.PAUSED
 
 
-def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
-    """The ONE ceiling stop: the selection's headline level on the origin panel, read at its paired
-    interval's lower bound, never a point estimate of a truncated draw. No pair, no stop."""
-    standing = cycle.standing
-    if target is None or standing is None:
-        return None
-    lift = standing.vs_origin.headline
-    reached = lift is not None and lift.rate_a + lift.estimate.ci_lo >= target
-    return StopReason.TARGET_HIT if reached else None
-
-
-def standing_tripped(cycle: Cycle) -> StopReason | None:
-    standing = cycle.standing
-    assert standing is not None, "a boundary stop reads the close it follows"
+def standing_tripped(standing: RunStanding, optimization: OptimizationConfig) -> StopReason | None:
+    """The ONE reading of whether *standing*'s round is the last: the close's stop, the adapter's
+    skip and the controller's act all read it. The ceiling stop reads the pick's own level on the
+    origin panel at its one-sided anytime-valid lower bound (``BAR_ADMISSION``), valid at whichever
+    round it is looked at; no pair, no stop."""
     if standing.lives is not None and standing.lives.spent:
         return StopReason.LIVES_EXHAUSTED
-    patience = cycle.config.optimization.convergence_patience
-    if patience is not None and standing.rounds_without_advance >= patience:
-        return StopReason.CONVERGED
+    target, read = optimization.halt_at_fitness, standing.vs_origin
+    if target is None or read.headline is None or read.b is None:
+        return None
+    floor = anytime_level_lower(read.headline.rate_b * read.b.n, read.b.n, 1.0 - BAR_ADMISSION)
+    if floor is not None and floor >= target:
+        return StopReason.TARGET_HIT
     return None

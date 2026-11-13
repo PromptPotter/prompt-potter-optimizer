@@ -1,5 +1,6 @@
-"""Round 0's one door (`open_origin_round`): a tripped gate halts, and fixing the backend then
-resuming re-measures the origin's lost cells (`repair.py::rewalk_lost_origin`) with no re-mint."""
+"""Round 0's one door (`open_origin_round`): the origin is walked inside it, a tripped gate halts,
+and fixing the backend then resuming re-measures the origin's lost cells (`walk_round_zero`) with
+no re-mint."""
 
 from __future__ import annotations
 
@@ -8,9 +9,12 @@ import logging
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.node_context import walk_origin
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
-from promptpotter.application.bench.resume_and_fork.repair import rewalk_lost_origin
+from promptpotter.application.bench.resume_and_fork.repair import origin_only
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.optimizers.nodes import RoundContext
+from promptpotter.application.origin import lock_criterion
 from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.runner.bench import bench_origin, declare_line_bench
 from promptpotter.application.runner.round import (
@@ -23,10 +27,10 @@ from promptpotter.application.runner.termination import (
     RUN_ENDS,
     end_run_on,
     origin_gate_tripped,
-    target_tripped,
 )
 from promptpotter.application.scoring.passes import measure_noise_floor
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.cell_fold import repairable_holes
 from promptpotter.domain.phases import STOP_REASON_INFO, ErrorRecord, StopLoop, StopReason
 from promptpotter.domain.run_records import OriginGatePass, RebaseRequest, RoundEnteredRecord
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
@@ -120,10 +124,6 @@ async def run_round_loop(
                     is_final_round=is_final_round or cut is not None,
                 )
                 clean_rounds += 1
-
-                target_stop = target_tripped(cycle, config.optimization.halt_at_fitness)
-                if target_stop is not None:
-                    return LoopEnd(target_stop)
                 # A hold refusal cuts a round while the ceiling still reads clear, so the cut speaks first.
                 tripped = cut or budget_stop(require_spend_book("a round boundary"))
                 if tripped is not None:
@@ -157,14 +157,15 @@ async def open_origin_round(
     ledger: CycleEventLog,
     *,
     spend: SpendRollup,
+    resumed_ending: StopReason | None,
 ) -> LoopEnd | None:
-    """Round 0's one door: the members initialize, a re-measured origin re-walks its holes, and
+    """Round 0's one door: the members initialize, the origin is walked (`walk_round_zero`), and
     until an L1 round closes every launch asks the gate, unless round 0 banked a pass. A tripped
-    gate halts the launch, holding nothing; resumed still unhealthy, the resume is the operator's
-    override. The gate decides before the bench spends, so a launch it halts runs no pass; an
-    origin it lets through is benched before its close (a replayed origin closed on the ledger
-    already). ``None`` proceeds into round 1. *spend* is the live rollup the bench pass counts its
-    own delta on."""
+    gate halts the launch, holding nothing; a launch resuming the gate's halt (*resumed_ending*)
+    still unhealthy is the operator's override. The gate decides before the bench spends, so a
+    launch it halts runs no pass; an origin it lets through is benched before its close (a
+    replayed origin closed on the ledger already). ``None`` proceeds into round 1. *spend* is the
+    live rollup the bench pass counts its own delta on."""
     session = cycle.session
     open_round: int | None = None
     try:
@@ -173,7 +174,7 @@ async def open_origin_round(
             await bench_line_origin(cycle, ledger, spend)
             return None
         open_round = 0
-        await rewalk_lost_origin(cycle, dataset, ledger)
+        await walk_round_zero(cycle, dataset, ledger)
         mode = cycle.config.optimization.origin_gate
         gated = (
             not origin_gate_passed(session)
@@ -191,7 +192,7 @@ async def open_origin_round(
         open_round = None
         if not gated:
             return None
-        if session.store.campaigns.resumed_ending(session.hop) is not StopReason.ORIGIN_GATE:
+        if resumed_ending is not StopReason.ORIGIN_GATE:
             health = cycle.origin_round.health
             logger.error(
                 "Origin gate (%s): round 0 is %s (%s) — halted. %s",
@@ -207,6 +208,40 @@ async def open_origin_round(
     except RUN_ENDS as exc:
         return loop_end_on(exc, cycle, session, round_num=0, open_round=open_round)
     return None
+
+
+async def walk_round_zero(cycle: Cycle, dataset: list[Sample], ledger: CycleEventLog) -> None:
+    """Round 0's ONE walk, inside its door and past the divergence check, so a resume it refuses
+    pays nothing. An unclosed origin is walked: a seated one on its scoring set, one whose rows
+    another launch measured (inherited, or a fork cut at round 0) on its own cells, the archive
+    replaying all but the errored. A closed origin no round has read re-walks only what it lost.
+    The criterion locks at the walk's close (`origin.py::lock_criterion`)."""
+    session = cycle.session
+    origin, head = cycle.origin_round, cycle.origin_round.head
+    assert origin.election is not None and head is not None, "round 0 ends on its origin"
+    rows = origin.rows(origin.election.ended_on)
+    holes, unsent = repairable_holes(rows), max(0, head.expected_samples - len(rows))
+    if origin.at_offset is not None:
+        standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
+        if not origin_only(cycle.rounds, standing) or not (holes or unsent):
+            return
+        logger.warning(
+            "Resume re-measures the origin's %d lost cell(s) and the %d its walk never sent; "
+            "round 0 closes again on them.",
+            holes,
+            unsent,
+        )
+    elif not head.expected_samples:
+        return
+    held = {cell.key for cell in rows}
+    pool = session.state.scoring.partition.search
+    cells = cycle.origin_cells(dataset) if unsent else [s for s in pool if s.key in held]
+    if not cells:
+        return
+    read = await walk_origin(RoundContext(cycle=cycle, round_num=0, ledger=ledger), cells)
+    if origin.at_offset is None:
+        read = lock_criterion(cycle, read, ledger)
+    cycle.seat_origin(read, origin.optimizer_state)
 
 
 async def bench_line_origin(cycle: Cycle, ledger: CycleEventLog, spend: SpendRollup) -> None:

@@ -65,7 +65,6 @@ class StoppingRule(FrozenModel):
     stopped for."""
 
     lives: dict[str, int] | None
-    convergence_patience: int | None
 
 
 class DeterminismClamp(StrictModel):
@@ -204,7 +203,7 @@ class RunDeclaration(FrozenModel):
 PINNED_LOOP_KEYS: dict[str, Any] = {
     "dataset_split": True,
     "bench_trigger": True,
-    "optimization": {"lives": True, "convergence_patience": True, "determinism": True},
+    "optimization": {"lives": True, "determinism": True},
 }
 
 

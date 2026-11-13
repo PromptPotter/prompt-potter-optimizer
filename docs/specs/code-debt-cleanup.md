@@ -244,8 +244,6 @@ row it closes.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
-- **`tests/test_identity.py` lays the spawn's arm beside its seat** (`_l4_arm`, `_l4_laid`, the depth
-  step). Action: the journey drives `_open_seat` over an offline inner campaign. **Rides with:** rk-dec 3.
 - **The browser inks a served state from its own map**: `webapp/lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`
   and `PipelineFlow`'s `tone`. Action: they go once a served word row carries its `Tone`
   (`domain/said.py`). **Re-test:** `git grep -n "MOVEMENT_CLASS" -- webapp/lib`.
@@ -257,8 +255,8 @@ row it closes.
   `runner/round.py::_walk_population` merges `CatchUpPool.caught` after `run_walks`, and a catch-up
   walk records no pass (`BACKFILL` is no arm role). Action: a caught-up cell is a recorded row of its
   prior's arm (its walk continues the prior's pass, `held` = the prior's rows). **Rides with:** rk-opt's
-  next chain. **Re-test:** in `test_scoring.py::test_an_arm_is_cut_only_on_evidence_that_it_trails`'s
-  locked block, the leader's last `running` before the close counts the cells `rows(leader)` holds.
+  next chain. **Re-test:** a CAPO race settled `locked_in`: the leader's last `running` before the close
+  counts the cells `rows(leader)` holds.
 - **A round close re-folds the bank's whole archive**: `SampleIndex.refresh` re-folds the bank's
   whole archive history at every round close for compare arms and L4 cells (`sample.py:195-248`), and
   the local archive sits at 29.96 MB of `_CellFile`'s 32 MB cap. **Rides with:** rk-opt's next chain.
@@ -606,77 +604,10 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/26 · rk-dec
 
-- **The crowning bar tests nothing a result can quote**: `application/scoring/selection.py::elect_round_winner`
-  admits with no interval and no multiplicity correction, and `RoundResult.improved` reads any selection
-  past round 0 as a promotion; at panel width no corrected exact verdict reaches α=0.05. Action
-  (operator, 2026-11-12): ONE predicate whose statistic is a switch, every reading built: today's
-  posterior bar; an exact paired sign test on the discordant cells, Holm-corrected across the round's
-  arms; an anytime-valid e-process on the paired discordance, valid wherever the race stops. Each
-  reading names what a result quotes, and `RoundResult.improved` reads the bar. Today's stays the
-  default until separability is read on banked runs. **Rides with:** rk-dec 2. **Re-test:** a tenant-ruler run's `index.json::final.rounds_to_separable`
-  beside its `rounds_to_improved`.
 - **The never / partly / always spread contradicts the headline beside it**:
   `application/scoring/measurement_log.py::_cycle_cells` pools every candidate the cycle ran, so
   `domain/cells.py::hit_spread` reads a sample only C0 saw as "never". Action: the spread reads the
   headline's own cells. **Rides with:** rk-dec 2.
-- **"Calls held equal" has no axis to hold**: `domain/spend.py::Budget` meters usd, tokens, rounds and
-  wall clock, while the roadmap, `paper/README.md` and `paper/plans/` each hold a different axis
-  equal. Action: USD is the one matched axis, named on `Budget` (operator, 2026-11-12). **Rides with:** rk-dec 2. **Re-test:**
-  `price-head-to-head paper/plans/comparability.yaml` — do one point's `search_cells` differ by arm?
-- **The election has no one-arm read**: `scoring/selection.py:177` fits a prior through
-  `candidate_abilities({"read": rows}, …)`, a fake arm key. Action: a one-arm read on the election's fit.
-  **Rides with:** rk-dec 2. **Re-test:** `git grep -n '{"read": ' -- promptpotter/application/scoring/selection.py`.
-- **Round 0 is walked before the cycle's init closes**: `origin.py::establish_campaign_origin` walks it
-  outside its door, `runner/loop.py::open_origin_round` holds its close and gate, and
-  `bench/node_context.py::rewalk_origin` walks it again for the repair; `origin.py::lock_criterion`
-  changes the scorer's id, which keys the difficulty ruler. Walking round 0 only inside its door puts
-  INIT before ORIGIN, which reorders every leg's phases (`offline_run.py::_ledger` keeps phase order), so
-  decisions move on every leg. Action: seat the origin unmeasured, inherited
-  (`origin.py::try_inherit_fork_origin`) or standing, walk it in its door, and lock the criterion at the
-  close, named as a decision move. **Rides with:** rk-dec, whose Owns gain `origin.py`,
-  `runner/{open_cycle,origin_gate}.py` and `bench/node_context.py::rewalk_origin`. **Re-test:**
-  `git grep -n "def establish_campaign_origin" -- promptpotter` is empty.
-- **A fork cut at round 0 keeps its origin's holes**: `bench/cycle.py::Cycle.reopen_origin` leaves round
-  0 with no close, so `resume_and_fork/repair.py::rewalk_lost_origin` returns at once. Telling a
-  just-walked origin from an inherited one needs the one walk above; a flag would be the patch. Action: an
-  inherited origin is re-walked when another launch measured its rows. Also: `runner/loop.py:205`'s
-  `resumed_ending` reads the fork's hop, so the operator's override is lost. **Rides with:** rk-dec, with the
-  walk; its Owns gain `bench/cycle.py` and `resume_and_fork/repair.py`. **Re-test:**
-  `--fork-on-divergence` at round 0 of a gate-halted campaign, backend fixed, passes in one launch.
-- **The last round is decided in three places** (✓): `runner/loop.py:129`'s `target_tripped` runs after
-  `post_round` (`:119`), so with `halt_at_fitness` set the escalation pays for L2/L3 and a
-  `fork_proposal` can rebase past TARGET_HIT. Action: `target_tripped` joins `standing_tripped` in
-  `termination.py`, and `post_round` and the adapter skip (`round.py:1464`) read only that. **Rides
-  with:** rk-dec.
-- **The ceiling stop and the advance read without a guarantee** (a statistics pass, ✓ for the stop):
-  `termination.py:124`'s `rate_a + estimate.ci_lo >= target` treats C0's rate as known, inherits the
-  level interval's undercoverage, and re-reads every round with no α spent: coverage 0.77–0.93 against a
-  nominal 0.975, and a 20/20 pick fires TARGET_HIT at 0.95 in 8% of looks when the true level is 0.9.
-  ADVANCED (`origin_panel.py:95-121`) is an uncorrected one-sided 2.5% test repeated every round on a
-  reused panel: under the null 12.8% of 5-arm × 10-round runs advance, so `rounds_to_separable ≤ 5` can
-  pass on noise. The crown row's numbers: per-round false admission 0.30 at 3 arms, 0.34–0.39 at 5.
-  Decided (orchestrator, on the crowning bar's pattern): the stop reads the pick's own one-sided level
-  bound, anytime-valid; the advance reads the bar's statistic switch (today's the default), so one
-  switch governs crown, advance and stop. **Rides with:** rk-dec 2.
-- **`refuse_origin` reads a schema fact off answered rows**: `capo/members.py::CapoInit.refuse_origin`,
-  `optimizer_manifest.py::refuse_origin` and `optimizers/nodes.py:211`, called at `bench/cycle.py:264`.
-  Every one is hashed (every treatment, both capos). Action: `refuse_pipeline(schema)` at `Cycle.start`. **Rides with:** rk-dec (the
-  re-key window), whose Owns gain those three hunks. **Re-test:**
-  `git grep -n "refuse_origin" -- promptpotter/application` is empty.
-- **`bench/difficulty.py` still guards a scorer run init guarantees**: `require_scorer` /
-  `require_partition` (`:167`, `:272`, `:337`), a hashed unit (the estimator digest), keep the two
-  accessors in `initialization/session.py`. Action: read the fields; the accessors go. **Rides with:**
-  rk-dec (the re-key window), whose Owns gain `bench/difficulty.py` and `session.py`'s accessors.
-  **Re-test:** `git grep -c "require_scorer\|require_partition" -- promptpotter` is 0.
-- **Three shipped-off behaviours stay as knobs**: potter's `pobb.lock_in` (off; 7 tests),
-  `origin_gate: critical_only` (`strict` and `off` stay) and `convergence_patience` (`lives` stays: the
-  round standing and the UI's hearts read the same `RoundAdvance` signal). Action (operator,
-  2026-11-12): each goes, its shipped behaviour hard-wired; `pobb.lock_in` sits in potter's hashed
-  files, a re-key. **Rides with:** rk-dec 4. **Re-test:**
-  `git grep -cE "lock_in|critical_only|convergence_patience" -- promptpotter` is 0.
-
-### valid (after rk-dec, before the behaviour keys)
-
 - **A resume asks "is this still valid" five ways**: `resume.py`'s consumed set and prompt hashes,
   `jobs/mint.py`'s defaults drift, seven members' `replay()` (capo, gepa, levi, the election, the race)
   and `round_packages` / `rederive`. Action: one validity check: `resume.py::_divergence` becomes
@@ -839,7 +770,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **The race and the election read different rulers** (✓): `race.py:144-153` builds `PoBBCheck` on
   `ctx.read(Ruler)` as of round open with `NO_CELLS` for the origin panel, while the election re-fits
   (`round.py:611-654`, `link`) and reads rows merged with `on_panel`, so `candidate-elimination.md:35-37`
-  and `pobb.py:151`'s "cannot disagree" is false; the ε-cut half stands once `lock_in` goes; and
+  and `pobb.py:151`'s "cannot disagree" is false; the ε cut is the half that stands; and
   `verdict-resolution.md:34-36`'s "the joint fit runs once, at ruler lock" is false (re-fit every round,
   `difficulty.py:223-256`). Decided (orchestrator; the operator may reverse it): the code, not the doc,
   is fixed: both read one ruler and one row set, and the doc then states it. **Rides with:** readings 2.

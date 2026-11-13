@@ -16,16 +16,13 @@ from promptpotter.application.bench.resume_and_fork.replayers import ReplayConte
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb import (
     EliminationContext,
-    EliminationGate,
     PoBBCheck,
     PoBBStop,
     graded_sheet,
-    locks_in,
     prior_reads,
     race_sheet,
     wire_sheet,
 )
-from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.domain.arms import Elimination
 from promptpotter.domain.paired_reading import ArmKey, PriorStanding
 from promptpotter.domain.scoring import CellSheet
@@ -51,7 +48,6 @@ class _RaceDecision(Replayed, kind=None):
     paired_breakdown: dict[ArmKey, PriorStanding]
     # Each cell by its `Sample.key`, each prior's grades as read: a replay re-fits from these.
     candidate_cells: list[str]
-    crowned: list[str]
     prior_histories: dict[ArmKey, dict[str, dict[str, float | None]]]
 
     def _read(self, ctx: ReplayContext) -> tuple[CellSheet, dict[ArmKey, CellSheet]] | None:
@@ -74,33 +70,10 @@ class EliminationCut(_RaceDecision, kind="elimination_cut"):
         return bool(reads) and min(r.p_better for r in reads.values()) < self.epsilon
 
 
-class LeaderLockIn(_RaceDecision, kind="leader_lock_in"):
-    admission: float
-
-    def replay(self, ctx: ReplayContext) -> bool:
-        read = self._read(ctx)
-        if read is None:
-            return False
-        return locks_in(
-            self.arm,
-            *read,
-            self.parent,
-            crowned=frozenset(self.crowned),
-            n_min=self.n_min,
-            ruler=ctx.ruler,
-            admission=self.admission,
-        )
-
-
 def _reason(ctx: EliminationContext, labels: Mapping[ArmKey, str]) -> str:
     q = f"q{ctx['queries_scored']}/{ctx['total_queries']}"
     n = ctx["n_priors"]
     priors = f"(of {n} prior{'' if n == 1 else 's'})"
-    if ctx["gate"] is EliminationGate.LOCK_IN:
-        return (
-            f"leader locked {q}  p_best={ctx['p_best']:.1%} >= admission={ctx['admission']:.0%}  "
-            f"{priors}"
-        )
     return (
         f"eliminated {q}  p_best={ctx['p_best']:.1%} < eps={ctx['epsilon']:.0%}  "
         f"vs {labels[ctx['leader']]} {priors}"
@@ -143,13 +116,10 @@ class PoBBRace:
         parent = ArmKey(lineage.parent.id)
         self._check = PoBBCheck(
             ctx.knobs(PoBBKnobs),
-            admission=ctx.read(Bounds).admission,
             n_min=ctx.read(Bounds).elimination_n_min,
             n_samples=len(panel.cells),
             ruler=ctx.read(Ruler).difficulty.ruler,
             parent=parent,
-            # The lock-in asks the election, which reads no cell that crowned the parent.
-            crowned=crowning_cells(lineage.rounds, lineage.parent.id),
         )
         self._progress, self._replay = ctx.read(Progress), ctx.read(Replay)
         if parent_results := ctx.read(Frontier).parent_own_rows:
@@ -196,14 +166,8 @@ class PoBBRace:
             "leader": context["leader"],
             "paired_breakdown": signal.paired_breakdown,
             "candidate_cells": signal.cells,
-            "crowned": sorted(self._check.crowned),
             "prior_histories": {pid: wire_sheet(prior) for pid, prior in signal.priors.items()},
         }
-        inputs = (
-            LeaderLockIn(**raced, admission=context["admission"])
-            if context["gate"] is EliminationGate.LOCK_IN
-            else EliminationCut(**raced, epsilon=context["epsilon"])
-        )
-        self._replay.decide(inputs, True)
+        self._replay.decide(EliminationCut(**raced, epsilon=context["epsilon"]), True)
         named = {**labels, self._check.parent: "parent"}
         return Elimination(reason=_reason(context, named), context=dict(context))

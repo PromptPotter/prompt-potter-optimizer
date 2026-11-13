@@ -127,6 +127,7 @@ from promptpotter.domain.command_kinds import (
     ForkCyclePayload,
     ForkSeed,
 )
+from promptpotter.domain.crowning_bar import CrowningBar
 from promptpotter.domain.cycle_paths import (
     CycleDir,
     CycleHop,
@@ -855,7 +856,11 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
         arm=unwalked, parent_id=parent.id, parent_scores={"g0": 0.0}, sigma=0.0, sigma_prime=1.0
     )
     winner = RoundWinner(
-        arms=[unwalked], coverage_floor=1, admission=0.5, parent=bar_arm, crowned=[]
+        arms=[unwalked],
+        coverage_floor=1,
+        bar=CrowningBar(statistic="posterior", admission=0.5),
+        parent=bar_arm,
+        crowned=[],
     )
     kept = PopulationKept(objective=paired.objective, survivors=[unwalked])
     for inputs, recorded in (
@@ -1265,7 +1270,7 @@ def test_an_unmodified_fork_origin_inherits_the_branch_points_reading_and_an_edi
     )
 
     def inherit(fields: dict[str, str]) -> Any:
-        # Resolved as `establish_campaign_origin` does: the fork seed wins.
+        # Resolved as `seat_campaign_origin` does: the fork seed wins.
         seed = CycleSeed(
             origin_prompts=prompted(**fields).prompts,
             origin_source=OriginSource.FORK_SEED,
@@ -2451,8 +2456,13 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
                 line=[cycle.origin_round.model_copy(update={"at_offset": closed.at_offset})],
             )
 
+        # Read before the launch writes, as `mint.py::open_launch` reads it.
+        resumed = stores.campaigns.resumed_ending(hop)
+
         async def walk() -> LoopEnd:
-            gated = await open_origin_round(cycle, [], ctx.ledger, spend=SpendRollup())
+            gated = await open_origin_round(
+                cycle, [], ctx.ledger, spend=SpendRollup(), resumed_ending=resumed
+            )
             return gated or await run_round_loop(cycle, cycle.config, session, ctx.ledger)
 
         with scoped(account=stores):

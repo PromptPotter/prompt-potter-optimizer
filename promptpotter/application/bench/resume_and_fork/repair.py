@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.bench.node_context import NodeContext, restated_round, rewalk_origin
+from promptpotter.application.bench.node_context import NodeContext, restated_round
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import mended_round
@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.optimizer_state import OptimizerState, StatePart
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.run_records import RoundProposedRecord
-    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
         StandingRound,
@@ -270,33 +269,9 @@ def _package_drift(
     return mismatches, drifted
 
 
-def _origin_only(rounds: Sequence[RoundResult], standing: StandingRounds) -> bool:
+def origin_only(rounds: Sequence[RoundResult], standing: StandingRounds) -> bool:
     """No round has read the origin yet: none closed past it, none walked on it."""
     return [t.round for t in rounds] == [0] and 1 not in standing.proposals
-
-
-async def rewalk_lost_origin(cycle: Cycle, dataset: list[Sample], ledger: CycleEventLog) -> None:
-    """A replayed origin no round has read yet, that lost cells, re-closes in place, never on a
-    branch that would keep only the dead measurement: one walk sends its holes and the cells its
-    walk never sent, the rest replayed. Past the divergence check, so a resume it refuses pays nothing."""
-    session = cycle.session
-    origin, head = cycle.origin_round, cycle.origin_round.head
-    standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
-    if origin.at_offset is None or not _origin_only(cycle.rounds, standing):
-        return
-    assert origin.election is not None and head is not None, "round 0 ends on its origin"
-    rows = origin.rows(origin.election.ended_on)
-    holes = repairable_holes(rows)
-    if not holes and len(rows) >= head.expected_samples:
-        return
-    ctx = RoundContext(cycle=cycle, round_num=0, ledger=ledger)
-    await rewalk_origin(ctx, cycle.origin_cells(dataset))
-    logger.warning(
-        "Resume re-measured the origin's %d lost cell(s) and the %d its walk never sent; round 0 "
-        "closes again on them.",
-        holes,
-        max(0, head.expected_samples - len(rows)),
-    )
 
 
 async def apply_correction(
@@ -311,8 +286,8 @@ async def apply_correction(
     campaign_store, hop = session.store.campaigns, session.hop
     # One read of the line before the branch exists to displace it.
     standing = campaign_store.standing_rounds(hop, moment=None)
-    if _origin_only(prior, standing):
-        # Re-walked in place past the divergence check (`rewalk_lost_origin`).
+    if origin_only(prior, standing):
+        # Walked in place, past the divergence check, in round 0's door (`loop.py::walk_round_zero`).
         return None
     cut = repair_cut(prior)
     # Only what the branch carries: it REGENERATES a round above the cut rather than correct it.

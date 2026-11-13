@@ -468,6 +468,17 @@
         "additionalProperties": false,
         "description": "What the election read of one arm: θ lives here and nowhere else.",
         "properties": {
+          "lift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThetaLift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "theta": {
             "anyOf": [
               {
@@ -1168,6 +1179,37 @@
         "title": "BankedStop",
         "type": "object"
       },
+      "BarRead": {
+        "additionalProperties": false,
+        "description": "The bar's verdict on one subject and the number a result quotes for it.",
+        "properties": {
+          "clears": {
+            "title": "Clears",
+            "type": "boolean"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "statistic": {
+            "enum": [
+              "posterior",
+              "sign_test",
+              "e_process",
+              "empirical_bayes"
+            ],
+            "title": "Statistic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "statistic",
+          "clears",
+          "quote"
+        ],
+        "title": "BarRead",
+        "type": "object"
+      },
       "BenchReading": {
         "additionalProperties": false,
         "description": "One individual's bench pass, read under a named scorer.",
@@ -1624,7 +1666,7 @@
       },
       "Budget": {
         "additionalProperties": false,
-        "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.",
+        "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.\n``usd`` is the ONE axis a head-to-head holds equal across its arms: cells, tokens, rounds and\nseconds are what each arm's money bought, and differ by arm.",
         "properties": {
           "rounds": {
             "anyOf": [
@@ -2961,6 +3003,16 @@
         "additionalProperties": false,
         "description": "What a round's selector decided over its arms, by key; ``selected`` null = the round HELD.",
         "properties": {
+          "bar": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BarRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "electable": {
             "title": "Electable",
             "type": "integer"
@@ -3036,7 +3088,8 @@
           "ended_on",
           "electable",
           "elects_on",
-          "ruler"
+          "ruler",
+          "bar"
         ],
         "title": "Election",
         "type": "object"
@@ -3045,6 +3098,16 @@
         "additionalProperties": false,
         "description": "A round's election, the moment it is held: the close carries the same one.",
         "properties": {
+          "bar": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BarRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "electable": {
             "title": "Electable",
             "type": "integer"
@@ -3135,6 +3198,7 @@
           "electable",
           "elects_on",
           "ruler",
+          "bar",
           "round"
         ],
         "title": "ElectionRecord",
@@ -3718,18 +3782,6 @@
             "default": "",
             "title": "Model",
             "type": "string"
-          },
-          "patience": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Patience"
           },
           "sp_budget_round": {
             "default": 0,
@@ -8702,6 +8754,25 @@
         ],
         "title": "ThetaCaveat",
         "type": "string"
+      },
+      "ThetaLift": {
+        "description": "θ over a bar's θ, and the noise of the DIFFERENCE, never either side's own SE.",
+        "properties": {
+          "se": {
+            "title": "Se",
+            "type": "number"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value",
+          "se"
+        ],
+        "title": "ThetaLift",
+        "type": "object"
       },
       "TokenAccount": {
         "additionalProperties": false,

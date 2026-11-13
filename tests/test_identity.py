@@ -38,6 +38,7 @@ from factories import (
     defaulted_config,
     inner_cells,
     inner_sandbox,
+    inner_seat,
     jumping_clock,
     loop_session,
     measurement,
@@ -379,22 +380,6 @@ _SPEC = InnerTaskSpec(
 )
 
 
-def _l4_arm(optimizer: str, overrides: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """An L4 cell's `optimization`, the arm laid as a spawn lays it (`spawn.py::_open_seat`)."""
-    return _l4_laid(optimizer, overrides).model_dump(mode="json", exclude_unset=True)
-
-
-def _l4_laid(optimizer: str, overrides: dict[str, dict[str, Any]]) -> OptimizerChoice:
-    bare = defaulted_config(
-        {"optimization": {"optimizer": optimizer, "degradation_threshold": 0.0}}
-    )
-    return bare.overlaid(spawn.arm_layer(overrides)).optimization
-
-
-def _l4_selected(optimizer: str, overrides: dict[str, dict[str, Any]]) -> SelectedOptimizer:
-    return select_optimizer(_l4_laid(optimizer, overrides))
-
-
 def _connector_config(**fields: Any) -> CampaignConfig:
     threshold = campaign_defaults()["optimization"]["degradation_threshold"]
     defaults = {"degradation_threshold": threshold}
@@ -615,25 +600,19 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
     )
     baseline = potter.prompt_hashes()
     assert potter.prompt_hashes() == baseline, "an unmoved preset re-hashed"
-    capo_calls = NodeContext(
-        jumping_clock(
-            run_init_round(
-                workspace(tmp_path / "mutated"),
-                offline,
-                samples(40, "TRUE"),
-                optimization=_l4_arm("capo", _CAPO_MUTATED),
-            )
-        ),
-        optimizers.NODE_MEMBERS.get("capo_mutate"),
-    ).read(Calls)
+    inner = workspace(tmp_path / "outer")
+
+    def arm(optimizer: str, overrides: dict[str, dict[str, Any]]) -> RoundContext:
+        return jumping_clock(inner_seat(inner, offline, optimizer, overrides))
+
+    mutated = arm("capo", _CAPO_MUTATED)
+    capo_calls = NodeContext(mutated, optimizers.NODE_MEMBERS.get("capo_mutate")).read(Calls)
     assert (
         capo_calls.prompt().compile_prompt(**values)
         == "Rephrase [Sort it.] to sort the list."
         != sent
     ), "the mutated CAPO prompt never reached the request it sends"
-    assert _l4_selected("capo", _CAPO_MUTATED).treatment(
-        every, built_stores.block_packs
-    ).digest != (treated), (
+    assert mutated.cycle.optimizer.treatment(every, built_stores.block_packs).digest != (treated), (
         "two inner cells under two arms stamp ONE treatment — a bank reads them as one arm"
     )
     # A valid layout edit on one node: `diagnostics` stays placed.
@@ -642,7 +621,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
         (capo, capo_hashes, _CAPO_MUTATED, "capo_mutate"),
         (potter, baseline, layout, "l1_critique"),
     ):
-        moved = _l4_selected(optimizer.name, override).prompt_hashes()
+        moved = arm(optimizer.name, override).cycle.optimizer.prompt_hashes()
         assert moved[edited_node] != hashes[edited_node], (
             f"{edited_node}: an override left the node hash unchanged — audits would pool the cycles"
         )
@@ -656,13 +635,14 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
         {"l1_generate": {"output_schema_field_names": {"rationale": "not a name"}}},
         {"l1_generate": {"output_schema_field_names": {"rationale": "why", "evidence": "why"}}},
     ):
-        with pytest.raises(PayloadInvalidError) as overlay_refusal:
-            _l4_selected("potter", unusable)
-        assert overlay_refusal.value.code == "optimizer_overlay", (
+        with pytest.raises(CellUnscoreableError) as cell_fault:
+            arm("potter", unusable)
+        refused = cell_fault.value.__cause__
+        assert isinstance(refused, PayloadInvalidError) and refused.code == "optimizer_overlay", (
             f"{unusable}: an unusable L4 mutation ran as the floor under its arm's name"
         )
     # An arm's model answers the inner node its edit names, and no other.
-    answered = _l4_selected("potter", {"l1_critique": {"model": "qwen/qwen3.7-flash"}})
+    answered = arm("potter", {"l1_critique": {"model": "qwen/qwen3.7-flash"}}).cycle.optimizer
     models = {n: answered.node_config(n).model for n in answered.llm_nodes}
     assert models == {
         n: "qwen/qwen3.7-flash" if n == "l1_critique" else potter.node_config(n).model
@@ -712,7 +692,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
         .optimization
     )
     assert runs(both) == "Rephrase [Sort it.] to sort the list.", "a draft edit beat L4's"
-    assert both.prompt_hashes() == _l4_selected("capo", _CAPO_MUTATED).prompt_hashes(), (
+    assert both.prompt_hashes() == mutated.cycle.optimizer.prompt_hashes(), (
         "one text under two declarations hashed apart: the hash reads a second door"
     )
 
@@ -4465,11 +4445,8 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
         proposals[0].individual.pipeline_params,
     )
     capo_seat = jumping_clock(
-        run_init_round(
-            workspace(tmp_path / "inner"),
-            offline,
-            samples(40, "TRUE"),
-            optimization=_l4_arm("capo", payload["optimizer_prompt_overrides"]),
+        inner_seat(
+            workspace(tmp_path / "outer"), offline, "capo", payload["optimizer_prompt_overrides"]
         )
     )
     sent = (

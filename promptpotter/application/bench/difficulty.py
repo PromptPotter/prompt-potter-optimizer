@@ -155,9 +155,7 @@ class AbilityScale(NamedTuple):
 
 
 def session_ruler_scope(session: Session) -> RulerScope:
-    return RulerScope(
-        scorer=session.state.scoring.require_scorer().id, dataset=session.measured_dataset
-    )
+    return RulerScope(scorer=session.state.scoring.scorer.id, dataset=session.measured_dataset)
 
 
 def ruler_rows(
@@ -284,9 +282,7 @@ class DifficultyView:
         assert session.campaign_id, "an election runs inside a campaign"
         session.store.ruler.fold(
             session_ruler_scope(session),
-            ruler_rows(
-                session.store, sheets, session.state.scoring.require_partition().admitted_keys
-            ),
+            ruler_rows(session.store, sheets, session.state.scoring.partition.admitted_keys),
             campaign=session.campaign_id,
             own=ruler_clock(session).own,
         )
@@ -346,7 +342,7 @@ def _session_ruler(
         session_ruler_scope(session),
         reach,
         judged,
-        objective_id=session.state.scoring.require_scorer().id,
+        objective_id=session.state.scoring.scorer.id,
         n_min=n_min,
         enable_2pl=enable_2pl,
     )

@@ -201,7 +201,7 @@ def _bind_observers(
     forked_from: RunObservers | None,
 ) -> RunObservers:
     readout = (
-        ReadoutProjection.for_campaign(session, campaign_config, sink=readout_sink)
+        ReadoutProjection.for_campaign(session, sink=readout_sink)
         if forked_from is None
         else forked_from.readout
     )

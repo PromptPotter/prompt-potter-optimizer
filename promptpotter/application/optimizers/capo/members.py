@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.optimizer_state import StatePart
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Pool
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
@@ -515,13 +516,11 @@ class CapoInit(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, CapoInitKnobs).size
 
-    def refuse_origin(self, origin_results: CellSheet) -> None:
-        # An origin the backend answered nothing reads nothing: the origin gate halts it, not CAPO.
-        answered = any(not cell.facts.errored for cell in origin_results)
-        if answered and prompt_chars(origin_results) is None:
+    def refuse_pipeline(self, schema: PipelineSchema) -> None:
+        if not schema.prompt_nodes():
             raise ValueError(
-                "CAPO's objective charges each cell for its prompt's length, and this pipeline's "
-                "rows carry no target_prompt_chars: it renders no prompt node CAPO could edit"
+                "CAPO's objective charges each cell for its prompt's length, and this pipeline "
+                "renders no prompt node CAPO could edit"
             )
 
     async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:

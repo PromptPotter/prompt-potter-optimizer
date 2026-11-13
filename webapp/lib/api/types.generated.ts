@@ -2169,7 +2169,9 @@ export interface RunLimits {
 }
 
 /** What bounds a run per axis: a named axis binds, a named null lifts, an omitted
- * one inherits. */
+ * one inherits. ``usd`` is the ONE axis a head-to-head holds equal across its
+ * arms: cells, tokens, rounds and seconds are what each arm's money bought,
+ * and differ by arm. */
 export interface Budget {
   /** The campaign's USD, in its ceiling meter: one book its live cycles share. */
   usd?: number | null;
@@ -2358,6 +2360,7 @@ export interface Election {
   verdict_reason: string | null;
   reelection: Reelection | null;
   ruler: RulerStamp;
+  bar: BarRead | null;
 }
 
 /** What the election read of one arm: θ lives here and nowhere else. */
@@ -2366,6 +2369,13 @@ export interface ArmFit {
   theta_se: number | null;
   theta_caveat: 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
   vs_reference: PairedReading | null;
+  lift: ThetaLift | null;
+}
+
+/** θ over a bar's θ, and the noise of the DIFFERENCE, never either side's own SE. */
+export interface ThetaLift {
+  value: number;
+  se: number;
 }
 
 /** A layer restating a round as electing another arm than its selector's, and
@@ -2380,6 +2390,13 @@ export interface Reelection {
 export interface Principal {
   id: string;
   display: string;
+}
+
+/** The bar's verdict on one subject and the number a result quotes for it. */
+export interface BarRead {
+  statistic: 'posterior' | 'sign_test' | 'e_process' | 'empirical_bayes';
+  clears: boolean;
+  quote: string;
 }
 
 /** One arm as every round read serves it, in flight (`current_round.candidates`)
@@ -2714,7 +2731,6 @@ export interface PairGuard {
  * the other was stopped for. */
 export interface StoppingRule {
   lives: Record<string, number> | null;
-  convergence_patience: number | null;
 }
 
 /** What a campaign PINS on every optimizer call — how the draw is made and which
@@ -3191,8 +3207,9 @@ export interface ArmPrice {
   /** Rounds closed after the origin: the point's `rounds`, or what its `usd` buys
    * first. */
   rounds: number;
-  /** Cells the search measures, the origin's included: the calls a budget-matched
-   * head-to-head holds equal, so arms of one point are compared on it. */
+  /** Cells the search measures, the origin's included: what the point's `usd`, the
+   * one axis a head-to-head holds equal (`Budget`), buys this arm, so it
+   * differs by arm. */
   search_cells: number;
   /** The origin's and the selection's held-out passes. */
   bench_cells: number;
@@ -3486,12 +3503,14 @@ export interface OptimizationConfig {
    * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
    * only on its record's rule. */
   halt_at_fitness: number | null;
-  /** Consecutive closed rounds without an advance of the best-so-far line on the
-   * origin panel (``RunStanding.rounds_without_advance``) after which the run
-   * stops ``converged``, under any optimizer. A promotion resets it,
-   * separated from the origin or not; a round whose origin-panel reading was
-   * not taken counts neither way. ``None`` → no such stop. */
-  convergence_patience: number | null;
+  /** The ONE bar a crown, an advance of the line and a promotion read
+   * (`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's
+   * θ posterior capped by the discordant cells. ``sign_test``: an exact
+   * paired sign test on the discordant cells, Holm-corrected across the
+   * round's arms. ``e_process``: an anytime-valid e-process on the paired
+   * discordance. ``empirical_bayes``: the arm's θ lift shrunk to the tenant's
+   * banked lift prior. */
+  crowning_bar: 'posterior' | 'sign_test' | 'e_process' | 'empirical_bayes';
   degradation_threshold: number;
   /** End a candidate at the first FATAL sample (empty response, content-filtered,
    * structurally broken) without spending the rest of its budget. Active
@@ -3527,11 +3546,10 @@ export interface OptimizationConfig {
   /** Halt after round 0 when the origin's degradation verdict is non-healthy,
    * instead of optimizing against a broken floor — the common failure while
    * bringing up a new connector. ``strict`` (default) halts on ``critical``
-   * or ``degraded``; ``critical_only`` halts only on a structurally-broken
-   * origin; ``off`` disarms the gate. Resuming re-measures the cells the
-   * origin lost and grades it again; an origin still unhealthy when resumed
-   * proceeds into the search. */
-  origin_gate: 'strict' | 'critical_only' | 'off';
+   * or ``degraded``; ``off`` disarms the gate. Resuming re-measures the cells
+   * the origin lost and grades it again; an origin still unhealthy when
+   * resumed proceeds into the search. */
+  origin_gate: 'strict' | 'off';
   /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
    * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
    * discriminating dataset wins held-out cross-validation. The switch is
@@ -4963,12 +4981,14 @@ export interface OptimizationLayer {
    * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
    * only on its record's rule. */
   halt_at_fitness: number | null;
-  /** Consecutive closed rounds without an advance of the best-so-far line on the
-   * origin panel (``RunStanding.rounds_without_advance``) after which the run
-   * stops ``converged``, under any optimizer. A promotion resets it,
-   * separated from the origin or not; a round whose origin-panel reading was
-   * not taken counts neither way. ``None`` → no such stop. */
-  convergence_patience: number | null;
+  /** The ONE bar a crown, an advance of the line and a promotion read
+   * (`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's
+   * θ posterior capped by the discordant cells. ``sign_test``: an exact
+   * paired sign test on the discordant cells, Holm-corrected across the
+   * round's arms. ``e_process``: an anytime-valid e-process on the paired
+   * discordance. ``empirical_bayes``: the arm's θ lift shrunk to the tenant's
+   * banked lift prior. */
+  crowning_bar: 'posterior' | 'sign_test' | 'e_process' | 'empirical_bayes' | null;
   degradation_threshold: number | null;
   /** End a candidate at the first FATAL sample (empty response, content-filtered,
    * structurally broken) without spending the rest of its budget. Active
@@ -5004,11 +5024,10 @@ export interface OptimizationLayer {
   /** Halt after round 0 when the origin's degradation verdict is non-healthy,
    * instead of optimizing against a broken floor — the common failure while
    * bringing up a new connector. ``strict`` (default) halts on ``critical``
-   * or ``degraded``; ``critical_only`` halts only on a structurally-broken
-   * origin; ``off`` disarms the gate. Resuming re-measures the cells the
-   * origin lost and grades it again; an origin still unhealthy when resumed
-   * proceeds into the search. */
-  origin_gate: 'strict' | 'critical_only' | 'off' | null;
+   * or ``degraded``; ``off`` disarms the gate. Resuming re-measures the cells
+   * the origin lost and grades it again; an origin still unhealthy when
+   * resumed proceeds into the search. */
+  origin_gate: 'strict' | 'off' | null;
   /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
    * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
    * discriminating dataset wins held-out cross-validation. The switch is
@@ -5711,7 +5730,6 @@ export const SCORE_LENS_LABELS: Record<string, string> = {
 // Mirror of application/optimizers/potter/pobb.py::ABORT_LENS_LABELS, in display order.
 export const ABORT_LENS_LABELS: Record<string, string> = {
   "abort:epsilon_off": "No ε-elimination",
-  "abort:lock_in_off": "No lock-in",
   "abort:all_off": "No early abort",
 };
 
@@ -6181,7 +6199,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [LAUNCH_REFUSAL_LABELS, ["used_up", "held", "over_declared", "no_key", "unpriced"]],
   [COUPLING_SEVERITY_INFO, ["collision", "inert", "info"]],
   [SCORE_LENS_LABELS, ["score:fitness"]],
-  [ABORT_LENS_LABELS, ["abort:epsilon_off", "abort:lock_in_off", "abort:all_off"]],
+  [ABORT_LENS_LABELS, ["abort:epsilon_off", "abort:all_off"]],
   [STEER_OUTSIDE_INFO, ["babysat", "refused"]],
   [CELL_TERM_META, ["fitness", "ground_truth_rank", "latency", "unworked", "cost", "tokens", "target_prompt_chars", "errored", "degraded", "cached", "retrieval_shortfall"]],
   [LOOKAHEAD_WORDS, ["one_at_a_time", "settled", "no_further_cell", "more_affordable", "holds_every_round", "holds_this_round", "discarded", "depth_one", "depth_many"]],

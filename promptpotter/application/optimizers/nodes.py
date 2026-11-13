@@ -195,8 +195,8 @@ class NodeMember(Protocol):
         """Read off the round file ALONE; the close stamps the roster's as ``RoundResult.optimizer_facts``."""
         return []
 
-    def refuse_origin(self, _origin_results: CellSheet) -> None:
-        """Raise where the origin's measurement holds what this member cannot start from."""
+    def refuse_pipeline(self, _schema: PipelineSchema) -> None:
+        """Raise where the pipeline holds nothing this member can edit."""
         return None
 
     def round_packages(self, _ctx: NodeContext) -> dict[str, str]:

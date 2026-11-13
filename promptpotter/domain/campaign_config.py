@@ -15,6 +15,7 @@ from promptpotter.domain.campaign import (
     StoppingRule,
 )
 from promptpotter.domain.cells import HardSampleOrder
+from promptpotter.domain.crowning_bar import CrowningStatistic
 from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.layer_fold import Folded, Lay, Layer, ScopedBy, fold_layers, rules_of
 from promptpotter.domain.paired_reading import LiftReference
@@ -31,8 +32,7 @@ from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
-OriginGateMode = Literal["strict", "critical_only", "off"]
-PanelGateMode = Literal["strict", "off"]
+GateMode = Literal["strict", "off"]
 ArmGateMode = Literal["off", "review", "author"]
 
 
@@ -182,15 +182,14 @@ class OptimizationConfig(OptimizerChoice):
             "record's rule."
         ),
     )
-    convergence_patience: Annotated[int | None, Knob(Estimand.STOPPING, Estimand.SPEND)] = Field(
-        None,
-        ge=1,
+    crowning_bar: Annotated[CrowningStatistic, Knob(Estimand.SELECTION, Estimand.STOPPING)] = Field(
         description=(
-            "Consecutive closed rounds without an advance of the best-so-far line on the origin "
-            "panel (``RunStanding.rounds_without_advance``) after which the run stops "
-            "``converged``, under any optimizer. A promotion resets it, separated from the "
-            "origin or not; a round whose origin-panel reading was not taken counts neither "
-            "way. ``None`` → no such stop."
+            "The ONE bar a crown, an advance of the line and a promotion read "
+            "(`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's θ "
+            "posterior capped by the discordant cells. ``sign_test``: an exact paired sign "
+            "test on the discordant cells, Holm-corrected across the round's arms. "
+            "``e_process``: an anytime-valid e-process on the paired discordance. "
+            "``empirical_bayes``: the arm's θ lift shrunk to the tenant's banked lift prior."
         ),
     )
     degradation_threshold: Annotated[float, Knob(Estimand.STOPPING)] = Field(ge=0.0, le=1.0)
@@ -211,7 +210,7 @@ class OptimizationConfig(OptimizerChoice):
         "the floor on n for a posterior to be meaningful.",
     )
 
-    panel_gate: Annotated[PanelGateMode, Knob(Estimand.GATE)] = Field(
+    panel_gate: Annotated[GateMode, Knob(Estimand.GATE)] = Field(
         description=(
             "Halt at the end of a round whose electable candidates carry HOLES — cells "
             "the loop attempted and got no measurement back from, or a spend or token "
@@ -239,13 +238,12 @@ class OptimizationConfig(OptimizerChoice):
         ),
     )
 
-    origin_gate: Annotated[OriginGateMode, Knob(Estimand.GATE)] = Field(
+    origin_gate: Annotated[GateMode, Knob(Estimand.GATE)] = Field(
         description=(
             "Halt after round 0 when the origin's degradation verdict is non-healthy, "
             "instead of optimizing against a broken floor — the common failure while "
             "bringing up a new connector. ``strict`` (default) halts on ``critical`` or "
-            "``degraded``; ``critical_only`` halts only on a structurally-broken origin; "
-            "``off`` disarms the gate. Resuming re-measures the cells the origin lost and "
+            "``degraded``; ``off`` disarms the gate. Resuming re-measures the cells the origin lost and "
             "grades it again; an origin still unhealthy when resumed proceeds into the search."
         ),
     )
@@ -277,8 +275,7 @@ class OptimizationConfig(OptimizerChoice):
     @property
     def stopping(self) -> StoppingRule:
         return StoppingRule(
-            lives=None if self.lives is None else self.lives.model_dump(mode="json"),
-            convergence_patience=self.convergence_patience,
+            lives=None if self.lives is None else self.lives.model_dump(mode="json")
         )
 
 

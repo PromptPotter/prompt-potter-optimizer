@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from promptpotter.application.intelligence.rasch import theta_cells
 from promptpotter.application.optimizers.nodes import RaceSnapshot
@@ -13,12 +13,10 @@ from promptpotter.application.scoring.selection import (
     capped_reach,
     cells_read,
     discordance,
-    elect_round_winner,
     paired_grades,
     prior_read,
 )
 from promptpotter.domain.cycle_paths import Lens
-from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.paired_reading import PriorStanding
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, Grade, GradedCell, MeasuredCell
 from promptpotter.domain.validators import StopSignal
@@ -35,7 +33,6 @@ class EliminationGate(StrEnum):
     """Named by the producer, never re-derived from which keys a context carries."""
 
     EPSILON = "epsilon"  # measurement stopped, NOT a verdict
-    LOCK_IN = "lock_in"
 
 
 ABORT_LENS_SUPPRESS: dict[str, frozenset[str]] = {
@@ -47,7 +44,6 @@ ABORT_LENS_SUPPRESS: dict[str, frozenset[str]] = {
 ABORT_LENS_LABELS: Worded[str, str] = Worded(
     {
         Lens("abort", f"{EliminationGate.EPSILON.value}_off").spelling: "No ε-elimination",
-        Lens("abort", f"{EliminationGate.LOCK_IN.value}_off").spelling: "No lock-in",
         Lens("abort", "all_off").spelling: "No early abort",
     }
 )
@@ -57,12 +53,11 @@ assert set(ABORT_LENS_LABELS) == {Lens("abort", body).spelling for body in ABORT
 
 
 class EliminationContext(TypedDict, total=False):
-    """``gate`` says which keys EXIST: lock-in adds the admission bar it met, ε the ε(n) that fired."""
+    """``gate`` says which keys EXIST: ε adds the ε(n) that fired."""
 
     gate: EliminationGate
     p_best: float
     epsilon: float
-    admission: float
     leader: ArmKey
     queries_scored: int
     total_queries: int
@@ -100,28 +95,6 @@ def wire_sheet(sheet: CellSheet) -> dict[str, dict[str, float | None]]:
     }
 
 
-def locks_in(
-    current: ArmKey,
-    sheet: CellSheet,
-    priors: Mapping[ArmKey, CellSheet],
-    parent: ArmKey,
-    *,
-    crowned: Collection[str],
-    n_min: int,
-    ruler: DeltaRuler | None,
-    admission: float,
-) -> bool:
-    """The election's own question: would ``elect_round_winner`` elect *current* now, over the
-    round's arms before it, against the parent's rows, on no cell that crowned the parent."""
-    if parent not in priors:
-        return False
-    arms = {k: election_rows(a, NO_CELLS, crowned) for k, a in {**priors, current: sheet}.items()}
-    bar = arms.pop(parent)
-    return (
-        elect_round_winner(list(arms), arms, bar, n_min, ruler, admission=admission)[0] == current
-    )
-
-
 def prior_reads(
     sheet: CellSheet, priors: Mapping[ArmKey, CellSheet], ruler: DeltaRuler | None, *, n_min: int
 ) -> dict[ArmKey, PriorRead]:
@@ -141,24 +114,18 @@ class PoBBCheck:
         self,
         knobs: PoBBKnobs,
         *,
-        admission: float | None,
         n_min: int,
         n_samples: int,
         ruler: DeltaRuler | None,
         parent: ArmKey,
-        crowned: Collection[str],
     ) -> None:
         # The SAME δ scale the round-winner election reads; ``None`` ⇒ flat, the ruler still cold.
         self.ruler = ruler
         self.parent = parent
-        self.crowned = crowned
         self.n_min = n_min
         self.epsilon = knobs.epsilon
         self.epsilon_floor = knobs.epsilon_floor
         self.epsilon_stop = knobs.epsilon_stop
-        self.lock_in = knobs.lock_in
-        # The selector's own promotion bar (`Selector.admission`); ``None`` locks no leader in.
-        self.admission = admission
         self.n_samples = n_samples
         # The GRADED rows, never a binarized hit, degenerate on a graded backend.
         self.priors: dict[ArmKey, CellSheet] = {}
@@ -216,47 +183,26 @@ class PoBBCheck:
                 )
             )
 
-        if not (self.epsilon_stop or self.lock_in):
-            return None
-        context: EliminationContext = {
-            "p_best": float(p_best),
-            "leader": leader,
-            "queries_scored": n,
-            "total_queries": self.n_samples,
-            "n_priors": len(reads),
-        }
-
-        def stop(outcome: Literal["eliminated", "locked_in"], gate: EliminationContext) -> PoBBStop:
-            return PoBBStop(
-                self.name,
-                outcome,
-                {**context, **gate},
-                cells=[cell.key for cell in sheet.scoreable],
-                priors=dict(self.priors),
-                paired_breakdown=paired_breakdown,
-            )
-
-        if (
-            self.lock_in
-            and self.admission is not None
-            and self._current is not None
-            and locks_in(
-                self._current,
-                sheet,
-                self.priors,
-                self.parent,
-                crowned=self.crowned,
-                n_min=self.n_min,
-                ruler=self.ruler,
-                admission=self.admission,
-            )
-        ):
-            return stop("locked_in", {"gate": EliminationGate.LOCK_IN, "admission": self.admission})
-        # ε is the ONLY futility gate; the priors include the round's parent (`potter/race.py`).
+        # ε is the ONLY gate; the priors include the round's parent (`potter/race.py`).
         bar = self.epsilon_at(read)
         if not self.epsilon_stop or p_best >= bar:
             return None
-        return stop("eliminated", {"gate": EliminationGate.EPSILON, "epsilon": float(bar)})
+        return PoBBStop(
+            self.name,
+            "eliminated",
+            {
+                "p_best": float(p_best),
+                "leader": leader,
+                "queries_scored": n,
+                "total_queries": self.n_samples,
+                "n_priors": len(reads),
+                "gate": EliminationGate.EPSILON,
+                "epsilon": float(bar),
+            },
+            cells=[cell.key for cell in sheet.scoreable],
+            priors=dict(self.priors),
+            paired_breakdown=paired_breakdown,
+        )
 
     def earliest_stop(
         self,
@@ -266,7 +212,7 @@ class PoBBCheck:
         unresolved: Mapping[ArmKey, Iterable[GradedCell]] | None = None,
     ) -> int | None:
         """An ``unresolved`` candidate may never become a prior: graded where its rows say, anything elsewhere, never counted on."""
-        if not (self.epsilon_stop or self.lock_in):
+        if not self.epsilon_stop:
             return None
         grades = paired_grades(cell for cell in results if cell.scored)
         cells = list(grades)
@@ -276,7 +222,6 @@ class PoBBCheck:
             for pid, rows in (unresolved or {}).items()
             if pid not in self.priors
         }
-        crowned = set(self.crowned)
         for m, (sample, row) in enumerate(upcoming, start=len(results) + 1):
             if row is None or row.scored:
                 cells.append(sample.key)
@@ -289,22 +234,11 @@ class PoBBCheck:
             read = len(theta_cells(dict.fromkeys(cells), cells, self.ruler))
             if not priors or read < self.n_min:
                 continue
-            # Whatever θ reads, the sign cap bounds both gates (`capped_reach`), an open cell either way.
-            cuts = self.epsilon_stop and any(
-                capped_reach(*_reach(cells, grades, g, worst=True))[0] < self.epsilon_at(read)
+            # Whatever θ reads, the sign cap bounds the gate (`capped_reach`), an open cell either way.
+            if any(
+                capped_reach(*_reach(cells, grades, g))[0] < self.epsilon_at(read)
                 for g in priors.values()
-            )
-            parent = priors.get(self.parent)
-            locks = (
-                self.lock_in
-                and self.admission is not None
-                and parent is not None
-                and capped_reach(
-                    *_reach([s for s in cells if s not in crowned], grades, parent, worst=False)
-                )[1]
-                > self.admission
-            )
-            if locks or cuts:
+            ):
                 return m
         return None
 
@@ -317,10 +251,9 @@ def _reach(
     cells: Sequence[str],
     candidate: Mapping[str, PairedGrade],
     prior: Mapping[str, PairedGrade],
-    *,
-    worst: bool,
 ) -> tuple[int, int]:
     """The candidate's discordant (wins, losses) over *prior* on *cells*, every cell either lacks
-    read as a loss (``worst``) or a win: the least or most support the sign cap can give."""
-    low, high = (_UNSOLVED, _SOLVED) if worst else (_SOLVED, _UNSOLVED)
-    return discordance([candidate.get(s, low) for s in cells], [prior.get(s, high) for s in cells])
+    read as a loss: the least support the sign cap can give."""
+    return discordance(
+        [candidate.get(s, _UNSOLVED) for s in cells], [prior.get(s, _SOLVED) for s in cells]
+    )

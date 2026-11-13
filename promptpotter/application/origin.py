@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.bench.task_context import campaign_framing
@@ -23,19 +22,16 @@ from promptpotter.application.scoring.formula.compiler import (
     realize_dials,
 )
 from promptpotter.application.scoring.metrics import compute_composite_fitness
-from promptpotter.application.scoring.search_point_scorer import ScoredWalk, score_search_point
+from promptpotter.application.scoring.search_point_scorer import ScoredWalk
 from promptpotter.domain.arms import ArmSlot, Concluded, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
 from promptpotter.domain.run_records import (
     OPERATOR_ORIGIN_SOURCES,
-    ArmRecord,
     CycleSeed,
     OriginSource,
-    PhaseRecord,
     ScoringLockedRecord,
 )
 from promptpotter.domain.sample import Sample
@@ -47,9 +43,9 @@ from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.scoring import CellSheet
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 
@@ -62,24 +58,29 @@ ORIGIN_SLOT = ArmSlot(round=0, idx=0, total=1)
 class CampaignOrigin(NamedTuple):
     origin: ReadArm
     framing: TaskDecomposition
-    # ``None`` where the campaign declared no dials to lock.
-    locked_scoring: dict[str, str] | None = None
 
 
-def lock_criterion(
-    session: Session, campaign_config: CampaignConfig, origin_rows: CellSheet, ledger: CycleEventLog
-) -> dict[str, str] | None:
-    """Locked once: ``pipeline_resolve.py::cycle_config`` reads the record back."""
-    block = campaign_config.scoring
+def lock_criterion(cycle: Cycle, read: ReadArm, ledger: CycleEventLog) -> ReadArm:
+    """Locked once, at round 0's close, on the rows its walk read; *read* comes back re-GRADED
+    under it, nothing re-measured. ``pipeline_resolve.py::cycle_config`` reads the record back."""
+    session = cycle.session
+    block = cycle.config.scoring
     if not isinstance(block, dict) or DIALS_KEY not in block:
-        return None
+        return read
     terms = campaign_terms(session.backend_client.connector.name)
     formula = realize_dials(
-        parse_dials(block[DIALS_KEY], terms), origin_anchors(origin_rows, terms), terms
+        parse_dials(block[DIALS_KEY], terms), origin_anchors(read.rows, terms), terms
     )
     locked = {k: v for k, v in block.items() if k != DIALS_KEY} | {"per_cell": formula}
     ledger.append(ScoringLockedRecord(declared=dict(block), locked=locked))
-    return locked
+    cycle.config = cycle.config.model_copy(update={"scoring": locked})
+    session.state.scoring = scorer_setup(
+        session, cycle.config, partition=session.state.scoring.partition
+    )
+    # The scorer's id keys the difficulty ruler, so round 0 is read on the locked one's.
+    cycle.reopen_difficulty()
+    sheet = session.state.scoring.scorer.sheet(cell.facts for cell in read.rows)
+    return ReadArm(read.key, read.state, sheet)
 
 
 def try_inherit_fork_origin(
@@ -198,14 +199,15 @@ def resolve_origin_opt_search_point(
     return origin.configured(pipeline_params, schema)
 
 
-async def establish_campaign_origin(
+def seat_campaign_origin(
     session: Session,
     dataset: list[Sample],
     campaign_config: CampaignConfig,
     *,
     cycle: CycleConfig,
-    ledger: CycleEventLog,
 ) -> CampaignOrigin:
+    """Round 0's seat, never its walk: inherited, standing or unmeasured. Round 0's door walks it
+    after INIT closes (`runner/loop.py::open_origin_round`)."""
     resolved_origin = resolve_origin_opt_search_point(
         dataset=session.dataset,
         seed=cycle.origin,
@@ -214,7 +216,6 @@ async def establish_campaign_origin(
     )
     # The SAME read identity uses; handed in, it could be a value the cycle id never saw.
     framing = campaign_framing(session.store, campaign_config, session.dataset)
-    pipeline_schema = session.pipeline_schema
     sp = session.points(framing).job(resolved_origin)
     inherited = try_inherit_fork_origin(
         session, cycle.own_seed, resolved_origin=resolved_origin, sp=sp, framing=framing
@@ -223,78 +224,31 @@ async def establish_campaign_origin(
         return inherited
     if (standing := standing_origin(session, resolved_origin)) is not None:
         return CampaignOrigin(origin=standing, framing=framing)
-    proposed = Proposed(role=MeasurementRole.ORIGIN, slot=ORIGIN_SLOT, individual=resolved_origin)
-    key = ArmKey(resolved_origin.id)
-
     # Never infer "no program" from an empty searchpoint: the L4 outer origin's is empty too.
-    if not dataset:
-        if isinstance(campaign_config.scoring, dict) and DIALS_KEY in campaign_config.scoring:
-            raise PayloadInvalidError(
-                "the campaign declares scoring dials, and dials are anchored on the origin's "
-                "measured cells — this origin measures none. Declare 'per_cell' instead.",
-                code="pipeline_config_invalid",
-            )
-        # The fold of no cell: `total=0`, never a bare 0.0 that reads as a real floor of zero.
-        unmeasured = measuring(proposed, sp, pipeline_schema, expected=0)
-        nothing = ScoredWalk(
-            NO_CELLS,
-            compute_composite_fitness(NO_CELLS, session.state.scoring.scorer, pipeline_schema),
-            signal=None,
-            stopped=None,
+    dials = isinstance(campaign_config.scoring, dict) and DIALS_KEY in campaign_config.scoring
+    if not dataset and dials:
+        raise PayloadInvalidError(
+            "the campaign declares scoring dials, and dials are anchored on the origin's "
+            "measured cells — this origin measures none. Declare 'per_cell' instead.",
+            code="pipeline_config_invalid",
         )
-        return CampaignOrigin(
-            origin=ReadArm(key, conclude(unmeasured, nothing, round_num=0), NO_CELLS),
-            framing=framing,
-        )
-
-    scoring_set = sample_dataset(dataset, campaign_config.sp_budget_origin)
-
-    ledger.append(PhaseRecord(phase=CampaignPhase.ORIGIN, event="enter", round=0))
-
-    arm = measuring(
+    scoring_set = sample_dataset(dataset, campaign_config.sp_budget_origin) if dataset else []
+    proposed = Proposed(role=MeasurementRole.ORIGIN, slot=ORIGIN_SLOT, individual=resolved_origin)
+    unmeasured = measuring(
         proposed,
         sp,
-        pipeline_schema,
+        session.pipeline_schema,
         expected=len(scoring_set),
         sample_order=[s.id for s in scoring_set],
     )
-    ledger.append(
-        ArmRecord(round=0, arm=key, state=proposed, anchors=session.state.view_context.anchors())
+    # The fold of no cell: `total=0`, never a bare 0.0 that reads as a real floor of zero.
+    nothing = ScoredWalk(
+        NO_CELLS,
+        compute_composite_fitness(NO_CELLS, session.state.scoring.scorer, session.pipeline_schema),
+        signal=None,
+        stopped=None,
     )
-    ledger.append(
-        ArmRecord(round=0, arm=key, state=arm, anchors=session.state.view_context.anchors())
-    )
-
-    try:
-        # One walk: a partial pass is graded by coverage (`origin_gate`), and its holes are the
-        # resume's to re-send (`repair.py::rewalk_lost_origin`), so nothing here reads `stopped`.
-        scored = await score_search_point(
-            sp,
-            scoring_set,
-            session,
-            kind=MeasurementRole.ORIGIN,
-            measured=resolved_origin.id,
-        )
-        sheet, scores = scored.sheet, scored.scores
-        locked_scoring = lock_criterion(session, campaign_config, sheet, ledger)
-        if locked_scoring is not None:
-            # Re-GRADED under the criterion these rows just anchored; nothing is re-measured.
-            session.state.scoring = scorer_setup(
-                session,
-                campaign_config.model_copy(update={"scoring": locked_scoring}),
-                partition=session.state.scoring.partition,
-            )
-            scorer = session.state.scoring.scorer
-            sheet = scorer.sheet(cell.facts for cell in sheet)
-            scores = compute_composite_fitness(sheet, scorer, pipeline_schema)
-        # Both what the ledger receives and round 0's arm — never re-derive either from these rows.
-        state = conclude(arm, replace(scored, sheet=sheet, scores=scores), round_num=0)
-        ledger.append(
-            ArmRecord(round=0, arm=key, state=state, anchors=session.state.view_context.anchors())
-        )
-    finally:
-        ledger.append(PhaseRecord(phase=CampaignPhase.ORIGIN, event="exit", round=0))
-
+    seated = conclude(unmeasured, nothing, round_num=0)
     return CampaignOrigin(
-        origin=ReadArm(key, state, sheet), framing=framing, locked_scoring=locked_scoring
+        origin=ReadArm(ArmKey(resolved_origin.id), seated, NO_CELLS), framing=framing
     )

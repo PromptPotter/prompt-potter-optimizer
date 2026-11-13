@@ -19,5 +19,6 @@ campaign:
     panel_gate: strict
     lift_reference: best_so_far
     origin_gate: strict
+    crowning_bar: posterior
     enable_2pl_graduation: true
     budget: {rounds: 5}

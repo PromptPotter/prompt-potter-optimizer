@@ -87,7 +87,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
-    from promptpotter.domain.scoring import CellSheet
 
 
 @shapes_optimizer_prompt
@@ -507,9 +506,9 @@ class SelectedOptimizer:
     def round_facts(self, round_result: RoundResult) -> list[OptimizerFact]:
         return [fact for member in self.members for fact in member.round_facts(self, round_result)]
 
-    def refuse_origin(self, origin_results: CellSheet) -> None:
+    def refuse_pipeline(self, schema: PipelineSchema) -> None:
         for member in self.members:
-            member.refuse_origin(origin_results)
+            member.refuse_pipeline(schema)
 
     def review(
         self,

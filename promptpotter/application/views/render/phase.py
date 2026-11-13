@@ -212,13 +212,12 @@ def render_round_stats(
     return "\n".join(lines)
 
 
-def render_patience_status(advance: RoundAdvance, stall: int, patience: int | None) -> str:
+def render_advance_status(advance: RoundAdvance, stall: int) -> str:
     info = ROUND_ADVANCE_INFO[advance]
     if advance.stall is StallEffect.RESETS:
         return _node_line(f"{GREEN}✓ {info.label}, auto-continuing...{RESET}")
     rounds = "round" if stall == 1 else "rounds"
-    bound = "" if patience is None else f" (converges at {patience})"
-    return _node_line(f"{YELLOW}⚠ {info.label} — {stall} {rounds} without an advance{bound}{RESET}")
+    return _node_line(f"{YELLOW}⚠ {info.label} — {stall} {rounds} without an advance{RESET}")
 
 
 def render_completion(

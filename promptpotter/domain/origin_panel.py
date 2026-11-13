@@ -6,6 +6,7 @@ from typing import NamedTuple, assert_never
 
 from pydantic import Field
 
+from promptpotter.domain.crowning_bar import CrowningBar
 from promptpotter.domain.paired_reading import (
     ArmName,
     MeasurandUnit,
@@ -93,9 +94,14 @@ assert ROUND_ADVANCE_INFO.keys() == set(RoundAdvance)
 
 @shapes_optimizer_prompt
 def round_advance(
-    round_num: int, improved: bool, lead: PairedReading, earlier: Sequence[PairedReading]
+    round_num: int,
+    improved: bool,
+    lead: PairedReading,
+    earlier: Sequence[PairedReading],
+    bar: CrowningBar | None,
 ) -> RoundAdvance:
-    """*improved* is a point-estimate promotion; only *lead* (pick over C0, origin panel) moves the line."""
+    """*improved* is the bar's promotion; only *lead* (pick over C0, origin panel) moves the line,
+    separated as the *bar*'s switch reads it."""
     if round_num == 0:
         return RoundAdvance.ORIGIN
     if not improved:
@@ -107,7 +113,7 @@ def round_advance(
             return RoundAdvance.UNREAD
         case ReadingStateKind.READ:
             lift = lead.headline
-            assert lift is not None, "a read pair carries its lift"
+            assert lift is not None and bar is not None, "a read pair carries its lift and bar"
             # A pair that lost a cell is a rate over a different exam: compare whole-panel rates only.
             whole = lead.on_whole_set
             tops = all(
@@ -117,7 +123,7 @@ def round_advance(
                 for pick in earlier
                 if pick.headline is not None
             )
-            separated = lift.estimate.side == "above" and tops
+            separated = bar.separates(lift) and tops
             return RoundAdvance.ADVANCED if separated else RoundAdvance.NOT_SEPARATED
 
 
@@ -169,6 +175,7 @@ class OverlapReading(FrozenModel):
         earlier: Sequence[PairedReading],
         triggered: Sequence[TriggeredReading],
         vs_parent: PairedReading | None,
+        bar: CrowningBar | None,
     ) -> OverlapReading:
         return cls(
             positions=tuple(positions),
@@ -176,7 +183,7 @@ class OverlapReading(FrozenModel):
             earlier=tuple(earlier),
             triggered=tuple(triggered),
             vs_parent=vs_parent,
-            advance=round_advance(round_num, improved, lead, earlier),
+            advance=round_advance(round_num, improved, lead, earlier, bar),
         )
 
     @classmethod
@@ -189,6 +196,7 @@ class OverlapReading(FrozenModel):
             earlier=(),
             triggered=(),
             vs_parent=None,
+            bar=None,
         )
 
 

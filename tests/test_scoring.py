@@ -187,7 +187,7 @@ from promptpotter.application.runner.round import (
     hold_for_operator,
     run_init,
 )
-from promptpotter.application.runner.termination import standing_tripped, target_tripped
+from promptpotter.application.runner.termination import standing_tripped
 from promptpotter.application.scoring import closed_rounds, evaluators, query_loop
 from promptpotter.application.scoring import passes as held_out
 from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
@@ -240,7 +240,6 @@ from promptpotter.domain.arms import (
     Measured,
     Proposed,
     Refused,
-    arm_end,
     is_leader_eligible,
 )
 from promptpotter.domain.bench import (
@@ -279,6 +278,7 @@ from promptpotter.domain.command_kinds import (
     SubmittedArm,
     VerifyCandidatePayload,
 )
+from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.dashboard_rows import RoundHealth, RunLimits
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
@@ -1436,7 +1436,7 @@ def _level_parent() -> tuple[Any, CellSheet]:
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     ruler = _easy_low_hard_high()
-    admission = election_knobs().admission
+    bar = CrowningBar(statistic="posterior", admission=election_knobs().admission)
     with pytest.raises(ValidationError):
         ElectionKnobs(admission=0.70)  # one discordant cell supports 0.75: it would promote
     weak_on_easy = [measurement(i, float(i < 16)) for i in range(20)]
@@ -1452,7 +1452,7 @@ def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
         sheet(measurement(i, float(i < 20)) for i in range(40)),
         4,
         ruler,
-        admission=admission,
+        bar=bar,
     )
     assert winner_id == "able_on_hard", "a round winner elects by ability, not subset accuracy"
     assert abilities.theta["able_on_hard"] > abilities.theta["weak_on_easy"]
@@ -1462,15 +1462,18 @@ def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     )
     one_cell = {ArmKey("one"): sheet(measurement(i, float(i < 7)) for i in range(20))}
     parent_six = sheet(measurement(i, float(i < 6)) for i in range(20))
-    assert elect_round_winner(list(one_cell), one_cell, parent_six, 6, spread, admission=admission)[
-        0
-    ] is (None), "one discordant cell of 20 promoted: a lift its own paired evidence cannot carry"
+    assert elect_round_winner(list(one_cell), one_cell, parent_six, 6, spread, bar=bar)[0] is (
+        None
+    ), "one discordant cell of 20 promoted: a lift its own paired evidence cannot carry"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
     # `coverage_floor` IS PoBB's `n_min`.
-    ruler, admission = _easy_low_hard_high(), election_knobs().admission
+    ruler, bar = (
+        _easy_low_hard_high(),
+        CrowningBar(statistic="posterior", admission=election_knobs().admission),
+    )
     flat, half = _level_parent()
     deep = sheet(measurements([1.0] * 21 + [0.0] * 7))
     shallow = sheet(measurements([1.0] * 5 + [0.0], range(14, 20)))
@@ -1482,20 +1485,17 @@ def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
     assert p["deep"] > p["shallow"], "so it demonstrated less"
     deep_key, shallow_key = ArmKey("deep"), ArmKey("shallow")
     thin_arms = {deep_key: deep, shallow_key: shallow}
-    assert elect_round_winner(list(thin_arms), thin_arms, half, 6, flat, admission=admission)[
-        0
-    ] == ("deep"), "a thin arm won"
-    assert elect_round_winner(
-        [shallow_key], {shallow_key: shallow}, half, 6, flat, admission=admission
-    )[0] == ("shallow"), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
+    assert elect_round_winner(list(thin_arms), thin_arms, half, 6, flat, bar=bar)[0] == ("deep"), (
+        "a thin arm won"
+    )
+    assert elect_round_winner([shallow_key], {shallow_key: shallow}, half, 6, flat, bar=bar)[0] == (
+        "shallow"
+    ), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
     behind = sheet(measurements([1.0] * 4 + [0.0] * 2))
     behind_lift = theta_lift_over_parent(candidate_abilities({"b": behind}, half, flat), "b")
     assert behind_lift is not None and behind_lift.value > 0.0
     assert (
-        elect_round_winner(
-            [ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat, admission=admission
-        )[0]
-        is None
+        elect_round_winner([ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat, bar=bar)[0] is None
     ), "a θ lift over the parent's whole panel never crowns an arm that LOST the cells it shares"
     swapped = sheet(measurement(i, float(0 < i < 20 or i == 20)) for i in range(40))
     assert (
@@ -1505,14 +1505,14 @@ def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
             sheet(measurement(i, float(i < 20)) for i in range(40)),
             4,
             ruler,
-            admission=admission,
+            bar=bar,
         )[0]
         is None
     ), "one cell won and one lost is a tie, whatever the δ weighting or the fit's last digit"
     longer, terse_parent = _charged_by_length()
     level = delta_ruler(dict.fromkeys(range(34), 0.0))
     assert elect_round_winner(
-        [ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level, admission=admission
+        [ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level, bar=bar
     )[0] == ("l"), "a cost term's tie-break was counted as a verdict lost"
 
 
@@ -1540,7 +1540,10 @@ def test_a_crowned_picks_lucky_cells_stay_out_of_every_race_it_judges() -> None:
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads() -> None:
-    admission, deep_key = election_knobs().admission, ArmKey("deep")
+    bar, deep_key = (
+        CrowningBar(statistic="posterior", admission=election_knobs().admission),
+        ArmKey("deep"),
+    )
     flat, half = _level_parent()
     twenty = sheet(measurements([1.0] * 20 + [0.0] * 8))
     near_key = ArmKey("near")
@@ -1549,9 +1552,7 @@ def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads(
         deep_key: sheet(measurements([1.0] * 18 + [0.0] * 10)),  # further off, on the whole panel
         ArmKey("thin"): sheet(measurements([1.0] * 3)),  # the highest θ, under the floor
     }
-    held_id, held_abilities = elect_round_winner(
-        list(arms), arms, twenty, 6, flat, admission=admission
-    )
+    held_id, held_abilities = elect_round_winner(list(arms), arms, twenty, 6, flat, bar=bar)
     reads = readable_lifts(list(arms), 6, held_abilities)
     assert held_id is None, "no arm cleared the bar"
     assert held_abilities.theta["thin"] > held_abilities.bar["thin"][0], (
@@ -1640,7 +1641,7 @@ def test_ab_replay_refits_the_whole_ruler_under_the_edited_formula(
         n_min=n_min,
         enable_2pl=two_pl,
     ).ruler
-    own = cycle.session.state.scoring.require_scorer()
+    own = cycle.session.state.scoring.scorer
     same = regraded_ruler(stores, stamp, own, n_min=n_min, enable_2pl=two_pl)
     assert read is not None and same is not None and same.delta == read.delta, (
         "ab re-fit the election's scale differently under the formula the election read it with"
@@ -1667,7 +1668,7 @@ def test_only_an_invalid_measurement_bars_an_arm_from_leading() -> None:
             True,
         ),
         (
-            arm_state("C1.1", locked_in=True, elimination={"p_best": 0.96, "gate": "lock_in"}),
+            arm_state("C1.1", locked_in=True, elimination={"gate": "settled"}),
             True,
         ),
         (arm_state("C1.4"), True),
@@ -2340,7 +2341,12 @@ def test_an_arm_is_read_on_the_theta_its_election_takes_over_every_cell_of_its_r
             read.theta[crowned],
             read.theta_se[crowned],
         ), "an arm carries the θ the election takes of its rows, on the scale it stamped"
-        assert fold.total == 4 and target_tripped(cycle, fold.fitness) is None, (
+        optimization = cycle.config.optimization.model_copy(
+            update={"halt_at_fitness": fold.fitness, "lives": None}
+        )
+        unpaid = LineOutlay(search_usd=None, worked_s=None)
+        standing = RunStanding.after(list(cycle.rounds), lives=None, outlay=unpaid)
+        assert fold.total == 4 and standing_tripped(standing, optimization) is None, (
             "a 4-cell point estimate met the target: the ceiling reads the paired lower bound"
         )
 
@@ -2608,31 +2614,13 @@ def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorde
         minted_dataset(stores, peer)
         session = cycle.session
         session.state.clock = LaunchClock.now()
-        # The origin's walk as INIT banks it, which the round file's cells name.
-        origin = cycle.origin_round.origin.individual
-        c0_arm = cycle.origin_round.panel[ArmKey(origin.id)]
+        # The origin walked in round 0's door, which the round file's cells name.
         ledger.append(RoundEnteredRecord(round=0))
-        ledger.append(
-            ArmRecord(
-                round=0,
-                arm=ArmKey(origin.id),
-                state=Proposed(role=c0_arm.role, slot=c0_arm.slot, individual=c0_arm.individual),
-            )
-        )
         walked = list(session.state.scoring.partition.search)[:4]
         with at_round(0):
-            c0 = asyncio.run(
-                score_search_point(
-                    cycle.points.measured(cycle.measured(origin.id)),
-                    walked,
-                    session,
-                    kind=MeasurementRole.ORIGIN,
-                    measured=origin.id,
-                )
+            asyncio.run(
+                open_origin_round(cycle, walked, ledger, spend=SpendRollup(), resumed_ending=None)
             )
-        cells = {ArmKey(origin.id): c0.sheet}
-        set_cycle(cycle, line=[cycle.origin_round.model_copy(update={"cells": cells})])
-        asyncio.run(open_origin_round(cycle, [], ledger, spend=SpendRollup()))
         bands = [
             record.view
             for _, record in ledger.iter()
@@ -3037,16 +3025,15 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
 class _Trailing(NamedTuple):
     cfg: PoBBKnobs
     parent: ArmKey
-    bar: float
     behind_perfect_prior: Callable[..., Any]
 
 
 @pytest.fixture
 def trailing() -> _Trailing:
-    """An ε ramping in from its floor, the election's bar, and an arm read behind a perfect prior."""
+    """An ε ramping in from its floor, and an arm read behind a perfect prior."""
     # The depths come from `fit_theta`'s dispersion rule.
     cfg = pobb_knobs(epsilon=0.30, epsilon_floor=0.15)
-    parent, bar = ArmKey("parent"), election_knobs().admission
+    parent = ArmKey("parent")
 
     def behind_perfect_prior(n: int, misses: int, *, parent_cells: int = 28) -> Any:
         check = PoBBCheck(
@@ -3055,23 +3042,19 @@ def trailing() -> _Trailing:
             n_samples=28,
             ruler=None,
             parent=parent,
-            admission=bar,
-            crowned=frozenset(),
         )
         check.register_completed(sheet(measurements([1.0] * 28)), key=ArmKey("winner"))
         check.register_completed(sheet(measurements([1.0] * parent_cells)), key=parent)
         check.set_current(ArmKey("arm"))
         return check.check(sheet(measurements([0.0] * misses + [1.0] * (n - misses))).cells)
 
-    return _Trailing(cfg, parent, bar, behind_perfect_prior)
+    return _Trailing(cfg, parent, behind_perfect_prior)
 
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_epsilon_ramps_in_from_its_floor(trailing: _Trailing) -> None:
-    cfg, parent, bar, _ = trailing
-    graded = PoBBCheck(
-        cfg, n_min=6, n_samples=28, ruler=None, parent=parent, admission=bar, crowned=frozenset()
-    )
+    cfg, parent, _ = trailing
+    graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent)
     for n, epsilon in ((6, 0.15), (9, 0.225), *((n, 0.30) for n in range(12, 29))):
         assert graded.epsilon_at(n) == pytest.approx(epsilon), f"ε at {n} cells"
     flat = PoBBCheck(
@@ -3080,8 +3063,6 @@ def test_epsilon_ramps_in_from_its_floor(trailing: _Trailing) -> None:
         n_samples=28,
         ruler=None,
         parent=parent,
-        admission=bar,
-        crowned=frozenset(),
     )
     assert flat.epsilon_at(6) == pytest.approx(0.30), "a floor at ε does not ramp"
     shipped = PoBBCheck(
@@ -3090,8 +3071,6 @@ def test_epsilon_ramps_in_from_its_floor(trailing: _Trailing) -> None:
         n_samples=28,
         ruler=None,
         parent=parent,
-        admission=bar,
-        crowned=frozenset(),
     )
     assert shipped.epsilon_at(shipped.n_min) == pytest.approx(shipped.epsilon), (
         "the manifest sits floor and ε on the same value, so an untouched campaign never grades"
@@ -3127,156 +3106,14 @@ def test_an_arm_behind_a_perfect_prior_is_cut_on_the_epsilon_that_fired(
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_an_arm_at_the_elections_admission_on_every_prior_stops_as_the_leader(
-    trailing: _Trailing,
-) -> None:
-    # One discordant cell (support 0.75) never reaches it, and a selector with no bar never.
-    _, parent, bar, behind_perfect_prior = trailing
-
-    def ahead_of_parent(n: int, wins: int, admission: float | None = bar, **bend: Any) -> Any:
-        knobs = pobb_knobs(**bend)
-        check = PoBBCheck(
-            knobs,
-            n_min=6,
-            n_samples=28,
-            ruler=None,
-            parent=parent,
-            admission=admission,
-            crowned=frozenset(),
-        )
-        check.register_completed(sheet(measurements([0.0] * 28)), key=parent)
-        check.set_current(ArmKey("arm"))
-        return check.check(sheet(measurements([1.0] * wins + [0.0] * (n - wins))).cells)
-
-    assert ahead_of_parent(6, 1) is None, "one discordant cell locked an arm in"
-    locked = ahead_of_parent(6, 6, lock_in=True)
-    assert locked is not None and locked.outcome == "locked_in", (
-        "an arm clearly ahead of the parent kept spending"
-    )
-    assert locked.check_result["admission"] == bar, "the lock-in archives the bar it met"
-    assert ahead_of_parent(6, 6, lock_in=True, admission=None) is None, (
-        "a selector with no bar locked in"
-    )
-    assert ahead_of_parent(6, 6, lock_in=True, epsilon_stop=False) is not None, (
-        "the elimination switch turned the lock-in off"
-    )
-    assert behind_perfect_prior(9, 2) is not None, "the lock-in switch turned elimination off"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_the_shipped_lock_in_never_stops_a_four_cell_leader(trailing: _Trailing) -> None:
-    # The lock-in re-reads the bar after every cell (optional stopping): 4/4 on four cells its
-    # parent read 1/4 meets it, and such a pick verifies far below it.
-    _, parent, bar, _ = trailing
-
-    def four_cells(**bend: Any) -> tuple[Any, int | None]:
-        check = PoBBCheck(
-            pobb_knobs(**bend),
-            n_min=4,
-            n_samples=20,
-            ruler=None,
-            parent=parent,
-            admission=bar,
-            crowned=frozenset(),
-        )
-        check.register_completed(sheet(measurements([1.0] + [0.0] * 19)), key=parent)
-        check.set_current(ArmKey("arm"))
-        read = sheet(measurements([1.0] * 4)).cells
-        return check.check(read), check.earliest_stop(read, [(s, None) for s in samples(20)[4:]])
-
-    stop, horizon = four_cells()
-    # Only ε's worst case (every cell ahead a miss) may still bound the walk, never the next cell.
-    assert stop is None and (horizon is None or horizon > 5), (
-        f"the shipped lock-in stopped a 4-cell leader ({stop}) or capped its walk at {horizon}"
-    )
-    stop, horizon = four_cells(lock_in=True)
-    assert stop is not None and stop.outcome == "locked_in", "the switch on no longer locks"
-    assert stop.check_result["p_best"] == pytest.approx(0.938, abs=1e-3), (
-        "switched on, the lock-in is no longer main's rule"
-    )
-    assert horizon == 5, f"switched on, the walk launched past the lock-in: {horizon}"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_the_lock_in_asks_the_elections_own_question(trailing: _Trailing) -> None:
-    # The round order leads with the parent's misses, and a warm bar reads the parent on every
-    # cell it scored, not those four.
-    _, parent, bar, _ = trailing
-
-    def front_loaded(parent_hits: int) -> Any:
-        check = PoBBCheck(
-            pobb_knobs(lock_in=True),
-            n_min=4,
-            n_samples=20,
-            ruler=delta_ruler(dict.fromkeys(range(20), 0.0)),
-            parent=parent,
-            admission=bar,
-            crowned=frozenset(),
-        )
-        rest = [1.0] * parent_hits + [0.0] * (16 - parent_hits)
-        check.register_completed(sheet(measurements([0.0] * 4 + rest)), key=parent)
-        check.set_current(ArmKey("arm"))
-        return check.check(sheet(measurements([1.0] * 4)).cells)
-
-    assert front_loaded(16) is None, (
-        "four cells the parent missed locked in an arm the election refuses"
-    )
-    admitted = front_loaded(14)
-    assert admitted is not None and admitted.outcome == "locked_in", (
-        "a lead the election admits kept spending"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_arm_is_cut_only_on_evidence_that_it_trails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # A locked-in leader is the bar every later arm races: one level with the parent and behind
-    # the leader is cut, never walked to its end against the parent alone.
-    def ace_or_as_parent(prompt: str, sample: Sample) -> bool:
-        return "Ace." in prompt or _PEER_READ_ORDER[sample.id] % 2 == 0
-
-    with _peer_cycle(
-        workspace(tmp_path / "locked"),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {"l1_generate": {"config": {"n_variants": 2}}, "pobb": {"config": {"lock_in": True}}},
-        ace_or_as_parent,
-    ) as (cycle, ledger):
-        offline.llm.says = _potter_says("Ace.", "Same.")
-        raced = asyncio.run(execute_round(cycle, 1, ledger)).result
-    ends = {
-        arm.individual.prompts["solve"].fields["instruction"]: arm_end(arm)
-        for arm in raced.panel.values()
-    }
-    assert ends == {"Ace.": "locked_in", "Same.": "eliminated"}, (
-        f"a locked-in leader never joined the priors the arm after it raced: {ends}"
-    )
-    by_text = {
-        arm.individual.prompts["solve"].fields["instruction"]: key
-        for key, arm in raced.panel.items()
-    }
-    leader, challenger_cells = by_text["Ace."], {c.key for c in raced.rows(by_text["Same."])}
-    assert challenger_cells <= {c.key for c in raced.rows(leader)}, (
-        "a locked-in leader's round reading left out the cells it was caught up on"
-    )
-    assert raced.folds[leader].total == len(raced.rows(leader)), (
-        "the round's close folded a locked-in leader on fewer cells than the election judged"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
 def test_an_arm_is_never_cut_on_cells_its_rival_never_sat(trailing: _Trailing) -> None:
-    _, parent, bar, _ = trailing
+    _, parent, _ = trailing
     unpaired = PoBBCheck(
         pobb_knobs(epsilon=0.05),
         n_min=4,
         n_samples=20,
         ruler=None,
         parent=parent,
-        admission=bar,
-        crowned=frozenset(),
     )
     unpaired.register_completed(
         sheet(measurements([1.0] * 8, sample_ids=list(range(8)))), key=ArmKey("lucky_leader")
@@ -3289,11 +3126,9 @@ def test_an_arm_is_never_cut_on_cells_its_rival_never_sat(trailing: _Trailing) -
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_cost_terms_tie_breaks_never_pin_p_best_at_a_coin(trailing: _Trailing) -> None:
-    cfg, parent, bar, _ = trailing
+    cfg, parent, _ = trailing
     longer, terse_parent = _charged_by_length()
-    charged = PoBBCheck(
-        cfg, n_min=6, n_samples=34, ruler=None, parent=parent, admission=bar, crowned=frozenset()
-    )
+    charged = PoBBCheck(cfg, n_min=6, n_samples=34, ruler=None, parent=parent)
     charged.register_completed(terse_parent, key=parent)
     standings: list[node_contract.RaceSnapshot] = []
     charged.set_current(ArmKey("l"), on_snapshot=standings.append)
@@ -3327,7 +3162,7 @@ def test_an_origin_round_serves_its_lift_over_the_constant_answer_on_the_cells_i
 def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trailing) -> None:
     # A verifier proves an answer wrong by an unsolved cell, and alike-and-all-solved is NOT
     # collapsed.
-    _, parent, bar, _ = trailing
+    _, parent, _ = trailing
 
     def answered(fitness: list[float], **over: Any) -> list[GradedCell]:
         return [
@@ -3350,8 +3185,6 @@ def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trail
         n_samples=28,
         ruler=None,
         parent=parent,
-        admission=bar,
-        crowned=frozenset(),
     )
     assert unpaired_check.check(constant) is None, (
         "one label on an n_min prefix, read against no parent, cut an arm the panel never judged"
@@ -3580,6 +3413,9 @@ def test_gepas_gate_tests_each_arm_against_the_minibatch_scores_of_its_own_paren
 # 6. Escalation and stop — live, and folded back on resume
 
 
+_TODAYS_BAR = CrowningBar(statistic="posterior", admission=BAR_ADMISSION)
+
+
 def _line_read(
     round_num: int,
     improved: bool,
@@ -3632,6 +3468,7 @@ def _line_read(
             for label, grades in triggered
         ],
         vs_parent=read(*picks[-1], picks[-2]) if len(picks) >= 2 else None,
+        bar=_TODAYS_BAR,
     )
 
 
@@ -3917,6 +3754,7 @@ def test_a_reading_that_failed_moves_the_stall_clock_neither_way(
         earlier=(),
         triggered=(),
         vs_parent=None,
+        bar=None,
     )
     assert stopped.advance is RoundAdvance.UNREAD
     rounds = [
@@ -3979,15 +3817,15 @@ def test_no_pair_to_read_stands_alone_and_a_pair_owed_refused_or_unlanded_is_no_
     }
     for state, advance in promoted_on.items():
         pair = lead if state is ReadingState.READ else PairedReading.unread(state)
-        assert round_advance(1, True, pair, ()) is advance, state
-        assert round_advance(1, False, pair, ()) is RoundAdvance.HELD, state
-        assert round_advance(0, True, pair, ()) is RoundAdvance.ORIGIN, state
+        assert round_advance(1, True, pair, (), _TODAYS_BAR) is advance, state
+        assert round_advance(1, False, pair, (), _TODAYS_BAR) is RoundAdvance.HELD, state
+        assert round_advance(0, True, pair, (), _TODAYS_BAR) is RoundAdvance.ORIGIN, state
 
 
 def _lived_peer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AbstractContextManager[tuple[Cycle, CycleEventLog]]:
-    """A CAPO peer on a life bank of 2 capped at 4, converged after 3 rounds without advance."""
+    """A CAPO peer on a life bank of 2 capped at 4."""
     return _peer_cycle(
         workspace(tmp_path / "peer"),
         _PEER_HOP,
@@ -3996,12 +3834,11 @@ def _lived_peer(
         {},
         lambda _p, _s: True,
         lives={"start": 2, "cap": 4},
-        convergence_patience=3,
     )
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_the_bench_stops_a_peer_on_spent_lives_and_on_convergence(
+def test_the_bench_stops_a_peer_on_spent_lives(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with _lived_peer(tmp_path, monkeypatch) as (cycle, _):
@@ -4023,7 +3860,10 @@ def test_the_bench_stops_a_peer_on_spent_lives_and_on_convergence(
             set_cycle(
                 cycle, line=line, standing=RunStanding.after(line, lives=lives.bank, outlay=paid)
             )
-            return stalls_left(line, lives.bank), standing_tripped(cycle)
+            assert cycle.standing is not None
+            return stalls_left(line, lives.bank), standing_tripped(
+                cycle.standing, cycle.config.optimization
+            )
 
         held, promoted, uncompared = (False, 2), (True, 2), (False, 0)
         assert stop_after(held) == (1, None)
@@ -4034,10 +3874,6 @@ def test_the_bench_stops_a_peer_on_spent_lives_and_on_convergence(
         assert stop_after(promoted, promoted, promoted, held, held) == (2, None), (
             "the bank fills to its cap"
         )
-        assert stop_after(promoted, promoted, promoted, held, held, held) == (
-            1,
-            StopReason.CONVERGED,
-        ), "the convergence clock ends the run with a life unspent"
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
@@ -4053,8 +3889,8 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
         }
         assert all(reading.advance is advance for advance, reading in readings.items())
 
-        # One ceiling stop: the pick's level on the origin panel at its paired interval's lower
-        # bound, `halt_at_fitness` its target; no pair, no stop.
+        # One ceiling stop: the pick's own level on the origin panel at its one-sided anytime-valid
+        # lower bound, `halt_at_fitness` its target; no pair, no stop.
         def outcome(reading: OverlapReading, target: float) -> StopReason | None:
             closing = round_result(1, improved=True, overlap=reading)
             folds = {key: score_summary(composite_fitness=1.0) for key in closing.folds}
@@ -4066,24 +3902,18 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
                     line, lives=None, outlay=LineOutlay(search_usd=None, worked_s=None)
                 ),
             )
-            return target_tripped(cycle, target)
+            assert cycle.standing is not None
+            optimization = cycle.config.optimization.model_copy(update={"halt_at_fitness": target})
+            return standing_tripped(cycle.standing, optimization)
 
-        for advance in (
-            RoundAdvance.NOT_SEPARATED,
-            RoundAdvance.ADVANCED_UNPAIRED,
-            RoundAdvance.UNREAD,
-        ):
+        for advance in (RoundAdvance.ADVANCED_UNPAIRED, RoundAdvance.UNREAD):
             assert outcome(readings[advance], 0.0) is None, f"{advance} met a ceiling unpaired"
-        clean = readings[RoundAdvance.ADVANCED]
-        assert outcome(clean, 0.7) is StopReason.TARGET_HIT, (
-            "a pick whose lower bound clears the target ran on"
-        )
-        assert outcome(clean, 0.9) is None, (
-            "9 of 9 stopped at a 0.9 ceiling: a point estimate of a truncated draw is no ceiling"
-        )
         swept = _line_read(1, True, ("C1.1", [1.0] * 9), c0=[0.0] * 9)
-        assert outcome(swept, 0.9) is StopReason.TARGET_HIT, (
-            "9 of 9 over a 0 of 9 origin is a 0.9 ceiling met, never a perfect score proven"
+        assert outcome(swept, 0.55) is StopReason.TARGET_HIT, (
+            "a pick whose anytime lower bound clears the target ran on"
+        )
+        assert outcome(swept, 0.6) is None, (
+            "9 of 9 stopped at a 0.6 ceiling: a short draw's rate is no level at every look"
         )
 
 

@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizers.nodes import RoundOpening
     from promptpotter.application.preflight import PreflightWarning
-    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.opt_search_point import NodePrompt
     from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
@@ -44,16 +43,13 @@ if TYPE_CHECKING:
 def init_enter(
     ctx: ViewContext,
     *,
-    config: CampaignConfig,
     dataset: Sequence[Sample],
     session: Session,
     warnings: Sequence[PreflightWarning],
 ) -> InitEnterView:
     schema = session.pipeline_schema
-    opt = config.optimization
     selected = bound_optimizer()
 
-    ctx.patience = opt.convergence_patience
     ctx.original_sp_flat = flatten_sp_summary(session.pipeline_params.laid_nodes)
     ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}
 
@@ -64,7 +60,6 @@ def init_enter(
 
     return InitEnterView(
         warnings=tuple(WarningEntry(title=w.title, detail=w.detail) for w in warnings),
-        patience=ctx.patience,
         sp_budget_round=selected.round_cells_asked(len(dataset)),
         model=selected.model(),
         composite_fitness_formula=full,

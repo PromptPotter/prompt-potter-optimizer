@@ -26,7 +26,10 @@ from promptpotter.application.bench.node_context import (
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.intelligence.rasch import candidate_abilities
+from promptpotter.application.intelligence.rasch import (
+    candidate_abilities,
+    theta_lift_over_parent,
+)
 from promptpotter.application.optimizers.nodes import (
     OPERATOR_SEAT,
     MeasuredRound,
@@ -61,7 +64,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     reread_cells,
     score_search_points,
 )
-from promptpotter.application.scoring.selection import cells_read, crowning_cells
+from promptpotter.application.scoring.selection import cells_read, crowning_cells, discordant
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
 from promptpotter.application.views.render.phase import stop_next_lines
 from promptpotter.domain.arm_reading import ArmFit
@@ -77,6 +80,7 @@ from promptpotter.domain.arms import (
     walked_short,
 )
 from promptpotter.domain.cell_fold import measured_cells, unscoreable_cells
+from promptpotter.domain.crowning_bar import BarRead, BarSubject
 from promptpotter.domain.opt_search_point import Locus, loci_of
 from promptpotter.domain.optimizer_state import RoundOutput
 from promptpotter.domain.origin_panel import (
@@ -112,11 +116,12 @@ from promptpotter.domain.run_records import (
     RunPhaseRecord,
 )
 from promptpotter.domain.run_standing import (
+    LineOutlay,
     LineStep,
+    RunStanding,
     best_line,
     line_reference,
     rounds_without_advance,
-    stalls_left,
 )
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
@@ -321,6 +326,7 @@ async def measure_overlap(
             earlier=(),
             triggered=(),
             vs_parent=None,
+            bar=None,
         )
 
     def gaps(step: LineStep) -> set[int]:
@@ -399,6 +405,7 @@ async def measure_overlap(
         vs_parent=pairs.read(picks[-2], picks[-1], topped_up, keep, paid)
         if len(picks) >= 2
         else None,
+        bar=cycle.crowning_bar(None),
     )
     return reading, bought
 
@@ -657,6 +664,7 @@ async def measure_population(
             theta_se=abilities.theta_se.get(key),
             theta_caveat=cycle.difficulty.scale.caveat(pooled(key, rows[key]).cells),
             vs_reference=readings.get(key),
+            lift=theta_lift_over_parent(abilities, key),
         )
         for key in arms
     }
@@ -1029,6 +1037,23 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
         )
 
 
+def _crowning_read(cycle: Cycle, measured: MeasuredRound, winner: ArmKey | None) -> BarRead | None:
+    """The ONE bar's read of the pick, every electable arm its round's multiplicity. Today's reading
+    is the selector's own admission, so under it the pick clears as its selector picked it."""
+    if winner is None:
+        return None
+    parent = measured.pooled(measured.parent.key)
+    subjects = {
+        key: BarSubject(
+            *discordant(measured.pooled(key), parent),
+            None if (fit := measured.fit.get(key)) is None else fit.lift,
+            key == winner,
+        )
+        for key in {*measured.electable, winner}
+    }
+    return cycle.crowning_bar(cycle.optimizer.admission).read(subjects)[winner]
+
+
 def _round_result(
     ctx: RoundContext,
     measured: MeasuredRound,
@@ -1056,6 +1081,7 @@ def _round_result(
             elects_on=elects_on,
             verdict_reason=selection.verdict_reason,
             ruler=cycle.difficulty.stamp,
+            bar=_crowning_read(cycle, measured, winner),
         ),
         priors=cycle.rounds,
         schema=cycle.session.pipeline_schema,
@@ -1349,27 +1375,28 @@ async def _adapt_beside_overlap(
     is_final_round: bool,
 ) -> RoundResult:
     cycle = ctx.cycle
-    overlap = asyncio.create_task(
-        measure_overlap(cycle, round_result, pool, measured.origin_panel_slots)
+    reading, bought = await measure_overlap(cycle, round_result, pool, measured.origin_panel_slots)
+    seated = cycle.seat(
+        round_result.model_copy(update={"overlap": reading, "overlap_results": bought})
     )
-    try:
-        # An adapter writes for the NEXT round, so none runs when no round follows.
-        lives = cycle.config.optimization.lives
-        will_stop = (
-            is_final_round
-            or measured.cut is not None
-            or (lives is not None and stalls_left(cycle.rounds, lives.bank) == 0)
-        )
-        if population.proposals and round_result.results and not will_stop:
-            await _adapt(ctx, cycle.optimizer.plan)
-    except BaseException:
-        overlap.cancel()
-        raise
-    reading, bought = await overlap
+    # An adapter writes for the NEXT round, so none runs when no round follows: the standing the
+    # close will state decides it, the one reading the close stops on.
+    lives = cycle.config.optimization.lives
+    standing = RunStanding.after(
+        [*(rr for rr in cycle.rounds if rr.round < seated.round), seated],
+        lives=None if lives is None else lives.bank,
+        # No stop reads what the line paid.
+        outlay=LineOutlay(search_usd=None, worked_s=None),
+    )
+    will_stop = (
+        is_final_round
+        or measured.cut is not None
+        or standing_tripped(standing, cycle.config.optimization) is not None
+    )
+    if population.proposals and round_result.results and not will_stop:
+        await _adapt(ctx, cycle.optimizer.plan)
     # Re-read: an adapter emits onto the round it adapts to.
-    return cycle.seat(
-        cycle.rounds[-1].model_copy(update={"overlap": reading, "overlap_results": bought})
-    )
+    return cycle.rounds[-1]
 
 
 async def walk_round(
@@ -1497,7 +1524,8 @@ async def post_round(
     )
     reserve_selection_pass(cycle, session)
 
-    if (stop := standing_tripped(cycle)) is not None:
+    assert cycle.standing is not None, "a boundary stop reads the close it follows"
+    if (stop := standing_tripped(cycle.standing, cycle.config.optimization)) is not None:
         raise StopLoop(stop)
     if (act := walked.act) is not None and not is_final_round:
         seat = RoundContext(cycle=cycle, round_num=round_num, ledger=ledger)

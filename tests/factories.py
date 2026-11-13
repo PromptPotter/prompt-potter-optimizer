@@ -28,12 +28,16 @@ from promptpotter.application.initialization.scoring_scope import session_scope
 from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
-from promptpotter.application.jobs.launcher.admission import admit_slotless, land_job
+from promptpotter.application.jobs.launcher.admission import (
+    admit_slotless,
+    land_job,
+    slotless_share,
+)
 from promptpotter.application.jobs.mint import declare, mint_framed_cycle
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import bench_defaults_pin
-from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.optimizers.nodes import ReadArm, RoundContext, SliceMap
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, PoBBKnobs
 from promptpotter.application.optimizers.potter.records import (
@@ -46,7 +50,9 @@ from promptpotter.application.pipeline_resolve import laid_session
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
-from promptpotter.application.runner.inner.tasks import cell_optimizer
+from promptpotter.application.runner.inner import spawn
+from promptpotter.application.runner.inner.tasks import InnerSpawnContext, cell_optimizer
+from promptpotter.application.runner.loop import walk_round_zero
 from promptpotter.application.runner.mint import (
     close_init,
     open_cycle,
@@ -94,13 +100,15 @@ from promptpotter.domain.bench import (
 from promptpotter.domain.campaign import Campaign, Optimize, Purpose, run_clamp
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
+    CycleConfig,
     OptimizerChoice,
 )
 from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.cells import Seat
+from promptpotter.domain.cells import PinnedCell, Seat
+from promptpotter.domain.crowning_bar import BarRead
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
-from promptpotter.domain.job import EmbeddedRun
+from promptpotter.domain.job import EmbeddedRun, InnerRun
 from promptpotter.domain.l4.cells import InnerCell, InnerCells, InnerTaskSpec
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
@@ -130,6 +138,7 @@ from promptpotter.domain.ruler import (
     AbilityReading,
     DeltaRuler,
     LevelSeries,
+    RulerReach,
     RulerScope,
     RulerStamp,
     ThetaCaveat,
@@ -645,6 +654,22 @@ def seat(
 LAUNCHED_DATASET = "justlogic/d234"
 
 
+def launched_bank(stores: Stores, world: Router, bank: Sequence[Sample]) -> None:
+    """`LAUNCHED_DATASET` installed in *stores* on *bank*, the offline *world* answering it."""
+    world.backend.truth |= {s.query: s.ground_truth for s in bank}
+    if world.rates is None:
+        world.rates = {}
+    # The definition's chain, root-down: the wheel's defaults, the family, the leaf.
+    family = LAUNCHED_DATASET.split("/")[0]
+    shutil.copytree(
+        install_datasets_root() / family, stores.install_datasets_root / family, dirs_exist_ok=True
+    )
+    # The bank as the cut of the definition's own `source:`: no fetch reaches the hub.
+    source = definition_source(resolve_dataset(stores, LAUNCHED_DATASET))
+    assert source is not None, f"{LAUNCHED_DATASET} names a source"
+    stores.tenant_datasets.record_cut(source.identity, Bank.of(bank))
+
+
 async def run_init_round(
     stores: Stores,
     world: Router,
@@ -657,9 +682,7 @@ async def run_init_round(
     """Round *round_num* of a cycle run init opened, as every door opens one: the offline *world*
     answers *bank*'s origin walk and an empty price list, admission holds the budget, the mint
     declares the campaign, unframed. A sync journey runs it on `jumping_clock`."""
-    world.backend.truth |= {s.query: s.ground_truth for s in bank}
-    if world.rates is None:
-        world.rates = {}
+    launched_bank(stores, world, bank)
     raw = dict(dataset_campaign_block(install_dataset(install_datasets_root(), LAUNCHED_DATASET)))
     held = raw["optimization"]
     if "optimizer" in (optimization or {}):
@@ -670,24 +693,14 @@ async def run_init_round(
         "dataset_split": split or {"bench": 0, "demo": 0},
         "task_framing": "off",
     }
-    # The definition's chain, root-down: the wheel's defaults, the family, the leaf.
-    family = LAUNCHED_DATASET.split("/")[0]
-    shutil.copytree(
-        install_datasets_root() / family, stores.install_datasets_root / family, dirs_exist_ok=True
-    )
-    # The bank as the cut of the definition's own `source:`: no fetch reaches the hub.
-    source = definition_source(resolve_dataset(stores, LAUNCHED_DATASET))
-    assert source is not None, f"{LAUNCHED_DATASET} names a source"
-    stores.tenant_datasets.record_cut(source.identity, Bank.of(bank))
     entered = await enter(stores)
     async with init_services(
         dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=entered
     ) as session:
         session, config = laid_session(session, ConfigLayers(campaign_defaults(), raw))
         declaration = declare(session, config, purpose=Optimize())
-        opened: list[RoundContext] = []
 
-        async def run(held: HeldBudget) -> tuple[None, CycleResult]:
+        async def run(held: HeldBudget) -> tuple[RoundContext, CycleResult]:
             minted = await mint_framed_cycle(
                 session,
                 declaration,
@@ -703,37 +716,9 @@ async def run_init_round(
                 running.hop,
                 held.share,
             )
-            observers = await asyncio.to_thread(
-                build_run_observers, session=running, campaign_config=cycle_config.config
+            return await launched_round(
+                running, cycle_config, minted.optimizer, held, round_num=round_num
             )
-            start_launch(running)
-            determinism = cycle_config.config.optimization.determinism
-            try:
-                with (
-                    at_round(0),
-                    scoped(
-                        ledger=observers.ledger,
-                        account=running.store,
-                        optimizer=minted.optimizer,
-                        determinism=run_clamp(determinism, running.purpose),
-                    ),
-                    session_scope(running),
-                ):
-                    prep = await open_launch(
-                        list(running.bank.samples),
-                        cycle_config,
-                        session=running,
-                        observers=observers,
-                        budget=held,
-                    )
-                    cycle, _ = await open_cycle(
-                        prep, session=running, ledger=observers.ledger, mode=RunMode()
-                    )
-                    close_init(cycle, observers.ledger)
-            finally:
-                observers.release()
-            opened.append(RoundContext(cycle, round_num, ledger=cycle_ledger(cycle)))
-            return None, cycle_result([], None, [], cost=0.0)
 
         start, held = await asyncio.to_thread(
             admit_slotless,
@@ -746,13 +731,56 @@ async def run_init_round(
             sends=sends_on(stores, config, declaration.environment.connector),
         )
         try:
-            _, ended = await run(held)
+            ctx, ended = await run(held)
         except BaseException as exc:
             await asyncio.to_thread(start.release, exc)
             raise
         await asyncio.to_thread(start.release, ended)
-        (ctx,) = opened
         return ctx
+
+
+async def launched_round(
+    running: Session,
+    cycle_config: CycleConfig,
+    optimizer: SelectedOptimizer,
+    held: HeldBudget,
+    *,
+    round_num: int,
+) -> tuple[RoundContext, CycleResult]:
+    """Run init on a minted cycle as its door opens it, through round 0's walk."""
+    observers = await asyncio.to_thread(
+        build_run_observers, session=running, campaign_config=cycle_config.config
+    )
+    start_launch(running)
+    determinism = cycle_config.config.optimization.determinism
+    try:
+        with (
+            at_round(0),
+            scoped(
+                ledger=observers.ledger,
+                account=running.store,
+                optimizer=optimizer,
+                determinism=run_clamp(determinism, running.purpose),
+            ),
+            session_scope(running),
+        ):
+            prep = await open_launch(
+                list(running.bank.samples),
+                cycle_config,
+                session=running,
+                observers=observers,
+                budget=held,
+            )
+            cycle, _ = await open_cycle(
+                prep, session=running, ledger=observers.ledger, mode=RunMode()
+            )
+            close_init(cycle, observers.ledger)
+            # Round 0's walk, as its door takes it; its close is the round's caller's.
+            await walk_round_zero(cycle, prep.dataset, observers.ledger)
+    finally:
+        observers.release()
+    ctx = RoundContext(cycle, round_num, ledger=cycle_ledger(cycle))
+    return ctx, cycle_result([], None, [], cost=0.0)
 
 
 def cycle_ledger(cycle: Cycle) -> CycleEventLog:
@@ -953,9 +981,69 @@ def inner_sandbox(stores: Stores, owner_campaign_id: str, owner_cycle_id: str) -
     return sandbox
 
 
-def inner_cells(*optimizers: str, dataset: str | None = None) -> InnerCells:
+async def inner_seat(
+    stores: Stores,
+    world: Router,
+    optimizer: str,
+    overrides: dict[str, dict[str, Any]],
+    *,
+    round_num: int = 1,
+) -> RoundContext:
+    """An L4 cell's inner campaign as the spawn opens it (`spawn.py::_open_seat`): *optimizer*'s
+    seat on `LAUNCHED_DATASET`, *overrides* its arm, under an outer cycle's sandbox."""
+    launched_bank(stores, world, samples(40, "TRUE"))
+    laid = defaulted_config(
+        {"optimization": {"optimizer": optimizer, "degradation_threshold": 0.0}}
+    )
+    seats = inner_cells(
+        optimizer,
+        dataset=LAUNCHED_DATASET,
+        campaign_config=laid.model_dump(mode="json"),
+        n_samples=30,
+    )
+    (cell_seat,) = seats.cells
+    owner = CycleHop(campaign_id="outer", cycle_id="cycle-0")
+    spawning = InnerSpawnContext(
+        inner_sandbox_root=inner_sandbox(stores, owner.campaign_id, owner.cycle_id),
+        identity=stores.identity,
+        shared_root=stores.shared_root,
+        install_datasets_root=stores.install_datasets_root,
+        research_datasets_root=None,
+        inside=(owner,),
+        enclosing=(),
+        acting=(),
+        cells=seats,
+        purpose=Optimize(),
+        ruler=RulerReach(version=0, own=None),
+    )
+    pin = PinnedCell(cell=cell_seat, instrument="i").pin()
+    asked = Sample(id=0, query=cell_seat.id, ground_truth=None, source_pin=pin)
+    # Under the outer run's book, as a cell's spawn reads it.
+    with scoped(account=stores), scoped(spawn=spawning, book=spend_book(1000.0)), at_round(0):
+        cell = spawn._resolve_inner_cell(asked, {"optimizer_prompt_overrides": overrides})
+        async with spawn._open_seat(cell, spawn.claim_sandbox(spawning)) as opened:
+            session = opened.session
+            ctx, _ = await slotless_share(
+                opened.cycle.config,
+                stores=session.store,
+                holder=InnerRun(LAUNCHED_DATASET),
+                hop=session.hop,
+                sends=(),
+                run=lambda held: launched_round(
+                    session, opened.cycle, opened.optimizer, held, round_num=round_num
+                ),
+            )
+            return ctx
+
+
+def inner_cells(
+    *optimizers: str,
+    dataset: str | None = None,
+    campaign_config: Mapping[str, Any] | None = None,
+    n_samples: int = 1,
+) -> InnerCells:
     """One seat per named manifest, on a dataset of its own, so each cell runs its own optimizer;
-    a lone seat runs on *dataset* where one is named."""
+    a lone seat runs on *dataset* where one is named, each cell's dataset under *campaign_config*."""
     assert dataset is None or len(optimizers) == 1, "two seats never share a dataset"
     on = {name: dataset or f"{name}ds" for name in optimizers}
     by_dataset: dict[str, InnerCell] = {}
@@ -963,12 +1051,14 @@ def inner_cells(*optimizers: str, dataset: str | None = None) -> InnerCells:
     for name in optimizers:
         selected = select_optimizer(OptimizerChoice(optimizer=name))
         treatment = selected.treatment(frozenset(Presumption), PackShelf(account=None)).digest
-        by_dataset[on[name]] = InnerCell({}, None, cell_optimizer(selected), treatment)
+        by_dataset[on[name]] = InnerCell(
+            campaign_config or {}, None, cell_optimizer(selected), treatment
+        )
         specs[name] = InnerTaskSpec(
             inner_dataset=on[name],
             optimizer_treatment=treatment,
             run_seed=0,
-            n_samples=1,
+            n_samples=n_samples,
             n_samples_bench=1,
             n_rounds=1,
         )
@@ -1034,6 +1124,9 @@ def election(
         "ended_on": ArmKey(ended_on) if ended_on else pick or PARENT,
         "electable": int(pick is not None),
         "elects_on": "ability",
+        "bar": None
+        if pick is None
+        else BarRead(statistic="posterior", clears=True, quote="today's bar"),
         "ruler": RulerStamp(
             id=flat_ruler_id("acc"),
             version=0,

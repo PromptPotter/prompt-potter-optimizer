@@ -82,10 +82,11 @@ So **a winner with lower fitness than a rival or the previous round is normally 
 the election wrong off the fitness column, say which column it used.
 
 **No harness rule ranks rounds by their own readings.** The run has one ceiling stop: the declared
-pick's headline level over C0 on the origin panel, read at its paired interval's lower bound, never a
-point estimate of a truncated draw or each round's composite high-water. `halt_at_fitness` is its
-target; no stop sits at 1.0, which the floored SE keeps out of reach of any finite panel. Only
-potter's L2/L3 stall comparator keeps the high-water, as its own signal.
+pick's own level on the origin panel, read at its one-sided anytime-valid lower bound
+(`shared/statistics.py::anytime_level_lower` at `BAR_ADMISSION`), so a level looked at every round
+spends no α it was not given; never a point estimate of a truncated draw, C0's rate taken as known, or
+each round's composite high-water. `halt_at_fitness` is its target; 9 of 9 bounds at 0.56, 20 of 20
+at 0.77. Only potter's L2/L3 stall comparator keeps the high-water, as its own signal.
 
 **States where θ is NOT ability, and the pushback above is wrong** — enumerated by
 `domain/ruler.py::ThetaCaveat`, served so the screen and the optimizer's `confounds` panel read one
@@ -176,9 +177,10 @@ contamination-resistant held-out set** (one year's AIME → the next; not a subs
 split).
 
 **Separability is read against C0, not the parent.** A round closes `advanced` only where its pick
-leads C0 on the origin panel by an interval clear of 0 and tops every earlier pick there; it is the clock a result quotes (`rounds_to_separable`). L1 patience
+leads C0 on the origin panel as the crowning bar's switch reads it (`domain/crowning_bar.py::CrowningBar.separates`: under
+`posterior`, an interval clear of 0) and tops every earlier pick there; it is the clock a result quotes (`rounds_to_separable`). L1 patience
 resets on `advanced`, `advanced_unpaired` and `not_separated` alike (`domain/origin_panel.py::RoundAdvance.stall`);
-adoption stays `improved`, which reads any selection past round 0 as a promotion. A pick whose reading
+adoption is `improved`, the bar's own verdict on the pick (`Election.bar`). A pick whose reading
 was not taken closes `unread` (neither reset nor stall); a panel with no pair lets the promotion stand
 alone (`advanced_unpaired`).
 
@@ -250,7 +252,7 @@ Every 4th slot takes the next HIT (the regression probe) **while a miss or unkno
 futility kill land at the end. k=4 buys a probe inside the first `elimination_n_min` window.
 
 **The first `elimination_n_min` slots take only cells θ is read on** (`theta_cells`: warm, the
-ruler's; cold, the parent's). PoBB's entry gate, ε ramp and lock-in and the coverage floor count
+ruler's; cold, the parent's). PoBB's entry gate and ε ramp and the coverage floor count
 cells read, not rows walked; led by the strata alone, a panel of mostly parent hits reaches its last
 ruler cell at its final row and no arm can be cut. Cost: the ruler learns off-ruler cells slower.
 

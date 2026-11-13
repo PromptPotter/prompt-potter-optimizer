@@ -342,7 +342,7 @@ class ThetaElection(nodes.Selector):
     name: ClassVar[str] = "theta_election"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = ElectionKnobs
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Replay})
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Bounds, Lineage, Ruler, Replay})
     elects_on: ClassVar[DisplayMetric] = "ability"
     elects_partial: ClassVar[bool] = True
 

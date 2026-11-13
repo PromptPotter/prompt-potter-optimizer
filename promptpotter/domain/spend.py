@@ -217,7 +217,9 @@ NESTED_NODE_PREFIX = "inner:"
 
 
 class Budget(FrozenModel):
-    """What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits."""
+    """What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.
+    ``usd`` is the ONE axis a head-to-head holds equal across its arms: cells, tokens, rounds and
+    seconds are what each arm's money bought, and differ by arm."""
 
     usd: NonNegativeWireFloat | None = Field(
         default=None,

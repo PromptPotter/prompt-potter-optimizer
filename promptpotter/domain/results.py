@@ -19,6 +19,7 @@ from promptpotter.domain.arm_reading import (
 from promptpotter.domain.arms import ArmState, Concluded, arm_name, is_leader_eligible
 from promptpotter.domain.bench import BenchScore, OwnLevel
 from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.crowning_bar import BarRead
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit, RoundArm
@@ -126,6 +127,8 @@ class Election(FrozenModel):
     reelection: Reelection | None = None
     # The δ scale the election read, whether or not a θ was fit on it.
     ruler: RulerStamp
+    # The crowning bar's read of the pick, what a promotion quotes; ``None`` where none was picked.
+    bar: BarRead | None
 
 
 class RoundOutcome(FrozenModel):
@@ -175,8 +178,14 @@ class RoundOutcome(FrozenModel):
 
     @property
     def improved(self) -> bool:
-        """A promotion, on a bare point estimate; round 0 adopts its origin and promotes nothing."""
-        return self.round > 0 and self.election is not None and self.election.selected is not None
+        """A promotion: a pick the crowning bar clears; round 0 adopts its origin and promotes nothing."""
+        election = self.election
+        return (
+            self.round > 0
+            and election is not None
+            and election.bar is not None
+            and election.bar.clears
+        )
 
     @property
     def ruler(self) -> RulerStamp | None:

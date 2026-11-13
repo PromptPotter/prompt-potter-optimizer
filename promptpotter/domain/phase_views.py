@@ -36,7 +36,6 @@ class InitEnterView(FrozenModel):
 
     kind: Literal["init_enter"] = "init_enter"
     warnings: tuple[WarningEntry, ...] = ()
-    patience: int | None = None
     sp_budget_round: int = 0
     model: str = ""
     composite_fitness_formula: str | None = None

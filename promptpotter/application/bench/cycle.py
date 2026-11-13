@@ -15,10 +15,12 @@ from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.nodes import ReadArm, SliceMap
 from promptpotter.application.scoring.metrics import arm_folds
+from promptpotter.application.scoring.selection import banked_lift_prior
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
 from promptpotter.domain.campaign import run_clamp
 from promptpotter.domain.cell_fold import ScoreSummary, merge_known_outcomes
+from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput
@@ -106,6 +108,7 @@ def _origin_round(
             fit=fit,
             elects_on=elects_on,
             ruler=ruler,
+            bar=None,
         ),
         # An abort pads no error rows onto the tail: the cells never sent are the panel's shortfall.
         health=head_health(0, arm, results, picked=True, priors=()),
@@ -195,8 +198,28 @@ class Cycle:
             ),
             framing=framing,
         )
+        optimizer.refuse_pipeline(session.pipeline_schema)
         cycle.seat_origin(origin, None)
         return cycle
+
+    def crowning_bar(self, admission: float | None) -> CrowningBar:
+        """The ONE bar crown, advance and promotion read, at the selector's *admission* (a
+        selector declaring none is read at ``BAR_ADMISSION``); the tenant's lift prior is read only
+        where the switch reads it."""
+        statistic = self.config.optimization.crowning_bar
+        prior = (
+            banked_lift_prior(self.survey, self.session.measured_dataset)
+            if statistic == "empirical_bayes"
+            else None
+        )
+        held = BAR_ADMISSION if admission is None else admission
+        return CrowningBar(statistic=statistic, admission=held, prior=prior)
+
+    def reopen_difficulty(self) -> None:
+        """Round 0's view again, on the scorer its close locked."""
+        origin = self.origin_round.head
+        assert origin is not None, "round 0 ends on its origin"
+        self.difficulty = DifficultyView.open(self.session, self.config, origin=origin.sp_hash)
 
     def rng(self, round_num: int, tag: str) -> random.Random:
         """A function of the run's seed, *round_num* and *tag* alone, so a resume redraws the same."""
@@ -258,7 +281,6 @@ class Cycle:
 
     def seat_origin(self, origin: ReadArm, optimizer_state: OptimizerState | None) -> None:
         """Round 0 on *origin*'s rows, read as a floor and left open so it closes in place."""
-        self.optimizer.refuse_origin(origin.rows)
         self.restate_rounds(
             [
                 _origin_round(

@@ -63,8 +63,8 @@ class ArmPrice(StrictModel):
         "buys first."
     )
     search_cells: int = Field(
-        description="Cells the search measures, the origin's included: the calls a budget-matched "
-        "head-to-head holds equal, so arms of one point are compared on it."
+        description="Cells the search measures, the origin's included: what the point's `usd`, the "
+        "one axis a head-to-head holds equal (`Budget`), buys this arm, so it differs by arm."
     )
     bench_cells: int = Field(description="The origin's and the selection's held-out passes.")
     usd: float = Field(

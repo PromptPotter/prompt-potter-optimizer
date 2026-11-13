@@ -874,6 +874,16 @@
         "additionalProperties": false,
         "description": "What the election read of one arm: θ lives here and nowhere else.",
         "properties": {
+          "lift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThetaLift"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "theta": {
             "anyOf": [
               {
@@ -1055,7 +1065,7 @@
             "type": "integer"
           },
           "search_cells": {
-            "description": "Cells the search measures, the origin's included: the calls a budget-matched head-to-head holds equal, so arms of one point are compared on it.",
+            "description": "Cells the search measures, the origin's included: what the point's `usd`, the one axis a head-to-head holds equal (`Budget`), buys this arm, so it differs by arm.",
             "title": "Search Cells",
             "type": "integer"
           },
@@ -1677,6 +1687,37 @@
         "title": "BankSnippetPayload",
         "type": "object"
       },
+      "BarRead": {
+        "additionalProperties": false,
+        "description": "The bar's verdict on one subject and the number a result quotes for it.",
+        "properties": {
+          "clears": {
+            "title": "Clears",
+            "type": "boolean"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "statistic": {
+            "enum": [
+              "posterior",
+              "sign_test",
+              "e_process",
+              "empirical_bayes"
+            ],
+            "title": "Statistic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "statistic",
+          "clears",
+          "quote"
+        ],
+        "title": "BarRead",
+        "type": "object"
+      },
       "BenchReading": {
         "additionalProperties": false,
         "description": "One individual's bench pass, read under a named scorer.",
@@ -2127,7 +2168,7 @@
       },
       "Budget": {
         "additionalProperties": false,
-        "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.",
+        "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.\n``usd`` is the ONE axis a head-to-head holds equal across its arms: cells, tokens, rounds and\nseconds are what each arm's money bought, and differ by arm.",
         "properties": {
           "rounds": {
             "anyOf": [
@@ -6161,6 +6202,16 @@
         "additionalProperties": false,
         "description": "What a round's selector decided over its arms, by key; ``selected`` null = the round HELD.",
         "properties": {
+          "bar": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BarRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "electable": {
             "title": "Electable",
             "type": "integer"
@@ -6234,7 +6285,8 @@
           "ended_on",
           "electable",
           "elects_on",
-          "ruler"
+          "ruler",
+          "bar"
         ],
         "title": "Election",
         "type": "object"
@@ -11461,18 +11513,16 @@
             "$ref": "#/components/schemas/Budget",
             "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork seed, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
           },
-          "convergence_patience": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
+          "crowning_bar": {
+            "description": "The ONE bar a crown, an advance of the line and a promotion read (`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's θ posterior capped by the discordant cells. ``sign_test``: an exact paired sign test on the discordant cells, Holm-corrected across the round's arms. ``e_process``: an anytime-valid e-process on the paired discordance. ``empirical_bayes``: the arm's θ lift shrunk to the tenant's banked lift prior.",
+            "enum": [
+              "posterior",
+              "sign_test",
+              "e_process",
+              "empirical_bayes"
             ],
-            "description": "Consecutive closed rounds without an advance of the best-so-far line on the origin panel (``RunStanding.rounds_without_advance``) after which the run stops ``converged``, under any optimizer. A promotion resets it, separated from the origin or not; a round whose origin-panel reading was not taken counts neither way. ``None`` → no such stop.",
-            "title": "Convergence Patience"
+            "title": "Crowning Bar",
+            "type": "string"
           },
           "degradation_fatal_fastpath": {
             "description": "End a candidate at the first FATAL sample (empty response, content-filtered, structurally broken) without spending the rest of its budget. Active while the degradation check runs (`degradation_threshold` > 0); the rate-based check stays governed by that threshold. The bench's, run on every optimizer's arms.",
@@ -11555,10 +11605,9 @@
             "type": "string"
           },
           "origin_gate": {
-            "description": "Halt after round 0 when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) halts on ``critical`` or ``degraded``; ``critical_only`` halts only on a structurally-broken origin; ``off`` disarms the gate. Resuming re-measures the cells the origin lost and grades it again; an origin still unhealthy when resumed proceeds into the search.",
+            "description": "Halt after round 0 when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) halts on ``critical`` or ``degraded``; ``off`` disarms the gate. Resuming re-measures the cells the origin lost and grades it again; an origin still unhealthy when resumed proceeds into the search.",
             "enum": [
               "strict",
-              "critical_only",
               "off"
             ],
             "title": "Origin Gate",
@@ -11578,6 +11627,7 @@
           "optimizer",
           "arm_gate",
           "budget",
+          "crowning_bar",
           "degradation_threshold",
           "degradation_fatal_fastpath",
           "elimination_n_min",
@@ -11621,18 +11671,23 @@
             ],
             "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork seed, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
           },
-          "convergence_patience": {
+          "crowning_bar": {
             "anyOf": [
               {
-                "minimum": 1.0,
-                "type": "integer"
+                "enum": [
+                  "posterior",
+                  "sign_test",
+                  "e_process",
+                  "empirical_bayes"
+                ],
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Consecutive closed rounds without an advance of the best-so-far line on the origin panel (``RunStanding.rounds_without_advance``) after which the run stops ``converged``, under any optimizer. A promotion resets it, separated from the origin or not; a round whose origin-panel reading was not taken counts neither way. ``None`` → no such stop.",
-            "title": "Convergence Patience"
+            "description": "The ONE bar a crown, an advance of the line and a promotion read (`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's θ posterior capped by the discordant cells. ``sign_test``: an exact paired sign test on the discordant cells, Holm-corrected across the round's arms. ``e_process``: an anytime-valid e-process on the paired discordance. ``empirical_bayes``: the arm's θ lift shrunk to the tenant's banked lift prior.",
+            "title": "Crowning Bar"
           },
           "degradation_fatal_fastpath": {
             "anyOf": [
@@ -11768,7 +11823,6 @@
               {
                 "enum": [
                   "strict",
-                  "critical_only",
                   "off"
                 ],
                 "type": "string"
@@ -11777,7 +11831,7 @@
                 "type": "null"
               }
             ],
-            "description": "Halt after round 0 when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) halts on ``critical`` or ``degraded``; ``critical_only`` halts only on a structurally-broken origin; ``off`` disarms the gate. Resuming re-measures the cells the origin lost and grades it again; an origin still unhealthy when resumed proceeds into the search.",
+            "description": "Halt after round 0 when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) halts on ``critical`` or ``degraded``; ``off`` disarms the gate. Resuming re-measures the cells the origin lost and grades it again; an origin still unhealthy when resumed proceeds into the search.",
             "title": "Origin Gate"
           },
           "panel_gate": {
@@ -16243,17 +16297,6 @@
         "additionalProperties": false,
         "description": "What stops a run short of its budget, so no arm outlasts another on a stall the other was\nstopped for.",
         "properties": {
-          "convergence_patience": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Convergence Patience"
-          },
           "lives": {
             "anyOf": [
               {
@@ -16270,8 +16313,7 @@
           }
         },
         "required": [
-          "lives",
-          "convergence_patience"
+          "lives"
         ],
         "title": "StoppingRule",
         "type": "object"
@@ -17237,6 +17279,25 @@
         ],
         "title": "ThetaCaveat",
         "type": "string"
+      },
+      "ThetaLift": {
+        "description": "θ over a bar's θ, and the noise of the DIFFERENCE, never either side's own SE.",
+        "properties": {
+          "se": {
+            "title": "Se",
+            "type": "number"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value",
+          "se"
+        ],
+        "title": "ThetaLift",
+        "type": "object"
       },
       "TokenAccount": {
         "additionalProperties": false,

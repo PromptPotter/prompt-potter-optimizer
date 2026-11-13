@@ -24,7 +24,7 @@ from promptpotter.application.jobs.quota import cycle_share, move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import measured_address
 from promptpotter.application.optimizer_manifest import bound_optimizer
-from promptpotter.application.origin import CampaignOrigin, establish_campaign_origin
+from promptpotter.application.origin import CampaignOrigin, seat_campaign_origin
 from promptpotter.application.preflight import run_preflight_checks
 from promptpotter.application.run_observers import (
     RunObservers,
@@ -40,7 +40,7 @@ from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
-from promptpotter.domain.phases import CampaignPhase
+from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.run_records import PhaseRecord, StandingBudgetRecord
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.backend import CELL
@@ -85,12 +85,14 @@ def root_cycle_id_of(origin_hash: str, declaration: RunDeclaration) -> str:
 @dataclass(frozen=True)
 class PreparedRun:
     """No ceiling of its own: the held one is SET INTO ``campaign_config``, so the value that halts
-    is served. ``dataset`` is the search split the line's cycles walk."""
+    is served. ``dataset`` is the search split the line's cycles walk; ``resumed_ending`` the stop
+    the launch resumed, read before run init can move the session onto a fork."""
 
     origin: CampaignOrigin
     campaign_config: CampaignConfig
     dataset: list[Sample]
     campaign: Campaign
+    resumed_ending: StopReason | None
 
 
 def start_launch(session: Session) -> None:
@@ -157,15 +159,14 @@ async def open_launch(
         book.refuse_unpriced(
             cell, filed(CELL).kind, NEXT_CELL, session.backend_client.connector.cell_payer
         )
-    # The launch's one session open, before the origin walk sends a cell.
+    # The launch's one session open, before round 0's door sends a cell.
     await session.backend_client.init_session(session.bank.samples, session.candidate_library)
-    origin = await establish_campaign_origin(
-        session, dataset, campaign_config, cycle=cycle, ledger=observers.ledger
-    )
-    if origin.locked_scoring is not None:
-        campaign_config = campaign_config.model_copy(update={"scoring": origin.locked_scoring})
     return PreparedRun(
-        origin=origin, campaign_config=campaign_config, dataset=dataset, campaign=campaign
+        origin=seat_campaign_origin(session, dataset, campaign_config, cycle=cycle),
+        campaign_config=campaign_config,
+        dataset=dataset,
+        campaign=campaign,
+        resumed_ending=campaigns.resumed_ending(session.hop),
     )
 
 
@@ -368,7 +369,6 @@ async def _enter_init(
             event="enter",
             view=init_enter(
                 session.state.view_context,
-                config=config,
                 dataset=dataset,
                 session=session,
                 warnings=preflight_warnings,

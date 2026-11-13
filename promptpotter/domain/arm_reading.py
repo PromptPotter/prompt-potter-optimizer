@@ -30,7 +30,7 @@ from promptpotter.domain.paired_reading import (
     MeasurandUnit,
     PairedReading,
 )
-from promptpotter.domain.ruler import ThetaCaveat, theta_band
+from promptpotter.domain.ruler import ThetaCaveat, ThetaLift, theta_band
 from promptpotter.domain.spend import PrefixReading, TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.verification import VerifyReading
@@ -221,6 +221,8 @@ class ArmFit(FrozenModel):
     theta_caveat: ThetaCaveat | None = None
     # This arm over the individual it was judged against; `None` on an arm with no reference.
     vs_reference: PairedReading | None = None
+    # Its θ over its parent's on the same fit: the arm-vs-parent pair a lift prior is read off.
+    lift: ThetaLift | None = None
 
 
 def panel_counts(arm: ArmState, fold: ScoreSummary | None) -> tuple[int | None, int | None]:
