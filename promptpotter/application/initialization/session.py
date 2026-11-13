@@ -11,7 +11,6 @@ from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, PartitionRecord, restored_partition
 from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.run_records import PipelineRead
@@ -73,7 +72,6 @@ class LaunchState:
     resumed_from_round: int = 1
     # Seated once, before any cell is read: by run init (`runner/mint.py`) or a pass's opener.
     scoring: ScorerSetup = field(init=False)
-    source: RunSource | None = None
     # Seeded off the cycle's index at init; afterwards written only by `record_intervention`.
     human_intervened: bool = False
     control: RunControl = field(default_factory=RunControl)

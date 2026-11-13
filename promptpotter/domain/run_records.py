@@ -30,6 +30,7 @@ from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart
 from promptpotter.domain.paired_reading import ArmKey, PriorStanding, RoundArm
+from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -72,7 +73,7 @@ from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import Principal
-from promptpotter.shared.measurement_context import ARM_ROLES, MeasurementRole
+from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
 
 
@@ -309,7 +310,7 @@ class ArmRecord(FrozenModel):
 
 
 class _Pass(FrozenModel):
-    """One cell of a pass: an ARM of the round where `role` is one of `ARM_ROLES`."""
+    """One cell of a pass: an ARM of the round where its `role`'s row says so."""
 
     round: int
     individual_id: str
@@ -319,7 +320,7 @@ class _Pass(FrozenModel):
     @property
     def arm(self) -> ArmKey | None:
         """The arm whose walk this cell continues; ``None`` for a pass no arm walks (a bench pass)."""
-        return ArmKey(self.individual_id) if self.role in ARM_ROLES else None
+        return ArmKey(self.individual_id) if PASSES[self.role].arm else None
 
 
 class SampleStartedRecord(_Pass):
@@ -1216,7 +1217,9 @@ class SpawnedBy(StrictModel):
     @property
     def arm(self) -> RoundArm | None:
         """The outer arm that asked, where an arm's pass did; any other pass names none."""
-        if self.role not in ARM_ROLES or self.round is None or self.individual_id is None:
+        if self.role is None or not PASSES[self.role].arm:
+            return None
+        if self.round is None or self.individual_id is None:
             return None
         return RoundArm(round=self.round, arm=ArmKey(self.individual_id))
 

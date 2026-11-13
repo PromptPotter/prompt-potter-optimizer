@@ -56,7 +56,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
-from promptpotter.domain.verification import NoiseBand, VerificationKind, VerifyReading
+from promptpotter.domain.verification import NoiseBand, VerifyReading
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
 from promptpotter.infrastructure.projections.base import Projection
@@ -79,6 +79,7 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
 )
+from promptpotter.shared.measurement_context import MeasurementRole
 
 _DASHBOARD_DEBOUNCE_S = 0.25
 # The write holds the lock every ledger append takes, so the next one rests this many times its cost.
@@ -109,7 +110,7 @@ _PHASE_TO_STATE: dict[str, DashboardState] = {
 }
 
 
-def _opened(kind: VerificationKind, arm: ArmName, rows: int) -> VerificationMark:
+def _opened(kind: MeasurementRole, arm: ArmName, rows: int) -> VerificationMark:
     return VerificationMark(
         kind=kind, arm=arm, state="running", rows=rows, scored=0, level=None, failed_as=None
     )
@@ -302,7 +303,7 @@ class LiveDashboardProjection(Projection):
             self._in_pass = False
         if record.phase == CampaignPhase.VERIFY and record.event == "exit":
             # A verify or a noise floor is graded inside its bracket; a bench pass after it.
-            s.verification = s.orphaned(spare="bench")
+            s.verification = s.orphaned(spare=MeasurementRole.BENCH)
         if (
             record.phase == CampaignPhase.BENCH
             and record.event == "exit"

@@ -4565,7 +4565,8 @@
           "repair",
           "overlap",
           "verify",
-          "bench"
+          "bench",
+          "noise_floor"
         ],
         "title": "MeasurementRole",
         "type": "string"
@@ -9017,13 +9018,7 @@
             "title": "Subject"
           },
           "verification": {
-            "enum": [
-              "verify",
-              "bench",
-              "noise_floor"
-            ],
-            "title": "Verification",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasurementRole"
           }
         },
         "required": [
@@ -9171,13 +9166,7 @@
             "type": "array"
           },
           "kind": {
-            "enum": [
-              "verify",
-              "bench",
-              "noise_floor"
-            ],
-            "title": "Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasurementRole"
           },
           "measured_datasets": {
             "additionalProperties": {

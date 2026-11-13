@@ -85,6 +85,7 @@ from promptpotter.domain.paired_reading import (
     MemberAddress,
     PairedReading,
 )
+from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import CellSheet, GradedCell, ScoringFormulaError, WalkedCell
 from promptpotter.domain.spend import SpendRollup
@@ -110,7 +111,7 @@ from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
+from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import sample_sd
 
 if TYPE_CHECKING:

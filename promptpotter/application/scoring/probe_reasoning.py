@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.application.initialization.scoring_scope import diagnostic_trace
+from promptpotter.application.initialization.scoring_scope import verb_ledger
 from promptpotter.application.jobs.coupon import keyed_client, provider_send
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO
@@ -17,6 +17,7 @@ from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget
 from promptpotter.infrastructure.llm.spend_book import CallLabel
+from promptpotter.infrastructure.llm.telemetry import filed_as
 from promptpotter.shared.errors import ErrorCategory
 from promptpotter.shared.run_scope import scoped
 
@@ -86,7 +87,7 @@ async def probe_reasoning(
     async with paid_pass(
         stores=stores, verb="probe-reasoning", hop=None, declared=declared, sends=sends
     ):
-        with diagnostic_trace(stores, None):
+        with verb_ledger(stores, None), filed_as("diagnostic"):
             client = keyed_client(provider)
             readings = [await _one(client, model, None)]
             for rung in rungs:

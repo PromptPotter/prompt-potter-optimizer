@@ -44,7 +44,7 @@ from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.store.dataset_access import ORIGIN_FILE, ResolvedDataset
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.errors import PayloadInvalidError
-from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_params import PipelineParams
@@ -272,8 +272,8 @@ async def establish_campaign_origin(
             sp,
             scoring_set,
             session,
-            label=MeasurementRole.ORIGIN,
-            measured=MeasuredPass(resolved_origin.id, MeasurementRole.ORIGIN),
+            kind=MeasurementRole.ORIGIN,
+            measured=resolved_origin.id,
         )
         sheet, scores = scored.sheet, scored.scores
         locked_scoring = lock_criterion(session, campaign_config, sheet, ledger)

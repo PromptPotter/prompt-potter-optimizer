@@ -16,7 +16,7 @@ from promptpotter.domain.run_records import ForkDirection, ForkTrigger
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import ConflictError, ErrorCategory
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
-from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -139,7 +139,6 @@ async def repair_incomplete_rounds(
                 )
                 continue
             sp = cycle.points.measured(arm)
-            stamp = MeasuredPass(individual_id=arm.individual.id, role=MeasurementRole.REPAIR)
             missing = sum(map(_repairable_hole, rows))
             # ONE walk, whole: the archive never replays an errored cell, so it sends exactly the
             # holes, and the composite is the GATEWAY's over the full panel.
@@ -147,9 +146,9 @@ async def repair_incomplete_rounds(
                 sp,
                 attempted,
                 session,
-                label=stamp.role,
+                kind=MeasurementRole.REPAIR,
                 sample_index=cycle.sample_index,
-                measured=stamp,
+                measured=arm.individual.id,
             )
             if scored.stopped is not None:
                 logger.warning(

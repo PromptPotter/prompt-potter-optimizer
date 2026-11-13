@@ -39,6 +39,7 @@ from promptpotter.infrastructure.store.read_model import (
     read_rows_past,
 )
 from promptpotter.shared.hashing import ADDRESS_HEX, CANONICAL_PIN, stable_hash
+from promptpotter.shared.measurement_context import MeasurementRole
 
 _INDEX_FOLD_KEY = "k"
 _FILES_MAX_BYTES = 32 << 20
@@ -385,8 +386,7 @@ class MeasurementArchive:
         entry: ArchiveEntry,
         graded: Iterable[tuple[MeasuredCell, str]],
         *,
-        role: str,
-        source: str,
+        role: MeasurementRole,
         created_at: str,
     ) -> list[str]:
         """Each cell beside its provenance grade; the addresses come back in that order."""
@@ -402,7 +402,6 @@ class MeasurementArchive:
                     config_key=entry.config_key,
                     dataset_hash=entry.dataset_hash,
                     role=role,
-                    source=source,
                     provenance=provenance,
                     created_at=created_at,
                 )
@@ -411,7 +410,7 @@ class MeasurementArchive:
             return refs
         with self._lock:
             # First: no answer is ever on disk under a configuration nothing describes.
-            self._register(entry.model_copy(update={"name": role, "created_at": created_at}))
+            self._register(entry.model_copy(update={"name": role.value, "created_at": created_at}))
             for file_key, filed in by_file.items():
                 self._file(file_key).append(self.cell_path(file_key), filed)
         return refs

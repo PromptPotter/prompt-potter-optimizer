@@ -20,7 +20,7 @@ from promptpotter.domain.ruler import LevelSeries, SeriesReading
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
-from promptpotter.domain.verification import VerificationKind, VerifyReading
+from promptpotter.domain.verification import VerifyReading
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
@@ -207,7 +207,7 @@ VerificationState = Literal["running", "done", "failed"]
 class VerificationMark(FrozenModel):
     """The latest verify or bench pass on one arm, as its records left it."""
 
-    kind: VerificationKind
+    kind: MeasurementRole
     arm: ArmName = Field(description="The arm the pass measures; `arm.key` joins it to its row.")
     state: VerificationState
     rows: int = Field(description="Rows the pass sends.")

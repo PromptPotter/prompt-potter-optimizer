@@ -1,30 +1,15 @@
 from __future__ import annotations
 
-import enum
 from typing import TYPE_CHECKING
+
+from promptpotter.domain.pass_kinds import PASSES
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import MeasuredCell
+    from promptpotter.shared.measurement_context import MeasurementRole
 
 MEASUREMENT_GRADES = ("A", "B", "C")
-
-
-class RunSource(enum.StrEnum):
-    ORIGIN = "origin"
-    OPTIMIZATION_LOOP = "optimization_loop"
-    VERIFY = "verify"
-    AB = "ab"
-    NOISE_FLOOR = "noise_floor"
-    SEED_SCREEN = "seed_screen"
-
-    @property
-    def deliberate(self) -> bool:
-        match self:
-            case RunSource.ORIGIN | RunSource.OPTIMIZATION_LOOP:
-                return True
-            case RunSource.VERIFY | RunSource.AB | RunSource.NOISE_FLOOR | RunSource.SEED_SCREEN:
-                return False
 
 
 REUSABLE_MIN_GRADE = "B"
@@ -42,7 +27,7 @@ def _ran_llm_path(measurement: MeasuredCell, schema: PipelineSchema | None) -> b
 
 
 def grade_answer(
-    source: RunSource,
+    kind: MeasurementRole,
     measurement: MeasuredCell,
     schema: PipelineSchema | None,
     *,
@@ -50,7 +35,7 @@ def grade_answer(
 ) -> str:
     if human_intervened:
         return "C"
-    met = int(source.deliberate) + int(_ran_llm_path(measurement, schema))
+    met = int(PASSES[kind].deliberate) + int(_ran_llm_path(measurement, schema))
     return "CBA"[met]
 
 

@@ -205,7 +205,7 @@ from promptpotter.shared.errors import (
     ResumeDivergenceError,
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
-from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
+from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.run_scope import rescope, scoped
 
 _CAMPAIGN = "testds__20260101-000000"
@@ -247,14 +247,14 @@ def _walk_panel(
             predicted=predicted,
         )
 
-    measured = None if ledger is None else MeasuredPass(individual_id="arm")
+    measured = None if ledger is None else "arm"
     with (
         scoped(ledger=CycleEventLog(root / "walk.jsonl" if ledger is None else ledger)),
         mock.patch.object(query_loop, "measure_sample", _measure),
     ):
         walked = asyncio.run(
             search_point_scorer.score_search_point(
-                sp, panel, session, label="panel", measured=measured
+                sp, panel, session, kind=MeasurementRole.PANEL, measured=measured
             )
         )
     return session, walked
@@ -653,7 +653,7 @@ def test_a_relabel_or_a_recut_moves_a_name_and_every_paid_answer_reads_on(
         archive,
         [MeasuredCell(sample_key=q2.key, predicted="g")],
         whole,
-        role=MeasurementRole.BENCH.value,
+        role=MeasurementRole.BENCH,
         created_at="2026-05-19T00:00:00Z",
     )
     assert bench_reads(built_stores, bank=recut, sample_keys=frozenset({q2.key})) == 1, (

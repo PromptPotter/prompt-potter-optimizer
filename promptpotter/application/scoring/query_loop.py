@@ -153,7 +153,6 @@ class QueryLoopState:
     cached_sample_results: dict[int, MeasuredCell]
     # ``None``: the walk writes no sample record — it is no pass a live surface draws.
     recorded: MeasuredPass | None
-    role: str
     sample_index: SampleIndex | None
     deprecated_samples: dict[int, MeasuredCell]
     recorder: WalkRecorder

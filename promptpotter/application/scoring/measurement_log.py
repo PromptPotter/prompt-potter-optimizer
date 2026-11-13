@@ -50,6 +50,7 @@ from promptpotter.domain.cells import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.paired_reading import MeasurandUnit
+from promptpotter.domain.pass_kinds import individual_cells
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.ruler import RulerReach, RulerScope
 from promptpotter.domain.sample import Bank
@@ -75,7 +76,7 @@ from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout
 from promptpotter.infrastructure.store.read_model import Moment, derived, file_sig
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
-from promptpotter.shared.measurement_context import RoleScope, individual_cells
+from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:

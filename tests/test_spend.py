@@ -861,9 +861,9 @@ async def _walk(
             sp,
             dataset,
             session,
-            label=MeasurementRole.PANEL,
+            kind=MeasurementRole.PANEL,
             checks=[_CutAfter(cut_at)] if cut_at else [],
-            measured=MeasuredPass(individual_id="arm"),
+            measured="arm",
             skip_at=skip_at,
         )
         stopped = await _stopped_by_operator(
@@ -941,9 +941,9 @@ async def _round(
             JobSearchPoint(),
             dataset,
             session,
-            label=MeasurementRole.PANEL,
+            kind=MeasurementRole.PANEL,
             checks=[_CutAfter(cut)] if cut else [],
-            measured=MeasuredPass(individual_id=f"c{w}"),
+            measured=f"c{w}",
         )
         for w, cut in enumerate(cuts)
     ]
@@ -1398,12 +1398,12 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
         # The stopped launch priced the cells it took.
         telemetry.bind_priced({feed.cell_key(s.key) for s in reread[:3]})
         with scoped(book=arm):
-            walk = open_walk(picked, reread, session, label=MeasurementRole.PANEL, measured=None)
+            walk = open_walk(picked, reread, session, kind=MeasurementRole.PANEL, measured=None)
             halted = await _stopped_by_operator(
                 query_loop.run_walks({"arm": walk}, session, keep_cut=False)
             )
             bench = await score_search_point(
-                graded, reread, session, label=MeasurementRole.BENCH, measured=None
+                graded, reread, session, kind=MeasurementRole.BENCH, measured=None
             )
             # The stopped launch made the round's calls; the resumed one learns them off the ledger.
             telemetry.bind_priced(set())

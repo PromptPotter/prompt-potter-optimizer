@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from asyncio import CancelledError
 from collections.abc import AsyncIterator, Awaitable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
@@ -22,15 +23,15 @@ from promptpotter.application.scoring.evaluators import (
     observation_owner,
 )
 from promptpotter.application.scoring.judges.registry import build_evaluators
+from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import Compare, Optimize
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, StopLoop
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, filed_as
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
@@ -39,6 +40,7 @@ from promptpotter.infrastructure.store.archive_queries import (
     OpenAt,
 )
 from promptpotter.shared.errors import DiagnosticError
+from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.run_scope import RunScope, run_scope, scoped
 
 if TYPE_CHECKING:
@@ -46,7 +48,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import TaskDecomposition
+    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -105,17 +107,11 @@ def session_scope(session: Session) -> Iterator[RunScope]:
 
 
 @contextmanager
-def arm_diagnostic_scoring(
-    session: Session,
-    campaign_config: CampaignConfig,
-    *,
-    source: RunSource,
-) -> Iterator[None]:
+def arm_diagnostic_scoring(session: Session, campaign_config: CampaignConfig) -> Iterator[None]:
     """The pass's scoring, under the scope a run on *session* would take, for the block."""
     # A run is refused at its mint (`jobs/mint.py::refuse_unrunnable`); a pass outside one, here.
     refuse_below_reasoning_floor(session.pipeline_params.nodes.items())
     with session_scope(session):
-        session.state.source = source
         session.state.scoring = scorer_setup(
             session,
             campaign_config,
@@ -138,7 +134,7 @@ class OpenedDiagnostic:
 
 @asynccontextmanager
 async def open_diagnostic(
-    stores: Stores, hop: CycleHop, *, source: RunSource, acting: str | None = None
+    stores: Stores, hop: CycleHop, *, acting: str | None = None
 ) -> AsyncIterator[OpenedDiagnostic]:
     """The one opener of every verb that scores a cycle's points outside its loop: its scope is
     the block's, so a pass the loop runs leaves the loop's own standing. *acting* is the command
@@ -156,7 +152,7 @@ async def open_diagnostic(
         acting=() if acting is None else (acting,),
     )
     # Its scope spawns as `run_optimization`'s: a pp-self point's connector dispatches no inner run without it.
-    with arm_diagnostic_scoring(session, config, source=source):
+    with arm_diagnostic_scoring(session, config):
         yield OpenedDiagnostic(
             campaign, session, config, campaign_framing(stores, config, session.dataset)
         )
@@ -171,20 +167,48 @@ def cycle_partition(
     return partition_bank(rows, campaign_config.dataset_split, seed=campaign_config.run_seed)
 
 
-async def diagnostic_pass(scoring: Awaitable[ScoredWalk]) -> ScoredWalk:
-    """Nothing above a diagnostic verb catches the round loop's ``StopLoop``."""
+def _refused(stop: StopLoop) -> DiagnosticError:
+    info = STOP_REASON_INFO[stop.reason]
+    unmeasured = "" if stop.unmeasured is None else f", {stop.unmeasured} cell(s) unmeasured"
+    return DiagnosticError(f"{info.label}{unmeasured}. {info.next_step}".strip())
+
+
+async def diagnostic_pass(scoring: Awaitable[ScoredWalk], session: Session) -> ScoredWalk:
+    """Nothing above a diagnostic verb catches the round loop's ``StopLoop``; a pause it asked
+    comes back with the cells its pass took."""
     try:
         scored = await scoring
     except StopLoop as stop:
-        info = STOP_REASON_INFO[stop.reason]
-        unmeasured = "" if stop.unmeasured is None else f", {stop.unmeasured} cell(s) unmeasured"
-        raise DiagnosticError(f"{info.label}{unmeasured}. {info.next_step}".strip()) from None
+        raise _refused(stop) from None
+    if (halt := scored.halt) is not None:
+        if isinstance(halt, StopLoop):
+            raise _refused(halt) from None
+        if not isinstance(halt, KeyboardInterrupt | CancelledError) or not (
+            session.state.control.paused(halt)
+        ):
+            raise halt
+        return scored
     if scored.stopped is not None:
         raise DiagnosticError(
             f"Scoring stopped after {len(scored.sheet)} cell(s): {scored.stopped}. A reading "
             "over part of the pass would describe the stop, not the configuration."
         )
     return scored
+
+
+async def replicates(
+    search_point: JobSearchPoint, rows: list[Sample], session: Session, k: int
+) -> list[ScoredWalk]:
+    """The one k-fresh-replicate pass: *search_point* on *rows*, *k* times in turn."""
+    return [
+        await diagnostic_pass(
+            score_search_point(
+                search_point, rows, session, kind=MeasurementRole.NOISE_FLOOR, measured=None
+            ),
+            session,
+        )
+        for _ in range(k)
+    ]
 
 
 @contextmanager
@@ -203,9 +227,3 @@ def verb_ledger(stores: Stores, hop: CycleHop | None) -> Iterator[CycleEventLog]
         book.ledger = ledger
     with scoped(ledger=ledger):
         yield ledger
-
-
-@contextmanager
-def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
-    with verb_ledger(stores, hop), filed_as("diagnostic"):
-        yield

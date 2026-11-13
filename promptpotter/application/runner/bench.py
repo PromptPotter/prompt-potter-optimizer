@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, replace
 from functools import partial
 from statistics import fmean
@@ -11,7 +10,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.jobs.launcher.admission import campaign_refusal
 from promptpotter.application.pipeline_resolve import cycle_config
-from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
+from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring.closed_rounds import (
     closed_rounds,
     cycle_instrument,
@@ -26,7 +25,6 @@ from promptpotter.application.scoring.paired import (
 )
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
-    reread_cells,
     score_search_point,
 )
 from promptpotter.application.scoring.selection import level_band
@@ -63,6 +61,7 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
     ReadingState,
 )
+from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_views import (
     BenchScoredView,
     VerificationEnterView,
@@ -85,12 +84,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.measurement_context import (
-    MeasuredPass,
-    MeasurementRole,
-    RoleScope,
-    individual_cells,
-)
+from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -106,6 +100,9 @@ if TYPE_CHECKING:
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.stores import Stores
+
+
+_BRACKET = PASSES[MeasurementRole.BENCH].bracket
 
 
 class _PassReading(NamedTuple):
@@ -458,10 +455,10 @@ async def _send_on_bench(
     # No `round=` on the bracket: it would move the dashboard's round back to the one being graded.
     ledger.append(
         PhaseRecord(
-            phase=CampaignPhase.BENCH,
+            phase=_BRACKET,
             event="enter",
             view=VerificationEnterView(
-                verification="bench",
+                verification=MeasurementRole.BENCH,
                 subject=subject,
                 arm=arm,
                 sp_hash=search_point.sp_hash(session.pipeline_schema),
@@ -478,57 +475,36 @@ async def _send_on_bench(
         control, held_lookahead=session.backend_client.connector.max_cells_in_flight
     )
     try:
-        return await _pass_on_bench(session, search_point, arm=arm, reads_before=reads_before), None
-    except (KeyboardInterrupt, asyncio.CancelledError, *RUN_STOPS) as stopping:
-        # Every run stop banks the pass as stopped, on the cells its walk filed before it (bl3.B4).
-        bench = list(session.state.scoring.partition.bench)
-        held = reread_cells(search_point, bench, session, label=MeasurementRole.BENCH)
-        stopped = _bench_pass(
-            session,
+        scored = await score_search_point(
             search_point,
-            arm=arm,
-            cells=held.addresses(),
-            stop=PassStop(cause=run_stop_reason(stopping), warning=None),
-            reads_before=reads_before,
+            list(session.state.scoring.partition.bench),
+            session,
+            kind=MeasurementRole.BENCH,
+            measured=arm.key,
         )
-        graded(ledger, session, stopped, subject=subject)
-        return stopped, stopping
+        signal = scored.signal
+        stop = (
+            # Every run stop banks the pass as stopped, on the cells its walk took before it (bl3.B4).
+            PassStop(cause=run_stop_reason(scored.halt), warning=None)
+            if scored.halt is not None
+            else None
+            if scored.stopped is None
+            else PassStop(
+                cause=scored.stopped,
+                warning=signal.check_result["dominant_warning"]
+                if signal is not None and signal.check_name == SCORING_ERROR_ABORT
+                else None,
+            )
+        )
+        taken = _bench_pass(
+            session, search_point, arm=arm, cells=scored.cells, stop=stop, reads_before=reads_before
+        )
+        if scored.halt is not None:
+            graded(ledger, session, taken, subject=subject)
+        return taken, scored.halt
     finally:
         session.state.control = control
-        ledger.append(PhaseRecord(phase=CampaignPhase.BENCH, event="exit"))
-
-
-async def _pass_on_bench(
-    session: Session,
-    search_point: JobSearchPoint,
-    *,
-    arm: ArmName,
-    reads_before: int,
-) -> VerificationPass:
-    scored = await score_search_point(
-        search_point,
-        list(session.state.scoring.partition.bench),
-        session,
-        label=MeasurementRole.BENCH,
-        measured=MeasuredPass(arm.key, MeasurementRole.BENCH),
-    )
-    stop: PassStop | None = None
-    if scored.stopped is not None:
-        signal = scored.signal
-        stop = PassStop(
-            cause=scored.stopped,
-            warning=signal.check_result["dominant_warning"]
-            if signal is not None and signal.check_name == SCORING_ERROR_ABORT
-            else None,
-        )
-    return _bench_pass(
-        session,
-        search_point,
-        arm=arm,
-        cells=scored.cells,
-        stop=stop,
-        reads_before=reads_before,
-    )
+        ledger.append(PhaseRecord(phase=_BRACKET, event="exit"))
 
 
 def _bench_pass(
@@ -542,7 +518,7 @@ def _bench_pass(
 ) -> VerificationPass:
     bench = session.state.scoring.partition.bench
     return VerificationPass(
-        kind="bench",
+        kind=MeasurementRole.BENCH,
         arm=arm,
         sp_hash=search_point.sp_hash(session.pipeline_schema),
         cells=cells,
@@ -574,7 +550,7 @@ def graded(
     read = _read_pass(session.store, bench_pass, session.state.scoring.scorer, tolerance=tolerance)
     ledger.append(
         PhaseRecord(
-            phase=CampaignPhase.BENCH,
+            phase=_BRACKET,
             event="graded",
             view=VerificationGradedView(
                 verification=bench_pass,

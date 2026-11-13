@@ -101,7 +101,6 @@ from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.job import EmbeddedRun
-from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
@@ -467,7 +466,7 @@ def filed(
     under: ArchiveEntry | None = None,
     *,
     grade: str = "A",
-    role: str = "panel",
+    role: MeasurementRole = MeasurementRole.PANEL,
     created_at: str = "",
 ) -> list[WalkedCell]:
     """Each cell filed as a fresh answer under *under*, as a walk files what it bought."""
@@ -476,7 +475,6 @@ def filed(
         filed_under() if under is None else under,
         [(cell, grade) for cell in held],
         role=role,
-        source=RunSource.OPTIMIZATION_LOOP.value,
         created_at=created_at,
     )
     return [(cell.sample_key, ref, False) for cell, ref in zip(held, refs, strict=True)]
@@ -538,10 +536,7 @@ def loop_session(
         campaign_id="" if hop is None else hop.campaign_id,
         cycle_id="" if hop is None else hop.cycle_id,
         drawn=None if hop is None else partition,
-        state=LaunchState(
-            source=RunSource.OPTIMIZATION_LOOP,
-            control=RunControl() if control is None else control,
-        ),
+        state=LaunchState(control=RunControl() if control is None else control),
     )
     session.state.scoring = ScorerSetup(
         scorer=scorer or scorer_of(),
@@ -1178,7 +1173,7 @@ def bench_pass(
         [("", {"individual": filed_as or f"bench_{individual}"})], prompt_fields_id=individual
     )
     return VerificationPass(
-        cells=filed(stores.archive, [row.facts for row in rows], under, role="bench"),
+        cells=filed(stores.archive, [row.facts for row in rows], under, role=MeasurementRole.BENCH),
         sample_keys=list(sample_keys),
         **fields,
     )

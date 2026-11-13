@@ -6,20 +6,11 @@ from pydantic import Field, model_validator
 
 from promptpotter.domain.bench import BandedValue, OwnLevel, PassStop
 from promptpotter.domain.paired_reading import ArmName, PairedReading
+from promptpotter.domain.pass_kinds import PASSES, IndividualWalk
 from promptpotter.domain.scoring import WalkedCell
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.measurement_context import IndividualWalk, MeasurementRole
+from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
-
-#: `verify` re-scores search rows the arm never read; `bench` reads the held-out rows;
-#: `noise_floor` re-scores the origin's round-0 rows fresh, `k` times over.
-VerificationKind = Literal["verify", "bench", "noise_floor"]
-
-# A noise-floor pass re-reads rows already standing, so it joins no walk.
-_ROLE: dict[VerificationKind, MeasurementRole] = {
-    "verify": MeasurementRole.VERIFY,
-    "bench": MeasurementRole.BENCH,
-}
 
 VerifyStrategy = Literal["random", "hard"]
 
@@ -51,7 +42,8 @@ def rescore_count(said: int | str) -> RescoreCount:
 class VerificationPass(FrozenModel):
     """One individual's held-out pass, as the facts it banked — never a grade of them."""
 
-    kind: VerificationKind
+    # A kind whose `Pass` row brackets it on the ledger.
+    kind: MeasurementRole
     arm: ArmName
     sp_hash: str
     # In walk order; a row the pass never reached is absent.
@@ -72,18 +64,16 @@ class VerificationPass(FrozenModel):
 
     @model_validator(mode="after")
     def _kind_fields(self) -> Self:
-        if (self.strategy is None) is (self.kind == "verify"):
+        if PASSES[self.kind].phase is None:
+            raise ValueError(f"a {self.kind} pass is no held-out pass")
+        if (self.strategy is None) is (self.kind == MeasurementRole.VERIFY):
             raise ValueError("a verify pass names its draw, and only a verify pass")
-        if (self.reads_before is None) is (self.kind == "bench"):
+        if (self.reads_before is None) is (self.kind == MeasurementRole.BENCH):
             raise ValueError("a bench pass counts its reads before, and only a bench pass")
         return self
 
-    @property
-    def role(self) -> MeasurementRole:
-        return _ROLE[self.kind]
-
     def walk(self) -> IndividualWalk[WalkedCell]:
-        return IndividualWalk(self.arm.key, frozenset({self.role}), self.cells)
+        return IndividualWalk(self.arm.key, frozenset({self.kind}), self.cells)
 
     def answers(self, sp_hash: str, sample_keys: list[str], scorer_id: str) -> bool:
         """Banked whole for this point, on these rows, under this grader: re-sending it buys nothing."""

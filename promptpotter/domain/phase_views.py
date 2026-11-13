@@ -13,11 +13,11 @@ from promptpotter.domain.spend import Budget, CeilingMeter, campaign_cap_lines, 
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.verification import (
     NoiseBand,
-    VerificationKind,
     VerificationPass,
     VerifyReading,
     VerifyStrategy,
 )
+from promptpotter.shared.measurement_context import MeasurementRole
 
 
 class ViewAnchors(FrozenModel):
@@ -106,7 +106,7 @@ class VerificationEnterView(FrozenModel):
     """Every ``sample_scored`` up to the matching ``exit`` is one of its rows; round 0 is the origin."""
 
     kind: Literal["verification_enter"] = "verification_enter"
-    verification: VerificationKind
+    verification: MeasurementRole
     # A bench pass's place on the line; `None` on a verify.
     subject: BenchSubject | None
     arm: ArmName

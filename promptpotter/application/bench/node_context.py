@@ -65,7 +65,7 @@ from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.shared.errors import SendRefusedError
-from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -228,9 +228,9 @@ async def measure_as_parent(
         sp,
         cells,
         session,
-        label=role,
+        kind=role,
         sample_index=cycle.sample_index,
-        measured=MeasuredPass(individual.id, role),
+        measured=individual.id,
         held=round_.held(key),
     )
     # A partial pass is kept: `read_pair` pairs each arm on the cells both scored.

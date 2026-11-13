@@ -22,6 +22,7 @@ from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit, RoundArm
+from promptpotter.domain.pass_kinds import SCOPE_ROLES, IndividualWalk, individual_cells
 from promptpotter.domain.phases import ErrorRecord, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
@@ -37,13 +38,7 @@ from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import Principal
-from promptpotter.shared.measurement_context import (
-    SCOPE_ROLES,
-    IndividualWalk,
-    MeasurementRole,
-    RoleScope,
-    individual_cells,
-)
+from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 
 def round_document_digest(rr: RoundResult) -> str:

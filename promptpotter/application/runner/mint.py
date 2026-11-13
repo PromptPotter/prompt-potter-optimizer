@@ -39,7 +39,6 @@ from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
-from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.run_records import PhaseRecord, StandingBudgetRecord
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
@@ -148,7 +147,6 @@ async def open_launch(
     # After the declaration, and before the origin pass, which spends.
     arm_run_controls(session, observers)
 
-    session.state.source = RunSource.ORIGIN
     session.state.scoring = scorer_setup(session, campaign_config, partition=partition)
     if (book := run_scope().book) is not None and (
         cell := await cell_bound(session, session.pipeline_params)

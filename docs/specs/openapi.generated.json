@@ -10008,7 +10008,8 @@
           "repair",
           "overlap",
           "verify",
-          "bench"
+          "bench",
+          "noise_floor"
         ],
         "title": "MeasurementRole",
         "type": "string"
@@ -17598,13 +17599,7 @@
             "description": "How a `failed` pass reads, so why it ended without a reading; null otherwise."
           },
           "kind": {
-            "enum": [
-              "verify",
-              "bench",
-              "noise_floor"
-            ],
-            "title": "Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasurementRole"
           },
           "level": {
             "anyOf": [
@@ -17677,13 +17672,7 @@
             "type": "array"
           },
           "kind": {
-            "enum": [
-              "verify",
-              "bench",
-              "noise_floor"
-            ],
-            "title": "Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasurementRole"
           },
           "measured_datasets": {
             "additionalProperties": {

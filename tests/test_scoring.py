@@ -15,7 +15,7 @@ import random
 import shutil
 import signal
 from collections import Counter
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from contextlib import (
     AbstractAsyncContextManager,
     AbstractContextManager,
@@ -317,6 +317,7 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
     RoundArm,
 )
+from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
 from promptpotter.domain.phase_views import VerificationGradedView
 from promptpotter.domain.phases import (
     CampaignPhase,
@@ -417,13 +418,7 @@ from promptpotter.shared.errors import (
     SendRefusedError,
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal
-from promptpotter.shared.measurement_context import (
-    IndividualWalk,
-    MeasuredPass,
-    MeasurementRole,
-    RoleScope,
-    individual_cells,
-)
+from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.plugin_registry import Registry
 from promptpotter.shared.run_scope import run_scope, scoped
 from promptpotter.shared.statistics import paired_mean_t
@@ -1707,7 +1702,7 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
                         cycle.parent_point,
                         search[:2],
                         session,
-                        label="origin",
+                        kind=MeasurementRole.ORIGIN,
                         measured=None,
                     )
                 )
@@ -2038,12 +2033,20 @@ def test_a_cut_theta_round_reads_its_cold_parent_on_the_cells_the_archive_holds_
             patched.setattr(query_loop, "measure_sample", unpriced)
             asyncio.run(
                 score_search_point(
-                    cycle.parent_point, search[1:2], session, label="origin", measured=None
+                    cycle.parent_point,
+                    search[1:2],
+                    session,
+                    kind=MeasurementRole.ORIGIN,
+                    measured=None,
                 )
             )
         asyncio.run(
             score_search_point(
-                cycle.parent_point, search[:1], session, label="origin", measured=None
+                cycle.parent_point,
+                search[:1],
+                session,
+                kind=MeasurementRole.ORIGIN,
+                measured=None,
             )
         )
         theta_walking.append(True)
@@ -2250,8 +2253,8 @@ def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
                 cycle.points.measured(cycle.measured(origin.id)),
                 list(session.state.scoring.partition.search)[:4],
                 session,
-                label=MeasurementRole.ORIGIN,
-                measured=MeasuredPass(origin.id, MeasurementRole.ORIGIN),
+                kind=MeasurementRole.ORIGIN,
+                measured=origin.id,
             )
         )
     c0_round = cycle.origin_round.model_copy(
@@ -2588,15 +2591,14 @@ def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
         stores, ledger = bench.stores, bench.ledger
         _, _opened, _unpaid = _closed_origin(bench)
 
-        async def _outage(scoring: Coroutine[Any, Any, Any]) -> NoReturn:
-            scoring.close()
+        async def _outage(*_: object) -> NoReturn:
             raise DiagnosticError("the rescore measured no cell")
 
         failed_from = ledger.next_offset
         with monkeypatch.context() as patched:
             patched.setattr(held_out, "open_diagnostic", _opened)
             patched.setattr(held_out, "paid_pass", _unpaid)
-            patched.setattr(held_out, "diagnostic_pass", _outage)
+            patched.setattr(held_out, "replicates", _outage)
             with pytest.raises(DiagnosticError):
                 asyncio.run(
                     held_out.measure_noise_floor(stores=stores, hop=_PEER_HOP, k=RescoreCount(2))
@@ -4910,7 +4912,7 @@ def test_c0_is_topped_up_on_a_scope_the_line_drew_never_paired_on_its_own_scope_
 def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin() -> None:
     def banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerificationPass:
         return VerificationPass(
-            kind="verify",
+            kind=MeasurementRole.VERIFY,
             arm=ArmName(key=ArmKey("c"), round=round_num, label="C3.1"),
             sp_hash="h",
             cells=[(f"k{sid}", f"r.{sid}", False) for sid in range(100, 110)],

@@ -212,9 +212,6 @@ CEILING_METER_LABELS: Worded[CeilingMeter, str] = Worded(
     }
 )
 
-# A pass whose ROLE files its spend, whatever each of its calls would otherwise bank as.
-ROLE_SPEND_KIND: dict[str, TokenUsageKind] = {MeasurementRole.BENCH: "bench"}
-
 # Prefixes a nested run's node on its outer ledger, so the outer rollup keeps those nodes apart.
 NESTED_NODE_PREFIX = "inner:"
 

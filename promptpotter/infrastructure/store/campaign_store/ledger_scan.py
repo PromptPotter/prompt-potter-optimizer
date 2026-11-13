@@ -10,6 +10,7 @@ from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
 from promptpotter.domain.bench import BenchReading, BenchScore, PartitionRecord
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.pass_kinds import IndividualWalk
 from promptpotter.domain.phase_views import (
     BenchScoredView,
     InitEnterView,
@@ -72,7 +73,6 @@ from promptpotter.domain.spend import (
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verification import (
     BenchPasses,
-    VerificationKind,
     VerificationPass,
     VerifyReading,
 )
@@ -86,7 +86,7 @@ from promptpotter.infrastructure.store.read_model import (
     money_on,
 )
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.measurement_context import IndividualWalk, MeasurementRole
+from promptpotter.shared.measurement_context import MeasurementRole
 
 
 class _Last:
@@ -639,9 +639,7 @@ def scan_closed_bench(ledger_path: Path) -> BenchScore | None:
     return _view(ledger_path, _ClosedBench)
 
 
-def _graded(
-    spans: Iterable[LedgerSpan], kind: VerificationKind
-) -> Iterator[VerificationGradedView]:
+def _graded(spans: Iterable[LedgerSpan], kind: MeasurementRole) -> Iterator[VerificationGradedView]:
     for span in spans:
         for view in LedgerIndex.of(span.path).view(_Verification, span.until):
             if view.verification.kind == kind:
@@ -821,7 +819,7 @@ def scan_launch_claim(ledger_path: Path) -> LaunchClaimRecord | None:
 
 def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
     held: BenchPasses | None = None
-    for view in _graded(spans, "bench"):
+    for view in _graded(spans, MeasurementRole.BENCH):
         taken = view.verification
         if view.subject == "selected":
             if held is not None:
@@ -843,7 +841,7 @@ def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
 def scan_bench_readings(spans: Iterable[LedgerSpan]) -> dict[tuple[int, ArmKey], BenchReading]:
     return {
         (view.reading.round, view.verification.arm.key): view.reading
-        for view in _graded(spans, "bench")
+        for view in _graded(spans, MeasurementRole.BENCH)
         if isinstance(view.reading, BenchReading)
     }
 
@@ -896,7 +894,7 @@ def scan_ledger_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[Walked
         if round_num not in closed
     ]
     # The whole chain: a fork inherits its parent's verify CELLS, though not its assurance.
-    walks += [view.verification.walk() for view in _graded(chain, "verify")]
+    walks += [view.verification.walk() for view in _graded(chain, MeasurementRole.VERIFY)]
     return walks
 
 
@@ -908,7 +906,7 @@ def scan_ledger_verify(ledger_path: Path) -> VerifyLedger:
     """Own ledger only: a fork inherits its parent's measurements, not its assurance."""
     graded: dict[ArmKey, tuple[VerificationPass, VerifyReading]] = {}
     passes: list[VerificationPass] = []
-    for view in _graded([LedgerSpan(ledger_path)], "verify"):
+    for view in _graded([LedgerSpan(ledger_path)], MeasurementRole.VERIFY):
         # A refused pass sent nothing: it verified no round.
         if isinstance(view.reading, VerifyReading):
             graded[view.verification.arm.key] = view.verification, view.reading

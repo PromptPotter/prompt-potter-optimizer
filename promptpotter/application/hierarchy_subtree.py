@@ -54,6 +54,7 @@ from promptpotter.domain.hierarchy import (
 from promptpotter.domain.job import ScoringPass
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
+from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.results import Election
 from promptpotter.domain.run_records import ForkDirection, SpawnedBy
 from promptpotter.domain.said import Said
@@ -73,7 +74,6 @@ from promptpotter.infrastructure.store.stores import (
     resolve_cycle_path,
 )
 from promptpotter.shared.errors import NotFoundError
-from promptpotter.shared.measurement_context import ARM_ROLES
 
 
 def _top_campaign(subject: Subject) -> str:
@@ -333,7 +333,7 @@ def _unplaced(spawned: SpawnedBy | None, *, asker_listed: bool) -> str:
         else "the cycle its record names is not among this campaign's courses"
         if not asker_listed
         else f"the {spawned.role.value} arm its record names is not on that course as read"
-        if spawned.role in ARM_ROLES
+        if PASSES[spawned.role].arm
         else f"the pass that spawned it ({spawned.role.value}) is not one of a round's arms"
     )
     return f"No candidate holds it: {asked}, so it hangs under the course."

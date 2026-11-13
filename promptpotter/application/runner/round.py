@@ -125,7 +125,7 @@ from promptpotter.domain.wounds import ValidationFailure, collapse_counts
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
 from promptpotter.shared.errors import SendRefusedError, graceful
-from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole, RoleScope
+from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -287,7 +287,7 @@ async def read_origin_panel(
         }
     return {
         member: reread_cells(
-            cycle.points.job(step.opt_sp), samples, cycle.session, label=MeasurementRole.OVERLAP
+            cycle.points.job(step.opt_sp), samples, cycle.session, kind=MeasurementRole.OVERLAP
         )
         for member, (step, samples) in gaps.items()
     }
@@ -532,13 +532,13 @@ async def _measure_gaps(
             member: (
                 cycle.points.job(step.opt_sp),
                 samples,
-                MeasuredPass(individual_id=step.opt_sp.id, role=MeasurementRole.OVERLAP),
+                step.opt_sp.id,
             )
             for member, (step, samples) in gaps.items()
         },
         cycle.session,
         # One run per (member, cell set), so a re-run of the same round replays it free.
-        label=MeasurementRole.OVERLAP,
+        kind=MeasurementRole.OVERLAP,
     )
     for member, walk in scored.items():
         if walk.stopped is not None:
@@ -580,7 +580,7 @@ async def measure_population(
     cells = selector.parent_cells(seat, panel, rows)
     if cut is not None:
         # The spent budget buys the parent no cell: it is read where the archive already holds it.
-        held = reread_cells(cycle.parent_point, cells, cycle.session, label=MeasurementRole.PARENT)
+        held = reread_cells(cycle.parent_point, cells, cycle.session, kind=MeasurementRole.PARENT)
         on_disk = held.by_key()
         cells = [sample for sample in cells if sample.key in on_disk]
         # Nothing the cut left can be elected, so the round is unwound as an unkept cut is.
@@ -1009,10 +1009,10 @@ def _catch_up(
         sp,
         [sample],
         cycle.session,
-        label=MeasurementRole.BACKFILL,
+        kind=MeasurementRole.BACKFILL,
         sample_index=cycle.sample_index,
         # The PRIOR being caught up, never the arm whose cell triggered it.
-        measured=MeasuredPass(prior, MeasurementRole.BACKFILL),
+        measured=prior,
     )
     walk.release()
     _, cell = walk.launch(1)
@@ -1046,11 +1046,11 @@ def _open_arm(
         sp,
         dataset,
         ctx.cycle.session,
-        label=MeasurementRole.PANEL,
+        kind=MeasurementRole.PANEL,
         checks=checks,
         sample_index=ctx.cycle.sample_index,
         # Handed to the gateway rather than bound here, so no re-entrant asker inherits it.
-        measured=MeasuredPass(arm.individual.id, MeasurementRole.PANEL),
+        measured=arm.individual.id,
         skip_at=skip_at,
         held=ctx.held(ArmKey(arm.individual.id)),
     )

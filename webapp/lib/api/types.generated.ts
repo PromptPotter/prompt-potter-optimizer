@@ -795,7 +795,7 @@ export interface MemberAddress {
   /** The arm the individual was measured as; null for a pass that is no arm. */
   arm: ArmName | null;
   /** Which pass, where the same individual is read by more than one. */
-  pass_role: 'origin' | 'panel' | 'backfill' | 'parent' | 'repair' | 'overlap' | 'verify' | 'bench' | null;
+  pass_role: 'origin' | 'panel' | 'backfill' | 'parent' | 'repair' | 'overlap' | 'verify' | 'bench' | 'noise_floor' | null;
 }
 
 /** The cells a pair is read on, as an identity two readings can be compared by. */
@@ -1858,7 +1858,7 @@ export interface RulerScope {
 
 /** The latest verify or bench pass on one arm, as its records left it. */
 export interface VerificationMark {
-  kind: 'verify' | 'bench' | 'noise_floor';
+  kind: 'origin' | 'panel' | 'backfill' | 'parent' | 'repair' | 'overlap' | 'verify' | 'bench' | 'noise_floor';
   /** The arm the pass measures; `arm.key` joins it to its row. */
   arm: ArmName;
   state: 'running' | 'done' | 'failed';
@@ -4521,7 +4521,7 @@ export interface VerificationGradedView {
 /** One individual's held-out pass, as the facts it banked — never a grade of
  * them. */
 export interface VerificationPass {
-  kind: 'verify' | 'bench' | 'noise_floor';
+  kind: 'origin' | 'panel' | 'backfill' | 'parent' | 'repair' | 'overlap' | 'verify' | 'bench' | 'noise_floor';
   arm: ArmName;
   sp_hash: string;
   cells: [string, string, boolean][];

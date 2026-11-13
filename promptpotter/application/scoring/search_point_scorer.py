@@ -15,18 +15,19 @@ from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, ru
 from promptpotter.domain.arms import degradation_reading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.measurement_provenance import grade_answer
-from promptpotter.domain.phases import WalkEnd
+from promptpotter.domain.pass_kinds import PASSES
+from promptpotter.domain.phases import StopLoop, WalkEnd
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, MeasuredCell, WalkedCell
-from promptpotter.domain.spend import ROLE_SPEND_KIND
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, current_round, filed_as
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import SendRefusedError
 from promptpotter.shared.measurement_context import (
-    RECORDED_ROLES,
     MeasuredPass,
+    MeasurementRole,
     measured_pass_context,
 )
 from promptpotter.shared.run_scope import run_scope
@@ -35,7 +36,6 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.scoring.query_loop import QueryLoopResult
-    from promptpotter.domain.measurement_provenance import RunSource
     from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.measurement_archive import CellClaim
@@ -51,6 +51,8 @@ class ScoredWalk:
     scores: ScoreSummary
     signal: StopSignal | None
     stopped: WalkEnd | None
+    # The run stop a keeping pass ended short on (`Pass.keeps`): its caller raises it.
+    halt: BaseException | None = None
 
     @property
     def cells(self) -> list[WalkedCell]:
@@ -182,9 +184,8 @@ def _walk_stop_signal(batch: QueryLoopResult) -> StopSignal | None:
 @dataclass
 class _ArchiveRecorder:
     session: Session
-    source: RunSource
     search_point: JobSearchPoint
-    role: str
+    kind: MeasurementRole
     entry: ArchiveEntry
 
     def sheet(self, results: Sequence[GradedCell]) -> CellSheet:
@@ -197,7 +198,7 @@ class _ArchiveRecorder:
 
     def provenance(self, facts: MeasuredCell) -> str:
         return grade_answer(
-            self.source,
+            self.kind,
             facts,
             self.session.pipeline_schema,
             human_intervened=self.session.state.human_intervened,
@@ -218,8 +219,7 @@ class _ArchiveRecorder:
         answers = self.session.store.archive.file_answers(
             self.entry,
             ((cell.facts, self.provenance(cell.facts)) for cell in cells),
-            role=self.role,
-            source=self.source.value,
+            role=self.kind,
             created_at=utcnow_iso(),
         )
         return [
@@ -233,50 +233,70 @@ async def score_search_point(
     dataset: list[Sample],
     session: Session,
     *,
-    label: str,
+    kind: MeasurementRole,
     sample_index: SampleIndex | None = None,
-    measured: MeasuredPass | None,
-    force_fresh: bool = False,
+    measured: str | None,
     held: CellSheet = NO_CELLS,
 ) -> ScoredWalk:
     """``measured`` has NO default on purpose: it decides what the numbers MEAN."""
-    # Opened inside the filing too: the walk's cells run in a copy of the context taken here.
-    with filed_as(ROLE_SPEND_KIND.get(label)):
-        walk = open_walk(
-            search_point,
-            dataset,
+    (scored,) = (
+        await score_search_points(
+            {kind: (search_point, dataset, measured)},
             session,
-            label=label,
+            kind=kind,
             sample_index=sample_index,
-            measured=measured,
-            force_fresh=force_fresh,
             held=held,
         )
-        await run_walks({label: walk}, session, keep_cut=False)
-    return close_walk(walk)
+    ).values()
+    return scored
 
 
 async def score_search_points[K: Hashable](
-    points: Mapping[K, tuple[JobSearchPoint, list[Sample], MeasuredPass | None]],
+    points: Mapping[K, tuple[JobSearchPoint, list[Sample], str | None]],
     session: Session,
     *,
-    label: str,
+    kind: MeasurementRole,
+    sample_index: SampleIndex | None = None,
+    held: CellSheet = NO_CELLS,
 ) -> dict[K, ScoredWalk]:
     """Each point on its own rows, in ONE pass: the slowest walk sets the wall clock, never their sum."""
-    with filed_as(ROLE_SPEND_KIND.get(label)):
+    row = PASSES[kind]
+    # Opened inside the filing too: the walk's cells run in a copy of the context taken here.
+    with filed_as(row.spend):
         walks = {
-            key: open_walk(search_point, dataset, session, label=label, measured=measured)
+            key: open_walk(
+                search_point,
+                dataset,
+                session,
+                kind=kind,
+                sample_index=sample_index,
+                measured=measured,
+                held=held,
+            )
             for key, (search_point, dataset, measured) in points.items()
         }
-        await run_walks(walks, session, keep_cut=False)
+        try:
+            cut = await run_walks(walks, session, keep_cut=row.keeps)
+        except (KeyboardInterrupt, asyncio.CancelledError, StopLoop, SendRefusedError) as halt:
+            if not row.keeps:
+                raise
+            return {key: _halted(walk, halt) for key, walk in walks.items()}
+    if cut is not None:
+        return {key: replace(close_walk(walk), halt=StopLoop(cut)) for key, walk in walks.items()}
     return {key: close_walk(walk) for key, walk in walks.items()}
 
 
+def _halted(walk: Walk, halt: BaseException) -> ScoredWalk:
+    """The rows it took before *halt*: a spent ceiling is kept by its walk (`keep_cut`) instead."""
+    sheet = CellSheet(walk.ctx.scorer.id, tuple(walk.results))
+    return ScoredWalk(sheet, walk.ctx.recorder.scores(walk.results), None, None, halt)
+
+
 def reread_cells(
-    search_point: JobSearchPoint, dataset: list[Sample], session: Session, *, label: str
+    search_point: JobSearchPoint, dataset: list[Sample], session: Session, *, kind: MeasurementRole
 ) -> CellSheet:
     """The rows a walk of *dataset* would take free off the archive, graded as it takes them."""
-    ctx = open_walk(search_point, dataset, session, label=label, measured=None).ctx
+    ctx = open_walk(search_point, dataset, session, kind=kind, measured=None).ctx
     held = ctx.cached_sample_results
     return ctx.scorer.sheet(held[s.id].replayed() for s in dataset if s.id in ctx.rereads)
 
@@ -286,46 +306,40 @@ def open_walk(
     dataset: list[Sample],
     session: Session,
     *,
-    label: str,
+    kind: MeasurementRole,
     checks: Sequence[StopRule] = (),
     sample_index: SampleIndex | None = None,
-    measured: MeasuredPass | None,
-    force_fresh: bool = False,
+    measured: str | None,
     skip_at: int | None = None,
     held: CellSheet = NO_CELLS,
 ) -> Walk:
     """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace."""
-    source = session.state.source
-    assert source is not None, "run init or a pass opener arms the run source before any scoring"
     store = session.store
     pipeline_schema = session.pipeline_schema
 
     entry = archive_entry(
         search_point, dataset_hash=session.bank.dataset_hash, pipeline_schema=pipeline_schema
     )
-    replaying = not force_fresh
-    node_configs = entry.node_configs if replaying else []
+    node_configs = [] if PASSES[kind].fresh else entry.node_configs
     # No node configs, no cell identity: every such searchpoint would share one claim per sample.
     feed = ReplayFeed(store.archive, node_configs) if node_configs else None
-    cached_sample_results, deprecated_samples = _resolve_prior_cache(
-        dataset, feed=feed, label=label
-    )
+    cached_sample_results, deprecated_samples = _resolve_prior_cache(dataset, feed=feed, label=kind)
     cell_keys = {} if feed is None else {s.id: feed.cell_key(s.key) for s in dataset}
     book = run_scope().book
     rereads = frozenset(
         s for s in cached_sample_results if book is None or book.replays_free(cell_keys[s])
     )
 
+    measuring = None if measured is None else MeasuredPass(measured, kind)
     ctx = QueryLoopState(
         search_point=search_point,
         session=session,
         cached_sample_results=cached_sample_results,
-        recorded=measured if measured is not None and measured.role in RECORDED_ROLES else None,
-        role=str(label),
+        recorded=measuring if PASSES[kind].recorded else None,
         sample_index=sample_index,
         deprecated_samples=deprecated_samples,
         recorder=_ArchiveRecorder(
-            session=session, source=source, search_point=search_point, role=str(label), entry=entry
+            session=session, search_point=search_point, kind=kind, entry=entry
         ),
         claim_cell=None
         if feed is None
@@ -344,7 +358,7 @@ def open_walk(
         dataset=dataset,
         ctx=ctx,
         checks=checks,
-        context=measured_pass_context(measured),
+        context=measured_pass_context(measuring),
         skip_at=skip_at,
     )
 

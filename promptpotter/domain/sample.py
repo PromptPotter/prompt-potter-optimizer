@@ -10,6 +10,7 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import dataset_hash, stable_hash
+from promptpotter.shared.measurement_context import MeasurementRole
 
 
 class Sample(StrictModel):
@@ -155,8 +156,7 @@ class FiledAnswer:
     cell: MeasuredCell
     config_key: str
     dataset_hash: str
-    role: str
-    source: str
+    role: MeasurementRole
     provenance: str
     created_at: str
     compaction: str | None = None
@@ -168,8 +168,7 @@ class FiledAnswer:
             MeasuredCell.from_wire(row),
             config_key=_stated(row, "config_key"),
             dataset_hash=_stated(row, "dataset_hash"),
-            role=_stated(row, "role"),
-            source=_stated(row, "source"),
+            role=MeasurementRole(_stated(row, "role")),
             provenance=_stated(row, "provenance"),
             created_at=_stated(row, "created_at"),
             compaction=_stamp(row, "compaction"),
@@ -181,8 +180,7 @@ class FiledAnswer:
             **self.cell.wire(),
             "config_key": self.config_key,
             "dataset_hash": self.dataset_hash,
-            "role": self.role,
-            "source": self.source,
+            "role": self.role.value,
             "provenance": self.provenance,
             "created_at": self.created_at,
         }

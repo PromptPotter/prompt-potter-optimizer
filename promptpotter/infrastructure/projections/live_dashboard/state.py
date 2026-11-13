@@ -21,7 +21,7 @@ from promptpotter.domain.run_records import BackendRevision, DefaultsDrift, RunW
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.domain.verification import VerificationKind
+from promptpotter.shared.measurement_context import MeasurementRole
 
 
 class CatchUpLogEntry(StrictModel):
@@ -184,7 +184,7 @@ class LiveDashboardState(DashboardFacts):
     # PER ROUND, and NOT clamped by a rewind, unlike `rounds[]`: a re-measured round costs twice.
     spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
 
-    def orphaned(self, spare: VerificationKind | None = None) -> list[VerificationMark]:
+    def orphaned(self, spare: MeasurementRole | None = None) -> list[VerificationMark]:
         """The passes, each still running and not of kind *spare* ended stopped: its process is gone ungraded."""
         return [
             mark.orphaned() if mark.state == "running" and mark.kind != spare else mark

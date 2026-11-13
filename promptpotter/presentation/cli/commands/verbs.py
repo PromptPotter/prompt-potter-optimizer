@@ -551,7 +551,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 dest="repeat",
                 type=int,
                 default=3,
-                help="Independent origin passes per bank (default 3). They run force_fresh — "
+                help="Independent origin passes per bank (default 3). They run fresh — "
                 "the archive is content-addressed, so replays would report a spread of exactly zero. "
                 "NOT 1: the verdict compares an exact floor against an origin carrying ~0.08 SE at 40 "
                 "rows, so one pass cannot settle a bank near its line. Costs repeat x --n-samples "
@@ -607,7 +607,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "noise_floor:cmd_noise_floor",
         terminal_only="a debug diagnostic re-scoring a cached origin, outside the loop",
         help="Debug diagnostic (NOT a loop feature): re-score a campaign's cached "
-        "origin --k times with force_fresh and report the mean+CI spread — the "
+        "origin --k times fresh and report the mean+CI spread — the "
         "backend's own run-to-run noise. On a pp-self cycle this measures the "
         "true inner-recursion noise floor. kx real spend; does not mutate the "
         "source cycle and is never invoked by the loop itself.",
@@ -629,7 +629,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 dest="k",
                 type=_rescore_count_arg,
                 default=rescore_count(3),
-                help="Number of force_fresh re-scores of the cached origin (default 3, at least 2). "
+                help="Number of fresh re-scores of the cached origin (default 3, at least 2). "
                 "kx real spend — on a pp-self cycle each re-score re-runs the full inner "
                 "recursion, so keep k small.",
             ),

@@ -16,8 +16,8 @@ from promptpotter.application.bench.difficulty import (
 )
 from promptpotter.application.initialization.scoring_scope import (
     diagnostic_pass,
-    diagnostic_trace,
     open_diagnostic,
+    replicates,
     verb_ledger,
 )
 from promptpotter.application.initialization.session import LaunchClock
@@ -38,12 +38,11 @@ from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
 from promptpotter.application.scoring.closed_rounds import cycle_instrument, walked_rows
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, read_pair
-from promptpotter.application.scoring.search_point_scorer import reread_cells, score_search_point
+from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
 from promptpotter.domain.bench import BENCH_REFUSAL_INFO, BandedValue, PartitionRecord
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
@@ -52,8 +51,9 @@ from promptpotter.domain.paired_reading import (
     MemberAddress,
     ReadingState,
 )
+from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_views import VerificationEnterView, VerificationGradedView
-from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase
+from promptpotter.domain.phases import STOP_REASON_INFO
 from promptpotter.domain.run_records import PhaseRecord, VerifySaturated
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
@@ -76,12 +76,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, DiagnosticError
-from promptpotter.shared.measurement_context import (
-    MeasuredPass,
-    MeasurementRole,
-    RoleScope,
-    individual_cells,
-)
+from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.statistics import mean_ci
 
 if TYPE_CHECKING:
@@ -116,11 +111,17 @@ def _bracketed(enter: VerificationEnterView) -> Iterator[CycleEventLog]:
     """A pass on its cycle's ledger: entered here, graded by the caller, exited whatever ends it."""
     ledger = active_cycle_ledger()
     assert ledger is not None
-    ledger.append(PhaseRecord(phase=CampaignPhase.VERIFY, event="enter", view=enter))
+    phase = PASSES[enter.verification].bracket
+    ledger.append(PhaseRecord(phase=phase, event="enter", view=enter))
     try:
         yield ledger
     finally:
-        ledger.append(PhaseRecord(phase=CampaignPhase.VERIFY, event="exit"))
+        ledger.append(PhaseRecord(phase=phase, event="exit"))
+
+
+def _graded(ledger: CycleEventLog, graded: VerificationGradedView) -> None:
+    phase = PASSES[graded.verification.kind].bracket
+    ledger.append(PhaseRecord(phase=phase, event="graded", view=graded))
 
 
 def pick_fresh(
@@ -298,7 +299,7 @@ async def verify_candidate(
     arm = arm_name(ArmKey(candidate_id), entry, round_num)
     label = arm.label
 
-    async with open_diagnostic(stores, hop, source=RunSource.VERIFY, acting=acting) as opened:
+    async with open_diagnostic(stores, hop, acting=acting) as opened:
         session, campaign_config, campaign = opened.session, opened.config, opened.campaign
         schema = session.pipeline_schema
         # Before a cell is bought: fresh cells of another searchpoint would read as this one's.
@@ -364,40 +365,30 @@ async def verify_candidate(
         )
         # Bound at the candidate's round: each cell's record names one, and the pass bills there.
         enter = VerificationEnterView(
-            verification="verify",
+            verification=MeasurementRole.VERIFY,
             subject=None,
             arm=arm,
             sp_hash=sp_hash,
             rows=len(picked),
             strategy=strategy,
         )
-        with diagnostic_trace(stores, hop), at_round(round_num), _bracketed(enter) as ledger:
-            try:
-                cells = (
-                    await diagnostic_pass(
-                        score_search_point(
-                            jsp,
-                            picked,
-                            session,
-                            label=MeasurementRole.VERIFY,
-                            measured=MeasuredPass(candidate_id, MeasurementRole.VERIFY),
-                        ),
-                    )
-                ).cells
-            except (KeyboardInterrupt, asyncio.CancelledError) as stop:
-                if not session.state.control.paused(stop):
-                    raise
-                # A pause stops on no outcome, so the rows walked are a fresh pick of their own;
-                # each was unmeasured, so a row the archive holds now is one this pass bought.
-                walked = reread_cells(jsp, picked, session, label=MeasurementRole.VERIFY)
-                cells = [(key, answer, False) for key, answer, _ in walked.addresses()]
+        with verb_ledger(stores, hop), at_round(round_num), _bracketed(enter) as ledger:
+            scored = await diagnostic_pass(
+                score_search_point(
+                    jsp, picked, session, kind=MeasurementRole.VERIFY, measured=candidate_id
+                ),
+                session,
+            )
+            cells = scored.cells
+            if scored.halt is not None:
+                # A pause stops on no outcome, so the rows it took are a fresh pick of their own.
                 picked = [s for s in picked if s.key in {key for key, _, _ in cells}]
                 if not picked:
                     raise DiagnosticError(
                         f"the verify pass of {label!r} was paused before it measured a cell."
                     ) from None
             banked = VerificationPass(
-                kind="verify",
+                kind=MeasurementRole.VERIFY,
                 arm=arm,
                 sp_hash=sp_hash,
                 cells=cells,
@@ -424,7 +415,7 @@ async def verify_candidate(
                 state=ReadingState.READ,
                 refusal=None,
             )
-            ledger.append(PhaseRecord(phase=CampaignPhase.VERIFY, event="graded", view=graded))
+            _graded(ledger, graded)
         return graded
 
 
@@ -459,7 +450,7 @@ async def verify_on_saturation(
         )
     except (DiagnosticError, BankedSearchPointError) as exc:
         refused = VerificationPass(
-            kind="verify",
+            kind=MeasurementRole.VERIFY,
             # No round may name the winner here, so its id is its label.
             arm=ArmName(key=ArmKey(winner_id), round=round_num, label=winner_id),
             sp_hash="",
@@ -471,21 +462,18 @@ async def verify_on_saturation(
             seed=seed,
             reads_before=None,
         )
-        ledger.append(
-            PhaseRecord(
-                phase=CampaignPhase.VERIFY,
-                event="graded",
-                view=VerificationGradedView(
-                    verification=refused,
-                    subject=None,
-                    tolerance=None,
-                    reserve_usd=None,
-                    reserve_tokens=None,
-                    reading=None,
-                    state=ReadingState.MEMBER_UNSCOREABLE,
-                    refusal=str(exc),
-                ),
-            )
+        _graded(
+            ledger,
+            VerificationGradedView(
+                verification=refused,
+                subject=None,
+                tolerance=None,
+                reserve_usd=None,
+                reserve_tokens=None,
+                reading=None,
+                state=ReadingState.MEMBER_UNSCOREABLE,
+                refusal=str(exc),
+            ),
         )
 
 
@@ -523,7 +511,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
         )
     sample_keys = {key for key, _, _ in recorded_cells}
 
-    async with open_diagnostic(stores, hop, source=RunSource.NOISE_FLOOR) as opened:
+    async with open_diagnostic(stores, hop) as opened:
         session = opened.session
         jsp = opened.points.measured(origin)
         scoring_set = [s for s in session.bank.samples if s.key in sample_keys]
@@ -547,7 +535,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
         arm = ArmName(key=ArmKey(origin.individual.id), round=0, label=origin.label)
         sp_hash = jsp.sp_hash(session.pipeline_schema)
         logger.info(
-            "noise-floor %s/%s: re-scoring origin C0 %dx (force_fresh) on %d samples",
+            "noise-floor %s/%s: re-scoring origin C0 %dx fresh on %d samples",
             hop.campaign_id,
             hop.cycle_id,
             k,
@@ -557,25 +545,15 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
         composites: list[float] = []
         fitnesses: list[float] = []
         enter = VerificationEnterView(
-            verification="noise_floor",
+            verification=MeasurementRole.NOISE_FLOOR,
             subject=None,
             arm=arm,
             sp_hash=sp_hash,
             rows=k * len(scoring_set),
             strategy=None,
         )
-        with diagnostic_trace(stores, hop), _bracketed(enter) as ledger:
-            for i in range(k):
-                scored = await diagnostic_pass(
-                    score_search_point(
-                        jsp,
-                        scoring_set,
-                        session,
-                        label=f"noise_floor_{i}",
-                        measured=None,
-                        force_fresh=True,
-                    ),
-                )
+        with verb_ledger(stores, hop), _bracketed(enter) as ledger:
+            for i, scored in enumerate(await replicates(jsp, scoring_set, session, k)):
                 fitness, composite = scored.scores.fitness, scored.scores.composite_fitness
                 if fitness is None or composite is None:
                     raise DiagnosticError(
@@ -592,7 +570,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
             mean_composite, ci_lo, ci_hi = band
             graded = VerificationGradedView(
                 verification=VerificationPass(
-                    kind="noise_floor",
+                    kind=MeasurementRole.NOISE_FLOOR,
                     arm=arm,
                     sp_hash=sp_hash,
                     cells=cells,
@@ -616,7 +594,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Ver
                 state=ReadingState.READ,
                 refusal=None,
             )
-            ledger.append(PhaseRecord(phase=CampaignPhase.VERIFY, event="graded", view=graded))
+            _graded(ledger, graded)
         return graded
 
 
@@ -647,9 +625,7 @@ async def grade_line_bench(*, stores: Stores, hop: CycleHop, acting: str) -> Ben
 async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
     standing = stores.campaigns.standing_rounds(hop, moment=None).rounds
     rounds = [standing[n].close for n in sorted(standing)]
-    async with open_diagnostic(
-        stores, hop, source=RunSource.OPTIMIZATION_LOOP, acting=acting
-    ) as opened:
+    async with open_diagnostic(stores, hop, acting=acting) as opened:
         session, config = opened.session, opened.config
         origin_sp = opened.points.measured(rounds[0].origin)
         clock = LaunchClock.now()

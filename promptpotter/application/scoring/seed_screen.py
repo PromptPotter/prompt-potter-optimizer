@@ -13,17 +13,15 @@ from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.initialization.scoring_scope import (
     arm_diagnostic_scoring,
-    diagnostic_pass,
-    diagnostic_trace,
+    replicates,
+    verb_ledger,
 )
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
-from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.scoring import (
     all_verifier_graded,
@@ -271,7 +269,7 @@ async def _screen(
             )
         campaign_config = campaign_config.model_copy(update={"pipeline_overlay": po})
     session = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
-    with arm_diagnostic_scoring(session, campaign_config, source=RunSource.SEED_SCREEN):
+    with arm_diagnostic_scoring(session, campaign_config):
         pipeline_params = session.pipeline_params
         # `run_walks` re-reads this at every launch boundary and clamps it to the backend's ceiling.
         session.state.control = replace(session.state.control, held_lookahead=parallel)
@@ -312,21 +310,10 @@ async def _screen(
             all_rows: list[GradedCell] = []
             cost_usd: float | None = None
             n_scored = 0
-            for i in range(max(1, repeat)):
-                # A screen answers for no campaign, so its bills land on the workspace's ledger.
-                with diagnostic_trace(stores, None):
-                    passed = await diagnostic_pass(
-                        score_search_point(
-                            origin_sp,
-                            bank,
-                            session,
-                            # Distinct per pass: `force_fresh` truncates its run's detail log first.
-                            label=f"seed{seed}_origin_{i}",
-                            measured=None,
-                            # A replay off the content-addressed archive would fabricate a zero spread.
-                            force_fresh=repeat > 1,
-                        ),
-                    )
+            # A screen answers for no campaign, so its bills land on the workspace's ledger.
+            with verb_ledger(stores, None):
+                passes = await replicates(origin_sp, bank, session, max(1, repeat))
+            for i, passed in enumerate(passes):
                 rows = passed.sheet.cells
                 scored = [cell.hit for cell in rows]
                 if not scored:

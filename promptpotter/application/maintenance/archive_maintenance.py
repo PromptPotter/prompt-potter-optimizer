@@ -178,13 +178,8 @@ def _age_band(created_at: str, *, now: datetime) -> str:
     return next(band for band, upper in _AGE_BANDS if age_days < upper)
 
 
-def _role_family(role: str) -> str:
-    head, _, tail = role.rpartition("_")
-    return head if head and tail.isdigit() else role
-
-
 class InventoryRow(StrictModel):
-    """One cut of the archive — a dataset, a role family, or an age band."""
+    """One cut of the archive — a dataset, a pass role, or an age band."""
 
     key: str
     configurations: int
@@ -279,7 +274,7 @@ def inventory_measurement_archive(
             cold = cold_each if _moved(answer) else 0.0
             for table, key in (
                 (by_dataset, " · ".join(named.get(answer.dataset_hash, [answer.dataset_hash]))),
-                (by_role, _role_family(answer.role)),
+                (by_role, answer.role.value),
                 (by_age, _age_band(answer.created_at, now=now)),
             ):
                 table.setdefault(key, _Tally()).add(configuration=configuration, hot=hot, cold=cold)
@@ -394,7 +389,7 @@ def _compacted(
             out.append(line)
             continue
         if answer.role != _ELIGIBLE_ROLE:
-            skipped[answer.role] = skipped.get(answer.role, 0) + 1
+            skipped[answer.role.value] = skipped.get(answer.role.value, 0) + 1
             out.append(line)
             continue
 
