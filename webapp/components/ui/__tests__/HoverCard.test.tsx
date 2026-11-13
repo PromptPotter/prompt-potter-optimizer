@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HoverCard } from "../HoverCard";
+import { Menu, MenuItem } from "../Menu";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -70,6 +71,19 @@ describe("HoverCard", () => {
     fireEvent.pointerDown(row, { pointerType: "touch" });
     fireEvent.focus(row);
     fireEvent.pointerUp(row, { pointerType: "touch" });
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("leaves a tap in a menu the trigger opened to that menu", () => {
+    render(
+      <HoverCard content={<span>meta</span>}>
+        <Menu renderTrigger={({ toggle }) => <button type="button" onClick={toggle}>⋯</button>}>
+          {() => <MenuItem onClick={() => undefined}>Rename</MenuItem>}
+        </Menu>
+      </HoverCard>,
+    );
+    fireEvent.click(screen.getByText("⋯"));
+    fireEvent.pointerUp(screen.getByText("Rename"), { pointerType: "touch" });
     expect(screen.queryByRole("note")).toBeNull();
   });
 

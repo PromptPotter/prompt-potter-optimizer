@@ -73,10 +73,7 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
           <button
             type="button"
             className="campaign-menu-trigger"
-            onClick={(e) => {
-              e.stopPropagation();
-              toggle();
-            }}
+            onClick={toggle}
             aria-haspopup="menu"
             aria-expanded={open}
             aria-label="Campaign actions"

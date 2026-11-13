@@ -97,4 +97,22 @@ describe("DataTable", () => {
     fireEvent.click(rows[0]!);
     expect(onRowClick).toHaveBeenCalledWith({ id: "a", v: 1 });
   });
+
+  it("leaves a press on a control in a row to that control", () => {
+    const onRowClick = vi.fn();
+    const onCopy = vi.fn();
+    const cols: readonly Column<Row>[] = [
+      ...COLS,
+      { id: "c", label: "", width: "40px", cell: () => <button type="button" onClick={onCopy}>copy</button> },
+    ];
+    render(
+      <DataTable ariaLabel="t" columns={cols} rows={[{ id: "a", v: 1 }]} getRowId={rowId} onRowClick={onRowClick} />,
+    );
+    fireEvent.click(screen.getByText("copy"));
+    fireEvent.keyDown(screen.getByText("copy"), { key: "Enter" });
+    expect(onCopy).toHaveBeenCalledOnce();
+    expect(onRowClick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("1"));
+    expect(onRowClick).toHaveBeenCalledWith({ id: "a", v: 1 });
+  });
 });

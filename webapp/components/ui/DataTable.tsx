@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cx } from "@/lib/cx";
+import { ownPress } from "./press";
 import s from "./DataTable.module.css";
 
 export interface Column<T> {
@@ -152,11 +153,16 @@ export function DataTable<T>({
                   style={{ ...pos, ...template }}
                   tabIndex={onRowClick ? 0 : undefined}
                   aria-current={id === activeRowId || undefined}
-                  onClick={onRowClick ? () => onRowClick(item.row) : undefined}
+                  onClick={
+                    onRowClick
+                      ? (e) => ownPress(e.currentTarget, e.target) && onRowClick(item.row)
+                      : undefined
+                  }
                   onKeyDown={
                     onRowClick
                       ? (e) => {
                           if (e.key !== "Enter" && e.key !== " ") return;
+                          if (!ownPress(e.currentTarget, e.target)) return;
                           e.preventDefault();
                           onRowClick(item.row);
                         }

@@ -14,10 +14,11 @@ const account = (page: import("@playwright/test").Page) =>
   page.getByRole("region", { name: "Account" });
 
 // The nav's own: a tab body may link another tab by its label. A phone folds the tabs behind ⋯
-// (`ToolbarFold`, at `--bp-sm`).
+// (`ToolbarFold`, at `--bp-sm`), which a pick shuts in its own event: read at once, never waited.
 async function navButton(page: import("@playwright/test").Page, label: string) {
-  const folded = page.getByRole("group", { name: "Account tabs" });
-  if (page.viewportSize()!.width <= 640 && !(await folded.isVisible())) {
+  if (page.viewportSize()!.width <= 640) {
+    const folded = page.getByRole("group", { name: "Account tabs" });
+    expect(await folded.isVisible(), "the tab fold stood open past a pick").toBe(false);
     await account(page).getByRole("button", { name: "Account tabs" }).click();
   }
   return page

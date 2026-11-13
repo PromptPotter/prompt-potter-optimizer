@@ -38,12 +38,7 @@ export function MenuItem({
       role="menuitem"
       className={s.item}
       disabled={disabled}
-      // A menu opened inside a `<summary>` or clickable row must not fire that frame.
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onClick();
-      }}
+      onClick={onClick}
     >
       <span className={s.check} aria-hidden="true" />
       <span className={s.label}>{children}</span>

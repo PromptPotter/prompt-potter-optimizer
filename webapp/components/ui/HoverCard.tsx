@@ -4,20 +4,13 @@ import { createPortal } from "react-dom";
 import { HOVER_CLOSE_GRACE_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
 import { EDGE, room, vertical } from "./overlay";
+import { ownPress } from "./press";
 import s from "./HoverCard.module.css";
 
 const GAP = 8;
 // Narrower than this beside its trigger on both sides (a phone), the card spans the viewport under
 // or over the trigger instead.
 const BESIDE_MIN = 240;
-
-const CONTROL = "button, a[href], input, select, textarea, summary, [tabindex]";
-
-// A tap on a live control inside the trigger is that control's; a disabled one taps through to the card.
-const ownControl = (wrap: HTMLElement | null, t: EventTarget) => {
-  const c = t instanceof Element ? t.closest(CONTROL) : null;
-  return !!c && c !== wrap && !!wrap?.contains(c) && !c.matches(":disabled");
-};
 
 // Trigger geometry only — nothing measures the card, so late-arriving content can't strand it.
 const anchor = (r: DOMRect): CSSProperties => {
@@ -123,7 +116,7 @@ export function HoverCard({
       }}
       onPointerUp={(e) => {
         pressed.current = false;
-        if (e.pointerType !== "mouse" && !ownControl(ref.current, e.target)) show();
+        if (e.pointerType !== "mouse" && ownPress(e.currentTarget, e.target)) show();
       }}
       onFocus={() => {
         if (!pressed.current) show();

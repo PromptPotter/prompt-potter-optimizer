@@ -1,4 +1,4 @@
-import { startTransition, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import { Chip } from "./Chip";
 import { IconMore } from "./icons";
@@ -59,9 +59,10 @@ export function ToolbarFold({
           )}
         >
           {({ close }) => (
-            // Seen on the way down, past a nested menu's stopPropagation; a transition, so the pick's own
-            // click lands before the panel unmounts.
-            <div onClickCapture={(e) => picks(e.target) && startTransition(close)}>
+            // On the way up, once the pick's own handler ran, and in the same event: a close on the way
+            // down unmounts the pick before it fires, and a deferred one leaves the fold up over it. It
+            // hears its buttons' clicks, which a key press on one fires too, and is no control itself.
+            <div role="presentation" onClick={(e) => picks(e.target) && close()}>
               <div className={s.folded} role="group" aria-label={label}>
                 {actions}
               </div>

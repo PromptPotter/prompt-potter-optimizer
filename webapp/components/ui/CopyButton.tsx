@@ -1,4 +1,4 @@
-import { useState, type MouseEvent, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { failureKind, operatorMessage } from "@/lib/api";
 import { COPIED_FLASH_MS, COPY_FAILURE_NOTICE_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
@@ -26,11 +26,6 @@ export function CopyButton({ data, title = "Copy as JSON", choices, children, di
   const [copied, setCopied] = useState(false);
   // The sentence a failed copy leaves on the control until it lapses; null while none stands.
   const [failure, setFailure] = useState<string | null>(null);
-  // Hosts frame this in something clickable (a `<summary>`, a row); one click must not also fire the frame.
-  const swallow = (e: MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
   const fail = (message: string) => {
     setFailure(message);
     window.setTimeout(() => setFailure(null), COPY_FAILURE_NOTICE_MS);
@@ -86,10 +81,7 @@ export function CopyButton({ data, title = "Copy as JSON", choices, children, di
         variant="ghost"
         className={cx(s.copy, !!children && s.text, stateClass)}
         disabled={disabled}
-        onClick={(e) => {
-          swallow(e);
-          void copy(only ? only.data : data);
-        }}
+        onClick={() => void copy(only ? only.data : data)}
         aria-label={copied ? "Copied" : name}
         title={name}
         role={failure ? "alert" : undefined}
@@ -107,10 +99,7 @@ export function CopyButton({ data, title = "Copy as JSON", choices, children, di
           variant="ghost"
           className={cx(s.copy, !!children && s.text, stateClass)}
           disabled={disabled}
-          onClick={(e) => {
-            swallow(e);
-            toggle();
-          }}
+          onClick={toggle}
           aria-haspopup="menu"
           aria-expanded={open}
           aria-label={copied ? "Copied" : (failure ?? title)}
