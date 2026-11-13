@@ -63,7 +63,7 @@ def _scripted_lm(sends: list[int], script: list[Exception]) -> Any:
                 model="gpt-x",
                 message=lm15.Message.assistant([said]),
                 finish_reason="stop",
-                usage=lm15.Usage(input_tokens=11, output_tokens=3),
+                usage=lm15.Usage(input_tokens=11, output_tokens=3, reasoning_tokens=2),
             )
 
     return dspy.LM("openai/gpt-x", engine=_Engine(), cache=False)
@@ -172,7 +172,10 @@ def test_a_resent_dspy_call_spends_one_of_its_programs_max_calls(
     data = _dspy_cell(program, 2, tmp_path / "resent.jsonl")
     assert data[dspy_module.SCORE_KEY] == 1.0, "a 5xx spent the call its resend answered"
     assert len(sends) == 3, f"{len(sends)} sends: two calls, one resent once"
-    assert len(_lm_bills(tmp_path / "resent.jsonl")) == 2, "an answered call left no bill"
+    bills = _lm_bills(tmp_path / "resent.jsonl")
+    assert [bill.reasoning_tokens for bill in bills] == [2, 2], (
+        "an answered call's bill dropped its reasoning tokens, or the call left no bill"
+    )
 
 
 def test_an_llm_judge_metrics_send_is_the_cells_billed_beside_the_programs(

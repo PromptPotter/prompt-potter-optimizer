@@ -261,7 +261,7 @@ export function health(
   grade: RoundHealth["grade"],
   reading: RoundHealth["reading"] = null,
 ): RoundHealth {
-  return { grade, reading };
+  return { grade, reading, floor: null };
 }
 
 export function armReading(
@@ -279,6 +279,7 @@ export function armReading(
     state: "measuring",
     end: null,
     walked_short: false,
+    refused_parameter: null,
     own: null,
     tokens: null,
     prefix: null,

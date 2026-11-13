@@ -118,6 +118,7 @@ class BlockRace[K: Hashable](Protocol):
 
 _ABORTS_AT_ONCE: dict[ErrorCategory, WalkEnd] = {
     ErrorCategory.CLIENT: WalkEnd.CLIENT_ERROR,
+    ErrorCategory.PARAMETER_REFUSED: WalkEnd.PARAMETER_REFUSED,
     ErrorCategory.PIPELINE: WalkEnd.PIPELINE_ERROR,
 }
 

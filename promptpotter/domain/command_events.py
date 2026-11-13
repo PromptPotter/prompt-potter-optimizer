@@ -62,6 +62,8 @@ class CommandRecord(FrozenModel):
     act_digest: str
     issued_by: Principal
     subject: str
+    # The producer that files and acts it: gone with no end, the act died with it (`producer_alive`).
+    filer: str
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

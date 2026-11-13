@@ -4,6 +4,7 @@ from typing import Literal, NamedTuple, get_args
 
 from pydantic import Field
 
+from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.worded import Worded
@@ -108,6 +109,20 @@ class HealthReading(FrozenModel):
     advice: str = Field(description="What the counts say, then the cause's remedy.")
 
 
+class ConstantFloor(FrozenModel):
+    """The origin read PAIRED against answering one label to every cell, on the cells both scored."""
+
+    label: str = Field(description="The label the constant answer gives: the most common truth.")
+    floor: float = Field(description="What the constant answer scores: the share of truths it is.")
+    lift: BandedValue = Field(
+        description="The origin's mean per-cell fitness minus the floor's score on that cell."
+    )
+
+    @property
+    def rewards_collapse(self) -> bool:
+        return self.lift.value < 0.0
+
+
 class DegradationHealth(FrozenModel):
     """A round's degradation verdict from the backend's warning stamps; it never stops the run.
 
@@ -131,6 +146,8 @@ class DegradationHealth(FrozenModel):
     output_ceiling_count: int
     # ``None`` where the answer space makes collapse meaningless. REPORTED, never graded.
     answer_modal_share: float | None = None
+    # The origin round's alone; ``None`` on every other and where collapse is no question.
+    constant_floor: ConstantFloor | None = None
     degraded_rate: float
     consecutive_degraded_rounds: int
     prior_clean_rounds: int

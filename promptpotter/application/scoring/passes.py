@@ -1,4 +1,4 @@
-"""Held-out passes: verify, the noise floor and the line bench, each filed on its cycle's ledger."""
+"""Held-out passes: verify, round 0's noise floor and the line bench, each filed on its cycle's ledger."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from promptpotter.application.bench.difficulty import (
 from promptpotter.application.initialization.scoring_scope import (
     diagnostic_pass,
     open_diagnostic,
-    replicates,
     verb_ledger,
 )
 from promptpotter.application.initialization.session import LaunchClock
@@ -59,7 +58,6 @@ from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import (
     NoiseBand,
-    RescoreCount,
     VerificationPass,
     VerifyHeldAbsent,
     VerifyReading,
@@ -80,10 +78,12 @@ from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.statistics import mean_ci
 
 if TYPE_CHECKING:
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.bench import BenchScore
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, Scorer, WalkedCell
+    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.verification import BenchPasses
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -478,124 +478,85 @@ async def verify_on_saturation(
 
 
 async def measure_noise_floor(
-    *,
-    stores: Stores,
-    hop: CycleHop,
-    k: RescoreCount,
+    session: Session, origin_sp: JobSearchPoint, k: int
 ) -> VerificationGradedView:
-    """The band is a pass on the cycle's ledger, graded as it banks."""
-    async with paid_pass(
-        stores=stores,
-        verb="noise-floor",
-        hop=hop,
-        declared=Budget(),
-        sends=campaign_sends(stores, hop),
-    ):
-        return await _rescore_origin(stores, hop, k)
-
-
-async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> VerificationGradedView:
-    standing = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(0)
-    if standing is None:
-        raise DiagnosticError(
-            f"round 0 never closed in {hop.campaign_id}/{hop.cycle_id} — the origin was never scored."
-        )
-    round_file = standing.close
-    if round_file.election is None:
-        raise DiagnosticError(f"round 0 of {hop.campaign_id}/{hop.cycle_id} carries no origin arm.")
+    """Round 0's origin re-scored *k* times fresh on the rows it recorded, one pass on the run's
+    ledger; a band it cannot read banks its refusal on the pass, never stopping the run."""
+    stores = session.store
+    round_file = stores.campaigns.standing_rounds(session.hop, moment=None).rounds[0].close
+    assert round_file.election is not None, "round 0 elects the origin it adopted"
     origin = round_file.origin
     recorded_cells = round_file.cells.arms[round_file.election.ended_on]
-    if not recorded_cells:
-        raise DiagnosticError(
-            f"origin arm in {hop.campaign_id}/{hop.cycle_id} round 0 carries no scored samples."
-        )
     sample_keys = {key for key, _, _ in recorded_cells}
-
-    async with open_diagnostic(stores, hop) as opened:
-        session = opened.session
-        jsp = opened.points.measured(origin)
-        scoring_set = [s for s in session.bank.samples if s.key in sample_keys]
-        if not scoring_set:
-            raise DiagnosticError(
-                f"none of round 0's {len(sample_keys)} scored sample(s) is in the bank the cycle drew."
+    scoring_set = [s for s in session.bank.samples if s.key in sample_keys]
+    scorer = session.state.scoring.scorer
+    kept = {s.key for s in scoring_set}
+    # Re-folded on exactly the rows the band re-scores, never round 0's whole fold (bl3.B2).
+    recorded = own_level(
+        walked_rows(stores, [c for c in recorded_cells if c[0] in kept], scorer).standing(),
+        scorer.fitness_unit,
+    )
+    arm = ArmName(key=ArmKey(origin.individual.id), round=0, label=origin.label)
+    sp_hash = origin_sp.sp_hash(session.pipeline_schema)
+    cells: list[WalkedCell] = []
+    composites: list[float] = []
+    fitnesses: list[float] = []
+    enter = VerificationEnterView(
+        verification=MeasurementRole.NOISE_FLOOR,
+        subject=None,
+        arm=arm,
+        sp_hash=sp_hash,
+        rows=k * len(scoring_set),
+        strategy=None,
+    )
+    with _bracketed(enter) as ledger:
+        for _ in range(k):
+            scored = await score_search_point(
+                origin_sp, scoring_set, session, kind=MeasurementRole.NOISE_FLOOR, measured=arm.key
             )
-        scorer = session.state.scoring.scorer
-        kept = {s.key for s in scoring_set}
-        # Re-folded on exactly the rows the band re-scores, never round 0's whole fold (bl3.B2).
-        recorded = own_level(
-            walked_rows(stores, [c for c in recorded_cells if c[0] in kept], scorer).standing(),
-            scorer.fitness_unit,
-        )
-        if recorded.composite is None:
-            raise DiagnosticError(
-                f"round 0 of {hop.campaign_id}/{hop.cycle_id} read no cell on the band's rows, so "
-                "there is no recorded composite for the band to stand beside."
-            )
-
-        arm = ArmName(key=ArmKey(origin.individual.id), round=0, label=origin.label)
-        sp_hash = jsp.sp_hash(session.pipeline_schema)
-        logger.info(
-            "noise-floor %s/%s: re-scoring origin C0 %dx fresh on %d samples",
-            hop.campaign_id,
-            hop.cycle_id,
-            k,
-            len(scoring_set),
-        )
-        cells: list[WalkedCell] = []
-        composites: list[float] = []
-        fitnesses: list[float] = []
-        enter = VerificationEnterView(
-            verification=MeasurementRole.NOISE_FLOOR,
-            subject=None,
-            arm=arm,
-            sp_hash=sp_hash,
-            rows=k * len(scoring_set),
-            strategy=None,
-        )
-        with verb_ledger(stores, hop), _bracketed(enter) as ledger:
-            for i, scored in enumerate(await replicates(jsp, scoring_set, session, k)):
-                fitness, composite = scored.scores.fitness, scored.scores.composite_fitness
-                if fitness is None or composite is None:
-                    raise DiagnosticError(
-                        f"noise-floor rescore {i + 1}/{k} of {hop.campaign_id}/{hop.cycle_id} "
-                        "measured no cell — the band would describe the outage, not the backend."
-                    )
-                cells += scored.cells
+            cells += scored.cells
+            fitness, composite = scored.scores.fitness, scored.scores.composite_fitness
+            if scored.stopped is None and fitness is not None and composite is not None:
                 composites.append(composite)
                 fitnesses.append(fitness)
-                logger.info("noise-floor rescore %d/%d: composite=%.4f", i + 1, k, composite)
-
-            band = mean_ci(composites)
-            assert band is not None  # a RescoreCount is two or more
-            mean_composite, ci_lo, ci_hi = band
-            graded = VerificationGradedView(
-                verification=VerificationPass(
-                    kind=MeasurementRole.NOISE_FLOOR,
-                    arm=arm,
-                    sp_hash=sp_hash,
-                    cells=cells,
-                    sample_keys=[s.key for s in scoring_set],
-                    stop=None,
-                    scorer_id=scorer.id,
-                    strategy=None,
-                    seed=None,
-                    reads_before=None,
-                ),
-                subject=None,
-                tolerance=None,
-                reserve_usd=None,
-                reserve_tokens=None,
-                reading=NoiseBand(
-                    raw=composites,
-                    band=BandedValue(value=mean_composite, ci_lo=ci_lo, ci_hi=ci_hi),
-                    fresh_fitness=sum(fitnesses) / len(fitnesses),
-                    recorded=recorded,
-                ),
-                state=ReadingState.READ,
-                refusal=None,
+        band = mean_ci(composites) if len(composites) == k else None
+        unread = band is None or recorded.composite is None
+        graded = VerificationGradedView(
+            verification=VerificationPass(
+                kind=MeasurementRole.NOISE_FLOOR,
+                arm=arm,
+                sp_hash=sp_hash,
+                cells=cells,
+                sample_keys=[s.key for s in scoring_set],
+                stop=None,
+                scorer_id=scorer.id,
+                strategy=None,
+                seed=None,
+                reads_before=None,
+            ),
+            subject=None,
+            tolerance=None,
+            reserve_usd=None,
+            reserve_tokens=None,
+            reading=None
+            if band is None or recorded.composite is None
+            else NoiseBand(
+                raw=composites,
+                band=BandedValue(value=band[0], ci_lo=band[1], ci_hi=band[2]),
+                fresh_fitness=sum(fitnesses) / len(fitnesses),
+                recorded=recorded,
+            ),
+            state=ReadingState.MEMBER_UNSCOREABLE if unread else ReadingState.READ,
+            refusal=(
+                f"{len(composites)} of {k} replicates and "
+                f"{'no' if recorded.composite is None else 'a'} recorded composite read on its "
+                "rows: a band would describe the outage, not the backend."
             )
-            _graded(ledger, graded)
-        return graded
+            if unread
+            else None,
+        )
+        _graded(ledger, graded)
+    return graded
 
 
 class BenchTriggerError(ConflictError):
@@ -606,7 +567,7 @@ async def grade_line_bench(*, stores: Stores, hop: CycleHop, acting: str) -> Ben
     """Admitted exactly where the served status says so (``BenchStatus.can_run``)."""
     async with paid_pass(
         stores=stores,
-        verb="bench",
+        pass_kind=MeasurementRole.BENCH,
         hop=hop,
         declared=Budget(),
         sends=campaign_sends(stores, hop),

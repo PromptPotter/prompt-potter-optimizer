@@ -157,7 +157,7 @@ row it closes.
 - **The held-out verb has three names**: `verify`, `bench`, `grade-bench` and "Grade on bench"; `bench`
   also collides with `application/bench/`. It is spelled in `domain/command_kinds.py` (`grade-bench`,
   `measuring:grade_bench`, `anyone("bench")`), `cli/commands/bench.py`, `webapp/lib/api/commands.ts`,
-  `domain/job.py::ScoringVerb`, `domain/campaign_config.py:421`,
+  `domain/campaign_config.py:421`,
   `infrastructure/projections/live_dashboard/projection.py:255`, `domain/bench.py:359` (`can_run`'s
   description) and `webapp/components/shell/searchpoint/BenchGradeAction.tsx:29` ("Grade on bench"). Action: "held-out" at
   all five doors, at once. **Rides with:** passb-2 2, whose Owns gain those files. **Re-test:**
@@ -167,10 +167,9 @@ row it closes.
   `RunArtifacts` drain re-renders the export off the ledger's newest bench reading
   (`ledger_scan.py::scan_closed_bench`), so `write_export` has one caller. **Rides with:** passb-2 2.
   **Re-test:** `git grep -c "restate_export_bench" -- promptpotter` is 0.
-- **A stopped paid pass exits 1 at the CLI, a noise-floor stop 130**:
-  `presentation/cli/campaign_runner.py::main` maps `PassStoppedError` to exit 1, while
-  `cli/commands/noise_floor.py::cmd_noise_floor` catches it itself. Action: `campaign_runner.py` answers
-  it with the paused exit code; noise-floor's catch goes. **Rides with:** passb-2 3. **Re-test:**
+- **A stopped paid pass exits 1 at the CLI**:
+  `presentation/cli/campaign_runner.py::main` maps `PassStoppedError` to exit 1. Action: `campaign_runner.py`
+  answers it with the paused exit code. **Rides with:** passb-2 3. **Re-test:**
   `git grep -lE "except PassStoppedError" -- promptpotter/presentation` names `campaign_runner.py` alone.
 - **`line_run` reads a paused pass as selecting**: a pass with a pause asked reads `PAUSED`
   (`infrastructure/run_state.py:82`), so `runner/bench.py::line_run` takes its hold for the loop's.
@@ -671,58 +670,28 @@ client. Left:
   opener that owns its lifetime. **Rides with:** life-2. **Re-test:** after those three suites, a probe
   on `BackendClient` reads no open client.
 
-### passes (links 1-2 landed at 47; link 3 beside holders, link 4 after it)
+### passes-5 (what passes 3-4 left at landing 52)
 
-- **A pass is still named by its job's verb** (landing 47 left it): `domain/pass_kinds.py::PASSES` is the
-  one row per kind, but `ScoringVerb` still names the pass a scoring job runs, and the seed screen keeps
-  its own opener beside `scoring_scope.py`'s. Action: `ScoringVerb` is retyped off the pass kind with the
-  verbs' deletion (one job migration: job files are SURVIVOR), and the seed screen's opener goes with its
-  verb. **Rides with:** passes 3. **Re-test:** `git grep -c "class ScoringVerb" -- promptpotter` is 0.
-- **A cell spawned outside any pass reads PANEL** (passes' census): `MeasuredPass.role` defaults to
-  PANEL, so `runner/inner/spawn.py:165` names a cell no pass measured as a panel cell. Root: a default
-  standing in for absence; the spawn names its pass or none. **Rides with:** passes 3.
-- **Diagnostics are verbs where they should be settings**: `noise-floor`, `seed-screen` and
-  `probe-reasoning` are each a verb, and each prints or files where the dashboard should read
-  (`seed-screen` a dated JSON under `DIAGNOSTICS_DIR`, the noise floor a pass nothing in `webapp/`
-  serves, `probe-reasoning` a `capabilities.py` row). Action (operator, 2026-11-12: no explicit verbs,
-  one door with different settings): one campaign started from a LIST (`arm_gate` review or author,
-  `submit-arms`), set by its arms (any knob, `reasoning_effort` included) and the `Pass` row's
-  `replicates` and `fresh` (the answers or the bank draw; a content-identical arm replays from the
-  archive, §0008), its readings on the served dashboard. The noise floor is its origin at k fresh
-  replicates. The seed screen and probe-reasoning go outright (orchestrator): a bank-draw spread is the
-  same replicates with the bank draw fresh, and the seed screen's verdict (the constant-answer floor
-  over the origin) is the row "A ± that measures nothing", served on every origin round in this same
-  link. A `registry._MODEL_PROFILES` row is earned by a round
-  whose arms differ in `reasoning_effort`: a rung the endpoint refuses is served as a REFUSAL on its
-  arm, never a generic errored cell, and each call's usage carries its reasoning tokens;
-  `docs/operations/datasets.md`'s "earned with `probe-reasoning`" line moves to that door. The noise
-  floor today appends a VERIFY `PhaseRecord` (`scoring/passes.py::_rescore_origin`) with no command
-  filed, so `presentation/CLAUDE.md`'s two rules on it (:9, :13) contradict; the campaign door files one,
-  and the contradiction goes with the verb. Price (one
-  budget): the probe was one call per rung on no dataset; the round is cells × rungs, cents on the
-  flash models, and buys a score per rung. The three verbs, `DIAGNOSTICS_DIR` and `probe_reasoning.py`
-  go; `ab` stays (it replays a code tree over recorded rounds, a developer's check, not a measurement of
-  a prompt). **Rides with:** passes 3. **Re-test:** `git ls-files promptpotter/presentation/cli/commands`
-  names no `noise_floor`, `seed_screen` or `probe_reasoning`; an origin round serves the paired
-  constant-answer floor; a refused rung reads REFUSED on its arm.
-- **`--diag` skips round 0's door** (✓): `runner/loop.py:188` skips the lost-cell rewalk, the origin gate
-  and `emit_origin_round` when diagnosing; reported, diag with a controller-less optimizer refuses only
-  after the mint (`entry.py:476`). Action: the `diagnosing or` goes with the diagnostic verbs (passes 3),
-  and a controller-less optimizer is refused at the payload. **Rides with:** passes 3.
-- **An idempotent retry is acted twice** (✓, model-checked): `store/command_log.py:341`'s `keyed()`
-  matches only accepted or applied events and `file()` (`:392`) refuses only a reused `command_id`, so a
-  same-key retry during the first act is filed and acted again (a second draft from ingest-upload, a 409
-  on a launch retry). Reported: a pause filed while run R0 releases is applied by the NEXT run, though it
-  predates that run's `held_since`, or reads "working: accepted" forever. Action (both verified in the
-  model): lookup, file and act serialize per (subject, key), a filing with no end whose filer is dead
-  folding as cancelled, and each loop filing stamped with the hold it was admitted against. The same
-  filing record serves the dead filer: a killed verify reads `working` to every door and its task's
-  result polls forever, because a command whose filer died stays `filed`; the filing names its filer
-  (a field on `domain/command_events.py::CommandRecord`), judged by holders' one death rule (the
-  producer token), and a dead filer's command reads ended. A build on `claimant_lock` (`a4c5f7948` on
-  `arc/passes`, unlanded) was held back because holders deletes that lock: it is re-cut on holders' rule.
-  **Rides with:** passes 4, after holders; its Owns gain `domain/command_events.py` (passb-2 3's stopped
-  pass rides this row). **Re-test:** kill a verify mid-pass; its command reads ended.
+passes 3-4 landed one list campaign for the diagnostics, the origin's constant floor, a refused
+parameter's `Cut(Refused)`, and a retry acting once on holders' death rule. Left:
+
+- **A pause filed as a run releases reaches the next run** (✓, model-checked): a pause filed while run
+  R0 releases is applied by the NEXT run, though it predates that run's `held_since`, or reads "working:
+  accepted" forever. Action (verified in the model): each loop filing stamped with the hold it was
+  admitted against. **Rides with:** passes-5.
+- **The noise floor's band reads ±0 at temperature 0**: `scoring/passes.py`'s noise floor takes
+  `mean_ci` over `k` replicate composites, which a temperature-0 solver answers identically, so the
+  band serves ±0 and measures nothing about the noise. Root: the replicates differ by what the floor is
+  meant to measure (the panel's draw), or the pass refuses at temperature 0. **Rides with:** passes-5.
+- **`origin_replicates` has no in-run test**: the knob is priced and served, but no test runs a round 0
+  with replicates and reads its cells. **Rides with:** passes-5.
+- **A send's error category is decided twice**: `spend_book.py::_status_failure` classifies at the
+  send's close, and `failed_send` classifies again where a cell is built
+  (`sample_measurement.py:575,703`, `dspy_module.py:208`, `harbor.py:1224`). Root: the cell reads the
+  send's own outcome. **Rides with:** passes-5.
+- **Harbor's bill reads no reasoning tokens**: DSPy's bill reads
+  `completion_tokens_details.reasoning_tokens` (landing 52), and Harbor's does not. Root: one usage reader for
+  every connector's bill. **Rides with:** passes-5.
 
 ### cfg-2 (what cfg left at landing 50; the re-key window)
 
@@ -1964,17 +1933,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   a sandbox (`jobs/mint.py::mint`, `tenant_datasets.relabel`); benign only while `dataset_hash` covers
   the whole dataset. Action: a sandboxed mint writes no account label. **Held:** none claims it.
   **Re-test:** an inner mint leaves the account's label file untouched.
-- **A ± that measures nothing**: a replicate pass's ± (today `seed-screen`'s `margin_se`) reads 0.000
-  over identical temperature-0 passes, which carry no row-sampling variance, and the panel quotes it as
-  a precision. Action: the
-  floor is an arm whose per-cell score is known for free (truth equals the majority), so the origin is
-  read PAIRED against it, a served reading on EVERY campaign's origin round: a bank whose
-  constant-answer floor exceeds the origin pays a candidate for collapsing to one label, which is the
-  seed screen's verdict (`seed_screen.py`'s `rewards_collapse`) and dataset election's disqualifier.
-  The floor has one owner (`potter/dispatch/injections/panels.py::_constant_answer` reads it).
-  **Rides with:** passes 3, which deletes the seed screen (today's paired reading serves it; readings
-  folds it later). **Re-test:** an origin round's served readings carry the paired floor and its
-  collapse verdict.
 - **The outer prompt ranks on θ, not the scored term**: Shape: `potter/dispatch/injections/panels.py`'s
   "weakest first" and "worse than the origin beyond their own error bar" read `mean_round_delta`, which
   is in-sample and scores nothing, because `held_out_lift` carries no SE. Action: serve the held-out

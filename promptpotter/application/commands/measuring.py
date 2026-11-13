@@ -9,6 +9,7 @@ from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.phase_views import VerificationGradedView
 from promptpotter.domain.run_records import VerifySaturated
 from promptpotter.domain.spend import Budget
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import DispatchedToCycle
@@ -29,7 +30,7 @@ async def verify_candidate(
         # Taken HERE, not inside `verify_candidate`: the loop's saturation check calls that under its book.
         async with paid_pass(
             stores=stores,
-            verb="verify",
+            pass_kind=MeasurementRole.VERIFY,
             hop=hop,
             declared=Budget(),
             sends=campaign_sends(stores, hop),

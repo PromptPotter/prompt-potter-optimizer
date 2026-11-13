@@ -263,6 +263,8 @@ class MeasuredCell:
     # A plain human message (no ``[TAG]`` prefix); the CATEGORY owns "this cell errored".
     error: str | None = field(default=None, metadata=ALWAYS)
     error_category: ErrorCategory | None = field(default=None, metadata=BY_HAND)
+    # Said with ``PARAMETER_REFUSED`` alone, as the send's outcome named it.
+    refused_parameter: str | None = None
     pipeline: PipelineData = field(
         default_factory=PipelineData, metadata=always_as("pipeline_data")
     )
@@ -357,6 +359,7 @@ _SAYS_EVERYTHING = MeasuredCell(
     predicted="p",
     error="e",
     error_category=ErrorCategory.SERVER,
+    refused_parameter="reasoning_effort",
     cached=True,
     answer="f.a",
     stale_outcome=StaleOutcome.RETRIED,
@@ -893,6 +896,22 @@ def enumerable_truth_labels(cells: Sequence[GradedCell]) -> Counter[str] | None:
     if not truth or len(truth) > ANSWER_SPACE_CAP or len(truth) == len(cells):
         return None
     return truth
+
+
+class ConstantAnswer(NamedTuple):
+    """The floor: one label answered to every cell, scoring a cell exactly where its truth is that label."""
+
+    label: str
+    share: float
+
+    def score(self, cell: GradedCell) -> float:
+        return 1.0 if cell.facts.ground_truth == self.label else 0.0
+
+
+@shapes_optimizer_prompt
+def constant_answer(truth: Counter[str]) -> ConstantAnswer:
+    label, n = truth.most_common(1)[0]
+    return ConstantAnswer(label, n / sum(truth.values()))
 
 
 @shapes_optimizer_prompt

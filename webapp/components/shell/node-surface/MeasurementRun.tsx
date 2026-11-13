@@ -142,7 +142,10 @@ export function MeasurementRun({
                   )}
                   {early && (
                     <Badge tone={ARM_END_INFO[early].tone}>
-                      <Term content={ARM_END_INFO[early].sentence}>{ARM_END_INFO[early].label}</Term>
+                      <Term content={ARM_END_INFO[early].sentence}>
+                        {ARM_END_INFO[early].label}
+                        {reading.refused_parameter ? ` ${reading.refused_parameter}` : null}
+                      </Term>
                     </Badge>
                   )}
                   {cached != null && cached > 0 && (

@@ -30,10 +30,23 @@ export function TimelinePane() {
       <div className="box-full">
         <TimeRay />
       </div>
+      <OriginFloor />
       <DegradedRounds />
     </>
   );
 }
+
+// The origin read paired against answering one label to every cell; absent where labels never repeat.
+const OriginFloor = memo(function OriginFloor() {
+  const { dash } = useViewedDashboard();
+  const floor = dash?.rounds.find((r) => r.round === 0)?.health.floor ?? null;
+  if (floor === null) return null;
+  return (
+    <div className="box-full">
+      <Said tone={floor.tone} label={floor.label} value={floor.value} sub={floor.sub} detail={floor.detail} />
+    </div>
+  );
+});
 
 // A critical round is the run's pinned line (`dash.said`); a degraded one is read under the timeline.
 const DegradedRounds = memo(function DegradedRounds() {

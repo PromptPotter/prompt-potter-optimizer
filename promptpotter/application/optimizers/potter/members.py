@@ -60,7 +60,6 @@ from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.escalation import (
     CLIMB_RULES,
     DEFAULT_ESCALATION_RULES,
-    FORCED_BY_DIAG,
     HEAL_RULES,
     Fire,
     LayerCall,
@@ -666,9 +665,6 @@ class Escalation(nodes.Controller):
             l3=LayerCall(L3, ctx.fire(L3Plan)),
         ):
             raise StopLoop(stop)
-
-    async def diagnose(self, ctx: NodeContext) -> None:
-        await self.act(ctx, FORCED_BY_DIAG)
 
 
 L2 = L2Context()

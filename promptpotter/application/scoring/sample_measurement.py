@@ -432,6 +432,7 @@ def _error_result(
     error_msg: str,
     *,
     category: ErrorCategory,
+    refused_parameter: str | None = None,
 ) -> MeasuredCell:
     return MeasuredCell(
         sample_key=sample.key,
@@ -440,6 +441,7 @@ def _error_result(
         predicted="ERROR",
         error=error_msg or "unknown error",
         error_category=category,
+        refused_parameter=refused_parameter,
     )
 
 
@@ -487,6 +489,7 @@ _HTTP_FAILURE_WORDS: dict[ErrorCategory, str] = {
     ErrorCategory.PROVIDER_CREDIT: "provider credit refused",
     ErrorCategory.PROVIDER_THROTTLED: "provider throttled",
     ErrorCategory.CLIENT: "caller config rejected by backend",
+    ErrorCategory.PARAMETER_REFUSED: "a request parameter refused by the endpoint",
     ErrorCategory.SERVER: "backend transient error",
 }
 
@@ -569,8 +572,13 @@ async def measure_sample(
         # Named by TYPE: a bare `TimeoutError()` has no message.
         failure = f"{type(exc).__name__}: {exc}"
         logger.exception("measure_sample failed for %s: %s", sample.query[:60], failure)
-        category = failed_send(exc).failure or ErrorCategory.UNKNOWN
-        return _error_result(sample, failure, category=category)
+        outcome = failed_send(exc)
+        return _error_result(
+            sample,
+            failure,
+            category=outcome.failure or ErrorCategory.UNKNOWN,
+            refused_parameter=outcome.refused_parameter,
+        )
 
 
 async def _send_cell(
@@ -692,7 +700,8 @@ def _known_failure(sample: Sample, exc: Exception) -> MeasuredCell | None:
         logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
         return _error_result(sample, str(exc), category=exc.category)
     # Never a backend 429: `BackendClient.run_query` answers each with the run's backpressure.
-    category = failed_send(exc).failure or ErrorCategory.UNKNOWN
+    outcome = failed_send(exc)
+    category = outcome.failure or ErrorCategory.UNKNOWN
     if isinstance(exc, httpx.HTTPStatusError):
         upstream = _extract_upstream_detail(exc)
         error_msg = (
@@ -700,7 +709,9 @@ def _known_failure(sample: Sample, exc: Exception) -> MeasuredCell | None:
             f"{f' :: {upstream}' if upstream else ''}"
         )
         logger.warning("measure_sample for %s: %s", query[:60], error_msg)
-        return _error_result(sample, error_msg, category=category)
+        return _error_result(
+            sample, error_msg, category=category, refused_parameter=outcome.refused_parameter
+        )
     if category is ErrorCategory.CONNECTION:
         error_msg = f"{type(exc).__name__}: {exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)

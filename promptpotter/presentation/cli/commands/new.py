@@ -256,9 +256,7 @@ async def _hold_checkin(
     _checkin_line("origin", f"complete — check-in '{draft.slug}' ready")
     launched = await dispatch_start_checkin(
         stores,
-        CommandCall(
-            StartCheckinPayload(draft_id=draft_id, diag=args.diag, budget=budget_from_args(args))
-        ),
+        CommandCall(StartCheckinPayload(draft_id=draft_id, budget=budget_from_args(args))),
         inline=inline_launch(args),
     )
     held = held_run(launched)
@@ -295,7 +293,6 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
         {
             "dataset_name": dataset_name,
             "optimization": knobs or None,
-            "diag": args.diag,
             "campaign_config": declared,
             "task_text": task_text,
             "budget": budget,
@@ -322,7 +319,7 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     except PotterError as exc:
         exc.add_note(_draft_kept(draft_id))
         raise
-    return await _run_origin(held, diag=args.diag)
+    return await _run_origin(held)
 
 
 @contextlib.contextmanager
@@ -341,7 +338,7 @@ async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline
         launched = (await dispatcher.dispatch(CommandCall(mint))).result
     held = held_run(launched)
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
-    return await _run_origin(held, diag=mint.diag)
+    return await _run_origin(held)
 
 
 def _arm_request(raw: str) -> dict[str, Any]:
@@ -465,7 +462,7 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     )
 
 
-async def _run_origin(held: HeldRun, *, diag: bool) -> CommandResult:
+async def _run_origin(held: HeldRun) -> CommandResult:
     session = held.session
     dataset_name = session.dataset_name or "?"
     _checkin_line(
@@ -478,5 +475,5 @@ async def _run_origin(held: HeldRun, *, diag: bool) -> CommandResult:
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(session.campaign_id))
 
     _checkin_line("origin", "launching origin scoring")
-    result = await run_inline(held, mode=RunMode(diag=diag))
+    result = await run_inline(held, mode=RunMode())
     return cycle_result_command(session, result)

@@ -1148,6 +1148,7 @@
                   "invalid",
                   "skipped",
                   "broken",
+                  "refused",
                   "eliminated",
                   "locked_in"
                 ],
@@ -1203,6 +1204,18 @@
               }
             ],
             "description": "The provider's prefix-cache reading of `tokens.input`; null beside a null `tokens`."
+          },
+          "refused_parameter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The request parameter the endpoint refused, where `end` is `refused`; null on every other arm.",
+            "title": "Refused Parameter"
           },
           "role": {
             "description": "What the arm IS in this round: its origin, one of its proposals, or a `parent` re-read on its cells as a reference — never one of the round's proposals, whatever round `arm` names.",
@@ -1277,6 +1290,7 @@
           "state",
           "end",
           "walked_short",
+          "refused_parameter",
           "own",
           "fitness_terms",
           "panel",
@@ -2249,6 +2263,19 @@
             "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, `prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`steer_verdict`, asked when a fork's seed is parsed). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
             "title": "Optimizer Narrowing",
             "type": "object"
+          },
+          "origin_replicates": {
+            "anyOf": [
+              {
+                "minimum": 2.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The noise floor: once round 0 closes, the origin is re-scored this many times fresh on the rows it recorded, and the spread of those composites is served beside the recorded level as the run's own run-to-run noise. Each replicate pays a call per row; the loop decides nothing on it. Unset sends no replicate.",
+            "title": "Origin Replicates"
           },
           "pipeline_overlay": {
             "additionalProperties": {
@@ -4047,6 +4074,19 @@
             ],
             "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, `prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`steer_verdict`, asked when a fork's seed is parsed). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
             "title": "Optimizer Narrowing"
+          },
+          "origin_replicates": {
+            "anyOf": [
+              {
+                "minimum": 2.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The noise floor: once round 0 closes, the origin is re-scored this many times fresh on the rows it recorded, and the spread of those composites is served beside the recorded level as the run's own run-to-run noise. Each replicate pays a call per row; the loop decides nothing on it. Unset sends no replicate.",
+            "title": "Origin Replicates"
           },
           "pipeline_overlay": {
             "anyOf": [
@@ -7010,7 +7050,6 @@
           "mode": {
             "$ref": "#/components/schemas/RunMode",
             "default": {
-              "diag": false,
               "fork_on_divergence": false,
               "no_divergence_check": false
             }
@@ -8101,7 +8140,7 @@
       },
       "HierarchyCourse": {
         "additionalProperties": false,
-        "description": "A course — one cycle's run, root, fork, diag or inner — as the listing serves it.",
+        "description": "A course — one cycle's run, root, fork or inner — as the listing serves it.",
         "properties": {
           "address": {
             "description": "Server-minted and stable: the key of every row and every open set. A course's is its `CyclePath` on the wire (`encodeCyclePath`).",
@@ -10307,12 +10346,6 @@
             "minLength": 1,
             "title": "Dataset Name",
             "type": "string"
-          },
-          "diag": {
-            "default": false,
-            "description": "Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so the other run-mode fields are `start-run`'s alone.",
-            "title": "Diag",
-            "type": "boolean"
           },
           "optimization": {
             "anyOf": [
@@ -12565,6 +12598,19 @@
             "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, `prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`steer_verdict`, asked when a fork's seed is parsed). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
             "title": "Optimizer Narrowing"
           },
+          "origin_replicates": {
+            "anyOf": [
+              {
+                "minimum": 2.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The noise floor: once round 0 closes, the origin is re-scored this many times fresh on the rows it recorded, and the spread of those composites is served beside the recorded level as the run's own run-to-run noise. Each replicate pays a call per row; the loop decides nothing on it. Unset sends no replicate.",
+            "title": "Origin Replicates"
+          },
           "pipeline_overlay": {
             "anyOf": [
               {
@@ -14134,6 +14180,17 @@
         "additionalProperties": false,
         "description": "A round's degradation grade as a surface reads it, worded now off the facts its close stamped.",
         "properties": {
+          "floor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Said"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The origin read paired against its constant-answer floor, `warn` where the floor is above it; null on every later round and where answers are no repeated label."
+          },
           "grade": {
             "enum": [
               "healthy",
@@ -14158,7 +14215,8 @@
         },
         "required": [
           "grade",
-          "reading"
+          "reading",
+          "floor"
         ],
         "title": "RoundHealth",
         "type": "object"
@@ -14194,7 +14252,7 @@
                 "type": "null"
               }
             ],
-            "description": "The arm the round ENDED on (`election.ended_on`), read: the headline's numbers are its own. Null on a diag round, which elects nothing."
+            "description": "The arm the round ENDED on (`election.ended_on`), read: the headline's numbers are its own."
           },
           "round": {
             "title": "Round",
@@ -14419,12 +14477,6 @@
         "additionalProperties": false,
         "description": "The SHAPE a run takes, on the wire and in the runner alike. How far it goes is its ``Budget``.",
         "properties": {
-          "diag": {
-            "default": false,
-            "description": "The diagnostic shape; a `start-run` of a cycle that finished one runs a counted sibling.",
-            "title": "Diag",
-            "type": "boolean"
-          },
           "fork_on_divergence": {
             "default": false,
             "description": "Branch a sibling cycle where the replay diverges, and run it.",
@@ -14915,7 +14967,7 @@
       },
       "ScoringPass": {
         "additionalProperties": false,
-        "description": "A paid verb scoring outside any run: its hop is the cycle it scores, or none at all.",
+        "description": "A paid pass scoring outside any run: its hop is the cycle it scores, or none at all.",
         "properties": {
           "kind": {
             "const": "scoring_pass",
@@ -14923,20 +14975,12 @@
             "title": "Kind",
             "type": "string"
           },
-          "verb": {
-            "enum": [
-              "bench",
-              "noise-floor",
-              "probe-reasoning",
-              "seed-screen",
-              "verify"
-            ],
-            "title": "Verb",
-            "type": "string"
+          "pass_kind": {
+            "$ref": "#/components/schemas/MeasurementRole"
           }
         },
         "required": [
-          "verb"
+          "pass_kind"
         ],
         "title": "ScoringPass",
         "type": "object"
@@ -16008,12 +16052,6 @@
             "$ref": "#/components/schemas/Budget",
             "default": {}
           },
-          "diag": {
-            "default": false,
-            "description": "Run the diagnostic shape.",
-            "title": "Diag",
-            "type": "boolean"
-          },
           "draft_id": {
             "maxLength": 128,
             "minLength": 8,
@@ -16030,7 +16068,7 @@
                 "type": "null"
               }
             ],
-            "description": "Start the draft as these arms of one head-to-head, its origin every arm's, in place of one campaign. Its own `budget` binds each arm, so `budget` and `diag` are refused beside it."
+            "description": "Start the draft as these arms of one head-to-head, its origin every arm's, in place of one campaign. Its own `budget` binds each arm, so `budget` is refused beside it."
           }
         },
         "required": [
@@ -16075,7 +16113,6 @@
           "mode": {
             "$ref": "#/components/schemas/RunMode",
             "default": {
-              "diag": false,
               "fork_on_divergence": false,
               "no_divergence_check": false
             }
@@ -16166,7 +16203,6 @@
           "converged",
           "optimizer_exhausted",
           "hard_cap_reached",
-          "diag_complete",
           "target_hit",
           "spend_budget",
           "token_budget",
@@ -18017,6 +18053,7 @@
           "stop_rule",
           "budget",
           "client_error",
+          "parameter_refused",
           "pipeline_error",
           "consecutive_errors"
         ],

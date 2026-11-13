@@ -328,7 +328,7 @@ def _unplaced(spawned: SpawnedBy | None, *, asker_listed: bool) -> str:
     asked = (
         "it carries no spawn record"
         if spawned is None
-        else "it was spawned outside any measured pass (the noise-floor diagnostic)"
+        else "it was spawned by an origin pass, which measures no candidate"
         if spawned.role is None
         else "the cycle its record names is not among this campaign's courses"
         if not asker_listed

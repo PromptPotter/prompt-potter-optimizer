@@ -16,6 +16,7 @@ from promptpotter.domain.arms import (
     Measured,
     Measuring,
     Proposed,
+    Refused,
     arm_end,
     walked_short,
 )
@@ -437,6 +438,10 @@ class ArmReading(FrozenModel):
         description="`end` names a stop of its walk, for it or against it: false on an `invalid` "
         "arm, which never started one."
     )
+    refused_parameter: str | None = Field(
+        description="The request parameter the endpoint refused, where `end` is `refused`; null "
+        "on every other arm."
+    )
     own: OwnLevel | None = Field(
         description="The arm's own level on its round's cells: fitness with the band the "
         "gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null "
@@ -502,6 +507,9 @@ class ArmReading(FrozenModel):
             state=arm.state,
             end=arm_end(arm),
             walked_short=walked_short(arm),
+            refused_parameter=arm.reason.parameter
+            if isinstance(arm, Cut) and isinstance(arm.reason, Refused)
+            else None,
             own=None if fold is None else _own_level(fold),
             fitness_terms={} if fold is None else fold.term_means,
             panel=panel,

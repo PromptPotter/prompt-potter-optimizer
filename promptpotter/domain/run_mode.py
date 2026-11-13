@@ -19,8 +19,3 @@ class RunMode(FrozenModel):
     fork_on_divergence: bool = Field(
         default=False, description="Branch a sibling cycle where the replay diverges, and run it."
     )
-    diag: bool = Field(
-        default=False,
-        description="The diagnostic shape; a `start-run` of a cycle that finished one runs a "
-        "counted sibling.",
-    )

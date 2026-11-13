@@ -23,7 +23,6 @@ from promptpotter.application.scoring.evaluators import (
     observation_owner,
 )
 from promptpotter.application.scoring.judges.registry import build_evaluators
-from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import Compare, Optimize
@@ -40,7 +39,6 @@ from promptpotter.infrastructure.store.archive_queries import (
     OpenAt,
 )
 from promptpotter.shared.errors import DiagnosticError
-from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.run_scope import RunScope, run_scope, scoped
 
 if TYPE_CHECKING:
@@ -48,7 +46,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+    from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -195,21 +193,6 @@ async def diagnostic_pass(scoring: Awaitable[ScoredWalk], session: Session) -> S
             "over part of the pass would describe the stop, not the configuration."
         )
     return scored
-
-
-async def replicates(
-    search_point: JobSearchPoint, rows: list[Sample], session: Session, k: int
-) -> list[ScoredWalk]:
-    """The one k-fresh-replicate pass: *search_point* on *rows*, *k* times in turn."""
-    return [
-        await diagnostic_pass(
-            score_search_point(
-                search_point, rows, session, kind=MeasurementRole.NOISE_FLOOR, measured=None
-            ),
-            session,
-        )
-        for _ in range(k)
-    ]
 
 
 @contextmanager

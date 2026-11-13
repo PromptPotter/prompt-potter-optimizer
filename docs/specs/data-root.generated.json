@@ -1055,6 +1055,22 @@
             "title": "InnerRun",
             "type": "object"
           },
+          "MeasurementRole": {
+            "description": "Why a scoring pass ran, stamped on every answer it files: provenance an id cannot carry.",
+            "enum": [
+              "origin",
+              "panel",
+              "backfill",
+              "parent",
+              "repair",
+              "overlap",
+              "verify",
+              "bench",
+              "noise_floor"
+            ],
+            "title": "MeasurementRole",
+            "type": "string"
+          },
           "PaidCall": {
             "additionalProperties": false,
             "description": "One LLM call outside any run (a check-in, a chat turn): a hold, never a slot.",
@@ -1111,7 +1127,7 @@
           },
           "ScoringPass": {
             "additionalProperties": false,
-            "description": "A paid verb scoring outside any run: its hop is the cycle it scores, or none at all.",
+            "description": "A paid pass scoring outside any run: its hop is the cycle it scores, or none at all.",
             "properties": {
               "kind": {
                 "const": "scoring_pass",
@@ -1119,20 +1135,12 @@
                 "title": "Kind",
                 "type": "string"
               },
-              "verb": {
-                "enum": [
-                  "bench",
-                  "noise-floor",
-                  "probe-reasoning",
-                  "seed-screen",
-                  "verify"
-                ],
-                "title": "Verb",
-                "type": "string"
+              "pass_kind": {
+                "$ref": "#/$defs/MeasurementRole"
               }
             },
             "required": [
-              "verb"
+              "pass_kind"
             ],
             "title": "ScoringPass",
             "type": "object"
@@ -1151,7 +1159,6 @@
               "converged",
               "optimizer_exhausted",
               "hard_cap_reached",
-              "diag_complete",
               "target_hit",
               "spend_budget",
               "token_budget",

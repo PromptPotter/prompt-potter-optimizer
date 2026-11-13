@@ -12,7 +12,7 @@ protocol's; peers are [`landscape.md`](landscape.md)'s.
 ## The admission bar — `gpt-oss-20b` must not already solve it
 
 Every candidate is screened against **`openai/gpt-oss-20b @ reasoning_effort: low`**, `temperature:
-0.0`, 30 rows (`seed-screen`) — the cheapest model a campaign ships on. Rows dated 2026-10-14/15 were
+0.0`, 30 rows of origin passes — the cheapest model a campaign ships on. Rows dated 2026-10-14/15 were
 screened under `meta-llama/llama-3.1-8b-instruct` (the L4 pool's cheap tier) as well; the verdict
 names the solver.
 
@@ -22,8 +22,8 @@ names the solver.
 - **The band — an origin with room to climb above its floor — is an approximate, unproven estimate: a lower origin is better, but one at 60–70% still
   leaves room to climb** (operator, 2026-11-10).
 - **Floor** = the best constant answer on the same rows. A seat needs a settled gap over the floor
-  ([`../operations/datasets.md`](../operations/datasets.md) § Selection criteria, 1b) — screen it
-  before reading any origin.
+  ([`../operations/datasets.md`](../operations/datasets.md) § Selection criteria, 1b); the origin
+  round serves it, paired (`domain/scoring.py::constant_answer`).
 - Literature anchors from older proxies **underpredict `gpt-oss-20b @ low` by 10–20pp**; bias every
   sub-20B prior upward. Headroom admits a dataset, never ranks it
   ([`external-constraints.md`](external-constraints.md) § L4).
@@ -67,7 +67,7 @@ did is the campaign tree's `readout.log` and `evidence`; earlier rows are
 | `legalbench-fods` | 53% / 45% mimo / mercury (floor 25%); 30% / 38% on 3–4B | 🟡 nearest MULTI-CLUSTER seat: seven confusable roles |
 | Headroom screen, natural origin on mimo / mercury (2026-10-24) | `bbh-multistep-arithmetic`, `bbh-tracking-seven`, `clinc150`, `banking77` (mteb), `legalbench-abercrombie`, `last-letters`, `bbh-word-sorting` | ❌ above band — both solvers reason unprompted |
 | BBEH mini | 28% bar · 0% 8B (floor 7%) · 44% `@ medium` · ~25% `@ high` | ✅ headline at the bar; ❌ 8B loops to the cap; 🟡 `medium` 1.8–220 s per sample; ❌ `high` exhausts the visible-token budget |
-| `justlogic/d234` | 0.500–0.625 (floor 0.350); re-read off `noise-floor --k 3` before quoting | ✅ focus instrument |
+| `justlogic/d234` | 0.500–0.625 (floor 0.350); re-read off a noise floor (`origin_replicates: 3`) before quoting | ✅ focus instrument |
 | `justlogic-d234-held` | 0.48–0.51 on 930–1,000 held-out rows | ✅ the instrument potter separates on (below) |
 | `sealqa/longseal-12` | literature 26.3–33.0%, ceiling 39.4–44.7% (the bar cannot screen a judge-graded episode) | ✅ wired; one harbor episode per cell |
 | PlanBench `task_1` · NaturalPlan · MuSiQue · BoardgameQA `Main-depth3` | 36% · 36% macro · 60% (38% 3hop) · 64% | 🟡 PDDL validator needed · `meeting_planning`-only (43%) is the clean cut · 3hop held · class-collapse-recovery target |

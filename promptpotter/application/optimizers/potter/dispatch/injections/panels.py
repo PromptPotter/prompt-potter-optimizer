@@ -68,6 +68,7 @@ from promptpotter.domain.scoring import (
     CellSheet,
     GradedCell,
     all_verifier_graded,
+    constant_answer,
     enumerable_truth_labels,
     graded_answer,
     is_hit,
@@ -645,11 +646,6 @@ def _labelled(cells: Iterable[GradedCell]) -> list[GradedCell]:
     return [c for c in cells if c.facts.ground_truth]
 
 
-def _constant_answer(truth: Counter[str]) -> tuple[str, float]:
-    label, n = truth.most_common(1)[0]
-    return label, n / sum(truth.values())
-
-
 @signal(
     "answer_distribution",
     kind=InjectionKind.MEASUREMENT,
@@ -665,7 +661,7 @@ def _r_answer_distribution(b: InjectionBundle) -> list[Item]:
     said = _predicted_counts(rows)
     n = len(rows)
 
-    top_label, constant = _constant_answer(truth)
+    top_label, constant = constant_answer(truth)
     # Mean fitness, never a `fitness >= 1.0` count, which reads 0.00 on every graded scorer.
     scored = compute_fitness(results=rows)
     if scored is None:

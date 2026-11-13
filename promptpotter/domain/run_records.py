@@ -1015,7 +1015,6 @@ class CycleFinal(FrozenModel):
     # On the origin's OWN samples — never round 1's matched floor, a different sample basis.
     origin_composite_fitness: float | None
     scorer_id: str
-    mode: Literal["diag", "full"]
     # The round the optimizer's DECLARED pick was selected in.
     result_round: int
     result_prompt_fields: dict[str, dict[str, str]]
@@ -1210,10 +1209,7 @@ class OriginGatePass(CheckpointInputs, kind="origin_gate_pass"):
 class SpawnedBy(StrictModel):
     """The outer work-item an L4 inner cycle was spawned to measure; an arm's address places the run under its candidate."""
 
-    round: int | None = Field(
-        default=None,
-        description="Outer round; 0 is the origin (C0). Null when the spawn came from outside any round (the noise-floor diagnostic).",
-    )
+    round: int = Field(description="Outer round; 0 is the origin (C0).")
     individual_id: str | None = Field(
         default=None,
         description="The outer individual's `OptSearchPoint.id` — stable across rounds, and the "
@@ -1237,7 +1233,7 @@ class SpawnedBy(StrictModel):
         """The outer arm that asked, where an arm's pass did; any other pass names none."""
         if self.role is None or not PASSES[self.role].arm:
             return None
-        if self.round is None or self.individual_id is None:
+        if self.individual_id is None:
             return None
         return RoundArm(round=self.round, arm=ArmKey(self.individual_id))
 
@@ -1337,8 +1333,6 @@ class ComparisonExit(enum.StrEnum):
     SUBMIT_ARMS = "submit_arms"
     SKIP = "skip"
     SET_LIMITS = "set_limits"
-    # A diag start: its rounds are unmeasured.
-    DIAG = "diag"
 
 
 class LeftComparisonRecord(FrozenModel):

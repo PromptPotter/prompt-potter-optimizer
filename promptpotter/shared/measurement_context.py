@@ -71,7 +71,7 @@ class MeasuredPass:
     """Bound at the INGRESS, or a re-entering asker inherits it stale."""
 
     individual_id: str
-    role: MeasurementRole = MeasurementRole.PANEL
+    role: MeasurementRole
 
 
 _MEASURED: contextvars.ContextVar[MeasuredPass | None] = contextvars.ContextVar(

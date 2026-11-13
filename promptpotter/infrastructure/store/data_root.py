@@ -71,7 +71,6 @@ from promptpotter.infrastructure.store.io import (
 )
 from promptpotter.infrastructure.store.layout import (
     ARCHIVE_HOMES_DIR,
-    DIAGNOSTICS_DIR,
     DRAFTS_DIR,
     HEAD_TO_HEADS_DIR,
     INNER_SANDBOXES_DIR,
@@ -520,7 +519,6 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
         TypeAdapter(HeadToHeadRecord),
     ),
     Kind("ruler", _WS, RULER_FILE, Fate.RUN, TypeAdapter(RulerFold)),
-    Kind("diagnostic", _WS, f"{DIAGNOSTICS_DIR}/*.json", Fate.RUN, _FOR_A_PERSON),
     Kind(
         "materialized panel",
         _WS,
@@ -602,6 +600,7 @@ KINDS: tuple[Kind, ...] = (
 RETIRED_KINDS: tuple[Kind, ...] = (
     Kind("retired run file", _WS, "campaigns/*/**", Fate.RUN, _retired),
     Kind("retired draft file", _WS, f"{_DRAFT}/**", Fate.RUN, _retired),
+    Kind("retired diagnostic", _WS, "diagnostics/*.json", Fate.RUN, _retired),
     # A cell claim's row: its holder files the cell's answer instead (`ReplayFeed.claim`).
     Kind(
         "retired cell claim row",

@@ -280,10 +280,10 @@ export interface CampaignLaunch {
   kind: 'campaign_launch';
 }
 
-/** A paid verb scoring outside any run: its hop is the cycle it scores, or none
+/** A paid pass scoring outside any run: its hop is the cycle it scores, or none
  * at all. */
 export interface ScoringPass {
-  verb: 'bench' | 'noise-floor' | 'probe-reasoning' | 'seed-screen' | 'verify';
+  pass_kind: 'origin' | 'panel' | 'backfill' | 'parent' | 'repair' | 'overlap' | 'verify' | 'bench' | 'noise_floor';
   kind: 'scoring_pass';
 }
 
@@ -537,7 +537,7 @@ export interface HierarchyState {
 export interface RunStatus {
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** Null while the run has not stopped. */
-  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
 }
 
@@ -545,7 +545,7 @@ export interface RunStatus {
  * yet to reach. */
 export interface PauseReading {
   /** Null on an accepted pause the loop has yet to reach. */
-  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound' | 'owed';
   /** Who or what asked, in the declarer's own words. */
   detail: string;
@@ -622,8 +622,7 @@ export interface VendorModels {
   models: string[];
 }
 
-/** A course — one cycle's run, root, fork, diag or inner — as the listing serves
- * it. */
+/** A course — one cycle's run, root, fork or inner — as the listing serves it. */
 export interface HierarchyCourse {
   /** Server-minted and stable: the key of every row and every open set. A course's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
@@ -981,7 +980,7 @@ export interface BenchStatus {
 export interface PassStop {
   /** The walk's own end, or the run stop that cut the pass: a pause mid-walk, a
    * spent budget before it was sent. */
-  cause: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
+  cause: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'parameter_refused' | 'pipeline_error' | 'consecutive_errors';
   /** The backend's dominant warning, where errors ended the pass. */
   warning: string | null;
 }
@@ -1426,10 +1425,13 @@ export interface ArmReading {
   /** How its walk ended short of its panel: cut against it (`invalid` refused it
    * before a cell), or `locked_in` — settled FOR it by the eliminator. Null
    * on a walk still running and one that ran its panel. */
-  end: 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in' | null;
+  end: 'invalid' | 'skipped' | 'broken' | 'refused' | 'eliminated' | 'locked_in' | null;
   /** `end` names a stop of its walk, for it or against it: false on an `invalid`
    * arm, which never started one. */
   walked_short: boolean;
+  /** The request parameter the endpoint refused, where `end` is `refused`; null on
+   * every other arm. */
+  refused_parameter: string | null;
   /** The arm's own level on its round's cells: fitness with the band the gateway
    * folds per cell, the composite beside it, over `n` rows carrying a
    * verdict. Null before the first row is graded, and on an `invalid` arm,
@@ -1605,7 +1607,7 @@ export interface ServedDashboard {
   state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
   optimizer_step: string | null;
   state_since: string;
-  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
   measuring_arm: ArmName | null;
   rounds: ServedRound[];
@@ -1751,6 +1753,10 @@ export interface RoundHealth {
   grade: 'healthy' | 'degraded' | 'critical' | 'unmeasured';
   /** Why the grade is not healthy, in words; null on `healthy` and on `unmeasured`. */
   reading: HealthReading | null;
+  /** The origin read paired against its constant-answer floor, `warn` where the
+   * floor is above it; null on every later round and where answers are no
+   * repeated label. */
+  floor: Said | null;
 }
 
 /** A graded cause in words, read off the facts its round stamped
@@ -2320,7 +2326,7 @@ export interface RoundView {
   /** Every arm the round read, in rank order. */
   candidates: ServedArm[];
   /** The arm the round ENDED on (`election.ended_on`), read: the headline's numbers
-   * are its own. Null on a diag round, which elects nothing. */
+   * are its own. */
   headline: ArmReading | null;
 }
 
@@ -3295,6 +3301,12 @@ export interface CampaignConfig {
    * smaller than this scores on the whole bank (`sample_dataset` is a prefix
    * slice) — not an error. */
   sp_budget_origin: number;
+  /** The noise floor: once round 0 closes, the origin is re-scored this many times
+   * fresh on the rows it recorded, and the spread of those composites is
+   * served beside the recorded level as the run's own run-to-run noise. Each
+   * replicate pays a call per row; the loop decides nothing on it. Unset
+   * sends no replicate. */
+  origin_replicates: number | null;
   exclude_nodes: string[];
   /** Which task framing every target render splices in. `committed` (default) runs
    * under the front matter of the dataset's `task.md`, which the first mint
@@ -3985,6 +3997,12 @@ export interface ConfigEdit {
    * smaller than this scores on the whole bank (`sample_dataset` is a prefix
    * slice) — not an error. */
   sp_budget_origin: number | null;
+  /** The noise floor: once round 0 closes, the origin is re-scored this many times
+   * fresh on the rows it recorded, and the spread of those composites is
+   * served beside the recorded level as the run's own run-to-run noise. Each
+   * replicate pays a call per row; the loop decides nothing on it. Unset
+   * sends no replicate. */
+  origin_replicates: number | null;
   exclude_nodes: string[] | null;
   /** Which task framing every target render splices in. `committed` (default) runs
    * under the front matter of the dataset's `task.md`, which the first mint
@@ -4727,9 +4745,6 @@ export interface RunMode {
   no_divergence_check: boolean;
   /** Branch a sibling cycle where the replay diverges, and run it. */
   fork_on_divergence: boolean;
-  /** The diagnostic shape; a `start-run` of a cycle that finished one runs a
-   * counted sibling. */
-  diag: boolean;
 }
 
 /** A fork's `CycleSeed` as sent: the applier freezes `node_narrowing` on the
@@ -4770,9 +4785,6 @@ export interface MintCampaignPayload {
   /** Laid over the dataset's own `optimization` before the mint freezes it; only
    * the fields sent move anything */
   optimization: OptimizationOverrides | null;
-  /** Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so
-   * the other run-mode fields are `start-run`'s alone. */
-  diag: boolean;
   /** A campaign declaration standing in for the dataset's own
    * `dataset.yaml::campaign`, laid over the defaults; `optimization` still
    * lays over it */
@@ -4795,6 +4807,12 @@ export interface PartialCampaignConfig {
    * smaller than this scores on the whole bank (`sample_dataset` is a prefix
    * slice) — not an error. */
   sp_budget_origin: number | null;
+  /** The noise floor: once round 0 closes, the origin is re-scored this many times
+   * fresh on the rows it recorded, and the spread of those composites is
+   * served beside the recorded level as the run's own run-to-run noise. Each
+   * replicate pays a call per row; the loop decides nothing on it. Unset
+   * sends no replicate. */
+  origin_replicates: number | null;
   exclude_nodes: string[] | null;
   /** Which task framing every target render splices in. `committed` (default) runs
    * under the front matter of the dataset's `task.md`, which the first mint
@@ -5103,11 +5121,9 @@ export interface SkipSearchpointPayload {
 export interface StartCheckinPayload {
   draft_id: string;
   budget: Budget;
-  /** Run the diagnostic shape. */
-  diag: boolean;
   /** Start the draft as these arms of one head-to-head, its origin every arm's, in
-   * place of one campaign. Its own `budget` binds each arm, so `budget` and
-   * `diag` are refused beside it. */
+   * place of one campaign. Its own `budget` binds each arm, so `budget` is
+   * refused beside it. */
   head_to_head: HeadToHeadRequest | null;
 }
 
@@ -5384,7 +5400,7 @@ export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_se
 export type CellSetName = 'origin_panel' | 'reference_cells' | 'bench_split' | 'measured_by_both';
 
 // promptpotter.domain.phases::StopReason
-export type StopReason = 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
+export type StopReason = 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
 
 // promptpotter.domain.phases::StopOutcome
 export type StopOutcome = 'success' | 'halted' | 'failed' | 'paused';
@@ -5762,10 +5778,11 @@ export const UNIT_FORMATS: Record<MeasurandUnit, UnitFormat> = {
 };
 
 // Mirror of domain/arms.py::ARM_END_INFO, in display order.
-export const ARM_END_INFO: Record<'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in', ArmEndInfo> = {
+export const ARM_END_INFO: Record<'invalid' | 'skipped' | 'broken' | 'refused' | 'eliminated' | 'locked_in', ArmEndInfo> = {
   "invalid": { label: "invalid", tone: "danger", sentence: "Refused before its first cell: its own validation failed fatally, so nothing was measured." },
   "skipped": { label: "skipped", tone: "quiet", sentence: "An operator cut it short." },
   "broken": { label: "broken", tone: "danger", sentence: "Its measurements kept failing, so the bench stopped it. That is the candidate's own fault, and it is charged to it." },
+  "refused": { label: "refused", tone: "warn", sentence: "The endpoint refused a request parameter it sent: a value this model does not serve, so its cells measure nothing about the prompt." },
   "eliminated": { label: "eliminated", tone: "quiet", sentence: "The optimizer's eliminator stopped buying it: a budget call, not a verdict on the idea." },
   "locked_in": { label: "locked in", tone: "quiet", sentence: "The optimizer's eliminator stopped it far enough ahead to call." },
 };
@@ -5962,7 +5979,6 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "target_hit": { label: "Target reached", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "lives_exhausted": { label: "Out of lives", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "hard_cap_reached": { label: "Arm cap", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
-  "diag_complete": { label: "Diagnostic complete", outcome: "success", category: "search", halts_mid_round: true, has_traceback: false, next_step: "The next round's arms are proposed and paused unmeasured; resuming measures exactly these arms.", grades_selection: true, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }] },
   "converged": { label: "Converged", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "optimizer_exhausted": { label: "Optimizer out of moves", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "rebased_to_fork": { label: "Rebased to fork", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
@@ -6154,7 +6170,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [CANDIDATE_COUNT_WORDS, ["replayed"]],
   [DISPLAY_METRIC_INFO, ["fitness", "ability", "composite"]],
   [UNIT_FORMATS, ["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]],
-  [ARM_END_INFO, ["invalid", "skipped", "broken", "eliminated", "locked_in"]],
+  [ARM_END_INFO, ["invalid", "skipped", "broken", "refused", "eliminated", "locked_in"]],
   [BENCH_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "campaign_not_active", "definition_unread", "connector_moved", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection"]],
   [COST_ABSENCE_WORDS, ["no_lift", "unpriced_tokens", "zero_spend"]],
   [LIFECYCLE_STATUS_LABELS, ["active", "archived", "deleted"]],
@@ -6174,7 +6190,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [READING_STATE_INFO, ["read", "not_asked", "pending", "not_held", "no_holdout", "held_elsewhere", "pass_stopped", "past_tolerance", "member_unscoreable", "under_two_cells", "no_selection", "same_individual", "run_failed", "scope_differs", "measurand_differs", "dataset_differs", "cell_set_differs", "instrument_differs"]],
   [DASHBOARD_STATE_PAUSE_WORDS, ["init", "origin", "proposing", "scoring", "between_samples", "between_candidates", "optimizer_step", "bench", "stopped"]],
   [RUN_PHASE_INFO, ["queued", "starting", "running", "scoring", "paused", "gate", "detached", "terminal"]],
-  [STOP_REASON_INFO, ["rounds_budget", "target_hit", "lives_exhausted", "hard_cap_reached", "diag_complete", "converged", "optimizer_exhausted", "rebased_to_fork", "paused", "panel_cut", "adapter_output_owed", "optimizer_abort", "spend_budget", "token_budget", "host_allowance", "wall_clock", "origin_gate", "backend_unreachable", "provider_credit_exhausted", "provider_throttled", "price_list_unreachable", "no_rate", "crashed", "input_refused", "not_admitted", "producer_vanished", "render_error", "diverged", "optimizer_timeout"]],
+  [STOP_REASON_INFO, ["rounds_budget", "target_hit", "lives_exhausted", "hard_cap_reached", "converged", "optimizer_exhausted", "rebased_to_fork", "paused", "panel_cut", "adapter_output_owed", "optimizer_abort", "spend_budget", "token_budget", "host_allowance", "wall_clock", "origin_gate", "backend_unreachable", "provider_credit_exhausted", "provider_throttled", "price_list_unreachable", "no_rate", "crashed", "input_refused", "not_admitted", "producer_vanished", "render_error", "diverged", "optimizer_timeout"]],
   [MOVABLE_AGENT_LABELS, ["proposer", "optimizer"]],
   [NODE_KIND_INFO, ["io", "llm", "tool", "retriever", "cache", "measurement", "member"]],
   [POOL_SOURCE_INFO, ["library", "partition"]],

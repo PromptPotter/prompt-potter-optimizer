@@ -36,6 +36,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset, resolve_dataset
 from promptpotter.presentation.terminal.completion import report_completion
+from promptpotter.shared.measurement_context import MeasurementRole
 
 # The bbeh definition is the SoT for everything about the task — its `pipeline` section drives
 # the target-layer schema (read by run_campaign on the dataset "bbeh", which resolves it in the
@@ -161,7 +162,11 @@ async def run_bbeh_campaign(
         client = session.backend_client
         sends = sends_on(session.store, campaign_config, client.connector.name)
         async with paid_pass(
-            stores=session.store, verb="verify", hop=None, declared=Budget(), sends=sends
+            stores=session.store,
+            pass_kind=MeasurementRole.VERIFY,
+            hop=None,
+            declared=Budget(),
+            sends=sends,
         ):
             for i, task in enumerate(tasks, start=1):
                 test_items = test_norm_by_task[task]

@@ -310,6 +310,7 @@ from promptpotter.infrastructure.identity import blocklist, grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.registry import default_routes
+from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import cycle_held
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
@@ -353,6 +354,7 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.hashing import SourceFacts, dataset_hash, source_facts, stable_hash
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, default_identity
+from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.run_scope import scoped
 
 pytestmark = pytest.mark.usefixtures("offline", "optimizing_memory")
@@ -721,19 +723,20 @@ def test_the_inner_campaign_id_separates_candidates_seeds_treatments_and_estimat
     every = frozenset(Presumption)
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
     c2 = {"l1_generate": {"instruction": "narrow the axes"}}
-    ids = {inner_campaign_id(_SPEC, o, "e") for o in (c1, c2, {}, _CAPO_MUTATED)}
+    panel = MeasurementRole.PANEL
+    ids = {inner_campaign_id(_SPEC, o, "e", panel) for o in (c1, c2, {}, _CAPO_MUTATED)}
     assert len(ids) == 4, (
         "two candidates differing only in one override field share a campaign — "
         "their measurements merge under one id with no error"
     )
     breaching = {"l1_critique": {"layout": {"thinking_style": ["no_such_panel"]}}}
-    assert inner_campaign_id(_SPEC, breaching, "e") != inner_campaign_id(_SPEC, {}, "e"), (
-        "a refused layout arm continued the floor arm's inner campaign"
-    )
+    assert inner_campaign_id(_SPEC, breaching, "e", panel) != inner_campaign_id(
+        _SPEC, {}, "e", panel
+    ), "a refused layout arm continued the floor arm's inner campaign"
     assert inner_campaign_id(
-        _SPEC.model_copy(update={"run_seed": 6}), c1, "e"
-    ) != inner_campaign_id(_SPEC, c1, "e"), "two seeds share one inner campaign"
-    assert inner_campaign_id(_SPEC, c1, "e") != inner_campaign_id(_SPEC, c1, "f"), (
+        _SPEC.model_copy(update={"run_seed": 6}), c1, "e", panel
+    ) != inner_campaign_id(_SPEC, c1, "e", panel), "two seeds share one inner campaign"
+    assert inner_campaign_id(_SPEC, c1, "e", panel) != inner_campaign_id(_SPEC, c1, "f", panel), (
         "a moved estimator continued the campaign the old one banked"
     )
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
@@ -744,10 +747,10 @@ def test_the_inner_campaign_id_separates_candidates_seeds_treatments_and_estimat
         for n in ({}, cut)
     )
     assert inner_campaign_id(
-        _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1, "e"
-    ) != inner_campaign_id(_SPEC.model_copy(update={"optimizer_treatment": as_cut}), c1, "e"), (
-        "a moved optimizer knob ran under the inner campaign of the unmoved one"
-    )
+        _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1, "e", panel
+    ) != inner_campaign_id(
+        _SPEC.model_copy(update={"optimizer_treatment": as_cut}), c1, "e", panel
+    ), "a moved optimizer knob ran under the inner campaign of the unmoved one"
     rewalked = capo.manifest.model_copy(update={"initial_population_walks": "alone"})
     assert replace(capo, manifest=rewalked).treatment(every, built_stores.block_packs).digest != (
         capo.treatment(every, built_stores.block_packs).digest
@@ -3047,7 +3050,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     )
     inner_hop = CycleHop(
         campaign_id=inner_campaign_id(
-            seats.spec(inner_seat), seats.own(inner_seat, {}), seats.estimator
+            seats.spec(inner_seat), seats.own(inner_seat, {}), seats.estimator, None
         ),
         cycle_id="cycle-0",
     )
@@ -3055,6 +3058,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     pin = PinnedCell(cell=inner_seat, instrument="i").pin()
     with (
         scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
+        at_round(0),
         pytest.raises(CellUnscoreableError) as inner,
     ):
         asyncio.run(
@@ -3110,6 +3114,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     built_stores: Stores,
     decl: _Declared,
     held: _Held,
+    offline: Router,
 ) -> None:
     # Another holder joins the very ones they hold; one that drained, or whose exit unwound through
     # `run_optimization`'s `finally`, leaves neither its ledger's index nor its cycle held.
@@ -3195,14 +3200,17 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     # An exit on an error drains nothing: a drain's own fault would replace the error in flight.
     drained = Mock()
     monkeypatch.setattr(DashboardCheckout, "drain", drained)
-    with pytest.raises(PayloadInvalidError):
+    offline.rates = {}
+    # The declaration names no scoring formula, so the launch refuses inside the run, past its
+    # observers' build.
+    with pytest.raises(ScoringFormulaError):
         asyncio.run(
             run_optimization(
                 [],
                 CycleConfig.laid(launched, []),
                 session=opened,
                 observers=observers,
-                mode=RunMode(diag=True),
+                mode=RunMode(),
                 budget=HeldBudget(
                     admitted=Budget(),
                     standing=Budget(),
@@ -3210,10 +3218,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
                     step_rounds=None,
                     share=Budget(),
                 ),
-                # No controller, so `--diag` refuses inside the run, past its observers' build.
-                optimizer=select_optimizer(
-                    OptimizationConfig(degradation_threshold=0.0, optimizer="gepa")
-                ),
+                optimizer=selected,
             )
         )
     assert not LedgerIndex.of(wired_ledger.path).pinned and not cycle_held(root_dir), (

@@ -194,6 +194,10 @@ class _CellSends:
             usage = TokenAccount(
                 input=sum(int(u.get("prompt_tokens") or 0) for u in totals.values()),
                 output=sum(int(u.get("completion_tokens") or 0) for u in totals.values()),
+                reasoning=sum(
+                    int((u.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0)
+                    for u in totals.values()
+                ),
             )
             self.used += usage
             bill = Billed(usage, None)

@@ -15,6 +15,7 @@ from promptpotter.domain.arms import (
     Measured,
     Measuring,
     Proposed,
+    Refused,
     Skipped,
 )
 from promptpotter.domain.phases import WalkEnd
@@ -126,6 +127,12 @@ def conclude(
         return Measured(**fields, locked_in=elimination)
     if stop == "broken":
         assert isinstance(scored.signal, BrokenSignal), "a broken stop is a `BrokenSignal`"
+        if scored.stopped is WalkEnd.PARAMETER_REFUSED:
+            # An abort pads no tail, so the walk's last errored cell is the refusal it ended on.
+            ended_on = next(c.facts for c in reversed(scored.sheet.cells) if c.facts.errored)
+            parameter = ended_on.refused_parameter
+            assert parameter is not None, "a refusal's send named its parameter with its category"
+            return Cut(**fields, reason=Refused(parameter=parameter))
         breakage = read_breakage(
             scored.signal,
             effective_pipeline_params=arm.individual.pipeline_params,

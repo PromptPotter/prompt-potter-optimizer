@@ -92,7 +92,7 @@ class RoundView(StrictModel):
     candidates: list[ServedArm] = Field(description="Every arm the round read, in rank order.")
     headline: ArmReading | None = Field(
         description="The arm the round ENDED on (`election.ended_on`), read: the headline's "
-        "numbers are its own. Null on a diag round, which elects nothing."
+        "numbers are its own."
     )
 
 

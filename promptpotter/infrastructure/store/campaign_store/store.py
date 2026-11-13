@@ -364,7 +364,7 @@ class CampaignStore:
 
     @staticmethod
     def _ids_matching(ids: list[str], needle: str) -> list[str]:
-        # Exact first: a root cycle's id is a prefix of every fork and diag of it.
+        # Exact first: a root cycle's id is a prefix of every fork of it.
         if needle in ids:
             return [needle]
         return [i for i in ids if i.endswith(f"__{needle}") or i.startswith(needle)]

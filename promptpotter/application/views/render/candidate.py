@@ -13,7 +13,7 @@ from promptpotter.application.views.render.primitives import (
     fmt_field_accuracy,
 )
 from promptpotter.domain.arm_reading import fold_fitness_text
-from promptpotter.domain.arms import Broken, Concluded, Cut, arm_elimination, arm_end
+from promptpotter.domain.arms import Broken, Concluded, Cut, Refused, arm_elimination, arm_end
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit, unit_count
@@ -102,6 +102,8 @@ def individual_summary(
             f"q{degrad['degraded_count']}/{degrad['total_scored']}{RESET}  "
             f"{tag}  ({degrad['dominant_warning']})"
         )
+    elif isinstance(cut, Refused):
+        detail_lines.append(f"{YELLOW}✂ refused: the endpoint refused {cut.parameter}{RESET}")
 
     if (comp := fold.composite_fitness) is not None:
         detail_lines.append(render_composite_fitness_oneliner(comp, reference=None))

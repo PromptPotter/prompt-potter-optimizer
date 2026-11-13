@@ -7,19 +7,15 @@ The run completes, the dashboard looks fine, and a different candidate should ha
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import dataclasses
 import json
 import random
-import shutil
 import signal
 from collections import Counter
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import (
-    AbstractAsyncContextManager,
     AbstractContextManager,
-    asynccontextmanager,
     contextmanager,
 )
 from itertools import count, product
@@ -61,6 +57,7 @@ from factories import (
     pobb_knobs,
     prompted,
     round_result,
+    run_init_round,
     samples,
     score_summary,
     scorer_of,
@@ -71,16 +68,7 @@ from factories import (
     walking_cycle,
     workspace,
 )
-from offline_run import (
-    DATASET,
-    ByCallIdentity,
-    campaign_config,
-    cited_panel,
-    stand_in_fetch,
-    synthetic_rows,
-    text_templates,
-)
-from offline_world import FakeBackend, FakeHarness, FakeLLM, Router
+from offline_world import FakeHarness, Router
 from pydantic import SecretStr, ValidationError
 
 from promptpotter import connectors
@@ -97,7 +85,6 @@ from promptpotter.application.commands.dispatcher import (
     CommandCall,
     CommandDispatcher,
 )
-from promptpotter.application.embedded_run import run_campaign
 from promptpotter.application.evidence.head_to_head import GuardDifference, GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.host_surface import (
@@ -109,10 +96,7 @@ from promptpotter.application.host_surface import (
     TaskResultOf,
     TaskStatusOf,
 )
-from promptpotter.application.initialization.scoring_scope import (
-    OpenedDiagnostic,
-    scorer_setup,
-)
+from promptpotter.application.initialization.scoring_scope import scorer_setup
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
 from promptpotter.application.intelligence.rasch import (
@@ -238,7 +222,7 @@ from promptpotter.application.scoring.selection import (
     readable_lifts,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
-from promptpotter.config.paths import install_datasets_root, optimizers_root
+from promptpotter.config.paths import optimizers_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors import n8n
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
@@ -249,6 +233,7 @@ from promptpotter.domain.arms import (
     CutKind,
     Measured,
     Proposed,
+    Refused,
     arm_end,
     is_leader_eligible,
 )
@@ -288,7 +273,7 @@ from promptpotter.domain.command_kinds import (
     VerifyCandidatePayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
-from promptpotter.domain.dashboard_rows import RunLimits
+from promptpotter.domain.dashboard_rows import RoundHealth, RunLimits
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
@@ -324,7 +309,6 @@ from promptpotter.domain.phases import (
     PauseCause,
     RunPhase,
     StopLoop,
-    StopOutcome,
     StopReason,
     WalkEnd,
 )
@@ -339,7 +323,6 @@ from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import ThetaCaveat
-from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     ArmRecord,
     CampaignCeilingRecord,
@@ -348,7 +331,6 @@ from promptpotter.domain.run_records import (
     ForkTrigger,
     PhaseRecord,
     RoundEnteredRecord,
-    RoundProposedRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
@@ -376,12 +358,11 @@ from promptpotter.domain.scoring import (
     is_answer_collapsed,
     turn_scalars,
 )
-from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import Budget, TokenUsageKind
 from promptpotter.domain.verification import (
     BenchPasses,
     NoiseBand,
-    RescoreCount,
     VerificationPass,
     VerifyStrategy,
 )
@@ -405,12 +386,10 @@ from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import write_yaml
 from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import Stores, descend_store
-from promptpotter.presentation.cli.commands import noise_floor as noise_floor_cli
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.shared.answer_text import extract_gsm8k_number
 from promptpotter.shared.errors import (
     ConflictError,
-    DiagnosticError,
     ErrorCategory,
     NotFoundError,
     PayloadInvalidError,
@@ -2186,7 +2165,11 @@ def _pause_mid_pass(
 
     async def _bench_pick() -> BenchPasses:
         async with paid_pass(
-            stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget(), sends=()
+            stores=stores,
+            pass_kind=MeasurementRole.BENCH,
+            hop=_PEER_HOP,
+            declared=Budget(),
+            sends=(),
         ):
             return await bench_selection(
                 session,
@@ -2214,7 +2197,7 @@ async def _held_pass(
 ) -> None:
     async with paid_pass(
         stores=stores,
-        verb="bench",
+        pass_kind=MeasurementRole.BENCH,
         hop=_PEER_HOP,
         declared=Budget(),
         sends=(),
@@ -2234,13 +2217,13 @@ async def _held_pass(
 
 class _ClosedOrigin(NamedTuple):
     drawn: list[Sample]
-    opened: Callable[..., AbstractAsyncContextManager[OpenedDiagnostic]]
-    unpaid: Callable[..., AbstractAsyncContextManager[None]]
+    session: Session
+    origin_sp: JobSearchPoint
 
 
 def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
-    """Round 0 closed on the origin's walk, and a diagnostic opened on the bank less one row it
-    recorded, so a band's rescore can only read the rest."""
+    """Round 0 closed on the origin's walk, and its session on the bank less one row it recorded,
+    so a band's rescore can only read the rest."""
     cycle, ledger, session = bench.cycle, bench.ledger, bench.session
     origin = cycle.origin_round.origin.individual
     c0_arm = cycle.origin_round.panel[ArmKey(origin.id)]
@@ -2274,21 +2257,9 @@ def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
     recorded_keys = {key for key, _, _ in round_zero.cells.arms[round_zero.election.ended_on]}
     drawn = [s for s in session.bank.samples if s.key in recorded_keys]
     kept = [s for s in session.bank.samples if s.key != drawn[0].key]
-
-    @asynccontextmanager
-    async def _opened(*_: Any, **__: Any) -> AsyncIterator[OpenedDiagnostic]:
-        yield OpenedDiagnostic(
-            campaign=minted_campaign(_PEER_HOP),
-            session=dataclasses.replace(session, bank=Bank.of(kept)),
-            config=cycle.config,
-            framing=cycle.framing,
-        )
-
-    @asynccontextmanager
-    async def _unpaid(**_: Any) -> AsyncIterator[None]:
-        yield
-
-    return _ClosedOrigin(drawn, _opened, _unpaid)
+    return _ClosedOrigin(
+        drawn, dataclasses.replace(session, bank=Bank.of(kept)), cycle.points.job(origin)
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -2540,45 +2511,14 @@ def test_a_host_task_is_filed_at_the_address_its_dispatch_acted_on(
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_second_terminals_pause_stops_noise_floor_and_it_exits_paused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _peer_bench(tmp_path, monkeypatch, offline) as bench:
-        stores = bench.stores
-
-        # noise-floor files no command.
-        async def _rescored(**_: Any) -> NoReturn:
-            await _held_pass(
-                stores, lambda: CommandDispatcher(stores).dispatch(CommandCall(_PEER_PAUSE))
-            )
-            raise AssertionError("a pause left noise-floor running")
-
-        floor_args = argparse.Namespace(
-            verbose=False, campaign=_PEER_HOP.campaign_id, cycle=_PEER_HOP.cycle_id, k=2
-        )
-        with monkeypatch.context() as patched:
-            patched.setattr(noise_floor_cli, "measure_noise_floor", _rescored)
-            patched.setattr(noise_floor_cli, "open_stores", lambda _: stores)
-            patched.setattr(noise_floor_cli, "setup_logging", lambda **_: None)
-            floor = asyncio.run(noise_floor_cli.cmd_noise_floor(floor_args))
-        assert floor.exit_code == StopOutcome.PAUSED.exit_code and floor.data is None, (
-            "a stopped noise-floor let its pause escape, or answered a band"
-        )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_noise_band_stands_beside_the_recorded_level_of_exactly_the_rows_it_rescored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     with _peer_bench(tmp_path, monkeypatch, offline) as bench:
-        stores, ledger = bench.stores, bench.ledger
-        drawn, _opened, _unpaid = _closed_origin(bench)
-        with monkeypatch.context() as patched:
-            patched.setattr(held_out, "open_diagnostic", _opened)
-            patched.setattr(held_out, "paid_pass", _unpaid)
-            band = asyncio.run(
-                held_out.measure_noise_floor(stores=stores, hop=_PEER_HOP, k=RescoreCount(2))
-            )
+        ledger = bench.ledger
+        drawn, session, origin_sp = _closed_origin(bench)
+        with scoped(ledger=ledger):
+            band = asyncio.run(held_out.measure_noise_floor(session, origin_sp, 2))
         assert isinstance(band.reading, NoiseBand) and len(band.reading.raw) == 2
         assert band.reading.recorded.n == len(band.verification.sample_keys) == len(drawn) - 1, (
             "the band stood beside a recorded level over rows it never re-scored (bl3.B2)"
@@ -2593,21 +2533,17 @@ def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     with _peer_bench(tmp_path, monkeypatch, offline) as bench:
-        stores, ledger = bench.stores, bench.ledger
-        _, _opened, _unpaid = _closed_origin(bench)
+        ledger = bench.ledger
+        _, session, origin_sp = _closed_origin(bench)
 
-        async def _outage(*_: object) -> NoReturn:
-            raise DiagnosticError("the rescore measured no cell")
+        async def _outage(*_: object, **__: object) -> NoReturn:
+            raise RuntimeError("the rescore raised")
 
         failed_from = ledger.next_offset
-        with monkeypatch.context() as patched:
-            patched.setattr(held_out, "open_diagnostic", _opened)
-            patched.setattr(held_out, "paid_pass", _unpaid)
-            patched.setattr(held_out, "replicates", _outage)
-            with pytest.raises(DiagnosticError):
-                asyncio.run(
-                    held_out.measure_noise_floor(stores=stores, hop=_PEER_HOP, k=RescoreCount(2))
-                )
+        with monkeypatch.context() as patched, scoped(ledger=ledger):
+            patched.setattr(held_out, "score_search_point", _outage)
+            with pytest.raises(RuntimeError):
+                asyncio.run(held_out.measure_noise_floor(session, origin_sp, 2))
         dashboard = LiveDashboardProjection()
         dashboard.feed(
             RunWiringRecord(
@@ -3244,6 +3180,28 @@ def test_a_cost_terms_tie_breaks_never_pin_p_best_at_a_coin(trailing: _Trailing)
 
 
 @pytest.mark.usefixtures("optimizing_memory")
+def test_an_origin_round_serves_its_lift_over_the_constant_answer_on_the_cells_it_scored(
+    tmp_path: Path, offline: Router
+) -> None:
+    bank = [
+        Sample(id=i, query=f"q{i}", ground_truth="TRUE" if i < 9 else "FALSE") for i in range(12)
+    ]
+    origin = jumping_clock(run_init_round(workspace(tmp_path), offline, bank)).cycle.origin_round
+    floor = origin.health.constant_floor
+    assert floor is not None and (floor.label, floor.floor) == ("TRUE", 0.75), (
+        f"the floor is not the modal truth's share: {floor}"
+    )
+    fitness = origin.results.column(ROW_GRADES["fitness"])
+    truth = {cell.key: cell.facts.ground_truth for cell in origin.results.scoreable}
+    paired = fmean(fitness[key] - (truth[key] == "TRUE") for key in fitness)
+    assert floor.lift.value == pytest.approx(paired), "the lift is not the origin paired per cell"
+    served = RoundHealth.of(0, origin.health).floor
+    assert served is not None and (served.key == "floor_rewards_collapse") is (paired < 0), (
+        "the served verdict disagrees with the floor's side of the origin"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
 def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trailing) -> None:
     # A verifier proves an answer wrong by an unsolved cell, and alike-and-all-solved is NOT
     # collapsed.
@@ -3390,6 +3348,27 @@ def test_a_fatal_row_ends_a_candidate_on_one_sighting_and_an_advisory_never_does
     assert rated.check([fatal[0], *clean[:4]]) is None, "1/5 = 0.2, under the bar"
     rate_cut = rated.check([*fatal, *clean[:2]])
     assert rate_cut is not None and rate_cut.check_result["degraded_rate"] == pytest.approx(0.5)
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_rung_the_endpoint_refuses_reads_refused_on_its_arm_never_broken(
+    tmp_path: Path, offline: Router
+) -> None:
+    said = {"detail": "Unsupported value: 'reasoning_effort' does not support 'high' here."}
+    offline.backend.faults["/matches"] = [httpx.Response(400, json=said) for _ in range(12)]
+    origin = jumping_clock(
+        run_init_round(
+            workspace(tmp_path), offline, samples(12, "TRUE"), optimization={"origin_gate": "off"}
+        )
+    ).cycle.origin_round
+    arm = origin.origin
+    assert isinstance(arm, Cut) and arm.reason == Refused(parameter="reasoning_effort"), (
+        f"a refused rung read {arm.state} {getattr(arm, 'reason', None)}, not REFUSED"
+    )
+    (reading,) = origin.arm_readings()
+    assert (reading.end, reading.refused_parameter) == ("refused", "reasoning_effort"), (
+        "the served arm does not say REFUSED or name the parameter"
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -3540,67 +3519,6 @@ _CLEAN_PANEL: Sequence[float | None] = [1.0] * 9
 _TIED_PANEL: Sequence[float | None] = [1.0, 0.0] + [0.0] * 6 + [1.0]
 
 
-# The resume continues the round `--diag` left open.
-@pytest.mark.usefixtures("optimizing_memory")
-def test_diag_shows_the_round_after_the_one_it_closes_and_a_resume_measures_it(
-    tmp_path: Path, offline: Router
-) -> None:
-    # `--diag` acts on the round it closes, then walks the next through the round loop's own walk
-    # and pauses inside it: banked on the reach that round opened on, open, never measured.
-    diagnosed = workspace(tmp_path / "diag")
-    shutil.copytree(install_datasets_root(), diagnosed.install_datasets_root, dirs_exist_ok=True)
-    declared = campaign_config("potter", 2, bench_trigger="at_end")
-    rows = synthetic_rows(60)
-    (requests := tmp_path / "diag_requests").mkdir()
-    proposer = ByCallIdentity(requests, text_templates(declared), cites=cited_panel(declared))
-    offline.llm = FakeLLM(proposer)
-    offline.backend = FakeBackend(rows)
-    offline.rates = {}
-    stand_in_fetch(diagnosed, rows)
-    shown, ended = asyncio.run(
-        run_campaign(DATASET, declared, stores=diagnosed, budget=Budget(), mode=RunMode(diag=True))
-    )
-    shown_log = CycleEventLog.open(CycleDir(diagnosed.campaigns.cycle_dir(shown.hop)))
-
-    def round_two() -> dict[ArmKey, Any]:
-        return {
-            r.arm: r.state for _, r in shown_log.iter() if isinstance(r, ArmRecord) and r.round == 2
-        }
-
-    opened_on = {
-        r.round: r.opened_on for _, r in shown_log.iter() if isinstance(r, RoundProposedRecord)
-    }
-    shown_arms = round_two()
-    index = diagnosed.campaigns.load(shown.hop, moment=None)
-    assert ended.stop_reason is StopReason.DIAG_COMPLETE
-    assert diagnosed.campaigns.standing_rounds(shown.hop, moment=None).last_closed == 1, (
-        "--diag closed the round it only shows"
-    )
-    assert index is not None and index.interrupted_round == 2, (
-        "--diag left its open round unreported"
-    )
-    assert shown_arms and all(isinstance(state, Proposed) for state in shown_arms.values()), (
-        "--diag measured an arm of the round it only shows"
-    )
-    assert opened_on[2].version > opened_on[1].version, (
-        "the shown round banked the reach the round before it opened on"
-    )
-    # The resume continues that round: it measures the arms `--diag` showed, proposing none.
-    proposed_before = proposer.calls.get("l1_generate", 0)
-    continued, finished = asyncio.run(
-        run_campaign(shown.hop, stores=diagnosed, budget=Budget(), mode=RunMode())
-    )
-    measured = round_two()
-    assert continued.hop == shown.hop and finished.stop_reason is StopReason.ROUNDS_BUDGET
-    assert proposer.calls.get("l1_generate", 0) == proposed_before, (
-        "the resume proposed round 2 again"
-    )
-    # Beside its parent, which every round races again.
-    assert shown_arms.keys() <= measured.keys() and not any(
-        isinstance(state, Proposed) for state in measured.values()
-    ), "the resume left an arm --diag showed unmeasured"
-
-
 def _high_water(comp: float | None, thetas: list[float], se: float) -> HighWater:
     """Round i read thetas[i] on one series; the peak is the FIRST round at the max."""
     origin = thetas[0] if thetas else None
@@ -3699,22 +3617,6 @@ def test_the_l1_only_arm_reaches_no_layer_above_it_over_the_whole_predicate_spac
     assert NextAction.FIRE_L2 in actions(EscalationLadder.FULL), (
         "not vacuous: the full ladder fires"
     )
-    # `--diag` asks the climb with no `bank_and_route` before it: on the L1 arm that composes no layer.
-    diag_asks = {
-        ask_l2_escalation(
-            ladder,
-            best=_high_water(fitness, [], 0.2),
-            escalation_ladder=EscalationLadder.L1,
-            l2_patience=l2_patience,
-            l3_patience=l3_patience,
-            admission=0.85,
-        ).next_action
-        for ladder in (Ladder(), l2_fired(Ladder(), LayerReading(5, 0.5, None, None)))
-        for fitness in (None, 0.5)
-        for l2_patience in (0, 2)
-        for l3_patience in (None, 0, 1)
-    }
-    assert diag_asks == {NextAction.CONTINUE}, "--diag fired a layer the L1 arm cannot reach"
 
 
 # Each stretch climbs the ladder the one before it left.

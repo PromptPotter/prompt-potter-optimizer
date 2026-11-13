@@ -1,6 +1,6 @@
 # Persistence, state and recovery
 
-Work lives in `.promptpotter/`: one campaign per `campaigns/{campaign_id}/`, every cycle (root, forks, diags) flat under its `cycles/`; a campaign is paused, resumed, rewound or forked, never finished.
+Work lives in `.promptpotter/`: one campaign per `campaigns/{campaign_id}/`, every cycle (root, forks) flat under its `cycles/`; a campaign is paused, resumed, rewound or forked, never finished.
 
 ## Four entities on disk
 
@@ -38,7 +38,7 @@ A step's offset is the line index in its course's own ledger. A fork is stored a
 
 - **`compact-archive` is the only verb that can destroy a measurement**; its `purge-cold --apply` is irreversible and `origin`/`parent` answers are never eligible.
 - `reset`, `land-data`, `close-admission` are the data-root verbs — [`../decisions.md`](../decisions.md) § 0011.
-- Nothing the loop decides reads a diagnostic (`seed-screen`, `probe-reasoning`, `noise-floor`). A paid diagnostic or a held-out pass holds a machine slot and an account reservation, refused `409 cycle_busy` / `409 machine_busy` rather than queued.
+- Nothing the loop decides reads the noise floor (`CampaignConfig.origin_replicates`). A held-out pass holds a machine slot and an account reservation, refused `409 cycle_busy` / `409 machine_busy` rather than queued.
 
 ## Layout
 
@@ -53,7 +53,7 @@ projects/{tenant_id}/
   drafts/{draft_id}/                  # an open check-in, until Start or Discard
   campaigns/{campaign_id}/
     campaign.json  log.md
-    cycles/{cycle_id}/                # root + forks + diags, ALL FLAT
+    cycles/{cycle_id}/                # root + forks, ALL FLAT
       dashboard.json  index.json  export.json  optimized.md
       log.md  review.md  readout.log
       rounds/round_NNNN.json
@@ -121,7 +121,7 @@ Until an L1 round closes, a resume re-enters round 0 and asks the origin gate ag
 
 A fork is a new cycle whose first record names its parent, the offset and the rounds it LIFTS (`0` = clean offshoot). Nothing is copied: the parent's prefix is walked. A fork inherits no standing budget (its money is the campaign ceiling).
 
-**A cut has a DIRECTION**: a diag or steered fork is an `offshoot`; `scoring_divergence`, `operator_rewind` and an L2/L3 rebase **supersede**, retiring the parent at the cut unless a producer holds it; a correction's measured answer is the only source of `equivalent` ([`../../promptpotter/infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree). **Every resume first repairs** cells recorded without a measurement, on a branch cut first and graded second so the parent stays byte-identical; a hole is plugged with a real measurement, never an archive row.
+**A cut has a DIRECTION**: a steered fork is an `offshoot`; `scoring_divergence`, `operator_rewind` and an L2/L3 rebase **supersede**, retiring the parent at the cut unless a producer holds it; a correction's measured answer is the only source of `equivalent` ([`../../promptpotter/infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree). **Every resume first repairs** cells recorded without a measurement, on a branch cut first and graded second so the parent stays byte-identical; a hole is plugged with a real measurement, never an archive row.
 
 ### Human in the loop
 

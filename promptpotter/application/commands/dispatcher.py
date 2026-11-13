@@ -35,6 +35,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject, decode_cycle_path
 from promptpotter.domain.run_records import LaunchAnswer, NoEffect
+from promptpotter.infrastructure.producer_lock import this_producer
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import (
     Stores,
@@ -63,6 +64,8 @@ class RejectedError(Exception):
 
 
 _HANDLER_PACKAGE = "promptpotter.application.commands"
+# A retry polls: the first call's end may land from another process, which no signal carries.
+_ACTING_POLL_S = 0.25
 # The longest key a door accepts; each declares it on its own wire (a header, a tool's schema).
 MAX_IDEMPOTENCY_KEY_CHARS = 256
 
@@ -366,8 +369,7 @@ class CommandDispatcher:
         recorded = await asyncio.to_thread(filed_as.recorded)
         if subject is not None and not call.payload.unmatched:
             # Before any check of its target: the first act may have minted or deleted it.
-            book = await asyncio.to_thread(self.stores.commands.book)
-            found = book.keyed(subject, kind, recorded[1], call.idempotency_key)
+            found = await self._settled(subject, kind, recorded[1], call.idempotency_key)
             if found is not None:
                 record, end = found
                 accepted = CommandAcceptedBody(command_id=record.command_id, subject=subject)
@@ -384,6 +386,20 @@ class CommandDispatcher:
             case _:
                 applier = await self._applier(Dispatched(self, call.payload, call.command_id))
                 return self._filed(WORKSPACE_SUBJECT, call, applier, recorded)
+
+    async def _settled(
+        self, subject: str, kind: CommandKind, act_digest: str, idempotency_key: str
+    ) -> tuple[CommandRecord, CommandAckRecord] | None:
+        """The act a retry under *idempotency_key* answers, once a first call still acting on it
+        ended: a key acts once."""
+        while True:
+            book = await asyncio.to_thread(self.stores.commands.book)
+            found = book.keyed(subject, kind, act_digest, idempotency_key)
+            if found is None:
+                return None
+            if (end := found[1]) is not None:
+                return found[0], end
+            await asyncio.sleep(_ACTING_POLL_S)
 
     async def _replayed(
         self, payload: CommandPayload, accepted: CommandAcceptedBody, end: CommandAckRecord
@@ -499,6 +515,7 @@ class CommandDispatcher:
                 act_digest=act_digest,
                 issued_by=acting_principal(self.stores.identity),
                 subject=subject,
+                filer=this_producer(self.stores.jobs_dir),
             )
         )
         accepted = CommandAcceptedBody(command_id=call.command_id, subject=subject)

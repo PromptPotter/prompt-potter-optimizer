@@ -232,7 +232,7 @@ def build_stores(
         grant=GrantStore(account),
         api_keys=TenantApiKeyStore(account),
         charges=ChargeBook(account),
-        commands=CommandLog(account),
+        commands=CommandLog(account, paths.jobs_dir(shared)),
     )
 
 

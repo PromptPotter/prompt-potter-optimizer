@@ -1479,7 +1479,7 @@ async def _adapt_beside_overlap(
 async def walk_round(
     cycle: Cycle, round_num: int, ledger: CycleEventLog
 ) -> tuple[RoundContext, list[Sample], Panel, Proposals]:
-    """A round's open through its banked walk: a measured round's prefix, and all `--diag` shows."""
+    """A round's open through its banked walk: a measured round's prefix."""
     # The search split alone: a bench or demo row a round could draw would elect on held-out rows.
     pool = list(cycle.session.state.scoring.partition.search)
     ctx = RoundContext(cycle=cycle, round_num=round_num, ledger=ledger)

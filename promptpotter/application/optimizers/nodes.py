@@ -766,10 +766,6 @@ class Controller(NodeMember, Protocol):
 
     async def act(self, ctx: NodeContext, cause: str) -> None: ...
 
-    async def diagnose(self, ctx: NodeContext) -> None:
-        """``--diag``: act on the round just closed; the bench then shows the next round unmeasured."""
-        ...
-
 
 @runtime_checkable
 class Reviewer(NodeMember, Protocol):

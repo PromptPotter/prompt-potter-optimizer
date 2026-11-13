@@ -122,8 +122,7 @@ from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.judges import call as judge_call
 from promptpotter.application.scoring.judges.registry import build_evaluators
-from promptpotter.application.scoring.passes import grade_line_bench, measure_noise_floor
-from promptpotter.application.scoring.probe_reasoning import probe_reasoning
+from promptpotter.application.scoring.passes import grade_line_bench
 from promptpotter.application.scoring.sample_measurement import (
     cell_billing,
     emit_replayed_step_tokens,
@@ -135,7 +134,6 @@ from promptpotter.application.scoring.search_point_scorer import (
     replayable_on,
     score_search_point,
 )
-from promptpotter.application.scoring.seed_screen import screen_inner_seeds
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
@@ -188,7 +186,7 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
-from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
+from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS, NodeCall, PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     PipelineNode,
@@ -240,7 +238,6 @@ from promptpotter.domain.spend import (
     TokenUsageKind,
 )
 from promptpotter.domain.validators import StopSignal
-from promptpotter.domain.verification import RescoreCount
 from promptpotter.infrastructure import holders
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.identity.default_claim import is_host
@@ -1033,7 +1030,7 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
         step_rounds=2,
     )
     hop = CycleHop(campaign_id="ds__000001", cycle_id="cycle_root")
-    mode = RunMode(from_round=2, diag=True)
+    mode = RunMode(from_round=2)
     launched_config = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
     held_job = spawned.get(held.job_id)
     assert held_job is not None
@@ -1353,7 +1350,10 @@ async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
     query = seat.id
     pin = PinnedCell(cell=seat, instrument="i").pin()
     cell = Sample(id=0, query=query, ground_truth=None, source_pin=pin)
-    with scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning):
+    with (
+        scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
+        telemetry.at_round(0),
+    ):
         # The connector DECLARES the seconds, the scoring seam enforces them, as in `measure_sample`.
         envelope = CellEnvelope(spawn.inner_cell_envelope_s(cell, {}), attempts=1, label=query)
         with pytest.raises(CellUnscoreableError):
@@ -2931,6 +2931,34 @@ def test_a_relays_422_on_an_answer_that_failed_validation_may_have_billed() -> N
     assert not replied(422, headers=None, said="").may_have_billed, "a plain 422 read as billed"
 
 
+def test_one_read_of_a_refusal_names_its_category_and_its_parameter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read: list[str] = []
+
+    class _Counted:
+        def __init__(self, key: str) -> None:
+            self.key = key
+
+        def search(self, said: str) -> bool:
+            read.append(self.key)
+            return self.key in said
+
+    monkeypatch.setattr(
+        "promptpotter.infrastructure.llm.spend_book._NAMED_PARAMETER",
+        {k: _Counted(k) for k in sorted(PARAM_SCOPE_KEYS)},
+    )
+    said = '{"error": "reasoning_effort: unsupported value"}'
+    outcome = replied(400, headers=None, said=said)
+    assert (outcome.failure, outcome.refused_parameter) == (
+        ErrorCategory.PARAMETER_REFUSED,
+        "reasoning_effort",
+    ), "a refusal lost its category or the parameter it names"
+    assert read.count("reasoning_effort") == 1, "the refusal's words were read more than once"
+    plain = replied(400, headers=None, said="bad request")
+    assert (plain.failure, plain.refused_parameter) == (ErrorCategory.CLIENT, None)
+
+
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -3359,21 +3387,6 @@ async def _paid_door(door: str, stores: Any) -> None:
                 keyed_client("openrouter")
         case "bench":
             await grade_line_bench(stores=stores, hop=_HELD_HOP, acting="bench")
-        case "noise-floor":
-            await measure_noise_floor(stores=stores, hop=_HELD_HOP, k=RescoreCount(2))
-        case "seed-screen":
-            write_yaml(
-                stores.tenant_datasets.dataset_dir("d") / DEFINITION_FILE,
-                {
-                    "pipeline": {"backend_type": "termnorm"},
-                    "campaign": {"optimization": {"degradation_threshold": 0.4}},
-                },
-            )
-            await screen_inner_seeds(
-                stores=stores, identity=stores.identity, dataset_name="d", seeds=[1], n_samples=1
-            )
-        case "probe-reasoning":
-            await probe_reasoning("openai/gpt-4o", stores=stores)
 
 
 _SPENT_THE_COUPON = {
@@ -3539,7 +3552,7 @@ def _doors() -> tuple[tuple[Any, ...], ...]:
                 HostAllowanceExhaustedError,
                 None,
             )
-            for door in ("turn", "bench", "noise-floor", "seed-screen", "probe-reasoning")
+            for door in ("turn", "bench")
         ),
     )
     return rows
@@ -3615,7 +3628,11 @@ def test_a_cycle_retaken_after_a_killed_bench_pass_closes_its_dead_bracket(
 
     async def _retaken() -> bool:
         async with paid_pass(
-            stores=killed, verb="bench", hop=_HELD_HOP, declared=Budget(), sends=_CELLS
+            stores=killed,
+            pass_kind=MeasurementRole.BENCH,
+            hop=_HELD_HOP,
+            declared=Budget(),
+            sends=_CELLS,
         ):
             return line_run(killed, _HELD_HOP).pass_open
 
@@ -3919,7 +3936,11 @@ def test_a_paid_verb_never_bills_a_cycle_its_producer_still_holds(tmp_path: Path
 
     async def bill_held() -> None:
         async with paid_pass(
-            stores=held_stores, verb="bench", hop=_HELD_HOP, declared=Budget(), sends=_CELLS
+            stores=held_stores,
+            pass_kind=MeasurementRole.BENCH,
+            hop=_HELD_HOP,
+            declared=Budget(),
+            sends=_CELLS,
         ):
             pass
 
@@ -3978,7 +3999,11 @@ def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside
 
     async def pass_beside() -> None:
         async with paid_pass(
-            stores=passing, verb="verify", hop=None, declared=Budget(), sends=_CELLS
+            stores=passing,
+            pass_kind=MeasurementRole.VERIFY,
+            hop=None,
+            declared=Budget(),
+            sends=_CELLS,
         ) as pass_book:
             assert pass_book.reserve.usd == pytest.approx(1.0), (
                 "a pass declared nothing and did not hold the coupon's headroom"
@@ -4758,7 +4783,11 @@ def test_a_delete_torn_at_its_tree_commits_at_its_tombstone_and_admits_nothing_a
     # reaches a sum, and no job of it holds a slot.
     async def bench_pass() -> None:
         async with paid_pass(
-            stores=stores, verb="bench", hop=root_hop, declared=Budget(usd=1.0), sends=()
+            stores=stores,
+            pass_kind=MeasurementRole.BENCH,
+            hop=root_hop,
+            declared=Budget(usd=1.0),
+            sends=(),
         ):
             raise AssertionError("a pass on a deleted campaign was admitted")
 

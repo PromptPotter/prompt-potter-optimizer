@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 class ErrorCategory(enum.StrEnum):
     CLIENT = "CLIENT"
+    # A 4xx naming a request parameter: the arm that sent its value is REFUSED, never broken.
+    PARAMETER_REFUSED = "PARAMETER_REFUSED"
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
     # Refusals no retry clears: a hole, like CONNECTION, since every later cell meets the same one.

@@ -48,7 +48,6 @@ class StopReason(enum.StrEnum):
     # The optimizer's own word; ``CONVERGED`` is the bench's reading of the standing.
     OPTIMIZER_EXHAUSTED = "optimizer_exhausted"
     HARD_CAP = "hard_cap_reached"
-    DIAG_COMPLETE = "diag_complete"
     TARGET_HIT = "target_hit"
     SPEND_BUDGET = "spend_budget"
     TOKEN_BUDGET = "token_budget"
@@ -77,6 +76,7 @@ class WalkEnd(enum.StrEnum):
     STOP_RULE = "stop_rule"
     BUDGET = "budget"
     CLIENT_ERROR = "client_error"
+    PARAMETER_REFUSED = "parameter_refused"
     PIPELINE_ERROR = "pipeline_error"
     CONSECUTIVE_ERRORS = "consecutive_errors"
 
@@ -546,17 +546,6 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
         StopReason.HARD_CAP: StopReasonInfo(
             "Arm cap", StopOutcome.SUCCESS, StopCategory.LIMIT, False, False, "", True, ()
         ),
-        StopReason.DIAG_COMPLETE: StopReasonInfo(
-            "Diagnostic complete",
-            StopOutcome.SUCCESS,
-            StopCategory.SEARCH,
-            True,
-            False,
-            "The next round's arms are proposed and paused unmeasured; resuming measures exactly "
-            "these arms.",
-            True,
-            (NextAct("start-run"),),
-        ),
         StopReason.CONVERGED: StopReasonInfo(
             "Converged", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ()
         ),
@@ -840,6 +829,7 @@ class ErrorCategoryInfo(NamedTuple):
 
 ERROR_CATEGORY_INFO: Annotated[dict[ErrorCategory, ErrorCategoryInfo], shapes_optimizer_prompt] = {
     ErrorCategory.CLIENT: ErrorCategoryInfo(True, None),
+    ErrorCategory.PARAMETER_REFUSED: ErrorCategoryInfo(True, None),
     ErrorCategory.SERVER: ErrorCategoryInfo(False, None),
     ErrorCategory.CONNECTION: ErrorCategoryInfo(False, StopReason.BACKEND_UNREACHABLE),
     ErrorCategory.PROVIDER_CREDIT: ErrorCategoryInfo(False, StopReason.PROVIDER_CREDIT),

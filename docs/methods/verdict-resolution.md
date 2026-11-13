@@ -164,7 +164,7 @@ optimizer climbs). Where the second does not exceed the first, optimization fail
 unusable instrument reads as a stalled optimizer. Hence screening. The origin-*score* bar is
 [`../research/benchmarks.md`](../research/benchmarks.md) § The admission bar's.
 
-*Within* → the `noise-floor` verb, only where a repeat is a real second call (above the sample level
+*Within* → the noise floor (`origin_replicates`), only where a repeat is a real second call (above the sample level
 a re-ask replays the content-addressed caches, which is why the L4 panel carries no within-cell term).
 *Between* → `aₛ`. **Screen a whole dataset before wiring it, then pick the subset inside one** — the
 hard-sample leaderboard, `pick_value` below.

@@ -9,7 +9,6 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_for
 from promptpotter.application.initialization.scoring_scope import session_scope
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
-from promptpotter.application.optimizers.nodes import Controller
 from promptpotter.application.run_observers import RunObservers, declare_run_stop
 from promptpotter.application.runner.bench import (
     bank_campaign_result,
@@ -52,7 +51,6 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.results import CycleResult
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
-    ComparisonExit,
     ConfigOverrides,
     CycleFinal,
     CycleSeed,
@@ -65,7 +63,6 @@ from promptpotter.infrastructure.llm.spend_book import SpendBook, require_spend_
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.run_scope import scoped
 
 logger = logging.getLogger(__name__)
@@ -140,7 +137,6 @@ def close_cycle(
     cycle_error: ErrorRecord | None,
     open_round: int | None,
     config: CampaignConfig,
-    diag: bool,
     pause_cause: PauseCause,
     rebasing: bool,
 ) -> CycleResult:
@@ -173,7 +169,6 @@ def close_cycle(
             cycle_result,
             config=config,
             selected=selected,
-            diag=diag,
             open_round=open_round,
             pause_cause=pause_cause,
             rebasing=rebasing,
@@ -190,7 +185,6 @@ def _finalize_run(
     *,
     config: CampaignConfig,
     selected: SelectedOptimizer,
-    diag: bool,
     open_round: int | None,
     pause_cause: PauseCause,
     rebasing: bool,
@@ -241,7 +235,6 @@ def _finalize_run(
                     else origin.composite.value
                 ),
                 scorer_id=session.state.scoring.scorer.id,
-                mode="diag" if diag else "full",
                 result_round=cycle_result.result_round,
                 result_prompt_fields=cycle_result.result_prompt_fields,
                 result_pipeline_params=cycle_result.result_pipeline_params,
@@ -270,7 +263,6 @@ async def _run_single_cycle(
     session: Session,
     observers: RunObservers,
     mode: RunMode,
-    diagnosing: Controller | None,
     step_rounds: int | None,
 ) -> _CycleOutcome:
     dataset, campaign_config = prep.dataset, prep.campaign_config
@@ -299,14 +291,8 @@ async def _run_single_cycle(
         declare_round_allowance(session, step_rounds)
         book = require_spend_book("the bench's set-aside")
         ended = await open_origin_round(
-            cycle,
-            dataset,
-            observers.ledger,
-            spend=observers.dashboard.live.state.spend,
-            diagnosing=diagnosing is not None,
-        ) or await run_round_loop(
-            cycle, campaign_config, session, observers.ledger, diagnosing=diagnosing
-        )
+            cycle, dataset, observers.ledger, spend=observers.dashboard.live.state.spend
+        ) or await run_round_loop(cycle, campaign_config, session, observers.ledger)
         stop_reason, cycle_error, fork, open_round, cancel_exc, stepped = ended
         if stepped:
             pause_cause = PauseCause.STEP
@@ -347,7 +333,6 @@ async def _run_single_cycle(
         cycle_error=cycle_error,
         open_round=open_round,
         config=campaign_config,
-        diag=diagnosing is not None,
         pause_cause=PauseCause.CANCELLED if cancel_exc is not None else pause_cause,
         rebasing=rebasing,
     )
@@ -419,7 +404,6 @@ async def _run_line(
     session: Session,
     observers: RunObservers,
     mode: RunMode,
-    diagnosing: Controller | None,
     step_rounds: int | None,
 ) -> _CycleOutcome:
     while True:
@@ -428,7 +412,6 @@ async def _run_line(
             session=session,
             observers=observers,
             mode=mode,
-            diagnosing=diagnosing,
             step_rounds=step_rounds,
         )
         if outcome.fork is None:
@@ -475,15 +458,6 @@ async def run_optimization(
             ),
             session_scope(session),
         ):
-            diagnosing = optimizer.plan.controller if mode.diag else None
-            if mode.diag and diagnosing is None:
-                raise PayloadInvalidError(
-                    f"--diag shows what an optimizer's controller does at a round boundary, and "
-                    f"{optimizer.name} declares no controller node"
-                )
-            if diagnosing is not None:
-                # Its rounds are unmeasured: an arm leaves its comparison at every door.
-                session.store.campaigns.leave_comparison(session.hop, ComparisonExit.DIAG)
             try:
                 prep = await open_launch(
                     dataset, cycle, session=session, observers=observers, budget=budget
@@ -500,7 +474,6 @@ async def run_optimization(
                         cycle_error=cycle_error,
                         open_round=None,
                         config=campaign_config,
-                        diag=diagnosing is not None,
                         pause_cause=PauseCause.INTERRUPT,
                         rebasing=False,
                     ),
@@ -528,7 +501,6 @@ async def run_optimization(
                     session=session,
                     observers=observers,
                     mode=mode,
-                    diagnosing=diagnosing,
                     step_rounds=budget.step_rounds,
                 )
             if outcome.cancelled is not None:

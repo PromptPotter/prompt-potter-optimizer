@@ -7,7 +7,7 @@ The measurement roster, the admission bar and the order of use are [`../research
 A focus dataset for L1 optimizer prompt evolution:
 
 1. **Origin in band** — the band, and how far to trust it, is [`../research/benchmarks.md`](../research/benchmarks.md) § The admission bar's.
-1b. **Origin clears its CONSTANT-ANSWER floor** — a stub emitting the commonest label, read off the `answer_distribution` panel.
+1b. **Origin clears its CONSTANT-ANSWER floor** — a stub emitting the commonest label, which every origin round serves paired against the origin on its cells (`RoundHealth.floor`, `warn` where the floor is above).
 2. **Reachable ceiling** of 50–75% under strong prompt engineering.
 3. **N ≥ 400, preferably 800+**; smaller N needs per-subtask stratification.
 4. **Multiple distinct subtask categories** — each an independent L1 lever.
@@ -15,7 +15,7 @@ A focus dataset for L1 optimizer prompt evolution:
 6. **No mode-collapse on one gold class** — a modal answer over 40% of gold inflates the origin; stratify by `prop` / `category` / `subtask` first.
 7. **HF-loadable.** 8. **Contamination-resistant** — 2024+ or synthetic. 9. **Anchored by measurement** — a 25-sample recon on `gpt-oss-20b @ low` is the verdict.
 
-Toy and demo datasets are picked on deliberation length: prefer one-pass tasks; read `reasoning_tokens` against `output_tokens` in `dashboard.json::spend.by_kind.backend` on the first round. The pin holds because these datasets leave `model` out of `optimizer.param_keys`; `provider` cannot be opened (`PARAM_FORBIDDEN_KEYS`). **A verdict is an ENVIRONMENT's** — the dataset under the solver named. The L4 pool screens a second solver, `meta-llama/llama-3.1-8b-instruct:nitro`, seated only through `seed-screen <dataset> --model <solver> --provider openrouter`.
+Toy and demo datasets are picked on deliberation length: prefer one-pass tasks; read `reasoning_tokens` against `output_tokens` in `dashboard.json::spend.by_kind.backend` on the first round. The pin holds because these datasets leave `model` out of `optimizer.param_keys`; `provider` cannot be opened (`PARAM_FORBIDDEN_KEYS`). **A verdict is an ENVIRONMENT's** — the dataset under the solver named. The L4 pool screens a second solver, `meta-llama/llama-3.1-8b-instruct:nitro`, seated only through a list campaign whose arm names that solver.
 
 ### Rejected without trial
 
@@ -37,7 +37,7 @@ A containerized agent episode costs 14–48× an `llm_only` call. Latency surviv
 - **The default for a new dataset** is `openai/gpt-oss-20b:nitro` via OpenRouter with no `reasoning_effort`.
 - **"Model floor" is a rung the MODEL decides.** An unset `reasoning_effort` resolves to the lowest rung the running model offers (`low` on `openai/gpt-oss-*`, which refuses `none`); a rung spelled in the file is a pin and follows no model a campaign swaps in.
 - **What a dataset DECLARES is not what the axis SEARCHES** — `PipelineSchema.param_options` replaces the declared values with the model's own answer, a campaign narrowing intersects ([`../../promptpotter/infrastructure/llm/CLAUDE.md`](../../promptpotter/infrastructure/llm/CLAUDE.md) § LLM client).
-- **What each endpoint refuses is `registry._MODEL_PROFILES`**, a row earned with `probe-reasoning <model>`; re-probe rather than trust a remembered reading. An indistinct ladder is served as a caveat, never narrowed.
+- **What each endpoint refuses is `registry._MODEL_PROFILES`**, a row earned by a round whose arms differ in `reasoning_effort` (a rung the endpoint refuses reads REFUSED on its arm); re-measure rather than trust a remembered reading. An indistinct ladder is served as a caveat, never narrowed.
 - **Groq caps output per model** (~2048 tokens on `gpt-oss-20b`) and charges reasoning against it: `medium` on a hard puzzle exhausts it before any content (`llm_only:reasoning_budget_exhausted`), and the retry trips the same trap.
 
 ### Reading a model A/B

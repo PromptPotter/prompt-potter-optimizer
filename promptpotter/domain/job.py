@@ -17,6 +17,7 @@ from promptpotter.domain.phases import (
     stop_reason_outcome,
 )
 from promptpotter.domain.refusal import Refusal
+from promptpotter.shared.measurement_context import MeasurementRole
 
 # The slot is held before the mint resolves the cycle it will name; its LAND fills it in.
 UNRESOLVED_HOP = CycleHop(campaign_id="", cycle_id="")
@@ -41,17 +42,14 @@ class CampaignLaunch:
     kind: Literal["campaign_launch"] = "campaign_launch"
 
 
-# Every paid verb that scores outside a run; each is its own rate bucket.
-ScoringVerb = Literal["bench", "noise-floor", "probe-reasoning", "seed-screen", "verify"]
-
-
 @dataclass(frozen=True)
 class ScoringPass:
-    """A paid verb scoring outside any run: its hop is the cycle it scores, or none at all."""
+    """A paid pass scoring outside any run: its hop is the cycle it scores, or none at all."""
 
     __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
-    verb: ScoringVerb
+    # Each kind is its own rate bucket.
+    pass_kind: MeasurementRole
     kind: Literal["scoring_pass"] = "scoring_pass"
 
 
@@ -196,8 +194,8 @@ class Job:
         match self.holder:
             case CampaignLaunch(dataset_name=dataset):
                 return where if resolved else f"a new campaign on {dataset}"
-            case ScoringPass(verb=verb):
-                return f"{verb} on {where if resolved else 'the workspace'}"
+            case ScoringPass(pass_kind=pass_kind):
+                return f"{pass_kind} on {where if resolved else 'the workspace'}"
             case EmbeddedRun(dataset_name=dataset):
                 return f"an embedded run on {where if resolved else dataset}"
             case InnerRun(dataset_name=dataset):

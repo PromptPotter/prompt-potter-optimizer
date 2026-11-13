@@ -19,7 +19,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
 from promptpotter.domain.hierarchy import ListingLifecycle
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.verification import RescoreCount, VerifyStrategy, rescore_count
+from promptpotter.domain.verification import VerifyStrategy
 from promptpotter.presentation.cli.parsers import (
     ACTIVE_CAMPAIGN,
     ACTIVE_CYCLE,
@@ -33,13 +33,6 @@ from promptpotter.presentation.cli.parsers import (
 # The grammar `new.py::_set_body` walks: a `--set`, and each knob of an `--arm` after its optimizer.
 SET_GRAMMAR = "PATH=VALUE"
 ARM_GRAMMAR = f"KEY=OPTIMIZER[,{SET_GRAMMAR}…]"
-
-
-def _rescore_count_arg(raw: str) -> RescoreCount:
-    try:
-        return rescore_count(raw)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _read_verb(
@@ -138,16 +131,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "`--set column_query=input` or `--set config.scoring.matcher=exact`, applied "
                 "before the resolver runs.",
             ),
-            Arg(
-                "--diag",
-                dest="diag",
-                action="store_true",
-                help="Diagnostic mode: origin → 1 full scored round → force "
-                "task-framing refinement (regardless of stall) → round 2 proposed as the "
-                "round loop proposes it, its arm gate included (`review` and `author` wait "
-                "on the operator), then paused unmeasured; `resume` measures exactly these "
-                "arms. index.json::final.mode lands as 'diag'.",
-            ),
             NO_WAIT,
             *BUDGET_AXES,
         ),
@@ -191,7 +174,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "resume",
         "resume_command:cmd_resume",
         unspelled={
-            "mode": "`--diag`, `--no-check` and `--fork-on-divergence` compose it",
+            "mode": "`--no-check` and `--fork-on-divergence` compose it",
             "round": "`--rewind ROUND`",
             "reason": "`--rewind-reason`",
             "keep_rounds": "`--rewind` keeps them, `--steer` does not",
@@ -199,7 +182,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             "candidate_id": "a terminal fork starts from a round's line, never a named candidate",
         },
         help="Continue the active campaign. Bare `resume` picks up where it "
-        "left off; flags handle rewind / divergence / diagnostic modes.",
+        "left off; flags handle rewind and divergence.",
         args=(
             Arg(
                 "--campaign",
@@ -233,13 +216,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 action="store_true",
                 help="On divergence, mint a sibling cycle (with parent_cycle_id) "
                 "and re-run the divergent round under the current scorer.",
-            ),
-            Arg(
-                "--diag",
-                dest="diag",
-                action="store_true",
-                help="Diagnostic mode (see `new --diag`). On a previously-completed "
-                "diag cycle, branches off a counted sibling.",
             ),
             Arg(
                 "--rewind",
@@ -519,68 +495,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             ),
         ),
     ),
-    Verb(
-        "seed-screen",
-        "seed_screen:cmd_seed_screen",
-        terminal_only="a debug diagnostic of a seed bank, outside every campaign",
-        help="Debug diagnostic (NOT a loop feature): score each candidate seed's bank "
-        "with the dataset origin and report its constant-answer floor, its reasoning "
-        "margin (origin - floor) and the disqualifier — a bank whose floor EXCEEDS "
-        "its origin pays a candidate for collapsing to one label. Real spend: "
-        "--n-samples target calls per seed, no optimizer calls. Never invoked by "
-        "the loop itself.",
-        args=(
-            Arg(
-                "dataset",
-                help="ANY dataset whose seeded bank draws are being screened (e.g. 'justlogic/d234'). "
-                "Not an L4-only verb: it resolves that dataset's own definition and origin, so a "
-                "screen needs no inner loop and no self-optimizing campaign.",
-            ),
-            Arg(
-                "--seeds",
-                dest="seeds",
-                type=int,
-                nargs="+",
-                required=True,
-                help="Candidate seed indices to measure (e.g. --seeds 0 1 2 3 4 5).",
-            ),
-            Arg(
-                "--n-samples",
-                dest="n_samples",
-                type=int,
-                default=40,
-                help="Rows per bank (default 40) — match the panel's `n_samples_origin`, or the "
-                "screen measures a bank nobody will run.",
-            ),
-            Arg(
-                "--repeat",
-                dest="repeat",
-                type=int,
-                default=3,
-                help="Independent origin passes per bank (default 3). They run fresh — "
-                "the archive is content-addressed, so replays would report a spread of exactly zero. "
-                "NOT 1: the verdict compares an exact floor against an origin carrying ~0.08 SE at 40 "
-                "rows, so one pass cannot settle a bank near its line. Costs repeat x --n-samples "
-                "calls; raise it further for any bank reported UNSETTLED.",
-            ),
-            Arg(
-                "--model",
-                dest="model",
-                default=None,
-                help="Pin the solver over the dataset's own declared model, the way an L4 pool "
-                "environment pins it (`panel.inner_model`): the screen then answers for "
-                "the (dataset, solver) pair a pool cell would run, with the dataset's effort, output "
-                "cap and temperature kept. Absent: the dataset's declared model.",
-            ),
-            Arg(
-                "--provider",
-                dest="provider",
-                default=None,
-                help="The gateway --model is asked through (`panel.inner_provider`). "
-                "Needs --model.",
-            ),
-        ),
-    ),
     _read_verb(
         "price-head-to-head",
         ReadKind.HEAD_TO_HEAD_PRICE,
@@ -595,57 +509,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 type=Path,
                 help="A head-to-head plan (YAML, `HeadToHeadPlan`), e.g. "
                 "paper/plans/comparability.yaml.",
-            ),
-        ),
-    ),
-    Verb(
-        "noise-floor",
-        "noise_floor:cmd_noise_floor",
-        terminal_only="a debug diagnostic re-scoring a cached origin, outside the loop",
-        help="Debug diagnostic (NOT a loop feature): re-score a campaign's cached "
-        "origin --k times fresh and report the mean+CI spread — the "
-        "backend's own run-to-run noise. On a pp-self cycle this measures the "
-        "true inner-recursion noise floor. kx real spend; does not mutate the "
-        "source cycle and is never invoked by the loop itself.",
-        args=(
-            Arg(
-                "campaign",
-                help="Campaign id, 6-hex suffix, or unambiguous prefix "
-                "(e.g. 'promptpotter-self__ca6d4d' or 'ca6d4d').",
-            ),
-            Arg(
-                "--cycle",
-                dest="cycle",
-                default=None,
-                help="Cycle id (full or prefix) when the campaign has more than one cycle. "
-                "Omit when the campaign has exactly one cycle.",
-            ),
-            Arg(
-                "--k",
-                dest="k",
-                type=_rescore_count_arg,
-                default=rescore_count(3),
-                help="Number of fresh re-scores of the cached origin (default 3, at least 2). "
-                "kx real spend — on a pp-self cycle each re-score re-runs the full inner "
-                "recursion, so keep k small.",
-            ),
-        ),
-    ),
-    Verb(
-        "probe-reasoning",
-        "probe_reasoning:cmd_probe_reasoning",
-        terminal_only="its reading fills a code table, which only a checkout edits",
-        help="Debug diagnostic (NOT a loop feature): ask ONE model which reasoning rungs it "
-        "honours and print the `registry._MODEL_PROFILES` row the readings support. A "
-        "catalogue publishes that `reasoning_effort` EXISTS and never which values it takes, "
-        "so this is the only way that table gets filled. ~6 cheap calls of real spend; writes "
-        "nothing but its bills, and the loop never invokes it.",
-        args=(
-            Arg("model", help="Model id, e.g. openai/gpt-oss-20b (a :nitro suffix is fine)"),
-            Arg(
-                "--provider",
-                default="openrouter",
-                help="Which gateway answers (default: openrouter).",
             ),
         ),
     ),

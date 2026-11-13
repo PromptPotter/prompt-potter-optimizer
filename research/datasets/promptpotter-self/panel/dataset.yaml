@@ -42,8 +42,7 @@ panel:
         config:
           n_variants: 3
     inner_optimizer_temperature: 0.0
-  # A seed picks WHICH 40 rows a cell draws (`application/scoring/seed_screen.py::draw_bank`, the ONE
-  # spelling — the runner imports it, so a screened bank and a run bank cannot diverge).
+  # A seed picks WHICH 40 rows a cell draws (`runner/inner/spawn.py::_open_seat`, the ONE spelling).
   #
   # The panel spans THREE benchmarks, two seats each, so an edit that helps one task family and
   # hurts another reads as the mixture it is. Each inner campaign reads its own benchmark's δ
@@ -67,17 +66,16 @@ panel:
   # THE LESSON THAT COST THE MOST: the floor is EXACT, the origin is MEASURED at ~0.08 SE per
   # 40-row pass, and only the measured side decides. Compare banks on the GAP (`reasoning_margin`),
   # never on floor or accuracy alone, and treat a thin positive margin as disqualifying. The
-  # thin-margin rule is written here and nowhere in code: `seed_screen.py` disqualifies only
-  # `class_floor > origin`.
+  # thin-margin rule is written here and nowhere in code: an origin round's collapse verdict reads
+  # only floor > origin.
   #
-  # SEATED, each on its `seed-screen` line (margin = origin - constant-answer floor):
+  # SEATED, each on its 2026-11-11 screen (margin = origin - constant-answer floor):
   #   justlogic/d234 seed-20 — origin 0.610, floor 0.350, margin +0.260 +/-0.023, 5 passes.
   #   justlogic/d234 seed-3  — margin +0.150 +/-0.018, 5 passes.
   #   hotpotqa-distractor seed-1 — origin 0.500, floor 0.025, margin +0.475 +/-0.000, 3 passes.
   #   hotpotqa-distractor seed-0 — origin 0.500, floor 0.100, margin +0.400 +/-0.014, 3 passes.
   #   legalbench-fods seed-0 — origin 0.525, floor 0.250, margin +0.275 +/-0.000, 3 passes.
   #   legalbench-fods seed-1 — origin 0.392, floor 0.200, margin +0.192 +/-0.017, 3 passes.
-  # The 2026-11-11 records are `diagnostics/seed-screen-{dataset}-2026-11-11.json` in the account.
   #
   # Each task is its own sample's content address (`runner/inner/spawn.py::_extract_experiment`),
   # so a swapped or edited seat voids only its own banked cells; every other seat replays.

@@ -35,7 +35,7 @@ async def cancel(dispatched: Dispatched[CancelPayload]) -> Applier[object]:
         if jobs is not None:
             for act in await asyncio.to_thread(launch_cancels, jobs, stores):
                 await dispatcher.dispatch(act)
-        elif owned.end is None and kind not in _PASS_KINDS:
+        elif owned.status == "filed" and kind not in _PASS_KINDS:
             raise TaskUncancellableError(f"{kind} acts to its end; ask again once it ends")
         elif owned.end is not None and owned.end.status == "accepted":
             raise TaskUncancellableError(f"{kind} stands for its loop, which takes it")

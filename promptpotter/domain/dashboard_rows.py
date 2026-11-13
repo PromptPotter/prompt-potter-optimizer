@@ -14,9 +14,10 @@ from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual, overlap_line
 from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
 from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.results_health import health_reading
+from promptpotter.domain.results_health import floor_said, health_reading
 from promptpotter.domain.round_health import DegradationHealth, HealthGrade, HealthReading
 from promptpotter.domain.ruler import LevelSeries, SeriesReading
+from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -255,10 +256,19 @@ class RoundHealth(FrozenModel):
     reading: HealthReading | None = Field(
         description="Why the grade is not healthy, in words; null on `healthy` and on `unmeasured`."
     )
+    floor: Said | None = Field(
+        description="The origin read paired against its constant-answer floor, `warn` where the "
+        "floor is above it; null on every later round and where answers are no repeated label."
+    )
 
     @classmethod
     def of(cls, round_num: int, health: DegradationHealth) -> RoundHealth:
-        return cls(grade=health.grade, reading=health_reading(round_num, health))
+        floor = health.constant_floor
+        return cls(
+            grade=health.grade,
+            reading=health_reading(round_num, health),
+            floor=None if floor is None else floor_said(floor),
+        )
 
 
 class RoundSummary(FrozenModel):

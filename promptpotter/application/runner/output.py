@@ -158,15 +158,10 @@ def _render_header(
     verdict: ReviewStat | None,
     halt: dict[str, str] | None,
 ) -> list[str]:
-    # The mode is banked when the cycle stops; a review rendered before then has none to name.
-    said = [
-        *([f"mode: **{final.mode}**"] if final else []),
-        *([f"{verdict.name}: **{_stat(verdict)}**"] if verdict else []),
-    ]
     parts: list[str] = [
         f"# Review — {index.cycle_id}",
         "",
-        *([f"_{' · '.join(said)}_", ""] if said else []),
+        *([f"_{verdict.name}: **{_stat(verdict)}**_", ""] if verdict else []),
     ]
     if halt is not None:
         where = f" — node `{halt['node']}`" if halt["node"] else ""

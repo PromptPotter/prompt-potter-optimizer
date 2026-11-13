@@ -128,7 +128,7 @@ def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) 
                 "name the candidate itself"
             )
         return RoundArm(round=slot.round, arm=named.arm)
-    # Off the announced arms: a --diag line walks its origin and closes no round 0.
+    # Off the announced arms: a line whose origin walk never closed still names its origin.
     origin = next(
         (
             key

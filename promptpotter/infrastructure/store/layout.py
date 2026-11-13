@@ -96,10 +96,9 @@ def draft_dirs(tenant_root: WorkspaceDir) -> list[Path]:
     return sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
 
 
-# Under a workspace: its own ledger and active pointer, its head-to-heads, its scoring verbs' runs.
+# Under a workspace: its own ledger and active pointer, its head-to-heads.
 WORKSPACE_STATE_DIR = ".workspace"
 HEAD_TO_HEADS_DIR = "head_to_heads"
-DIAGNOSTICS_DIR = "diagnostics"
 
 
 def head_to_head_path(tenant_root: WorkspaceDir, head_to_head_id: str) -> Path:

@@ -402,7 +402,7 @@ async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[
         request.campaign_config(dispatcher.stores)
         return await launch(
             request,
-            RunMode(diag=payload.diag),
+            RunMode(),
             stores=dispatcher.stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
@@ -446,7 +446,7 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
         assert_origin_ready(draft, draft_pipeline(stores, draft, served))
         return admit(
             CheckinStart(claim=claim, dataset_name=draft.dataset_name, budget=start.budget),
-            RunMode(diag=start.diag),
+            RunMode(),
             stores=stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,

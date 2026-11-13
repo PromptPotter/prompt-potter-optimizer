@@ -318,6 +318,14 @@ class CampaignConfig(StrictModel):
         "scored on a superset stays like-for-like. A bank smaller than this scores on "
         "the whole bank (`sample_dataset` is a prefix slice) — not an error.",
     )
+    origin_replicates: Annotated[int | None, Knob(Estimand.SPEND)] = Field(
+        None,
+        ge=2,
+        description="The noise floor: once round 0 closes, the origin is re-scored this many "
+        "times fresh on the rows it recorded, and the spread of those composites is served "
+        "beside the recorded level as the run's own run-to-run noise. Each replicate pays a "
+        "call per row; the loop decides nothing on it. Unset sends no replicate.",
+    )
     exclude_nodes: Annotated[list[str], Knob(Estimand.SEARCH)] = Field(default_factory=list)
     task_framing: Annotated[Literal["committed", "off"], Knob(Estimand.SEARCH)] = Field(
         "committed",

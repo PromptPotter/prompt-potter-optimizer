@@ -35,8 +35,8 @@ def candidate_label(round_num: int, idx: int) -> str:
 
 
 #: Why an arm stopped short of its panel AGAINST it: refused before a cell, by the operator, by the
-#: bench's run-health rules, or by the eliminator (`Eliminator.stop_disqualifies` says if that rejects).
-CutKind = Literal["invalid", "skipped", "broken", "eliminated"]
+#: bench's run-health rules, by the endpoint it calls, or by the eliminator (`Eliminator.stop_disqualifies` says if that rejects).
+CutKind = Literal["invalid", "skipped", "broken", "refused", "eliminated"]
 #: How an arm's walk ended short of its panel: cut against it, or locked in for it.
 ArmEnd = Literal[CutKind, "locked_in"]
 
@@ -61,6 +61,12 @@ ARM_END_INFO: Worded[ArmEnd, ArmEndInfo] = Worded(
             "danger",
             "Its measurements kept failing, so the bench stopped it. That is the candidate's own"
             " fault, and it is charged to it.",
+        ),
+        "refused": ArmEndInfo(
+            "refused",
+            "warn",
+            "The endpoint refused a request parameter it sent: a value this model does not serve,"
+            " so its cells measure nothing about the prompt.",
         ),
         "eliminated": ArmEndInfo(
             "eliminated",
@@ -223,6 +229,13 @@ class Broken(FrozenModel):
     degradation: DegradationContext
 
 
+class Refused(FrozenModel):
+    """The endpoint refused a request parameter the arm sent."""
+
+    kind: Literal["refused"] = "refused"
+    parameter: str
+
+
 class Invalid(FrozenModel):
     """Refused before a cell: the reasons are the arm's own fatal ``validation_failures``."""
 
@@ -235,7 +248,9 @@ class Skipped(FrozenModel):
     kind: Literal["skipped"] = "skipped"
 
 
-CutReason = Annotated[Eliminated | Broken | Invalid | Skipped, Field(discriminator="kind")]
+CutReason = Annotated[
+    Eliminated | Broken | Refused | Invalid | Skipped, Field(discriminator="kind")
+]
 
 
 class Cut(_Walked):

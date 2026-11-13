@@ -25,7 +25,7 @@ class ModelProfile:
     default_route: tuple[str, ...] = ()
 
 
-# Keyed by the normalized ``org/model`` id; fill one with `probe-reasoning <model>`.
+# Keyed by the normalized ``org/model`` id; a row is read off a round whose arms differ in `reasoning_effort`.
 _MODEL_PROFILES: dict[str, ModelProfile] = {
     "deepseek/deepseek-v4-flash": ModelProfile(min_max_tokens=8000),
     # DigitalOcean (the `:nitro` pick) answers half of an L4 outer `l1_generate` with a schema skeleton.

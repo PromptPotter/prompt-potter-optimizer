@@ -118,7 +118,7 @@ Every frame carries `activity` whole — `status`, `notices`, and `decision` wit
 
 ## 7. Per-cycle artifact paths
 
-What each file holds is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § File reference. v1 promises only: inside `campaigns/{campaign_id}/cycles/{cycle_id}/`, **`rounds/round_NNNN.json` + `index.json` + `log.md`**, and `export.json` (§5c). Everything under `.runtime/` may change shape between minor versions — §6 promises the record family, not the file layout. Sibling cycles (forks, diag) live flat under `cycles/`, each with its own `dashboard.json`, seeded from the parent at the cut.
+What each file holds is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § File reference. v1 promises only: inside `campaigns/{campaign_id}/cycles/{cycle_id}/`, **`rounds/round_NNNN.json` + `index.json` + `log.md`**, and `export.json` (§5c). Everything under `.runtime/` may change shape between minor versions — §6 promises the record family, not the file layout. Sibling cycles (forks) live flat under `cycles/`, each with its own `dashboard.json`, seeded from the parent at the cut.
 
 ## 8. What is NOT stable
 

@@ -658,6 +658,7 @@
                   "invalid",
                   "skipped",
                   "broken",
+                  "refused",
                   "eliminated",
                   "locked_in"
                 ],
@@ -713,6 +714,18 @@
               }
             ],
             "description": "The provider's prefix-cache reading of `tokens.input`; null beside a null `tokens`."
+          },
+          "refused_parameter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The request parameter the endpoint refused, where `end` is `refused`; null on every other arm.",
+            "title": "Refused Parameter"
           },
           "role": {
             "description": "What the arm IS in this round: its origin, one of its proposals, or a `parent` re-read on its cells as a reference — never one of the round's proposals, whatever round `arm` names.",
@@ -787,6 +800,7 @@
           "state",
           "end",
           "walked_short",
+          "refused_parameter",
           "own",
           "fitness_terms",
           "panel",
@@ -1877,8 +1891,7 @@
           "fork",
           "submit_arms",
           "skip",
-          "set_limits",
-          "diag"
+          "set_limits"
         ],
         "title": "ComparisonExit",
         "type": "string"
@@ -1918,6 +1931,33 @@
           }
         },
         "title": "ConfigOverrides",
+        "type": "object"
+      },
+      "ConstantFloor": {
+        "additionalProperties": false,
+        "description": "The origin read PAIRED against answering one label to every cell, on the cells both scored.",
+        "properties": {
+          "floor": {
+            "description": "What the constant answer scores: the share of truths it is.",
+            "title": "Floor",
+            "type": "number"
+          },
+          "label": {
+            "description": "The label the constant answer gives: the most common truth.",
+            "title": "Label",
+            "type": "string"
+          },
+          "lift": {
+            "$ref": "#/components/schemas/BandedValue",
+            "description": "The origin's mean per-cell fitness minus the floor's score on that cell."
+          }
+        },
+        "required": [
+          "label",
+          "floor",
+          "lift"
+        ],
+        "title": "ConstantFloor",
         "type": "object"
       },
       "CostAbsence": {
@@ -2003,6 +2043,7 @@
                 "broken": "#/components/schemas/Broken",
                 "eliminated": "#/components/schemas/Eliminated",
                 "invalid": "#/components/schemas/Invalid",
+                "refused": "#/components/schemas/Refused",
                 "skipped": "#/components/schemas/Skipped"
               },
               "propertyName": "kind"
@@ -2013,6 +2054,9 @@
               },
               {
                 "$ref": "#/components/schemas/Broken"
+              },
+              {
+                "$ref": "#/components/schemas/Refused"
               },
               {
                 "$ref": "#/components/schemas/Invalid"
@@ -2090,14 +2134,6 @@
               }
             ],
             "title": "Fitness Ceiling"
-          },
-          "mode": {
-            "enum": [
-              "diag",
-              "full"
-            ],
-            "title": "Mode",
-            "type": "string"
           },
           "origin_composite_fitness": {
             "anyOf": [
@@ -2196,7 +2232,6 @@
           "prompt_hashes",
           "origin_composite_fitness",
           "scorer_id",
-          "mode",
           "result_round",
           "result_prompt_fields",
           "result_pipeline_params"
@@ -2793,6 +2828,17 @@
           "consecutive_degraded_rounds": {
             "title": "Consecutive Degraded Rounds",
             "type": "integer"
+          },
+          "constant_floor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstantFloor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "degraded_rate": {
             "title": "Degraded Rate",
@@ -6326,6 +6372,27 @@
         "title": "Reelection",
         "type": "object"
       },
+      "Refused": {
+        "additionalProperties": false,
+        "description": "The endpoint refused a request parameter the arm sent.",
+        "properties": {
+          "kind": {
+            "const": "refused",
+            "default": "refused",
+            "title": "Kind",
+            "type": "string"
+          },
+          "parameter": {
+            "title": "Parameter",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parameter"
+        ],
+        "title": "Refused",
+        "type": "object"
+      },
       "ResolvedRunRecord": {
         "additionalProperties": false,
         "description": "What a run init resolved, read over the chain: the read LAST wins, the roster FIRST.",
@@ -8412,17 +8479,9 @@
             "description": "WHY this cell ran. A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass."
           },
           "round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "Outer round; 0 is the origin (C0). Null when the spawn came from outside any round (the noise-floor diagnostic).",
-            "title": "Round"
+            "description": "Outer round; 0 is the origin (C0).",
+            "title": "Round",
+            "type": "integer"
           },
           "task": {
             "description": "The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The individual does NOT identify a run: every task runs for every individual, so one individual's spawns are as many as the panel has cells and are told apart only by this.",
@@ -8431,6 +8490,7 @@
           }
         },
         "required": [
+          "round",
           "task"
         ],
         "title": "SpawnedBy",
@@ -8578,7 +8638,6 @@
           "converged",
           "optimizer_exhausted",
           "hard_cap_reached",
-          "diag_complete",
           "target_hit",
           "spend_budget",
           "token_budget",
@@ -9417,6 +9476,7 @@
           "stop_rule",
           "budget",
           "client_error",
+          "parameter_refused",
           "pipeline_error",
           "consecutive_errors"
         ],

@@ -5,23 +5,31 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated
 
+from promptpotter.domain.arm_reading import level_text, lift_interval_text, lift_text
+from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_health import (
     HEALTH_CAUSE_INFO,
+    ConstantFloor,
     DegradationHealth,
     HealthCause,
     HealthGrade,
     HealthReading,
 )
+from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import (
     NO_RESULT,
+    ROW_GRADES,
     GradedCell,
     MeasuredCell,
     NodeWarning,
+    constant_answer,
+    enumerable_truth_labels,
     modal_answer_share,
 )
 from promptpotter.shared.errors import ErrorCategory
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.statistics import mean_ci
 
 STRUCTURAL_FLAG_RATE: float = 0.30
 DEGRADED_RATE_FLAG: float = 0.20
@@ -250,6 +258,7 @@ def compute_degradation_health(
     dominant_node: str | None = None,
     last_error: str | None = None,
     answer_modal_share: float | None = None,
+    constant_floor: ConstantFloor | None = None,
     node_failure_rates: dict[str, float] | None = None,
     node_warnings: dict[str, list[str]] | None = None,
     is_origin: bool = False,
@@ -304,6 +313,7 @@ def compute_degradation_health(
         hole_count=hole_count,
         no_result_count=no_result_count,
         answer_modal_share=answer_modal_share,
+        constant_floor=constant_floor,
         degraded_rate=counts.degraded_rate,
         consecutive_degraded_rounds=consecutive_degraded_rounds,
         prior_clean_rounds=prior_clean_rounds,
@@ -500,6 +510,31 @@ def health_reading(round_num: int, health: DegradationHealth) -> HealthReading |
     )
 
 
+def floor_said(floor: ConstantFloor) -> Said:
+    lift = floor.lift
+    band = (
+        None
+        if lift.ci_lo is None or lift.ci_hi is None
+        else lift_interval_text(lift.ci_lo, lift.ci_hi, "score")
+    )
+    collapse = floor.rewards_collapse
+    verdict = (
+        "a candidate is paid for collapsing to that one label."
+        if collapse
+        else "a candidate collapsing to it scores below the origin."
+    )
+    return Said(
+        key="floor_rewards_collapse" if collapse else "floor_cleared",
+        tone="warn" if collapse else "quiet",
+        label=f"Origin {'under' if collapse else 'over'} the constant-answer floor",
+        value=lift_text(lift.value, "score"),
+        sub=band,
+        detail=f"Answering «{floor.label}» to every cell scores "
+        f"{level_text(floor.floor, 'score')}; on the same cells the origin reads "
+        f"{lift_text(lift.value, 'score')} against it, so {verdict}",
+    )
+
+
 def assemble_prior_healths(
     rounds: Sequence[RoundResult],
     round_num: int,
@@ -549,6 +584,23 @@ def _trailing_degraded(prior_healths: Sequence[DegradationHealth]) -> int:
             break
         count += 1
     return count
+
+
+def origin_floor(results: Sequence[GradedCell]) -> ConstantFloor | None:
+    paired = [c for c in results if c.scored and c.facts.ground_truth]
+    truth = enumerable_truth_labels(paired)
+    if truth is None:
+        return None
+    constant = constant_answer(truth)
+    fitness = ROW_GRADES["fitness"].read
+    lifts = [fitness(c) - constant.score(c) for c in paired]
+    band = mean_ci(lifts)
+    lift = (
+        BandedValue(value=lifts[0], ci_lo=None, ci_hi=None)
+        if band is None
+        else BandedValue(value=band[0], ci_lo=band[1], ci_hi=band[2])
+    )
+    return ConstantFloor(label=constant.label, floor=constant.share, lift=lift)
 
 
 def compute_round_health(
@@ -609,6 +661,7 @@ def compute_round_health(
         last_error=last_error,
         # Over every attempted row: hedging IS how a round produces unscoreable rows.
         answer_modal_share=modal_answer_share(results),
+        constant_floor=origin_floor(results) if is_origin else None,
         node_failure_rates=node_failure_rates,
         node_warnings=node_warnings,
         is_origin=is_origin,

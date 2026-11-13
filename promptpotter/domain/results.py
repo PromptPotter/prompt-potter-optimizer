@@ -140,7 +140,6 @@ class RoundOutcome(FrozenModel):
     reference: RoundArm | None
     # Each arm's fold of the cells the round files for it; none for an arm refused before a cell.
     folds: dict[ArmKey, ScoreSummary]
-    # ``None``: a diag round, its variants generated and never scored.
     election: Election | None
     # Not `improved`, the selector's point estimate. `pending` until the overlap pass lands.
     overlap: OverlapReading
@@ -296,7 +295,7 @@ class RoundResult(RoundOutcome):
 
     @computed_field(  # type: ignore[prop-decorator]
         description="The arm the round ENDED on (`election.ended_on`), read: the headline's "
-        "numbers are its own. Null on a diag round, which elects nothing."
+        "numbers are its own."
     )
     @property
     def headline(self) -> ArmReading | None:

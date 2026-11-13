@@ -76,6 +76,7 @@ from promptpotter.domain.arms import (
     Invalid,
     Measured,
     Proposed,
+    Refused,
     Skipped,
     arm_end,
 )
@@ -354,6 +355,8 @@ def arm_state(
                 owner=NurseOwner.L1,
             )
             return Cut(reason=Broken(failure=failure, degradation={}), **fields)
+        case "refused":
+            return Cut(reason=Refused(parameter="reasoning_effort"), **fields)
         case "invalid":
             raise ValueError("an invalid arm is built by its `invalid_reason`")
 

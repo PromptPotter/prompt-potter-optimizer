@@ -4,7 +4,7 @@
 
 ## What you trade away
 
-Only the operator surfaces — the webapp, an agent driving the campaign (`/potter-run`) and L4. `compile()` mints a real campaign on disk, so the engine and the CLI verbs of the same distribution work on it (`pause`, `resume`, `noise-floor`, `seed-screen`, `ab`, `verify`).
+Only the operator surfaces — the webapp, an agent driving the campaign (`/potter-run`) and L4. `compile()` mints a real campaign on disk, so the engine and the CLI verbs of the same distribution work on it (`pause`, `resume`, `ab`, `verify`).
 
 ## The contract
 

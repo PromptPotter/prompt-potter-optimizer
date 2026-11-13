@@ -391,7 +391,7 @@ class _RunEntry(_HierarchyEntry):
 
 
 class HierarchyCourse(_RunEntry):
-    """A course — one cycle's run, root, fork, diag or inner — as the listing serves it."""
+    """A course — one cycle's run, root, fork or inner — as the listing serves it."""
 
     level: Literal["course"] = "course"
     facts: CourseFacts

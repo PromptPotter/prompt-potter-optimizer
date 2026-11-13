@@ -176,9 +176,8 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
     if cell is None:
         raise PayloadInvalidError(
             f"no archive row prices a cell of {plan.dataset_name} on the models it runs, so "
-            "there is no measured price to read. Buy one with `seed-screen "
-            f"{plan.dataset_name} --seeds 0 --n-samples 20 --repeat 1`, whose cells the archive "
-            "files.",
+            "there is no measured price to read. Buy one with a campaign's origin round "
+            f"(`new {plan.dataset_name}`), whose cells the archive files.",
             code="cell_unpriced",
         )
     names = {select_optimizer(c.optimization).name for c in configs}

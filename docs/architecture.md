@@ -117,7 +117,7 @@ bounded where it is PRODUCED**; a composition site selects whole items, never cu
 - **Dataset** — **its identity is its content, its name a label**.
 - **Campaign** — one declared effort (dataset, origin, optimizer manifest) and its cycle tree; its
   declaration is the `RunDeclaration`, written by every door through one `declare`.
-- **Cycle** — one node of that tree (root | fork | diag). A check-in is a draft, never a cycle. On
+- **Cycle** — one node of that tree (root | fork). A check-in is a draft, never a cycle. On
   disk: [`operations/persistence-and-state.md`](operations/persistence-and-state.md).
 
 #### Two resolution seams

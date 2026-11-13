@@ -33,6 +33,7 @@ from promptpotter.domain.command_kinds import (
     SubmitArmsPayload,
 )
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
+from promptpotter.infrastructure.holders import producer_alive
 from promptpotter.infrastructure.store.io import append_line, appending
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
 from promptpotter.infrastructure.store.read_model import LineIndex
@@ -266,10 +267,10 @@ class CommandBook:
     events in log order (a landed draft's ahead of its cycle's) and its inbox, and the ``cancel``
     asked of each command still acting, which its end drops."""
 
-    __slots__ = ("_line", "_state")
+    __slots__ = ("_jobs_dir", "_line", "_state")
 
-    def __init__(self, state: _State, line: int) -> None:
-        self._state, self._line = state, line
+    def __init__(self, state: _State, line: int, jobs_dir: Path) -> None:
+        self._state, self._line, self._jobs_dir = state, line, jobs_dir
 
     def filing(self, command_id: str) -> CommandRecord | None:
         held = self._state.filed.get(command_id)
@@ -280,7 +281,13 @@ class CommandBook:
         return None if moved is None else moved.at(self._line)
 
     def status(self, command_id: str) -> CommandStatus | None:
-        return None if (moved := self._moved(command_id)) is None else moved.status
+        """A filing with no end reads ``cancelled`` once its filer is gone: its act died with it."""
+        if (moved := self._moved(command_id)) is None:
+            return None
+        filer = self._state.filed[command_id][1].filer
+        if moved.status == "filed" and not producer_alive(self._jobs_dir, filer):
+            return "cancelled"
+        return moved.status
 
     def end(self, command_id: str) -> CommandAckRecord | None:
         """The status event that last moved it: its effect, or the refusal it kept."""
@@ -321,11 +328,12 @@ class CommandBook:
 
     def keyed(
         self, subject: str, kind: str, act_digest: str, idempotency_key: str
-    ) -> tuple[CommandRecord, CommandAckRecord] | None:
-        """The act a retry under *idempotency_key* names on *subject*, matched on (kind, act, key);
-        a key *subject* holds for another act is refused, never replayed. A command never accepted
-        satisfies no key; one accepted answers its retry after a void too."""
-        found: tuple[CommandRecord, CommandAckRecord] | None = None
+    ) -> tuple[CommandRecord, CommandAckRecord | None] | None:
+        """The act a retry under *idempotency_key* names on *subject*, matched on (kind, act, key):
+        its accepted end, or ``None`` while its filer still acts on it. A key *subject* holds for
+        another act is refused, never replayed. A command never accepted satisfies no key; one
+        accepted answers its retry after a void too."""
+        found: tuple[CommandRecord, CommandAckRecord | None] | None = None
         asked: dict[str, CommandRecord] = {}
         for event in self.subject_events(subject):
             if isinstance(event, CommandRecord):
@@ -337,6 +345,8 @@ class CommandBook:
                         f"another payload here; send this {kind} under a key of its own.",
                         details={"command_id": event.command_id},
                     )
+                if self.status(event.command_id) == "filed":
+                    found = event, None
                 asked[event.command_id] = event
             elif event.status in ("accepted", "applied") and event.command_id in asked:
                 found = asked[event.command_id], event
@@ -367,8 +377,8 @@ class _Book:
         self._line = self.at_offset + 1
         self._state.feed(self._line, COMMAND_LOG_ADAPTER.validate_python(line))
 
-    def value(self) -> CommandBook:
-        return CommandBook(self._state, self._line)
+    def value(self) -> tuple[_State, int]:
+        return self._state, self._line
 
 
 def _encoded(*rows: CommandLogRow) -> bytes:
@@ -376,24 +386,35 @@ def _encoded(*rows: CommandLogRow) -> bytes:
 
 
 class CommandLog:
-    """One account's log; `build_stores` opens it once, as `Stores.commands`."""
+    """One account's log; `build_stores` opens it once, as `Stores.commands`. *jobs_dir* holds
+    the producers whose death ends a filing they never ended."""
 
-    def __init__(self, account: WorkspaceDir) -> None:
-        self.path = command_log_path(account)
+    def __init__(self, account: WorkspaceDir, jobs_dir: Path) -> None:
+        self.path, self.jobs_dir = command_log_path(account), jobs_dir
 
     def book(self) -> CommandBook:
-        return LineIndex.of(self.path, (_Book,)).view(_Book)
+        state, line = LineIndex.of(self.path, (_Book,)).view(_Book)
+        return CommandBook(state, line, self.jobs_dir)
 
     def file(self, record: CommandRecord) -> None:
-        """A filing's id is the log's own: refused inside the write that would land a second one,
-        so two calls under one id never both act."""
+        """A filing's id and its key are the log's own: refused inside the write that would land a
+        second one, so two calls under one id, or one matched key, never both act."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with appending(self.path) as put:
-            if self.book().filing(record.command_id) is not None:
+            book = self.book()
+            if book.filing(record.command_id) is not None:
                 raise ConflictError(
                     f"command {record.command_id} is already filed; send a new call under an id "
                     "of its own",
                     code="command_id_reused",
+                )
+            matched = not PAYLOAD_MODEL_FOR_KIND[record.kind].unmatched
+            key = record.subject, record.kind, record.act_digest, record.idempotency_key
+            if matched and book.keyed(*key) is not None:
+                raise ConflictError(
+                    f"a call under key {record.idempotency_key!r} already acts here; retry it to "
+                    "read its answer",
+                    code="idempotency_key_acting",
                 )
             put(_encoded(record))
 

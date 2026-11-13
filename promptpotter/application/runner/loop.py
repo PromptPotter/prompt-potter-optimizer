@@ -8,11 +8,9 @@ import logging
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.resume_and_fork.repair import rewalk_lost_origin
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizers.nodes import Controller, RoundContext
 from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.runner.bench import bench_origin, declare_line_bench
 from promptpotter.application.runner.round import (
@@ -20,7 +18,6 @@ from promptpotter.application.runner.round import (
     execute_round,
     post_round,
     run_init,
-    walk_round,
 )
 from promptpotter.application.runner.termination import (
     RUN_ENDS,
@@ -28,6 +25,7 @@ from promptpotter.application.runner.termination import (
     origin_gate_tripped,
     target_tripped,
 )
+from promptpotter.application.scoring.passes import measure_noise_floor
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.phases import STOP_REASON_INFO, ErrorRecord, StopLoop, StopReason
 from promptpotter.domain.run_records import OriginGatePass, RebaseRequest, RoundEnteredRecord
@@ -73,10 +71,8 @@ async def run_round_loop(
     config: CampaignConfig,
     session: Session,
     ledger: CycleEventLog,
-    *,
-    diagnosing: Controller | None = None,
 ) -> LoopEnd:
-    """Round 1 on, past round 0's door. *diagnosing* is ``--diag``'s controller: the run closes the round it resumes on and stops."""
+    """Round 1 on, past round 0's door."""
     round_num = session.state.resumed_from_round
     clean_rounds = max(session.state.resumed_from_round - 1, 0)
     open_round: int | None = None
@@ -103,7 +99,6 @@ async def run_round_loop(
                 "Round %d (clean=%d/%s, parent=%s)", round_num, clean_rounds, cap, cycle.parent_fold
             )
 
-            # Through the boundary checks: a --diag controller reads the round just closed.
             with at_round(round_num):
                 open_round = round_num
                 ledger.append(RoundEnteredRecord(round=round_num))
@@ -133,16 +128,6 @@ async def run_round_loop(
                 tripped = cut or budget_stop(require_spend_book("a round boundary"))
                 if tripped is not None:
                     return LoopEnd(tripped)
-
-                if diagnosing is not None:
-                    diagnosed = RoundContext(cycle=cycle, round_num=round_num, ledger=ledger)
-                    await diagnosing.diagnose(NodeContext(diagnosed, diagnosing))
-                    # The next round is walked and banked, then left open: `resume` measures its arms.
-                    open_round = round_num + 1
-                    with at_round(open_round):
-                        ledger.append(RoundEnteredRecord(round=open_round))
-                        await walk_round(cycle, open_round, ledger)
-                    return LoopEnd(StopReason.DIAG_COMPLETE, interrupted_round=open_round)
             round_num += 1
 
     except RUN_ENDS as exc:
@@ -172,7 +157,6 @@ async def open_origin_round(
     ledger: CycleEventLog,
     *,
     spend: SpendRollup,
-    diagnosing: bool,
 ) -> LoopEnd | None:
     """Round 0's one door: the members initialize, a re-measured origin re-walks its holes, and
     until an L1 round closes every launch asks the gate, unless round 0 banked a pass. A tripped
@@ -185,7 +169,7 @@ async def open_origin_round(
     open_round: int | None = None
     try:
         run_init(cycle, ledger)
-        if diagnosing or session.state.resumed_from_round > 1:
+        if session.state.resumed_from_round > 1:
             await bench_line_origin(cycle, ledger, spend)
             return None
         open_round = 0
@@ -199,6 +183,11 @@ async def open_origin_round(
             await bench_line_origin(cycle, ledger, spend)
         if cycle.origin_round.at_offset is None:
             await emit_origin_round(cycle, session, ledger)
+            replicates = cycle.config.origin_replicates
+            if not gated and replicates is not None:
+                origin = cycle.origin_round.head
+                assert origin is not None, "round 0 ends on its origin"
+                await measure_noise_floor(session, cycle.points.job(origin.individual), replicates)
         open_round = None
         if not gated:
             return None

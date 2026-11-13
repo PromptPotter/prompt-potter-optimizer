@@ -1603,7 +1603,7 @@ def test_a_forks_own_ledger_displaces_its_parents_prefix_once(
     assert candidates(displaced) == prefix, "the fork's rounds displaced its parent's own"
 
 
-# A --diag line closes no round 0.
+# A line whose origin walk never closed names its origin by the arm it announced.
 @pytest.mark.usefixtures("offline", "optimizing_memory")
 def test_a_line_stands_on_its_origin_until_an_election_crowns_another(
     built_stores: Stores,
@@ -1625,7 +1625,7 @@ def test_a_line_stands_on_its_origin_until_an_election_crowns_another(
     close_round(
         origin_log,
         [
-            # Held in memory, as a --diag run holds its origin round: only round 1 closes.
+            # `close_round` closes the line's last round alone: round 0 stays the announced arm.
             _round(
                 round=0,
                 arms={walked_origin: arm_state("w_origin", slot=origin_slot)},
@@ -2435,9 +2435,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
             )
 
         async def walk() -> LoopEnd:
-            gated = await open_origin_round(
-                cycle, [], ctx.ledger, spend=SpendRollup(), diagnosing=False
-            )
+            gated = await open_origin_round(cycle, [], ctx.ledger, spend=SpendRollup())
             return gated or await run_round_loop(cycle, cycle.config, session, ctx.ledger)
 
         with scoped(account=stores):

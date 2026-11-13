@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import random
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -43,7 +44,6 @@ from promptpotter.application.runner.inner.tasks import (
     parse_panel,
     parse_resolved,
 )
-from promptpotter.application.scoring.seed_screen import class_floor, draw_bank, draw_bench
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cells import Seat
@@ -62,7 +62,7 @@ from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import SpawnedBy
-from promptpotter.infrastructure.llm.telemetry import current_round
+from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.infrastructure.store.io import write_text
 from promptpotter.infrastructure.store.layout import (
     SandboxOwner,
@@ -113,7 +113,7 @@ OUTER_SAMPLE_WALL_S_PER_ROUND = 600.0
 Overrides = dict[str, dict[str, Any]]
 
 
-def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str) -> dict[str, Any]:
+def _spawn_provenance(ctx: InnerSpawnContext, round_num: int, query: str) -> dict[str, Any]:
     cand = measured_pass()
     return {
         "round": round_num,
@@ -124,7 +124,7 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
     }
 
 
-def _purpose(role: MeasurementRole) -> str:
+def _purpose(role: MeasurementRole | None) -> str:
     return "backfill" if role is MeasurementRole.BACKFILL else "own"
 
 
@@ -132,7 +132,7 @@ def inner_campaign_id(
     spec: InnerTaskSpec,
     overrides: Overrides,
     estimator: str,
-    role: MeasurementRole = MeasurementRole.PANEL,
+    role: MeasurementRole | None,
 ) -> str:
     """Content, never asker: the TREATMENT, never the budget, so a deepened cell continues the rounds already banked."""
     # The estimator too: one that reads a new per-round fact never continues a campaign lacking it.
@@ -149,7 +149,6 @@ class _InnerCell(NamedTuple):
     cell: Seat
     spec: InnerTaskSpec
     overrides: Overrides
-    role: MeasurementRole
     campaign_id: str
 
 
@@ -162,10 +161,10 @@ def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
     cells = _cells(ctx)
     cell = panel_cell(sample)
     arm = cells.own(cell, payload.get("optimizer_prompt_overrides") or {})
-    role = cand.role if (cand := measured_pass()) else MeasurementRole.PANEL
+    role = cand.role if (cand := measured_pass()) else None
     spec = cells.spec(cell)
     campaign_id = inner_campaign_id(spec, arm, cells.estimator, role)
-    return _InnerCell(ctx, cell, spec, arm, role, campaign_id)
+    return _InnerCell(ctx, cell, spec, arm, campaign_id)
 
 
 def sandbox_stores(ctx: InnerSpawnContext) -> Stores:
@@ -259,8 +258,6 @@ class _Opened(NamedTuple):
     session: Session
     cycle: CycleConfig
     train_data: list[Sample]
-    # The constant-answer floor over the bank the seat drew.
-    bank_floor: float | None
     optimizer: SelectedOptimizer
 
 
@@ -289,9 +286,14 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
         if not all_samples:
             raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
         n = min(max(spec.n_samples, spec.n_samples_origin or 0), len(all_samples))
-        # The draw `seed-screen` chose the seeds under: drawn differently, the bank is one nobody screened.
-        search = draw_bank(all_samples, n, spec.run_seed)
-        bench = draw_bench(all_samples, search, spec.n_samples_bench, spec.run_seed)
+        # A pure function of the seat's seed, so every arm of a head-to-head draws one bank.
+        search = random.Random(spec.run_seed).sample(all_samples, n)
+        taken = {s.key for s in search}
+        rest = [s for s in all_samples if s.key not in taken]
+        bench = [
+            s.model_copy(update={"held_out": True})
+            for s in random.Random(spec.run_seed).sample(rest, min(spec.n_samples_bench, len(rest)))
+        ]
         if len(bench) < spec.n_samples_bench:
             # Before anything is minted or sent: a short bench is a panel geometry error, not a measurement.
             raise CellUnscoreableError(
@@ -330,7 +332,7 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
                 raise
             # The arm's fault, banked on its cell in the selection's own words, before anything is sent.
             raise CellUnscoreableError(str(refused), spent={}) from refused
-        yield _Opened(session, cycle, train_data, class_floor(search), optimizer)
+        yield _Opened(session, cycle, train_data, optimizer)
 
 
 async def _run_inner_campaign(
@@ -366,22 +368,6 @@ async def _run_inner_campaign(
                     optimizer=opened.optimizer,
                 ),
             )
-    # Reported, never enforced: one origin pass sits inside its own error bar.
-    origin_fitness = (
-        None
-        if result.origin is None or result.origin.fitness is None
-        else result.origin.fitness.value
-    )
-    floor = opened.bank_floor
-    if origin_fitness is not None and floor is not None and floor >= origin_fitness:
-        logger.warning(
-            "inner cell %s MAY REWARD COLLAPSE: constant-answer floor %.3f >= this run's origin "
-            "%.3f. One pass sits inside its own error bar — re-screen the seat "
-            "with a seed screen before trusting the panel.",
-            cell.cell.id,
-            floor,
-            origin_fitness,
-        )
     return result
 
 
@@ -411,7 +397,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     minted: list[CycleHop] = []
     fresh = sandbox_stores(cell.ctx).campaigns.load_campaign(cell.campaign_id) is None
     # Captured in the OUTER task: the inner task's context copy rebinds the round.
-    spawned_by = _spawn_provenance(cell.ctx, current_round(), query)
+    spawned_by = _spawn_provenance(cell.ctx, bound_round(), query)
 
     # Awaited DIRECTLY, never under `asyncio.shield`/`wait`, which orphan it to keep billing.
     # The context binds no OUTER candidate, or inner optimizer calls bill under the outer cell's role.

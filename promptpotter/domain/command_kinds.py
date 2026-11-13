@@ -660,8 +660,8 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
     def _rewinds_past_its_origin(self) -> ForkCyclePayload:
         if self.keep_rounds and self.round == 0:
             raise ValueError(
-                "keep_rounds at round 0 lifts no round to continue from; a run that starts over "
-                "at the origin is a diag run"
+                "keep_rounds at round 0 lifts no round to continue from; fork without "
+                "keep_rounds to start over at the origin"
             )
         if self.keep_rounds and self.candidate_id:
             raise ValueError(
@@ -925,18 +925,17 @@ class StartCheckinPayload(DraftPayload, kind=CommandKind.START_CHECKIN):
     draft field holds it. Acked at admission, so it lands with the draft on the root cycle."""
 
     budget: Budget = Budget()
-    diag: bool = Field(default=False, description="Run the diagnostic shape.")
     head_to_head: HeadToHeadRequest | None = Field(
         default=None,
         description="Start the draft as these arms of one head-to-head, its origin every arm's, "
-        "in place of one campaign. Its own `budget` binds each arm, so `budget` and `diag` are "
-        "refused beside it.",
+        "in place of one campaign. Its own `budget` binds each arm, so `budget` is refused "
+        "beside it.",
     )
 
     @model_validator(mode="after")
     def _arms_run_their_own_budget(self) -> StartCheckinPayload:
-        if self.head_to_head is not None and (self.budget.named or self.diag):
-            raise ValueError("a head-to-head's arms run its budget and the full shape")
+        if self.head_to_head is not None and self.budget.named:
+            raise ValueError("a head-to-head's arms run its budget")
         return self
 
 
@@ -962,11 +961,6 @@ class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
         default=None,
         description="Laid over the dataset's own `optimization` before the mint freezes it; only "
         "the fields sent move anything",
-    )
-    diag: bool = Field(
-        default=False,
-        description="Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so "
-        "the other run-mode fields are `start-run`'s alone.",
     )
     campaign_config: PartialCampaignConfig | None = Field(
         default=None,

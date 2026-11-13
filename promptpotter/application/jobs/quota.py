@@ -161,8 +161,8 @@ def _slot_meter(stores: Stores, holder: JobHolder, hop: CycleHop) -> _Meter | No
                 f"launch:{stores.identity.user_id}",
                 "Too many campaign launches; slow down and retry shortly.",
             )
-        case ScoringPass(verb=verb):
-            return _verb_meter(stores, verb)
+        case ScoringPass(pass_kind=pass_kind):
+            return _verb_meter(stores, pass_kind)
         case PaidCall(bucket=bucket):
             return _verb_meter(stores, bucket)
         # Neither asks the slot door: an embedded run is a declared exemption (`admit_slotless`).

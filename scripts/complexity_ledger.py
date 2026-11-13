@@ -36,7 +36,7 @@ BASELINE = {
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
-    "config_leaf_fields": 88,
+    "config_leaf_fields": 89,
     # `Settings` fields — what the environment can set.
     "settings_env": 38,
     # Parameters annotated `Any`.
@@ -58,7 +58,7 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 12,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 190,
+    "p_served": 193,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 10,
     # The rows each file naming most of them leaves out.

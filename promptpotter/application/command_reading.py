@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from promptpotter.application.jobs.launcher.admission import PassStoppedError
-from promptpotter.domain.command_events import CommandAckRecord, CommandRecord
+from promptpotter.domain.command_events import CommandAckRecord, CommandRecord, CommandStatus
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.phases import STOP_REASON_INFO, StopCategory, StopOutcome, StopReason
 from promptpotter.domain.run_records import LaunchedEffect, LaunchedJob
@@ -97,15 +97,18 @@ class OwnedCommand(FrozenModel):
 
     filed: CommandRecord
     end: CommandAckRecord | None
+    # `CommandBook.status`: a filing with no end reads ``cancelled`` once its filer is gone.
+    status: CommandStatus
 
 
 def owned_command(stores: Stores, command_id: str) -> OwnedCommand:
     """*command_id* as this principal filed it: refused as absent for anyone else's."""
     book = stores.commands.book()
-    filed = book.filing(command_id)
-    if filed is None or filed.issued_by.id != acting_principal(stores.identity).id:
+    filed, status = book.filing(command_id), book.status(command_id)
+    principal = acting_principal(stores.identity).id
+    if filed is None or status is None or filed.issued_by.id != principal:
         raise NotFoundError(f"no command {command_id!r}")
-    return OwnedCommand(filed=filed, end=book.end(command_id))
+    return OwnedCommand(filed=filed, end=book.end(command_id), status=status)
 
 
 def launched_jobs(jobs: JobRegistry, owned: OwnedCommand) -> list[Job] | None:
@@ -136,6 +139,8 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
         status = next(s for s in _PRECEDENCE if s in {r[0] for r in read})
         said = "; ".join(r[1] for r in read)
         updated = max([updated, *(r[2] for r in read)])
+    elif end is None and owned.status == "cancelled":
+        status, said = "cancelled", f"{filed.kind}: its filer died before it ended"
     elif end is None:
         status, said = "working", f"{filed.kind}: running"
     else:

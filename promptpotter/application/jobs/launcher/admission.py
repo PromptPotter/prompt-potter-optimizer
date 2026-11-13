@@ -40,7 +40,6 @@ from promptpotter.domain.job import (
     LaunchMove,
     PaidCall,
     ScoringPass,
-    ScoringVerb,
     SlotHolder,
 )
 from promptpotter.domain.phases import (
@@ -81,6 +80,7 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
+from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.run_scope import run_scope, scoped
 
 if TYPE_CHECKING:
@@ -723,7 +723,7 @@ class PassStoppedError(ConflictError):
 async def paid_pass(
     *,
     stores: Stores,
-    verb: ScoringVerb,
+    pass_kind: MeasurementRole,
     hop: CycleHop | None,
     declared: Budget,
     sends: tuple[Send, ...],
@@ -736,7 +736,7 @@ async def paid_pass(
         request_jobs,
         stores=stores,
         job_registry=job_registry,
-        holder=ScoringPass(verb),
+        holder=ScoringPass(pass_kind),
         hop=UNRESOLVED_HOP if hop is None else hop,
     )
     if job.queued:
@@ -798,7 +798,7 @@ async def paid_pass(
             holding.release()
         if taken is not None:
             raise PassStoppedError(
-                f"The {verb} pass stopped: {taken[1]}. Every cell it measured is banked, and a "
+                f"The {pass_kind} pass stopped: {taken[1]}. Every cell it measured is banked, and a "
                 "rerun replays them."
             ) from None
         raise

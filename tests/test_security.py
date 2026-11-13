@@ -315,6 +315,7 @@ from promptpotter.shared.identity import (
     default_identity,
     require_capability,
 )
+from promptpotter.shared.measurement_context import MeasurementRole
 
 _FENCE, _FENCE_END = "<UNTRUSTED_DATASET_CONTENT", "</UNTRUSTED_DATASET_CONTENT>"
 
@@ -1236,7 +1237,7 @@ async def test_slot_asks_racing_on_one_rate_token_admit_exactly_one(
             request_jobs(
                 stores=build_stores_from_identity(writer),
                 job_registry=passes,
-                holder=ScoringPass("verify"),
+                holder=ScoringPass(MeasurementRole.VERIFY),
             )
         except quota.RateLimitedError:
             return False
@@ -1456,7 +1457,7 @@ def test_a_pass_registered_on_a_terminal_cycle_refuses_the_hosts_claim(tmp_path:
     request_jobs(
         stores=terminal,
         job_registry=JobRegistry(terminal.jobs_dir, capacity=lambda _live: 1),
-        holder=ScoringPass("bench"),
+        holder=ScoringPass(MeasurementRole.BENCH),
         hop=scored,
     )
     assert claim_default(projects_root=projects, user_id="owner-9", email=None) is not None, (
@@ -1736,6 +1737,10 @@ def _cookies(response: Any) -> dict[str, str]:
     }
 
 
+# A producer no process holds: a command filed by it lost its filer.
+_GONE_FILER = "a-filer-long-gone"
+
+
 def _command(kind: str, at: str, subject: str) -> CommandRecord:
     return CommandRecord(
         command_id=kind,
@@ -1744,6 +1749,7 @@ def _command(kind: str, at: str, subject: str) -> CommandRecord:
         act_digest=kind,
         issued_by=SYSTEM_PRINCIPAL,
         subject=subject,
+        filer=_GONE_FILER,
         timestamp=at,
     )
 
@@ -2103,7 +2109,7 @@ def _pass_started(stores: Stores, on: CycleHop) -> tuple[JobRegistry, Job]:
         principal_id="u",
         workspace=stores.campaigns.workspace,
         hop=on,
-        holder=ScoringPass("bench"),
+        holder=ScoringPass(MeasurementRole.BENCH),
     )
     return since_jobs, since
 
@@ -2129,7 +2135,7 @@ def test_an_archived_campaigns_launch_and_pass_are_refused_at_the_slot_door_befo
         one_token.setattr(settings_mod.settings, "USER_RATE_PER_MIN", 1e-9)
         for room, capacity in ((0, lambda _live: 0), (1, lambda _live: 1)):
             refusing = JobRegistry(tmp_path / "jobs", capacity=capacity)
-            for holder in (CampaignLaunch("ds1"), ScoringPass("bench")):
+            for holder in (CampaignLaunch("ds1"), ScoringPass(MeasurementRole.BENCH)):
                 with pytest.raises(CampaignRefusedError) as archived:
                     request_jobs(stores=asker, job_registry=refusing, holder=holder, hop=hop)
                 assert archived.value.refusal is CampaignRefusal.NOT_ACTIVE, (
@@ -2140,7 +2146,9 @@ def test_an_archived_campaigns_launch_and_pass_are_refused_at_the_slot_door_befo
             "a refused launch claimed and released its archived campaign's cycle"
         )
         # The asker's one token still admits a pass: no refused ask spent it.
-        (spare,) = request_jobs(stores=asker, job_registry=refusing, holder=ScoringPass("bench"))
+        (spare,) = request_jobs(
+            stores=asker, job_registry=refusing, holder=ScoringPass(MeasurementRole.BENCH)
+        )
         refusing.release(spare.job_id)
 
 
@@ -2190,7 +2198,11 @@ async def test_a_launch_holds_its_cycle_from_the_moment_it_is_accepted_and_a_ful
         )
     with pytest.raises(CycleBusyError):
         async with paid_pass(
-            stores=built_stores, verb="bench", hop=hop, declared=Budget(), sends=()
+            stores=built_stores,
+            pass_kind=MeasurementRole.BENCH,
+            hop=hop,
+            declared=Budget(),
+            sends=(),
         ):
             pass
     assert registry.cancel_queued(job.job_id), "a queued launch stayed queued"
@@ -2205,7 +2217,9 @@ def test_a_pass_registers_under_the_gate_and_the_delete_sees_it_before_it_holds_
 ) -> None:
     hop, _, _, delete_refused = held_cycle
     passes = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
-    request_jobs(stores=built_stores, job_registry=passes, holder=ScoringPass("bench"), hop=hop)
+    request_jobs(
+        stores=built_stores, job_registry=passes, holder=ScoringPass(MeasurementRole.BENCH), hop=hop
+    )
     assert not built_stores.run_state(hop).producer.attached
     delete_refused(passes)
 
@@ -2297,7 +2311,10 @@ async def test_a_pass_registered_on_a_stub_not_yet_holding_it_refuses_the_stubs_
     campaigns.mint_cycle(stub)
     stub_delete = DeleteCyclePayload(campaign_id=hop.campaign_id, cycle_id=stub.cycle_id)
     (stub_pass,) = request_jobs(
-        stores=built_stores, job_registry=passes, holder=ScoringPass("bench"), hop=stub
+        stores=built_stores,
+        job_registry=passes,
+        holder=ScoringPass(MeasurementRole.BENCH),
+        hop=stub,
     )
     with pytest.raises(CycleBusyError):
         await CommandDispatcher(built_stores, passes).dispatch(CommandCall(stub_delete))
@@ -2338,7 +2355,10 @@ async def test_a_fork_stub_a_pass_holds_is_neither_counted_nor_swept(
 
     assert counted() == 1
     (fork_pass,) = request_jobs(
-        stores=built_stores, job_registry=passes, holder=ScoringPass("bench"), hop=fork
+        stores=built_stores,
+        job_registry=passes,
+        holder=ScoringPass(MeasurementRole.BENCH),
+        hop=fork,
     )
     held_at = subtree_version(built_stores, family)
     assert counted() == 0, "the tree counted a stub a pass holds as deletable"
@@ -2752,7 +2772,10 @@ def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_s
     # No run or pass takes a torn mint: every door reads its campaign first.
     with pytest.raises(NotFoundError):
         request_jobs(
-            stores=built_stores, job_registry=holders, holder=ScoringPass("bench"), hop=torn_hop
+            stores=built_stores,
+            job_registry=holders,
+            holder=ScoringPass(MeasurementRole.BENCH),
+            hop=torn_hop,
         )
     # A mint that wrote its manifest past the plan's scan is no torn one, whoever holds it now:
     # the act asks again, keeps it, says so, and the next entry lands again.
@@ -3011,7 +3034,7 @@ async def test_a_passs_cancel_is_its_pause_read_by_that_pass_alone(
     _read_as_owed(command_log, owed, controls, stops=("stopped",))
 
 
-async def test_a_command_whose_act_still_runs_reads_filed_and_its_retry_files_again(
+async def test_a_command_whose_act_still_runs_reads_filed(
     command_log: _CommandLog,
 ) -> None:
     _, sender, _, acts, _, _, verify, _, _, _, seen, _, _, _ = command_log
@@ -3024,19 +3047,37 @@ async def test_a_command_whose_act_still_runs_reads_filed_and_its_retry_files_ag
     acts["alive"] = _midway
     flight = asyncio.ensure_future(sender.dispatch(verify("alive")))
     await started.wait()
-    await seen(("filed", "its act runs"), "alive", verify("alive"))
+    await seen(("filed", "its act runs"), "alive", None)
     release.set()
     await flight
-    owed = {("filed", "its act runs"): ("filed", "working", "working", "re-filed", 0)}
+    owed = {("filed", "its act runs"): ("filed", "working", "working", "-", 0)}
     _read_as_owed(command_log, owed, {})
 
 
-# The next pass walks the dead pass's cycle, and the reused id is the dead command's.
-async def test_a_command_whose_filer_died_stays_filed_and_its_id_stays_the_logs_own(
+async def test_a_retry_under_a_key_whose_act_still_runs_answers_that_act(
     command_log: _CommandLog,
 ) -> None:
-    # Its cancel stands for it alone, so neither a run boundary nor the next pass on its cycle
-    # reads it.
+    _, sender, _, acts, _, _, verify, _, _, _, _, _, _, _ = command_log
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def _midway() -> None:
+        started.set()
+        await release.wait()
+
+    acts["alive"] = _midway
+    flight = asyncio.ensure_future(sender.dispatch(verify("alive")))
+    await started.wait()
+    retry = asyncio.ensure_future(sender.dispatch(verify("alive")))
+    release.set()
+    first, again = await flight, await retry
+    assert again.accepted.command_id == first.accepted.command_id, "a key acted twice"
+
+
+# The next pass walks the dead pass's cycle, and the reused id is the dead command's.
+async def test_a_command_whose_filer_died_reads_cancelled_and_its_id_stays_the_logs_own(
+    command_log: _CommandLog,
+) -> None:
+    # Every door reads it ended, and neither a run boundary nor the next pass on its cycle reads it.
     stores, sender, acts_hop, acts, _, _, verify, _, _, _, seen, _, walking, _ = command_log
     dead = verify("dead")
     dead_payload, dead_digest = dead.payload.recorded()
@@ -3049,6 +3090,7 @@ async def test_a_command_whose_filer_died_stays_filed_and_its_id_stays_the_logs_
             act_digest=dead_digest,
             issued_by=acting_principal(stores.identity),
             subject=subject_key(stores.subject(acts_hop)),
+            filer=_GONE_FILER,
         )
     )
     await seen(("filed", "its filer gone, cancelled"), "dead", None)
@@ -3062,7 +3104,7 @@ async def test_a_command_whose_filer_died_stays_filed_and_its_id_stays_the_logs_
     reused = CommandCall(verify("reused").payload, "reused", command_id=dead.command_id)
     await seen(("unfiled", "a call under a filed command's id"), "reused", reused)
     owed = {
-        ("filed", "its filer gone, cancelled"): ("filed", "working", "working", "-", 0),
+        ("filed", "its filer gone, cancelled"): ("cancelled", "cancelled", "cancelled", "-", 0),
         ("unfiled", "a call under a filed command's id"): ("-", "-", "-", "ConflictError", 0),
     }
     _read_as_owed(command_log, owed, {"the next pass on a dead pass's cycle": "running"})
@@ -3404,7 +3446,9 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Com
     stores.campaigns.mint_cycle(held)
 
     with pytest.raises(PassStoppedError):
-        async with paid_pass(stores=stores, verb="bench", hop=held, declared=Budget(), sends=()):
+        async with paid_pass(
+            stores=stores, pass_kind=MeasurementRole.BENCH, hop=held, declared=Budget(), sends=()
+        ):
             pause = PauseCyclePayload(campaign_id="held", cycle_id="cycle_held", reason="stop")
             await sender.dispatch(CommandCall(pause))
             controls["outer, paused under a pass"] = stores.run_state(held).admission.refusal
@@ -3963,7 +4007,6 @@ async def test_one_refused_start_run_asked_in_process_is_the_value_every_door_re
     for argv, sentence in (
         (["new", "x", "--max-usd", "null"], "usd: "),
         (["new", "x", "--max-usd", "abc"], value["message"].removeprefix("budget.")),
-        (["noise-floor", "c1", "--k", "abc"], "a rescore count is a whole number"),
     ):
         monkeypatch.setattr(sys, "argv", ["promptpotter", *argv])
         with pytest.raises(SystemExit):

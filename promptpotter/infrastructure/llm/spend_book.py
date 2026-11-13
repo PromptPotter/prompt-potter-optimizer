@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 import time
 import uuid
@@ -8,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
+from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
 from promptpotter.domain.run_records import (
     Bill,
     CallPrice,
@@ -108,21 +110,30 @@ class SendOutcome(NamedTuple):
     resendable: bool = False
     detail: str = ""
     headers: object | None = None
+    # Said with ``PARAMETER_REFUSED`` alone: the request parameter whose value the endpoint refused.
+    refused_parameter: str | None = None
+
+
+_NAMED_PARAMETER = {key: re.compile(rf"\b{key}\b") for key in sorted(PARAM_SCOPE_KEYS)}
 
 
 def _status_failure(
     status: int, said: str, credit_statuses: frozenset[int] | None
-) -> ErrorCategory | None:
+) -> tuple[ErrorCategory | None, str | None]:
+    """The failure a reply's status and words say, and the parameter a refusal of one names."""
     if 200 <= status < 300:
-        return None
+        return None, None
     if status == 429:
-        return ErrorCategory.PROVIDER_THROTTLED
+        return ErrorCategory.PROVIDER_THROTTLED, None
     if 400 <= status < 500 and status != 408:
         credit = credit_statuses is None or status in credit_statuses
         if credit and is_provider_credit_refusal(said):
-            return ErrorCategory.PROVIDER_CREDIT
-        return ErrorCategory.CLIENT
-    return ErrorCategory.SERVER
+            return ErrorCategory.PROVIDER_CREDIT, None
+        named = (key for key, pattern in _NAMED_PARAMETER.items() if pattern.search(said))
+        if (parameter := next(named, None)) is not None:
+            return ErrorCategory.PARAMETER_REFUSED, parameter
+        return ErrorCategory.CLIENT, None
+    return ErrorCategory.SERVER, None
 
 
 def answered(bill: Billed | None) -> SendOutcome:
@@ -140,7 +151,7 @@ def replied(
     credit_statuses: frozenset[int] | None = None,
     answered_on: frozenset[int] = frozenset(),
 ) -> SendOutcome:
-    failure = _status_failure(status, said, credit_statuses)
+    failure, parameter = _status_failure(status, said, credit_statuses)
     # ``answered_on``: the statuses a relay answers a model that DID generate with, so may bill.
     refused = 400 <= status < 500 and status != 408 and status not in answered_on
     return SendOutcome(
@@ -151,6 +162,7 @@ def replied(
         resendable=status >= 500,
         detail=said,
         headers=headers,
+        refused_parameter=parameter,
     )
 
 

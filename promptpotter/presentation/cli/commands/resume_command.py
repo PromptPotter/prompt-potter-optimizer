@@ -52,7 +52,6 @@ def _run_mode(args: argparse.Namespace, *, fork_on_divergence: bool) -> RunMode:
             "from_round": args.resume_from_round,
             "no_divergence_check": args.no_divergence_check,
             "fork_on_divergence": fork_on_divergence,
-            "diag": args.diag,
         },
     )
 
