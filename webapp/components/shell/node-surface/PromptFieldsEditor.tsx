@@ -148,12 +148,9 @@ export function PromptFieldsEditor({
       keys.filter((key) => !cleared.includes(key)),
       next,
     );
-    const patch = promptFieldsPatch(scope, node, prompts, laid);
-    onApply(
-      cleared.length > 0
-        ? { ...patch, reset: cleared.map((key) => `config.optimization.nodes.${node}.config.${key}`) }
-        : patch,
-    );
+    // `null`, the wire's clear, on the config alone: a target's fields replace the whole map.
+    const clears = scope === "optimizer" ? cleared.map((key) => [key, null] as const) : [];
+    onApply(promptFieldsPatch(scope, node, prompts, { ...laid, ...Object.fromEntries(clears) }));
   };
 
   // A drop is an edit committed at once: the field takes the snippet after its own text.

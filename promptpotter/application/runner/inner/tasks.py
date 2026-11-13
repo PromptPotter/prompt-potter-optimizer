@@ -29,7 +29,6 @@ from promptpotter.application.scoring import metrics, selection
 from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.campaign_config import (
-    DEFAULT_ORIGIN_BUDGET,
     ArmGateMode,
     CampaignConfig,
     OptimizationConfig,
@@ -77,7 +76,7 @@ class InnerBenchmarkConfig(FrozenModel):
 
     n_samples_per_inner_round: int = Field(ge=1)
     # Explicit `null` ⇒ the per-round count; the inner-origin θ is the term BOTH arms of every paired delta subtract.
-    n_samples_origin: int | None = Field(default=DEFAULT_ORIGIN_BUDGET, ge=1)
+    n_samples_origin: int | None = Field(ge=1)
     # Held OUT of the search: drawn beside the origin bank under the cell's seed, read by every
     # bench pass and reached by no inner node. The scored lift is read on these rows alone.
     n_samples_bench: int = Field(ge=1)

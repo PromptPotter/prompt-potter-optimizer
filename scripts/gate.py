@@ -1907,6 +1907,10 @@ def main() -> int:
             have = ", ".join(c.name for c in CHECKS)
             parser.error(f"no such check: {', '.join(unknown)} (have: {have})")
         checks = [c for c in CHECKS if c.name in asked]
+    if not args.push and any(c.kind == "py" for c in checks):
+        # Before the selection, which parses sources another interpreter's `ast` may not read.
+        # A push re-execs nowhere: each checkout pins its own, and a path pinned here names this tree.
+        _reexec_pinned()
 
     sel = Selection.build(args.staged, args.changed)
     if args.staged:
@@ -1930,10 +1934,7 @@ def main() -> int:
                     todo.append(builder)
     checks.sort(key=CHECKS.index)
     if args.push:
-        # Before any re-exec: each checkout pins its own, and a path pinned here would name this tree.
         return _prove_tips(sys.stdin.read(), checks)
-    if any(c.kind == "py" for c in checks):
-        _reexec_pinned()
     if args.staged and checks and not _tree_is_index():
         return _prove_index()
     label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)

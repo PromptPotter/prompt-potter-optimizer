@@ -6,15 +6,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.bench import BenchTrigger, DatasetSplit
 from promptpotter.domain.campaign import (
     DeterminismClamp,
-    Environment,
-    Purpose,
-    RunDeclaration,
     StoppingRule,
 )
 from promptpotter.domain.cells import HardSampleOrder
@@ -33,8 +30,6 @@ from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringL
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
-
-DEFAULT_ORIGIN_BUDGET: int = 40
 
 OriginGateMode = Literal["strict", "critical_only", "off"]
 PanelGateMode = Literal["strict", "off"]
@@ -104,22 +99,11 @@ def over_the_default(budget: Budget) -> Budget:
     return _DEFAULT_BUDGET.over(budget)
 
 
-def named_over_the_default(budget: Budget) -> Budget:
-    """Only the axes where *budget* differs from the default: a declaration restates none."""
-    return budget.only(
-        axis
-        for axis in budget.named
-        if axis not in _DEFAULT_BUDGET.named
-        or getattr(budget, axis) != getattr(_DEFAULT_BUDGET, axis)
-    )
-
-
 class OptimizerChoice(StrictModel):
     """What `optimizer_manifest.py::select_optimizer` reads: which optimizer, its overlay, and
     the gate its roster closes under. Bare, it is the manifest as declared."""
 
     optimizer: Annotated[str, Knob(Estimand.SEARCH)] = Field(
-        "potter",
         min_length=1,
         description=(
             "The optimizer manifest this campaign runs — a directory under "
@@ -138,8 +122,15 @@ class OptimizerChoice(StrictModel):
             "all ride here; each node validates its own knobs when the optimizer is selected."
         ),
     )
+    # A bare selection holds no round: the manifest as declared. A campaign's gate is its own.
+    arm_gate: ArmGateMode = "off"
+
+
+class OptimizationConfig(OptimizerChoice):
+    """The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs
+    are its nodes' ``config`` in its manifest, never fields here."""
+
     arm_gate: Annotated[ArmGateMode, Knob(Estimand.GATE)] = Field(
-        "off",
         description=(
             "Hold every round, before any arm is measured, until the operator answers with "
             "the arms it measures (`submit-arms`). ``off`` (default) never holds. "
@@ -152,18 +143,12 @@ class OptimizerChoice(StrictModel):
         ),
     )
 
-
-class OptimizationConfig(OptimizerChoice):
-    """The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs
-    are its nodes' ``config`` in its manifest, never fields here."""
-
     @field_validator("budget", mode="before")
     @classmethod
     def _over_the_default(cls, given: object) -> Budget:
         return over_the_default(Budget.model_validate(given))
 
     budget: Annotated[Budget, Knob(Estimand.SPEND)] = Field(
-        _DEFAULT_BUDGET,
         description=(
             "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the "
             "CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and "
@@ -208,9 +193,8 @@ class OptimizationConfig(OptimizerChoice):
             "way. ``None`` → no such stop."
         ),
     )
-    degradation_threshold: Annotated[float, Knob(Estimand.STOPPING)] = Field(...)
+    degradation_threshold: Annotated[float, Knob(Estimand.STOPPING)] = Field(ge=0.0, le=1.0)
     degradation_fatal_fastpath: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
-        True,
         description=(
             "End a candidate at the first FATAL sample (empty response, "
             "content-filtered, structurally broken) without spending the rest of "
@@ -222,14 +206,12 @@ class OptimizationConfig(OptimizerChoice):
     elimination_n_min: Annotated[
         int, Knob(Estimand.STOPPING, Estimand.ABILITY, Estimand.DIFFICULTY)
     ] = Field(
-        6,
         description="Minimum distinct samples before θ is read as ability: the δ ruler stays "
         "flat below it, and no eliminator cuts an arm (nor a selector crowns one) on fewer — "
         "the floor on n for a posterior to be meaningful.",
     )
 
     panel_gate: Annotated[PanelGateMode, Knob(Estimand.GATE)] = Field(
-        "strict",
         description=(
             "Halt at the end of a round whose electable candidates carry HOLES — cells "
             "the loop attempted and got no measurement back from, or a spend or token "
@@ -246,7 +228,6 @@ class OptimizationConfig(OptimizerChoice):
     )
 
     lift_reference: Annotated[LiftReference, Knob(Estimand.GATE)] = Field(
-        "best_so_far",
         description=(
             "What each arm's lift is read against — member `a` of its `vs_reference` reading. "
             "``best_so_far`` (default): the "
@@ -259,7 +240,6 @@ class OptimizationConfig(OptimizerChoice):
     )
 
     origin_gate: Annotated[OriginGateMode, Knob(Estimand.GATE)] = Field(
-        "strict",
         description=(
             "Halt after round 0 when the origin's degradation verdict is non-healthy, "
             "instead of optimizing against a broken floor — the common failure while "
@@ -274,7 +254,6 @@ class OptimizationConfig(OptimizerChoice):
         bool,
         Knob(Estimand.DISCRIMINATION, Estimand.DIFFICULTY, Estimand.ABILITY),
     ] = Field(
-        True,
         description=(
             "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty "
             "δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, "
@@ -305,7 +284,6 @@ class OptimizationConfig(OptimizerChoice):
 
 class CampaignConfig(StrictModel):
     sp_budget_origin: Annotated[int, Knob(Estimand.SELECTION)] = Field(
-        DEFAULT_ORIGIN_BUDGET,
         ge=1,
         le=MAX_PASS_ROWS,
         description="Origin eval budget — how many bank samples the origin (C0) is "
@@ -328,7 +306,6 @@ class CampaignConfig(StrictModel):
     )
     exclude_nodes: Annotated[list[str], Knob(Estimand.SEARCH)] = Field(default_factory=list)
     task_framing: Annotated[Literal["committed", "off"], Knob(Estimand.SEARCH)] = Field(
-        "committed",
         description="Which task framing every target render splices in. `committed` "
         "(default) runs under the front matter of the dataset's `task.md`, which the first mint "
         "decomposes from its body when none is committed yet. `off` runs "
@@ -353,7 +330,7 @@ class CampaignConfig(StrictModel):
         "+ graded C (`steer_verdict`, asked when a fork's seed is parsed). Nothing declared for "
         "a node = nothing sanctioned there, the restrictive default.",
     )
-    scoring: Annotated[str | dict[str, str] | None, Knob(Estimand.GATE)] = Field(None)
+    scoring: Annotated[str | dict[str, str], Knob(Estimand.GATE)]
     judges: Annotated[dict[str, JudgeSpec], Knob(Estimand.GATE)] = Field(
         default_factory=dict,
         description="LLM-as-judge graders for datasets whose answer is free text, where no "
@@ -372,7 +349,6 @@ class CampaignConfig(StrictModel):
         "steered to would not be one.",
     )
     display_metric: Annotated[DisplayMetric, Knob(Estimand.DISPLAY)] = Field(
-        "fitness",
         description="Which fitness number the operator's round and candidate views display "
         "first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — "
         "the optimizer's selector decides on its own objective, and the campaign's headline "
@@ -383,7 +359,6 @@ class CampaignConfig(StrictModel):
         "`dashboard.json::display_metric`; never on `OptSearchPoint`.",
     )
     hard_sample_order: Annotated[HardSampleOrder, Knob(Estimand.DISPLAY)] = Field(
-        "info_gain",
         description="Which key ranks the hard-sample leaderboard — the heatmap, the table "
         "and the `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by the "
         "queue mechanism's acquisition score (`pick_value`: decision-information gain + δ "
@@ -414,14 +389,12 @@ class CampaignConfig(StrictModel):
         "holds nothing out: the whole bank is the search split and there is no bench score.",
     )
     run_seed: Annotated[int, Knob(Estimand.SELECTION)] = Field(
-        0,
         description="The run's one seed. It seeds which rows fall where and the order the search "
         "pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, "
         "so a reordered bank holds out the same rows and reads them in the same order. An L4 "
         "seat seeds its determinism clamp and its solver node from it too.",
     )
     bench_trigger: Annotated[BenchTrigger, Knob(Estimand.SPEND)] = Field(
-        "manual",
         description="When the line's bench passes are sent — each a cell per bench row, the "
         "ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` "
         "(default): a launch sends none and sets nothing aside for one; the operator asks for "
@@ -432,6 +405,14 @@ class CampaignConfig(StrictModel):
     )
 
     optimization: OptimizationConfig
+
+    @model_validator(mode="after")
+    def _excluded_nodes_unconfigured(self) -> CampaignConfig:
+        if dropped := set(self.exclude_nodes) & {*self.optimizer_narrowing, *self.pipeline_overlay}:
+            raise ValueError(
+                f"exclude_nodes drops {sorted(dropped)}, which a narrowing or overlay sets"
+            )
+        return self
 
     def identity(self) -> dict[str, object]:
         """What this config adds to a cell's identity beside its optimizer's ``Treatment``, less every default."""
@@ -468,54 +449,6 @@ def _seeded(overrides: ConfigOverrides, held: Mapping[str, object]) -> dict[str,
 
 
 _TREATMENT_OWNED: dict[str, Any] = {"optimization": {"optimizer": True, "nodes": True}}
-
-# What the target runs on and is graded by: the declaration's environment, every other key its loop.
-_ENVIRONMENT_KEYS = frozenset(
-    {"pipeline_overlay", "exclude_nodes", "task_framing", "scoring", "judges"}
-)
-
-
-def declare_run(
-    config: CampaignConfig,
-    *,
-    purpose: Purpose,
-    dataset_hash: str,
-    connector: str,
-    bench_defaults_pin: str,
-) -> RunDeclaration:
-    """Every door's config becomes ONE declaration: the keys its layers SET, never a default."""
-    named = config.model_dump(mode="json", exclude_unset=True)
-    optimization = {k: v for k, v in named.pop("optimization").items() if k != "budget"}
-    run_seed = named.pop("run_seed", None)
-    return RunDeclaration(
-        purpose=purpose,
-        dataset_hash=dataset_hash,
-        run_seed=run_seed,
-        loop={
-            **{k: v for k, v in named.items() if k not in _ENVIRONMENT_KEYS},
-            "optimization": optimization,
-        },
-        budget=named_over_the_default(config.optimization.budget),
-        environment=Environment(
-            connector=connector,
-            target={k: v for k, v in named.items() if k in _ENVIRONMENT_KEYS},
-        ),
-        bench_defaults_pin=bench_defaults_pin,
-    )
-
-
-def effective_config(declaration: RunDeclaration) -> CampaignConfig:
-    """The ONE derivation of what a declaration runs: today's defaults under its parts."""
-    loop = declaration.loop
-    seed = {} if declaration.run_seed is None else {"run_seed": declaration.run_seed}
-    return CampaignConfig.model_validate(
-        {
-            **loop,
-            **declaration.environment.target,
-            **seed,
-            "optimization": {**loop["optimization"], "budget": declaration.budget},
-        }
-    )
 
 
 def _scoring_block(scoring: object) -> dict[str, str]:

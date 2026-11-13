@@ -9,7 +9,6 @@ import {
   nodeOverlayPatch,
   overlayEdits,
   seedOverlayFromRows,
-  seedResetFromRows,
   type ConfigRow,
 } from "../node-config";
 import {
@@ -201,10 +200,9 @@ describe("configRows (values mode)", () => {
 
     expect(seedOverlayFromRows(rows, { "llm_only.layout": '{"instruction": ' })).toEqual({});
     const seeded = configRows(withNested, { llm_only: { layout: { instruction: ["plan"] } } }, "values");
-    expect(seedOverlayFromRows(seeded, { "llm_only.layout": "" })).toEqual({});
-    expect(seedResetFromRows(seeded, { "llm_only.layout": "" })).toEqual([
-      "pipeline_overlay.llm_only.layout",
-    ]);
+    expect(seedOverlayFromRows(seeded, { "llm_only.layout": "" })).toEqual({
+      llm_only: { layout: null },
+    });
   });
 
   // `schema_owned` fences only the OPTIMIZER, never the operator setting the value.

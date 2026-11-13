@@ -175,12 +175,13 @@ export function rowIntents(rows: ConfigRow[]): ParamIntent[] {
   return rows.map((r) => ({ key: r.key, open: !r.locked, allowed: r.allowed }));
 }
 
-// Only the node's changed knobs: the server lays `config` over the draft's by its paths.
+// Only the node's changed knobs: the server lays `config` over the draft's by its paths, a box
+// emptied as `null`, the wire's clear.
 export function nodeOverlayPatch(node: string, rows: ConfigRow[]): DraftPatch {
   const config: Record<string, unknown> = {};
   for (const r of rows) {
-    if (r.value !== r.baseValue && r.value !== "") {
-      const value = parseParam(r, r.value);
+    if (r.value !== r.baseValue) {
+      const value = r.value.trim() === "" ? null : parseParam(r, r.value);
       if (value !== undefined) config[r.key] = value;
     }
   }
@@ -247,6 +248,8 @@ export function applyFlatEdits(
   return out;
 }
 
+// A seeded key whose box an edit emptied is `null`, the wire's clear: the fork drops the
+// candidate's value and the layer below shows through.
 export function seedOverlayFromRows(
   rows: ConfigRow[],
   edits: Record<string, string>,
@@ -257,19 +260,11 @@ export function seedOverlayFromRows(
     const edit = edits[flatConfigKey(r.node, r.key)];
     if (!r.inSeed && (edit === undefined || edit === r.value)) continue;
     const raw = edit ?? r.value;
-    if (raw === "") continue;
-    const value = parseParam(r, raw);
+    const value = raw.trim() === "" ? (r.inSeed ? null : undefined) : parseParam(r, raw);
     if (value === undefined) continue;
     (overlay[r.node] ??= {})[r.key] = value;
   }
   return overlay;
-}
-
-// Each seeded key an edit cleared, as `ForkSeed.reset` names it: the fork drops it.
-export function seedResetFromRows(rows: ConfigRow[], edits: Record<string, string>): string[] {
-  return rows
-    .filter((r) => r.kind !== "prompt" && r.inSeed && edits[flatConfigKey(r.node, r.key)] === "")
-    .map((r) => `pipeline_overlay.${r.node}.${r.key}`);
 }
 
 export interface KnobGroup {

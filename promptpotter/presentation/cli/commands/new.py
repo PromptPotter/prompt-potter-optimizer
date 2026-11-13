@@ -11,7 +11,6 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, get_args, get_origin
 
-import yaml
 from pydantic import BaseModel
 
 from promptpotter.application.commands import (
@@ -24,7 +23,6 @@ from promptpotter.application.commands.dispatcher import CommandCall, CommandDis
 from promptpotter.application.commands.launching import dispatch_start_checkin
 from promptpotter.application.datasets.authored import (
     campaign_file_block,
-    validated_campaign_config,
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.loaders import no_dataset_hint
@@ -44,9 +42,9 @@ from promptpotter.domain.command_kinds import (
     StartCheckinPayload,
 )
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
+from promptpotter.domain.layer_fold import wire_value
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import LaunchAnswer
-from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES
 from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,
@@ -90,12 +88,6 @@ def _checkin_line(step: str, detail: str) -> None:
     logger.info("✓ %-13s — %s", step, detail)
 
 
-def _value(raw: str) -> Any:
-    """YAML, except a word YAML 1.1 reads as a bool stays the word: `reasoning_effort=off`."""
-    value = yaml.safe_load(raw)
-    return raw if isinstance(value, bool) and raw.lower() not in ("true", "false") else value
-
-
 def _members(annotation: object) -> tuple[Any, ...]:
     return tuple(m for m in (get_args(annotation) or (annotation,)) if m is not type(None))
 
@@ -105,7 +97,10 @@ def _laid(into: object, annotation: object, rest: list[str], raw: str, path: str
     any key, ``Any`` as it comes; at the leaf a field that takes a string keeps the word."""
     members = _members(annotation) if get_origin(annotation) is not dict else (annotation,)
     if not rest:
-        return raw if str in members else _value(raw)
+        try:
+            return wire_value(raw, text=str in members)
+        except ValueError as exc:
+            raise PayloadInvalidError(f"--set {path}: {exc}") from None
     for member in members:
         if isinstance(member, type) and issubclass(member, BaseModel):
             return _lay(into if isinstance(into, dict) else {}, member, rest, raw, path)
@@ -269,12 +264,7 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
     budget = budget_from_args(args)
     if args.config:
         path = Path(args.config)
-        declared = validated_campaign_config(campaign_file_block(path), path=path).model_dump(
-            mode="json", exclude_unset=True
-        )
-        # A file's budget bounds this launch, under the `--max-*` flags: the payload's one door.
-        filed = declared.get("optimization", {}).pop("budget", {})
-        budget = Budget.model_validate(filed).over(budget)
+        declared = campaign_file_block(path)
     dataset_name = args.dataset or args.dataset_name
     if not dataset_name:
         refused = PayloadInvalidError(
@@ -368,7 +358,7 @@ def _head_to_head_payload(args: argparse.Namespace) -> MintHeadToHeadPayload:
 
 
 def _spelled(value: object) -> str:
-    return value if isinstance(value, str) and yaml.safe_load(value) == value else json.dumps(value)
+    return value if isinstance(value, str) else json.dumps(value)
 
 
 _BUDGET_FLAGS = {

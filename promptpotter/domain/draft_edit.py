@@ -28,8 +28,8 @@ def _partial(
     return create_model(f"_{model.__name__}Fields", __base__=StrictModel, **fields)
 
 
-# Neither `optimization` takes `budget`: a launch's budget is its payload's own field, the one door
-# on every launch kind.
+# An edit's `optimization` takes no `budget`: a launch's bound is its payload's own field, the one
+# door on every launch kind; a declaration's (`CampaignLayer`) is its standing budget.
 class OptimizationOverrides(
     _partial(OptimizationConfig, only=("optimizer", "nodes", "arm_gate", "halt_at_fitness"))  # type: ignore[misc]
 ):
@@ -37,19 +37,20 @@ class OptimizationOverrides(
     laid over the one it names. Every other knob is the dataset's declaration."""
 
 
-class PartialOptimizationConfig(
-    _partial(OptimizationConfig, only=OptimizationConfig.model_fields.keys() - {"budget"})  # type: ignore[misc]
-):
-    """A stand-in declaration's ``optimization``: every knob a dataset declares."""
-
-
 class ConfigEdit(_partial(CampaignConfig, optimization=OptimizationOverrides)):  # type: ignore[misc]
     """A check-in edit's ``config``, by `CampaignConfig`'s own paths. Only the fields sent move
     anything: its ``exclude_unset`` dump is a layer of `campaign_config.py::CAMPAIGN_RULE`'s fold."""
 
 
-class PartialCampaignConfig(_partial(CampaignConfig, optimization=PartialOptimizationConfig)):  # type: ignore[misc]
-    """A mint's stand-in declaration, by `CampaignConfig`'s own paths, laid over its defaults."""
+class OptimizationLayer(_partial(OptimizationConfig)):  # type: ignore[misc]
+    """One layer of a declaration's ``optimization``: every knob, its budget the standing one."""
+
+
+class CampaignLayer(_partial(CampaignConfig, optimization=OptimizationLayer)):  # type: ignore[misc]
+    """One layer of a ``campaign`` declaration, by `CampaignConfig`'s own paths: a definition
+    file's, or a mint's stand-in for the dataset's own. Its budget is the declaration's standing
+    one at every door (`authored.py::ConfigLayers.of`); a knob it does not name (a retired one)
+    refuses where the layer is read."""
 
 
 class NodeOutputEdit(StrictModel):
@@ -84,18 +85,12 @@ class EditDraftPatch(StrictModel):
     raw_task_description: str | None = Field(default=None, max_length=16384, pattern=r"\S")
     config: ConfigEdit | None = Field(
         default=None,
-        description="Laid over the draft's config by `CampaignConfig`'s rule per key. "
-        "A string `scoring` names the criterion whole; a `scoring` "
+        description="Laid over the draft's config by `CampaignConfig`'s rule per key: an absent "
+        "key leaves its value, `null` drops the draft's own so the layer below shows through, and "
+        '`""` is the empty string. A string `scoring` names the criterion whole; a `scoring` '
         "mapping is folded into the criterion the draft runs, key by key: `matcher` picks "
         "the per-sample matcher, `dials` the composite's weights (the empty string clears them), "
         "`per_sample` and `per_cell` set those formulas.",
-    )
-    reset: list[str] | None = Field(
-        default=None,
-        description="Dotted paths, by this patch's own fields, of the draft's own values to drop "
-        "before the rest is laid, so the layer below shows through: "
-        "`config.optimization.nodes.<node>.config.<key>` or `origin_prompts.<step>.<field>`. "
-        "A path the draft does not set is a no-op.",
     )
     node_narrowing: dict[str, list[ParamIntent]] | None = None
     node_output: NodeOutputEdit | None = None

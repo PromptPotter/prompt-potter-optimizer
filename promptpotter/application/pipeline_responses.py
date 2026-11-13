@@ -13,9 +13,8 @@ from promptpotter.application.optimizer_manifest import (
     select_optimizer,
 )
 from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts
-from promptpotter.domain.campaign_config import OptimizationConfig, OptimizerChoice
+from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.cell_terms import CellTerm
-from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.pipeline_schema import (
     CapabilityMenu,
@@ -32,6 +31,7 @@ from promptpotter.domain.said import Tone
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
+from promptpotter.infrastructure.store.dataset_access import campaign_defaults
 from promptpotter.shared.plugin_registry import BUILT_IN
 from promptpotter.shared.worded import Worded
 
@@ -328,7 +328,7 @@ def _pool_draws(selected: SelectedOptimizer, pool: type[Pool]) -> list[PoolDraw]
 
 
 def _pool_fills(
-    selected: SelectedOptimizer, initializer: Initializer, held: list[PoolEntry], opened: set[str]
+    selected: SelectedOptimizer, initializer: Initializer, held: list[PoolEntry], opened: list[str]
 ) -> list[PoolFill]:
     in_play = set(kept(initializer.active(selected), ((e.id, e.group) for e in held)))
     landed = Counter(initializer.pool.part(e) for e in held if e.id in in_play)
@@ -338,8 +338,8 @@ def _pool_fills(
             entries=landed[part],
             most=selected.shot_cap if part == SHOTS_KEY else None,
         )
-        for part in (*PROMPT_FIELDS, SHOTS_KEY)
-        if landed[part] and part in opened
+        for part in opened
+        if landed[part]
     ]
 
 
@@ -359,11 +359,11 @@ def _pack_offers(
     return offered, mint.shelf.refusals()
 
 
-def _opened_parts(target: PipelineSchema) -> set[str]:
+def _opened_parts(target: PipelineSchema) -> list[str]:
+    """Each part an edit may write, in the target nodes' own field order, then the shots."""
     nodes = target.prompt_nodes()
-    return {f for node in nodes for f in node.open_prompt_fields} | (
-        {SHOTS_KEY} if nodes else set()
-    )
+    fields = [f for node in nodes for f in node.open_prompt_fields]
+    return list(dict.fromkeys([*fields, *([SHOTS_KEY] if nodes else [])]))
 
 
 def _node_prompts(selected: SelectedOptimizer) -> dict[str, OptimizerNodePrompt]:
@@ -387,7 +387,7 @@ def _pool_row(
     selected: SelectedOptimizer,
     initializer: Initializer,
     mint: MintFacts | None,
-    opened: set[str],
+    opened: list[str],
 ) -> PoolRow:
     held = initializer.held(selected, mint)
     drawn = any(initializer.pool in selected.draws(member) for member in selected.members)
@@ -437,7 +437,7 @@ def optimizer_setup(
 
 
 def optimizer_roster() -> OptimizerRoster:
-    default = OptimizationConfig.model_fields["optimizer"].default
+    default = campaign_defaults()["optimization"]["optimizer"]
     names = sorted(optimizers.MANIFESTS.table, key=lambda n: (n != default, n))
     origins = optimizers.MANIFESTS.origins
     entries = []

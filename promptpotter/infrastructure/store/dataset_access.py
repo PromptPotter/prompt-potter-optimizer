@@ -10,12 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import yaml
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, ValidationError
 
 from promptpotter import connectors
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.dataset_name import validate_dataset_name
+from promptpotter.domain.draft_edit import CampaignLayer
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
@@ -27,6 +28,7 @@ from promptpotter.shared.errors import (
     FileUnreadableError,
     PayloadInvalidError,
     SlugTakenError,
+    validation_reason,
 )
 
 if TYPE_CHECKING:
@@ -57,18 +59,16 @@ class ResolvedDataset:
     directory: Path
     tier: DatasetTier
     # The tier's root, below which a `family.yaml` is a layer; `None` on an account's own, which
-    # no tenant can lay a family or a default under.
+    # no tenant can lay a family under.
     tier_root: Path | None
-    # The install root, whose `defaults.yaml` lies under every install and research definition.
-    defaults_root: Path | None
 
 
 def tenant_dataset(name: str, directory: Path) -> ResolvedDataset:
-    return ResolvedDataset(name, directory, "yours", None, None)
+    return ResolvedDataset(name, directory, "yours", None)
 
 
 def install_dataset(install_root: Path, name: str) -> ResolvedDataset:
-    return ResolvedDataset(name, install_root / name, "install", install_root, install_root)
+    return ResolvedDataset(name, install_root / name, "install", install_root)
 
 
 def is_dataset_dir(dataset_dir: Path) -> bool:
@@ -80,15 +80,13 @@ def _holds_definition(directory: Path) -> bool:
 
 
 def definition_chain(dataset: ResolvedDataset) -> list[Path]:
-    """The directories a definition is laid from, root first: the install root (its
-    ``defaults.yaml``), every directory below the tier root holding ``family.yaml`` or a
-    ``dataset.yaml``, then the leaf; a plain directory between them is a path segment, never a
-    layer. An account's own is the leaf whole."""
+    """The directories a definition is laid from, root first: the wheel's install root (its
+    ``defaults.yaml``, `campaign_defaults`'s one home), every directory below the tier root
+    holding ``family.yaml`` or a ``dataset.yaml``, then the leaf; a plain directory between them
+    is a path segment, never a layer. An account's own is its leaf over the defaults."""
     leaf, root = dataset.directory, dataset.tier_root
-    if root is None or dataset.defaults_root is None:
-        return [leaf]
-    between = [d for d in reversed(leaf.parents) if d.is_relative_to(root) and d != root]
-    return [dataset.defaults_root, *(d for d in between if _holds_definition(d)), leaf]
+    between = [d for d in reversed(leaf.parents) if root and d.is_relative_to(root) and d != root]
+    return [install_datasets_root(), *(d for d in between if _holds_definition(d)), leaf]
 
 
 def _layer_file(directory: Path, leaf: Path) -> Path:
@@ -117,6 +115,11 @@ def definition_layer(raw: bytes) -> dict[str, Any] | None:
         if not isinstance(data.get(key) or {}, dict):
             raise ValueError(f"`{key}` must be a mapping")
     _card(data.get("card") or {})
+    # A knob `CampaignConfig` does not name (a retired one) refuses here, at the landing's read.
+    try:
+        CampaignLayer.model_validate(data.get("campaign") or {})
+    except ValidationError as exc:
+        raise ValueError(f"`campaign`: {validation_reason(exc, shown=3)}") from None
     return data
 
 
@@ -346,11 +349,7 @@ def _holders(stores: Stores, name: str) -> list[ResolvedDataset]:
         install_dataset(stores.install_datasets_root, name),
     ]
     if research is not None:
-        tiers.append(
-            ResolvedDataset(
-                name, research / name, "research", research, stores.install_datasets_root
-            )
-        )
+        tiers.append(ResolvedDataset(name, research / name, "research", research))
     return [dataset for dataset in tiers if is_dataset_dir(dataset.directory)]
 
 

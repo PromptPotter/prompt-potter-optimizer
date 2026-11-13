@@ -626,7 +626,7 @@ class Children(CycleRead):
         admitted = admission_failures(individual, config, schema, carried=carried)
         return Proposal(
             individual=individual,
-            overlay=asked,
+            overlay=config,
             validation_failures=[*failures, *admitted],
         )
 
@@ -674,7 +674,7 @@ class Children(CycleRead):
                 *placeholder_failures(individual, schema),
             ]
         held = proposal.overlay
-        merged = {n: {**held.get(n, {}), **asked.get(n, {})} for n in (*held, *asked)}
+        merged = {n: {**held.get(n, {}), **config.get(n, {})} for n in (*held, *config)}
         return proposal.model_copy(
             update={"individual": individual, "overlay": merged, "validation_failures": failures}
         )

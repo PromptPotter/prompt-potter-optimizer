@@ -12,10 +12,13 @@ from pydantic.fields import FieldInfo
 from pydantic_core import to_jsonable_python
 
 from promptpotter.application import optimizers
+from promptpotter.application.optimizers.nodes import CountKnob
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, knob_label
 from promptpotter.domain.pipeline_schema import KnobLayer, KnobLayers
+from promptpotter.domain.pool import DemoPool
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.dataset_access import campaign_defaults
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
@@ -29,8 +32,6 @@ if TYPE_CHECKING:
 class KnobDecl:
     path: tuple[str, ...]
     knob: Knob
-    default: Any
-    required: bool
 
     @property
     def dotted(self) -> str:
@@ -46,28 +47,13 @@ def _unwrap_optional(annotation: object) -> object:
     return annotation
 
 
-def _default_of(field: FieldInfo) -> Any:
-    if field.is_required():
-        return None
-    if field.default_factory is not None:
-        return field.default_factory()  # type: ignore[call-arg]
-    return field.default
-
-
 def _walk(model_cls: type[BaseModel], prefix: tuple[str, ...] = ()) -> list[KnobDecl]:
     out: list[KnobDecl] = []
     for name, field in model_cls.model_fields.items():
         path = (*prefix, name)
         knob = next((m for m in field.metadata if isinstance(m, Knob)), None)
         if knob is not None:
-            out.append(
-                KnobDecl(
-                    path=path,
-                    knob=knob,
-                    default=_default_of(field),
-                    required=field.is_required(),
-                )
-            )
+            out.append(KnobDecl(path=path, knob=knob))
             continue
         inner = _unwrap_optional(field.annotation)
         if isinstance(inner, type) and issubclass(inner, BaseModel):
@@ -94,12 +80,8 @@ def _node_prefix(node: str) -> tuple[str, ...]:
 def _node_decls(selected: SelectedOptimizer) -> dict[tuple[str, ...], KnobDecl]:
     out: dict[tuple[str, ...], KnobDecl] = {}
     for node in selected.member_nodes:
-        declared = selected.declared_knobs(node).model_dump(mode="json")
         for decl in _walk(optimizers.NODE_MEMBERS.get(node).knobs, _node_prefix(node)):
-            value: Any = declared
-            for part in decl.path[len(_node_prefix(node)) :]:
-                value = value.get(part) if isinstance(value, dict) else None
-            out[decl.path] = KnobDecl(path=decl.path, knob=decl.knob, default=value, required=False)
+            out[decl.path] = decl
     return out
 
 
@@ -119,6 +101,14 @@ def _models_in(annotation: object) -> Iterator[type[BaseModel]]:
         yield from _models_in(arg)
 
 
+def _default_of(field: FieldInfo) -> Any:
+    if field.is_required():
+        return None
+    if field.default_factory is not None:
+        return field.default_factory()  # type: ignore[call-arg]
+    return field.default
+
+
 def _leaf_defaults(
     model_cls: type[BaseModel], prefix: str, within: frozenset[type[BaseModel]] = frozenset()
 ) -> Iterator[tuple[str, Any]]:
@@ -131,13 +121,14 @@ def _leaf_defaults(
 
 
 def bench_defaults_pin() -> str:
-    """Walked LIVE, so any moved code default moves it; the optimizer's are its ``Treatment.manifest``."""
+    """Walked LIVE, so any moved default moves it, `defaults.yaml`'s or a sub-model's; the
+    optimizer's are its ``Treatment.manifest``."""
     bench = {
         p: d
         for p, d in _leaf_defaults(CampaignConfig, "")
         if not p.startswith("optimization.nodes")
     }
-    return stable_hash(to_jsonable_python(bench))
+    return stable_hash(to_jsonable_python({**bench, "defaults.yaml": campaign_defaults()}))
 
 
 _UNMEASURED = frozenset({Estimand.SPEND, Estimand.DISPLAY})
@@ -214,28 +205,6 @@ COUPLINGS: tuple[Coupling, ...] = (
         ),
     ),
     Coupling(
-        name="graduation_self_gated_on_holdout",
-        knobs=(
-            "optimization.enable_2pl_graduation",
-            "optimization.elimination_n_min",
-        ),
-        estimand=Estimand.DISCRIMINATION,
-        relation=(
-            "enable_2pl_graduation lets the difficulty ruler add per-sample "
-            "discrimination aₛ (2PL), but only where a data-rich dataset wins held-out "
-            "cross-validation; the same elimination_n_min floor that warms δ gates when "
-            "the bank is rich enough to fit aₛ at all."
-        ),
-        consequence=(
-            "Self-gated, not a collision: a cold or non-discriminating dataset stays "
-            "1PL automatically, and the held-out gate means 2PL can never regress a "
-            "dataset. Shown so the operator sees the ruler may carry discrimination "
-            "once the bank is rich. Turn OFF to pin 1PL everywhere."
-        ),
-        severity="info",
-        predicate=lambda _c: False,
-    ),
-    Coupling(
         name="lives_no_headroom",
         knobs=("optimization.lives.start", "optimization.budget"),
         estimand=Estimand.STOPPING,
@@ -285,8 +254,31 @@ def _member_predicate(
     return coupling.predicate(config, knobs, declared)
 
 
+def _draw_couplings(selected: SelectedOptimizer) -> Iterator[Coupling]:
+    """Every member drawing shots by a count of its own: inert where no demo pool is held out."""
+    for member in selected.members:
+        draw = member.draws.get(DemoPool)
+        if not isinstance(draw, CountKnob):
+            continue
+        yield Coupling(
+            name=f"{member.name}.shots_without_demo_pool",
+            knobs=(".".join((*_node_prefix(member.name), draw.knob)), "dataset_split"),
+            estimand=Estimand.SEARCH,
+            relation="An individual's shots are drawn from the demo pool `dataset_split.demo` "
+            "holds out.",
+            consequence=f"The campaign holds out no demo pool, so {member.name} writes no shot "
+            f"and its {draw.knob} is inert.",
+            severity="inert",
+            predicate=functools.partial(_starves_shots, draw.count(selected, member)),
+        )
+
+
+def _starves_shots(shots: int, config: CampaignConfig) -> bool:
+    return shots > 0 and (config.dataset_split is None or config.dataset_split.demo == 0)
+
+
 def declared_couplings(selected: SelectedOptimizer) -> list[Coupling]:
-    return [*COUPLINGS, *_member_couplings(selected)]
+    return [*COUPLINGS, *_member_couplings(selected), *_draw_couplings(selected)]
 
 
 def check_couplings(config: CampaignConfig, selected: SelectedOptimizer) -> list[Coupling]:
@@ -294,7 +286,7 @@ def check_couplings(config: CampaignConfig, selected: SelectedOptimizer) -> list
 
 
 # A set optimizer-node knob names the layer that set it last; a set bench knob is `campaign`.
-KnobSource = Literal["default", KnobLayer, "required", "manifest"]
+KnobSource = Literal["default", KnobLayer, "manifest"]
 
 
 class ConfigKnob(StrictModel):
@@ -304,7 +296,7 @@ class ConfigKnob(StrictModel):
     label: str = Field(description="Short display name (prefix-stripped)")
     value: Any = Field(description="Effective value in this campaign's frozen config")
     source: KnobSource = Field(
-        description="Where the value came from: default | required | manifest (an optimizer "
+        description="Where the value came from: default (`defaults.yaml`) | manifest (an optimizer "
         "node's knob, as its manifest declares it) | the layer that set it: campaign (the "
         "operator's edit; any set bench knob), and on an optimizer node's knob dataset, "
         "free_tier or seed"
@@ -375,8 +367,10 @@ def _knob_rows(
     config: CampaignConfig, selected: SelectedOptimizer, laid_by: KnobLayers
 ) -> list[tuple[ConfigKnob, frozenset[Estimand]]]:
     """``value`` is ``None`` where an opt-in submodel is off, not merely unset; *laid_by* names
-    the layer behind each ``optimization.nodes`` key *config* sets (`CycleConfig.knob_layers`)."""
+    the layer behind each ``optimization.nodes`` key *config* sets (`CycleConfig.knob_layers`); a
+    bench knob holding `defaults.yaml`'s value, or an unset opt-in's, is the default."""
     dumped = config.model_dump(mode="json")
+    defaults = campaign_defaults()
     authored = config.model_dump(mode="json", exclude_defaults=True)
     nodes = {n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes}
     dumped["optimization"]["nodes"] = {n: {"config": v} for n, v in nodes.items()}
@@ -390,7 +384,8 @@ def _knob_rows(
             node, _, key = path[len(_NODES_PATH) : len(_NODES_PATH) + 3]
             source = laid_by[node][key] if set_by_operator else "manifest"
         else:
-            source = "required" if decl.required else ("campaign" if set_by_operator else "default")
+            stated = set_by_operator and value != _at(defaults, path)
+            source = "campaign" if stated else "default"
         knob = ConfigKnob(
             path=decl.dotted,
             label=knob_label(decl.dotted),

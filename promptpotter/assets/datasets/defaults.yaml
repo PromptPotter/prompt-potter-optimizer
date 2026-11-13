@@ -1,8 +1,23 @@
 # The default every `{name}/dataset.yaml::campaign` and every upload's draft is laid over — what
 # one leaves unsaid, it says this. The merge rule is `assets/datasets/CLAUDE.md` § A dataset file is
-# a partial. A node's template is its connector's (`Connector.node_templates`).
+# a partial. Every campaign default lives here and nowhere in code: each `CampaignConfig` field this
+# file names is required there. A node's template is its connector's (`Connector.node_templates`).
 campaign:
+  sp_budget_origin: 40
+  task_framing: committed
   scoring: label_match(predicted, ground_truth)
+  display_metric: fitness
+  hard_sample_order: info_gain
+  run_seed: 0
+  bench_trigger: manual
   optimization:
+    optimizer: potter
+    arm_gate: "off"
     degradation_threshold: 0.4
+    degradation_fatal_fastpath: true
+    elimination_n_min: 6
+    panel_gate: strict
+    lift_reference: best_so_far
+    origin_gate: strict
+    enable_2pl_graduation: true
     budget: {rounds: 5}

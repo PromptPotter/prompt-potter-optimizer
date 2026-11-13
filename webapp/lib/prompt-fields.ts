@@ -33,7 +33,7 @@ export function promptFieldsPatch(
   scope: NodeScope,
   node: string,
   prompts: Record<string, NodePrompt>,
-  fields: Record<string, string>,
+  fields: Record<string, string | null>,
 ): DraftPatch {
   if (scope === "optimizer") {
     const before = prompts[node];
@@ -44,7 +44,9 @@ export function promptFieldsPatch(
   }
   const next: Record<string, Record<string, string>> = {};
   for (const [name, p] of Object.entries(prompts)) next[name] = p.fields;
-  next[node] = Object.fromEntries(Object.entries(fields).filter(([, v]) => v.trim() !== ""));
+  next[node] = Object.fromEntries(
+    Object.entries(fields).flatMap(([k, v]) => (v === null || v.trim() === "" ? [] : [[k, v]])),
+  );
   return { origin_prompts: next };
 }
 

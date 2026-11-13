@@ -91,7 +91,6 @@ from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
-    OptimizationConfig,
     OptimizerChoice,
 )
 from promptpotter.domain.command_events import WORKSPACE_SUBJECT, CommandRecord, subject_key
@@ -103,7 +102,7 @@ from promptpotter.domain.command_kinds import (
     PauseCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
-from promptpotter.domain.draft_edit import OptimizationOverrides
+from promptpotter.domain.draft_edit import CampaignLayer, OptimizationOverrides
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.pipeline_manifest import prompt_key
@@ -624,7 +623,7 @@ def campaign_config(
     raw.update(BENCH, bench_trigger=bench_trigger)
     opt = raw["optimization"]
     # The template's node overlay is written for the optimizer it selects, and only that one.
-    templated = opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
+    templated = opt["optimizer"]
     # Draws follow the campaign's id unless a clamp seeds them, and every run mints an id.
     opt.update(
         budget={"usd": 1000.0, "rounds": rounds},
@@ -655,6 +654,14 @@ def campaign_config(
         block = nodes[sampler.name] = dict(nodes.get(sampler.name) or {})
         block["config"] = {**(block.get("config") or {}), sampler.size_knob: ROUND_CELLS}
     return CampaignConfig.model_validate(raw)
+
+
+def stated(config: CampaignConfig) -> CampaignLayer:
+    """*config* as a door states it: the layer `ConfigLayers.stating` lays over `defaults.yaml`."""
+    layer: CampaignLayer = CampaignLayer.model_validate(
+        config.model_dump(mode="json", exclude_unset=True)
+    )
+    return layer
 
 
 def text_templates(config: CampaignConfig) -> dict[str, str]:
@@ -815,7 +822,7 @@ async def run_one(
         harness.backend.before_answer = pausing_in_walk(stores, pause_in_walk)
     session, result = await run_campaign(
         DATASET,
-        config,
+        stated(config),
         stores=stores,
         readout_sink=print,
         budget=Budget(),
@@ -1002,7 +1009,7 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     for step_rounds in (None, 1):
         session, _ = await run_campaign(
             DATASET,
-            config,
+            stated(config),
             stores=stores,
             readout_sink=print,
             budget=Budget(),
@@ -1065,7 +1072,7 @@ async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
         backend.down, backend.sent = True, []
         session, result = await run_campaign(
             DATASET,
-            config,
+            stated(config),
             stores=stores,
             readout_sink=print,
             budget=Budget(),
@@ -1128,7 +1135,12 @@ async def run_l4(workspace: Path, *, rows: int) -> None:
     config = CampaignConfig.model_validate(raw)
     harness = Harness.installed(workspace, config, text_templates(config), samples, crossing=False)
     session, result = await run_campaign(
-        L4_DATASET, config, stores=stores, readout_sink=print, budget=Budget(), mode=RunMode()
+        L4_DATASET,
+        stated(config),
+        stores=stores,
+        readout_sink=print,
+        budget=Budget(),
+        mode=RunMode(),
     )
     await banked(stores, session, result, harness, workspace, name=L4, bench_trigger="at_end")
     askers = {asker for asker, _, _ in harness.llm.turns if asker}
@@ -1234,7 +1246,7 @@ async def run_arms(
         shared["optimization"].pop(knob, None)
     ran = await run_head_to_head(
         DATASET,
-        CampaignConfig.model_validate(shared),
+        CampaignLayer.model_validate(shared),
         request,
         stores=stores,
         mode=RunMode(),

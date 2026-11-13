@@ -11,14 +11,19 @@ from promptpotter.application.datasets.tabular_ingest import read_candidate_libr
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
 from promptpotter.application.scoring.judges.registry import judge_instrument
+from promptpotter.config.paths import install_datasets_root
+from promptpotter.domain.campaign import Environment, Purpose, RunDeclaration
 from promptpotter.domain.campaign_config import CAMPAIGN_RULE, CampaignConfig
-from promptpotter.domain.layer_fold import Folded, Layer, fold_layers
+from promptpotter.domain.draft_edit import CampaignLayer
+from promptpotter.domain.layer_fold import Folded, Layer, fold_layers, wire_patch
 from promptpotter.domain.pipeline_schema import KnobLayer
 from promptpotter.domain.scoring import Scorer
 from promptpotter.infrastructure.store.dataset_access import (
+    DEFAULTS_FILE,
     DEFINITION_FILE,
     DatasetDefinition,
     ResolvedDataset,
+    campaign_defaults,
     read_dataset_definition,
     read_dataset_framing,
 )
@@ -84,6 +89,81 @@ def load_dataset_campaign_config(dataset: ResolvedDataset) -> CampaignConfig:
     )
 
 
+def defaults_config() -> CampaignConfig:
+    """`defaults.yaml`'s campaign, whole: the value of every knob no layer above it sets."""
+    return validated_campaign_config(
+        campaign_defaults(), path=install_datasets_root() / DEFAULTS_FILE
+    )
+
+
+# What the target runs on and is graded by: the declaration's environment, every other key its loop.
+_ENVIRONMENT_KEYS = frozenset(
+    {"pipeline_overlay", "exclude_nodes", "task_framing", "scoring", "judges"}
+)
+
+
+def declare_run(
+    config: CampaignConfig,
+    *,
+    purpose: Purpose,
+    dataset_hash: str,
+    connector: str,
+    bench_defaults_pin: str,
+) -> RunDeclaration:
+    """Every door's config becomes ONE declaration: what it states over today's defaults."""
+    defaults = defaults_config()
+    under = defaults.model_dump(mode="json")
+    named = {k: v for k, v in config.model_dump(mode="json").items() if under[k] != v}
+    named.pop("optimization", None)
+    held = under["optimization"]
+    optimization = {
+        k: v
+        for k, v in config.optimization.model_dump(mode="json").items()
+        if k != "budget" and held[k] != v
+    }
+    budget, standing = config.optimization.budget, defaults.optimization.budget
+    return RunDeclaration(
+        purpose=purpose,
+        dataset_hash=dataset_hash,
+        run_seed=named.pop("run_seed", None),
+        loop={
+            **{k: v for k, v in named.items() if k not in _ENVIRONMENT_KEYS},
+            "optimization": optimization,
+        },
+        budget=budget.only(
+            a
+            for a in budget.named
+            if a not in standing.named or getattr(budget, a) != getattr(standing, a)
+        ),
+        environment=Environment(
+            connector=connector,
+            target={k: v for k, v in named.items() if k in _ENVIRONMENT_KEYS},
+        ),
+        bench_defaults_pin=bench_defaults_pin,
+    )
+
+
+def effective_config(declaration: RunDeclaration) -> CampaignConfig:
+    """The ONE derivation of what a declaration runs: today's defaults under its parts."""
+    defaults = defaults_config()
+    loop = declaration.loop
+    seed = {} if declaration.run_seed is None else {"run_seed": declaration.run_seed}
+    budget = defaults.optimization.budget.over(declaration.budget)
+    return CampaignConfig.model_validate(
+        {
+            **defaults.model_dump(mode="json"),
+            **loop,
+            **declaration.environment.target,
+            **seed,
+            "optimization": {
+                **defaults.optimization.model_dump(mode="json"),
+                **loop["optimization"],
+                "budget": budget.model_dump(mode="json", exclude_unset=True),
+            },
+        }
+    )
+
+
 class ConfigLayers(NamedTuple):
     """A run's config as a door hands it to the mint: the dataset's ``campaign`` block, and the
     door's edit, the keys it SETS (`pipeline_resolve.py::laid_config` lays them)."""
@@ -92,17 +172,24 @@ class ConfigLayers(NamedTuple):
     campaign: Mapping[str, Any]
 
     @classmethod
-    def of(cls, dataset: ResolvedDataset, stated: CampaignConfig | None) -> ConfigLayers:
-        """A declaration *stated* in place of the dataset's block is the edit, laid over nothing."""
-        if stated is None:
-            return cls(dataset_campaign_block(dataset), {})
-        return cls({}, stated.model_dump(mode="json", exclude_unset=True))
+    def of(cls, dataset: ResolvedDataset, stated: CampaignLayer | None) -> ConfigLayers:
+        """The dataset's block, or a declaration *stated* in its place."""
+        return cls(dataset_campaign_block(dataset), {}) if stated is None else cls.stating(stated)
+
+    @classmethod
+    def stating(cls, stated: CampaignLayer) -> ConfigLayers:
+        """*stated* is the edit, laid over `defaults.yaml` alone, as a definition is."""
+        return cls(campaign_defaults(), stated.model_dump(mode="json", exclude_unset=True))
 
     def over(self, optimization: Mapping[str, Any]) -> ConfigLayers:
-        """*optimization* laid into the edit, last."""
+        """*optimization*, as a door sent it (`layer_fold.py::wire_patch`), laid into the edit,
+        last; its ``budget`` is the payload's own, where a null axis is unbounded, never a clear."""
+        sent = {k: v for k, v in optimization.items() if k != "budget"}
+        budget = {"budget": optimization["budget"]} if "budget" in optimization else {}
+        laid = wire_patch(CAMPAIGN_RULE, sent, "optimization")
         layers = [
             Layer("campaign", self.campaign),
-            Layer("campaign", {"optimization": optimization}),
+            Layer("campaign", {"optimization": {**laid, **budget}}),
         ]
         return self._replace(campaign=fold_layers(CAMPAIGN_RULE, layers).document)
 

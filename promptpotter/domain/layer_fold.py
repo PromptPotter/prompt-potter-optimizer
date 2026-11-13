@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import functools
+import json
 import types
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -143,27 +144,30 @@ def _only_clears(patch: Mapping[str, object]) -> bool:
     return all(v is CLEAR or (isinstance(v, Mapping) and _only_clears(v)) for v in patch.values())
 
 
-def clears(paths: Iterable[str], grammar: Iterable[tuple[str, ...]]) -> dict[str, Any]:
-    """Each dotted path as a patch clearing it, refused unless one *grammar* pattern (``*`` is
-    any key) spells it: every door's reset path, one grammar."""
-    spelled = list(grammar)
-    patch: dict[str, Any] = {}
-    for path in paths:
-        keys = path.split(".")
-        if not any(_spells(pattern, keys) for pattern in spelled):
-            named = " or ".join(f"`{'.'.join(p).replace('*', '<key>')}`" for p in spelled)
-            raise ValueError(f"reset path {path!r} names no value a layer holds: one of {named}")
-        at = patch
-        for key in keys[:-1]:
-            at = at.setdefault(key, {})
-        at[keys[-1]] = CLEAR
-    return patch
+def wire_patch(rule: Rule, sent: Mapping[str, object], *at: str) -> dict[str, object]:
+    """A patch as every door sends it, laid as the fold reads it: an absent key leaves its value,
+    ``null`` is `CLEAR` (the layer below shows through), and ``""`` is the empty string. A value
+    *rule* lays whole is the value, nulls inside it included."""
+    out: dict[str, object] = {}
+    for key, value in sent.items():
+        if value is None:
+            out[key] = CLEAR
+        elif isinstance(value, Mapping) and rule((*at, key)).lay in (Lay.KEYS, Lay.CALL):
+            out[key] = wire_patch(rule, value, *at, key)
+        else:
+            out[key] = value
+    return out
 
 
-def _spells(pattern: tuple[str, ...], keys: list[str]) -> bool:
-    return len(pattern) == len(keys) and all(
-        p in ("*", k) for p, k in zip(pattern, keys, strict=True)
-    )
+def wire_value(raw: str, *, text: bool) -> Any:
+    """A value typed in as text, read by its declared type: a field taking text keeps the word,
+    any other reads *raw* as JSON (``null`` the `CLEAR` `wire_patch` lays); every door's typing."""
+    if text:
+        return raw
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise ValueError(f"{raw!r} is no JSON value (a string field keeps the word)") from None
 
 
 def _unstamp(stamps: dict[tuple[str, ...], Any], path: tuple[str, ...], *, itself: bool) -> None:

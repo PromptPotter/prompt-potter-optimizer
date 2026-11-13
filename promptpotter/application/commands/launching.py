@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -69,6 +68,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, InnerRun, Job
+from promptpotter.domain.layer_fold import wire_value
 from promptpotter.domain.phases import INNER_PAUSE_REFUSAL
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineSchema, narrowing_of
@@ -106,8 +106,8 @@ logger = logging.getLogger(__name__)
 
 
 def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, NodeCall]:
-    """Each steered value in its param's declared type at *schema*, as every door sends it: a
-    string stays text, and a string sent for any other type is read as JSON."""
+    """Each steered value in its param's declared type at *schema*, as every door sends it
+    (`layer_fold.py::wire_value`)."""
     typed: dict[str, NodeCall] = {}
     for node, cfg in overlay.items():
         declared = schema.get_node(node)
@@ -124,13 +124,12 @@ def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, N
                 raise PayloadInvalidError(
                     f"payload.seed: {node!r} carries no {param!r}; params: {known}"
                 )
-            if kind != "string" and isinstance(value, str):
+            if isinstance(value, str):
                 try:
-                    value = json.loads(value)
-                except ValueError:
+                    value = wire_value(value, text=kind == "string")
+                except ValueError as exc:
                     raise PayloadInvalidError(
-                        f"payload.seed steers {node}.{param}, declared {kind}; {value!r} is not "
-                        "one (spell it as JSON)"
+                        f"payload.seed steers {node}.{param}, declared {kind}: {exc}"
                     ) from None
             params[param] = value
         typed[node] = PayloadInvalidError.validating(
@@ -151,7 +150,7 @@ def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop
             }
         except ValueError as exc:
             raise PayloadInvalidError(f"payload.seed.node_narrowing invalid: {exc}") from exc
-    verdict = steer_verdict(stores, permitted_narrowing(stores, of), sent.pipeline_overlay)
+    verdict = steer_verdict(stores, permitted_narrowing(stores, of), sent.laid)
     if verdict == "refused":
         logger.warning(
             "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
@@ -159,11 +158,7 @@ def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop
             CAMPAIGN_BABYSIT_CAP,
         )
         raise NotFoundError("Not found", code="not_found")
-    overlay = (
-        _typed_steer(sent.pipeline_overlay, recorded_schema(stores, hop))
-        if sent.pipeline_overlay
-        else {}
-    )
+    overlay = _typed_steer(sent.laid, recorded_schema(stores, hop)) if sent.laid else {}
     for node, call in overlay.items():
         allowed = narrowing[node].param_allowed_values if node in narrowing else {}
         for param, value in call.laid_keys().items():
@@ -395,7 +390,9 @@ async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[
         request = FreshMint(
             dataset=dataset,
             budget=payload.budget,
-            layers=ConfigLayers.of(dataset, payload.declared).over(payload.optimization_sent),
+            layers=ConfigLayers.of(dataset, payload.campaign_config).over(
+                payload.optimization_sent
+            ),
             task_text=payload.task_text,
         )
         # Refused here, before a slot is asked for: a queued mint would refuse it only later.

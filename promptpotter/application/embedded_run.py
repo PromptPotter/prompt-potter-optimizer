@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.datasets.authored import ConfigLayers
+from promptpotter.application.datasets.authored import ConfigLayers, effective_config
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
@@ -41,7 +41,6 @@ from promptpotter.application.pipeline_resolve import cycle_config, laid_session
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import Optimize
-from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.results import CycleResult
@@ -54,8 +53,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.domain.campaign import RunDeclaration
-    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.command_kinds import HeadToHeadRequest
+    from promptpotter.domain.draft_edit import CampaignLayer
     from promptpotter.domain.run_mode import RunMode
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
@@ -113,7 +112,7 @@ async def _dataset_session(
 
 async def run_campaign(
     target: str | CycleHop,
-    campaign_config: CampaignConfig | None = None,
+    campaign_config: CampaignLayer | None = None,
     *,
     stores: Stores | None = None,
     program: object | None = None,
@@ -141,7 +140,7 @@ async def run_campaign(
                 )
             refuse_campaign(stores, campaign := campaign_at(stores, target))
             resuming = ExistingCycle(target, campaign, budget)
-            campaign_config = cycle_config(stores, campaign, target).config
+            config = cycle_config(stores, campaign, target).config
             connector, measured = campaign.connector, campaign.dataset_name
         else:
             session = await clients.enter_async_context(
@@ -150,20 +149,20 @@ async def run_campaign(
             assert session.dataset is not None, "a dataset session resolved its dataset"
             session, laid = laid_session(session, ConfigLayers.of(session.dataset, campaign_config))
             declaration = declare(session, laid, purpose=Optimize())
-            campaign_config = effective_config(declaration)
+            config = effective_config(declaration)
             connector, measured = declaration.environment.connector, session.measured_dataset
 
         # Admitted BEFORE the mint, whose framing call is paid, and before a resume binds its
         # cycle: a refusal leaves nothing written. Offloaded: the sweep scans every cycle ledger.
         await asyncio.to_thread(sweep, stores.projects_root)
         start, held = await admit_slotless(
-            campaign_config,
+            config,
             stores=stores,
             holder=EmbeddedRun(measured),
             hop=None if resuming is None else resuming.hop,
             requested=budget,
             step_rounds=step_rounds,
-            sends=sends_on(stores, campaign_config, connector),
+            sends=sends_on(stores, config, connector),
         )
         # Then held as a head-to-head's arm is: its cycle opened, a mint's landed on.
         stamps: CycleHop | None = None
@@ -193,7 +192,7 @@ async def run_campaign(
 
 async def run_head_to_head(
     dataset_name: str,
-    campaign_config: CampaignConfig,
+    campaign_config: CampaignLayer,
     request: HeadToHeadRequest,
     *,
     stores: Stores | None = None,
@@ -226,11 +225,7 @@ async def run_head_to_head(
         AsyncExitStack() as closing,
     ):
         admitted = await admit_head_to_head(
-            DatasetArms(
-                session,
-                ConfigLayers({}, campaign_config.model_dump(mode="json", exclude_unset=True)),
-                closing,
-            ),
+            DatasetArms(session, ConfigLayers.stating(campaign_config), closing),
             request,
             job_registry=JobRegistry.attach(stores.jobs_dir),
             holder=EmbeddedRun(session.measured_dataset),

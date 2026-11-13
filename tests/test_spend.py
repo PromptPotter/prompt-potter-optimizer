@@ -36,6 +36,7 @@ from factories import (
     backend_client,
     billed_call,
     cycle_result,
+    defaulted_config,
     filed,
     filed_under,
     inner_cells,
@@ -145,7 +146,6 @@ from promptpotter.domain.campaign_config import (
     CAMPAIGN_RULE,
     CampaignConfig,
     CycleConfig,
-    OptimizationConfig,
 )
 from promptpotter.domain.cells import PinnedCell
 from promptpotter.domain.checkin_draft import DatasetBasis
@@ -407,7 +407,7 @@ def _armed(stores: Stores, hop: CycleHop | None, held: HeldBudget) -> SpendBook:
 
 
 def _budgeted(budget: Budget) -> CampaignConfig:
-    config = CampaignConfig.model_validate({"optimization": {"degradation_threshold": 0.05}})
+    config = defaulted_config({"optimization": {"degradation_threshold": 0.05}})
     optimization = config.optimization.model_copy(update={"budget": budget})
     return config.model_copy(update={"optimization": optimization})
 
@@ -1031,7 +1031,7 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
     )
     hop = CycleHop(campaign_id="ds__000001", cycle_id="cycle_root")
     mode = RunMode(from_round=2)
-    launched_config = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
+    launched_config = defaulted_config({"optimization": {"degradation_threshold": 0.05}})
     held_job = spawned.get(held.job_id)
     assert held_job is not None
     launched = HeldRun(
@@ -4938,7 +4938,7 @@ def unframed_session(built_stores: Stores) -> _Framing:
         rows,
         dataset=resolve_dataset(stores, "drafted"),
     )
-    declared = mint.declare(framing, CampaignConfig.model_validate(unframed), purpose=Optimize())
+    declared = mint.declare(framing, defaulted_config(unframed), purpose=Optimize())
     return _Framing(framing, declared, rows)
 
 

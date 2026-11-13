@@ -17,7 +17,6 @@ import httpx
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, Endpoint, cell_envelope_of
 from promptpotter.domain.connector import AuthScheme
-from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_schema import OUTPUT_CONTRACT_KEYS
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.tls import tls_context
@@ -72,6 +71,17 @@ def _harness_reply(body: dict[str, Any]) -> dict[str, Any] | None:
     return {ANSWER_KEY: answer, "terminal_node": HARNESS_NODE}
 
 
+# The harness node's own prompt fields, in the order it declares them.
+_HARNESS_FIELDS = (
+    "persona",
+    "task_intent",
+    "problem_description",
+    "instruction",
+    "thinking_style",
+    "answer_format",
+)
+
+
 def _pipeline_declaration(_stores: Stores, _experiment: Mapping[str, Any] | None) -> dict[str, Any]:
     return {
         "nodes": {
@@ -79,7 +89,7 @@ def _pipeline_declaration(_stores: Stores, _experiment: Mapping[str, Any] | None
                 "type": "llm",
                 "runtime": "backend",
                 "description": "The LLM node an n8n eval harness holds, on the n8n node's model.",
-                "prompt_info": {"fields": list(PROMPT_FIELDS), "rewrite_slot": "instruction"},
+                "prompt_info": {"fields": list(_HARNESS_FIELDS), "rewrite_slot": "instruction"},
                 "config": {},
                 "optimizer": {"param_keys": []},
             },

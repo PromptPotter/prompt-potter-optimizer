@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from promptpotter.application.optimizers.nodes import MemberCoupling
+from promptpotter.application.optimizers.potter.knobs import EscalationKnobs
 from promptpotter.domain.campaign_config import Estimand
 
 ADAPTIVE_QUEUE = (
@@ -66,4 +69,35 @@ POBB = (
         severity="inert",
         predicate=lambda _c, k, _d: k.epsilon_floor > k.epsilon,
     ),
+)
+
+
+# The `EscalationLadder` predicate each knob is read under: a patience paces the next rung's climb.
+_READ_ON = {"l1_patience": "fires_l2", "l2_patience": "fires_l3", "l3_patience": "fires_l3"} | {
+    f"{act}_capability": "fires_l2" for act in ("rebase", "reelect", "terminate")
+}
+assert set(_READ_ON) == set(EscalationKnobs.model_fields) - {"escalation_ladder"}, "a rung unread"
+
+
+def _unread(knob: str, rung: str) -> Callable[[object, EscalationKnobs, EscalationKnobs], bool]:
+    return lambda _c, k, d: (
+        not getattr(k.escalation_ladder, rung) and getattr(k, knob) != getattr(d, knob)
+    )
+
+
+LADDER = tuple(
+    MemberCoupling(
+        name=f"{knob}_above_the_ladder",
+        knobs=(knob, "escalation_ladder"),
+        bench_knobs=(),
+        estimand=Estimand.CONTROLLER,
+        relation=f"{knob} is read only on a rung `escalation_ladder` climbs to.",
+        consequence=(
+            f"{knob} is set off the manifest's value, but the ladder never climbs to the rung "
+            "that reads it, so the setting is inert."
+        ),
+        severity="inert",
+        predicate=_unread(knob, rung),
+    )
+    for knob, rung in _READ_ON.items()
 )

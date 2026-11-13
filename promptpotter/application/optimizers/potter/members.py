@@ -24,7 +24,7 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import (
 from promptpotter.application.intelligence.rasch import build_round_order
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.nodes import OptimizerPhase
-from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, POBB
+from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, LADDER, POBB
 from promptpotter.application.optimizers.potter.dispatch.bundle import injection_registry
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     BUNDLE_READS,
@@ -268,8 +268,10 @@ class L1Generate(LayoutNode, nodes.Proposer):
 
     def arms(self, selected: SelectedOptimizer) -> int:
         knobs = selected.knobs_of(self.name, L1GenerateKnobs)
-        # +1: the leader a held round keeps for one more read (`l1.py::rejoining`).
-        return knobs.n_variants + knobs.recombine + 1
+        # An unfired host writes no child; +1: the leader a held round keeps (`l1.py::rejoining`).
+        ladder = selected.knobs_of(Escalation.name, EscalationKnobs).escalation_ladder
+        hosted = knobs.recombination_host == self.name or ladder.fires_l2
+        return knobs.n_variants + (knobs.recombine if hosted else 0) + 1
 
     def opening(self, ctx: NodeContext, bench: nodes.RoundOpening) -> nodes.RoundOpening:
         knobs = ctx.knobs(L1GenerateKnobs)
@@ -617,6 +619,7 @@ class Escalation(nodes.Controller):
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Ladder})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Bounds, Replay})
     fires: ClassVar[frozenset[type]] = frozenset({L2Context, L3Plan})
+    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = LADDER
     priced_surface: ClassVar[Mapping[str, int]] = {
         "escalation_rules": len(DEFAULT_ESCALATION_RULES) + len(CLIMB_RULES) + len(HEAL_RULES)
     }

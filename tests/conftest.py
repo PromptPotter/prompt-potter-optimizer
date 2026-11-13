@@ -38,7 +38,7 @@ def completed_registries() -> None:
 def bound_potter() -> Iterator[None]:
     """The selection an optimizing run scopes (`runner/entry.py`), for a test driving a node
     without one."""
-    with scoped(optimizer=select_optimizer(OptimizerChoice())):
+    with scoped(optimizer=select_optimizer(OptimizerChoice(optimizer="potter"))):
         yield
 
 

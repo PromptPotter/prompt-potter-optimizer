@@ -20,14 +20,13 @@ from pydantic import (
 )
 
 from promptpotter.domain.campaign import Arm, ArmName, Compare
-from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.dataset_name import DatasetName, validate_dataset_name
 from promptpotter.domain.draft_edit import (
+    CampaignLayer,
     EditDraftPatch,
     OptimizationOverrides,
-    PartialCampaignConfig,
 )
-from promptpotter.domain.layer_fold import clears
+from promptpotter.domain.layer_fold import CLEAR, wire_patch
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.phases import (
     INNER_ARMS_REFUSAL,
@@ -36,6 +35,7 @@ from promptpotter.domain.phases import (
     INNER_SKIP_REFUSAL,
     STOP_REASON_INFO,
 )
+from promptpotter.domain.pipeline_params import node_rule
 from promptpotter.domain.pipeline_schema import ParamIntent
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import ConfigOverrides
@@ -597,37 +597,42 @@ class ForkSeed(StrictModel):
     own rows and stamps the `origin_source` the wire omits."""
 
     origin_prompts: dict[str, NodePrompt] = Field(default_factory=dict)
-    pipeline_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    pipeline_overlay: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Per node, its keys laid over the forked candidate's: `null` drops the "
+        "candidate's own value, so the layer below shows through.",
+    )
     config_overrides: ConfigOverrides = Field(default_factory=ConfigOverrides)
     node_narrowing: dict[str, list[ParamIntent]] = Field(
         default_factory=dict,
         description="Per node, the rows as drawn; overrides the campaign's narrowing for this "
         "cycle only, and a node it does not name inherits.",
     )
-    reset: list[str] = Field(
-        default_factory=list,
-        description="Dotted `pipeline_overlay.<node>.<key>` paths of the forked candidate's own "
-        "values to drop before the edit is laid, so the layer below shows through. A path the "
-        "candidate does not set is a no-op.",
-    )
 
     @model_validator(mode="after")
     def _budget_rides_the_payload(self) -> ForkSeed:
         if self.config_overrides.budget.named:
             raise ValueError("a fork's budget is the payload's own `budget`, not the seed's")
-        clears(self.reset, _FORK_RESETS)
         return self
 
     @property
     def cleared(self) -> dict[str, dict[str, object]]:
-        """The reset as a patch of the forked candidate's node document."""
-        cleared: dict[str, dict[str, object]] = clears(self.reset, _FORK_RESETS).get(
-            "pipeline_overlay", {}
-        )
-        return cleared
+        """The keys the seed clears, as a patch of the forked candidate's node document."""
+        rule = node_rule(None)
+        return {
+            node: kept
+            for node, keys in self.pipeline_overlay.items()
+            if (kept := {k: v for k, v in wire_patch(rule, keys, node).items() if v is CLEAR})
+        }
 
-
-_FORK_RESETS = (("pipeline_overlay", "*", "*"),)
+    @property
+    def laid(self) -> dict[str, dict[str, object]]:
+        """The values the seed sets, its clears apart."""
+        return {
+            node: kept
+            for node, keys in self.pipeline_overlay.items()
+            if (kept := {k: v for k, v in keys.items() if v is not None})
+        }
 
 
 class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCLE):
@@ -962,7 +967,7 @@ class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
         description="Laid over the dataset's own `optimization` before the mint freezes it; only "
         "the fields sent move anything",
     )
-    campaign_config: PartialCampaignConfig | None = Field(
+    campaign_config: CampaignLayer | None = Field(
         default=None,
         description="A campaign declaration standing in for the dataset's own "
         "`dataset.yaml::campaign`, laid over the defaults; `optimization` still lays over it",
@@ -990,21 +995,9 @@ class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
         )
         return data
 
-    @property
-    def declared(self) -> CampaignConfig | None:
-        """The stand-in declaration, laid over `CampaignConfig`'s defaults."""
-        stated = self.campaign_config
-        return (
-            None
-            if stated is None
-            else CampaignConfig.model_validate(stated.model_dump(mode="json", exclude_unset=True))
-        )
-
     @model_validator(mode="after")
     def _name_is_a_dataset_name(self) -> MintCampaignPayload:
         validate_dataset_name(self.dataset_name)
-        # Refused at the door, as a whole declaration is.
-        _ = self.declared
         return self
 
 

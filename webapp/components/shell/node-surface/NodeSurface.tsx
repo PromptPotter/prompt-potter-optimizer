@@ -50,9 +50,7 @@ export function NodeSurface({
   compact?: boolean | undefined;
   modelCapabilities?: CapabilityMenu | undefined;
   onApply?: ((patch: DraftPatch) => void) | undefined;
-  onConfigChange?:
-    | ((overlay: Record<string, Record<string, unknown>>, reset: string[]) => void)
-    | undefined;
+  onConfigChange?: ((overlay: Record<string, Record<string, unknown>>) => void) | undefined;
   onNarrowing?: ((node: string, rows: ParamIntent[]) => void) | undefined;
 }) {
   const kind = node?.kind;

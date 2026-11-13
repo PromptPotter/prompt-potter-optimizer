@@ -72,4 +72,5 @@ class OptimizerPromptEdits(
     create_model("_Edits", __base__=StrictModel, **dict.fromkeys(PROMPT_FIELDS, (str, None)))  # type: ignore[misc]
 ):
     """The fields a node sets over its template: an unsent field stays ``None`` and a sent null
-    refuses (a reset is `EditDraftPatch.reset`'s paths), so its ``exclude_none`` dump is the edit."""
+    refuses (a patch's null clears before the fold reaches this, `layer_fold.py::wire_patch`), so
+    its ``exclude_none`` dump is the edit."""

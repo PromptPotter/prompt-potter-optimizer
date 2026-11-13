@@ -10,7 +10,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
-from promptpotter.application.datasets.authored import ConfigLayers
+from promptpotter.application.datasets.authored import ConfigLayers, effective_config
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import RunStart, admit_arms, probe_backend
@@ -28,7 +28,6 @@ from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import draft_served
-from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import LaunchedJob

@@ -222,7 +222,10 @@ def _merged_config(
         laid["temperature"] = temperature
     # The determinism clamp goes LAST: it must beat every per-call setting, steered temperature included.
     if (clamp := bound_determinism()) is not None:
-        laid |= clamp.model_dump(exclude_none=True)
+        laid |= clamp.model_dump(exclude_none=True, exclude={"route_order"})
+        # A route names one model's hosts: it pins only a call to the model it keys.
+        if hosts := (clamp.route_order or {}).get(config.model):
+            laid["route_order"] = hosts
     # Except the call's own draw, drawn FROM the clamp's seed: it keys the call on every provider.
     if seed is not None:
         laid["seed"] = seed

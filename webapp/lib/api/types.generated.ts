@@ -2727,12 +2727,14 @@ export interface DeterminismClamp {
    * under the other's name. `None` (default) draws each call's seed off the
    * campaign id. */
   seed: number | null;
-  /** The upstream HOSTS behind the gateway, in order, every optimizer call is
-   * routed to (the gateway's own `provider_name`s — read them off `served_by`
-   * in the ledger, never from a catalogue). Hosts of one model disagree
-   * systematically, so an unpinned route makes a measurement whose producer
-   * nothing can name. `None` (default) lets the gateway re-rank per call. */
-  route_order: string[] | null;
+  /** Per model, the upstream HOSTS behind the gateway, in order, every optimizer
+   * call to that model is routed to (the gateway's own `provider_name`s —
+   * read them off `served_by` in the ledger, never from a catalogue). A route
+   * names one model's hosts, so a call to a model it does not key keeps its
+   * own. Hosts of one model disagree systematically, so an unpinned route
+   * makes a measurement whose producer nothing can name. `None` (default)
+   * lets the gateway re-rank per call. */
+  route_order: Record<string, string[]> | null;
 }
 
 /** The column a pick's election is quoted on: θ where it was won on θ, unless θ
@@ -3331,7 +3333,7 @@ export interface CampaignConfig {
    * parsed). Nothing declared for a node = nothing sanctioned there, the
    * restrictive default. */
   optimizer_narrowing: Record<string, NodeSearchNarrowing>;
-  scoring: string | Record<string, string> | null;
+  scoring: string | Record<string, string>;
   /** LLM-as-judge graders for datasets whose answer is free text, where no
    * deterministic matcher can grade a cell. Each value names a registered
    * judge (`promptpotter.judges`) and the models to run it on; its verdict is
@@ -3957,18 +3959,14 @@ export interface EditDraftPatch {
   slug: string | null;
   connector: string | null;
   raw_task_description: string | null;
-  /** Laid over the draft's config by `CampaignConfig`'s rule per key. A string
-   * `scoring` names the criterion whole; a `scoring` mapping is folded into
-   * the criterion the draft runs, key by key: `matcher` picks the per-sample
-   * matcher, `dials` the composite's weights (the empty string clears them),
-   * `per_sample` and `per_cell` set those formulas. */
+  /** Laid over the draft's config by `CampaignConfig`'s rule per key: an absent key
+   * leaves its value, `null` drops the draft's own so the layer below shows
+   * through, and `""` is the empty string. A string `scoring` names the
+   * criterion whole; a `scoring` mapping is folded into the criterion the
+   * draft runs, key by key: `matcher` picks the per-sample matcher, `dials`
+   * the composite's weights (the empty string clears them), `per_sample` and
+   * `per_cell` set those formulas. */
   config: ConfigEdit | null;
-  /** Dotted paths, by this patch's own fields, of the draft's own values to drop
-   * before the rest is laid, so the layer below shows through:
-   * `config.optimization.nodes.<node>.config.<key>` or
-   * `origin_prompts.<step>.<field>`. A path the draft does not set is a no-
-   * op. */
-  reset: string[] | null;
   node_narrowing: Record<string, ParamIntent[]> | null;
   node_output: NodeOutputEdit | null;
   column_query: string | null;
@@ -4171,11 +4169,11 @@ export interface ConfigKnob {
   label: string;
   /** Effective value in this campaign's frozen config */
   value: unknown;
-  /** Where the value came from: default | required | manifest (an optimizer node's
-   * knob, as its manifest declares it) | the layer that set it: campaign (the
-   * operator's edit; any set bench knob), and on an optimizer node's knob
-   * dataset, free_tier or seed */
-  source: 'default' | 'dataset' | 'campaign' | 'free_tier' | 'seed' | 'required' | 'manifest';
+  /** Where the value came from: default (`defaults.yaml`) | manifest (an optimizer
+   * node's knob, as its manifest declares it) | the layer that set it:
+   * campaign (the operator's edit; any set bench knob), and on an optimizer
+   * node's knob dataset, free_tier or seed */
+  source: 'default' | 'dataset' | 'campaign' | 'free_tier' | 'seed' | 'manifest';
 }
 
 export interface ConfigCoupling {
@@ -4751,15 +4749,13 @@ export interface RunMode {
  * forked cycle's own rows and stamps the `origin_source` the wire omits. */
 export interface ForkSeed {
   origin_prompts: Record<string, NodePrompt>;
+  /** Per node, its keys laid over the forked candidate's: `null` drops the
+   * candidate's own value, so the layer below shows through. */
   pipeline_overlay: Record<string, Record<string, unknown>>;
   config_overrides: ConfigOverrides;
   /** Per node, the rows as drawn; overrides the campaign's narrowing for this cycle
    * only, and a node it does not name inherits. */
   node_narrowing: Record<string, ParamIntent[]>;
-  /** Dotted `pipeline_overlay.<node>.<key>` paths of the forked candidate's own
-   * values to drop before the edit is laid, so the layer below shows through.
-   * A path the candidate does not set is a no-op. */
-  reset: string[];
 }
 
 /** A fork's campaign-config delta, in which an absent field inherits the parent's
@@ -4788,14 +4784,17 @@ export interface MintCampaignPayload {
   /** A campaign declaration standing in for the dataset's own
    * `dataset.yaml::campaign`, laid over the defaults; `optimization` still
    * lays over it */
-  campaign_config: PartialCampaignConfig | null;
+  campaign_config: CampaignLayer | null;
   /** The task description to frame from, in place of the dataset's own */
   task_text: string | null;
 }
 
-/** A mint's stand-in declaration, by `CampaignConfig`'s own paths, laid over its
- * defaults. */
-export interface PartialCampaignConfig {
+/** One layer of a ``campaign`` declaration, by `CampaignConfig`'s own paths: a
+ * definition file's, or a mint's stand-in for the dataset's own. Its budget
+ * is the declaration's standing one at every door
+ * (`authored.py::ConfigLayers.of`); a knob it does not name (a retired one)
+ * refuses where the layer is read. */
+export interface CampaignLayer {
   /** Origin eval budget — how many bank samples the origin (C0) is scored on at
    * check-in. The bench's, whatever the optimizer: a round's own panel is its
    * sampler's knob. Wide because origin breadth is the one breadth that is
@@ -4906,11 +4905,12 @@ export interface PartialCampaignConfig {
    * selection reads the test set. An arm of a head-to-head is minted `at_end`
    * where this says `manual`: its comparison is the bench score. */
   bench_trigger: 'manual' | 'at_end' | null;
-  optimization: PartialOptimizationConfig | null;
+  optimization: OptimizationLayer | null;
 }
 
-/** A stand-in declaration's ``optimization``: every knob a dataset declares. */
-export interface PartialOptimizationConfig {
+/** One layer of a declaration's ``optimization``: every knob, its budget the
+ * standing one. */
+export interface OptimizationLayer {
   /** The optimizer manifest this campaign runs — a directory under
    * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
    * nothing selects it install-wide. */
@@ -4931,6 +4931,18 @@ export interface PartialOptimizationConfig {
    * deadline; a pause ends it resumably, and a resume holds again unless an
    * answer was already banked. */
   arm_gate: 'off' | 'review' | 'author' | null;
+  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
+   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
+   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
+   * closed rounds after the origin (0 measures the origin and stops; null
+   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
+   * cutting a remote cell still open at its edge. A fork seed, a standing
+   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
+   * account admits the result whole or refuses the launch. A null axis is
+   * unbounded. ``tokens`` is unset by default: a token is worth a different
+   * amount on every route, so set it only where a backend bills but reports
+   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
+  budget: Budget | null;
   /** Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1
    * life per round that promotes an arm, -1 per round that does not, banked
    * up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm

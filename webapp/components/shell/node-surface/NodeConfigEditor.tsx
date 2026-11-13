@@ -19,7 +19,6 @@ import {
   pickedRoute,
   rowIntents,
   seedOverlayFromRows,
-  seedResetFromRows,
   type ConfigMode,
   type ConfigRow,
   type ValueType,
@@ -40,9 +39,7 @@ export function NodeConfigEditor(props: {
   modelCapabilities: CapabilityMenu | undefined;
   onApply: ((patch: DraftPatch) => void) | undefined;
   onNarrowing: ((node: string, rows: ParamIntent[]) => void) | undefined;
-  onChange:
-    | ((overlay: Record<string, Record<string, unknown>>, reset: string[]) => void)
-    | undefined;
+  onChange: ((overlay: Record<string, Record<string, unknown>>) => void) | undefined;
   keysAskedElsewhere: readonly string[] | undefined;
 }) {
   const {
@@ -88,7 +85,7 @@ export function NodeConfigEditor(props: {
         .filter((r) => marks.has(flatConfigKey(r.node, r.key)))
         .map((r) => [flatConfigKey(r.node, r.key), r.value]),
     );
-    onChange?.(seedOverlayFromRows(base, edits), seedResetFromRows(base, edits));
+    onChange?.(seedOverlayFromRows(base, edits));
   };
   const update = (i: number, patch: Partial<ConfigRow>) => {
     const next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r));

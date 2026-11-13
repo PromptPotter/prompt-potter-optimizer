@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any, Self
@@ -25,8 +24,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
-
-logger = logging.getLogger(__name__)
 
 # Where the laid document names the chain beside its nodes: the wire's spelling, and the dump's.
 STEPS_KEY = "steps"
@@ -191,14 +188,12 @@ class PipelineParams(FrozenModel):
         return self.model_validate({**self._laid_steps, **nodes})
 
     def overlaid(self, overlay: Mapping[str, Mapping[str, Any]], schema: PipelineSchema) -> Self:
-        """*overlay* laid over its nodes, a node *schema* does not declare dropped."""
-        if not overlay:
-            return self
-        declared = {n.name for n in schema.declared_nodes}
-        nodes = lay_nodes(self.laid_nodes, overlay, schema=schema)
-        for node in nodes.keys() - declared:
-            logger.warning("Dropping LLM override for undeclared node %r", node)
-        return self.with_nodes({n: c for n, c in nodes.items() if n in declared})
+        """*overlay* laid over its nodes; a node *schema* does not declare refuses."""
+        if undeclared := sorted(overlay.keys() - {n.name for n in schema.declared_nodes}):
+            raise ValueError(f"an overlay names undeclared nodes {undeclared}")
+        return (
+            self.with_nodes(lay_nodes(self.laid_nodes, overlay, schema=schema)) if overlay else self
+        )
 
 
 # A node never takes the name of a carrier field: the laid document reads `steps` as the chain, and

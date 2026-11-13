@@ -44,12 +44,13 @@ def overlay_sets_model_outside_allowed(
     overlay: Mapping[str, Mapping[str, Any]] | None, permitted: Mapping[str, Sequence[str]]
 ) -> bool:
     """The babysit trigger: *overlay* moves a key past what a bound steer may pick, a model past
-    its node's *permitted*."""
+    its node's *permitted*; a ``null`` clears, and moves nothing past either."""
     return any(
         (pick := pickable(key, steer_bound=True)) == "none"
-        or (pick == "permitted" and value not in (None, *permitted.get(node, ())))
+        or (pick == "permitted" and value not in permitted.get(node, ()))
         for node, cfg in (overlay or {}).items()
         for key, value in cfg.items()
+        if value is not None
     )
 
 
