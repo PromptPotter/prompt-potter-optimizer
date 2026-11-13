@@ -4,16 +4,16 @@ delegator and capabilities kept. No writer ever set one, so no bound is lost."""
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 from promptpotter.infrastructure.identity.paths import IDENTITY_DIR, IdentityPaths
-from promptpotter.infrastructure.store.data_root import Staged
-from promptpotter.infrastructure.store.io import read_text_optional
+from promptpotter.infrastructure.store.data_root import Staged, read_as_staged
 
 
-def staged(projects_root: Path) -> list[Staged]:
+def staged(projects_root: Path, before: Mapping[Path, bytes]) -> list[Staged]:
     path = IdentityPaths(projects_root.parent / IDENTITY_DIR).grants
-    held = read_text_optional(path)
+    held = read_as_staged(path, before) or b""
     grants = json.loads(held).get("grants", {}) if held.strip() else {}
     moved = [sub for sub, grant in grants.items() if "spend_ceiling_usd" in grant]
     if not moved:

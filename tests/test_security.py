@@ -266,6 +266,7 @@ from promptpotter.infrastructure.store.stores import Stores, descend_store, tena
 from promptpotter.infrastructure.store.user_store import (
     CONSENT_FILE,
     USER_FILE,
+    ConsentLine,
     User,
     UserStore,
     count_accounts,
@@ -2642,19 +2643,31 @@ def test_a_landing_drops_a_charge_book_whose_settle_another_writer_split(
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_landing_carries_an_acceptance_off_the_account_file_onto_its_consent_trail(
-    built_stores: Stores,
+    tmp_path: Path,
 ) -> None:
-    workspace = built_stores.campaigns.workspace
+    # The account file as the last release wrote it: one record, the newest acceptance. Its trail
+    # line names whose it was (here a delegate's, over its delegator's), and a trail may lack it.
+    at = "2026-02-01T00:00:00Z"
     user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
-    accepted = {"version": TERMS_VERSION, "accepted_at": "2026-02-01T00:00:00Z"}
-    write_json(workspace / USER_FILE, user.model_dump() | {"terms_accepted": {"d": accepted}})
-    landing = plan_landing(built_stores.projects_root, reset=False)
-    assert not landing.refused, f"an account written before the reshape refused: {landing.refusal}"
-    apply_landing(built_stores.projects_root, landing)
-    users = UserStore(workspace)
-    assert users.load() == user, "the account changed beyond its terms record"
-    assert users.accepted_terms("d") == TERMS_VERSION, "a landing asked a person's consent again"
-    assert users.accepted_terms("u") is None, "an acceptance was stood on by another principal"
+    delegates = ConsentLine(event="terms_accepted", user_id="d", subject=TERMS_VERSION, at=at)
+    for name, trail, owner in (("bare", None, "u"), ("delegated", delegates, "d")):
+        stores = workspace(tmp_path / name)
+        base = stores.campaigns.workspace
+        record = {"version": TERMS_VERSION, "accepted_at": at}
+        write_json(base / USER_FILE, user.model_dump() | {"terms_accepted": record})
+        if trail is not None:
+            (base / CONSENT_FILE).write_text(trail.model_dump_json() + "\n", encoding="utf-8")
+        landing = plan_landing(stores.projects_root, reset=False)
+        assert not landing.refused, f"{name}: the last release's account refused: {landing.refusal}"
+        apply_landing(stores.projects_root, landing)
+        users = UserStore(base)
+        assert users.load() == user, f"{name}: the account changed beyond its terms record"
+        assert users.accepted_terms(owner) == TERMS_VERSION, f"{name}: consent was asked again"
+        others = {"u", "d"} - {owner}
+        assert all(users.accepted_terms(o) is None for o in others), (
+            f"{name}: an acceptance was stood on by another principal"
+        )
+        assert len(users.consent_trail()) == 1, f"{name}: an acceptance the trail held was doubled"
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
@@ -2695,11 +2708,17 @@ async def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_
     append_jsonl(events, old | {"event": "request_refused", "subject": "x", "device": None})
     # The identity survivors the base wrote are migrated, never wiped.
     identity = IdentityPaths(data_root / IDENTITY_DIR)
-    # The host's claim marker, over the terminal's record its claim renamed under the host's id.
+    # The host's claim marker, over the terminal's record its claim renamed under the host's id,
+    # its terms record on it as the last release wrote it: two migrations reshape that one file, the
+    # acceptance landing under the id the claim moved onto.
     marker = data_root / IDENTITY_DIR / "default_claimed.json"
     write_json(marker, {"user_id": "h", "claimed_at": "2026-01-01T00:00:00Z", "renamed": True})
     host_dir = built_stores.projects_root / "h"
-    write_json(host_dir / USER_FILE, user.model_dump(mode="json") | {"user_id": "default"})
+    accepted = {"version": TERMS_VERSION, "accepted_at": "2026-01-01T00:00:00Z"}
+    write_json(
+        host_dir / USER_FILE,
+        user.model_dump(mode="json") | {"user_id": "default", "terms_accepted": accepted},
+    )
     monkeypatch.setattr(settings_mod.settings, "HOST_ADMIN_EMAIL", "h@x.com")
     write_json(
         identity.grants,
@@ -2754,6 +2773,9 @@ async def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_
     assert (host.user_id, host.email) == ("h", "h@x.com") and host_user_id(
         built_stores.projects_root
     ) == "h", "a landing lost the host"
+    assert UserStore(host_dir).accepted_terms("h") == TERMS_VERSION, (
+        "the host is asked consent again"
+    )
     regranted = read_grant(identity.grants, "sub")
     assert regranted is not None and regranted.delegated_by == "u", "a landing lost a grant"
     again = plan_landing(built_stores.projects_root, reset=False)

@@ -1,14 +1,16 @@
-"""`user.json` before a terms acceptance became its consent line alone: each account drops
-`terms_accepted`, and an acceptance its trail does not hold is appended there, stamped as the
-account recorded it, so no consent is asked again."""
+"""`user.json` as v0.8.19 wrote it holds one terms acceptance (`terms_accepted: {version,
+accepted_at}`), the newest, which a delegate's accept may have written over its delegator's. Each
+account drops it, and an acceptance its trail does not hold is appended there under the principal
+whose trail line it is (matched on `accepted_at`), else the account's own id, stamped as the account
+recorded it, so no consent is asked again."""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
-from promptpotter.infrastructure.store.data_root import Staged
-from promptpotter.infrastructure.store.io import read_bytes_optional
+from promptpotter.infrastructure.store.data_root import Staged, read_as_staged
 from promptpotter.infrastructure.store.user_store import (
     CONSENT_FILE,
     USER_FILE,
@@ -17,32 +19,37 @@ from promptpotter.infrastructure.store.user_store import (
 )
 
 
-def staged(projects_root: Path) -> list[Staged]:
+def staged(projects_root: Path, before: Mapping[Path, bytes]) -> list[Staged]:
     out: list[Staged] = []
     for workspace in account_dirs(projects_root):
         user_path = workspace / USER_FILE
-        user = json.loads(read_bytes_optional(user_path) or b"{}")
+        user = json.loads(read_as_staged(user_path, before) or b"{}")
         if "terms_accepted" not in user:
             continue
-        accepted: dict[str, dict[str, str]] = user.pop("terms_accepted") or {}
+        record: dict[str, str] | None = user.pop("terms_accepted")
         trail_path = workspace / CONSENT_FILE
-        trail = read_bytes_optional(trail_path) or b""
-        held = {
-            (line.user_id, line.subject)
+        trail = read_as_staged(trail_path, before) or b""
+        accepts = [
+            line
             for raw in trail.splitlines()
             if raw.strip()
             and (line := ConsentLine.model_validate_json(raw)).event == "terms_accepted"
-        }
-        owed = [
-            ConsentLine(
-                event="terms_accepted",
-                user_id=principal,
-                subject=record["version"],
-                at=record["accepted_at"],
-            ).model_dump_json()
-            for principal, record in sorted(accepted.items())
-            if (principal, record["version"]) not in held
         ]
+        owed: list[str] = []
+        if record is not None:
+            by = next(
+                (line.user_id for line in accepts if line.at == record["accepted_at"]),
+                user["user_id"],
+            )
+            if all((line.user_id, line.subject) != (by, record["version"]) for line in accepts):
+                owed.append(
+                    ConsentLine(
+                        event="terms_accepted",
+                        user_id=by,
+                        subject=record["version"],
+                        at=record["accepted_at"],
+                    ).model_dump_json()
+                )
         data = json.dumps(user, indent=2, ensure_ascii=False).encode("utf-8")
         out.append(Staged(user_path, data, f"{workspace.name} drops its terms record"))
         if owed:

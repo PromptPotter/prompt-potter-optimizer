@@ -177,12 +177,16 @@ class Landing(NamedTuple):
 
 
 def _staged(projects_root: Path) -> dict[Path, Staged]:
+    """Each migration, in `MIGRATIONS` order, reads the root as the ones before it staged it: a
+    release jump lands every reshape of a survivor since the last release, composed."""
     staged: dict[Path, Staged] = {}
     for name, migration in MIGRATIONS.items():
-        for one in migration(projects_root):
-            if one.path in staged:
-                raise ValueError(f"two migrations stage {one.path}")
-            staged[one.path] = one._replace(said=f"{name}: {one.said}")
+        for one in migration(projects_root, {path: held.data for path, held in staged.items()}):
+            earlier = staged.get(one.path)
+            said = f"{name}: {one.said}"
+            staged[one.path] = one._replace(
+                said=said if earlier is None else f"{earlier.said}; {said}"
+            )
     return staged
 
 

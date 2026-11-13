@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import glob
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from enum import Enum
 from io import BytesIO
 from pathlib import Path, PurePosixPath
@@ -655,6 +655,12 @@ class Staged(NamedTuple):
     path: Path
     data: bytes
     said: str
+
+
+def read_as_staged(path: Path, staged: Mapping[Path, bytes]) -> bytes | None:
+    """*path* as a landing's earlier migrations staged it, else as it stands: a migration reads
+    through it, so two reshapes of one survivor compose."""
+    return staged[path] if path in staged else read_bytes_optional(path)
 
 
 def classify(rel: PurePosixPath) -> Found | None:
