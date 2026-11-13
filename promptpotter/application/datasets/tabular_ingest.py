@@ -7,6 +7,7 @@ The extension only breaks a tie the content cannot (``.tsv`` with one column).
 
 from __future__ import annotations
 
+import asyncio
 import codecs
 import csv
 import io
@@ -112,7 +113,16 @@ def _zip_format(blob: bytes) -> TabularFormat:
     )
 
 
-def read_tabular(blob: bytes, filename: str) -> Table:
+async def read_tabular(blob: bytes, filename: str) -> Table:
+    return await asyncio.to_thread(_parse_table, blob, filename)
+
+
+def read_kept_table(path: Path) -> Table:
+    # Kept only once it parsed within the caps; still read on the caller's thread.
+    return _parse_table(path.read_bytes(), path.name)
+
+
+def _parse_table(blob: bytes, filename: str) -> Table:
     fmt = sniff_format(blob)
     if fmt != "text" and settings.HARDENED_MODE:
         # A spreadsheet is a macro / zip-bomb / XXE vector.
@@ -258,15 +268,29 @@ def _jsonl_records(text: str) -> list[dict[str, Any]]:
     return records
 
 
+def _check_width(columns: int) -> None:
+    if columns > MAX_COLUMNS:
+        raise IngestError(
+            reason="too_large",
+            message=f"Upload exceeds the per-file cap of {MAX_COLUMNS} columns.",
+        )
+
+
 def _unique_headers(raw: Iterable[Any]) -> list[str]:
     """A blank header is named by position, a repeated one numbered: a column is never dropped."""
+    cells = list(raw)
+    _check_width(len(cells))
     headers: list[str] = []
     taken: set[str] = set()
-    for i, cell in enumerate(raw, start=1):
-        name = _stringify_cell(cell) or f"column_{i}"
-        base, n = name, 2
-        while name in taken:
-            name, n = f"{base}_{n}", n + 1
+    # Per name, the next number to try: every lower one is taken, so no repeat rescans from 2.
+    next_n: dict[str, int] = {}
+    for i, cell in enumerate(cells, start=1):
+        base = name = _stringify_cell(cell) or f"column_{i}"
+        if name in taken:
+            n = next_n.get(base, 2)
+            while (name := f"{base}_{n}") in taken:
+                n += 1
+            next_n[base] = n + 1
         taken.add(name)
         headers.append(name)
     return headers
@@ -281,11 +305,7 @@ def _records_to_table(records: Iterable[dict[Any, Any]]) -> Table:
             if key not in seen:
                 seen.add(key)
                 keys.append(key)
-        if len(keys) > MAX_COLUMNS:
-            raise IngestError(
-                reason="too_large",
-                message=f"Upload exceeds the per-file cap of {MAX_COLUMNS} columns.",
-            )
+        _check_width(len(keys))
         cells = {key: _stringify_cell(value) for key, value in rec.items()}
         if not any(cells.values()):
             continue
@@ -486,11 +506,15 @@ def _dedup_terms(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def parse_candidate_library(blob: bytes, filename: str) -> tuple[str, ...]:
+async def parse_candidate_library(blob: bytes, filename: str) -> tuple[str, ...]:
+    return await asyncio.to_thread(_library_terms, blob, filename)
+
+
+def _library_terms(blob: bytes, filename: str) -> tuple[str, ...]:
     if sniff_format(blob) == "text" and file_extension(filename) in ("txt", ""):
         terms = _dedup_terms(decode_text(blob).splitlines())
     else:
-        table = read_tabular(blob, filename)
+        table = _parse_table(blob, filename)
         terms = _dedup_terms(row.get(table.headers[0], "") for row in table.rows)
     if not terms:
         raise IngestError(

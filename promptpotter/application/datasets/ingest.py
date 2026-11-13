@@ -88,16 +88,16 @@ async def ingest_draft(
     slug: str | None = None,
 ) -> DraftCampaignWire:
     await _open_checkin(stores)
-    kept = stores.tenant_datasets.keep_upload(blob, file_extension(filename))
-    record_upload(stores, filename=filename, kept=kept)
-    table = read_tabular(blob, filename)
+    table = await read_tabular(blob, filename)
     base_slug = slug or default_slug_from_filename(filename or "upload")
     try:
         validate_dataset_name(base_slug)
     except ValueError as exc:
         raise IngestError(reason="bad_slug", message=str(exc)) from None
-    # Raised before the draft is kept, so a taken name leaves no orphan.
+    # Raised before the upload or the draft is kept, so a refused one leaves nothing.
     claim_own_definition(stores, base_slug, new=True)
+    kept = stores.tenant_datasets.keep_upload(blob, file_extension(filename))
+    record_upload(stores, filename=filename, kept=kept)
 
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
     draft = new_draft(

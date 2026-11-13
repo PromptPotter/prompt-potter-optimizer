@@ -3690,7 +3690,7 @@ def _recut_banks(stores: Stores) -> tuple[list[Sample], Bank, Bank]:
     return l4_bank, drawn_bank, recut
 
 
-def test_an_exported_table_reads_to_the_labels_it_holds() -> None:
+async def test_an_exported_table_reads_to_the_labels_it_holds() -> None:
     # A mis-decoded label grades every cell against text the person never wrote, with no error.
     for filename, blob in (
         (
@@ -3711,13 +3711,13 @@ def test_an_exported_table_reads_to_the_labels_it_holds() -> None:
             "\n".join(json.dumps(r, ensure_ascii=False) for r in _EXPORTED_ROWS).encode(),
         ),
     ):
-        table = read_tabular(blob, filename)
+        table = await read_tabular(blob, filename)
         assert (table.headers, list(table.rows)) == (("query", "label"), _EXPORTED_ROWS), (
             f"{filename}: an exported table read to labels it does not hold"
         )
 
 
-def test_an_opendocument_repeat_count_is_the_files_claim() -> None:
+async def test_an_opendocument_repeat_count_is_the_files_claim() -> None:
     # Blanks keep their columns, tails stay unexpanded, and a valued repeat stops at the cap
     # instead of allocating what it declares.
     def ods(*rows: str) -> bytes:
@@ -3747,7 +3747,7 @@ def test_an_opendocument_repeat_count_is_the_files_claim() -> None:
         row(cell("Café"), cell("", 2), cell("Getränk", 1_000_000_000), tail),
         row(tail, repeat=1_048_000),
     )
-    assert read_tabular(sheet, "s.ods").rows == (
+    assert (await read_tabular(sheet, "s.ods")).rows == (
         {"query": "Café", "column_2": "", "column_3": "", "label": "Getränk"},
     ), "an OpenDocument repeat shifted a column or expanded a blank tail"
     for refused in (
@@ -3755,13 +3755,15 @@ def test_an_opendocument_repeat_count_is_the_files_claim() -> None:
         ods(row(cell("query")), row(cell("q"), repeat=1_000_000_000)),
     ):
         with pytest.raises(IngestError):
-            read_tabular(refused, "s.ods")
+            await read_tabular(refused, "s.ods")
     header_row = row(cell("query"), cell("label"))
     plain = ods(header_row, *(row(*map(cell, r.values())) for r in _EXPORTED_ROWS))
-    assert list(read_tabular(plain, "s.ods").rows) == _EXPORTED_ROWS, "an OpenDocument misread"
+    assert list((await read_tabular(plain, "s.ods")).rows) == _EXPORTED_ROWS, (
+        "an OpenDocument misread"
+    )
 
 
-def test_an_excel_dimension_and_row_number_bound_no_walk() -> None:
+async def test_an_excel_dimension_and_row_number_bound_no_walk() -> None:
     # They are claims too: the caps bound the walk, not the sheet.
     def xlsx(dimension: str, last_row: int) -> bytes:
         wb = openpyxl.Workbook()
@@ -3783,12 +3785,11 @@ def test_an_excel_dimension_and_row_number_bound_no_walk() -> None:
                 dst.writestr(info, data)
         return out.getvalue()
 
-    assert list(read_tabular(xlsx("A1:B3", 3), "s.xlsx").rows) == _EXPORTED_ROWS
-    assert list(read_tabular(xlsx("A1:XFD1048576", 3), "s.xlsx").rows) == _EXPORTED_ROWS, (
-        "a declared Excel dimension padded the walk"
-    )
+    assert list((await read_tabular(xlsx("A1:B3", 3), "s.xlsx")).rows) == _EXPORTED_ROWS
+    padded = await read_tabular(xlsx("A1:XFD1048576", 3), "s.xlsx")
+    assert list(padded.rows) == _EXPORTED_ROWS, "a declared Excel dimension padded the walk"
     with pytest.raises(IngestError):
-        read_tabular(xlsx("A1:B3", 1_048_576), "s.xlsx")
+        await read_tabular(xlsx("A1:B3", 1_048_576), "s.xlsx")
 
 
 def test_no_held_out_row_sits_on_the_search_side_or_in_a_shot() -> None:
