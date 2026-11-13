@@ -45,6 +45,7 @@ export function useRemoteModel() {
     metered: dash.spend_metered,
     budget: dash.run_limits.budget,
     overshoot: dash.run_limits.overshoot,
+    overshot: dash.overshot,
     share: dash.allotment,
     lookahead,
     heldCall: dash.held_call,

@@ -35,9 +35,11 @@ from promptpotter.domain.run_records import (
     stale_file_warning,
 )
 from promptpotter.domain.spend import (
+    NO_OVERSHOOT,
     NOTHING_PAID,
     Budget,
     CeilingMeter,
+    Overshoot,
     PaidSpend,
     SpendRollup,
     UserSpend,
@@ -838,6 +840,8 @@ class Money(NamedTuple):
     worked_s: float
     # By (job hold, node): what a call of the node holds at with `overshoot` on.
     by_node: dict[tuple[str, str], NodeCalls]
+    # By the ledger a call's sends land on (`Hold.ledger`).
+    overshot: dict[str, Overshoot]
 
     def holding(self, hold_id: str) -> bool:
         """Whether *hold_id* and every hold above it is still open."""
@@ -927,8 +931,9 @@ class _Money:
         self._by_round: dict[int, SpendRollup] = {}
         self._calls = 0
         self._worked_s = 0.0
-        # Each call hold a bill closed.
-        self._billed: set[str] = set()
+        # What each call's bills drew, by its hold.
+        self._cost: dict[str, UserSpend] = {}
+        self._overshot: dict[str, Overshoot] = {}
         self._by_node: dict[tuple[str, str], NodeCalls] = {}
         # A copy, since the next feed banks into the live rollups; one per feed, not per read.
         self._view: Money | None = None
@@ -981,9 +986,17 @@ class _Money:
             above = self._holds[above].parent if above in self._holds else None
 
     def _cost_of(self, call: Hold, part: UserSpend) -> None:
-        """*part* of what *call* drew, filed under its node at the job it runs under."""
-        first = call.hold_id not in self._billed
-        self._billed.add(call.hold_id)
+        """*part* of what *call* drew, filed under its node at the job it runs under, and on its
+        ledger past what it held."""
+        before = self._cost.get(call.hold_id)
+        first = before is None
+        cost = part if before is None else before.plus(part)
+        self._cost[call.hold_id] = cost
+        if (held := call.bound.usd) is not None and call.ledger is not None:
+            was = 0.0 if before is None else max(0.0, before.at_most_usd - held)
+            if (past := max(0.0, cost.at_most_usd - held)) > was:
+                overshot = self._overshot.get(call.ledger, NO_OVERSHOOT)
+                self._overshot[call.ledger] = overshot.past(was, past)
         job = call.parent
         # A cell between a call and its job carries a resource; a job's hold carries none.
         while job in self._holds and self._holds[job].resource is not None:
@@ -1022,6 +1035,7 @@ class _Money:
                 self._calls,
                 self._worked_s,
                 dict(self._by_node),
+                dict(self._overshot),
             )
         return self._view
 

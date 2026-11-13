@@ -46,10 +46,12 @@ from factories import (
     minted_dataset,
     on_jumping_clock,
     pipeline_schema,
+    run_wiring,
     samples,
     score_summary,
     scorer_of,
     spend_book,
+    stored_campaign,
     workspace,
 )
 from offline_world import NOT_A_KEY, PROVIDER_KEYS, Hang, Router, Said, completion
@@ -142,6 +144,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     score_search_point,
 )
 from promptpotter.application.scoring.seed_screen import screen_inner_seeds
+from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
@@ -2326,6 +2329,44 @@ def test_with_overshoot_on_a_call_holds_its_nodes_mean_bill_in_the_run_after_the
     assert held("other", 0.01) == worst.budget, "another node's bills sized a node's first call"
     _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=False)
     assert held("judge", 0.01) == worst.budget, "overshoot off still held a call below its worst"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_bill_past_its_overshoot_hold_draws_on_the_run_and_the_dashboard_serves_it(
+    tmp_path: Path, built_stores: Stores
+) -> None:
+    hop = CycleHop(campaign_id="camp", cycle_id="cyc")
+    campaign = minted_campaign(hop)
+    stored_campaign(built_stores, campaign)
+    minted_dataset(built_stores, campaign)
+    built_stores.campaigns.mint_cycle(hop)
+    ledger = CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(hop)))
+    ledger.append(run_wiring())
+    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    book = _armed(built_stores, hop, _held(built_stores, jobs, Budget(usd=1.0)))
+    _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=True)
+    worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.10)
+    with _billing_on(ledger, book):
+        for billed in (0.02, 0.05):
+            Admission(
+                book,
+                CallLabel("judge", "optimizer"),
+                worst,
+                model=None,
+                provider=None,
+                paid_by="host",
+            ).settle(Billed(TokenAccount(input=60, output=40), billed))
+    money = money_on(built_stores.charges.path)
+    assert money.drawn[book.hold_id].total.sent_usd == pytest.approx(0.07), (
+        "a bill past its hold drew less than its whole bill on the run's hold"
+    )
+    assert book.money_left().usd == pytest.approx(0.93), "the share counted only what was held"
+    dash = served_dashboard(built_stores, hop)
+    assert isinstance(dash, ServedDashboard) and dash.overshot is not None
+    assert dash.overshot.calls == 1 and dash.overshot.usd == pytest.approx(0.03), (
+        "the dashboard served another overshoot than the one call billed past its mean"
+    )
+    assert dash.run_limits.overshoot, "the dashboard served the switch off"
 
 
 @pytest.mark.usefixtures("run_bound", "offline")

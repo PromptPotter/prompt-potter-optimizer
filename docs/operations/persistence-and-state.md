@@ -100,6 +100,8 @@ A command is taken at the next **per-sample** checkpoint, so a pause asked mid-c
 
 `.runtime/` holds no control file. The standing budget is the last `standing_budget` record on the cycle's ledger; its money axes are the campaign's, the last `campaign_ceiling` record on the ROOT's ledger.
 
+Every call holds its worst case, so no ceiling is ever passed; `set-limits --overshoot on` (the standing record's `overshoot`, off by default) holds a call at its node's mean billed cost in the run once one has billed (`spend_book.py::SpendBook.expected`), a bill past it drawn on every hold above and served as the dashboard's `overshot`.
+
 ### Where the error text is
 
 A failed cell's `ErrorCategory` and message land in the latest `rounds/round_NNNN.json` and `readout.log`. A death with no terminal record is machine-sleep or session-end class. Only a hard kill leaves containers behind; the next run on that backend sweeps them.

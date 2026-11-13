@@ -119,6 +119,7 @@ export function RemotePanel({ model: m }: { model: RemoteModel }) {
         <RunLimitsControl
           budget={m.budget}
           overshoot={m.overshoot}
+          overshot={m.overshot}
           share={m.share}
           metered={m.metered}
         />

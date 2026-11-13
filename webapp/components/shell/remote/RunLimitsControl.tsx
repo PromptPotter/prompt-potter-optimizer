@@ -3,6 +3,7 @@ import { commands, cycleAddress } from "@/lib/api";
 import {
   type Budget,
   type MeteredSpend,
+  type Overshoot,
   ACCOUNT_TAB_INFO,
   CAP_AXIS_INFO,
   CEILING_METER_LABELS,
@@ -50,11 +51,12 @@ function usedText(axis: CapAxis, metered: MeteredSpend | null, share: Budget | n
 interface Props {
   budget: Budget;
   overshoot: boolean;
+  overshot: Overshoot | null;
   share: Budget | null;
   metered: MeteredSpend | null;
 }
 
-export function RunLimitsControl({ budget, overshoot, share, metered }: Props) {
+export function RunLimitsControl({ budget, overshoot, overshot, share, metered }: Props) {
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
   const [drafts, setDrafts] = useState<Drafts>(() => draftsOf(budget));
@@ -180,6 +182,11 @@ export function RunLimitsControl({ budget, overshoot, share, metered }: Props) {
               )
             }
           />
+          {overshot && overshot.calls > 0 ? (
+            <span className="run-limits-control-used">
+              {` · ${overshot.calls} ${overshot.calls === 1 ? "call" : "calls"} past their hold by ${fmtUsd(overshot.usd)}`}
+            </span>
+          ) : null}
         </span>
       </div>
       <div className="run-limits-control-edit">

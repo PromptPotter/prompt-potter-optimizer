@@ -1687,6 +1687,9 @@ export interface ServedDashboard {
    * all, and what its run's book binds; null where no run holds a share, and
    * on a replay. */
   allotment: Budget | null;
+  /** The cycle's calls billed past their hold (`run_limits.overshoot`), off the
+   * account's charge book; null on a replay, which reads none. */
+  overshot: Overshoot | null;
   /** What an offshoot of this cycle starts under; null on a replay. */
   fork_remainder: ForkRemainder | null;
   /** The arm a surface following the run shows (`_observed`); null before any arm
@@ -2240,6 +2243,15 @@ export interface LookaheadDepth {
   /** Whether a press of this depth is admitted now: the control applies, the run
    * admits `set-sample-lookahead` and the next walk can take that many. */
   pickable: boolean;
+}
+
+/** The calls whose bills passed what their hold held, each drawn on every hold
+ * above it. */
+export interface Overshoot {
+  /** Calls billed past their hold. */
+  calls: number;
+  /** What they billed past it, in USD. */
+  usd: number;
 }
 
 /** What a cycle's rounds cap has left, which an offshoot takes as its own. Spend

@@ -567,6 +567,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     metered_line: null,
     cap_lines: [],
     allotment: null,
+    overshot: null,
     catch_up_log: [],
     current_round: currentRound(),
     observed: null,

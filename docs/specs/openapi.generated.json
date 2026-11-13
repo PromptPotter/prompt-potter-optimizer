@@ -12065,6 +12065,28 @@
         "title": "OverlapReading",
         "type": "object"
       },
+      "Overshoot": {
+        "additionalProperties": false,
+        "description": "The calls whose bills passed what their hold held, each drawn on every hold above it.",
+        "properties": {
+          "calls": {
+            "description": "Calls billed past their hold.",
+            "title": "Calls",
+            "type": "integer"
+          },
+          "usd": {
+            "description": "What they billed past it, in USD.",
+            "title": "Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "calls",
+          "usd"
+        ],
+        "title": "Overshoot",
+        "type": "object"
+      },
       "OwnLevel": {
         "additionalProperties": false,
         "description": "One individual's own level on one set of rows, in both columns; never one side of a pair.",
@@ -15348,6 +15370,17 @@
             "description": "Which of `rounds` carries the newest overlap line that was read — the one set of cells its members' rates may be set side by side on.",
             "title": "Overlap Line Round"
           },
+          "overshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Overshoot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cycle's calls billed past their hold (`run_limits.overshoot`), off the account's charge book; null on a replay, which reads none."
+          },
           "pause": {
             "anyOf": [
               {
@@ -15507,6 +15540,7 @@
           "metered_line",
           "cap_lines",
           "allotment",
+          "overshot",
           "fork_remainder",
           "observed",
           "walk",
