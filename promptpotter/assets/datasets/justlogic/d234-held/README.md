@@ -8,8 +8,9 @@ task, the pin and the `:nitro` trade are that file's; this one states only the c
 The bank is `justlogic/d234`'s 600 rows at the same ids in the same order, followed by 120 rows
 of the same depths that cut never drew (40 per depth, ids 600 onward), each marked `held_out`.
 150 rows is the ceiling for any pass (operator, 2026-10-23).
-Both halves are derived from the dataset NAME by `_justlogic_bank`, the held half as its `bench_tail`
-(`promptpotter/application/datasets/loaders.py`).
+Both halves are the `columns` recipe's per-stratum cut of the `source:` this definition and its
+`family.yaml` lay together, the held half its `bench_tail`
+(`promptpotter/application/datasets/loaders.py::_stratified`).
 
 `dataset_split` is `justlogic/d234`'s, value for value. A bench-only row is held out by
 declaration and never ranked (`promptpotter/domain/bench.py::partition_bank`), so:

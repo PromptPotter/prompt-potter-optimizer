@@ -93,6 +93,9 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   accounts survive a landing (seven migrations go); one release per hold, each fact before its gate; the
   money fold over open holds; L4 runs one level deep (operator, 2026-11-13: depth 2 is a security risk,
   its re-enable recipe in `docs/concepts/l4.md`). payer 1 closed unbuilt (its premise was false).
+- **landed 49:** recipes: a recipe names no benchmark (seven unbacked recipes go, justlogic and
+  HotpotQA are `columns` mappings with byte-identical banks), and the panel templates are asset files
+  (`harbor_tasks`, `repo_file`); every cut re-keys, its rows unchanged.
 - **passes 3**, beside cfg: no diagnostic verb, one list campaign set by its arms and replicates whose
   readings the dashboard serves (the seed screen and probe-reasoning go). Then **passes 4**: a retry
   acts once and a dead filer's command ends, judged by holders' death rule.
@@ -124,8 +127,7 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   accepted (operator, 2026-11-12).
 - **L4:** re-measure C0.
 - **readings:** one reading for every comparison, the 31 `*Reading` classes folded; key-neutral
-  behind the behaviour keys. Beside it, **recipes**: each benchmark's loader becomes a field mapping on
-  the generic recipe and the panel templates asset files (operator, 2026-11-12; re-keys those cuts).
+  behind the behaviour keys.
 - **then:** faults; narr (the stored dashboard views go, renderers reading the records), rec (a
   discriminated union where optional fields and a validator spell one; write-only fields go, a gate
   check holding every field to a reader), rn-conn, ren (the two

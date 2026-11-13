@@ -212,6 +212,7 @@ promptpotter = [
     "assets/free_tier.yaml",        # what a free account may run
     "assets/datasets/**/*.yaml",    # dataset definitions, family and install defaults
     "assets/datasets/**/*.md",      # + task framing and READMEs
+    "assets/panels/**/*",           # Harbor task templates a panel recipe lays per row
     # A BUILD ARTIFACT — the Vite build — so it cannot sit in the source tree the way
     # assets/optimizers/ does. `scripts/build_release.py` stages it before `uv build`;
     # without that the glob matches nothing silently.

@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import random
-import re
 import sys
 import urllib.request
 from collections import defaultdict
@@ -17,7 +16,7 @@ from pathlib import Path
 from types import CodeType, FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.datasets.sealqa_panel import write_longseal_panel
+from promptpotter.application.datasets.harbor_panel import write_task_panel
 from promptpotter.application.datasets.tabular_ingest import materialize_samples, read_kept_table
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.infrastructure.store.dataset_access import (
@@ -150,10 +149,6 @@ def _configs(src: Source) -> tuple[str, ...]:
     return (str(src["config"]),) if "config" in src.params else ()
 
 
-def _hub_split(src: Source) -> list[Row]:
-    return list(from_hub(src, *_configs(src), split=src["split"]))
-
-
 def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
     return [Sample.from_dict(item, fallback_id=i) for i, item in enumerate(items)]
 
@@ -227,185 +222,48 @@ def _bank(
     )
 
 
-def _hotpotqa(row: Row) -> Drawn:
-    context = row["context"]
-    paragraphs = "\n\n".join(
-        f"{title}: {''.join(sentences)}"
-        for title, sentences in zip(context["title"], context["sentences"], strict=True)
-    )
-    return f"Question: {row['question']}\n\nContext:\n\n{paragraphs}", row["answer"]
-
-
 def _plain_number(value: float) -> str:
     # `GSM8K_ANSWER_RE` reads no exponent, which is what `repr` makes of a large or tiny float.
     return str(int(value)) if value.is_integer() else format(Decimal(repr(value)), "f")
-
-
-def _class_label_rows(
-    src: Source, column: str, query: Callable[[Row, Any], str]
-) -> Callable[[], list[Row]]:
-    def rows() -> list[Row]:
-        ds = from_hub(src, split=src["split"])
-        label = ds.features[column]
-        return [
-            {"query": query(row, label), "ground_truth": label.int2str(row[column])} for row in ds
-        ]
-
-    return rows
-
-
-def _naturalplan_rows(src: Source) -> list[Row]:
-    examples = json.loads(_github_raw(src, src["path"]))
-    # Tiered 100 per head count, so the take keeps the fewest-people tiers whole.
-    return sorted(examples.values(), key=lambda row: row["num_people"])[: int(src["take"])]
-
-
-def _naturalplan(row: Row) -> Drawn:
-    golden = {key: row[key] for key in ("constraints", "dist_matrix", "golden_plan")}
-    return row["prompt_0shot"], json.dumps(golden, separators=(",", ":"))
-
-
-_BLOCKSWORLD_FACT_RE = re.compile(r"the (\w+) block is (?:on top of the (\w+) block|on the table)")
-
-
-def _blocksworld_problem(query: str) -> str:
-    # The last [STATEMENT] is the instance to solve; the one before it is the prompt's worked example.
-    init, goal = query.rsplit("[STATEMENT]", 1)[1].split("My goal is to have that")
-    return json.dumps(
-        {
-            "below": {top: under or "table" for top, under in _BLOCKSWORLD_FACT_RE.findall(init)},
-            "goal": [[top, under or "table"] for top, under in _BLOCKSWORLD_FACT_RE.findall(goal)],
-        },
-        separators=(",", ":"),
-    )
-
-
-def _arc(row: Row) -> Drawn:
-    choices = row["choices"]
-    options = "\n".join(
-        f"{label}) {text}" for label, text in zip(choices["label"], choices["text"], strict=True)
-    )
-    return f"{row['question']}\n\nOptions:\n{options}", row["answerKey"]
-
-
-def _instruction_induction_task_rows(task: str, examples: dict[str, Row]) -> list[Row]:
-    rng = random.Random(_BANK_SEED)
-    rows: list[Row] = []
-    for example in examples.values():
-        if task == "cause_and_effect":
-            pair = [example["cause"], example["effect"]]
-            rng.shuffle(pair)
-            text, gold = f"Sentence 1: {pair[0]} Sentence 2: {pair[1]}", example["cause"]
-        elif task == "taxonomy_animal":
-            # The source lists the animals in an arbitrary order and grades a set; input order is exact.
-            animals = set(example["category_items"])
-            kept = [word for word in example["words"] if word in animals]
-            if len(kept) != len(animals):
-                raise ValueError(
-                    f"taxonomy_animal: {animals - set(kept)} not among the input words"
-                )
-            text, gold = example["input"], ", ".join(kept)
-        else:
-            text, gold = example["input"], example["output"]
-        rows.append({"query": f"Task: {task}\nInput: {text}", "ground_truth": gold})
-    return rows
-
-
-def _instruction_induction_rows(src: Source) -> list[Row]:
-    rows: list[Row] = []
-    for task in src["tasks"]:
-        doc = json.loads(_github_raw(src, f"data/raw/execute/{task}.json"))
-        rows.extend(_instruction_induction_task_rows(task, doc["examples"]))
-    return rows
-
-
-def _justlogic_rows(src: Source, *, held: bool) -> list[Row]:
-    depths = set(src["depths"])
-    by_depth: dict[int, list[Row]] = defaultdict(list)
-    for row in from_hub(src, split=src["split"]):
-        if row["depth"] in depths:
-            by_depth[row["depth"]].append(row)
-    train = int(src["train_per_depth"])
-    # The tail's size is the held cut's alone: the training cut declares none.
-    end = train + int(src["held_per_depth"]) if held else train
-    picked: list[Row] = []
-    for depth in sorted(by_depth):
-        rows = by_depth[depth]
-        indices = list(range(len(rows)))
-        random.Random(_BANK_SEED).shuffle(indices)
-        drawn = indices[train:end] if held else indices[:train]
-        picked.extend(rows[i] for i in drawn)
-    return picked
-
-
-def _justlogic(row: Row) -> Drawn:
-    return (
-        f"Premises:\n{row['paragraph']}\n\n"
-        f"Claim: {row['question']}\n\n"
-        f"Is the claim TRUE, FALSE, or Uncertain given the premises?"
-    ), str(row["label"])
-
-
-def _justlogic_bank(src: Source) -> BankLoader:
-    tail = BankLoader(src.kind, lambda: _justlogic_rows(src, held=True), _justlogic)
-    return BankLoader(
-        src.kind,
-        lambda: _justlogic_rows(src, held=False),
-        _justlogic,
-        bench_tail=tail if src.get("held_tail") else None,
-    )
-
-
-_SCREEN_TASTE_QUERY = """Titles this person likes:
-{shown}
-
-Candidates:
-{slate}"""
-
-
-def _screen_taste_rows(src: Source) -> list[Row]:
-    """Each row is one DRAW: ``shown`` liked titles as context, and a slate of one more held out plus
-    distractors. A title on both lists is an unscoreable row, so the recipe refuses one."""
-    liked, other = list(src["titles"]), list(src["distractors"])
-    n_rows, n_shown, n_slate = int(src["rows"]), int(src["shown"]), int(src["slate"])
-    if both := sorted(set(liked) & set(other)):
-        raise ValueError(f"in titles AND distractors, so no row can score: {both}")
-    rng = random.Random(int(src["seed"]))
-    items: list[Row] = []
-    seen: set[str] = set()
-    while len(items) < n_rows:
-        draw = rng.sample(liked, n_shown + 1)
-        shown, held = draw[:n_shown], draw[n_shown]
-        # The ANSWER is what makes a row distinct; a second draw holding it out is wasted spend.
-        if held in seen:
-            continue
-        seen.add(held)
-        slate = [held, *rng.sample(other, n_slate - 1)]
-        # Shuffled, or the answer is always first and position alone scores 1.0.
-        rng.shuffle(slate)
-        query = _SCREEN_TASTE_QUERY.format(shown="\n".join(shown), slate="\n".join(slate))
-        items.append({"query": query, "ground_truth": held})
-    return items
-
-
-def _hub_rows(draw: Callable[[Row], Drawn]) -> Callable[[Source], BankLoader]:
-    return lambda src: _bank(src, lambda: _hub_split(src), draw)
 
 
 def _cell(value: object) -> str:
     return _plain_number(value) if isinstance(value, float) else str(value)
 
 
+def _stratified(rows: list[Row], src: Source, *, held: bool) -> list[Row]:
+    """`per_stratum` rows of each `strata` value of column `stratum`, each stratum drawn apart; the
+    held cut is the next `held_per_stratum` of the same draw, so the two never share a row."""
+    column, strata, take = src["stratum"], set(src["strata"]), int(src["per_stratum"])
+    by_stratum: dict[Any, list[Row]] = defaultdict(list)
+    for row in rows:
+        if row[column] in strata:
+            by_stratum[row[column]].append(row)
+    # The tail's size is the held cut's alone: the training cut declares none.
+    end = take + int(src["held_per_stratum"]) if held else take
+    picked: list[Row] = []
+    for key in sorted(by_stratum):
+        group = by_stratum[key]
+        indices = list(range(len(group)))
+        random.Random(_BANK_SEED).shuffle(indices)
+        picked.extend(group[i] for i in (indices[take:end] if held else indices[:take]))
+    return picked
+
+
 def _columns(src: Source) -> BankLoader:
     """Two columns of a hub split: `query` and `truth` name them, `truth_prefix` leads the answer,
     and `where` names a boolean column a row must hold. A `query` holding `{column}` is a template
     over the row, and `data_files` picks files of a repo whose files share no schema. A class-label
-    truth reads as its name."""
-    query, truth, prefix, where = (
+    truth reads as its name. `paragraphs: {column, title, text}` replaces a struct column of parallel
+    lists with its `"{title}: {text}"` paragraphs before the template is formatted. `stratum` cuts
+    the split per stratum (`_stratified`), and `held_per_stratum` appends that held cut as the bench
+    tail."""
+    query, truth, prefix, where, paragraphs = (
         src["query"],
         src["truth"],
         src.get("truth_prefix", ""),
         src.get("where"),
+        src.get("paragraphs"),
     )
 
     def rows() -> list[Row]:
@@ -419,9 +277,29 @@ def _columns(src: Source) -> BankLoader:
         ]
 
     def query_of(row: Row) -> str:
+        if paragraphs is not None:
+            lists = row[paragraphs["column"]]
+            joined = "\n\n".join(
+                f"{title}: {''.join(text)}"
+                for title, text in zip(
+                    lists[paragraphs["title"]], lists[paragraphs["text"]], strict=True
+                )
+            )
+            row = {**row, paragraphs["column"]: joined}
         return str(query).format_map(row) if "{" in str(query) else str(row[query])
 
-    return _bank(src, rows, lambda row: (query_of(row), f"{prefix}{_cell(row[truth])}"))
+    def draw(row: Row) -> Drawn:
+        return query_of(row), f"{prefix}{_cell(row[truth])}"
+
+    if "stratum" not in src.params:
+        return _bank(src, rows, draw)
+    tail = (
+        BankLoader(src.kind, lambda: _stratified(rows(), src, held=True), draw)
+        if "held_per_stratum" in src.params
+        else None
+    )
+    cut = _bank(src, lambda: _stratified(rows(), src, held=False), draw)
+    return replace(cut, bench_tail=tail)
 
 
 def _table(src: Source) -> BankLoader:
@@ -444,54 +322,37 @@ BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
     # The rows themselves, inline: a hand-authored bank small enough to ship as its definition.
     "rows": lambda src: _bank(src, lambda: [dict(row) for row in src["items"]]),
     "table": _table,
-    "hotpotqa": _hub_rows(_hotpotqa),
-    "trec": lambda src: _bank(
-        src,
-        _class_label_rows(
-            src,
-            "coarse_label",
-            lambda row, _: (
-                f"Question: {row['text']}\n\nAnswer type: ABBR, ENTY, DESC, HUM, LOC or NUM?"
-            ),
-        ),
-    ),
-    "naturalplan_meeting": lambda src: _bank(src, lambda: _naturalplan_rows(src), _naturalplan),
-    "planbench_blocksworld": lambda src: _bank(
-        src,
-        lambda: [row for row in _hub_split(src) if row["domain"] == src["domain"]],
-        lambda row: (row["query"], _blocksworld_problem(row["query"])),
-    ),
-    "arc": _hub_rows(_arc),
-    "instruction_induction": lambda src: _bank(src, lambda: _instruction_induction_rows(src)),
-    "justlogic": _justlogic_bank,
-    "screen_taste": lambda src: _bank(src, lambda: _screen_taste_rows(src)),
 }
 """A recipe is the code half of a cut; the ``source:`` section beside the definition is the data half
 — repo, commit and every cut parameter. ``Source.identity`` keys a held cut on both halves."""
 
 
-def _sealqa_longseal(src: Source, out_dir: Path) -> int:
+def _harbor_tasks(src: Source, out_dir: Path) -> int:
+    """A hub split as Harbor task directories, each laid from the `template` layers and formatted
+    over its row's `question`, `answer` and `documents` columns."""
     rows = list(from_hub(src, *_configs(src), split=src["split"]))
     provenance = f"{src.repo} config={src['config']} split={src['split']} revision={src.rev}"
-    return write_longseal_panel(
+    return write_task_panel(
         rows,
         out_dir,
-        docs=int(src["docs"]),
-        two_step=bool(src.get("two_step")),
+        layers=list(src["template"]),
+        columns={key: str(src[key]) for key in ("question", "answer", "documents")},
+        task_prefix=str(src["task_prefix"]),
         provenance=provenance,
     )
 
 
-def _dbllmbench_questions(src: Source, out_dir: Path) -> int:
-    # Upstream's file verbatim: JSON is YAML, and a byte-for-byte copy is what "their panel" means.
+def _repo_file(src: Source, out_dir: Path) -> int:
+    """One file of a GitHub repo, verbatim, as the panel: JSON is YAML, and a byte-for-byte copy is
+    what "their panel" means. `tasks` names the key listing its tasks."""
     text = _github_raw(src, src["path"])
     write_bytes(out_dir / MATERIALIZED_PANEL_FILE, text.encode("utf-8"))
-    return len(json.loads(text)["questions"])
+    return len(json.loads(text)[src["tasks"]])
 
 
 PANEL_RECIPES: dict[str, Callable[[Source, Path], int]] = {
-    "sealqa_longseal": _sealqa_longseal,
-    "dbllmbench_questions": _dbllmbench_questions,
+    "harbor_tasks": _harbor_tasks,
+    "repo_file": _repo_file,
 }
 """A recipe that BUILDS a connector-owned panel and the task directories it names, into the tenant tier."""
 

@@ -3,7 +3,7 @@ card:
   summary: Given logical premises and a claim, answer TRUE, FALSE or Uncertain.
 
 source:
-  depths: [2, 3, 4]
+  strata: [2, 3, 4]
 
 campaign:
   optimization:

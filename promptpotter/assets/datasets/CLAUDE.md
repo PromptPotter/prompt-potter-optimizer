@@ -8,7 +8,7 @@ Each `dataset.yaml` directory is a definition named by its path, read-only in th
 
 ## `source:` is where the rows come from
 
-Rows are a recipe (`BANK_RECIPES` / `PANEL_RECIPES`) plus the cut beside it; a new cut is a new definition, never a recipe edit. A re-cut is a new `dataset_hash` and needs no new name: the next `new` moves the label, and per-sample history carries over by `sample_key`.
+Rows are a recipe (`BANK_RECIPES` / `PANEL_RECIPES`) plus the cut beside it; a new cut is a new definition, never a recipe edit. A recipe names no benchmark: a benchmark's loader is a field mapping in `source:` (`columns` maps its query template, truth column, per-stratum cut and `paragraphs`, a struct of parallel title/text lists rendered as paragraphs), and a panel's task files are the template layers under `assets/panels/` its `harbor_tasks` source lists. A re-cut is a new `dataset_hash` and needs no new name: the next `new` moves the label, and per-sample history carries over by `sample_key`.
 
 ## Declarations, not defaults
 

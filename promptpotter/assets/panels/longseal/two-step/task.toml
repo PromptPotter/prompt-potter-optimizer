@@ -1,0 +1,33 @@
+schema_version = "1.4"
+
+[metadata]
+
+[verifier]
+timeout_sec = 300.0
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+build_timeout_sec = 600.0
+
+# Named rather than inherited: this fold is what makes two steps ONE cell score. Per-step rewards
+# ride the row as terms beside it — promoting either to an item would claim 2N observations.
+multi_step_reward_strategy = "mean"
+
+[[steps]]
+name = "retrieve"
+[steps.agent]
+timeout_sec = 900.0
+[steps.verifier]
+timeout_sec = 300.0
+# SEPARATE: a shared verifier's `tests/` lands in the agent's container and is only emptied at the
+# NEXT step's verification, so gold document numbers would be readable throughout the answer step.
+environment_mode = "separate"
+
+[[steps]]
+name = "answer"
+[steps.agent]
+timeout_sec = 900.0
+[steps.verifier]
+timeout_sec = 300.0

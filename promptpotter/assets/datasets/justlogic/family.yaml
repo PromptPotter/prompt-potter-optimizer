@@ -1,9 +1,18 @@
 source:
   hub: michaelchenkj/JustLogic
   rev: 98603ec6ea79c5da6c2e2c45f0ada2bfedad1e98
-  recipe: justlogic
+  recipe: columns
   split: train
-  train_per_depth: 200
+  query: |-
+    Premises:
+    {paragraph}
+
+    Claim: {question}
+
+    Is the claim TRUE, FALSE, or Uncertain given the premises?
+  truth: label
+  stratum: depth
+  per_stratum: 200
 
 pipeline:
   # JustLogic (Chen 2025): a synthetic, knowledge-independent deductive benchmark, routed through

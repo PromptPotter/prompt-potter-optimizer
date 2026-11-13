@@ -24,7 +24,7 @@ from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from types import ModuleType
-from typing import Any, NamedTuple, cast
+from typing import Any, ClassVar, NamedTuple, cast
 from unittest.mock import Mock
 
 import openpyxl
@@ -1688,6 +1688,39 @@ def test_a_recipes_identity_reads_the_code_it_imports_and_no_other() -> None:
         ("columns", {loaders}, "a recipe's identity took code it does not run"),
     ):
         assert set(loaders.recipe_modules(recipe)) == imported, why
+
+
+def test_a_paragraphs_row_renders_as_one_title_and_text_paragraph_per_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Split(list[dict[str, Any]]):
+        features: ClassVar[dict[str, object]] = {"answer": object()}
+
+    row = {
+        "question": "Who?",
+        "answer": "Ada",
+        "context": {"title": ["One", "Two"], "sentences": [["a. ", "b."], ["c."]]},
+    }
+    monkeypatch.setattr(loaders, "from_hub", lambda *_args, **_kwargs: Split([row]))
+    section: dict[str, Any] = {
+        "recipe": "columns",
+        "hub": "org/repo",
+        "rev": "c1",
+        "split": "validation",
+        "query": "Question: {question}\n\nContext:\n\n{context}",
+        "truth": "answer",
+        "paragraphs": {"column": "context", "title": "title", "text": "sentences"},
+    }
+    src = loaders.Source.of(section)
+    assert src is not None
+    (sample,) = loaders.BANK_RECIPES["columns"](src).load()
+    assert (sample.query, sample.ground_truth) == (
+        "Question: Who?\n\nContext:\n\nOne: a. b.\n\nTwo: c.",
+        "Ada",
+    ), "paragraphs rendered another query than the title: text paragraphs of the context"
+    row["context"] = {"title": ["One"], "sentences": [["a."], ["b."]]}
+    with pytest.raises(ValueError):
+        loaders.BANK_RECIPES["columns"](src).load()
 
 
 def test_a_derived_read_is_keyed_by_its_files_signature(tmp_path: Path) -> None:

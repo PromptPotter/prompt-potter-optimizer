@@ -37,7 +37,7 @@ When the operator says the data is ready **and it loads cleanly**, author the or
   `CLAUDE.local.md` (`promptpotter/connectors/CLAUDE.md` § TermNorm is not a third party), start
   `start-server-py-LLMs.bat` (the autonomy mode says who), wait for `/status` 200.
 - **No loader.** A tenant dataset is ingested, never given a loader. A new fetched benchmark (rare): a
-  recipe in `application/datasets/loaders.py::BANK_RECIPES` and a dataset folder drafted from
+  field mapping in its `source:` on the `columns` recipe, never code, and a dataset folder drafted from
   `justlogic/d234`, per `docs/operations/datasets.md` § Adding a dataset.
 
 ## First-run smoke

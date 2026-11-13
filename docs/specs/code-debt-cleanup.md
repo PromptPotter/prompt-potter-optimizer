@@ -1122,19 +1122,6 @@ open holds. These rows were in its brief and not built.
   `difficulty.py:223-256`). Decided (orchestrator; the operator may reverse it): the code, not the doc,
   is fixed: both read one ruler and one row set, and the doc then states it. **Rides with:** readings 2.
 
-### recipes (beside readings)
-
-- **Each benchmark's loader is code**: `application/datasets/loaders.py` spells a bank recipe per
-  benchmark (`hotpotqa`, `trec`, `naturalplan_meeting`, `planbench_blocksworld`, `arc`,
-  `instruction_induction`, `screen_taste`, `justlogic`) and the panel recipes `sealqa_longseal` and
-  `dbllmbench_questions`; `sealqa_panel.py`'s Dockerfile, `solve.sh`, `task.toml`, `test.sh` and
-  instruction templates are Python string constants. The first seven back no shipped or research
-  dataset (read the box's tenant datasets first, free). Action (operator, 2026-11-12): each becomes a
-  field mapping in `source:` on the generic columns / table recipe (blocksworld's query parse may need
-  one hook; justlogic follows where a mapping fits), the panel templates asset files. Recipe code is
-  hashed into the cut (`loaders.py::_recipe_digest`), so every moved recipe re-keys its cut. **Rides
-  with:** recipes. **Re-test:** `loaders.py` names no benchmark.
-
 ### batch/26 · rn-conn
 
 - **One fact, two words: `backend_type` and `connector`**: the definition key `pipeline.backend_type`,

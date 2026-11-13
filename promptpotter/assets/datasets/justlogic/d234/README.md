@@ -8,8 +8,8 @@ and knowledge-independent — no factual recall.
 
 An iid random mix of JustLogic depths 2, 3 and 4, interleaved before numbering, so any `n`-sample
 prefix is an iid draw across d2/d3/d4. The depths, the per-depth count and the seed are all derived
-from the dataset NAME by its `DATASET_FAMILIES` row / `_justlogic_rows`
-(`promptpotter/application/datasets/loaders.py`) — read them there; a new combination such as
+from the `source:` this definition and its `family.yaml` lay together, cut by the `columns` recipe
+(`promptpotter/application/datasets/loaders.py::_stratified`) — read them there; a new combination such as
 `justlogic/d34` needs a dataset dir and no code.
 
 **Each cut is a separate dataset name, never a re-cut of another** — owned by

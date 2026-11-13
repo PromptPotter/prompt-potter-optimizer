@@ -126,6 +126,7 @@ def _wheel_problem(wheel: Path, *, expect_webapp: bool) -> tuple[str | None, int
     required = {
         "assets/datasets/**/*.yaml": "promptpotter/assets/datasets/defaults.yaml",
         "assets/datasets/**/*.md": "promptpotter/assets/datasets/justlogic/task.md",
+        "assets/panels/**/*": "promptpotter/assets/panels/longseal/base/environment/Dockerfile",
         "assets/optimizers/*/*.yaml": "promptpotter/assets/optimizers/potter/pipeline.yaml",
         "assets/optimizers/*/*.json": "promptpotter/assets/optimizers/potter/resolved_schemas.json",
         "assets/checkin/*.yaml": "promptpotter/assets/checkin/pipeline.yaml",

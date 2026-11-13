@@ -3,10 +3,9 @@ card:
   summary: Deductive reasoning on a 150-row bench, sized to compare two optimizers.
 
 source:
-  depths: [2, 3, 4]
-  held_tail: true
+  strata: [2, 3, 4]
   # 40 per depth: the bench is 30 + 120 = 150 rows, the operator's ceiling for any pass.
-  held_per_depth: 40
+  held_per_stratum: 40
 
 campaign:
   optimization:
