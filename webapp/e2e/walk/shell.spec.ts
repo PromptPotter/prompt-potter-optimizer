@@ -1,20 +1,22 @@
-import { test, expect, open, ready, campaigns } from "../harness";
+import { test, expect, open, ready, campaigns, showSidebar } from "../harness";
 
 test.describe("app shell", () => {
   test("boots to the shell, not to a crash", async ({ page }) => {
     await open(page);
-    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+    // Never the brand literal: `lib/brand.ts` is VITE_*-overridable for whitelabel.
+    await expect(page.locator("#main-content")).toBeVisible();
     await expect(page.getByRole("link", { name: "Skip to content" })).toHaveAttribute(
       "href",
       "#main-content",
     );
-    // Never the brand literal: `lib/brand.ts` is VITE_*-overridable for whitelabel.
-    await expect(page.locator("#main-content")).toBeVisible();
+    await showSidebar(page);
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
   });
 
   test("the sidebar lists exactly the campaigns the API serves", async ({ page, request }) => {
     const served = await campaigns(request);
     await open(page);
+    await showSidebar(page);
 
     // Counted by their ⋯ menus: row labels move when the operator runs.
     const rows = page.getByRole("button", { name: "Campaign actions" });
@@ -24,6 +26,7 @@ test.describe("app shell", () => {
   test("a campaign row opens its actions, and Escape closes them", async ({ page, request }) => {
     test.skip((await campaigns(request)).length === 0, "no campaign in this workspace");
     await open(page);
+    await showSidebar(page);
 
     await page.getByRole("button", { name: "Campaign actions" }).first().click();
     const menu = page.getByRole("menu");
@@ -34,12 +37,14 @@ test.describe("app shell", () => {
 
   test("the campaign filter opens", async ({ page }) => {
     await open(page);
+    await showSidebar(page);
     await page.getByRole("button", { name: "Filter campaigns" }).click();
     // The surface, not the member list: the lifecycle set is owned server-side.
     await expect(page.getByRole("group", { name: "Filter campaigns" })).toBeVisible();
   });
 
-  test("the sidebar collapses and expands", async ({ page }) => {
+  test("the sidebar collapses and expands", async ({ page, isMobile }) => {
+    test.skip(isMobile, "a phone's sidebar is the list screen, with no collapse (responsive.spec)");
     await open(page);
     const collapse = page.getByRole("button", { name: "Collapse sidebar" });
     await expect(collapse).toHaveAttribute("aria-expanded", "true");
@@ -52,6 +57,7 @@ test.describe("app shell", () => {
 
   test("the theme toggle actually repaints", async ({ page }) => {
     await open(page);
+    await showSidebar(page);
     const root = page.locator("html");
     const before = await root.getAttribute("data-theme");
     await page.getByRole("button", { name: "Toggle theme" }).click();
@@ -62,6 +68,7 @@ test.describe("app shell", () => {
 
   test("support points at the issue tracker", async ({ page }) => {
     await open(page);
+    await showSidebar(page);
     await expect(page.getByRole("link", { name: "Support" })).toHaveAttribute(
       "href",
       /github\.com\/.*\/issues/,

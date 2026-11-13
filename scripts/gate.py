@@ -955,7 +955,9 @@ def _eslint(sel: Selection) -> Outcome:
 
 def _playwright(sel: Selection) -> Outcome:
     # `walk` serves a copy of the walk world, in this gate's own home; `spend` costs real money.
-    tiers = _node("npx", "playwright", "test", "--project=cold", "--project=walk")
+    tiers = _node(
+        "npx", "playwright", "test", "--project=cold", "--project=walk", "--project=touch"
+    )
     walk_home = str(Path(os.environ["PROMPTPOTTER_HOME"]) / "e2e-walk")
     return run(tiers, _WEBAPP, PP_E2E_WALK_WORLD=str(sel.world), PP_E2E_WALK_HOME=walk_home)
 

@@ -1,4 +1,4 @@
-import { test, expect, open, ready } from "../harness";
+import { test, expect, open, ready, showSidebar } from "../harness";
 
 const TABS = [
   ["profile", "Profile"],
@@ -20,6 +20,7 @@ const navButton = (page: import("@playwright/test").Page, label: string) =>
 test.describe("account", () => {
   test("opens from the sidebar", async ({ page }) => {
     await open(page);
+    await showSidebar(page);
     await page.getByRole("button", { name: "Open account" }).click();
     await expect(account(page)).toBeVisible();
   });

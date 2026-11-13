@@ -6,6 +6,7 @@ test.beforeEach(async ({ page, rich }) => {
 
 test.describe("dashboard", () => {
   test("draws the pipeline graph", async ({ page }) => {
+    await page.locator("#view-optimizer").scrollIntoViewIfNeeded();
     const graph = page.getByRole("img", { name: "Pipeline graph" });
     await expect(graph).toBeVisible();
     await expect(graph.getByRole("button").first()).toBeVisible();

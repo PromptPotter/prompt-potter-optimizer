@@ -14,7 +14,8 @@ npx playwright test --project=walk -g "theme"    # one slice
 
 First time on a machine: `npx playwright install chromium`.
 
-**`gate.py` runs `cold` and `walk`**, the walk against the `walk-world` check's run
+**`gate.py` runs `cold`, `walk` and `touch`**, the walk (and `touch`, the same specs on a 390px touch
+phone) against the `walk-world` check's run
 (`scripts/gate.py::_playwright`); `spend` needs money. `walk` reads no operator campaign when
 `PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`) names a run — potter's straight run is what `gate.py --only walk-world` leaves
 at `.gate_cache/walk-world/<key>/potter/data`, under that check's own key so a world is walked only
@@ -32,6 +33,7 @@ TermNorm at :8000 once turned a CI-red spec green at the push hook.
 | Project | Workspace | Covers |
 |---|---|---|
 | `walk` | a copy of `PP_E2E_WALK_WORLD`, else the checkout's `.promptpotter/`, **read-only** | every view against real campaigns and rounds — the only world where Dashboard, Compare, Verify and Files have anything to draw. Issues no write. |
+| `touch` | the walk's | the walk's specs at 390px with `hasTouch` + `isMobile`, so `(pointer:coarse)` matches; a spec that walks the desktop layout says so in its `test.skip(isMobile, …)` |
 | `cold` | a throwaway `PROMPTPOTTER_HOME` | the zero-campaign path a new account meets: consent gate, empty reads, dataset picker. |
 | `spend` | the same throwaway world | two campaigns taken to a measured round, each under `PP_E2E_BUDGET_USD`. **Real money** — `PP_E2E_SPEND=1`, and the dataset's backend must be up. `run.spec.ts` is the browser ingest path, `l4.spec.ts` the recursion; each spec's header states why it is minted the way it is. |
 
@@ -39,7 +41,7 @@ Two servers rather than one, because `PROMPTPOTTER_HOME` is bound at import and 
 cannot hold both. **Neither binds 8001** — that port is the operator's.
 
 **A run boots only the servers its projects need** (`playwright.config.ts::runs`, read off
-`--project`): `walk` starts the walk server, `cold` and `spend` the throwaway one, and no
+`--project`): `walk` or `touch` starts the walk server, `cold` and `spend` the throwaway one, and no
 `--project` at all — `npm run e2e` — starts both. The gate's `walk` reads its `PP_E2E_WALK_WORLD`
 copy, so the gate never opens the operator's workspace.
 
