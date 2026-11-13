@@ -12,7 +12,7 @@ claim is [`benchmarks.md`](benchmarks.md)'s; this page claims no head-to-head be
 |---|---|---|
 | **Telemetry** — Langfuse, Phoenix, Weave, LangSmith | Spans, tokens, latency, a prompt store, LLM-as-judge over traces | A human writes the prompt. Nothing searches. |
 | **Eval + an optimizer menu** — Opik, agent-opt, Promptolution, MLflow, NeMo | Several search algorithms behind one interface | Each runs *however it wants*: reachable, not comparable. |
-| **A single algorithm, in a paper** — MIPROv2, CAPO, GEPA, LEVI (prompt); AlphaEvolve, OpenEvolve (code) | One method, one benchmark suite, one budget convention | No interface, no obligation to run beside anything else. |
+| **A single algorithm, in a paper** — APE, OPRO, MIPROv2, PromptWizard, CAPO, GEPA, LEVI (prompt); SkillOpt, DarwinX, AutoDesign, SIFT, RRSI, SoL-Pi (harness); AlphaEvolve, OpenEvolve, AlgoTuner (code) | One method, one benchmark suite, one budget convention | No interface, no obligation to run beside anything else. |
 
 **The gap is the third column.** No one serves a **stopping rule** across methods — none, ours
 included, anytime-valid under optional stopping ([`external-constraints.md`](external-constraints.md)
@@ -21,9 +21,13 @@ an optimizer manifest, measured under one model, budget meter, grader, split and
 ([`../specs/roadmap.md`](../specs/roadmap.md) § The bench).
 
 **PromptPotter's own family is LLM-driven evolution**: an LLM proposes variants, a scorer ranks them,
-winners breed. The members we run or reach: [DSPy](https://github.com/stanfordnlp/dspy)'s MIPROv2
-(the prompt a compiled artifact, instructions × demos); [CAPO](https://arxiv.org/abs/2504.16005)
-(racing under a token budget); [GEPA](https://arxiv.org/abs/2507.19457), the reference point. **PromptPotter moves a whole declared pipeline jointly
+winners breed. The line: [APE](https://arxiv.org/abs/2211.01910) and OPRO (an LLM authors its own
+instruction); [DSPy](https://github.com/stanfordnlp/dspy) and [MIPROv2](https://arxiv.org/abs/2406.11695)
+(the prompt a compiled artifact, instructions × demos); [PromptWizard](https://arxiv.org/abs/2405.18369)
+(critique-guided refinement); [CAPO](https://arxiv.org/abs/2504.16005) (racing under a token budget);
+[GEPA](https://arxiv.org/abs/2507.19457) (ICLR 2026 oral), the reference point, though CAPO outscored
+it in the promptolution head-to-head and its gains shrink at matched budgets
+([LEVI](https://arxiv.org/abs/2605.09764)). **PromptPotter moves a whole declared pipeline jointly
 with the prompt and searches a tree, not a line** (§ Comparison to MCTS).
 
 ## Peers
@@ -43,10 +47,14 @@ with the prompt and searches a tree, not a line** (§ Comparison to MCTS).
 | **Palantir AIP Evals** ([docs](https://www.palantir.com/docs/foundry/aip-evals/overview)) | Grid-searches human-written prompt and model variants. | **Weak**: nothing proposes or stops early. | 2026-09-24 |
 | **Vertex AI Prompt Optimizer** ([docs](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/prompts/prompt-optimizer)) · **Bedrock Advanced Prompt Optimization** ([how it works](https://docs.aws.amazon.com/bedrock/latest/userguide/advanced-prompt-optimization-how.html)) | Instruction and/or demonstrations over one vendor's catalogue; the customer's scorer (Cloud Run / Lambda) called by the service; Bedrock's `advpo:optimize` / `advpo:exclude` tags scope what may be rewritten. | **Weak**: template text alone, no stopping rule or comparability. Bedrock's tags — a lock on a span inside one field, finer than our per-field lock; the service-called scorer is the push shape R2 avoids. | 2026-10-31, summarizing fetch |
 | **AlphaEvolve** (Google DeepMind; a managed Gemini Enterprise service) · **OpenEvolve** ([`algorithmicsuperintelligence/openevolve`](https://github.com/algorithmicsuperintelligence/openevolve), Apache-2.0) | Gemini proposes edits inside `EVOLVE-BLOCK` markers, a program database keeps the population; the user's `run_controller_loop()` pulls candidates, runs *their* evaluator, posts scores back. The local `AlphaEvolve-from-OpenEvolve-Questionmark/` checkout is the managed service's client, not OpenEvolve. | **Relevant** (§ Against GEPA and AlphaEvolve); the search is closed. The controller shape — service proposes, client evaluates — is the inverse of our plug point. | 2026-09-24 |
-| **Agent Lightning** ([`microsoft/agent-lightning`](https://github.com/microsoft/agent-lightning), MIT) | v0.x: a server enqueues rollouts, runners dequeue over REST and report OpenTelemetry spans that double as heartbeats; silence past a timeout requeues; no auth. APO is textual gradients plus beam search over one template; v1.0 is RL-only. | **Reference** for the pull shape ([`../specs/roadmap.md`](../specs/roadmap.md) § Embedding (M15), R2); weak as an optimizer. Spans as liveness; a caller-chosen rollout id. Its requeue is a retry, which [`../architecture.md`](../architecture.md) § Errors heal upward refuses. | 2026-10-31 |
+| **Agent Lightning** ([`microsoft/agent-lightning`](https://github.com/microsoft/agent-lightning), MIT) | v0.x: a server enqueues rollouts, runners dequeue over REST and report OpenTelemetry spans that double as heartbeats; silence past a timeout requeues; no auth. APO is textual gradients plus beam search over one template; v1.0 ([2608.17528](https://arxiv.org/abs/2608.17528)) is RL-only. | **Reference** for the pull shape ([`../specs/roadmap.md`](../specs/roadmap.md) § Embedding (M15), R2); weak as an optimizer. Spans as liveness; a caller-chosen rollout id. Its requeue is a retry, which [`../architecture.md`](../architecture.md) § Errors heal upward refuses. | 2026-10-31 |
 | **OSS Vizier** · **Optuna** 5.0 · **W&B Sweeps** | Client-evaluated services: Vizier `SuggestTrials` / `CompleteTrial` with a `client_id` that returns a pending trial; Optuna `ask()` / `tell()`; W&B agents polling a controller whose heartbeat replies `run`, `resume`, `stop` or `exit`. None optimizes prompts. | **Reference**: `client_id` as a lease idempotent per program; the stop riding the poll reply, so the one stop ([`../decisions.md`](../decisions.md) § 0010) needs no second channel. | 2026-10-31 |
 | **NeMo Agent Toolkit** → **NeMo Helix** (NVIDIA) | `nat optimize`: Optuna over numeric knobs, a genetic algorithm over prompts steered by a `prompt_purpose`, `reps_per_param_set` repeats; deprecated October 2026 for Helix (0.x). | **Weak**: not a standard, its maker retiring it. `prompt_purpose` — the operator's intent handed to the mutator. | 2026-10-31 |
-| **NVIDIA SkillEvaluator** ([`NVIDIA/skillevaluator`](https://github.com/NVIDIA/skillevaluator)) | Three tiers: validation (static checks, rubric, LLM security pass), deduplication (embedding overlap within and across a `--catalog`), paired trials with and without the skill (*Skill Lift*). | **Not a competitor**. The tiers, adopted for skilled-agent targets ([`../specs/roadmap.md`](../specs/roadmap.md) § Evolving agent harnesses); SkillSpector is the tier-1 floor ([`external-constraints.md`](external-constraints.md) § SKILL). | 2026-09-24, README |
+| **NVIDIA SkillEvaluator** ([`NVIDIA/skillevaluator`](https://github.com/NVIDIA/skillevaluator), [2608.20614](https://arxiv.org/abs/2608.20614)) | Three tiers: validation (static checks, rubric, LLM security pass), deduplication (embedding overlap within and across a `--catalog`), paired trials with and without the skill (*Skill Lift*). | **Not a competitor**. The tiers, adopted for skilled-agent targets ([`../specs/roadmap.md`](../specs/roadmap.md) § Evolving agent harnesses); SkillSpector is the tier-1 floor ([`external-constraints.md`](external-constraints.md) § SKILL). | 2026-09-24, README |
+| **SIFT** ([2609.19526](https://arxiv.org/abs/2609.19526)) | DGM line: a coding agent patches its own harness. An LLM judge ranks candidates' source pairwise without seeing tasks (ρ ≈ 0.68 vs benchmark) into a Bradley-Terry fit; parents sampled by measured rank, predicted rank and a visit penalty; a 4-task easy gate precedes the 50-task evaluation. 35.1% Polyglot vs DGM 30.7%. No code. | **Reference**: visit-penalised selection matches ours (`application/mask/backprop.py` UCB1). A zero-sample judge pre-screen as a prior for PoBB's arm order; the easy-subset gate; a per-step cost table. Preset: [`../specs/roadmap.md`](../specs/roadmap.md) § SIFT reproduction. | 2026-09-24 |
+| **RRSI** ([2609.24972](https://arxiv.org/abs/2609.24972), [`google-research/rrsi`](https://github.com/google-research/rrsi), Apache-2.0) | Frozen model, evolving harness, regularized: an annealed edit cap, a proposer conditioned on edit history, a pre-evaluation leakage critic, a noise-adjusted floor, a cost rule. Table 2: unregularized posts the best evolve score at 2.4× the tokens; RRSI +3.9 OOD over H_0. | **Reference**: it measures the failure an outer loop of ours would have — an evolve-set gain that does not transfer. The floor (`rrsi/calibrate.py`), the critic, the cost rule, evolve / ID / OOD columns beside tokens. | 2026-10-11, README, Table 2 |
+| **SoL-Pi** (NVIDIA Labs; [site](https://nvlabs.github.io/SoL-Pi/), MIT) | A coding-agent harness improved by an auto-research loop: *Oracle Analysis* prices an idea on trajectories already paid for; no agent inside the loop sees held-out results; a predeclared tolerance gate. 152 directions in, 4 survived. | **Reference**: the tolerance gate as a selector shape (cost the objective); Oracle Analysis; a proposer blind to held-out results. No stopping rule, cross-lineage budget or archive. | 2026-10-20 |
+| **SkillOpt** · **DarwinX** · **AutoDesign** · Sakana's [RSI Lab](https://sakana.ai/rsi-lab/) · a [reading list](https://github.com/leezythu/Awesome-Harness-Self-Improvement) | Evolve a harness around a frozen model on agent environments (ALFWorld, SpreadsheetBench, Terminal-Bench, WebArena) the `harbor` connector measures too; DarwinX makes the "single-lineage search is path-dependent" critique. | **Relevant** as head-to-head arms: wiring plus a per-cell spend ceiling. None runs sequential elimination, a cost-per-fitness model or a subset-invariant ability scale. | 2026-09-24 |
 
 ## Why PoBB's family and not another
 
@@ -116,17 +124,18 @@ methods run inside the plug point.
 
 ## Agent-harness evolution
 
-Evolving a harness around a frozen model is a crowded paper line with no shared bench; the
-`harbor` connector measures its agent environments. PromptPotter already recurses — an outer cycle whose backend is an inner cycle
+Evolving a harness around a frozen model is occupied (SkillOpt, DarwinX, AutoDesign, SIFT, RRSI,
+SoL-Pi, above). PromptPotter already recurses — an outer cycle whose backend is an inner cycle
 ([`../concepts/l4.md`](../concepts/l4.md)) — where the optimizer *is* the instrument,
 so the thing varied also does the measuring; only a bench that holds a harness constant answers that.
 The distinguishing claim: sequential elimination, a cost-per-fitness model, a subset-invariant ability
-scale, joint prompt and pipeline-parameter search. The danger it carries:
+scale, joint prompt and pipeline-parameter search. Precedent and measured danger:
 [`external-constraints.md`](external-constraints.md) § Ranked, item 1, and § L4.
 
 ## Test-time compute, moved out of the request
 
-Searching inside the request — sample, verify, pick — is what PromptPotter runs as tuning infrastructure: a
+Searching inside the request — sample, verify, pick ([Snell et al.](https://arxiv.org/abs/2408.03314)
+· [survey](https://arxiv.org/abs/2406.16838)) — is what PromptPotter runs as tuning infrastructure: a
 configuration found once, then an ordinary call with no search in the path, the test-time budget
 (`reasoning_effort`, `max_tokens`, the model) itself tunable. Live per-question model selection is a
 gateway's job ([OpenRouter](https://openrouter.ai)); PromptPotter tunes what the gateway calls.

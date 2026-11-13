@@ -103,7 +103,7 @@ nodes:
   # 50 centroids (App. A). The descriptors are the prompt's length and its per-cell score profile
   # on the proxy (§3.1, "especially useful for prompt optimization"); the paper names none for its
   # prompt runs. NOT the paper's: `cvt_samples`, the uniform draws k-means places the centroids
-  # among, which it does not state; k-means over uniform draws is what spreads a CVT's cells evenly.
+  # among, which it does not state (Vassiliades et al. 2017 construct the CVT this way).
   map_elites:
     type: selector
     config:

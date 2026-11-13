@@ -23,7 +23,7 @@ optimizer rides: candidate budget allocation ([`../methods/candidate-elimination
 and hard-sample ordering ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The round order).
 
 The critique is the only step that reads raw per-sample results; **`l1_critique → l1_generate` is
-performance-driven feedback, not failure-driven healing**.
+performance-driven feedback, not failure-driven healing** (after [PromptWizard](https://arxiv.org/abs/2405.18369)).
 **It searches a tree, not a trail**: a spent branch rewinds to the round the L2/L3 layer's `fork_proposal` names (`stand_on`), else the one a UCB rule picks (`application/bench/node_context.py::Lineage.branch_round`) —
 [`../research/landscape.md`](../research/landscape.md) § Comparison to MCTS.
 

@@ -105,8 +105,7 @@ model; the head-to-head target, identical across every arm, is the bbeh-comparis
 
 ## PEvol-Bench — the AC-grade bench definition (v1 draft)
 
-PromptPotter is an Algorithm Configuration solver in prompt space: it tunes one pipeline's prompts and
-params for a distribution of instances. A credible AC bench
+PromptPotter is an Algorithm Configuration solver in prompt space (Hutter et al.). A credible AC bench
 needs a pre-assembled canonical split, a compound-pipeline description, a population large enough for
 a config / test split, and non-saturation for the *reference solver's* target model — procedurally
 generated tasks with an unlimited test set are the ideal. **Nothing above is PEvol-Bench-grade.** v1
@@ -118,7 +117,8 @@ candidates: **MMLU-Pro** (~12k) for breadth, **MATH** (7,500 test) for depth, bo
 **Absolute accuracy** — `correct / total` on test, per (method, model). Its interval is paired and
 clustered (arms differenced per cell, seeds averaged within it: `evidence` serves it as
 `HeadToHead.contrasts`, Holm and BH across the matrix), exact or bootstrapped, with SNR per benchmark,
-never a binomial SE ([`external-constraints.md`](external-constraints.md) § The preprint).
+never a binomial SE; the Agentic Benchmark Checklist is filled and published as an appendix
+([`external-constraints.md`](external-constraints.md) § The preprint).
 
 Beside it, two round counts from `index.json::final`: **`rounds_to_separable`** (first round whose
 pick separates from the origin on the shared panel) — quote this — and **`rounds_to_improved`** (first
@@ -144,6 +144,7 @@ sees ([`../architecture.md`](../architecture.md) § The bench score is not an op
 **The bench set is spent by reuse.** Every campaign kept or dropped off its headline is one adaptive
 query against the same rows; each pass stamps the count and the headline serves its selection's. There is deliberately no once-only split — a
 head-to-head needs every pick graded on ONE set; a new `run_seed` is the fresh holdout, and the count
-says when one is due. A correction of the winner's own number would have to model PoBB's
-data-dependent stopping, not assume a fixed shortlist; the same stopping is why ε carries no
-anytime-valid guarantee ([`external-constraints.md`](external-constraints.md) § Ranked, item 2).
+says when one is due. [arXiv:2605.05973](https://arxiv.org/abs/2605.05973) corrects the curse
+assuming a fixed shortlist and smooth selection, which PoBB's stopping strains — check its estimator
+before adopting; the same stopping is why ε carries no anytime-valid guarantee
+([`external-constraints.md`](external-constraints.md) § Ranked, item 2).
