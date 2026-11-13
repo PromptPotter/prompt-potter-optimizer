@@ -115,6 +115,8 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landed 54:** passes-5 and holders-3: a pause stands for the hold it was filed against, one reader
   of a reply's usage, `origin_replicates` tested in a run; `reindex` plans unless `--apply`, and an
   atomic write's temporary stays locked through its replace. Every `Extra` names a declared extra.
+- **landed 55:** a draft prices its menu on the provider its node runs on, and a run reaches only the
+  nodes its walks list or fire (`fired_on`): an upload on TermNorm starts with no `model_unpriced`.
 - **v0.8.20** is cut here (operator, 2026-11-13).
 - **cfg-2**: the defaults' one home, the patch check spelled once after a proposal carries the
   stripped overlay, the browser's "" handling.

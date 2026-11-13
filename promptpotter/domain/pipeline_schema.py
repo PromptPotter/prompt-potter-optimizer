@@ -380,6 +380,9 @@ class PipelineNode(FrozenModel):
     current_config: dict[str, Any] = Field(default_factory=dict)
     # A gateway's: the pipelines (dataset slugs) its measurement runs, as its declaration names them.
     nested_datasets: list[str] = Field(default_factory=list)
+    # The walks whose runs fire this node though none lists it (an escalation, a fallback). A node
+    # no walk lists or fires is served but never run: a backend runs only the steps it is sent.
+    fired_on: list[str] = Field(default_factory=list)
     # Decided at parse, before `narrow`: no campaign's closing moves which node carries the model rows.
     tunes_llm: bool
     # `None`: its backend bounds nothing. Rides the schema, never the identity.
@@ -803,18 +806,18 @@ class PipelineSchema(FrozenModel):
 
     @property
     def running_nodes(self) -> list[PipelineNode]:
-        """Which nodes a run reaches: the chain, then each on a phase walk or on none (the graph
-        fires it); a node only on an alternative walk runs on the chain alone."""
+        """Which nodes a run reaches: the chain, then each a phase walk lists or a run walk fires
+        (`PipelineNode.fired_on`). A node only on an alternative walk runs on the chain alone; one
+        no walk lists or fires runs on none."""
         on_chain = set(self.active_steps)
-        walks = self.pipelines.items()
-        phased = {n for name, steps in walks if name in PHASE_PIPELINES for n in steps}
-        walked = {n for _, steps in walks for n in steps}
+        runs = {DEFAULT_PIPELINE, *PHASE_PIPELINES}
+        phased = {n for name in PHASE_PIPELINES for n in self.pipelines.get(name, ())}
         return [
             *self.nodes,
             *(
                 n
                 for n in self.declared_nodes
-                if n.name not in on_chain and (n.name in phased or n.name not in walked)
+                if n.name not in on_chain and (n.name in phased or not runs.isdisjoint(n.fired_on))
             ),
         ]
 

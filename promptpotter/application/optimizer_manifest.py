@@ -883,18 +883,37 @@ def _edges_of(member: NodeMember) -> frozenset[type]:
     return member.consults | fires
 
 
-def _roster(schema: PipelineSchema) -> tuple[str, ...]:
+def _reach(schema: PipelineSchema) -> dict[str, set[str]]:
+    """Each member a walk reaches, by the walks reaching it: those listing it, and those of every
+    member whose edges reach it."""
     table = optimizers.NODE_MEMBERS.table
     declared = [n.name for n in schema.declared_nodes if n.name in table]
-    reached = {n for walk in _WALKS for n in schema.pipelines.get(walk, ()) if n in table}
-    frontier = list(reached)
+    reach: dict[str, set[str]] = {}
+    for walk in _WALKS:
+        for n in schema.pipelines.get(walk, ()):
+            if n in table:
+                reach.setdefault(n, set()).add(walk)
+    frontier = list(reach)
     while frontier:
-        for edge in _edges_of(table[frontier.pop()]):
+        node = frontier.pop()
+        for edge in _edges_of(table[node]):
             for n in declared:
-                if n not in reached and isinstance(table[n], edge):
-                    reached.add(n)
+                if isinstance(table[n], edge) and not reach.setdefault(n, set()) >= reach[node]:
+                    reach[n] |= reach[node]
                     frontier.append(n)
-    return tuple(n for n in declared if n in reached)
+    return reach
+
+
+def _roster(schema: PipelineSchema) -> tuple[str, ...]:
+    reach = _reach(schema)
+    return tuple(n.name for n in schema.declared_nodes if n.name in reach)
+
+
+def fired_on(schema: PipelineSchema) -> dict[str, list[str]]:
+    """Each member no walk lists, by the walks whose members fire it: its `PipelineNode.fired_on`
+    where this graph is declared as another's pipeline."""
+    listed = {n for walk in _WALKS for n in schema.pipelines.get(walk, ())}
+    return {n: sorted(walks) for n, walks in _reach(schema).items() if n not in listed}
 
 
 def _walk(selected: SelectedOptimizer) -> tuple[NodeMember, ...]:

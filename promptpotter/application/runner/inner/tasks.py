@@ -19,7 +19,11 @@ from promptpotter.application.bench import difficulty
 from promptpotter.application.bench.difficulty import ruler_clock
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.intelligence import rasch
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
+from promptpotter.application.optimizer_manifest import (
+    SelectedOptimizer,
+    fired_on,
+    select_optimizer,
+)
 from promptpotter.application.runner.inner import narrative
 from promptpotter.application.scoring import metrics, selection
 from promptpotter.domain.bench import DatasetSplit
@@ -464,7 +468,9 @@ class InnerCells:
             nests.setdefault(cell.optimizer.plan.measurement, []).append(name)
         nodes: dict[str, dict[str, Any]] = {}
         walks: dict[str, list[str]] = {}
+        fired: dict[str, list[str]] = {}
         for inner in self.optimizers:
+            fired |= {n: on for n, on in fired_on(inner.schema).items() if owners[n] is inner}
             for node in inner.schema.declared_nodes:
                 if owners[node.name] is not inner:
                     continue
@@ -494,10 +500,12 @@ class InnerCells:
             for name, steps in inner.schema.pipelines.items():
                 walk = walks.setdefault(name, [])
                 walk += [n for n in steps if n in nodes and n not in walk]
-        return {
-            "nodes": nodes,
-            "pipelines": {k: v for k, v in walks.items() if v},
-        }
+        kept = {k: v for k, v in walks.items() if v}
+        # An escalation no walk lists runs only as its controller fires it: the outer runs it so.
+        for name, on in fired.items():
+            if name in nodes and (on := [w for w in on if w in kept]):
+                nodes[name]["fired_on"] = on
+        return {"nodes": nodes, "pipelines": kept}
 
 
 def inner_instrument_config(

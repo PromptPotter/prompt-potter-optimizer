@@ -92,7 +92,6 @@ from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
-    CapabilityMenu,
     KnobLayer,
     KnobLayers,
     NestedPipelineRef,
@@ -801,10 +800,6 @@ def _recorded_read(resolved: ResolvedRun, hop: CycleHop) -> PipelineRead:
     return resolved.read
 
 
-def _served_menu(m: _Merge, params: PipelineParams, workspace: Path | None) -> CapabilityMenu:
-    return resolve_schema_menu(_routed_as_run(m.filtered, params), workspace=workspace)
-
-
 def campaign_admits(cfg: CampaignConfig, schema: PipelineSchema) -> frozenset[Presumption]:
     """What a campaign's chain and scorer let a block presume: its pools draw and its treatment hashes this one set."""
     per_sample = split_scoring_block(cfg.scoring, judge_instrument=None).per_sample
@@ -836,25 +831,26 @@ def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
     )
 
 
-def _rows(m: _Merge, folded: FoldedParams) -> dict[str, list[NodeConfigParam]]:
+def _rows(m: _Merge, folded: FoldedParams, ran: PipelineSchema) -> dict[str, list[NodeConfigParam]]:
     return m.filtered.node_config_schema(
         steer_bound=m.steer_bound,
         values=folded.params.laid_nodes,
         sources=folded.provenance,
-        model_menu=_admitted_menu(m),
+        model_menu=_admitted_menu(m, ran),
         declared=m.declared,
     )
 
 
-def _admitted_menu(m: _Merge) -> list[str]:
+def _admitted_menu(m: _Merge, ran: PipelineSchema) -> list[str]:
     """Offers no model the Start would refuse: one no rate prices under a dollar ceiling, or one
-    the free tier does not list for a free account. A served read never fetches a price list: a
+    the free tier does not list for a free account. A model is priced on the provider *ran* lays
+    its node on, never the one the backend declares. A served read never fetches a price list: a
     route's answer is the last any process's fetch gave (`pricing.remembered_priced`), kept fresh by
     the API's sweep, and a route none answered stays offered, as through an outage."""
     models = m.filtered.selectable_models()
     if m.free:
         models = [model for model in models if model in free_task_models()]
-    providers = {n.provider for n in m.filtered.declared_nodes if n.provider}
+    providers = {n.provider for n in ran.declared_nodes if n.provider}
     if not providers or m.cfg.optimization.budget.usd is None:
         return models
     return [
@@ -875,7 +871,8 @@ def _response(
     connector: str,
     mint: MintFacts | None,
 ) -> CampaignPipelineResponse:
-    rows = _rows(m, folded)
+    ran = schema_as_run(m.filtered, folded.params, workspace)
+    rows = _rows(m, folded, ran)
     return CampaignPipelineResponse(
         campaign_id=campaign_id,
         cycle_id=cycle_id,
@@ -889,7 +886,7 @@ def _response(
         node_config_schema=rows,
         view=m.filtered.view,
         node_output_schema=resolved_output_schemas(m.filtered, folded.params),
-        model_capabilities=_served_menu(m, folded.params, workspace),
+        model_capabilities=resolve_schema_menu(ran, workspace=workspace),
         reach=reach_map(rows),
         nests=_nests(m.declared),
         is_single_node=m.filtered.is_single_node,
@@ -916,7 +913,8 @@ def resolve_pipeline_for_draft(
 @dataclass(frozen=True)
 class DraftPipeline:
     """The draft's pipeline before Start commits any of it: what its nodes run with, their rows,
-    the chain they run in, the chain as declared before the draft narrowed it, its config as this
+    the chain they run in as its mint holds it (`schema_as_run`: each node on its laid provider and
+    model), the chain as declared before the draft narrowed it, its config as this
     account runs it, the layers its mint lays, the definition an upload's Start writes (`local`),
     and the backend that serves it."""
 
@@ -944,10 +942,11 @@ class DraftPipeline:
 def draft_pipeline(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftPipeline:
     m = _draft_merge(stores, draft, served)
     folded = m.layers.fold()
+    ran = schema_as_run(m.filtered, folded.params, stores.base_dir)
     return DraftPipeline(
         folded.params,
-        _rows(m, folded),
-        m.filtered,
+        _rows(m, folded, ran),
+        ran,
         m.declared,
         m.cfg,
         m.config_layers,
@@ -1267,7 +1266,10 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
     session.backend_client.connector.prompt_delivery(pipeline_params)
 
     excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
-    logger.info("Running nodes: %s%s", ", ".join(filtered.running), excl_str)
+    declared = session.pipeline_schema
+    unrun = [n.name for n in declared.declared_nodes if n.name not in declared.running]
+    unrun_str = f"  Declared, run by no walk: {', '.join(unrun)}" if unrun else ""
+    logger.info("Running nodes: %s%s%s", ", ".join(filtered.running), excl_str, unrun_str)
 
     return replace(
         session,

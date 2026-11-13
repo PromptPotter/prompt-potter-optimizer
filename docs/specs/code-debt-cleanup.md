@@ -1448,12 +1448,6 @@ Toolbar, and the phone walk's back step. Left:
   the box still word it (master `research_pipeline.py:278`). Action: the message is the fault alone.
   **Rides with:** xconn 4. **Re-test:** `git grep -n "failed: {" -- backend-api/api` in the TermNorm
   checkout, on master.
-- **TermNorm serves `direct_prompt` as a node no step runs**: it parses, but `/pipeline` lists it as an
-  llm `ranker` absent from `STEP_REGISTRY`, so PP reads its prompt fields as config axes. Fixed only on
-  TermNorm's `xconn` branch (11b1dbe); master (ce4f15b) and the box still serve it (master
-  `pipeline.json:246`). Action: in the TermNorm checkout, the block leaves `nodes` for a top-level
-  `prompts` section. **Rides with:** xconn 4. **Re-test:** TermNorm's `pipeline.json` on master holds no
-  `direct_prompt` under `nodes`.
 - **`infrastructure/llm/send_pacing.py::SendBudget` stops at the relay's door**: TermNorm's
   `_MAX_ATTEMPTS`, and terminus-2's `_query_llm` thrice over `connectors/harbor.py::_AgentModel`, retry
   on their own. Patched singly, each fix is one more copy; the remedy is the upstream redesign. **Rides

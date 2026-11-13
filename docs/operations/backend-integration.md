@@ -4,12 +4,12 @@ PromptPotter optimizes any backend registered as a `Connector`; every axis is de
 
 ## The HTTP default — TermNorm's endpoints
 
-A `remote_http` connector that keeps `Connector`'s defaults speaks two of the endpoints [TermNorm](https://github.com/runfish5/TermNorm-excel) serves: `/matches` and `GET /pipeline`. `/status` is TermNorm's own declared probe; a connector that declares none probes nothing.
+A `remote_http` connector that keeps `Connector`'s defaults speaks two of the endpoints [TermNorm](https://github.com/runfish5/TermNorm-excel) serves: `/matches` and `GET /pipeline`. `/status` is TermNorm's own declared probe; a connector that declares none probes nothing. The request body is each connector's `wire_adapter`; TermNorm's opens a session first (`POST /sessions {terms}`, re-sent on `no_session`).
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/matches` | POST | Run one query under given `pipeline_params`; returns prediction, ranked candidates, and `diagnostics.warnings[]` (`{step, code, message}` — the self-healing signal). |
-| `/pipeline` | GET | Full schema: nodes, types, parameters, allowed value sets, LLM-node prompt templates, named sequences. Read live at run init and on every draft read. |
+| `/matches` | POST | Run one query: TermNorm's body is `{query, steps?, node_config?}` (`termnorm.py::termnorm_wire_adapter`); returns prediction, ranked candidates, and `diagnostics.warnings[]` (`{step, code, message}` — the self-healing signal). |
+| `/pipeline` | GET | Full schema: nodes, types, parameters, allowed value sets, LLM-node prompt templates, named sequences. Read live at run init and on every draft read. A node no sequence lists runs only where it names the sequence that fires it (`fired_on`). |
 | `/status` | GET | TermNorm's liveness and version probe; 200 when up. |
 
 Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md). PromptPotter's own API roster is `/docs` (`openapi.generated.json`).

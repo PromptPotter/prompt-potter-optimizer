@@ -1821,10 +1821,23 @@ def test_the_drafts_chain_reaches_the_mint_on_a_reused_dataset(
     )
 
 
-def test_an_exclusion_drops_no_node_the_graph_fires_and_runs_no_alternative_walk() -> None:
+def test_a_node_off_every_walk_runs_only_where_a_walk_fires_it() -> None:
+    # A backend runs the steps it is sent: a node it serves for another endpoint is priced and
+    # tuned by no run, while one the graph fires off every walk (an escalation) stays a lever.
     schema = _chain_schema()
     off_chain = schema.model_copy(update={"pipelines": {"default": ["web_search", "llm_only"]}})
-    assert running_only(off_chain, exclude=["web_search"]).running == ("llm_only", "rerank"), (
+    assert running_only(off_chain, exclude=[]).running == ("web_search", "llm_only"), (
+        "a node no walk lists or fires ran: its route is priced and its params searched"
+    )
+    fired = off_chain.model_copy(
+        update={
+            "declared_nodes": [
+                n.model_copy(update={"fired_on": ["default"]}) if n.name == "rerank" else n
+                for n in off_chain.declared_nodes
+            ]
+        }
+    )
+    assert running_only(fired, exclude=["web_search"]).running == ("llm_only", "rerank"), (
         "an exclusion dropped a node the graph fires off every walk"
     )
     alternative = off_chain.model_copy(

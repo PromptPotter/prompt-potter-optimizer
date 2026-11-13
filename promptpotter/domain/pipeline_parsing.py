@@ -389,6 +389,15 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             step_kwargs["nested_datasets"] = _names(
                 node["nested_datasets"], f"{where}.nested_datasets"
             )
+        if "fired_on" in node:
+            fired_on = _names(node["fired_on"], f"{where}.fired_on")
+            if unknown := sorted(set(fired_on) - set(pipelines)):
+                _refuse(
+                    f"node {name!r} is fired on {unknown}, which `pipelines` does not declare.",
+                    node=name,
+                    fired_on=fired_on,
+                )
+            step_kwargs["fired_on"] = fired_on
 
         obs_name = opt.get("observation_name")
         if obs_name:
