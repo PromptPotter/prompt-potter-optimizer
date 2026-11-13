@@ -25,6 +25,8 @@ order of [`../specs/roadmap.md`](../specs/roadmap.md), whether run by a person o
 
 - **An arc joins its landing (`batch/<n>`, the chains of one census) on proof, not review**: the full
   gate green on its tip plus the brief's equals-main checks.
+- **A landing on main closes on CI green on its commit**: the push gate proves the desk's platform
+  alone, and states main's CI as it pushes (`gate.py::_ci_of`); a red main is the next landing's fix.
 - **A row that moves a treatment digest lands with the chain that owns its file**, with decisions and
   requests equal to main, before the next paid run.
 - **One independent review covers each landing before main.** One fix pass on the batch branch fixes

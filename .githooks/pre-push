@@ -2,6 +2,7 @@
 # Block a push to main whose tip would fail CI: `scripts/gate.py --push` reads the refs git hands
 # on stdin and runs every check CI runs in a clean checkout of the tip pushed to main, whatever the
 # working tree holds; any other branch pushes unproven. A check whose inputs already ran green is a stamp read.
+# It proves this desk's platform only, so it also states CI's word on the main it lands on.
 #
 # Enabled with pre-commit, by `git config core.hooksPath .githooks`.
 

@@ -1666,12 +1666,36 @@ def _prove_index() -> int:
     return _proven_in(head.strip(), sys.argv[1:], files=files.strip())
 
 
+def _ci_of(commit: str) -> str:
+    """CI's word on the main a push lands on: this gate proves the desk's platform, and a red main
+    on another (a POSIX-only path) is read here or by no one."""
+    gh = shutil.which("gh")
+    if not gh:
+        return "unread — `gh` is not on PATH"
+    line = '.[] | "\\(.status) \\(.conclusion) \\(.url)"'
+    listed = [gh, "run", "list", "--workflow", "CI", "--commit", commit, "--limit", "1"]
+    rc, out = run([*listed, "--json", "status,conclusion,url", "-q", line], REPO)
+    if rc:
+        return f"unread — {out.strip() or 'gh could not list its runs'}"
+    status, _, rest = out.strip().partition(" ")
+    if not status:
+        return "no run"
+    conclusion, _, url = rest.partition(" ")
+    if status != "completed":
+        return f"{status}, {url}"
+    if conclusion == "success":
+        return "green"
+    return f"RED ({conclusion}) — this push lands on it; read {url} first"
+
+
 def _prove_tips(refs: str, checks: Sequence[Check]) -> int:
     # *refs* is git's pre-push stdin: `<local ref> <local sha> <remote ref> <remote sha>` a line.
     # Only main is proven: a branch is work in flight, proven when it lands. An all-zero local
     # sha is a deletion: no tip to prove.
     pushed = [line.split() for line in refs.splitlines()]
     tips = sorted({sha for _, sha, ref, _ in pushed if ref == _PROVEN_REF and set(sha) != {"0"}})
+    for landed in {sha for _, _, ref, sha in pushed if ref == _PROVEN_REF and set(sha) != {"0"}}:
+        print(f"gate[push]: main's CI at {landed[:12]}: {_ci_of(landed)}")
     missing = [str(clone_root() / rel) for rel in _BORROWED if not (clone_root() / rel).is_dir()]
     if tips and missing and any(c.kind == "web" for c in checks):
         print(
