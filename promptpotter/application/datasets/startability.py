@@ -25,7 +25,7 @@ from promptpotter.application.datasets.loaders import (
     source_extra,
 )
 from promptpotter.application.datasets.origin_readiness import columns_confirmed
-from promptpotter.application.datasets.tabular_ingest import read_tabular
+from promptpotter.application.datasets.tabular_ingest import read_kept_table
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.settings import settings
 from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
@@ -191,8 +191,7 @@ def draft_samples(stores: Stores, draft: DraftFile) -> Sequence[Sample] | None:
 def checkin_rows(stores: Stores, draft: DraftFile) -> list[dict[str, str]]:
     match draft.basis:
         case UploadBasis(kept=kept):
-            path = stores.tenant_datasets.upload_path(kept)
-            return list(read_tabular(path.read_bytes(), path.name).rows)
+            return list(read_kept_table(stores.tenant_datasets.upload_path(kept)).rows)
         case DatasetBasis(dataset=name):
             return labelled_rows(checkin_bank(stores, name).samples)
         case _:

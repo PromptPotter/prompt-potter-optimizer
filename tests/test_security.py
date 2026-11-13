@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextlib
 import dataclasses
 import json
 import logging
@@ -68,6 +69,7 @@ from promptpotter.application.cycle_addressing import cycle_target, followed_cyc
 from promptpotter.application.cycle_files import FileScope, read_cycle_file
 from promptpotter.application.datasets.draft_campaign import new_draft, owned_draft
 from promptpotter.application.datasets.ingest import ingest_draft
+from promptpotter.application.datasets.tabular_ingest import IngestError
 from promptpotter.application.hierarchy_subtree import hierarchy_subtree, subtree_version
 from promptpotter.application.host_surface import (
     CallTool,
@@ -137,6 +139,7 @@ from promptpotter.domain.command_kinds import (
     DeleteCyclePayload,
     DiscardDraftPayload,
     EditDraftCampaignPayload,
+    IngestUploadPayload,
     MintCampaignPayload,
     PauseCyclePayload,
     ReadKind,
@@ -149,6 +152,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
+from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.hierarchy import SubtreeCampaign
 from promptpotter.domain.job import JOB_ADAPTER, CampaignLaunch, Job, ScoringPass
@@ -188,6 +192,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import NOTHING_PAID, Budget
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
+from promptpotter.infrastructure import docker_host
 from promptpotter.infrastructure.identity.blocklist import (
     block_email,
     check_blocklist,
@@ -232,7 +237,13 @@ from promptpotter.infrastructure.store.account_spend import campaign_spend, sand
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
 from promptpotter.infrastructure.store.data_root import Fate, classify
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
-from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_jsonl, write_yaml
+from promptpotter.infrastructure.store.io import (
+    append_jsonl,
+    take_lock,
+    write_json,
+    write_jsonl,
+    write_yaml,
+)
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
@@ -326,6 +337,119 @@ def test_a_path_segment_never_escapes_its_tenant_dir(tmp_path: Path) -> None:
         cycle_dir_for(
             WorkspaceDir(tmp_path), CycleHop(campaign_id="ok_campaign", cycle_id="../escape")
         )
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_newline_a_drive_a_device_or_a_trailing_dot_names_no_path_at_any_door(
+    tmp_path: Path,
+) -> None:
+    sessions_dir = tmp_path / "sessions"
+    sessions = OIDCSessionStore(sessions_dir)
+    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    for name in ("abc\n", "D:x", "CON", "abc."):
+        with pytest.raises(ValueError):
+            campaign_root_dir_for(WorkspaceDir(tmp_path), name)
+        with pytest.raises(ValueError):
+            validate_dataset_name(name.lower())
+        with pytest.raises(ValueError):
+            IngestUploadPayload(slug=name.lower(), blob=b"q,a\nx,y\n")
+        with pytest.raises(NotFoundError):
+            jobs.get(name)
+        # A live session where an unchecked cookie would land, planted only inside the dir.
+        planted = sessions_dir / f"{name}.json"
+        if planted.parent == sessions_dir:
+            with contextlib.suppress(OSError):
+                write_json(planted, _session_of("planted").model_dump(mode="json"))
+        assert sessions.read(name) is None, f"the cookie {name!r} read a session file"
+
+
+def _docker_answering(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, listed: list[tuple[str, str]]
+) -> list[str]:
+    """`docker ps` lists *listed* (container id, producer label); what `docker rm` was handed."""
+    removed: list[str] = []
+
+    async def answered(*args: str, **_: object) -> tuple[int, str]:
+        if args[0] == "ps":
+            return 0, "\n".join(f"{cid}|{label}|" for cid, label in listed)
+        removed.extend(args[2:])
+        return 0, ""
+
+    monkeypatch.setattr(docker_host, "docker", answered)
+    monkeypatch.setattr(docker_host, "_SCRATCH_HOME", tmp_path / "scratch", raising=False)
+    return removed
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_container_labelled_with_a_path_deletes_nothing_outside_the_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "machine" / "producers"
+    home.mkdir(parents=True)
+    kept = tmp_path / "outside" / "kept"
+    kept.mkdir(parents=True)
+    removed = _docker_answering(
+        monkeypatch, tmp_path, [("c-up", "../.."), ("c-abs", str(kept.parent))]
+    )
+    await docker_host.reap_dead_producers(home, compose_overlay=None)
+    assert kept.is_dir(), "a container's label deleted a directory outside the home"
+    assert removed == [], "a container labelled with no token of ours was removed"
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_sweep_leaves_the_containers_of_a_producer_another_process_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "machine" / "producers"
+    held, dead = take_lock(home / "live.lock", wait_s=0), take_lock(home / "dead.lock", wait_s=0)
+    assert held is not None and dead is not None
+    dead.release()
+    removed = _docker_answering(monkeypatch, tmp_path, [("c-live", "live"), ("c-dead", "dead")])
+    try:
+        await docker_host.reap_dead_producers(home, compose_overlay=None)
+    finally:
+        held.release()
+    assert removed == ["c-dead"], "a sweep reaped a live producer's containers or kept a dead one's"
+    assert not (home / "dead.lock").exists(), "a reaped producer's lock outlived it"
+
+
+def _uploader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, user_id: str) -> Stores:
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "home"))
+    return workspace(
+        tmp_path, dataclasses.replace(_who(user_id), capabilities=OWNER_COMMAND_CAPABILITIES)
+    )
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_header_of_one_repeated_name_is_refused_at_once_while_a_second_tenant_is_answered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ada, eve = (_uploader(tmp_path, monkeypatch, u) for u in ("ada-id", "eve-id"))
+    header = b"a," * 100_000 + b"a\n"
+
+    async def refusal() -> tuple[IngestError, float]:
+        started = time.monotonic()
+        with pytest.raises(IngestError) as refused:
+            await ingest_draft(stores=ada, blob=header, filename="wide.csv")
+        return refused.value, time.monotonic() - started
+
+    (refused, took), answered = await asyncio.gather(
+        refusal(), ingest_draft(stores=eve, blob=b"q,a\nx,y\n", filename="t.csv")
+    )
+    assert refused.reason == "too_large", "a header past the column cap was read"
+    assert took < 1.0, f"a 200 KB header held its parse {took:.1f} s"
+    assert answered.slug == "t", "a second tenant's upload went unanswered beside it"
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_refused_upload_is_never_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ada = _uploader(tmp_path, monkeypatch, "ada-id")
+    with pytest.raises(IngestError):
+        await ingest_draft(stores=ada, blob=b"\x00\x01 not a table \x00", filename="x.csv")
+    uploads = ada.tenant_datasets.upload_path("probe").parent
+    assert not (uploads.is_dir() and any(uploads.iterdir())), "a refused upload was kept"
 
 
 @pytest.mark.usefixtures("offline")

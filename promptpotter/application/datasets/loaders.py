@@ -18,7 +18,7 @@ from types import CodeType, FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.datasets.sealqa_panel import write_longseal_panel
-from promptpotter.application.datasets.tabular_ingest import materialize_samples, read_tabular
+from promptpotter.application.datasets.tabular_ingest import materialize_samples, read_kept_table
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.infrastructure.store.dataset_access import (
     MATERIALIZED_PANEL_FILE,
@@ -430,7 +430,7 @@ def _table(src: Source) -> BankLoader:
 
     def rows() -> list[Row]:
         samples = materialize_samples(
-            read_tabular(path.read_bytes(), path.name),
+            read_kept_table(path),
             query_col=src["query"],
             ground_truth_col=src["truth"],
         )

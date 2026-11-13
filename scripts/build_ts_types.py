@@ -24,12 +24,7 @@ from promptpotter.application.read_params import PARAMS_FOR_READ
 from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.domain.campaign import LifecycleFilter
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
-from promptpotter.domain.cycle_paths import (
-    ALL_DOTS_PATTERN,
-    HOP_SEP,
-    ID_COMPONENT_PATTERN,
-    UNIT_SEP,
-)
+from promptpotter.domain.cycle_paths import HOP_SEP, ID_COMPONENT_PATTERN, UNIT_SEP
 from promptpotter.domain.phases import DashboardState, ProducerState, RunPhase
 from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTION_PREFIX
 from promptpotter.domain.said import TONES
@@ -414,13 +409,12 @@ def _emit_live_windows() -> str:
 
 
 def _emit_cycle_path_grammar() -> str:
-    for pattern in (ID_COMPONENT_PATTERN, ALL_DOTS_PATTERN):
-        if "/" in pattern:
-            raise ValueError(
-                f"cycle-path pattern {pattern!r} contains '/', which cannot ride a TS regex "
-                "literal unescaped. Escape it here deliberately rather than emitting a regex "
-                "that differs from the Python one."
-            )
+    if "/" in ID_COMPONENT_PATTERN:
+        raise ValueError(
+            f"cycle-path pattern {ID_COMPONENT_PATTERN!r} contains '/', which cannot ride a TS "
+            "regex literal unescaped. Escape it here deliberately rather than emitting a regex "
+            "that differs from the Python one."
+        )
 
     return (
         "// The cycle-address grammar. Mirror of domain/cycle_paths.py, which owns it and\n"
@@ -436,8 +430,8 @@ def _emit_cycle_path_grammar() -> str:
         # `json.dumps`, not `!r`: a Python repr picks single quotes, which the file's style forbids.
         f"export const CYCLE_PATH_HOP_SEP = {json.dumps(HOP_SEP)};\n"
         f"export const CYCLE_PATH_UNIT_SEP = {json.dumps(UNIT_SEP)};\n"
-        f"export const ID_COMPONENT_RE = /{ID_COMPONENT_PATTERN}/;\n"
-        f"export const ALL_DOTS_RE = /{ALL_DOTS_PATTERN}/;"
+        # Anchored and case-folded here, as Python's `fullmatch` under `re.IGNORECASE` reads it.
+        f"export const ID_COMPONENT_RE = /^(?:{ID_COMPONENT_PATTERN})$/i;"
     )
 
 

@@ -32,8 +32,10 @@ describe("CyclePath", () => {
     expect(decodeCyclePath("camp::cy~broken")).toBeNull();
     expect(decodeCyclePath("bad/slash::cy")).toBeNull();
     expect(decodeCyclePath("camp::cy space")).toBeNull();
-    // All-dots passes the id charset but is a traversal segment (`store/io.py::validate_path_component`).
+    // The server's refusals (`store/io.py::validate_path_component`): a trailing dot, a device name.
     expect(decodeCyclePath("..::..")).toBeNull();
+    expect(decodeCyclePath("abc.::cy")).toBeNull();
+    expect(decodeCyclePath("camp::con")).toBeNull();
   });
 
   it("reads root and leaf hops", () => {
