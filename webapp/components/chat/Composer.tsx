@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { cx } from "@/lib/cx";
+import { useShellHeight } from "@/lib/hooks/useShellHeight";
 
 export function Composer({
   value,
@@ -27,9 +28,12 @@ export function Composer({
 }) {
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // The remote floats above the composer.
+  const publish = useShellHeight("--chat-composer-h");
 
   return (
     <div
+      ref={publish}
       className={cx("chat-input-row", dragging && "is-dragover")}
       // A disabled attach refuses a drop too: the browser's own drop would open the file instead.
       onDragOver={(e) => {

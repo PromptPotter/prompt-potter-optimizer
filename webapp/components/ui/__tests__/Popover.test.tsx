@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Popover } from "../Popover";
 
 function Harness() {
@@ -44,6 +44,18 @@ describe("Popover", () => {
     fireEvent.click(screen.getByText(/trigger/));
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByText("item")).toBeNull();
+  });
+
+  it("opens above a low trigger, its edge clamped inside the viewport", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(-20, window.innerHeight - 40, 50, 20),
+    );
+    render(<Harness />);
+    fireEvent.click(screen.getByText(/trigger/));
+    const panel = screen.getByText("item").parentElement!;
+    expect(panel.style.left).toBe("8px");
+    expect(panel.style.bottom).toBe("42px");
+    expect(panel.style.top).toBe("");
   });
 
   it("closes when content calls close()", () => {

@@ -1,6 +1,6 @@
-.shell{--sidebar-width:200px;--nav-dock-h:0px;--remote-dock-h:0px;position:relative;display:flex;height:var(--vh-full);min-height:700px}
+.shell{--sidebar-width:200px;--nav-dock-h:0px;--remote-dock-h:0px;--remote-dock-lift:0px;position:relative;display:flex;height:var(--vh-full);min-height:700px}
 /* A spacer ITEM, not padding: Chrome omits a flex container's end padding from scrollable overflow. */
-.content::after{content:"";display:block;flex:0 0 auto;height:calc(var(--remote-dock-h) + var(--safe-bottom))}
+.content::after{content:"";display:block;flex:0 0 auto;height:calc(var(--remote-dock-h) + var(--remote-dock-lift) + var(--safe-bottom))}
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 .view-tabs{display:flex;flex:0 0 auto;padding:var(--space-6) var(--space-18);border-bottom:0.5px solid var(--color-border);overflow-x:auto;scrollbar-width:thin}
 .views{flex:1;display:flex;min-height:0;overflow-x:auto;scroll-snap-type:x mandatory}

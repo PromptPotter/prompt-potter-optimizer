@@ -28,6 +28,9 @@ function settle() {
 }
 
 const wrapOf = (triggerText: string) => screen.getByText(triggerText).parentElement!;
+const hover = (el: Element) => fireEvent.pointerEnter(el, { pointerType: "mouse" });
+const unhover = (el: Element) => fireEvent.pointerLeave(el, { pointerType: "mouse" });
+const focus = (el: HTMLElement) => fireEvent.focus(el);
 
 describe("HoverCard", () => {
   it("mounts its content only while hovered", () => {
@@ -38,10 +41,10 @@ describe("HoverCard", () => {
     );
     expect(screen.queryByRole("note")).toBeNull();
 
-    fireEvent.mouseEnter(wrapOf("row"));
+    hover(wrapOf("row"));
     expect(screen.getByRole("note").textContent).toContain("on disk");
 
-    fireEvent.mouseLeave(wrapOf("row"));
+    unhover(wrapOf("row"));
     settle();
     expect(screen.queryByRole("note")).toBeNull();
   });
@@ -52,8 +55,34 @@ describe("HoverCard", () => {
         <button type="button">row</button>
       </HoverCard>,
     );
-    fireEvent.focus(wrapOf("row"));
+    focus(screen.getByText("row"));
     expect(screen.getByRole("note").textContent).toContain("meta");
+  });
+
+  it("leaves a tap on a live control inside the trigger to that control", () => {
+    render(
+      <HoverCard content={<span>meta</span>}>
+        <button type="button">row</button>
+      </HoverCard>,
+    );
+    const row = screen.getByText("row");
+    fireEvent.pointerEnter(row, { pointerType: "touch" });
+    fireEvent.pointerDown(row, { pointerType: "touch" });
+    fireEvent.focus(row);
+    fireEvent.pointerUp(row, { pointerType: "touch" });
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("opens on a tap through a disabled control, its reason in reach", () => {
+    render(
+      <HoverCard content={<span>why not</span>}>
+        <button type="button" disabled>
+          row
+        </button>
+      </HoverCard>,
+    );
+    fireEvent.pointerUp(screen.getByText("row"), { pointerType: "touch" });
+    expect(screen.getByRole("note").textContent).toContain("why not");
   });
 
   it("stays open when the pointer crosses into the card", () => {
@@ -62,13 +91,13 @@ describe("HoverCard", () => {
         <button type="button">row</button>
       </HoverCard>,
     );
-    fireEvent.mouseEnter(wrapOf("row"));
-    fireEvent.mouseLeave(wrapOf("row"));
-    fireEvent.mouseEnter(screen.getByRole("note"));
+    hover(wrapOf("row"));
+    unhover(wrapOf("row"));
+    hover(screen.getByRole("note"));
     settle();
     expect(screen.getByRole("note").textContent).toContain("cycle_62839439e429");
 
-    fireEvent.mouseLeave(screen.getByRole("note"));
+    unhover(screen.getByRole("note"));
     settle();
     expect(screen.queryByRole("note")).toBeNull();
   });
@@ -83,7 +112,7 @@ describe("HoverCard", () => {
         <button type="button">row</button>
       </HoverCard>,
     );
-    fireEvent.focus(wrapOf("row"));
+    focus(screen.getByText("row"));
     fireEvent.blur(wrapOf("row"), { relatedTarget: screen.getByText("copy") });
     settle();
     expect(screen.getByText("copy")).toBeTruthy();
@@ -96,13 +125,13 @@ describe("HoverCard", () => {
         <button type="button">row</button>
       </HoverCard>,
     );
-    fireEvent.mouseEnter(wrapOf("row"));
+    hover(wrapOf("row"));
     const card = screen.getByRole("note");
     expect(card.style.bottom).toBe("48px");
     expect(card.style.top).toBe("");
     expect(card.style.left).toBe("208px");
 
-    fireEvent.mouseEnter(card);
+    hover(card);
     expect(card.style.bottom).toBe("48px");
   });
 
@@ -112,7 +141,7 @@ describe("HoverCard", () => {
         <button type="button">row</button>
       </HoverCard>,
     );
-    fireEvent.mouseEnter(wrapOf("row"));
+    hover(wrapOf("row"));
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("note")).toBeNull();
   });

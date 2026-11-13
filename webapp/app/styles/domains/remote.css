@@ -1,7 +1,7 @@
 .remote-control{
   position:fixed;
   left:50%;
-  bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  bottom:calc(var(--nav-dock-h) + var(--remote-dock-lift) + var(--safe-bottom));
   transform:translateX(-50%);
   z-index:50;
   display:inline-flex;
@@ -17,12 +17,12 @@
   color:var(--color-text-secondary);
 }
 
-/* It floats and reserves no space: this publishes its height to the spacer shell.css puts at the foot of every pane. */
-.shell:has(> .remote-control){--remote-dock-h:62px}
+/* A wide screen's pill floats clear of the edge; the spacer at every pane's foot reserves the lift too. */
+.shell:has(> .remote-control){--remote-dock-lift:16px}
 @media (max-width:880px){
+  .shell:has(> .remote-control){--remote-dock-lift:0px}
   .remote-control{
     left:0;right:0;transform:none;max-width:none;
-    bottom:calc(var(--nav-dock-h) + env(safe-area-inset-bottom,0px));
     display:flex;flex-wrap:wrap;justify-content:center;
     gap:var(--space-4) var(--space-6);
     padding:var(--space-6) var(--space-8);
@@ -30,8 +30,6 @@
     box-shadow:0 -2px 12px rgba(0,0,0,.16);
   }
   .remote-control > *{flex:0 0 auto}
-  /* Measure under touch emulation: `pointer:coarse` does not match in a desktop browser. */
-  .shell:has(> .remote-control){--remote-dock-h:64px}
   .shell.mobile-list:has(> .remote-control) .sidebar-footer{
     padding-bottom:calc(var(--remote-dock-h) + env(safe-area-inset-bottom,0px));
   }

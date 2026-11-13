@@ -1,5 +1,5 @@
 // The disabled controls are INTENTIONAL placeholders (`docs/specs/roadmap.md` § Host assistant): never hide them.
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
 import { useViewedCourse } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
@@ -78,24 +78,8 @@ export function ChatPane() {
       ? [...stored, ...mounted]
       : [...ingestItems.head, ...stored, ...ingestItems.tail];
 
-  // The remote floats above the composer, so its height is published to the shell the remote hangs off.
-  const paneRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const row = paneRef.current?.querySelector<HTMLElement>(".chat-input-row");
-    const shell = paneRef.current?.closest<HTMLElement>(".shell");
-    if (!row || !shell) return;
-    const publish = new ResizeObserver(() =>
-      shell.style.setProperty("--chat-composer-h", `${row.offsetHeight}px`),
-    );
-    publish.observe(row);
-    return () => {
-      publish.disconnect();
-      shell.style.removeProperty("--chat-composer-h");
-    };
-  }, []);
-
   return (
-    <div className="content chat-content" id="content-chat" ref={paneRef}>
+    <div className="content chat-content" id="content-chat">
       {/* A run's alone: over a check-in its steps draw the draft's pipeline. */}
       {subject === null && viewedPath && (
         <div className="wf-hero">

@@ -43,7 +43,7 @@ export function ValueList({
   return (
     <Popover
       className={s.wrap}
-      side="over"
+      over
       renderTrigger={({ open, toggle }) => (
         <button
           type="button"

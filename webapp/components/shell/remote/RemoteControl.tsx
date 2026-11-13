@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { FailureLine } from "@/components/ui";
 import { cx } from "@/lib/cx";
+import { useShellHeight } from "@/lib/hooks/useShellHeight";
 import { RunControlButton } from "@/components/shell/remote/RunControlButton";
 import { RemotePanel } from "./RemotePanel";
 import { useRemoteModel } from "./useRemoteModel";
@@ -16,11 +17,13 @@ const SKIP_ICON = (
 export function RemoteControl() {
   const m = useRemoteModel();
   const [open, setOpen] = useState(false);
+  const publish = useShellHeight("--remote-dock-h");
   if (!m) return null;
   const { innerHop } = m;
 
   return (
     <div
+      ref={publish}
       className={cx("remote-control", open && "remote-control-open")}
       role="group"
       aria-label="Campaign remote control"

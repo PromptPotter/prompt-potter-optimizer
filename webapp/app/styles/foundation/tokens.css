@@ -27,7 +27,8 @@
   --chart-series-7:#b5afa5; --chart-series-8:#fb923c;
   --box-min:26rem;
   --box-gap:var(--space-14);
-  --box-scroll-max:60dvh;
+  /* A box's own scroller is a wide screen's: on a phone the pane is the one scroller. */
+  --box-scroll-max:none;
   --chart-h:clamp(140px,22dvh,220px);
   --reading-measure:980px;
 
@@ -94,6 +95,7 @@
   --scrollbar-thumb-hover:rgba(100,100,100,.7);
   --scrollbar-thumb-active:rgba(191,191,191,.4);
 }
+@media not all and (max-width:880px){:root{--box-scroll-max:60dvh}}
 
 *{scrollbar-width:thin;scrollbar-color:var(--scrollbar-thumb) transparent}
 *::-webkit-scrollbar{width:16px;height:16px}
