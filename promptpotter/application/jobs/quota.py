@@ -859,6 +859,7 @@ def next_launch_budget(config: CampaignConfig, *, stores: Stores, hop: CycleHop)
 def change_budget(
     requested: Budget,
     *,
+    overshoot: bool | None = None,
     stores: Stores,
     job_registry: JobRegistry,
     hop: CycleHop,
@@ -867,7 +868,8 @@ def change_budget(
     """Set-limits is an admission of the changed ceiling: the wallet read, the clamp, the reserve
     and the hold run under the one gate a launch admits under, so no admission between them goes
     unseen. Money moves the CAMPAIGN's ceiling and re-shares it over every live cycle; holds land
-    first. Whether the ceiling *hop* runs under moved: a change restating it moves nothing."""
+    first. Whether the ceiling *hop* runs under, or its overshoot, moved: a change restating them
+    moves nothing."""
     campaigns = stores.campaigns
     armed = campaigns.armed_budget(hop)
     change = requested
@@ -885,15 +887,18 @@ def change_budget(
             change, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
         )
     cycle = change.only(CYCLE_AXES)
-    if cycle.named:
-        prior = campaigns.read_standing_budget(hop)
+    prior = campaigns.read_standing_budget(hop)
+    switched = overshoot is not None and overshoot != prior.overshoot
+    if cycle.named or switched:
         campaigns.append(
             hop,
             StandingBudgetRecord(
-                budget=prior.budget.over(cycle), pause_at_round=prior.pause_at_round
+                budget=prior.budget.over(cycle),
+                pause_at_round=prior.pause_at_round,
+                overshoot=prior.overshoot if overshoot is None else overshoot,
             ),
         )
-    return campaigns.armed_budget(hop) != armed
+    return switched or campaigns.armed_budget(hop) != armed
 
 
 def _clamped(
@@ -984,6 +989,7 @@ def hold_run(stores: Stores, hold_id: str, bound: Budget, *, parent: str | None)
             key_source="host",
             bound=bound,
             resource=None,
+            node=None,
             ledger=None,
         )
     )

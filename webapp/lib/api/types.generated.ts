@@ -2144,6 +2144,10 @@ export interface SampleRounds {
  * dashboard lays the standing budget over it. */
 export interface RunLimits {
   budget: Budget;
+  /** Whether a call holds its node's mean billed cost in the run rather than its
+   * worst case, a bill past it drawn on the run's hold (`set-limits
+   * --overshoot`). */
+  overshoot: boolean;
   optimizer: OptimizerLimit[];
 }
 
@@ -5037,11 +5041,11 @@ export interface SetConcurrentCyclesPayload {
   max_concurrent_cycles: number;
 }
 
-/** Raise or lower an existing cycle's spend, token, round or wall-clock bound; a
- * budget- or round-halted cycle continues by a higher ceiling, then a `start-
- * run`. Spend is clamped against the account allowance. On an arm of a head-
- * to-head it moves that arm alone, and leaves the comparison only when a
- * ceiling moved. */
+/** Raise or lower an existing cycle's spend, token, round or wall-clock bound, or
+ * switch its overshoot; a budget- or round-halted cycle continues by a higher
+ * ceiling, then a `start-run`. Spend is clamped against the account
+ * allowance. On an arm of a head-to-head it moves that arm alone, and leaves
+ * the comparison only when a ceiling or the switch moved. */
 export interface ChangeRunLimitsPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
@@ -5049,6 +5053,11 @@ export interface ChangeRunLimitsPayload {
   campaign_id: string;
   cycle_id: string;
   budget: Budget;
+  /** on: a call holds its node's mean billed cost in this run once one has billed,
+   * a bill past it drawn on the run's hold and reported; off (the default):
+   * every call holds its worst case, so no ceiling is ever passed. Omit to
+   * leave it as it stands. */
+  overshoot: boolean | null;
 }
 
 /** Arm how many cells ahead the walk sends. */
@@ -5212,7 +5221,7 @@ export interface CommandPayloads {
   "resolve-origin": CommandSent<ResolveOriginPayload, "draft_id">;
   "set-api-key": CommandSent<SetApiKeyPayload, "provider" | "secret">;
   "set-concurrent-cycles": CommandSent<SetConcurrentCyclesPayload, "max_concurrent_cycles">;
-  "set-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id" | "budget">;
+  "set-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id">;
   "set-sample-lookahead": CommandSent<SetSampleLookaheadPayload, "campaign_id" | "cycle_id" | "cells">;
   "set-user-settings": CommandSent<SetUserSettingsPayload, "demo_mode_enabled">;
   "skip-searchpoint": CommandSent<SkipSearchpointPayload, "campaign_id" | "cycle_id">;

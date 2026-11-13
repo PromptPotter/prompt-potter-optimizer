@@ -548,10 +548,10 @@ class CleanupEmptyCyclesPayload(CyclePayload, kind=CommandKind.CLEANUP_EMPTY_CYC
 
 
 class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.SET_LIMITS):
-    """Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or
-    round-halted cycle continues by a higher ceiling, then a `start-run`. Spend is clamped against the
-    account allowance. On an arm of a head-to-head it moves that arm alone, and leaves the
-    comparison only when a ceiling moved."""
+    """Raise or lower an existing cycle's spend, token, round or wall-clock bound, or switch its
+    overshoot; a budget- or round-halted cycle continues by a higher ceiling, then a `start-run`.
+    Spend is clamped against the account allowance. On an arm of a head-to-head it moves that arm
+    alone, and leaves the comparison only when a ceiling or the switch moved."""
 
     inner_refusal: ClassVar[str | None] = (
         "An inner run spends under the outer run's ceiling. Change the outer run's limits instead."
@@ -562,13 +562,20 @@ class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.SET_LIMITS):
     )
 
     # An axis it does not name stays as it stands; a named null lifts it.
-    budget: Budget
+    budget: Budget = Budget()
+    overshoot: bool | None = Field(
+        default=None,
+        description="on: a call holds its node's mean billed cost in this run once one has "
+        "billed, a bill past it drawn on the run's hold and reported; off (the default): every "
+        "call holds its worst case, so no ceiling is ever passed. Omit to leave it as it stands.",
+    )
 
     @model_validator(mode="after")
     def _names_an_axis(self) -> ChangeRunLimitsPayload:
-        if not self.budget.named:
+        if not self.budget.named and self.overshoot is None:
             raise ValueError(
-                "a budget naming at least one of usd / tokens / rounds / wall_clock_s is required"
+                "a budget naming at least one of usd / tokens / rounds / wall_clock_s, or "
+                "`overshoot`, is required"
             )
         return self
 

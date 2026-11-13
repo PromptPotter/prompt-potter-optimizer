@@ -380,6 +380,7 @@ def spend_book(
             key_source="host",
             bound=reserve if enclosing is None else Budget(),
             resource=None,
+            node=None,
             ledger=None,
         )
     )

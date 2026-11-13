@@ -7331,6 +7331,12 @@
             },
             "title": "Optimizer",
             "type": "array"
+          },
+          "overshoot": {
+            "default": false,
+            "description": "Whether a call holds its node's mean billed cost in the run rather than its worst case, a bill past it drawn on the run's hold (`set-limits --overshoot`).",
+            "title": "Overshoot",
+            "type": "boolean"
           }
         },
         "title": "RunLimits",
@@ -8508,6 +8514,11 @@
           "budget": {
             "$ref": "#/components/schemas/Budget",
             "default": {}
+          },
+          "overshoot": {
+            "default": false,
+            "title": "Overshoot",
+            "type": "boolean"
           },
           "pause_at_round": {
             "anyOf": [
