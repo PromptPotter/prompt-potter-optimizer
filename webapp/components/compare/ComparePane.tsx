@@ -35,14 +35,14 @@ import { isCustomMetric, MetricExpression, MetricPicker } from "./MetricPicker";
 import { PairwisePanel } from "./PairwisePanel";
 import { SearchpointCards } from "./SearchpointPanels";
 
-const VIEWS: readonly { value: CompareView; label: string; title: string }[] = [
-  { value: "grouped", label: "Grouped", title: "One bar per subject, grouped by cell" },
-  { value: "overlaid", label: "Stacked", title: "One bar per cell, subjects sharing it" },
-  { value: "lines", label: "Lines", title: "One line per subject across the cells" },
+const VIEWS: readonly { value: CompareView; label: string; hint: string }[] = [
+  { value: "grouped", label: "Grouped", hint: "One bar per subject, grouped by cell" },
+  { value: "overlaid", label: "Stacked", hint: "One bar per cell, subjects sharing it" },
+  { value: "lines", label: "Lines", hint: "One line per subject across the cells" },
   {
     value: "merged",
     label: "Merged",
-    title: "Cells merged: one estimate per subject, with its 95% interval",
+    hint: "Cells merged: one estimate per subject, with its 95% interval",
   },
 ];
 

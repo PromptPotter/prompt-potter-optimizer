@@ -1,9 +1,4 @@
-import {
-  ALL_DOTS_RE,
-  CYCLE_PATH_HOP_SEP,
-  CYCLE_PATH_UNIT_SEP,
-  ID_COMPONENT_RE,
-} from "@/lib/api/types";
+import { CYCLE_PATH_HOP_SEP, CYCLE_PATH_UNIT_SEP, ID_COMPONENT_RE } from "@/lib/api/types";
 
 // Mirror `store/layout.py::root_cycle_id` — change both.
 const SIBLING_LAST_SEP_RE = /_(fork)_(?!.*_fork_)([^/]*)$/;
@@ -38,9 +33,8 @@ export type CyclePath = PathHop[];
 
 const HOP_SEP = CYCLE_PATH_HOP_SEP;
 
-// All-dots ids match the charset but are traversal segments the server refuses.
 export function validIdComponent(s: string): boolean {
-  return ID_COMPONENT_RE.test(s) && !ALL_DOTS_RE.test(s);
+  return ID_COMPONENT_RE.test(s);
 }
 
 export function encodeCyclePath(path: CyclePath): string {

@@ -8,33 +8,40 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "@/lib/cx";
+import { EDGE, room, vertical } from "./overlay";
 import s from "./Popover.module.css";
 
 type Align = "left" | "right";
-type Side = "bottom" | "top" | "over";
 
 interface Props {
   renderTrigger: (args: { open: boolean; toggle: () => void }) => ReactNode;
   children: (args: { close: () => void }) => ReactNode;
   align?: Align;
-  side?: Side;
+  // The panel opens across its trigger, as a list over its field.
+  over?: boolean;
   className?: string | undefined;
 }
 
 const GAP = 2;
 
-const place = (r: DOMRect, align: Align, side: Side): CSSProperties => {
-  const x = align === "right" ? { right: window.innerWidth - r.right } : { left: r.left };
-  if (side === "top") return { ...x, bottom: window.innerHeight - r.top + GAP };
-  if (side === "over") return { ...x, top: r.top, minWidth: r.width };
-  return { ...x, top: r.bottom + GAP };
+// Flips above a low trigger and clamps the aligned edge inside the viewport, as HoverCard does.
+const place = (r: DOMRect, align: Align, over: boolean): CSSProperties => {
+  const vw = window.innerWidth;
+  const v = vertical(r, GAP, over);
+  const inset = Math.max(EDGE, align === "right" ? vw - r.right : r.left);
+  return {
+    ...(align === "right" ? { right: inset } : { left: inset }),
+    ...v.at,
+    ...(over ? { minWidth: r.width } : {}),
+    ...room(vw - inset - EDGE, v.h),
+  };
 };
 
 export function Popover({
   renderTrigger,
   children,
   align = "left",
-  side = "bottom",
+  over = false,
   className,
 }: Props) {
   const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
@@ -44,8 +51,8 @@ export function Popover({
   const close = useCallback(() => setAt(null), []);
   const toggle = useCallback(() => {
     const r = anchor?.getBoundingClientRect();
-    setAt((prev) => (prev || !r ? null : place(r, align, side)));
-  }, [anchor, align, side]);
+    setAt((prev) => (prev || !r ? null : place(r, align, over)));
+  }, [anchor, align, over]);
 
   useEffect(() => {
     if (!open) return;
@@ -60,7 +67,7 @@ export function Popover({
     const follow = (e: Event) => {
       if (e.target instanceof Node && panelRef.current?.contains(e.target)) return;
       const r = anchor?.getBoundingClientRect();
-      if (r) setAt(place(r, align, side));
+      if (r) setAt(place(r, align, over));
     };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
@@ -72,7 +79,7 @@ export function Popover({
       window.removeEventListener("scroll", follow, true);
       window.removeEventListener("resize", follow);
     };
-  }, [open, anchor, align, side]);
+  }, [open, anchor, align, over]);
 
   return (
     <div className={cx(s.wrap, className)} ref={setAnchor}>

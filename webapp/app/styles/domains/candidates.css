@@ -62,7 +62,7 @@
 .fitness-notes .said{font-size:var(--text-xs);margin-bottom:var(--space-4)}
 .fitness-chart-wrap{display:flex;flex-direction:column;width:100%;min-width:0}
 .fitness-mask{margin-top:var(--space-18)}
-@media (min-width:880px){
+@media not all and (max-width:880px){
   .box-grid > .cand-card.mask-open{grid-column:1 / -1}
   .cand-card.mask-open{display:grid;grid-template-columns:minmax(0,var(--box-min)) minmax(0,1fr);grid-template-rows:auto 1fr;column-gap:var(--space-18);align-items:start}
   .cand-card.mask-open > .card-title{grid-column:1;grid-row:1}

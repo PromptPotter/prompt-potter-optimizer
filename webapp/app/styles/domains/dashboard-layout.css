@@ -4,7 +4,7 @@
 /* ONE sizing rule for every box: a box never states a width, height or margin of its own. */
 .box-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--box-gap);align-items:start}
 .box-grid > *{min-width:0;margin:0}
-@media (min-width:880px){
+@media not all and (max-width:880px){
   .box-grid{grid-template-columns:repeat(auto-fit,minmax(min(var(--box-min),100%),1fr))}
   .box-grid > .card-full,.box-grid > .box-full{grid-column:1 / -1}
 }

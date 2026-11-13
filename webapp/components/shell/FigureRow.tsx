@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Term } from "@/components/ui";
+import { HoverCard, Term } from "@/components/ui";
 import type { FamilyId } from "@/lib/address";
 import type { Said } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
@@ -32,10 +32,12 @@ export function Figure({
         {marked && <span className="phase-dot" aria-hidden="true" />}
         {hover ? <Term content={hover}>{value}</Term> : value}
       </dd>
-      {/* Clamped: a served reason can be a provider's whole error; `title` repeats it whole. */}
+      {/* Clamped: a served reason can be a provider's whole error; its card repeats it whole. */}
       {sub && (
-        <dd className="figure-sub" title={sub}>
-          {sub}
+        <dd className="figure-sub">
+          <HoverCard content={sub} focusable>
+            {sub}
+          </HoverCard>
         </dd>
       )}
     </div>

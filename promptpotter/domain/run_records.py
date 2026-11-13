@@ -478,6 +478,8 @@ class Hold(FrozenModel):
     bound: Budget
     # The kind a call's or a cell's hold binds, as its run's share files it; ``None`` on a job's.
     resource: TokenUsageKind | None
+    # The node a call or a cell sends for; ``None`` on a job's.
+    node: str | None
     # The ledger a call's sends land on, relative to the account; ``None`` on a job's or a cell's.
     ledger: str | None
     timestamp: str = Field(default_factory=utcnow_iso)
@@ -1023,6 +1025,8 @@ class StandingBudgetRecord(FrozenModel):
     budget: Budget = Budget()
     # RUN-scoped: the closed-round count at which the launch in flight pauses (``start-run {step_rounds}``).
     pause_at_round: int | None = None
+    # On: a call holds its node's mean billed cost in the run, never its worst case (`SpendBook.expected`).
+    overshoot: bool = False
     timestamp: str = Field(default_factory=utcnow_iso)
 
     _cycle_axes = field_validator("budget")(cycle_axes_only)

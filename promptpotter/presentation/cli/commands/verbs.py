@@ -70,6 +70,12 @@ def _int_list_arg(raw: str) -> list[int]:
         raise argparse.ArgumentTypeError(f"expected indices like `0,2`, got {raw!r}") from exc
 
 
+def _switch_arg(raw: str) -> bool:
+    if raw not in ("on", "off"):
+        raise argparse.ArgumentTypeError(f"expected `on` or `off`, got {raw!r}")
+    return raw == "on"
+
+
 _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "new",
@@ -832,6 +838,8 @@ def _field_args(name: str, field: FieldInfo) -> tuple[Arg, ...]:
         spec["choices"] = get_args(annotation)
     elif annotation is int:
         spec["type"] = int
+    elif annotation == bool | None:
+        spec |= {"type": _switch_arg, "metavar": "on|off"}
     elif get_origin(annotation) is list:
         (item,) = get_args(annotation)
         if isinstance(item, type) and issubclass(item, BaseModel):

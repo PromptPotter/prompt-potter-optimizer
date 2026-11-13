@@ -105,7 +105,7 @@ async def plan_draft_patch(
         changes["origin_prompts"] = patch.origin_prompts
     elif prompts != draft.origin_prompts:
         changes["origin_prompts"] = prompts
-    if (library := _candidate_library(stores, draft, patch)) is not None:
+    if (library := await _candidate_library(stores, draft, patch)) is not None:
         changes["candidate_library"] = library
 
     was = draft_pipeline(stores, draft, held)
@@ -333,7 +333,7 @@ def _narrowing_follows_schema(
 _LIBRARY_SOURCES = ("candidate_library", "candidate_library_column", "candidate_library_file")
 
 
-def _candidate_library(
+async def _candidate_library(
     stores: Stores, draft: DraftFile, patch: EditDraftPatch
 ) -> tuple[str, ...] | None:
     """The library a patch sets, from the one source it sends: the terms, a draft column's
@@ -343,7 +343,7 @@ def _candidate_library(
         raise PayloadInvalidError(f"patch sends {sent}; a library comes from one of them.")
     if patch.candidate_library_file is not None:
         upload = patch.candidate_library_file
-        return parse_candidate_library(upload.blob, upload.filename)
+        return await parse_candidate_library(upload.blob, upload.filename)
     if (column := patch.candidate_library_column) is None:
         return None if patch.candidate_library is None else tuple(patch.candidate_library)
     if column not in draft.headers:

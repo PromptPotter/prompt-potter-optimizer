@@ -340,10 +340,20 @@ export function reportTape(label: string, tape: Tape | null, minReplayed?: numbe
   ).toBeGreaterThanOrEqual(minReplayed);
 }
 
+/** On a phone the sidebar is the list screen, behind the title row's back button. */
+export async function showSidebar(page: Page) {
+  const back = page.getByRole("button", { name: /^Campaigns/ });
+  if (await back.isVisible()) await back.click();
+}
+
+// The panes, not only the page: `.main` clips and `.content` scrolls, so the document never overflows.
+// Read once no lazy pane is still `aria-busy`, or a pane not yet drawn passes.
 export async function noSidewaysScroll(page: Page) {
-  const over = await page.evaluate(() => {
-    const el = document.documentElement;
-    return el.scrollWidth - el.clientWidth;
-  });
-  expect(over, "the page body scrolls sideways").toBeLessThanOrEqual(1);
+  await expect(page.locator('[aria-busy="true"]:visible')).toHaveCount(0);
+  const over = await page.evaluate(() =>
+    [document.documentElement, ...document.querySelectorAll(".content, .view, .card")]
+      .filter((el) => el.getClientRects().length > 0 && el.scrollWidth - el.clientWidth > 1)
+      .map((el) => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")} +${el.scrollWidth - el.clientWidth}px`),
+  );
+  expect(over, "a pane scrolls sideways").toEqual([]);
 }

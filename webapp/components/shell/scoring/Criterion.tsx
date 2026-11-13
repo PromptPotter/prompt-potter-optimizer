@@ -35,11 +35,11 @@ const TERM_GLYPHS: Record<string, ComponentType> = {
 };
 
 const KINDS = [
-  { value: "dials" as const, label: "Dials", title: "Weigh per-cell terms against correctness" },
+  { value: "dials" as const, label: "Dials", hint: "Weigh per-cell terms against correctness" },
   {
     value: "expression" as const,
     label: "Expression",
-    title: "Type the criterion yourself — anything the dials cannot spell",
+    hint: "Type the criterion yourself — anything the dials cannot spell",
   },
 ];
 

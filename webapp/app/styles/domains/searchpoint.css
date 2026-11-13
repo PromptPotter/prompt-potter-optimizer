@@ -44,7 +44,7 @@
 .subject-flip-line strong{font-family:var(--font-mono);color:var(--color-text-primary)}
 .subject-flip-line.is-gained strong{color:var(--color-success)}
 .subject-flip-line.is-lost strong{color:var(--color-danger)}
-.subject-flip-card{--hovercard-max-w:340px;--hovercard-max-h:280px;overflow:hidden}
+.subject-flip-card{--hovercard-max-w:340px;--hovercard-max-h:280px}
 .subject-flip-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:var(--text-xs)}
 .subject-flip-list li{display:flex;align-items:baseline;gap:var(--space-6);white-space:nowrap}
 .subject-flip-id{font-family:var(--font-mono);color:var(--color-text-primary);flex:0 0 auto}

@@ -505,6 +505,20 @@ class PaidSpend(NamedTuple):
 NOTHING_PAID = PaidSpend()
 
 
+class Overshoot(FrozenModel):
+    """The calls whose bills passed what their hold held, each drawn on every hold above it."""
+
+    calls: int = Field(description="Calls billed past their hold.")
+    usd: float = Field(description="What they billed past it, in USD.")
+
+    def past(self, before: float, after: float) -> Overshoot:
+        """A call's excess moved from *before* to *after*."""
+        return Overshoot(calls=self.calls + (before == 0 < after), usd=self.usd + after - before)
+
+
+NO_OVERSHOOT = Overshoot(calls=0, usd=0.0)
+
+
 class LifetimeSpend(StrictModel):
     """What an account, or one campaign's share of it, was billed over its whole life."""
 

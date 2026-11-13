@@ -13,6 +13,7 @@ import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
 import { filled, unitCount } from "@/lib/format";
 import {
+  Button,
   Chip,
   CommitInput,
   FailureLine,
@@ -88,20 +89,18 @@ export function VerifyAction({
     <div className="verify-action">
       <div className="verify-action-row">
         <HoverCard content="Re-score this candidate on search cells it has never been measured on.">
-          <button type="button" className="btn" onClick={run} disabled={busy}>
+          <Button onClick={run} disabled={busy}>
             {busy ? "Verifying…" : `Verify ${candidate.label}`}
-          </button>
+          </Button>
         </HoverCard>
         {acting && (
-          <button
-            type="button"
-            className="btn"
+          <Button
             onClick={() => void stop.run("cancel", () => commands.cancel({ command_id: acting }))}
             disabled={stop.pending !== null}
             title="Stop at the next cell; what it measured is read and kept."
           >
             Stop
-          </button>
+          </Button>
         )}
         <Menu
           align="left"

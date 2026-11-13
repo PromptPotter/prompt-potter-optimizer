@@ -192,8 +192,9 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
 def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
     """This cycle's own axes; its money is the campaign's (``move_campaign_money``), its hold the job's."""
     cycle = held.standing.only(CYCLE_AXES)
-    if stores.campaigns.read_standing_budget(hop).budget != cycle:
-        stores.campaigns.append(hop, StandingBudgetRecord(budget=cycle))
+    prior = stores.campaigns.read_standing_budget(hop)
+    if prior.budget != cycle:
+        stores.campaigns.append(hop, StandingBudgetRecord(budget=cycle, overshoot=prior.overshoot))
 
 
 def _rebase_held(session: Session, parent: CycleHop) -> None:
@@ -253,7 +254,11 @@ def declare_round_allowance(session: Session, step_rounds: int | None) -> None:
     if standing.pause_at_round != pause_at_round:
         campaigns.append(
             session.hop,
-            StandingBudgetRecord(budget=standing.budget, pause_at_round=pause_at_round),
+            StandingBudgetRecord(
+                budget=standing.budget,
+                pause_at_round=pause_at_round,
+                overshoot=standing.overshoot,
+            ),
         )
 
 

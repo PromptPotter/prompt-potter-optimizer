@@ -32,6 +32,9 @@ export function ensureChartRegistered(): void {
   // a chart's re-render.
   applyChartDefaults();
   subscribeTheme(applyChartDefaults);
+  // A column is the hit, not its drawn mark: a tap on a 6px bar at N=40 misses.
+  ChartJS.defaults.interaction.mode = "index";
+  ChartJS.defaults.interaction.intersect = false;
   registered = true;
 }
 

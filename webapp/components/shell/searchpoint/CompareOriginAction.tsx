@@ -1,7 +1,7 @@
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
 import { useCompareWithOrigin } from "@/lib/hooks/useCompareWithOrigin";
-import { HoverCard } from "@/components/ui";
+import { Button, HoverCard } from "@/components/ui";
 
 export function CompareOriginAction({
   candidate,
@@ -19,9 +19,9 @@ export function CompareOriginAction({
           : "Open Compare on the origin and this searchpoint, replacing what is on the board."
       }
     >
-      <button type="button" className="btn" onClick={run ?? undefined} disabled={run === null}>
+      <Button onClick={run ?? undefined} disabled={run === null}>
         Compare {candidate.label} with {originLabel ?? "the origin"}
-      </button>
+      </Button>
     </HoverCard>
   );
 }

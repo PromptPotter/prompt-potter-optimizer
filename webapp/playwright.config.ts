@@ -76,6 +76,19 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], baseURL: WALK_URL },
     },
     {
+      // The walk again on a phone: `hasTouch` + `isMobile` make `(pointer:coarse)` match.
+      name: "touch",
+      testMatch: /walk[/\\].*\.spec\.ts/,
+      retries: process.env.CI ? 1 : 0,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 390, height: 844 },
+        hasTouch: true,
+        isMobile: true,
+        baseURL: WALK_URL,
+      },
+    },
+    {
       name: "cold",
       testMatch: /cold[/\\].*\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], baseURL: COLD_URL },
@@ -87,7 +100,7 @@ export default defineConfig({
     },
   ],
   webServer: [
-    ...(runs("walk") && !process.env.PP_E2E_BASE_URL
+    ...((runs("walk") || runs("touch")) && !process.env.PP_E2E_BASE_URL
       ? [
           // A named world is synthetic, so its backend is too; a server already up may serve another one.
           WALK_WORLD

@@ -1,3 +1,4 @@
+import { HoverCard } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { PLACEHOLDER } from "@/lib/format";
 import { connectorReachability, interiorNodes } from "@/lib/derivations";
@@ -38,88 +39,93 @@ export function ConnectorInspector() {
           : health.detail;
   const interior = interiorNodes(served?.view ?? null);
 
-  // A div host, not a span: the popover below is flow content, which no inline element may hold.
+  const pop = (
+    <div role="group" aria-label="Connector state">
+      <div className="connector-pop-head">
+        <span className="dot" />
+        <span className="name">{connector ?? PLACEHOLDER}</span>
+        <span className="state">{label}</span>
+      </div>
+      {baseUrl && (
+        <div className="connector-pop-url" title={baseUrl}>
+          {baseUrl}
+        </div>
+      )}
+      <div className="connector-pop-sec">
+        {unset && (
+          <span className="sec-chip warn" title="No address configured: every call refuses">
+            no url
+          </span>
+        )}
+        {isTls !== null && (
+          <span
+            className={`sec-chip ${isTls ? "ok" : "warn"}`}
+            title={
+              isTls
+                ? "https — TLS chain verified by httpx default"
+                : "http — cleartext; do not use over a public network"
+            }
+          >
+            {isTls ? "tls" : "plain"}
+          </span>
+        )}
+        {remote && (
+          <>
+            <span className={cx("sec-chip", !authHeader && "warn")}>
+              {authHeader ? `auth: ${authHeader}` : "no auth"}
+            </span>
+            <a
+              className="sec-doc"
+              href={SECURITY_DOC_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open the connection-security setup guide on GitHub"
+            >
+              docs ↗
+            </a>
+          </>
+        )}
+      </div>
+      {interior.length === 0 && (
+        <p className="connector-pop-empty">
+          {selfOpt
+            ? "optimizer prompt nodes — inspect them in the inner run"
+            : "no nodes loaded"}
+        </p>
+      )}
+      {others.length > 0 && (
+        <div className="connector-pop-switch">
+          <div className="head">Other backends</div>
+          <ul>
+            {others.map((b) => (
+              <li key={b.id}>
+                <button
+                  type="button"
+                  className="alt"
+                  disabled
+                  title="Switching is read-only today — see connection-security docs"
+                >
+                  <span className="alt-name">{b.id}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {footText ? <div className="connector-pop-foot">{footText}</div> : null}
+    </div>
+  );
+
+  // The dot is the card's trigger, not a control of its own: a tap opens the card.
   return (
     <div className={cx("connector", stateCls)}>
-      <button
-        type="button"
-        className="connector-dot"
-        aria-label={`Connector ${connector ?? PLACEHOLDER} — ${label}`}
-      />
-      <div className="connector-pop" role="group" aria-label="Connector state">
-        <div className="connector-pop-head">
-          <span className="dot" />
-          <span className="name">{connector ?? PLACEHOLDER}</span>
-          <span className="state">{label}</span>
-        </div>
-        {baseUrl && (
-          <div className="connector-pop-url" title={baseUrl}>
-            {baseUrl}
-          </div>
-        )}
-        <div className="connector-pop-sec">
-          {unset && (
-            <span className="sec-chip warn" title="No address configured: every call refuses">
-              no url
-            </span>
-          )}
-          {isTls !== null && (
-            <span
-              className={`sec-chip ${isTls ? "ok" : "warn"}`}
-              title={
-                isTls
-                  ? "https — TLS chain verified by httpx default"
-                  : "http — cleartext; do not use over a public network"
-              }
-            >
-              {isTls ? "tls" : "plain"}
-            </span>
-          )}
-          {remote && (
-            <>
-              <span className={cx("sec-chip", !authHeader && "warn")}>
-                {authHeader ? `auth: ${authHeader}` : "no auth"}
-              </span>
-              <a
-                className="sec-doc"
-                href={SECURITY_DOC_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open the connection-security setup guide on GitHub"
-              >
-                docs ↗
-              </a>
-            </>
-          )}
-        </div>
-        {interior.length === 0 && (
-          <p className="connector-pop-empty">
-            {selfOpt
-              ? "optimizer prompt nodes — inspect them in the inner run"
-              : "no nodes loaded"}
-          </p>
-        )}
-        {others.length > 0 && (
-          <div className="connector-pop-switch">
-            <div className="head">Other backends</div>
-            <ul>
-              {others.map((b) => (
-                <li key={b.id}>
-                  <button
-                    type="button"
-                    className="alt"
-                    disabled
-                    title="Switching is read-only today — see connection-security docs"
-                  >
-                    <span className="alt-name">{b.id}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {footText ? <div className="connector-pop-foot">{footText}</div> : null}
-      </div>
+      <HoverCard content={pop} className={cx("connector-pop", stateCls)} focusable>
+        <span
+          className="connector-dot"
+          role="img"
+          aria-label={`Connector ${connector ?? PLACEHOLDER} — ${label}`}
+        />
+      </HoverCard>
     </div>
   );
 }

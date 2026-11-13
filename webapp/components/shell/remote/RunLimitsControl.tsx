@@ -3,6 +3,7 @@ import { commands, cycleAddress } from "@/lib/api";
 import {
   type Budget,
   type MeteredSpend,
+  type Overshoot,
   ACCOUNT_TAB_INFO,
   CAP_AXIS_INFO,
   CEILING_METER_LABELS,
@@ -14,7 +15,7 @@ import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtUnit, fmtUsd } from "@/lib/format";
 import { capInput, capText, parseCapIn, type Cap } from "@/lib/run-limits";
 import { useWorkspace } from "@/lib/workspace";
-import { Button, Dialog, FailureLine } from "@/components/ui";
+import { Button, Dialog, FailureLine, Switch } from "@/components/ui";
 
 const AXES = wordKeys(CAP_AXIS_INFO);
 
@@ -49,11 +50,13 @@ function usedText(axis: CapAxis, metered: MeteredSpend | null, share: Budget | n
 
 interface Props {
   budget: Budget;
+  overshoot: boolean;
+  overshot: Overshoot | null;
   share: Budget | null;
   metered: MeteredSpend | null;
 }
 
-export function RunLimitsControl({ budget, share, metered }: Props) {
+export function RunLimitsControl({ budget, overshoot, overshot, share, metered }: Props) {
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
   const [drafts, setDrafts] = useState<Drafts>(() => draftsOf(budget));
@@ -84,12 +87,12 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
   // A refused 0 never reaches `next`, so a 0 there is a legal cap admitting nothing more.
   const isHalt = AXES.some((axis) => next[axis] === 0);
 
-  const send = async (change: Budget, applied: string) => {
+  const send = async (change: { budget?: Budget; overshoot?: boolean }, applied: string) => {
     if (!viewedPath) return;
     setConfirmingHalt(false);
     setNote(null);
     const r = await cmd.run("set-limits", () =>
-      commands["set-limits"]({ ...cycleAddress(viewedPath), budget: change }),
+      commands["set-limits"]({ ...cycleAddress(viewedPath), ...change }),
     );
     if (r.ok) setNote(applied);
   };
@@ -97,7 +100,7 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
   // Quotes NO number: `quota.py::change_budget` mins the request against the allowance.
   const apply = () =>
     void send(
-      next,
+      { budget: next },
       isHalt
         ? "Applied — halting after this round."
         : "Applied — the armed cap is shown above; it takes at the next round.",
@@ -149,7 +152,7 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
                   disabled={disabled || pending}
                   onClick={() =>
                     void send(
-                      { [spec.axis]: null },
+                      { budget: { [spec.axis]: null } },
                       `Applied — no ${spec.title.toLowerCase()} from the next round; the other caps govern.`,
                     )
                   }
@@ -162,6 +165,30 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
           </div>
         );
       })}
+      <div className="row">
+        <span className="lbl">Overshoot</span>
+        <span className="val">
+          <Switch
+            checked={overshoot}
+            label="Hold each call at its node's mean bill"
+            locked={disabled || pending}
+            lockedNote="saving"
+            onChange={() =>
+              void send(
+                { overshoot: !overshoot },
+                overshoot
+                  ? "Applied — every call holds its worst case again."
+                  : "Applied — a call holds its node's mean bill once one has billed.",
+              )
+            }
+          />
+          {overshot && overshot.calls > 0 ? (
+            <span className="run-limits-control-used">
+              {` · ${overshot.calls} ${overshot.calls === 1 ? "call" : "calls"} past their hold by ${fmtUsd(overshot.usd)}`}
+            </span>
+          ) : null}
+        </span>
+      </div>
       <div className="run-limits-control-edit">
         <button
           type="button"

@@ -3,40 +3,37 @@ import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { HOVER_CLOSE_GRACE_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
+import { EDGE, room, vertical } from "./overlay";
 import s from "./HoverCard.module.css";
 
 const GAP = 8;
-// The card's margin to the viewport's edge.
-const EDGE = 8;
 // Narrower than this beside its trigger on both sides (a phone), the card spans the viewport under
 // or over the trigger instead.
 const BESIDE_MIN = 240;
 
-// The free space toward each side the card grows; `.card` takes the smaller of it and its host's own
-// cap, so no placement reaches past an edge.
-const room = (w: number, h: number) =>
-  ({ "--hovercard-room-w": `${w}px`, "--hovercard-room-h": `${h}px` }) as CSSProperties;
+const CONTROL = "button, a[href], input, select, textarea, summary, [tabindex]";
+
+// A tap on a live control inside the trigger is that control's; a disabled one taps through to the card.
+const ownControl = (wrap: HTMLElement | null, t: EventTarget) => {
+  const c = t instanceof Element ? t.closest(CONTROL) : null;
+  return !!c && c !== wrap && !!wrap?.contains(c) && !c.matches(":disabled");
+};
 
 // Trigger geometry only — nothing measures the card, so late-arriving content can't strand it.
 const anchor = (r: DOMRect): CSSProperties => {
   const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const high = r.top * 2 < vh;
   const toRight = vw - r.right - GAP - EDGE;
   const toLeft = r.left - GAP - EDGE;
   if (Math.max(toRight, toLeft) < BESIDE_MIN) {
-    return {
-      position: "fixed",
-      left: EDGE,
-      ...(high ? { top: r.bottom + GAP } : { bottom: vh - r.top + GAP }),
-      ...room(vw - 2 * EDGE, high ? vh - r.bottom - GAP - EDGE : r.top - GAP - EDGE),
-    };
+    const v = vertical(r, GAP);
+    return { position: "fixed", left: EDGE, ...v.at, ...room(vw - 2 * EDGE, v.h) };
   }
+  const v = vertical(r, 0, true);
   return {
     position: "fixed",
-    ...(high ? { top: r.top } : { bottom: vh - r.bottom }),
+    ...v.at,
     ...(toRight >= toLeft ? { left: r.right + GAP } : { right: vw - r.left + GAP }),
-    ...room(Math.max(toRight, toLeft), high ? vh - r.top - EDGE : r.bottom - EDGE),
+    ...room(Math.max(toRight, toLeft), v.h),
   };
 };
 
@@ -60,6 +57,7 @@ export function HoverCard({
   }, []);
   const cardRef = useRef<HTMLDivElement>(null);
   const timer = useRef(0);
+  const pressed = useRef(false);
   const [at, setAt] = useState<CSSProperties | null>(null);
   const open = at !== null;
 
@@ -111,13 +109,25 @@ export function HoverCard({
       ref={setRef}
       className={block ? s.block : s.wrap}
       tabIndex={focusable ? 0 : undefined}
-      onMouseEnter={show}
-      onMouseLeave={leave}
-      // A tap opens it itself: iOS focuses a tapped span only sometimes.
-      onPointerUp={(e) => {
-        if (e.pointerType !== "mouse") show();
+      // Hover is a mouse's: a touch browser's compat mouseenter after a tap opens nothing.
+      onPointerEnter={(e) => {
+        if (e.pointerType === "mouse") show();
       }}
-      onFocus={show}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse") leave(e);
+      }}
+      // Focus a press gave is the press's: the release below decides, as iOS focuses a tapped span
+      // only sometimes. Any other focus is the keyboard's, and opens it.
+      onPointerDown={() => {
+        pressed.current = true;
+      }}
+      onPointerUp={(e) => {
+        pressed.current = false;
+        if (e.pointerType !== "mouse" && !ownControl(ref.current, e.target)) show();
+      }}
+      onFocus={() => {
+        if (!pressed.current) show();
+      }}
       onBlur={(e) => {
         if (!within(e.relatedTarget)) hide();
       }}
@@ -130,8 +140,12 @@ export function HoverCard({
             className={cx(s.card, className)}
             role="note"
             style={at}
-            onMouseEnter={show}
-            onMouseLeave={leave}
+            onPointerEnter={(e) => {
+              if (e.pointerType === "mouse") show();
+            }}
+            onPointerLeave={(e) => {
+              if (e.pointerType === "mouse") leave(e);
+            }}
           >
             {content}
           </div>,

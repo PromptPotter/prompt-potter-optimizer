@@ -77,7 +77,7 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
           options={variants.map((_, i) => ({
             value: String(i),
             label: `.${i + 1}`,
-            title: `Candidate ${i + 1} of ${variants.length}`,
+            hint: `Candidate ${i + 1} of ${variants.length}`,
           }))}
           value={String(idx)}
           onChange={setPick}

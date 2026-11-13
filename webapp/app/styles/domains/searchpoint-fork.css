@@ -1,7 +1,7 @@
-.inspector-body{display:grid;grid-template-columns:max-content 1fr;gap:var(--space-4) var(--space-16);padding:var(--space-8) var(--space-12);font-family:var(--font-mono);font-size:var(--text-base)}
+.inspector-body{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--space-4) var(--space-16);padding:var(--space-8) var(--space-12);font-family:var(--font-mono);font-size:var(--text-base)}
 .inspector-row{display:contents}
 .inspector-key{color:var(--color-text-secondary)}
-.inspector-val{color:var(--color-text-primary)}
+.inspector-val{min-width:0;overflow-wrap:anywhere;color:var(--color-text-primary)}
 .inspector-note{grid-column:1/-1;color:var(--color-text-secondary);font-style:italic;margin-top:6px}
 .inspector-actions{padding:var(--space-8) var(--space-12);border-top:1px solid var(--color-border);display:flex;align-items:center;gap:var(--space-8)}
 .fork-button{background:var(--color-accent);color:var(--color-text-on-accent);border:0;border-radius:6px;padding:var(--space-6) var(--space-14);font-size:var(--text-base);cursor:pointer;font-family:inherit}

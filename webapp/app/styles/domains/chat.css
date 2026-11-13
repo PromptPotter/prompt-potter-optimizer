@@ -28,7 +28,7 @@
 .chat-tools:hover{color:var(--color-text-primary)}
 .chat-tools[aria-expanded="true"]{color:var(--color-accent)}
 .chat-tools:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
-.chat-tools-panel{width:min(340px,calc(100vw - 32px));padding:var(--space-6) var(--space-12) var(--space-10)}
+.chat-tools-panel{width:340px;max-width:100%;padding:var(--space-6) var(--space-12) var(--space-10)}
 .chat-send{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:0;width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;transition:background .15s,color .15s}
 .chat-send:hover:not(:disabled){background:var(--color-accent-strong);color:#fff}
 .chat-send:disabled{opacity:.5;cursor:not-allowed}

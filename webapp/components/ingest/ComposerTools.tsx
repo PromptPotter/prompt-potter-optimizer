@@ -34,7 +34,6 @@ export function ComposerTools() {
   return (
     <Popover
       align="right"
-      side="top"
       className="chat-tools-wrap"
       renderTrigger={({ open, toggle }) => (
         <button

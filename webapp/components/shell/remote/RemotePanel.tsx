@@ -89,7 +89,7 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
             label: String(d.cells),
             fill: d.fill ?? undefined,
             disabled: pending || !d.pickable,
-            title: lookaheadDepthLabel(d),
+            hint: lookaheadDepthLabel(d),
           }))}
         />
       </span>
@@ -116,7 +116,13 @@ export function RemotePanel({ model: m }: { model: RemoteModel }) {
       <SamplesInFlight model={m} />
       <div className="remote-panel-section">
         <div className="section-title">Finishing criteria</div>
-        <RunLimitsControl budget={m.budget} share={m.share} metered={m.metered} />
+        <RunLimitsControl
+          budget={m.budget}
+          overshoot={m.overshoot}
+          overshot={m.overshot}
+          share={m.share}
+          metered={m.metered}
+        />
       </div>
     </div>
   );

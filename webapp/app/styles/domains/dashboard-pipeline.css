@@ -79,10 +79,7 @@
   filter:drop-shadow(0 0 5px var(--color-accent-glow))
 }
 .connector{position:absolute;left:50%;top:50%;transform:translate(-50%,calc(-50% - 7px));z-index:3}
-.connector-dot{
-  appearance:none;border:0;padding:0;cursor:pointer;background:transparent;
-  width:14px;height:14px;position:relative;outline:none
-}
+.connector-dot{display:inline-block;vertical-align:middle;width:14px;height:14px;position:relative;cursor:pointer}
 .connector-dot::before{
   content:'';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:6px;height:6px;border-radius:50%;
@@ -91,22 +88,14 @@
 }
 .connector.live .connector-dot::before{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
 .connector.offline .connector-dot::before{background:var(--color-danger);box-shadow:0 0 5px var(--color-danger)}
-.connector-dot:hover::before,.connector-dot:focus-visible::before{transform:translate(-50%,-50%) scale(1.35)}
-.connector.live .connector-dot:hover::before,.connector.live .connector-dot:focus-visible::before{box-shadow:0 0 7px var(--color-success)}
-.connector.offline .connector-dot:hover::before,.connector.offline .connector-dot:focus-visible::before{box-shadow:0 0 8px var(--color-danger)}
-.connector-pop{
-  position:absolute;left:50%;top:calc(100% + 10px);transform:translateX(-50%);
-  min-width:240px;max-width:300px;
-  background:var(--color-background-primary);border:1px solid var(--color-border);
-  border-radius:8px;padding:var(--space-10) var(--space-12);
-  box-shadow:0 8px 24px rgba(0,0,0,.18);
-  opacity:0;pointer-events:none;transition:opacity .12s ease;z-index:4
-}
-.connector:hover .connector-pop,.connector:focus-within .connector-pop{opacity:1;pointer-events:auto}
+.connector-dot:hover::before,.connector :focus-visible > .connector-dot::before{transform:translate(-50%,-50%) scale(1.35)}
+.connector.live .connector-dot:hover::before,.connector.live :focus-visible > .connector-dot::before{box-shadow:0 0 7px var(--color-success)}
+.connector.offline .connector-dot:hover::before,.connector.offline :focus-visible > .connector-dot::before{box-shadow:0 0 8px var(--color-danger)}
+.connector-pop{--hovercard-max-w:300px}
 .connector-pop-head{display:flex;align-items:center;gap:var(--space-6);font-size:var(--text-sm);color:var(--color-text-primary);margin-bottom:6px}
 .connector-pop-head .dot{width:6px;height:6px;border-radius:50%;background:var(--color-text-secondary);flex-shrink:0}
-.connector.live .connector-pop-head .dot{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
-.connector.offline .connector-pop-head .dot{background:var(--color-danger);box-shadow:0 0 4px var(--color-danger)}
+.connector-pop.live .connector-pop-head .dot{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
+.connector-pop.offline .connector-pop-head .dot{background:var(--color-danger);box-shadow:0 0 4px var(--color-danger)}
 .connector-pop-head .name{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .connector-pop-head .state{font-size:var(--text-xs);color:var(--color-text-secondary);flex-shrink:0}
 .connector-pop-url{font-size:var(--text-xs);color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -137,10 +126,6 @@
 }
 /* A ring folds to its box (`layoutGrid` `maxCols`), so it takes the whole width it is given. */
 .wf-hero-node.llm.wf-hero-node-multi.is-ring{width:100%;max-width:none}
-/* Here, not in responsive.css: domains/ load after foundation/, so the same override there loses at equal specificity. */
-@media (max-width:640px){
-  .wf-hero-node.llm.wf-hero-node-multi{min-width:0;max-width:100%}
-}
 /* The top padding is glow room: `pulse-active` reaches 14px and the rail's own clip would shave the halo. */
 .wf-hero-multi-rail{max-width:100%;padding-top:8px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-behavior:smooth}
 /* No height: one contradicting the strip's `height={CELL_H}` makes `meet` scale the level instead of shortening it. */

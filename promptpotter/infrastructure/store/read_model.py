@@ -35,9 +35,11 @@ from promptpotter.domain.run_records import (
     stale_file_warning,
 )
 from promptpotter.domain.spend import (
+    NO_OVERSHOOT,
     NOTHING_PAID,
     Budget,
     CeilingMeter,
+    Overshoot,
     PaidSpend,
     SpendRollup,
     UserSpend,
@@ -793,6 +795,26 @@ class Spent(NamedTuple):
 MoneyRecord = Hold | Bill | Release | Lapse | TokenUsageRecord
 
 
+class NodeCalls(NamedTuple):
+    """One node's billed calls under one job, and what they drew."""
+
+    calls: int
+    usd: float
+    tokens: int
+
+    @property
+    def mean(self) -> tuple[float, int]:
+        return self.usd / self.calls, -(-self.tokens // self.calls)
+
+    def plus(self, cost: UserSpend, *, first: bool) -> NodeCalls:
+        return NodeCalls(
+            self.calls + first, self.usd + cost.at_most_usd, self.tokens + cost.at_most_tokens
+        )
+
+
+NO_CALLS = NodeCalls(0, 0.0, 0)
+
+
 class Money(NamedTuple):
     """One subject's money: the account's charge book, or one ledger's OWN lines."""
 
@@ -816,6 +838,10 @@ class Money(NamedTuple):
     by_round: dict[int, SpendRollup]
     calls: int
     worked_s: float
+    # By (job hold, node): what a call of the node holds at with `overshoot` on.
+    by_node: dict[tuple[str, str], NodeCalls]
+    # By the ledger a call's sends land on (`Hold.ledger`).
+    overshot: dict[str, Overshoot]
 
     def holding(self, hold_id: str) -> bool:
         """Whether *hold_id* and every hold above it is still open."""
@@ -905,6 +931,10 @@ class _Money:
         self._by_round: dict[int, SpendRollup] = {}
         self._calls = 0
         self._worked_s = 0.0
+        # What each call's bills drew, by its hold.
+        self._cost: dict[str, UserSpend] = {}
+        self._overshot: dict[str, Overshoot] = {}
+        self._by_node: dict[tuple[str, str], NodeCalls] = {}
         # A copy, since the next feed banks into the live rollups; one per feed, not per read.
         self._view: Money | None = None
 
@@ -945,12 +975,35 @@ class _Money:
         self._open.pop(held.hold_id, None)
         if bill.price.bill_or_rate_usd is None and held.hold_id not in self._unpriced:
             self._unpriced[held.hold_id] = held
-            self._draw(held.parent, _unpriced_of(held))
+            unpriced = _unpriced_of(held)
+            self._draw(held.parent, unpriced)
+            paid = paid.plus(unpriced)
+        self._cost_of(held, paid.total)
 
     def _draw(self, above: str | None, paid: PaidSpend) -> None:
         while above is not None:
             self._drawn[above] = self._drawn.get(above, NOTHING_PAID).plus(paid)
             above = self._holds[above].parent if above in self._holds else None
+
+    def _cost_of(self, call: Hold, part: UserSpend) -> None:
+        """*part* of what *call* drew, filed under its node at the job it runs under, and on its
+        ledger past what it held."""
+        before = self._cost.get(call.hold_id)
+        first = before is None
+        cost = part if before is None else before.plus(part)
+        self._cost[call.hold_id] = cost
+        if (held := call.bound.usd) is not None and call.ledger is not None:
+            was = 0.0 if before is None else max(0.0, before.at_most_usd - held)
+            if (past := max(0.0, cost.at_most_usd - held)) > was:
+                overshot = self._overshot.get(call.ledger, NO_OVERSHOOT)
+                self._overshot[call.ledger] = overshot.past(was, past)
+        job = call.parent
+        # A cell between a call and its job carries a resource; a job's hold carries none.
+        while job in self._holds and self._holds[job].resource is not None:
+            job = self._holds[job].parent
+        if job is not None and call.node is not None:
+            key = (job, call.node)
+            self._by_node[key] = self._by_node.get(key, NO_CALLS).plus(part, first=first)
 
     def _call(self, usage: TokenUsageRecord) -> None:
         self._usage.append(usage)
@@ -981,6 +1034,8 @@ class _Money:
                 {n: held.model_copy(deep=True) for n, held in self._by_round.items()},
                 self._calls,
                 self._worked_s,
+                dict(self._by_node),
+                dict(self._overshot),
             )
         return self._view
 

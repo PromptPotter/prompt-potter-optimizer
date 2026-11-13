@@ -17,12 +17,12 @@
 }
 
 /* Pointer events stay ON: the operator points into the card to select an id out of it. A host caps
-   the card with `--hovercard-max-w` / `-h`; the placement's free space (`--hovercard-room-*`,
-   `HoverCard.tsx::anchor`) caps it too. */
+   the card with `--hovercard-max-w` / `-h`; the placement's free space (`--overlay-room-*`,
+   `overlay.ts::room`) caps it too. */
 .card {
   z-index: 1100;
-  max-width: min(var(--hovercard-max-w, 100vw), var(--hovercard-room-w));
-  max-height: min(var(--hovercard-max-h, 100vh), var(--hovercard-room-h));
+  max-width: min(var(--hovercard-max-w, 100vw), var(--overlay-room-w));
+  max-height: min(var(--hovercard-max-h, 100vh), var(--overlay-room-h));
   overflow-y: auto;
   background: var(--color-background-secondary);
   border: 0.5px solid var(--color-border);

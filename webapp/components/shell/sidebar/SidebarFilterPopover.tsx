@@ -25,7 +25,7 @@ const LIFECYCLE_SEGMENTS: readonly Segment<ListedLifecycle>[] = [
   {
     value: "archived",
     label: "Archived",
-    title:
+    hint:
       "Show archived campaigns. Deleted campaigns are hidden — read them by id from the file tree.",
   },
 ];

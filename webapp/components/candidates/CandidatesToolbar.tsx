@@ -87,29 +87,30 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
             {d.glyph}
           </Chip>
         ))}
-        <Chip
-          icon
-          on={rung > 0}
-          ink={rung === 2 ? "var(--color-new)" : "var(--color-overlap)"}
-          disabled={m.overlapDisabled}
-          ariaLabel={
-            rung === 2
-              ? "Choosing which cells the overlap bars are read on; press to turn them off"
-              : rung === 1
-                ? "Overlap shown — press to choose its cells"
-                : hasOverlap
-                  ? "Show the overlap reading — the adopted line on one shared set of cells"
-                  : "Pick a set of cells to read the candidates on"
+        <HoverCard
+          content={
+            m.areCourses ? "Bars are runs: open one to compare its candidates" : overlapNext[rung]
           }
-          title={
-            m.areCourses
-              ? "Bars are runs: open one to compare its candidates"
-              : overlapNext[rung]
-          }
-          onClick={m.stepOverlap}
         >
-          ∩
-        </Chip>
+          <Chip
+            icon
+            on={rung > 0}
+            ink={rung === 2 ? "var(--color-new)" : "var(--color-overlap)"}
+            disabled={m.overlapDisabled}
+            ariaLabel={
+              rung === 2
+                ? "Choosing which cells the overlap bars are read on; press to turn them off"
+                : rung === 1
+                  ? "Overlap shown — press to choose its cells"
+                  : hasOverlap
+                    ? "Show the overlap reading — the adopted line on one shared set of cells"
+                    : "Pick a set of cells to read the candidates on"
+            }
+            onClick={m.stepOverlap}
+          >
+            ∩
+          </Chip>
+        </HoverCard>
       </ChipGroup>
       <ToolbarSpacer />
       <Menu
@@ -160,22 +161,25 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
               </MenuCheck>
             </HoverCard>
             <MenuSep />
-            <MenuCheck
-              on={m.compareOn}
-              disabled={m.compareDisabled}
-              onClick={() => {
-                if (m.compareDisabled) return;
-                m.toggleCompare();
-                close();
-              }}
-              title={
+            <HoverCard
+              content={
                 m.hasCompareKey
                   ? "Read this searchpoint beside others on the Compare tab"
                   : "Pick a candidate first: a bar, a node or a forest stub"
               }
             >
-              Compare this searchpoint
-            </MenuCheck>
+              <MenuCheck
+                on={m.compareOn}
+                disabled={m.compareDisabled}
+                onClick={() => {
+                  if (m.compareDisabled) return;
+                  m.toggleCompare();
+                  close();
+                }}
+              >
+                Compare this searchpoint
+              </MenuCheck>
+            </HoverCard>
             {m.wonOnTheta && (
               <>
                 <MenuSep />

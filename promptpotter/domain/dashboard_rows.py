@@ -198,6 +198,11 @@ class RunLimits(StrictModel):
 
     # Its money axes are the CAMPAIGN's ceiling, which every live cycle shares.
     budget: Budget = Budget()
+    overshoot: bool = Field(
+        default=False,
+        description="Whether a call holds its node's mean billed cost in the run rather than its "
+        "worst case, a bill past it drawn on the run's hold (`set-limits --overshoot`).",
+    )
     optimizer: list[OptimizerLimit] = Field(default_factory=list)
 
 

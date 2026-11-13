@@ -47,7 +47,8 @@ test.describe("the view axis", () => {
     await expect.poll(() => new URL(page.url()).hash).not.toContain("/files");
   });
 
-  test("command words open views, and a view opens once", async ({ page, rich }) => {
+  test("command words open views, and a view opens once", async ({ page, rich, isMobile }) => {
+    test.skip(isMobile, "a phone shows one column: the opened view replaces the chat it was typed in");
     await open(page, rich.addr);
     const field = page.getByRole("textbox", { name: "Chat input" });
     await field.fill("samples and spend");
@@ -59,7 +60,8 @@ test.describe("the view axis", () => {
     await expect.poll(() => new URL(page.url()).hash).toContain("/spend/samples");
   });
 
-  test("Compare opens from the campaign list beside what is open", async ({ page, rich }) => {
+  test("Compare opens from the campaign list beside what is open", async ({ page, rich, isMobile }) => {
+    test.skip(isMobile, "a phone shows one column: nothing stands beside the opened Compare");
     await open(page, `${rich.addr}${DASHBOARD_VIEWS}`);
     await page
       .getByRole("navigation", { name: "Primary" })
@@ -78,7 +80,8 @@ test.describe("the view axis", () => {
     await pressed(page, "Dashboard");
   });
 
-  test("the pinned cycle is named on screen and can be released", async ({ page, rich }) => {
+  test("the pinned cycle is named on screen and can be released", async ({ page, rich, isMobile }) => {
+    test.skip(isMobile, "held (operator): the masthead's id placement; the id hides at ≤880px");
     await open(page, rich.addr);
     await expect(page.getByText(`ID: ${rich.cycleId}`)).toBeVisible();
     await page.getByRole("button", { name: /Follow your run/ }).click();

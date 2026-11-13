@@ -3541,10 +3541,11 @@
       },
       "ChangeRunLimitsPayload": {
         "additionalProperties": false,
-        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or\nround-halted cycle continues by a higher ceiling, then a `start-run`. Spend is clamped against the\naccount allowance. On an arm of a head-to-head it moves that arm alone, and leaves the\ncomparison only when a ceiling moved.",
+        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound, or switch its\novershoot; a budget- or round-halted cycle continues by a higher ceiling, then a `start-run`.\nSpend is clamped against the account allowance. On an arm of a head-to-head it moves that arm\nalone, and leaves the comparison only when a ceiling or the switch moved.",
         "properties": {
           "budget": {
-            "$ref": "#/components/schemas/Budget"
+            "$ref": "#/components/schemas/Budget",
+            "default": {}
           },
           "campaign_id": {
             "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
@@ -3570,12 +3571,23 @@
               }
             ],
             "title": "Descend"
+          },
+          "overshoot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "on: a call holds its node's mean billed cost in this run once one has billed, a bill past it drawn on the run's hold and reported; off (the default): every call holds its worst case, so no ceiling is ever passed. Omit to leave it as it stands.",
+            "title": "Overshoot"
           }
         },
         "required": [
           "campaign_id",
-          "cycle_id",
-          "budget"
+          "cycle_id"
         ],
         "title": "ChangeRunLimitsPayload",
         "type": "object"
@@ -12051,6 +12063,28 @@
         "title": "OverlapReading",
         "type": "object"
       },
+      "Overshoot": {
+        "additionalProperties": false,
+        "description": "The calls whose bills passed what their hold held, each drawn on every hold above it.",
+        "properties": {
+          "calls": {
+            "description": "Calls billed past their hold.",
+            "title": "Calls",
+            "type": "integer"
+          },
+          "usd": {
+            "description": "What they billed past it, in USD.",
+            "title": "Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "calls",
+          "usd"
+        ],
+        "title": "Overshoot",
+        "type": "object"
+      },
       "OwnLevel": {
         "additionalProperties": false,
         "description": "One individual's own level on one set of rows, in both columns; never one side of a pair.",
@@ -14371,6 +14405,12 @@
             },
             "title": "Optimizer",
             "type": "array"
+          },
+          "overshoot": {
+            "default": false,
+            "description": "Whether a call holds its node's mean billed cost in the run rather than its worst case, a bill past it drawn on the run's hold (`set-limits --overshoot`).",
+            "title": "Overshoot",
+            "type": "boolean"
           }
         },
         "title": "RunLimits",
@@ -15327,6 +15367,17 @@
             "description": "Which of `rounds` carries the newest overlap line that was read — the one set of cells its members' rates may be set side by side on.",
             "title": "Overlap Line Round"
           },
+          "overshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Overshoot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cycle's calls billed past their hold (`run_limits.overshoot`), off the account's charge book; null on a replay, which reads none."
+          },
           "pause": {
             "anyOf": [
               {
@@ -15486,6 +15537,7 @@
           "metered_line",
           "cap_lines",
           "allotment",
+          "overshot",
           "fork_remainder",
           "observed",
           "walk",

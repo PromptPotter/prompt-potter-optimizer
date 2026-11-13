@@ -420,8 +420,6 @@ export const FitnessChart = memo(function FitnessChart({
     const bars = active.filter((s) => s.kind === "bar").length;
     const cat = bars <= 1 ? 0.55 : bars === 2 ? 0.75 : bars === 3 ? 0.9 : 0.95;
     const paper = getCss("--color-background-primary");
-    const barCount = Math.max(1, labels.length);
-    const maxBar = Math.max(6, Math.min(28, Math.round(640 / (barCount * Math.max(1, bars)))));
     const outline = () => {
       if (!selectionBorder) return { borderColor: "transparent", borderWidth: 0 };
       return {
@@ -500,7 +498,8 @@ export const FitnessChart = memo(function FitnessChart({
           yAxisID: spec.axis,
           barPercentage: 0.95,
           categoryPercentage: cat,
-          maxBarThickness: maxBar,
+          // A cap only: the category's own width, read by Chart.js, sizes every bar under it.
+          maxBarThickness: 28,
           // chart.js applies `minBarLength` as absolute, so a negative stub would cross zero.
           ...(spec.signed ? {} : { minBarLength: 2 }),
         };

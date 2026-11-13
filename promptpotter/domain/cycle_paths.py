@@ -13,19 +13,19 @@ from promptpotter.shared.errors import BadRequestError
 CycleDir = NewType("CycleDir", Path)
 WorkspaceDir = NewType("WorkspaceDir", Path)
 
-# One author for both languages: `scripts/build_ts_types.py::_emit_cycle_path_grammar` emits all four.
+# One author for both languages: `scripts/build_ts_types.py::_emit_cycle_path_grammar` emits all three.
 HOP_SEP = "~"
 UNIT_SEP = "::"
-# Spelled without escapes: the emitter wraps it in `/…/` untranslated, so the browser's is byte-identical.
-ID_COMPONENT_PATTERN = r"^[a-zA-Z0-9_.-]+$"
-# Paired with the charset, never alone: `.` / `..` / `...` match the charset and are traversal segments.
-ALL_DOTS_PATTERN = r"^\.+$"
+# Fullmatched, case-folded; no escapes, so the browser's is byte-identical. A trailing dot (so every
+# all-dots traversal segment) and a Windows device name each open another file than the one spelled.
+ID_COMPONENT_PATTERN = (
+    r"(?!(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?![a-zA-Z0-9_-]))[a-zA-Z0-9_.-]*[a-zA-Z0-9_-]"
+)
 
-ID_COMPONENT_RE = re.compile(ID_COMPONENT_PATTERN)
-ALL_DOTS_RE = re.compile(ALL_DOTS_PATTERN)
+ID_COMPONENT_RE = re.compile(ID_COMPONENT_PATTERN, re.IGNORECASE)
 
 # Admit `~` or `:` into the charset and a deep path splits into a DIFFERENT well-formed address.
-if any(ID_COMPONENT_RE.match(ch) for ch in HOP_SEP + UNIT_SEP):
+if any(ID_COMPONENT_RE.fullmatch(ch) for ch in HOP_SEP + UNIT_SEP):
     raise RuntimeError(
         f"cycle-path grammar is not round-trippable: a separator in {HOP_SEP + UNIT_SEP!r} "
         f"matches the id charset {ID_COMPONENT_PATTERN!r}, so encode/decode would silently "

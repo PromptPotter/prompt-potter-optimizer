@@ -9,7 +9,10 @@
 .panel {
   position: fixed;
   z-index: 1100;
-  min-width: 140px;
+  min-width: min(140px, var(--overlay-room-w));
+  max-width: var(--overlay-room-w);
+  max-height: var(--overlay-room-h);
+  overflow-y: auto;
   padding: var(--space-4) 0;
   background: var(--color-background-secondary);
   border: 0.5px solid var(--color-border);

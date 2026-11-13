@@ -46,10 +46,12 @@ from factories import (
     minted_dataset,
     on_jumping_clock,
     pipeline_schema,
+    run_wiring,
     samples,
     score_summary,
     scorer_of,
     spend_book,
+    stored_campaign,
     workspace,
 )
 from offline_world import NOT_A_KEY, PROVIDER_KEYS, Hang, Router, Said, completion
@@ -142,6 +144,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     score_search_point,
 )
 from promptpotter.application.scoring.seed_screen import screen_inner_seeds
+from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
@@ -401,10 +404,12 @@ def _budgeted(budget: Budget) -> CampaignConfig:
     return config.model_copy(update={"optimization": optimization})
 
 
-def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Budget) -> Budget:
+def _change_run_limits(
+    dispatcher: CommandDispatcher, hop: CycleHop, budget: Budget, *, overshoot: bool | None = None
+) -> Budget:
     """The ceiling the change armed: the campaign's money and the cycle's own axes."""
     payload = ChangeRunLimitsPayload(
-        campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget
+        campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget, overshoot=overshoot
     )
     dispatched = DispatchedToCycle(dispatcher, payload, "limits", minted_campaign(hop), hop)
 
@@ -1650,6 +1655,11 @@ def _charges() -> ChargeBook:
     return bound_account("the test").charges
 
 
+_CELL = CallLabel("cell", "backend")
+_BENCH = CallLabel("b", "bench")
+_OPTIMIZER = CallLabel("o", "optimizer")
+
+
 def _bill(hold_id: str, usd: float, *, key_source: KeySource = "host") -> Bill:
     price = CallPrice(kind="backend", model=None, provider=None, cost_usd=usd, rate_priced_usd=None)
     return Bill(hold_id=hold_id, key_source=key_source, price=price, tokens=0)
@@ -1663,6 +1673,7 @@ def _drawn(book: SpendBook, usd: float, *, key_source: KeySource = "host", lapse
         key_source=key_source,
         bound=Budget(usd=usd, tokens=0),
         resource="backend",
+        node="cell",
         ledger="drawn.jsonl",
     )
     book.charges.append(call)
@@ -2293,16 +2304,87 @@ def test_every_level_holds_a_sends_whole_bound_whatever_such_sends_billed_before
         own = spend_book(0.5, usd_reserve=reserve)
         assert own.fits(worst, paid_by="host") == 4, f"reserve {reserve}: the bound holds"
         held = [
-            own.hold(worst, "backend", what="cell", paid_by="host", ledger="cells.jsonl")
+            own.hold(worst, _CELL, what="cell", paid_by="host", ledger="cells.jsonl")
             for _ in range(4)
         ]
         with pytest.raises(SendRefusedError):
-            own.hold(worst, "backend", what="cell", paid_by="host", ledger="cells.jsonl")
+            own.hold(worst, _CELL, what="cell", paid_by="host", ledger="cells.jsonl")
         billed = 0
         while own.exhausted() is None:
             own.charges.append(_bill(held.pop(), worst.usd or 0.0))
             billed += 1
         assert billed == 4, f"reserve {reserve}: the run stops on reaching its ceiling"
+
+
+# Each call's hold is read after the bills before it: the mean moves with every one.
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_with_overshoot_on_a_call_holds_its_nodes_mean_bill_in_the_run_after_the_first(
+    tmp_path: Path, built_stores: Stores
+) -> None:
+    hop = CycleHop(campaign_id="camp", cycle_id="cyc")
+    built_stores.campaigns.create_campaign(minted_campaign(hop))
+    built_stores.campaigns.mint_cycle(hop)
+    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    book = _armed(built_stores, hop, _held(built_stores, jobs, Budget(usd=1.0)))
+    worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.10)
+
+    def held(node: str, billed: float) -> Budget:
+        """What a call of *node* is held at, which then bills *billed* on 100 tokens."""
+        with _billing_on(CycleEventLog(tmp_path / "calls.jsonl"), book):
+            call = Admission(
+                book, CallLabel(node, "optimizer"), worst, model=None, provider=None, paid_by="host"
+            )
+            bound = list(money_on(built_stores.charges.path).holds.values())[-1].bound
+            call.settle(Billed(TokenAccount(input=60, output=40), billed))
+        return bound
+
+    _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=True)
+    assert held("judge", 0.02) == worst.budget, "a node's first call held less than its worst case"
+    assert held("judge", 0.04) == Budget(usd=0.02, tokens=100), (
+        "a node's second call held another figure than its first call's bill"
+    )
+    assert held("judge", 0.05).usd == pytest.approx(0.03), "the hold is not the node's mean bill"
+    assert held("other", 0.01) == worst.budget, "another node's bills sized a node's first call"
+    _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=False)
+    assert held("judge", 0.01) == worst.budget, "overshoot off still held a call below its worst"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_bill_past_its_overshoot_hold_draws_on_the_run_and_the_dashboard_serves_it(
+    tmp_path: Path, built_stores: Stores
+) -> None:
+    hop = CycleHop(campaign_id="camp", cycle_id="cyc")
+    campaign = minted_campaign(hop)
+    stored_campaign(built_stores, campaign)
+    minted_dataset(built_stores, campaign)
+    built_stores.campaigns.mint_cycle(hop)
+    ledger = CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(hop)))
+    ledger.append(run_wiring())
+    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    book = _armed(built_stores, hop, _held(built_stores, jobs, Budget(usd=1.0)))
+    _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=True)
+    worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.10)
+    with _billing_on(ledger, book):
+        for billed in (0.02, 0.05):
+            Admission(
+                book,
+                CallLabel("judge", "optimizer"),
+                worst,
+                model=None,
+                provider=None,
+                paid_by="host",
+            ).settle(Billed(TokenAccount(input=60, output=40), billed))
+    money = money_on(built_stores.charges.path)
+    assert money.drawn[book.hold_id].total.sent_usd == pytest.approx(0.07), (
+        "a bill past its hold drew less than its whole bill on the run's hold"
+    )
+    assert book.money_left().usd == pytest.approx(0.93), "the share counted only what was held"
+    dash = served_dashboard(built_stores, hop)
+    assert isinstance(dash, ServedDashboard) and dash.overshot is not None
+    assert dash.overshot.calls == 1 and dash.overshot.usd == pytest.approx(0.03), (
+        "the dashboard served another overshoot than the one call billed past its mean"
+    )
+    assert dash.run_limits.overshoot, "the dashboard served the switch off"
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
@@ -2382,7 +2464,7 @@ def test_a_bench_pass_eats_none_of_an_arms_search_budget_and_replays_spend_it(
     searched.append(_replay(0.09))
     pass_bound = SendBound(input_tokens=100, output_tokens=100, usd=5.0)
     # On the account's own key: one on the box's would meet the reserve (B2).
-    benched = fresh.hold(pass_bound, "bench", what="bench pass", paid_by="user", ledger="b")
+    benched = fresh.hold(pass_bound, _BENCH, what="bench pass", paid_by="user", ledger="b")
     fresh.charges.append(Release(hold_id=benched))
     searched.append(billed_call(5.0, kind="bench", node="b", output_tokens=1, key_source="user"))
     assert fresh.exhausted() is None, "the bench pass ate into the arm's search budget"
@@ -2397,7 +2479,7 @@ def test_a_bench_pass_eats_none_of_an_arms_search_budget_and_replays_spend_it(
     searched.append(_replay(0.02))
     small = SendBound(input_tokens=1, output_tokens=1, usd=0.02)
     with pytest.raises(SendRefusedError):
-        fresh.hold(small, "optimizer", what="o", paid_by="host", ledger="o")
+        fresh.hold(small, _OPTIMIZER, what="o", paid_by="host", ledger="o")
 
 
 # The killed send's hold is read beside the sends the burst left unreported.
@@ -2459,9 +2541,10 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling_and_a_killed_hold_stay
         key_source="host",
         bound=Budget(usd=hold_usd, tokens=2_100),
         resource="optimizer",
+        node="o",
         ledger=charges.held_on(burst_ledger.path),
     )
-    reaped = {"hold_id": "reaped", "parent": None, "resource": None, "ledger": None}
+    reaped = {"hold_id": "reaped", "parent": None, "resource": None, "node": None, "ledger": None}
     charges.append(killed.model_copy(update=reaped))
     charges.append(killed)
     assert _unreported_sends(burst_ledger) == unreported, "a send out under a live job lapsed"
@@ -2492,6 +2575,7 @@ def test_a_bill_naming_no_price_closes_its_hold_in_tokens_and_keeps_its_money_he
             key_source="host",
             bound=Budget(usd=hold_usd, tokens=2_100),
             resource="optimizer",
+            node="o",
             ledger=on_bare,
         )
     )
@@ -2536,7 +2620,7 @@ def test_a_nested_runs_send_is_admitted_by_both_books_and_billed_on_its_roots_le
     room = (inner.money_left(), book.money_left())
     past_root = SendBound(input_tokens=0, output_tokens=0, usd=0.06)
     with pytest.raises(SendRefusedError):
-        inner.hold(past_root, "optimizer", what="past the root", paid_by="host", ledger="r")
+        inner.hold(past_root, _OPTIMIZER, what="past the root", paid_by="host", ledger="r")
     assert (inner.money_left(), book.money_left()) == room, (
         "a nested send past its ROOT's ceiling was admitted on its own book's room, or held "
         "half-way"
@@ -3499,13 +3583,13 @@ def test_in_flight_the_reserve_binds_only_a_send_on_the_boxs_key() -> None:
     send = SendBound(input_tokens=1, output_tokens=1, usd=0.04)
     _drawn(book, 1.0, key_source="user", lapsed=False)
     assert book.exhausted() is None, "a run spending its own key stopped at the host's coupon"
-    book.hold(send, "optimizer", what="o", paid_by="host", ledger="o")
+    book.hold(send, _OPTIMIZER, what="o", paid_by="host", ledger="o")
     with pytest.raises(HostAllowanceExhaustedError) as past:
-        book.hold(send, "optimizer", what="o", paid_by="host", ledger="o")
+        book.hold(send, _OPTIMIZER, what="o", paid_by="host", ledger="o")
     assert run_stop_reason(past.value) is StopReason.HOST_ALLOWANCE, (
         "a run stopped past the coupon read as another stop"
     )
-    book.hold(send, "optimizer", what="o", paid_by="user", ledger="o")
+    book.hold(send, _OPTIMIZER, what="o", paid_by="user", ledger="o")
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
@@ -3517,11 +3601,11 @@ def test_a_compare_arms_uncounted_bench_sends_still_draw_the_coupons_reserve(
     compared.append(billed_call(0.03, kind="bench"))
     graded = spend_book(None, usd_reserve=0.05, meters="search_incurred", metered_on=compared.path)
     with pytest.raises(HostAllowanceExhaustedError):
-        graded.hold(send, "bench", what="b", paid_by="host", ledger="b")
+        graded.hold(send, _BENCH, what="b", paid_by="host", ledger="b")
     with pytest.raises(SendRefusedError) as unpriced:
         graded.hold(
             SendBound(input_tokens=1, output_tokens=1, usd=None),
-            "diagnostic",
+            CallLabel("d", "diagnostic"),
             what="d",
             paid_by="host",
             ledger="d",
@@ -4045,6 +4129,7 @@ def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
             key_source="host",
             bound=Budget(usd=0.02),
             resource="optimizer",
+            node="o",
             ledger="campaigns/camp-6b/cycles/cycle_forked01/events.jsonl",
         )
     )
@@ -4074,6 +4159,7 @@ def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
             key_source="host",
             bound=Budget(usd=0.05),
             resource="optimizer",
+            node="o",
             ledger="campaigns/camp-6b/cycles/cycle_forked01/events.jsonl",
         )
     )
@@ -4102,6 +4188,7 @@ def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
             key_source="host",
             bound=Budget(usd=0.04),
             resource="optimizer",
+            node="o",
             ledger="chat/events.jsonl",
         )
     )
@@ -4875,6 +4962,7 @@ def test_a_campaign_id_is_drawn_again_over_a_live_dir_a_tombstone_and_a_charged_
             key_source="host",
             bound=Budget(usd=0.1),
             resource="backend",
+            node="cell",
             ledger=built_stores.charges.held_on(campaigns.ledger(wiped)),
         )
     )

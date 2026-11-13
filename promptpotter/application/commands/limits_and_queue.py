@@ -7,7 +7,7 @@ from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import campaign_sends, withdraw_queued
 from promptpotter.domain.run_records import ComparisonExit
-from promptpotter.domain.spend import MONEY_AXES, Budget
+from promptpotter.domain.spend import MONEY_AXES
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal
 
@@ -28,24 +28,27 @@ if TYPE_CHECKING:
 async def change_run_limits(
     dispatched: DispatchedToCycle[ChangeRunLimitsPayload],
 ) -> Applier[object]:
-    dispatcher, hop, change = dispatched.dispatcher, dispatched.hop, dispatched.payload.budget
+    dispatcher, hop, change = dispatched.dispatcher, dispatched.hop, dispatched.payload
     return Applier.silent(lambda: _apply_change_run_limits(dispatcher, hop, change))
 
 
-def _change_budget(dispatcher: CommandDispatcher, hop: CycleHop, change: Budget) -> bool:
+def _change_budget(
+    dispatcher: CommandDispatcher, hop: CycleHop, change: ChangeRunLimitsPayload
+) -> bool:
     stores = dispatcher.stores
     return quota.change_budget(
-        change,
+        change.budget,
+        overshoot=change.overshoot,
         stores=stores,
         job_registry=dispatcher.job_registry,
         hop=hop,
         # A change naming no money axis reads no config: it sends nothing a clamp asks of.
-        sends=campaign_sends(stores, hop) if change.named & MONEY_AXES else (),
+        sends=campaign_sends(stores, hop) if change.budget.named & MONEY_AXES else (),
     )
 
 
 async def _apply_change_run_limits(
-    dispatcher: CommandDispatcher, hop: CycleHop, change: Budget
+    dispatcher: CommandDispatcher, hop: CycleHop, change: ChangeRunLimitsPayload
 ) -> None:
     """Clamped to the account FIRST: unclamped, a raise here is the way around the host-wallet gate.
     Settable on every arm of a head-to-head: a change that moves a ceiling the arm runs under moves

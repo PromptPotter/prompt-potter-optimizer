@@ -38,9 +38,11 @@ from promptpotter.domain.said import Said, pinned
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import (
+    NO_OVERSHOOT,
     Budget,
     CeilingMeter,
     MeteredSpend,
+    Overshoot,
     campaign_cap_lines,
     metered_line,
 )
@@ -60,6 +62,7 @@ from promptpotter.infrastructure.store.command_log import (
     requested_lookahead,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import duration_words
 from promptpotter.shared.worded import Worded
@@ -317,6 +320,10 @@ class ServedDashboard(DashboardFacts):
         description="This cycle's share of the campaign's ceiling — the most it may have metered "
         "in all, and what its run's book binds; null where no run holds a share, and on a replay."
     )
+    overshot: Overshoot | None = Field(
+        description="The cycle's calls billed past their hold (`run_limits.overshoot`), off the "
+        "account's charge book; null on a replay, which reads none."
+    )
     fork_remainder: ForkRemainder | None = Field(
         description="What an offshoot of this cycle starts under; null on a replay."
     )
@@ -409,6 +416,7 @@ class _Standing(NamedTuple):
     fork_remainder: ForkRemainder
     # ``None`` where the manifest, and so the meter, is gone.
     campaign_metered: Budget | None
+    overshot: Overshoot
     at: float
 
 
@@ -579,6 +587,7 @@ def _serve(
         if meter is None or standing is None or campaign_metered is None
         else campaign_cap_lines(meter, campaign=campaign_metered, cap=run_limits.budget),
         allotment=None if standing is None else standing.allotment,
+        overshot=None if standing is None else standing.overshot,
         fork_remainder=None if standing is None else standing.fork_remainder,
         observed=_observed(state, live=live),
         walk=_walk(state, hop, live=live),
@@ -638,6 +647,9 @@ def served_dashboard(
             campaign_metered=None
             if meter is None
             else stores.campaigns.metered_spend(hop.campaign_id, meter),
+            overshot=money_on(stores.charges.path).overshot.get(
+                stores.charges.held_on(CycleLayout(cycle_path).ledger), NO_OVERSHOOT
+            ),
             at=time.time(),
         ),
     )
