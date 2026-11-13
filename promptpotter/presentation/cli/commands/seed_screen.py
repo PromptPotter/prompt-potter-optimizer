@@ -20,7 +20,6 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
         seeds=list(args.seeds),
         n_samples=args.n_samples,
         repeat=args.repeat,
-        parallel=args.parallel,
         model=args.model,
         provider=args.provider,
     )

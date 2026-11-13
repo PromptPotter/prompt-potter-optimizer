@@ -554,7 +554,7 @@ def inner_instrument_config(
             # Every bench-only row of the bank is held out; `bench: 0` ranks no search row away.
             "dataset_split": DatasetSplit(bench=0, tolerance=spec.n_samples_bench // 10),
             "run_seed": spec.run_seed,
-            "bench_trigger": "each_round",
+            "bench_trigger": "at_end",
             "optimization": base.optimization.model_copy(update=opt_update),
             "pipeline_overlay": po,
             "optimizer_narrowing": narrowing,

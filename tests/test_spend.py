@@ -752,12 +752,15 @@ def _filed(stores: Stores, sp: JobSearchPoint, session: Any) -> ReplayFeed:
     return ReplayFeed(stores.archive, entry.node_configs)
 
 
-def _control_pausing(pressed: Callable[[], bool], **bound: Any) -> RunControl:
+def _control_pausing(pressed: Callable[[], bool], *, lookahead: int) -> RunControl:
     class _Pressed(RunControl):
         def pause_requested(self) -> bool:
             return pressed()
 
-    return _Pressed(**bound)
+        def sample_lookahead(self) -> int:
+            return lookahead
+
+    return _Pressed()
 
 
 def _ended_on(walk: query_loop.Walk) -> WalkEnd | None:
@@ -853,7 +856,7 @@ async def _walk(
             scorer=_HIT,
             control=_control_pausing(
                 lambda: pause_after_call is not None and len(returned) >= pause_after_call,
-                held_lookahead=armed,
+                lookahead=armed,
             ),
             client=backend_client(stores.jobs_dir, max_cells_in_flight=max_cells),
         )
@@ -904,6 +907,8 @@ async def _round(
     cuts: list[int | None],
     slowest_last: bool = False,
     pause_after_call: int | None = None,
+    kind: MeasurementRole = MeasurementRole.PANEL,
+    ceiling: int | None = None,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
     flag = {"pause": False}
@@ -933,15 +938,17 @@ async def _round(
         pipeline_schema([]),
         dataset,
         scorer=_HIT,
-        control=_control_pausing(lambda: flag["pause"], held_lookahead=armed),
-        client=backend_client(stores.jobs_dir, max_cells_in_flight=armed, holds_own_sends=True),
+        control=_control_pausing(lambda: flag["pause"], lookahead=armed),
+        client=backend_client(
+            stores.jobs_dir, max_cells_in_flight=ceiling or armed, holds_own_sends=True
+        ),
     )
     walks = [
         open_walk(
             JobSearchPoint(),
             dataset,
             session,
-            kind=MeasurementRole.PANEL,
+            kind=kind,
             checks=[_CutAfter(cut)] if cut else [],
             measured=f"c{w}",
         )
@@ -1105,6 +1112,17 @@ async def test_a_catch_up_holds_a_cells_slot_and_is_archived_only_for_a_cell_abs
         "a catch-up was archived for a cell the walk never absorbed"
     )
     assert lone["rows"] == wide["rows"] == quick["rows"] == c1["rows"], "a catch-up moved a record"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_verify_pass_sends_at_the_backends_ceiling_under_a_one_cell_press(
+    built_stores: Stores,
+) -> None:
+    sent = await _round(
+        built_stores, _dataset(), armed=1, cuts=[None], kind=MeasurementRole.VERIFY, ceiling=4
+    )
+    assert sent["peak"] > 1, "a verify pass sent one cell at a time"
 
 
 @pytest.mark.usefixtures("run_bound", "offline")

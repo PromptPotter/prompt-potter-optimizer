@@ -173,8 +173,8 @@ def restored_partition(bank: Sequence[Sample], drawn: PartitionRecord) -> BankPa
 
 BenchSubject = Literal["origin", "selected"]
 
-# `manual`: only when asked (`bench`, `grade-bench`); `each_round`: at the end AND every round that selected.
-BenchTrigger = Literal["manual", "at_end", "each_round"]
+# `manual`: only when asked (`bench`, `grade-bench`); `at_end`: the origin at launch, the selection at the end.
+BenchTrigger = Literal["manual", "at_end"]
 
 
 class PassStop(FrozenModel):

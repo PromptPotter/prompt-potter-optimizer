@@ -112,8 +112,6 @@ class RunControl:
     # The commands whose passes this control acts for, outermost first: a `cancel` of one is its
     # pause while that command acts, and of no other act on its cycle.
     acting: tuple[str, ...] = ()
-    # Held, never spent, where no round spends a press (a screen, a bench pass); ``None`` reads the inbox.
-    held_lookahead: int | None = None
 
     def __post_init__(self) -> None:
         if self.commands is None and (self.cycle is not None or self.enclosing or self.acting):
@@ -188,14 +186,10 @@ class RunControl:
         self._log().ack(command_id, "applied")
 
     def sample_lookahead(self) -> int:
-        if self.held_lookahead is not None:
-            return self.held_lookahead
         return requested_lookahead(self._inbox())
 
     def spend_sample_lookahead(self) -> None:
         """One ack per round removes a plain press and leaves an ``auto`` one standing."""
-        if self.held_lookahead is not None:
-            return
         asked = self._inbox().lookahead
         if asked is not None and not asked.taken:
             self._log().ack(asked.command_id, "applied")

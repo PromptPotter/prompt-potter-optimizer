@@ -1519,8 +1519,7 @@
           "trigger": {
             "enum": [
               "manual",
-              "at_end",
-              "each_round"
+              "at_end"
             ],
             "title": "Trigger",
             "type": "string"

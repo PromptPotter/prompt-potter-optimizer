@@ -37,7 +37,6 @@ from promptpotter.application.optimizers.nodes import (
     RoundWalk,
 )
 from promptpotter.application.runner.bench import (
-    grade_round_selection,
     line_outlay,
     reserve_selection_pass,
 )
@@ -861,11 +860,9 @@ async def _walk_population(
     skipped = session.store.campaigns.standing_rounds(session.hop, moment=None).skipped
     walks: dict[ArmKey, Walk | None] = {}
     for key, arm in proposed.items():
-        checks: list[StopRule] = list(cycle.session.state.scoring.degradation_checks)
         # The arms before this one still being walked may yet become priors.
         rule = race.rule(list(walks.items())) if race is not None else None
-        if rule is not None:
-            checks.append(rule)
+        checks = [] if rule is None else [rule]
         walks[key] = _open_arm(
             ctx, arm, sps[key], panel.order, checks, skipped.get((round_num, key))
         )
@@ -1602,7 +1599,6 @@ async def post_round(
         seed=cycle.rng(round_num, "verify").getrandbits(31),
         ledger=ledger,
     )
-    await grade_round_selection(cycle, session, round_result, ledger=ledger)
     reserve_selection_pass(cycle, session)
 
     if (stop := standing_tripped(cycle)) is not None:

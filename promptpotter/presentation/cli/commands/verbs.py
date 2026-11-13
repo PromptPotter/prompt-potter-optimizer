@@ -558,16 +558,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "calls; raise it further for any bank reported UNSETTLED.",
             ),
             Arg(
-                "--parallel",
-                dest="parallel",
-                type=int,
-                default=1,
-                help="Rows to hold in flight within each pass (default 1, sequential). A screen has no "
-                "round and no cycle, so this is a LAUNCH parameter held for the whole run rather than a "
-                "press the browser arms and a round spends — that control belongs to `new`/`resume`, "
-                "which have a round to spend it at. Clamped to the backend's own ceiling.",
-            ),
-            Arg(
                 "--model",
                 dest="model",
                 default=None,

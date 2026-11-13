@@ -469,11 +469,6 @@ async def _send_on_bench(
     )
     # Counted before the send, so the pass is never one of its own readers.
     reads_before = _reads_before(session)
-    # A look-ahead press is a round's to spend, and a pass is no round: it holds the backend's ceiling.
-    control = session.state.control
-    session.state.control = replace(
-        control, held_lookahead=session.backend_client.connector.max_cells_in_flight
-    )
     try:
         scored = await score_search_point(
             search_point,
@@ -503,7 +498,6 @@ async def _send_on_bench(
             graded(ledger, session, taken, subject=subject)
         return taken, scored.halt
     finally:
-        session.state.control = control
         ledger.append(PhaseRecord(phase=_BRACKET, event="exit"))
 
 
@@ -564,32 +558,6 @@ def graded(
             ),
         )
     )
-
-
-async def grade_round_selection(
-    cycle: Cycle, session: Session, round_result: RoundResult, *, ledger: CycleEventLog
-) -> None:
-    passes, election, head = cycle.bench_passes, round_result.election, round_result.head
-    if not (
-        cycle.config.bench_trigger == "each_round"
-        and election is not None
-        and election.selected is not None
-        and passes is not None
-    ):
-        return
-    assert head is not None, "a round that selected ends on the arm it selected"
-    label = head.label
-    taken = await score_on_bench(
-        session,
-        cycle.selected_sp,
-        individual_id=head.individual.id,
-        subject="selected",
-        label=label,
-        round_num=round_result.round,
-        ledger=ledger,
-    )
-    graded(ledger, session, taken, subject="selected")
-    cycle.bench_passes = _with_selection(passes, taken)
 
 
 def _with_selection(passes: BenchPasses, taken: VerificationPass) -> BenchPasses:

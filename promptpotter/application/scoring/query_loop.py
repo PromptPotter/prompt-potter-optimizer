@@ -18,6 +18,7 @@ from promptpotter.application.scoring.sample_measurement import (
     measure_sample,
 )
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
     STOP_REASON_INFO,
@@ -65,7 +66,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import CatchUps, CaughtUp
     from promptpotter.infrastructure.store.measurement_archive import CellClaim
-    from promptpotter.shared.measurement_context import MeasuredPass
+    from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,7 @@ class WalkRecorder(Protocol):
 class QueryLoopState:
     search_point: JobSearchPoint
     session: Session
+    kind: MeasurementRole
     cached_sample_results: dict[int, MeasuredCell]
     # ``None``: the walk writes no sample record — it is no pass a live surface draws.
     recorded: MeasuredPass | None
@@ -201,12 +203,11 @@ class QueryLoopState:
         return cell is None or claim_campaign_price(cell)
 
 
-def _armed_cells(session: Session) -> int:
+def _armed_cells(session: Session, kind: MeasurementRole) -> int:
     """Sample look-ahead is LIVE though it defaults off: any dataset, the moment the operator arms it."""
-    return effective_lookahead(
-        session.state.control.sample_lookahead(),
-        session.backend_client.connector.max_cells_in_flight,
-    )
+    ceiling = session.backend_client.connector.max_cells_in_flight
+    asked = ceiling if PASSES[kind].depth == "ceiling" else session.state.control.sample_lookahead()
+    return effective_lookahead(asked, ceiling)
 
 
 async def _maybe_recover_degraded(
@@ -724,7 +725,7 @@ class _ScoringPhase[K: Hashable]:
         assert walk is not None
         if self.gauge is not None:
             self.gauge.touch()
-        armed = _armed_cells(self.session)
+        armed = _armed_cells(self.session, walk.ctx.kind)
         if walk.skip_at is not None and len(walk.results) >= walk.skip_at:
             logger.info("Replaying an operator skip after query %d/%d.", walk.skip_at, walk.n)
             return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
@@ -850,9 +851,9 @@ class _ScoringPhase[K: Hashable]:
             if backfills is not None:
                 room -= len(backfills.start_backfill(sample, min(room, self.affordable())))
 
-    async def depth_raised(self, armed: int) -> None:
+    async def depth_raised(self, armed: int, kind: MeasurementRole) -> None:
         """Polled: the press is a command another process records on the ledger, which no signal carries."""
-        while _armed_cells(self.session) <= armed:  # noqa: ASYNC110 — a cross-process ledger wait
+        while _armed_cells(self.session, kind) <= armed:  # noqa: ASYNC110 — a cross-process ledger wait
             await asyncio.sleep(HELD_POLL_S)
 
     async def wait(self, walk: Walk, armed: int) -> None:
@@ -874,7 +875,7 @@ class _ScoringPhase[K: Hashable]:
         watched = set[asyncio.Future[Any]](calls)
         raised: asyncio.Future[None] | None = None
         if armed < self.session.backend_client.connector.max_cells_in_flight:
-            raised = asyncio.ensure_future(self.depth_raised(armed))
+            raised = asyncio.ensure_future(self.depth_raised(armed, walk.ctx.kind))
             watched.add(raised)
         try:
             await asyncio.wait(watched, return_when=asyncio.FIRST_COMPLETED)

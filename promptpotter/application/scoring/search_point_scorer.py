@@ -320,7 +320,8 @@ def open_walk(
     entry = archive_entry(
         search_point, dataset_hash=session.bank.dataset_hash, pipeline_schema=pipeline_schema
     )
-    node_configs = [] if PASSES[kind].fresh else entry.node_configs
+    row = PASSES[kind]
+    node_configs = [] if row.fresh else entry.node_configs
     # No node configs, no cell identity: every such searchpoint would share one claim per sample.
     feed = ReplayFeed(store.archive, node_configs) if node_configs else None
     cached_sample_results, deprecated_samples = _resolve_prior_cache(dataset, feed=feed, label=kind)
@@ -334,8 +335,9 @@ def open_walk(
     ctx = QueryLoopState(
         search_point=search_point,
         session=session,
+        kind=kind,
         cached_sample_results=cached_sample_results,
-        recorded=measuring if PASSES[kind].recorded else None,
+        recorded=measuring if row.recorded else None,
         sample_index=sample_index,
         deprecated_samples=deprecated_samples,
         recorder=_ArchiveRecorder(
@@ -357,7 +359,7 @@ def open_walk(
     return Walk(
         dataset=dataset,
         ctx=ctx,
-        checks=checks,
+        checks=[*session.state.scoring.degradation_checks, *checks] if row.checks else checks,
         context=measured_pass_context(measuring),
         skip_at=skip_at,
     )

@@ -420,9 +420,8 @@ class CampaignConfig(StrictModel):
         "(default): a launch sends none and sets nothing aside for one; the operator asks for "
         "the headline (CLI `bench`, command `grade-bench`), which grades the origin and the "
         "selection as they then stand. `at_end`: the origin's pass at launch, its price set "
-        "aside under the ceiling, and the selection's once the run ends. `each_round`: that, "
-        "and every round that selects a new individual is graded too. An arm of a head-to-head "
-        "is minted `at_end` where this says `manual`: its comparison is the bench score.",
+        "aside under the ceiling, and the selection's once the run ends. No round is graded "
+        "on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
     )
 
     optimization: OptimizationConfig

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
@@ -32,6 +32,10 @@ class Pass:
     keeps: bool
     # The ledger bracket a held-out pass is entered, graded and exited under.
     phase: CampaignPhase | None
+    # The look-ahead it sends at: the operator's request, which a round spends, or the backend's ceiling.
+    depth: Literal["requested", "ceiling"]
+    # It ends early on the campaign's degradation checks.
+    checks: bool
 
     @property
     def bracket(self) -> CampaignPhase:
@@ -55,15 +59,17 @@ def _pass(
     fresh: bool = False,
     keeps: bool = False,
     phase: CampaignPhase | None = None,
+    depth: Literal["requested", "ceiling"] = "requested",
+    checks: bool = False,
 ) -> Pass:
-    return Pass(kind, scopes, arm, recorded, deliberate, spend, fresh, keeps, phase)
+    return Pass(kind, scopes, arm, recorded, deliberate, spend, fresh, keeps, phase, depth, checks)
 
 
 PASSES: dict[MeasurementRole, Pass] = {
     row.kind: row
     for row in (
         _pass(MeasurementRole.ORIGIN, _DECISION, arm=True, recorded=True),
-        _pass(MeasurementRole.PANEL, _DECISION, arm=True, recorded=True),
+        _pass(MeasurementRole.PANEL, _DECISION, arm=True, recorded=True, checks=True),
         _pass(MeasurementRole.BACKFILL, _DECISION),
         _pass(MeasurementRole.PARENT, _DECISION, arm=True, recorded=True),
         _pass(MeasurementRole.REPAIR, _DECISION),
@@ -76,6 +82,8 @@ PASSES: dict[MeasurementRole, Pass] = {
             spend="diagnostic",
             keeps=True,
             phase=CampaignPhase.VERIFY,
+            depth="ceiling",
+            checks=True,
         ),
         _pass(
             MeasurementRole.BENCH,
@@ -84,6 +92,8 @@ PASSES: dict[MeasurementRole, Pass] = {
             spend="bench",
             keeps=True,
             phase=CampaignPhase.BENCH,
+            depth="ceiling",
+            checks=True,
         ),
         # It re-reads rows already standing, so it joins no reading.
         _pass(
@@ -93,6 +103,8 @@ PASSES: dict[MeasurementRole, Pass] = {
             spend="diagnostic",
             fresh=True,
             phase=CampaignPhase.VERIFY,
+            depth="ceiling",
+            checks=True,
         ),
     )
 }

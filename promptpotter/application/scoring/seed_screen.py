@@ -6,7 +6,7 @@ import random
 import re
 import statistics
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.bench.task_context import campaign_framing
@@ -207,13 +207,10 @@ async def screen_inner_seeds(
     seeds: list[int],
     n_samples: int,
     repeat: int = 3,
-    parallel: int = 1,
     model: str | None = None,
     provider: str | None = None,
 ) -> SeedScreenOutcome:
     # Argument checks BEFORE anything is built: `init_services` spends a backend handshake.
-    if parallel < 1:
-        raise DiagnosticError(f"--parallel must be at least 1, got {parallel}.")
     if provider and not model:
         raise DiagnosticError("--provider is the gateway a --model is asked through; pass both.")
     # The pin moves a task node's model, never its payer: the dataset's cells send as declared.
@@ -225,7 +222,7 @@ async def screen_inner_seeds(
         stores=stores, verb="seed-screen", hop=None, declared=Budget(), sends=sends
     ):
         return await _screen(
-            stores, identity, dataset_name, seeds, n_samples, repeat, parallel, model, provider
+            stores, identity, dataset_name, seeds, n_samples, repeat, model, provider
         )
 
 
@@ -236,7 +233,6 @@ async def _screen(
     seeds: list[int],
     n_samples: int,
     repeat: int,
-    parallel: int,
     model: str | None,
     provider: str | None,
 ) -> SeedScreenOutcome:
@@ -271,18 +267,6 @@ async def _screen(
     session = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
     with arm_diagnostic_scoring(session, campaign_config):
         pipeline_params = session.pipeline_params
-        # `run_walks` re-reads this at every launch boundary and clamps it to the backend's ceiling.
-        session.state.control = replace(session.state.control, held_lookahead=parallel)
-        ceiling = session.backend_client.connector.max_cells_in_flight
-        if parallel > ceiling:
-            # A warning: a terminal shows this layer's info only under `--verbose`.
-            logger.warning(
-                "seed-screen: --parallel %d exceeds this backend's declared ceiling of %d "
-                "(Connector.max_cells_in_flight); running at %d.",
-                parallel,
-                ceiling,
-                ceiling,
-            )
         # The run's C0 framing: the origin must be the prompt the campaign will actually score.
         origin = resolve_origin_opt_search_point(
             session.dataset,

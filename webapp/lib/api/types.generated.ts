@@ -955,7 +955,7 @@ export interface BenchScore {
  * admitted. */
 export interface BenchStatus {
   state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
-  trigger: 'manual' | 'at_end' | 'each_round';
+  trigger: 'manual' | 'at_end';
   /** Whether `bench` / `grade-bench` is admitted now. Every entry point reads this
    * one answer. */
   can_run: boolean;
@@ -3368,11 +3368,10 @@ export interface CampaignConfig {
    * the operator asks for the headline (CLI `bench`, command `grade-bench`),
    * which grades the origin and the selection as they then stand. `at_end`:
    * the origin's pass at launch, its price set aside under the ceiling, and
-   * the selection's once the run ends. `each_round`: that, and every round
-   * that selects a new individual is graded too. An arm of a head-to-head is
-   * minted `at_end` where this says `manual`: its comparison is the bench
-   * score. */
-  bench_trigger: 'manual' | 'at_end' | 'each_round';
+   * the selection's once the run ends. No round is graded on the bench, so no
+   * selection reads the test set. An arm of a head-to-head is minted `at_end`
+   * where this says `manual`: its comparison is the bench score. */
+  bench_trigger: 'manual' | 'at_end';
   optimization: OptimizationConfig;
 }
 
@@ -4059,11 +4058,10 @@ export interface ConfigEdit {
    * the operator asks for the headline (CLI `bench`, command `grade-bench`),
    * which grades the origin and the selection as they then stand. `at_end`:
    * the origin's pass at launch, its price set aside under the ceiling, and
-   * the selection's once the run ends. `each_round`: that, and every round
-   * that selects a new individual is graded too. An arm of a head-to-head is
-   * minted `at_end` where this says `manual`: its comparison is the bench
-   * score. */
-  bench_trigger: 'manual' | 'at_end' | 'each_round' | null;
+   * the selection's once the run ends. No round is graded on the bench, so no
+   * selection reads the test set. An arm of a head-to-head is minted `at_end`
+   * where this says `manual`: its comparison is the bench score. */
+  bench_trigger: 'manual' | 'at_end' | null;
   optimization: OptimizationOverrides | null;
 }
 
@@ -4870,11 +4868,10 @@ export interface PartialCampaignConfig {
    * the operator asks for the headline (CLI `bench`, command `grade-bench`),
    * which grades the origin and the selection as they then stand. `at_end`:
    * the origin's pass at launch, its price set aside under the ceiling, and
-   * the selection's once the run ends. `each_round`: that, and every round
-   * that selects a new individual is graded too. An arm of a head-to-head is
-   * minted `at_end` where this says `manual`: its comparison is the bench
-   * score. */
-  bench_trigger: 'manual' | 'at_end' | 'each_round' | null;
+   * the selection's once the run ends. No round is graded on the bench, so no
+   * selection reads the test set. An arm of a head-to-head is minted `at_end`
+   * where this says `manual`: its comparison is the bench score. */
+  bench_trigger: 'manual' | 'at_end' | null;
   optimization: PartialOptimizationConfig | null;
 }
 

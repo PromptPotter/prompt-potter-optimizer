@@ -14,7 +14,7 @@ from promptpotter.application.bench.resume_and_fork.repair import rewalk_lost_or
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import Controller, RoundContext
 from promptpotter.application.run_phase_control import budget_stop
-from promptpotter.application.runner.bench import bench_origin, bench_selection, declare_line_bench
+from promptpotter.application.runner.bench import bench_origin, declare_line_bench
 from promptpotter.application.runner.round import (
     emit_origin_round,
     execute_round,
@@ -237,21 +237,6 @@ async def bench_line_origin(cycle: Cycle, ledger: CycleEventLog, spend: SpendRol
         )
         if cycle.bench_passes is not None and book.binds("bench"):
             book.set_aside(cycle.bench_passes.reserve_usd, cycle.bench_passes.reserve_tokens)
-        if (
-            cycle.bench_passes is not None
-            and config.bench_trigger == "each_round"
-            and len(cycle.rounds) > 1
-        ):
-            # The selection a resumed line stands on, graded where its line holds no pass:
-            # a re-enacting fork's floor, read today as the round it re-runs will be.
-            with at_round(cycle.rounds[-1].round):
-                cycle.bench_passes = await bench_selection(
-                    session,
-                    cycle.rounds,
-                    points=cycle.points,
-                    banked=cycle.bench_passes,
-                    ledger=ledger,
-                )
     declare_line_bench(
         session, config, ledger, passes=cycle.bench_passes, selecting=True, ending=None
     )
