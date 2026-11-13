@@ -11,7 +11,7 @@ python scripts/offline_run.py --digests
 
 `--help` lists the sizing and leg flags. `--straight` (each optimizer's straight run, no nested leg) is the webapp's walk world (`scripts/gate.py::_walk_world`). It refuses an interpreter whose `promptpotter` is another tree's.
 
-**The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments and then `--controlled`, each in its own home of the clone's (`processes.py::clone_cache`) — whenever a file the engine runs from changed since it was last green; the pre-push hook runs it on a tip pushed to main (`gate.py --push`, in a throwaway worktree on the clone's venv, `gate.py::_proven_in`); pre-commit and `--changed` leave it out. A failed leg fails it; a `MOVED` never does. Each optimizer's workspace is kept green on its own, keyed by content on what that optimizer reaches (`scripts/last_green.py::OFFLINE_RUN_READS` less other optimizers' packages, `scripts/offline_run.py::unreached`); a green optimizer under the same arguments prints `unchanged since green`; another home or `--against` reruns all.
+**The gate runs it** — `scripts/gate.py --only offline-run,offline-run-controlled`, under the default arguments and under `--controlled`, side by side, each in its own home of the clone's (`processes.py::clone_cache`) — whenever a file the engine runs from changed since it was last green; the pre-push hook runs it on a tip pushed to main (`gate.py --push`, in a throwaway worktree on the clone's venv, `gate.py::_proven_in`); pre-commit and `--changed` leave it out. A failed leg fails it; a `MOVED` never does. Each optimizer's workspace is kept green on its own, keyed by content on what that optimizer reaches (`scripts/last_green.py::OFFLINE_RUN_READS` less other optimizers' packages, `scripts/offline_run.py::unreached`) and filed inside the workspace (`scripts/offline_run.py::GREEN`), so another tree rewriting the shared home takes its green along; a green optimizer under the same arguments prints `unchanged since green`; another home reruns all.
 
 `--controlled` proves the controlled comparison instead ([`../architecture.md`](../architecture.md) § The controlled comparison): two workspaces, each minting one head-to-head's arms in one act (`application/embedded_run.py::run_head_to_head`, as the `head-to-head` verb does) and running them one after another, one after a foreign campaign on the dataset. It fails unless an arm searches its prompt's fields alone, each arm's memory holds only runs it filed, and every election read its head-to-head's freeze plus its own lines; `head_to_head.json` is the evidence read.
 
@@ -44,9 +44,10 @@ One workspace per optimizer, `<home>/<optimizer>/`, because the archive and the 
 
 ## Proving parity
 
-Run it on the base once and keep that home; every later run names it and prints, per leg that wrote a trace, `UNMOVED`, `no base`, or the trace fields that moved (`decisions.run.<key>`, `decisions.rounds[<n>]`, `decisions.ledger.<list>`, `decisions.harness.<key>`, how many requests, `world`):
+Run it on the base once and keep that home; every later run names it and prints, per leg that wrote a trace, `UNMOVED`, `no base`, or the trace fields that moved (`decisions.run.<key>`, `decisions.rounds[<n>]`, `decisions.ledger.<list>`, `decisions.harness.<key>`, how many requests, `world`). A home still green for the tree's sources is compared without a run, so a landing asks the gate (`equals-main`, red unless every leg reads `UNMOVED`), which reads the home its `offline-run` check just wrote, `<clone>/.gate_cache/offline-run`:
 
 ```bash
+python scripts/gate.py --against base                          # offline-run, then equals-main
 PROMPTPOTTER_HOME=after python scripts/offline_run.py --against base
 diff -r base/<optimizer>/requests after/<optimizer>/requests   # what each optimizer call was SENT
 ```

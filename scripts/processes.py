@@ -91,7 +91,7 @@ if sys.platform == "win32":
 
 
 class _Metered(threading.local):
-    """The job a lane's running check spawns into: its peak is every process that check started."""
+    """The job a running check spawns into: its peak is every process that check started."""
 
     job: int | None = None
 
@@ -345,9 +345,6 @@ def free_mb() -> int:
 
 # What one unit of each fan-out commits: the slope of its check's job peak across widths.
 _OFFLINE_RUN_CHILD_MB = 108
-# Each lane's heaviest check at full width (offline-run; a cold eslint): below their sum, in turn.
-_PY_LANE_MB = 1200
-_WEB_LANE_MB = 1000
 # Past this, free memory is no reason to widen: the OS kills concurrent processes on low memory.
 OFFLINE_RUN_CHILDREN_MAX = 8
 
@@ -361,9 +358,6 @@ class RamBudget:
     @classmethod
     def read(cls) -> RamBudget:
         return cls(free_mb())
-
-    def lanes_overlap(self) -> bool:
-        return self.free_mb >= _PY_LANE_MB + _WEB_LANE_MB
 
     def offline_run_children(self, tasks: int) -> int:
         fit = self.free_mb // _OFFLINE_RUN_CHILD_MB

@@ -33,12 +33,12 @@ from last_green import (
     OFFLINE_RUN,
     OFFLINE_RUN_READS,
     LastGreen,
-    bare_imports,
     digest,
     imported,
     reads,
 )
 from processes import (
+    OFFLINE_RUN_CHILDREN_MAX,
     REPO,
     Outcome,
     RamBudget,
@@ -76,13 +76,13 @@ class Selection:
     staged_paths: tuple[str, ...] = ()
     # ``None`` is the whole check.
     narrowed: tuple[str, ...] | None = None
-    # The py lane's probes not kept green, asked in one host process.
-    probes: tuple[_Probe, ...] = ()
-    # Every check is `light`, so this gate runs beside a sibling's rather than queuing.
+    # Every check is commit-tier, so this gate runs beside a sibling's rather than queuing.
     unqueued: bool = False
     # The run `walk-world` builds and `walk` serves a copy of, under that check's key: `None` only
     # where git lists no tree to key it on.
     walk_world: Path | None = None
+    # The base home `equals-main` reads the offline run against (`--against`).
+    against: Path | None = None
 
     @property
     def world(self) -> Path:
@@ -285,72 +285,14 @@ def _unbuilt_schemas(out: str) -> Outcome:
     return (1, "a model's schema does not build:\n" + out) if out.strip() else (0, "")
 
 
-_ANSWERS = "probe answers: "
-_PROBE_HOST = f"""
-import contextlib, io, json, os, runpy, sys
-answers = []
-for source in json.loads(sys.argv[1]):
-    out, code = io.StringIO(), 0
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-        try:
-            if source.endswith(".py"):
-                sys.argv = [source]
-                sys.path.insert(0, os.path.dirname(os.path.abspath(source)))
-                runpy.run_path(source, run_name="__main__")
-            else:
-                exec(source, {{"__name__": "__probe__"}})
-        except SystemExit as stop:
-            code = stop.code if isinstance(stop.code, int) else int(stop.code is not None)
-            if isinstance(stop.code, str):
-                print(stop.code)
-        except Exception as exc:
-            code = 1
-            print(f"{{type(exc).__name__}}: {{exc}}")
-    answers.append((code, out.getvalue().strip()))
-print({_ANSWERS!r} + json.dumps(answers))
-"""
+def _probe(source: str, judge: Callable[[str], Outcome]) -> Callable[[Selection], Outcome]:
+    argv = [source] if source.endswith(".py") else ["-c", source]
 
+    def check(_: Selection) -> Outcome:
+        rc, out = run([sys.executable, "-X", "utf8", *argv], REPO)
+        return (rc, out) if rc else judge(out)
 
-@dataclass(frozen=True)
-class _Probe:
-    source: str
-    judge: Callable[[str], Outcome]
-    fresh: bool = False
-
-    def __call__(self, sel: Selection) -> Outcome:
-        return _ask_together(sel.probes if self in sel.probes else (self,))[self]
-
-
-@dataclass(frozen=True)
-class _Hosted:
-    probes: int
-    secs: float
-    peak_mb: int | None
-
-
-# A host's peak is every probe it ran, so it is metered in its own job and printed as its own row.
-_HOSTS: list[_Hosted] = []
-
-
-@cache
-def _ask_together(probes: tuple[_Probe, ...]) -> dict[_Probe, Outcome]:
-    ordered = sorted(probes, key=lambda probe: not probe.fresh)
-    sources = json.dumps([probe.source for probe in ordered])
-    began = time.monotonic()
-    asking, metered.job = metered.job, (job := open_job())
-    try:
-        rc, out = run([sys.executable, "-X", "utf8", "-c", _PROBE_HOST, sources], REPO)
-    finally:
-        metered.job = asking
-        _HOSTS.append(_Hosted(len(ordered), time.monotonic() - began, close_job(job)))
-    marked = [line for line in out.splitlines() if line.startswith(_ANSWERS)]
-    if not marked:
-        return dict.fromkeys(ordered, (rc or 1, out))
-    verdicts: dict[_Probe, Outcome] = {}
-    answers = json.loads(marked[-1][len(_ANSWERS) :])
-    for probe, (code, text) in zip(ordered, answers, strict=True):
-        verdicts[probe] = (code, text) if code else probe.judge(text)
-    return verdicts
+    return check
 
 
 # CR is absent deliberately: `read_text` translates line endings.
@@ -1108,6 +1050,8 @@ def _advisories(_: Selection) -> Outcome:
 _TREE = ("",)
 _ENGINE = ("!webapp/",)
 _GATE = ("scripts/gate.py", "scripts/last_green.py", "scripts/processes.py")
+_GENERATED_TYPES = "webapp/lib/api/types.generated.ts"
+_GENERATED_MARKS = "webapp/components/ui/vendor-marks.generated.ts"
 _WEBAPP_READS = ("webapp/", "tests/fixtures/", *_GATE)
 _ENGINE_RUNTIME = (*ENGINE_RUNTIME, *_GATE)
 _RUFF_READS = (*_RUFF_TARGETS, "pyproject.toml", *_GATE)
@@ -1116,50 +1060,72 @@ _RUFF_READS = (*_RUFF_TARGETS, "pyproject.toml", *_GATE)
 @dataclass(frozen=True)
 class Check:
     name: str
-    # CI's `check` job, its `webapp` job, publish.yml.
-    kind: Literal["py", "web", "release"]
+    # CI's `check` job, its `webapp` job, publish.yml; `parity` is what `--against` asks.
+    kind: Literal["py", "web", "release", "parity"]
     run: Callable[[Selection], Outcome]
-    # The pre-commit hook's fast set (`--staged`). The pre-push hook runs every check CI runs.
-    on_commit: bool = False
-    # Cheap and, when green, writes nothing a sibling gate reads, so a gate of only these never queues behind a sibling's.
-    light: bool = False
-    landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
-    # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
-    # or its peak is more than any lane beside it leaves free.
-    alone: bool = False
-    # The checks that build what it reads: earlier in its lane, or anywhere earlier when it runs
-    # alone, and brought along by `--only`.
-    after: tuple[str, ...] = ()
-    # Empty is its kind's prefixes; `!prefix` is everything outside one. A callable is derived at
-    # first use, so importing the gate parses nothing.
-    reads: tuple[str, ...] | Callable[[], tuple[str, ...]] = ()
-    # A path that stands while its product is this key's: its verdict is kept only while it
-    # stands. A green build writes it where the builder did not: `greens.json` is the clone's and
-    # a product the checkout's, so one another tree built never stands for this one.
-    builds: str = ""
-    # Directories it reads of what its `after` built; their content is in its key.
-    product: tuple[str, ...] = ()
+    # What its job may commit: the schedule reserves it, and a peak past it is red on Windows,
+    # the one platform a job meters.
+    mb: int
+    # `commit`: the pre-commit set, cheap and writing nothing a sibling gate reads, so a gate of
+    # only these never queues; `landing` proves a landing, so `--changed` leaves it out.
+    tier: Literal["commit", "edit", "landing"] = "edit"
+    # The cores it keeps busy; the schedule never runs more beside each other than the box has.
+    slots: int = 1
+    # Empty is its kind's prefixes; `!prefix` is everything outside one. A product it reads is
+    # named by its directory (`builds`).
+    reads: tuple[str, ...] = ()
+    # Tracked files it regenerates: every check reading one runs after it.
+    writes: tuple[str, ...] = ()
+    # Untracked products another check names by directory: a `{key}` path is the stamp a green
+    # leaves, and the verdict is kept only while each stands.
+    builds: tuple[str, ...] = ()
     # Returns `None` where ownership cannot be told, and then the whole check runs.
     narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
-    # A job peak past this many MB is red, on Windows alone: the desk's free RAM binds what runs
-    # beside builders, where a CI runner has room.
-    ceiling_mb: int | None = None
 
     def inputs(self) -> tuple[str, ...] | None:
         if self.kind == "release":  # the answer lives on the network
             return None
-        reads = self.reads() if callable(self.reads) else self.reads
-        return reads or (_ENGINE if self.kind == "py" else _WEBAPP_READS)
+        return self.reads or (_ENGINE if self.kind == "py" else _WEBAPP_READS)
 
     def key(self, store: LastGreen) -> str | None:
+        """Its sources, and each builder's key, which stands for the product it left."""
         prefixes = self.inputs()
-        if prefixes is None:
+        # A parity's answer is the `--against` home's too, which no key covers.
+        if prefixes is None or self.kind == "parity":
             return None
-        return digest(store.key(prefixes, self.product).encode()).hex()
+        made = [key for b in _builders(self, CHECKS) if (key := b.key(store)) is not None]
+        return digest(store.key(prefixes).encode(), *(key.encode() for key in made)).hex()
 
     def kept(self, store: LastGreen, key: str | None) -> bool:
-        standing = not self.builds or (REPO / self.builds.format(key=key)).exists()
+        standing = all((REPO / path.format(key=key)).exists() for path in self.builds)
         return key is not None and standing and store.holds(self.name, key)
+
+
+def _product_root(path: str) -> str:
+    stem = path.partition("{key}")[0]
+    return stem[: max(stem.rfind("/"), stem.rfind("\\")) + 1] if "{key}" in path else path
+
+
+def _builders(check: Check, among: Sequence[Check]) -> tuple[Check, ...]:
+    """The checks *among* building a product *check* names by its directory: brought along by
+    any query that asks for *check*, as it reads what they leave."""
+    named = [prefix for prefix in check.inputs() or () if prefix and not prefix.startswith("!")]
+    return tuple(
+        other
+        for other in among
+        if other is not check
+        and any(prefix.startswith(_product_root(path)) for path in other.builds for prefix in named)
+    )
+
+
+def _producers(check: Check, among: Sequence[Check]) -> tuple[Check, ...]:
+    inputs = check.inputs() or ()
+    rewriting = [
+        other
+        for other in among
+        if other is not check and any(reads(path, inputs) for path in other.writes)
+    ]
+    return tuple(dict.fromkeys((*rewriting, *_builders(check, among))))
 
 
 def _web_modules(changed: Sequence[str]) -> tuple[str, ...] | None:
@@ -1170,11 +1136,16 @@ def _web_modules(changed: Sequence[str]) -> tuple[str, ...] | None:
     return tuple(path[len("webapp/") :] for path in changed if (REPO / path).is_file())
 
 
+# Its pool's default width is every core, past which its worker timeout trips on a busy box.
+_VITEST_SLOTS = 4
+
+
 def _vitest(sel: Selection) -> Outcome:
+    width = f"--maxWorkers={_VITEST_SLOTS}"
     if sel.narrowed:
-        related = ("vitest", "related", "--run", "--passWithNoTests", *sel.narrowed)
+        related = ("vitest", "related", "--run", "--passWithNoTests", width, *sel.narrowed)
         return run(_node("npx", *related), _WEBAPP)
-    return run(_node("npm", "run", "test"), _WEBAPP)
+    return run(_node("npm", "run", "test", "--", width), _WEBAPP)
 
 
 def _pytest(_: Selection) -> Outcome:
@@ -1187,11 +1158,6 @@ def _pytest(_: Selection) -> Outcome:
             return code, out
     metered.job = job
     return run(_py("pytest"), REPO)
-
-
-def _suite_reads() -> tuple[str, ...]:
-    """The suite and every module it imports bare off pytest's `pythonpath`."""
-    return (*_ENGINE_RUNTIME, "tests/", *sorted(bare_imports()))
 
 
 # The plug point's one out-of-package optimizer.
@@ -1293,17 +1259,26 @@ def _walk_world(sel: Selection) -> Outcome:
     return run(argv, REPO, PROMPTPOTTER_HOME=str(home))
 
 
-def _offline_run(_: Selection) -> Outcome:
-    # The clone's homes, so a worktree's run answers for main and the worktree deletes clean. One
-    # home per leg: a home stamped for other arguments is rewritten whole.
-    failed: list[tuple[int, str]] = []
-    for leg, flags in ((OFFLINE_RUN, ()), (f"{OFFLINE_RUN}-controlled", ("--controlled",))):
+# The clone's homes, so a worktree's run answers for main and the worktree deletes clean. One
+# home per leg: a home stamped for other arguments is rewritten whole.
+_OFFLINE_HOME = clone_cache() / OFFLINE_RUN
+_CONTROLLED = f"{OFFLINE_RUN}-controlled"
+
+
+def _offline_leg(home: Path, *flags: str) -> Callable[[Selection], Outcome]:
+    def check(_: Selection) -> Outcome:
         argv = [sys.executable, "scripts/offline_run.py", *flags]
-        code, out = run(argv, REPO, PROMPTPOTTER_HOME=str(clone_cache() / leg))
-        if code:
-            failed.append((code, f"{leg}:\n{out}"))
-    if failed:
-        return failed[0][0], "\n".join(out for _, out in failed)
+        return run(argv, REPO, PROMPTPOTTER_HOME=str(home))
+
+    return check
+
+
+def _equals_main(sel: Selection) -> Outcome:
+    argv = [sys.executable, "scripts/offline_run.py", f"--against={sel.against}"]
+    code, out = run(argv, REPO, PROMPTPOTTER_HOME=str(_OFFLINE_HOME))
+    compared = [line for line in out.splitlines() if ": against " in line]
+    if code or not compared or any(not line.endswith(": UNMOVED") for line in compared):
+        return code or 1, out
     return 0, ""
 
 
@@ -1338,24 +1313,28 @@ def _extras(_: Selection) -> Outcome:
     return 0, ""
 
 
+_CORES = os.cpu_count() or 1
+
+# Each `mb` is the job peak measured on a cold cache (after `#`) plus about a quarter; a check
+# at 0 spawns no process.
 CHECKS: tuple[Check, ...] = (
     Check(
         "ruff-format",
         "py",
         _ruff("format", "--check"),
-        on_commit=True,
-        light=True,
+        mb=185,  # 146
+        tier="commit",
         reads=_RUFF_READS,
     ),
-    Check("ruff-check", "py", _ruff("check"), on_commit=True, light=True, reads=_RUFF_READS),
-    Check("deptry", "py", lambda _: run(_py("deptry", "."), REPO)),
-    Check("mypy", "py", _mypy),
+    Check("ruff-check", "py", _ruff("check"), mb=235, tier="commit", reads=_RUFF_READS),  # 186
+    Check("deptry", "py", lambda _: run(_py("deptry", "."), REPO), mb=50),  # 37
+    Check("mypy", "py", _mypy, mb=715),  # 570
     Check(
         "extras",
         "py",
         _extras,
-        on_commit=True,
-        light=True,
+        mb=0,
+        tier="commit",
         reads=(
             "pyproject.toml",
             ".github/workflows/",
@@ -1364,34 +1343,29 @@ CHECKS: tuple[Check, ...] = (
             *_GATE,
         ),
     ),
-    Check(
-        "layering",
-        "py",
-        _layering,
-        on_commit=True,
-        light=True,
-        reads=("promptpotter/", *_GATE),
-    ),
+    Check("layering", "py", _layering, mb=0, tier="commit", reads=("promptpotter/", *_GATE)),
     Check(
         "help-imports",
         "py",
-        _Probe(_HELP_PROBE, judge=_loaded_use_cases, fresh=True),
+        _probe(_HELP_PROBE, _loaded_use_cases),
+        mb=55,  # 43
         reads=_ENGINE_RUNTIME,
     ),
     Check(
         "handler-tables",
         "py",
-        _Probe(_HANDLER_PROBE, judge=_dangling_handlers),
+        _probe(_HANDLER_PROBE, _dangling_handlers),
+        mb=115,  # 92
         reads=_ENGINE_RUNTIME,
     ),
-    Check("instruction-files", "py", _instruction_files, on_commit=True, light=True, reads=_TREE),
-    Check("doc-claims", "py", _doc_claims, on_commit=True, light=True, reads=_TREE),
+    Check("instruction-files", "py", _instruction_files, mb=45, tier="commit", reads=_TREE),  # 33
+    Check("doc-claims", "py", _doc_claims, mb=270, tier="commit", reads=_TREE),  # 215
     Check(
         "surface-ledger",
         "py",
         lambda _: run([sys.executable, "scripts/complexity_ledger.py", "--check"], REPO),
-        on_commit=True,
-        light=True,
+        mb=250,  # 200
+        tier="commit",
         reads=(
             "promptpotter/",
             "tests/",
@@ -1402,65 +1376,85 @@ CHECKS: tuple[Check, ...] = (
         ),
     ),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent.
-    Check("undiffable", "py", _undiffable, on_commit=True, light=True, reads=_TREE),
+    Check("undiffable", "py", _undiffable, mb=0, tier="commit", reads=_TREE),
+    # A regenerator reads what it imports and its own output, so none reads another's: no cycle.
     Check(
         "ts-types",
         "py",
-        _Probe("scripts/build_ts_types.py", judge=_rewrote),
-        on_commit=True,
-        light=True,
-        reads=(*_ENGINE, "webapp/lib/api/types.generated.ts"),
+        _probe("scripts/build_ts_types.py", _rewrote),
+        mb=190,  # 153
+        tier="commit",
+        reads=(*_ENGINE_RUNTIME, "scripts/build_ts_types.py", _GENERATED_TYPES),
+        writes=(_GENERATED_TYPES,),
     ),
     # "web", unlike its siblings: it reads `simple-icons` out of `webapp/node_modules`.
     Check(
         "vendor-marks",
         "web",
-        _Probe("scripts/build_vendor_marks.py", judge=_rewrote),
-        on_commit=True,
-        light=True,
+        _probe("scripts/build_vendor_marks.py", _rewrote),
+        mb=15,  # 12
+        tier="commit",
         reads=(
             "scripts/build_vendor_marks.py",
             "webapp/assets/vendor-marks/",
-            "webapp/components/ui/vendor-marks.generated.ts",
+            _GENERATED_MARKS,
             "webapp/package-lock.json",
             *_GATE,
         ),
+        writes=(_GENERATED_MARKS,),
     ),
     Check(
         "optimizer-schemas",
         "py",
-        _Probe("scripts/build_optimizer_schemas.py", judge=_rewrote),
-        on_commit=True,
-        light=True,
+        _probe("scripts/build_optimizer_schemas.py", _rewrote),
+        mb=80,  # 65
+        tier="commit",
+        reads=(*_ENGINE_RUNTIME, "scripts/build_optimizer_schemas.py"),
+        writes=("promptpotter/assets/optimizers/", "promptpotter/assets/checkin/"),
     ),
     Check(
         "specs",
         "py",
-        _Probe("scripts/build_specs.py", judge=_rewrote),
-        on_commit=True,
-        light=True,
+        _probe("scripts/build_specs.py", _rewrote),
+        mb=165,  # 131
+        tier="commit",
+        reads=(*_ENGINE_RUNTIME, "scripts/build_specs.py", "docs/specs/"),
+        writes=("docs/specs/",),
     ),
-    # Last in the host: it imports every module, which no regenerator before it may see.
     Check(
         "schema-builds",
         "py",
-        _Probe(_SCHEMA_PROBE, judge=_unbuilt_schemas),
+        _probe(_SCHEMA_PROBE, _unbuilt_schemas),
+        mb=230,  # 182
         reads=_ENGINE_RUNTIME,
     ),
     Check(
         "pytest",
         "py",
         _pytest,
-        reads=_suite_reads,
-        ceiling_mb=375,  # 38 MB above a measured warm 337 MB: a 40 MB growth is red
+        mb=375,  # 38 MB above a measured warm 337 MB: a 40 MB growth is red
+        # Every script, as the suite imports them bare off pytest's `pythonpath`.
+        reads=(*ENGINE_RUNTIME, "tests/", "scripts/"),
     ),
     # The script keeps a green per optimizer, keyed on the sources that optimizer reaches, so a run
     # by hand answers for it and a pushed tip reruns only the optimizers whose sources moved.
     Check(
         OFFLINE_RUN,
         "py",
-        _offline_run,
-        landing=True,
+        _offline_leg(_OFFLINE_HOME),
+        mb=1270,  # 1017
+        tier="landing",
+        slots=min(OFFLINE_RUN_CHILDREN_MAX, _CORES),
+        reads=(*OFFLINE_RUN_READS, *_GATE),
+        builds=(str(_OFFLINE_HOME),),
+    ),
+    Check(
+        _CONTROLLED,
+        "py",
+        _offline_leg(clone_cache() / _CONTROLLED, "--controlled"),
+        mb=460,  # 368
+        tier="landing",
+        slots=2,  # its two workspaces
         reads=(*OFFLINE_RUN_READS, *_GATE),
     ),
     # "py" as it runs the engine: a `--web` gate then runs in the pinned venv `walk` serves from.
@@ -1468,57 +1462,73 @@ CHECKS: tuple[Check, ...] = (
         "walk-world",
         "py",
         _walk_world,
-        landing=True,
+        mb=300,  # 237
+        tier="landing",
         reads=(*OFFLINE_RUN_READS, *_GATE),
-        builds=_WALK_WORLD,
+        builds=(_WALK_WORLD,),
     ),
     Check(
         "optimizer-plugin",
         "py",
         _optimizer_plugin,
-        landing=True,
+        mb=275,  # 218
+        tier="landing",
         reads=(*OFFLINE_RUN_READS, f"{_EXAMPLE_PLUGIN_DIR}/", *_GATE),
     ),
-    Check("lockfile", "web", _lockfile, on_commit=True, light=True),
-    Check("eslint", "web", _eslint, on_commit=True, light=True, narrow=_web_modules),
-    Check("vitest", "web", _vitest, alone=True, narrow=_web_modules),
+    Check(
+        "equals-main",
+        "parity",
+        _equals_main,
+        mb=175,  # 140
+        tier="landing",
+        reads=(str(_OFFLINE_HOME),),
+    ),
+    Check("lockfile", "web", _lockfile, mb=0, tier="commit"),
+    Check("eslint", "web", _eslint, mb=2135, tier="commit", narrow=_web_modules),  # 1706
+    Check("vitest", "web", _vitest, mb=735, slots=_VITEST_SLOTS, narrow=_web_modules),  # 586
     Check(
         "vite-build",
         "web",
         lambda _: run(_node("npm", "run", "build"), _WEBAPP),
+        mb=1360,  # 1086
+        slots=2,
         # Inside `out/`, so vite's `emptyOutDir` takes it with the product it vouched for.
-        builds="webapp/out/.built-{key}",
+        builds=("webapp/out/.built-{key}",),
     ),
     # Its incremental `tsconfig.tsbuildinfo` is written only where its content moved.
-    Check("tsc", "web", _tsc, on_commit=True, light=True),
+    Check("tsc", "web", _tsc, mb=735, tier="commit"),  # 586
     Check(
         "playwright",
         "web",
         _playwright,
-        landing=True,
-        alone=True,
-        after=("vite-build", "walk-world"),
-        product=("webapp/out",),
+        mb=1680,  # 1344
+        tier="landing",
+        slots=3,  # its browser and both servers
         # Both servers' backend is the offline world's (`e2e/serve_app.py`); `walk` walks its run.
-        reads=(*_WEBAPP_READS, *OFFLINE_RUN_READS),
+        reads=(*_WEBAPP_READS, *OFFLINE_RUN_READS, "webapp/out/", os.path.join(_WALK_WORLDS, "")),
     ),
-    Check("npm-audit", "release", _npm_audit),
-    Check("pip-audit", "release", _pip_audit),
-    Check("advisories", "release", _advisories),
+    Check("npm-audit", "release", _npm_audit, mb=115),  # 91
+    Check("pip-audit", "release", _pip_audit, mb=165),  # 130
+    Check("advisories", "release", _advisories, mb=115),  # 93
 )
 
 
-def _built_before(check: Check, at: int) -> bool:
-    # A lane runs in `CHECKS` order, and the `alone` checks run after every lane.
-    earlier = {b.name: b for b in CHECKS[:at]}
-    return all(
-        name in earlier
-        and (check.alone or (earlier[name].kind == check.kind and not earlier[name].alone))
-        for name in check.after
-    )
+def _graph_order() -> list[Check]:
+    placed: list[Check] = []
+    while len(placed) < len(CHECKS):
+        ready = [c for c in CHECKS if c not in placed and set(_producers(c, CHECKS)) <= set(placed)]
+        if not ready:
+            cycle = [c.name for c in CHECKS if c not in placed]
+            raise AssertionError(f"the checks' writes and reads form a cycle among {cycle}")
+        placed += ready
+    return placed
 
 
-assert all(_built_before(c, i) for i, c in enumerate(CHECKS))
+_NAMED = {c.name: c for c in CHECKS}
+_graph_order()
+# The products the landing checks read, pinned beneath the derived edges.
+assert {"vite-build", "walk-world"} <= {b.name for b in _builders(_NAMED["playwright"], CHECKS)}
+assert {OFFLINE_RUN} <= {b.name for b in _builders(_NAMED["equals-main"], CHECKS)}
 
 
 @dataclass(frozen=True)
@@ -1542,8 +1552,8 @@ def _execute(check: Check, sel: Selection, store: LastGreen | None) -> Result:
         peak = close_job(job)
     if result.kept:
         return result
-    if check.ceiling_mb is not None and peak is not None and peak > check.ceiling_mb:
-        over = f"peaked at {peak} MB, over its {check.ceiling_mb} MB cap.\n{result.out}"
+    if peak is not None and peak > check.mb:
+        over = f"peaked at {peak} MB, over its {check.mb} MB cap.\n{result.out}"
         return dataclasses.replace(result, rc=result.rc or 1, out=over, peak_mb=peak)
     return dataclasses.replace(result, peak_mb=peak)
 
@@ -1563,41 +1573,52 @@ def _verdict(check: Check, sel: Selection, store: LastGreen | None) -> Result:
             key = (
                 None  # narrowed, or edited while it ran: the verdict is for no tree anyone can name
             )
-        if not rc and key is not None and check.builds:
-            (REPO / check.builds.format(key=key)).touch()
+        for path in check.builds if not rc and key is not None else ():
+            (REPO / path.format(key=key)).touch()
     except Exception as exc:  # a broken check is a red check, never a silent skip
         logger.exception("check %s raised", check.name)
         rc, out, key = 1, f"{type(exc).__name__}: {exc}", None
     return Result(check, rc, out, time.monotonic() - began, key)
 
 
-def _lanes(
-    checks: Sequence[Check], sel: Selection, store: LastGreen | None, overlap: bool
+def _schedule(
+    checks: Sequence[Check], sel: Selection, store: LastGreen | None, free_mb: int
 ) -> list[Result]:
-    """CI's jobs, each serial, side by side where memory holds both: every tool owns its own parallelism."""
-    shared = [c for c in checks if not c.alone]
-    lanes = [[c for c in shared if c.kind == k] for k in dict.fromkeys(c.kind for c in shared)]
-    ran: list[list[Result]] = [[] for _ in lanes]
+    """Each check once its producers are done, beside every other the box's free memory and cores
+    still hold; the widest first. One too big for the box runs when nothing else does."""
+    done: dict[Check, Result] = {}
+    running: set[Check] = set()
+    moved = threading.Condition()
 
-    def lane(at: int) -> None:
-        ran[at] = [_execute(check, sel, store) for check in lanes[at]]
+    def execute(check: Check) -> None:
+        result = _execute(check, sel, store)
+        with moved:
+            running.discard(check)
+            done[check] = result
+            moved.notify()
 
-    # Daemons, so Ctrl+C ends the gate rather than waiting out each lane.
-    threads = [threading.Thread(target=lane, args=(at,), daemon=True) for at in range(len(lanes))]
-    for thread in threads:
-        thread.start()
-        if not overlap:
-            thread.join()
-    for thread in threads:
-        thread.join()
-    ran.append([_execute(check, sel, store) for check in checks if check.alone])
-    return sorted((r for results in ran for r in results), key=lambda r: checks.index(r.check))
+    with moved:
+        while len(done) < len(checks):
+            ready = [
+                c
+                for c in checks
+                if c not in done and c not in running and done.keys() >= set(_producers(c, checks))
+            ]
+            for check in sorted(ready, key=lambda c: (-c.slots, -c.mb)):
+                mb = sum(c.mb for c in running) + check.mb
+                slots = sum(c.slots for c in running) + check.slots
+                if not running or (mb <= free_mb and slots <= _CORES):
+                    running.add(check)
+                    # A daemon, so Ctrl+C ends the gate rather than waiting out each check.
+                    threading.Thread(target=execute, args=(check,), daemon=True).start()
+            moved.wait()
+    return [done[check] for check in checks]
 
 
 # The one remote ref a push proves.
 _PROVEN_REF = "refs/heads/main"
 # What a checkout (a pushed tip, a commit's index) borrows from the clone's main tree, as it reads
-# that tree's venv and greens: the web lane's packages, which a side worktree has none of.
+# that tree's venv and greens: the web checks' packages, which a side worktree has none of.
 _BORROWED = ("webapp/node_modules",)
 # The temp dir is the machine's: the clone's tag keeps one clone's sweep off another's checkouts.
 _CHECKOUT = f"pp-tree-{digest(str(clone_root()).encode()).hex()[:8]}-"
@@ -1725,7 +1746,7 @@ def _prove_tips(refs: str, checks: Sequence[Check]) -> int:
     missing = [str(clone_root() / rel) for rel in _BORROWED if not (clone_root() / rel).is_dir()]
     if tips and missing and any(c.kind == "web" for c in checks):
         print(
-            f"gate[push]: the web lane reads {', '.join(missing)}, which is absent: `npm ci` there"
+            f"gate[push]: the web checks read {', '.join(missing)}, which is absent: `npm ci` there"
         )
         return 1
     failed = 0
@@ -1799,16 +1820,55 @@ def _surplus(uv: str, owner: Path, extras: list[str]) -> list[str]:
 
 
 def _with_builders(checks: list[Check]) -> list[Check]:
-    """`checks` plus every builder their `after` names, transitively, so `--only playwright` never
-    reads a product older than its sources."""
-    named = {c.name: c for c in CHECKS}
+    """`checks` plus every builder of a product they read, transitively, so `--only playwright`
+    never reads a product older than its sources."""
     pulled, todo = list(checks), list(checks)
     while todo:
-        for builder in (named[name] for name in todo.pop().after):
+        for builder in _builders(todo.pop(), CHECKS):
             if builder not in pulled:
                 pulled.append(builder)
                 todo.append(builder)
     return pulled
+
+
+# The kinds that run the engine, so a run holding one runs in the pinned venv.
+_PINNED_KINDS = ("py", "parity")
+
+
+def _kinds(args: argparse.Namespace) -> set[str]:
+    selected = (
+        ("py", args.py),
+        ("web", args.web),
+        ("release", args.release),
+        ("parity", args.against is not None),
+    )
+    return {kind for kind, on in selected if on} or {"py", "web"}
+
+
+def _asked(args: argparse.Namespace) -> set[str]:
+    return {name for value in args.only for name in value.split(",") if name}
+
+
+def _query(args: argparse.Namespace, sel: Selection) -> list[Check]:
+    asked = _asked(args)
+    checks = (
+        [c for c in CHECKS if c.name in asked]
+        if asked
+        else [
+            c for c in CHECKS if c.kind in _kinds(args) and (c.tier == "commit" or not args.staged)
+        ]
+    )
+    if args.staged:
+        checks = [
+            c for c in checks if any(reads(path, c.inputs() or ()) for path in sel.staged_paths)
+        ]
+    if sel.changed is not None and not asked:
+        checks = [
+            c
+            for c in checks
+            if c.tier != "landing" and any(reads(path, c.inputs() or ()) for path in sel.changed)
+        ]
+    return sorted(checks if args.staged else _with_builders(checks), key=CHECKS.index)
 
 
 def _reexec_pinned() -> None:
@@ -1869,10 +1929,7 @@ def _reexec_pinned() -> None:
     raise SystemExit(proc.returncode)
 
 
-def main() -> int:
-    # Tools print ✖ and →, which raise on a cp1252 console while REPORTING the failure.
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-    end_children_with_this_process()
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run every check CI runs.")
     parser.add_argument("--py", action="store_true", help="only the Python half (CI's `check` job)")
     parser.add_argument(
@@ -1906,10 +1963,24 @@ def main() -> int:
         help="checks by name, the flag repeated or the names comma-separated",
     )
     parser.add_argument(
+        "--against",
+        metavar="HOME",
+        type=Path,
+        help="a landing's parity (`equals-main`): the offline run's traces against this home's",
+    )
+    parser.add_argument(
         "--commit-msg",
         metavar="FILE",
         help="the commit-msg hook: a subject opening on ASCII",
     )
+    return parser
+
+
+def main() -> int:
+    # Tools print ✖ and →, which raise on a cp1252 console while REPORTING the failure.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    end_children_with_this_process()
+    parser = _parser()
     args = parser.parse_args()
     if args.commit_msg:
         subject = Path(args.commit_msg).read_bytes().split(b"\n", 1)[0]
@@ -1919,69 +1990,46 @@ def main() -> int:
             return 1
         return 0
 
-    selected = (("py", args.py), ("web", args.web), ("release", args.release))
-    kinds = {k for k, on in selected if on} or {"py", "web"}
-    checks = [c for c in CHECKS if c.kind in kinds and (c.on_commit or not args.staged)]
-    if args.only:
-        asked = {name for value in args.only for name in value.split(",") if name}
-        if unknown := sorted(asked - {c.name for c in CHECKS}):
-            have = ", ".join(c.name for c in CHECKS)
-            parser.error(f"no such check: {', '.join(unknown)} (have: {have})")
-        checks = [c for c in CHECKS if c.name in asked]
-    if not args.push and any(c.kind == "py" for c in _with_builders(checks)):
-        # Before the selection, which parses sources another interpreter's `ast` may not read, and
-        # over the builders the run will pull in: `--web` runs walk-world, a py check.
-        # A push re-execs nowhere: each checkout pins its own, and a path pinned here names this tree.
-        _reexec_pinned()
+    asked = _asked(args)
+    if unknown := sorted(asked - _NAMED.keys()):
+        parser.error(f"no such check: {', '.join(unknown)} (have: {', '.join(_NAMED)})")
+    if args.against is None and any(_NAMED[name].kind == "parity" for name in asked):
+        parser.error("equals-main reads the home `--against` names")
 
     sel = Selection.build(args.staged, args.changed)
-    if args.staged:
-        checks = [
-            c for c in checks if any(reads(path, c.inputs() or ()) for path in sel.staged_paths)
-        ]
-    if sel.changed is not None and not args.only:
-        checks = [
-            c
-            for c in checks
-            if not c.landing and any(reads(path, c.inputs() or ()) for path in sel.changed)
-        ]
-    if not args.staged:
-        checks = _with_builders(checks)
-    checks.sort(key=CHECKS.index)
+    checks = _query(args, sel)
+    # Over the very checks the run executes, builders included: `--web` runs walk-world, a py check.
+    if not args.push and any(c.kind in _PINNED_KINDS for c in checks):
+        # A push re-execs nowhere: each checkout pins its own, and a path pinned here names this tree.
+        _reexec_pinned()
     if args.push:
         return _prove_tips(sys.stdin.read(), checks)
     if args.staged and checks and not _tree_is_index():
         return _prove_index()
-    label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)
+    kinds = "+".join(sorted(_kinds(args)))
+    label = "staged" if args.staged else kinds + ("/changed" * args.changed)
     # One CI runner, one gate.
-    light = all(c.light for c in checks)
-    queue_behind_siblings(f"gate[{label}]", exempt=light or bool(os.environ.get("CI")))
+    unqueued = all(c.tier == "commit" for c in checks)
+    queue_behind_siblings(f"gate[{label}]", exempt=unqueued or bool(os.environ.get("CI")))
     budget = RamBudget.read()
 
     # `--staged` checks less than any key names, so it neither reads nor records a green, and CI
     # keeps none; the walk world is keyed all the same, on the tree that builds it.
     store = None if args.staged else LastGreen.open()
     tree = store or LastGreen.of_tree()
-    [walk_world] = (c for c in CHECKS if c.name == "walk-world")
-    world_key = None if tree is None else walk_world.key(tree)
+    world_key = None if tree is None else _NAMED["walk-world"].key(tree)
     sel = dataclasses.replace(
         sel,
         walk_world=None if world_key is None else Path(_WALK_WORLD.format(key=world_key)),
-        probes=tuple(
-            c.run
-            for c in checks
-            if c.kind == "py"
-            and isinstance(c.run, _Probe)
-            and not (store is not None and c.kept(store, c.key(store)))
-        ),
-        unqueued=light,
+        unqueued=unqueued,
+        against=args.against,
     )
     started = time.monotonic()
     # CI's configuration, never the desk's: no `.env` and no workspace, or a verdict reads either.
     with tempfile.TemporaryDirectory(prefix="pp-gate-", ignore_cleanup_errors=True) as home:
         os.environ["PROMPTPOTTER_HOME"] = home
         os.environ["PROMPTPOTTER_ENV_FILE"] = str(Path(home) / ".env")
-        results = _lanes(checks, sel, store, budget.lanes_overlap())
+        results = _schedule(checks, sel, store, budget.free_mb)
     total = time.monotonic() - started
     if store is not None:
         store.record({r.check.name: None if r.rc else r.key for r in results if not r.kept})
@@ -1991,23 +2039,13 @@ def main() -> int:
 
     for r in results:
         if not r.kept:
-            peak = f"{r.peak_mb} MB" if r.peak_mb else "-"
+            peak = f"{r.peak_mb or '-'} of {r.check.mb} MB"
             verdict = "FAIL" if r.rc else "ok"
-            print(f"{r.check.name:<20}{r.check.kind:<8}{verdict:>5}{r.secs:>8.1f}s{peak:>10}")
-    for host in _HOSTS:
-        peak = f"{host.peak_mb} MB" if host.peak_mb else "-"
-        print(f"{f'({host.probes} in a probe host)':<33}{host.secs:>8.1f}s{peak:>10}")
+            print(f"{r.check.name:<24}{r.check.kind:<8}{verdict:>5}{r.secs:>8.1f}s{peak:>16}")
     for r in failed:
         print(f"\n--- {r.check.name} ---\n{r.out}")
-    lanes = {
-        kind: sum(r.secs for r in results if r.check.kind == kind)
-        for kind in {r.check.kind for r in results}
-    }
-    wall = ", ".join(f"{kind} {secs:.1f}s" for kind, secs in sorted(lanes.items()) if secs)
-    if len(lanes) > 1:
-        turns = "side by side" if budget.lanes_overlap() else "in turn"
-        wall += f"; lanes {turns} at {budget.free_mb} MB free"
-    timed = f"{total:.1f}s" + (f" ({wall})" if wall else "")
+    busy = sum(r.secs for r in results)
+    timed = f"{total:.1f}s ({busy:.1f}s of checks, at {budget.free_mb} MB free on {_CORES} cores)"
     if failed:
         print(
             "\nChange the failing fact where it is DECIDED, not where it shows. Green on rerun, or"

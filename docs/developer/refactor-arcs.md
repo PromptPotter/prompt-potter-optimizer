@@ -24,7 +24,8 @@ order of [`../specs/roadmap.md`](../specs/roadmap.md), whether run by a person o
 ## Landing
 
 - **An arc joins its landing (`batch/<n>`, the chains of one census) on proof, not review**: the full
-  gate green on its tip plus the brief's equals-main checks.
+  gate green on its tip plus the brief's equals-main checks, the offline run's by
+  `gate.py --against <main's home>` ([`offline-run.md`](offline-run.md) § Proving parity).
 - **A landing on main closes on CI green on its commit**: the push gate proves the desk's platform
   alone, and states main's CI as it pushes (`gate.py::_ci_of`); a red main is the next landing's fix.
 - **A row that moves a treatment digest lands with the chain that owns its file**, with decisions and

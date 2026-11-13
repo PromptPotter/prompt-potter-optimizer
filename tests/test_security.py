@@ -31,6 +31,7 @@ from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple, cast, override
 
+import gate
 import pytest
 from factories import (
     PROMPT_INFO,
@@ -4206,3 +4207,25 @@ async def test_one_refused_start_run_asked_in_process_is_the_value_every_door_re
         with pytest.raises(SystemExit):
             campaign_runner.main()
         assert sentence in capsys.readouterr().err, f"`{' '.join(argv)}` was not refused in it"
+
+
+def test_a_webapp_gate_runs_the_engine_checks_it_pulls_in_inside_the_pinned_venv() -> None:
+    # CI's webapp job asks no engine check, yet playwright reads the walk world walk-world builds.
+    pulled = gate._query(gate._parser().parse_args(["--web"]), gate.Selection(False, (), ()))
+    assert "walk-world" in {c.name for c in pulled}, "a --web gate dropped the walk world it reads"
+    assert any(c.kind in gate._PINNED_KINDS for c in pulled), "a --web gate re-execs nowhere"
+
+
+def test_a_declared_write_is_what_orders_two_gate_checks() -> None:
+    # An undeclared read is invisible to the gate, so the declared write must be the whole edge.
+    def green(_: gate.Selection) -> tuple[int, str]:
+        return 0, ""
+
+    reader = gate.Check("reader", "py", green, mb=0, reads=("docs/specs/", "webapp/out/"))
+    writer = gate.Check("writer", "py", green, mb=0, reads=("scripts/",))
+    for declared in (
+        dataclasses.replace(writer, writes=("docs/specs/",)),
+        dataclasses.replace(writer, builds=("webapp/out/.built-{key}",)),
+    ):
+        assert gate._producers(reader, (declared, reader)) == (declared,), f"{declared} unordered"
+    assert gate._producers(reader, (writer, reader)) == (), "an undeclared write ordered"

@@ -9,7 +9,6 @@ import json
 import os
 import sys
 import sysconfig
-import tomllib
 from collections.abc import Mapping, Sequence
 from functools import cache
 from pathlib import Path
@@ -115,25 +114,6 @@ def imported(path: Path) -> set[str]:
     return {modules[name] for name in _import_names(path) if name in modules}
 
 
-@cache
-def bare_imports() -> frozenset[str]:
-    """What the suite imports bare off pytest's `pythonpath`, outside the suite itself."""
-    config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
-    path = config["tool"]["pytest"]["ini_options"]["pythonpath"]
-    todo = sorted((REPO / "tests").glob("*.py"))
-    seen: set[Path] = set()
-    while todo:
-        module = todo.pop()
-        if module in seen:
-            continue
-        seen.add(module)
-        for name in _import_names(module):
-            todo.extend(p for d in path if (p := REPO / d / f"{name}.py").is_file())
-    return frozenset(
-        rel for p in seen if not (rel := p.relative_to(REPO).as_posix()).startswith("tests/")
-    )
-
-
 class LastGreen:
     """One store per clone: a key is content, so a green any worktree recorded holds in every other."""
 
@@ -164,16 +144,7 @@ class LastGreen:
         code, listed = git("ls-files", "-co", "--exclude-standard", "-z")
         return None if code else cls(listed, clone_cache() / "greens.json")
 
-    def key(
-        self, prefixes: Sequence[str], products: Sequence[str] = (), without: Sequence[str] = ()
-    ) -> str:
-        # git ignores a built product, so it is walked.
-        built = sorted(
-            Path(root, name).relative_to(REPO).as_posix()
-            for product in products
-            for root, _, names in os.walk(REPO / product)
-            for name in names
-        )
+    def key(self, prefixes: Sequence[str], without: Sequence[str] = ()) -> str:
         skipped = tuple(without)
         sources = (
             rel for rel in self._files if reads(rel, prefixes) and not rel.startswith(skipped)
@@ -182,7 +153,7 @@ class LastGreen:
             self._tools,
             *(
                 rel.encode() + b"\0" + file_digest(REPO / rel)
-                for rel in (*self._INSTALLED, *sources, *built)
+                for rel in (*self._INSTALLED, *sources)
             ),
         ).hex()
 

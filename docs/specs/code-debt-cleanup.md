@@ -1602,9 +1602,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **`scripts/build_optimizer_schemas.py` names its outputs by absolute path.** Action: repo-relative
   wherever the output is in the checkout. **Rides with:** rel 1. **Re-test:** every regenerator prints
   `wrote|unchanged <repo-relative path>`.
-- **The gate's `py` lane and "needs the pinned venv" are one flag**: `scripts/gate.py::main` (`:1868`)
-  keys on `kind == "py"`, not `_reexec_pinned`. Action: one fact for the venv need, apart from the lane. **Rides with:** rel 2.
-  **Re-test:** `python scripts/gate.py --py` lists `walk-world`.
 - **The git hooks call bare `python`**: `.githooks/pre-commit`, `commit-msg` and `pre-push` each
   `exec python scripts/gate.py …` (`commit-msg:5`, `pre-commit:10`, `pre-push:8`); `gate.py` imports no
   `promptpotter` at module level, so the real failure is a `python` without PyYAML (`gate.py:30`), though
@@ -1644,6 +1641,12 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **The walk world keyed by its check's key has no test for the key-is-None path** (`scripts/gate.py`,
   `6381c24b9`: a world is never built or pruned under no key). Action: a test holds that path. **Rides
   with:** rel 2. **Re-test:** a gate test runs the `walk-world` check with no key.
+- **Two gates on one desk share playwright's port and the clone's `.gate_cache` homes, and `CI` alone
+  waives the clone lock** (`scripts/gate.py::main`, `processes.py::queue_behind_siblings`): a `CI=1`
+  gate on the desk collided with a pre-push gate (port 8123 in use; `offline_run.py::prepared_home`'s
+  rmtree, WinError 32). The DAG schedules inside one gate only. Action: the waiver keys on the runner,
+  not an env var a desk sets. **Rides with:** rel 2. **Re-test:** a `CI=1` gate beside `gate.py --push`
+  queues.
 - **Unverified, for the next change to each file**: `shell/CriticalAlertBanner` builds `Said` rows in the
   browser; `ViewTabs.show` is many `open`/`close` calls, not one workspace act;
   `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after; `FileTree` mounts a 2 s

@@ -143,6 +143,8 @@ if TYPE_CHECKING:
 
 DATASET = "justlogic/d234"
 STAMP = "offline-run.json"
+# The key a workspace went green under, written last, so a killed or rewritten one holds none.
+GREEN = "green.key"
 TRACE = "trace.json"
 # Set in a leg's env under `--coverage`: the directory its process files the lines it ran into.
 COVERAGE = "PROMPTPOTTER_OFFLINE_COVERAGE"
@@ -1727,8 +1729,10 @@ def optimizer_keys(kept: LastGreen, names: Sequence[str], *, controlled: bool) -
     return {name: kept.key(OFFLINE_RUN_READS, without=skipped.get(name, ())) for name in names}
 
 
-def still_green(home: Path, run: str, kept: LastGreen, keys: dict[str, str]) -> set[str]:
-    return {n for n, k in keys.items() if kept.holds(f"{run} {n}", k) and (home / n).is_dir()}
+def still_green(home: Path, keys: dict[str, str]) -> set[str]:
+    # In the workspace, never the clone's store: another tree rewriting the shared home takes it.
+    stamps = {n: home / n / GREEN for n in keys}
+    return {n for n, k in keys.items() if stamps[n].is_file() and stamps[n].read_text("utf-8") == k}
 
 
 def holds_run(home: Path, run: str) -> bool:
@@ -2161,18 +2165,17 @@ def main() -> int:
     )
     kept = None if args.coverage else LastGreen.open()
     keys = {} if kept is None else optimizer_keys(kept, names, controlled=args.controlled)
-    held = args.against is None and holds_run(home, run)
-    green = still_green(home, run, kept, keys) if held and kept is not None else set()
+    held = holds_run(home, run)
+    green = still_green(home, keys) if held else set()
     for name in sorted(green):
         print(f"{name}: unchanged since green -- {home / name}")
     due = [name for name in names if name not in green]
     if not due:
+        if args.against is not None:
+            print("\n".join(moved_against(home, args.against, names)))
         return 0
     stamp: dict[str, object] = {"offline": True, "note": LABEL, "run": run, "workspaces": names}
     queue_behind_siblings("offline_run")
-    if kept is not None:
-        # Unfiled first, so a run killed while it rewrites a workspace leaves no green behind.
-        kept.record(dict.fromkeys((f"{run} {name}" for name in due), None))
     covered = prepared_home(home, stamp, due, held=held, coverage=args.coverage)
     end_children_with_this_process()
     # One workspace each: a shared archive and δ ruler let one optimizer's run move another's.
@@ -2296,16 +2299,17 @@ def main() -> int:
         failed[name] += not wounded_leg(name, home / name, wound)
     said_leg(failed, "potter", home / "potter" / L4, nesting, "an L4 campaign over inner runs")
     if args.against is not None:
-        print("\n".join(moved_against(home, args.against, due)))
+        print("\n".join(moved_against(home, args.against, names)))
     if args.controlled and not any(failed.values()):
         print(controlled_reading(home, arm_names))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
     if covered is not None:
         print("\n".join(coverage_by_package(covered)))
-    # Filed under the flags it ran with, and only where the sources read the same as before it.
+    # Under the home its flags stamped, and only where the sources read the same as before it.
     if kept is not None:
         now = optimizer_keys(kept, due, controlled=args.controlled)
-        kept.record({f"{run} {n}": keys[n] for n in due if not failed[n] and keys[n] == now[n]})
+        for name in (n for n in due if not failed[n] and keys[n] == now[n]):
+            (home / name / GREEN).write_text(keys[name], "utf-8")
     return 1 if any(failed.values()) else 0
 
 
