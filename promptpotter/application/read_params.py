@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import AsyncIterator
-from typing import Annotated, Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
-from pydantic import AfterValidator, Field
+from pydantic import Field
 
 from promptpotter.application import account, cycle_files
 from promptpotter.application.backend_listing import (
@@ -108,7 +108,7 @@ from promptpotter.domain.cycle_paths import (
     parse_lens,
     parse_sample_ids,
 )
-from promptpotter.domain.dataset_name import validate_dataset_name
+from promptpotter.domain.dataset_name import DatasetName
 from promptpotter.domain.export import ExportTier
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.hierarchy import (
@@ -134,10 +134,6 @@ _DESCEND = (
 
 # Filled as each model declares the row it answers: the ONE row → params table.
 PARAMS_FOR_READ: dict[ReadKind, type[ReadParams]] = {}
-
-
-# Parsed where the params parse: a malformed name is the caller's 422, never a store's 500.
-DatasetName = Annotated[str, AfterValidator(validate_dataset_name)]
 
 
 class ReadParams(StrictModel):

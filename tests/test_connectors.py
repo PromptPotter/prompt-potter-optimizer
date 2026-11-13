@@ -98,9 +98,37 @@ def _dspy_cell(program: dspy_module.DspyProgram, max_calls: int, ledger: Path) -
     return dict(data)
 
 
+def _priced(offline: Router) -> None:
+    offline.rates = {"openai/gpt-x": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6}}
+    assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
+
+
+def _program(lm: Any, calls: int, metric: Any) -> dspy_module.DspyProgram:
+    """A student of *calls* `Predict` steps, each sending on *lm*, judged by *metric*."""
+    import dspy  # extras: dspy
+
+    class _Calls(dspy.Module):  # type: ignore[misc]
+        def __init__(self, calls: int) -> None:
+            super().__init__()
+            self.steps = [dspy.Predict("question -> answer") for _ in range(calls)]
+            for step in self.steps:
+                step.lm = lm
+
+        def forward(self, question: str) -> Any:
+            for step in self.steps:
+                answer = step(question=question)
+            return answer
+
+    example = dspy.Example(question="2+2?", answer="4").with_inputs("question")
+    return dspy_module.DspyProgram(student=_Calls(calls), metric=metric, examples=[example])
+
+
 # 1. A connector's cell survives its backend's quirks and its host's state, and bills every send.
-def test_connector_cells(offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # A TermNorm reload under sixteen cells in flight re-sends the terms once and fails no cell.
+
+
+def test_a_termnorm_reload_under_sixteen_cells_resends_the_terms_once_and_fails_no_cell(
+    offline: Router, tmp_path: Path
+) -> None:
     client = backend_client(tmp_path, session_factory=TermNormSession, max_cells_in_flight=16)
     rows = samples(16)
     offline.backend.truth = {s.query: s.ground_truth for s in rows}
@@ -130,52 +158,47 @@ def test_connector_cells(offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_p
     assert offline.backend.asked.count("/sessions") == 1, "one reload re-sent the terms per cell"
     assert offline.backend.asked.count("/matches") == 2 * len(rows), "a recovered cell resent twice"
 
-    # A resent DSPy call spends one of its program's `max_calls`.
-    import dspy  # extras: dspy
+
+def test_a_resent_dspy_call_spends_one_of_its_programs_max_calls(
+    offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from dspy import lm15
 
-    offline.rates = {"openai/gpt-x": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6}}
-    assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
+    _priced(offline)
     monkeypatch.setattr(dspy_module, "held_wait", _no_wait)
     sends: list[int] = []
     lm = _scripted_lm(sends, [lm15.ServerError("boom", status=500)])
-
-    class _Calls(dspy.Module):  # type: ignore[misc]
-        def __init__(self, calls: int) -> None:
-            super().__init__()
-            self.steps = [dspy.Predict("question -> answer") for _ in range(calls)]
-            for step in self.steps:
-                step.lm = lm
-
-        def forward(self, question: str) -> Any:
-            for step in self.steps:
-                answer = step(question=question)
-            return answer
-
-    example = dspy.Example(question="2+2?", answer="4").with_inputs("question")
-    program = dspy_module.DspyProgram(
-        student=_Calls(2),
-        metric=lambda ex, pred: pred.answer == ex.answer,
-        examples=[example],
-    )
+    program = _program(lm, 2, lambda ex, pred: pred.answer == ex.answer)
     data = _dspy_cell(program, 2, tmp_path / "resent.jsonl")
     assert data[dspy_module.SCORE_KEY] == 1.0, "a 5xx spent the call its resend answered"
     assert len(sends) == 3, f"{len(sends)} sends: two calls, one resent once"
     assert len(_lm_bills(tmp_path / "resent.jsonl")) == 2, "an answered call left no bill"
 
-    # An LLM-judge metric's send is the cell's: billed beside the program's.
+
+def test_an_llm_judge_metrics_send_is_the_cells_billed_beside_the_programs(
+    offline: Router, tmp_path: Path
+) -> None:
+    import dspy  # extras: dspy
+
+    _priced(offline)
+    sends: list[int] = []
     judge = _scripted_lm(sends, [])
 
     def judged(_example: Any, prediction: Any) -> float:
         return float(bool(dspy.settings.lm(f"Is {prediction.answer} right?")))
 
-    program = dspy_module.DspyProgram(student=_Calls(1), metric=judged, examples=[example])
+    program = _program(_scripted_lm(sends, []), 1, judged)
     with dspy.context(lm=judge):
         data = _dspy_cell(program, 2, tmp_path / "judged.jsonl")
     assert data[dspy_module.SCORE_KEY] == 1.0, "the judge's verdict is not the cell's score"
     assert len(_lm_bills(tmp_path / "judged.jsonl")) == 2, "the judge's send went unbilled"
 
-    # The host's state is read per cell: an image rebuilt under its tag, a re-pinned roster.
+
+# The host's state is read per cell.
+@pytest.mark.usefixtures("offline")
+def test_a_dbllmbench_image_rebuilt_under_its_tag_fails_the_cell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     built = ["abc1234"]
 
     async def inspected(*_args: str, **_kw: Any) -> tuple[int, str]:
@@ -187,6 +210,12 @@ def test_connector_cells(offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_p
     built[0] = "f00d000"
     with pytest.raises(CellInfrastructureError):
         jumping_clock(dbllmbench._check_image(image))
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_harbor_roster_repinned_under_a_live_server_resolves_as_pinned(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(harbor, "_ROSTER_DIR", tmp_path)
     resolve = harbor.CONNECTOR.resolve_experiment
     assert resolve is not None
@@ -200,7 +229,13 @@ def test_connector_cells(offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_p
         resolved = [t["id"] for t in resolve(stores, panel)["tasks"]]
         assert resolved == pinned, f"a live server resolved {resolved} off a re-pinned roster"
 
-    # An n8n cell is keyed on the URL the wire posts to: a trailing `/` in `.env` re-keys none.
+
+# An n8n cell is keyed on the URL the wire posts to.
+@pytest.mark.usefixtures("offline")
+def test_a_trailing_slash_on_the_n8n_harness_url_rekeys_no_cell(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stores = workspace(tmp_path)
     harness = n8n.CONNECTOR.identity_config
     assert harness is not None
     keys = []

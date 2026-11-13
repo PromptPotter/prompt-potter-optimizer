@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.store.io import rmtree_robust
+from promptpotter.infrastructure.store.io import rmtree_robust, validate_path_component
 from promptpotter.shared.errors import CellInfrastructureError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping
+    from collections.abc import Iterator, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +23,10 @@ logger = logging.getLogger(__name__)
 CONTAINER_PRODUCER = f"{os.getpid():x}{uuid4().hex[:4]}"
 _PRODUCER_LABEL = "com.promptpotter.producer"
 _COMPOSE_FILES_LABEL = "com.docker.compose.project.config_files"
-_PRODUCER_LOCK = ".producer.lock"
-# ONE home: under a second, the sweep reaps a live sibling as scratch-less. Temp dir: MAX_PATH.
-_PRODUCERS_HOME = Path(tempfile.gettempdir()) / "promptpotter-cells"
-PRODUCER_SCRATCH = _PRODUCERS_HOME / CONTAINER_PRODUCER
-_SWEPT: set[Path | None] = set()
+# Scratch only, in the temp dir for MAX_PATH: a private /tmp is per process, so no liveness lives here.
+_SCRATCH_HOME = Path(tempfile.gettempdir()) / "promptpotter-cells"
+PRODUCER_SCRATCH = _SCRATCH_HOME / CONTAINER_PRODUCER
+_SWEPT: set[tuple[Path, Path | None]] = set()
 
 PACKAGE_CACHE = "promptpotter-package-cache"
 _PACKAGE_CACHE_PORT = 3142
@@ -135,10 +134,25 @@ def forget_package_cache() -> None:
     _package_cache_running = False
 
 
-def _dead_producers(home: Path, labelled: Iterable[str]) -> set[str]:
-    tokens = {*labelled, *(d.name for d in home.iterdir() if d.is_dir())} - {CONTAINER_PRODUCER}
+def _dead_producers(home: Path) -> set[str]:
+    # Only a token this home minted is judged: another home's lock is not here to read.
+    locks = home.glob("*.lock") if home.is_dir() else ()
     # The lock, never an mtime: a cell runs for minutes writing nothing.
-    return {token for token in tokens if not producer_lock.held(home / token / _PRODUCER_LOCK)}
+    return {
+        lock.stem
+        for lock in locks
+        if lock.stem != CONTAINER_PRODUCER and not producer_lock.held(lock)
+    }
+
+
+def _forget_producers(home: Path, dead: set[str]) -> None:
+    scratch = _SCRATCH_HOME.iterdir() if _SCRATCH_HOME.is_dir() else ()
+    for left in [d for d in scratch if d.name in dead]:
+        with contextlib.suppress(OSError):
+            rmtree_robust(left)
+    for token in dead:
+        with contextlib.suppress(OSError):
+            (home / f"{token}.lock").unlink()
 
 
 async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> None:
@@ -151,30 +165,35 @@ async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> No
     gone: list[str] = []
     for line in out.splitlines() if code == 0 else []:
         cid, _, rest = line.partition("|")
-        token, _, compose_files = rest.partition("|")
+        label, _, compose_files = rest.partition("|")
         if not cid:
             continue
-        if token.strip():
-            by_token.setdefault(token.strip(), []).append(cid)
+        if token := label.strip():
+            # Any container may carry the label: a token no path component spells is dropped.
+            with contextlib.suppress(ValueError):
+                by_token.setdefault(validate_path_component(token), []).append(cid)
         # Unlabelled yet naming our overlay is nobody's: nothing this code starts is unlabelled.
         elif ours is not None and ours in compose_files.lower():
             gone.append(cid)
-    for token in await asyncio.to_thread(_dead_producers, home, by_token):
-        gone += by_token.get(token, [])
-        with contextlib.suppress(OSError):
-            await asyncio.to_thread(rmtree_robust, home / token)
+    dead = await asyncio.to_thread(_dead_producers, home)
+    gone += [cid for token in dead for cid in by_token.get(token, [])]
     if gone:
-        await docker("rm", "--force", *gone, timeout=120)
+        code, out = await docker("rm", "--force", *gone, timeout=120)
+        if code != 0:
+            logger.debug("could not remove what earlier runs left: %s", out[-300:])
+            return
         logger.info("removed %d container(s) left by a run that is gone", len(gone))
+    await asyncio.to_thread(_forget_producers, home, dead)
 
 
-async def claim_machine(*, compose_overlay: Path | None) -> None:
-    if compose_overlay in _SWEPT:
+async def claim_machine(home: Path, *, compose_overlay: Path | None) -> None:
+    if (home, compose_overlay) in _SWEPT:
         return
-    producer_lock.take(PRODUCER_SCRATCH / _PRODUCER_LOCK)
-    _SWEPT.add(compose_overlay)
+    producer_lock.take(home / f"{CONTAINER_PRODUCER}.lock")
+    PRODUCER_SCRATCH.mkdir(parents=True, exist_ok=True)
+    _SWEPT.add((home, compose_overlay))
     try:
-        await reap_dead_producers(_PRODUCERS_HOME, compose_overlay=compose_overlay)
+        await reap_dead_producers(home, compose_overlay=compose_overlay)
     except (OSError, TimeoutError) as exc:
         # Not re-raised into `machine_step`: a failed sweep leaves junk, never a failed cell.
         logger.debug("could not reap what earlier runs left: %s", exc)

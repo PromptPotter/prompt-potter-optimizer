@@ -100,6 +100,7 @@ from promptpotter.domain.campaign_config import (
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
@@ -147,6 +148,7 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RunPhaseRecord,
+    RunWiringRecord,
     SampleScoredRecord,
     TokenUsageRecord,
 )
@@ -380,6 +382,7 @@ def spend_book(
             key_source="host",
             bound=reserve if enclosing is None else Budget(),
             resource=None,
+            node=None,
             ledger=None,
         )
     )
@@ -786,6 +789,21 @@ def minted_campaign(
             bench_defaults_pin=bench_defaults_pin(),
         ),
         **fields,
+    )
+
+
+def run_wiring() -> RunWiringRecord:
+    """A launch's wiring on one cell at a time, declaring no limit: what a dashboard folds first."""
+    return RunWiringRecord(
+        round_cells_ceiling=1,
+        display_metric="fitness",
+        elects_on="fitness",
+        max_cells_in_flight=1,
+        measured_unit="sample",
+        measurement_node="l1_score",
+        run_limits=RunLimits(),
+        defaults_drift=None,
+        backend_revision=None,
     )
 
 

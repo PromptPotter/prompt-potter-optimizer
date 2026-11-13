@@ -794,6 +794,17 @@
                 ],
                 "title": "Ledger"
               },
+              "node": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Node"
+              },
               "parent": {
                 "anyOf": [
                   {
@@ -832,6 +843,7 @@
               "key_source",
               "bound",
               "resource",
+              "node",
               "ledger"
             ],
             "title": "Hold",

@@ -497,11 +497,14 @@ def dataset_panel_rows(
 
 def readable_task_context(stores: Stores, dataset: ResolvedDataset) -> TaskDecomposition:
     """An upload's own framing wins; an install's yields to the one this tenant decomposed or
-    edited, which the read-only tier cannot hold. A blank record is absent."""
+    edited, which the read-only tier cannot hold. A blank record is absent; one over budget is
+    refused here, the one read of either tier."""
     committed = read_dataset_framing(dataset).framing
     decomposed = stores.tenant_datasets.load_task_context(dataset.name)
     tiers = (committed, decomposed) if dataset.tier == "yours" else (decomposed, committed)
-    return next((framing for framing in tiers if framing), TaskDecomposition())
+    framing = next((held for held in tiers if held), TaskDecomposition())
+    framing.check_budget(source=f"{dataset.name}'s committed framing")
+    return framing
 
 
 def _install_names(root: Path) -> list[str]:

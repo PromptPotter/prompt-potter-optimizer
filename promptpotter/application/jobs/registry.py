@@ -41,7 +41,12 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.refusal import Refusal
-from promptpotter.infrastructure.store.io import open_text_robust, unlink_robust, write_json
+from promptpotter.infrastructure.store.io import (
+    open_text_robust,
+    unlink_robust,
+    validate_path_component,
+    write_json,
+)
 from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
@@ -464,10 +469,11 @@ class JobRegistry:
         write_json(at or self._path(job.job_id), JOB_ADAPTER.dump_python(job, mode="json"))
 
     def _path(self, job_id: str) -> Path:
-        if not job_id or "/" in job_id or "\\" in job_id or job_id.startswith("."):
+        try:
+            return self._dir / f"{validate_path_component(job_id)}.json"
+        except ValueError:
             # Names no file this registry could hold, so no job: refused as any absent one is.
-            raise NotFoundError(f"no job {job_id!r}")
-        return self._dir / f"{job_id}.json"
+            raise NotFoundError(f"no job {job_id!r}") from None
 
     def _ended_path(self, job_id: str) -> Path:
         return self._path(job_id).parent / ENDED_JOBS_DIR / f"{job_id}.json"

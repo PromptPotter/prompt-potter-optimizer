@@ -178,6 +178,9 @@ class LiveCycle(NamedTuple):
     def standing(self) -> Budget:
         return self.campaigns.read_standing_budget(self.hop).budget
 
+    def overshoot(self) -> bool:
+        return self.campaigns.read_standing_budget(self.hop).overshoot
+
     def share(self) -> Budget:
         """The most the cycle may have metered of its campaign's ceiling, which a reshare moves."""
         share = self.campaigns.last(self.hop, CycleShareRecord)
@@ -394,7 +397,7 @@ class SpendBook:
     def hold(
         self,
         bound: SendBound,
-        kind: TokenUsageKind,
+        label: CallLabel,
         *,
         what: str,
         paid_by: KeySource,
@@ -404,7 +407,7 @@ class SpendBook:
         it, then one write on the account, under its run's open cell or else its job."""
         parent = draws_on(self)
         money = self._money()
-        for book, filed_as in self._levels(kind):
+        for book, filed_as in self._levels(label.kind):
             past = book._past_cells(money, bound, parent)
             book.refuse_unless_room(past, filed_as, what, paid_by)
         hold_id = uuid.uuid4().hex
@@ -414,11 +417,27 @@ class SpendBook:
                 parent=parent,
                 key_source=paid_by,
                 bound=bound.budget,
-                resource=kind,
+                resource=label.kind,
+                node=label.node,
                 ledger=ledger,
             )
         )
         return hold_id
+
+    def expected(self, bound: SendBound, node: str) -> SendBound:
+        """What a call of *node* holds: its worst case *bound*, or with the cycle's `overshoot` on
+        the mean its node's calls in this run billed, on each axis *bound* bounds, never past it."""
+        if self.cycle is None or not self.cycle.overshoot():
+            return bound
+        if (calls := self._money().by_node.get((self.hold_id, node))) is None:
+            return bound
+        usd, tokens = calls.mean
+        return SendBound(
+            input_tokens=0,
+            output_tokens=None if bound.tokens is None else min(bound.tokens, tokens),
+            usd=None if bound.usd is None else min(bound.usd, usd),
+            unpriced=bound.unpriced,
+        )
 
     def _past_cells(self, money: Money, bound: SendBound, parent: str) -> SendBound:
         """What *bound* asks of this book past what each cell between *parent* and its job still
@@ -601,7 +620,7 @@ def reserved(label: CallLabel, bound: SendBound, *, paid_by: KeySource) -> Itera
     label = filed(label)
     book = require_spend_book(label.node)
     billing_ledger(label.node)
-    cell = book.hold(bound, label.kind, what=label.node, paid_by=paid_by, ledger=None)
+    cell = book.hold(bound, label, what=label.node, paid_by=paid_by, ledger=None)
     try:
         with scoped(reservation=cell):
             yield
@@ -653,8 +672,8 @@ class Admission:
         self.closed = False
         what = f"{label.node} on {model}" if model else label.node
         self._hold_id = book.hold(
-            bound,
-            label.kind,
+            book.expected(bound, label.node),
+            label,
             what=what,
             paid_by=paid_by,
             ledger=self._charges.held_on((self._root.ledger or self._ledger).path),

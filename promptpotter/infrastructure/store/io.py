@@ -15,7 +15,7 @@ from typing import IO, Any, NamedTuple
 import yaml
 
 from promptpotter.config.settings import LOCK_TIMEOUT
-from promptpotter.domain.cycle_paths import ALL_DOTS_RE, ID_COMPONENT_RE
+from promptpotter.domain.cycle_paths import ID_COMPONENT_RE
 from promptpotter.shared.errors import ConflictError
 
 if sys.platform == "win32":
@@ -76,12 +76,10 @@ else:
 
 
 def validate_path_component(name: str) -> str:
-    # An all-dots component (`.`/`..`) matches the dot-allowing regex but is a traversal segment.
-    if not name or ALL_DOTS_RE.match(name) or not ID_COMPONENT_RE.match(name):
+    if not ID_COMPONENT_RE.fullmatch(name):
         raise ValueError(
-            f"Invalid path component: {name!r}. "
-            "Only alphanumerics, hyphens, underscores, and dots are allowed "
-            "(and not an all-dots traversal segment)."
+            f"Invalid path component: {name!r}. Only alphanumerics, hyphens, underscores and "
+            "dots, never ending on a dot, and no Windows device name (CON, NUL, COM1, ...)."
         )
     return name
 

@@ -20,9 +20,9 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Coroutine, Iterator, Sequence
 from pathlib import Path
-from typing import Any, cast, get_args
+from typing import Any, NamedTuple, cast, get_args
 from unittest import mock
 
 import httpx
@@ -46,10 +46,12 @@ from factories import (
     minted_dataset,
     on_jumping_clock,
     pipeline_schema,
+    run_wiring,
     samples,
     score_summary,
     scorer_of,
     spend_book,
+    stored_campaign,
     workspace,
 )
 from offline_world import NOT_A_KEY, PROVIDER_KEYS, Hang, Router, Said, completion
@@ -75,6 +77,7 @@ from promptpotter.application.head_to_head_price import (
     optimizer_round_price,
     priced_head_to_head,
 )
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs import interlock, mint, quota
 from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.account_activity import account_activity
@@ -141,12 +144,13 @@ from promptpotter.application.scoring.search_point_scorer import (
     score_search_point,
 )
 from promptpotter.application.scoring.seed_screen import screen_inner_seeds
+from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.arms import CutKind
 from promptpotter.domain.bench import BenchRefusal
-from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.campaign import Optimize, RunDeclaration
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     CycleConfig,
@@ -189,6 +193,7 @@ from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     PipelineNode,
+    PipelineSchema,
     WebSpendBound,
 )
 from promptpotter.domain.results import CycleResult
@@ -399,10 +404,12 @@ def _budgeted(budget: Budget) -> CampaignConfig:
     return config.model_copy(update={"optimization": optimization})
 
 
-def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Budget) -> Budget:
+def _change_run_limits(
+    dispatcher: CommandDispatcher, hop: CycleHop, budget: Budget, *, overshoot: bool | None = None
+) -> Budget:
     """The ceiling the change armed: the campaign's money and the cycle's own axes."""
     payload = ChangeRunLimitsPayload(
-        campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget
+        campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget, overshoot=overshoot
     )
     dispatched = DispatchedToCycle(dispatcher, payload, "limits", minted_campaign(hop), hop)
 
@@ -461,9 +468,9 @@ _EVERY_FIELD: dict[str, Any] = {
 }
 
 
-@pytest.mark.usefixtures("run_bound")
-async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_rate_belongs_to_its_provider_model_pair_and_a_cache_read_reprices_inside_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def row(input_usd: float, output_usd: float, lister: str, **tiers: float) -> dict[str, Any]:
         return {
@@ -540,6 +547,9 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             "no cache tier on the row: the read bills at the INPUT price, never a rate nobody sourced"
         )
 
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_wire_cost_reaches_the_reply_and_a_bill_sums_the_parts_that_named_one() -> None:
     # OpenRouter's real shape: `cost` rides as an EXTRA on the usage object.
     priced = {
         "prompt_tokens": 263,
@@ -571,7 +581,11 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             f"{reported}: a bill is the sum of the parts that named one, absent only when none did"
         )
 
-    # What a client cannot send never reaches the provider; the gateway caps the price it pays.
+
+@pytest.mark.usefixtures("run_bound")
+async def test_a_send_carries_only_what_its_client_sends_under_the_gateways_price_cap(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
     async def ceiling(*_: Any, **__: Any) -> RateCeiling:
         return RateCeiling(tiers=(PriceTier(0, 0.5, 0.25),))
 
@@ -603,7 +617,11 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
                 "or the gateway sent no price ceiling"
             )
 
-    # A cell that ran without a grade still bills what it spent; a replay states its row's price.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+async def test_an_ungraded_cell_bills_what_it_spent_and_a_replay_states_its_rows_price(
+    tmp_path: Path,
+) -> None:
     async def ran_ungraded(*_args: Any) -> dict[str, Any]:
         spent = {"agent": {"input": 1200, "output": 300, "estimated": False, "cost_usd": 0.0076}}
         raise CellUnscoreableError("verifier timed out", spent=spent)
@@ -639,7 +657,11 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         "a replay states the price its row recorded: re-priced, incurred cost moves with each refresh"
     )
 
-    # The replay of a grading is still METERED, with no charge: its cost ignores cache history.
+
+@pytest.mark.usefixtures("run_bound")
+async def test_a_replayed_grading_is_metered_uncharged_and_an_empty_reply_never_cached(
+    tmp_path: Path, offline: Router
+) -> None:
     calls, metered, score = await _grade_twice(tmp_path / "judge", offline, reply="A")
     blank_calls, _, blank = await _grade_twice(tmp_path / "blank", offline, reply="   ")
     assert score.score == 1.0, "the replayed reply must grade identically, not merely cheaply"
@@ -947,13 +969,29 @@ async def _round(
     }
 
 
-@pytest.mark.usefixtures("run_bound")
-@on_jumping_clock
-async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resume(
+def _dataset() -> list[Sample]:
+    return [Sample(id=i, query=f"q{i}", ground_truth=str(i % 2)) for i in range(1, 9)]
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_budget_equality_is_over_the_axes_each_names() -> None:
+    # A lift is no bound, and an omitted axis no lift.
+    for one, other, same in (
+        (Budget(usd=1.0), Budget(usd=1.0), True),
+        (Budget(usd=None), Budget(), False),
+        (Budget(usd=1.0, tokens=None), Budget(usd=1.0), False),
+        (Budget(usd=1.0), Budget(usd=2.0), False),
+    ):
+        assert (one == other) is same and (hash(one) == hash(other)) is same, (
+            f"{one!r} and {other!r} read {'apart' if same else 'as one'}: equality saw another "
+            "set of axes than the ones each names"
+        )
+    assert Budget(usd=1.0).only(MONEY_AXES).named == {"usd"}, "only() named an axis self did not"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    built_stores: Stores,
-    offline: Router,
 ) -> None:
     # An identity rebuilt from the tenant alone carries no issuer, and no issuer IS the operator.
     signup = IdentityContext(
@@ -974,18 +1012,6 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         standing=Budget(usd=0.25, rounds=None),
         step_rounds=2,
     )
-    # Equality is over the axes NAMED: a lift is no bound, and an omitted axis no lift.
-    for one, other, same in (
-        (Budget(usd=1.0), Budget(usd=1.0), True),
-        (Budget(usd=None), Budget(), False),
-        (Budget(usd=1.0, tokens=None), Budget(usd=1.0), False),
-        (Budget(usd=1.0), Budget(usd=2.0), False),
-    ):
-        assert (one == other) is same and (hash(one) == hash(other)) is same, (
-            f"{one!r} and {other!r} read {'apart' if same else 'as one'}: equality saw another "
-            "set of axes than the ones each names"
-        )
-    assert Budget(usd=1.0).only(MONEY_AXES).named == {"usd"}, "only() named an axis self did not"
     hop = CycleHop(campaign_id="ds__000001", cycle_id="cycle_root")
     mode = RunMode(from_round=2, diag=True)
     launched_config = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
@@ -1016,8 +1042,13 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     )
     assert rebuilt.base_dir == stores.base_dir, "the spawned run billed another tenant's tree"
 
-    # The look-ahead changes the bill and never the record.
-    dataset = [Sample(id=i, query=f"q{i}", ground_truth=str(i % 2)) for i in range(1, 9)]
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_lookahead_window_changes_the_bill_and_never_the_record(
+    built_stores: Stores,
+) -> None:
+    dataset = _dataset()
     d1 = await _walk(built_stores, dataset, armed=1, cut_at=None)
     d2 = await _walk(built_stores, dataset, armed=2, cut_at=None)
     assert (d1["max_depth"], d2["max_depth"]) == (1, 2), (
@@ -1047,7 +1078,16 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     assert deep["billed"] == len(deep["calls"]), (
         "a discarded remote call still bills: the provider charges whether or not anyone waits"
     )
-    # A catch-up holds a slot like a cell, and is archived only for a cell the walk absorbed.
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_catch_up_holds_a_cells_slot_and_is_archived_only_for_a_cell_absorbed(
+    built_stores: Stores,
+) -> None:
+    dataset = _dataset()
+    # The unarmed cut walk, whose record no catch-up may move.
+    c1 = await _walk(built_stores, dataset, armed=1, cut_at=4)
     lone = await _walk(built_stores, dataset, armed=1, cut_at=4, parent_lacks_cells=True)
     wide = await _walk(
         built_stores, dataset, armed=3, cut_at=4, max_cells=3, parent_lacks_cells=True
@@ -1070,7 +1110,14 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         "a catch-up was archived for a cell the walk never absorbed"
     )
     assert lone["rows"] == wide["rows"] == quick["rows"] == c1["rows"], "a catch-up moved a record"
-    # A round's walks measure AT ONCE and decide IN TURN; the depth bounds the ROUND, not each walk.
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_rounds_walks_measure_at_once_decide_in_turn_and_share_one_depth(
+    built_stores: Stores,
+) -> None:
+    dataset = _dataset()
     serial = await _round(built_stores, dataset, armed=1, cuts=[4, None, 6])
     fanned = await _round(built_stores, dataset, armed=4, cuts=[4, None, 6])
     assert serial["peak"] == 1 and fanned["peak"] <= 4, "the depth did not bound the round"
@@ -1091,12 +1138,27 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     for w in (0, 1):
         calls = sorted(sid for who, sid, _ in ahead["asked"] if who == w)
         assert calls == [s.id for s in dataset], f"walk {w}'s calls ran under another identity"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_the_call_back_as_a_pause_is_pressed_is_absorbed_and_never_paid_again(
+    built_stores: Stores,
+) -> None:
+    dataset = _dataset()
     paused = await _round(built_stores, dataset, armed=1, cuts=[None], pause_after_call=3)
     assert paused["stops"] == ["graceful"], "a pause read as another stop"
     assert len(paused["rows"][0]) == len(paused["calls"]) == 3, (
         "the call that returned as the pause was pressed is absorbed, not paid again on resume"
     )
-    # A pause starts nothing: an unstarted catch-up stays so, one already out launches no cell.
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_pause_starts_no_catch_up_and_a_catch_up_out_at_it_launches_no_cell(
+    built_stores: Stores,
+) -> None:
+    dataset = _dataset()
     for armed_, pace, after, taken in ((1, 0.01, 2, 2), (2, 0.02, 1, 1)):
         owing = await _walk(
             built_stores,
@@ -1112,6 +1174,15 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         assert len(owing["rows"]) == len(owing["calls"]) == taken, (
             f"armed {armed_}: a catch-up out at the pause launched a cell"
         )
+
+
+# The resumed walk replays the cells the stopped one banked.
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_what_comes_back_behind_a_stalled_head_is_banked_priced_and_never_paid_again(
+    built_stores: Stores,
+) -> None:
+    dataset = _dataset()
     head = dataset[0].id
     stopped = await _walk(
         built_stores, dataset, armed=4, max_cells=4, cut_at=None, pause_after_call=3, stall=head
@@ -1129,17 +1200,35 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     assert [r.key for r in resumed["rows"]] == [s.key for s in dataset], (
         "the resumed walk did not replay what it banked"
     )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_cell_past_where_a_rule_could_cut_is_never_banked(built_stores: Stores) -> None:
+    dataset = _dataset()
+    head = dataset[0].id
     capped = await _walk(
         built_stores, dataset, armed=4, max_cells=4, cut_at=2, pause_after_call=2, stall=head
     )
     assert set(capped["banked"]) == {head, dataset[1].id}, (
         "a cell past where a rule could cut was banked: the serial walk would not have measured it"
     )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_walks_spend_ceiling_binds_before_a_call(built_stores: Stores) -> None:
+    dataset = _dataset()
     ceiling = await _walk(built_stores, dataset, armed=4, max_cells=4, cut_at=None, cap_usd=5.0)
     assert (ceiling["stop_reason"], ceiling["billed"]) == ("spend_budget", 5.0), (
         "a spend ceiling binds BEFORE a call: every cell out is counted at its bound"
     )
-    # A skip made before a stop outlives it: the LAST decision on record per candidate replays.
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_the_last_skip_on_record_per_candidate_outlives_a_stop_and_a_rewind_drops_it(
+    tmp_path: Path,
+) -> None:
     skips = CycleEventLog(tmp_path / "skips.jsonl")
     superseding: tuple[tuple[str, int, CutKind | None], ...] = (
         ("a", 3, "skipped"),
@@ -1167,6 +1256,15 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     assert standing_skips() == {(2, "a"): 3, (2, "c"): 4}, "a resume re-entering lost a skip"
     skips.append(RoundEnteredRecord(round=2, rewound=True))
     assert standing_skips() == {}, "a regenerated round inherited a displaced skip"
+
+
+# The second walk resumes the first's skipped individual.
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_skip_holds_and_its_replay_records_the_depth_it_skipped_at(
+    built_stores: Stores,
+) -> None:
+    dataset = _dataset()
     replayed = await _walk(built_stores, dataset, armed=4, max_cells=4, cut_at=None, skip_at=3)
     assert replayed["stop_reason"] == "skip" and len(replayed["rows"]) == 3, "a skip did not hold"
     assert sorted(replayed["calls"]) == [s.id for s in dataset[:3]], "a skipped cell was paid"
@@ -1183,7 +1281,12 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         "a replayed skip recorded no depth, so the next resume skips at zero cells"
     )
 
-    # A cell's envelope cancels the inner campaign it spawned, so nothing spends past it.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+) -> None:
     started, cancelled = asyncio.Event(), asyncio.Event()
 
     async def _hanging_inner(_cell: Any, _minted: list[Any], _spawned_by: dict[str, Any]) -> Any:
@@ -1224,7 +1327,12 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     assert started.is_set(), "the inner campaign never started — the envelope proved nothing"
     assert cancelled.is_set(), "the inner campaign outlived its envelope and kept spending"
 
-    # A resumed arm re-reads its cells unbilled, and its bench pass still runs past the ceiling.
+
+@pytest.mark.usefixtures("run_bound")
+@on_jumping_clock
+async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_the_ceiling(
+    tmp_path: Path, built_stores: Stores, offline: Router
+) -> None:
     billed_cent = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost": 0.01}
     offline.llm.says = lambda body: completion("ok", model=body["model"], usage=billed_cent)
     loop_reuse = LLMReuseCache(tmp_path / "reuse", "optimizer_reuse")
@@ -1326,7 +1434,11 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         "the ledger names another set of priced calls than the arm paid for"
     )
 
-    # A ledger index serves the file as it stands: grown, compacted, raced and shared.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_ledger_index_serves_the_file_as_it_stands_grown_compacted_raced_and_shared(
+    tmp_path: Path,
+) -> None:
     index = CycleEventLog.open(CycleDir(tmp_path / "index"))
 
     def bill(n: int, round: int | None = None, log: CycleEventLog = index) -> None:
@@ -1411,8 +1523,12 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         "writers sharing one file — the server's command beside the run's records — lost a bill"
     )
 
-    # A cell Ada paid for is hers until the host names one install-owned archive home, and Bob's
-    # replay of it from there is the same measurement: it bills him nothing.
+
+# The refused purge reads the cell the named home carried.
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_cell_one_account_paid_replays_free_to_another_only_from_a_named_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     homes = tmp_path / "homes"
 
     def account(sub: str) -> Stores:
@@ -1521,6 +1637,11 @@ def _charges() -> ChargeBook:
     return bound_account("the test").charges
 
 
+_CELL = CallLabel("cell", "backend")
+_BENCH = CallLabel("b", "bench")
+_OPTIMIZER = CallLabel("o", "optimizer")
+
+
 def _bill(hold_id: str, usd: float, *, key_source: KeySource = "host") -> Bill:
     price = CallPrice(kind="backend", model=None, provider=None, cost_usd=usd, rate_priced_usd=None)
     return Bill(hold_id=hold_id, key_source=key_source, price=price, tokens=0)
@@ -1534,6 +1655,7 @@ def _drawn(book: SpendBook, usd: float, *, key_source: KeySource = "host", lapse
         key_source=key_source,
         bound=Budget(usd=usd, tokens=0),
         resource="backend",
+        node="cell",
         ledger="drawn.jsonl",
     )
     book.charges.append(call)
@@ -1550,8 +1672,8 @@ def _unreported_sends(ledger: CycleEventLog) -> int:
 
 
 @pytest.mark.usefixtures("offline")
-def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+def test_a_mid_run_ceiling_reaches_the_running_book_and_the_loop(
+    tmp_path: Path, built_stores: Stores
 ) -> None:
     # The declared ceiling lives on the ledger alone, so a launch's flag sweep cannot take it.
     campaigns = built_stores.campaigns
@@ -1596,7 +1718,11 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         "a LIFT of the round cap reads as no cap, never a fall back to the config's"
     )
 
-    # Moving one ceiling leaves the other at its launch cap.
+
+@pytest.mark.usefixtures("offline")
+def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
+    tmp_path: Path, built_stores: Stores
+) -> None:
     moved = CycleHop(campaign_id="camp-4", cycle_id="cycle_budget0001")
     built_stores.campaigns.create_campaign(minted_campaign(moved))
     built_stores.campaigns.mint_cycle(moved)
@@ -1635,7 +1761,10 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     _change_run_limits(dispatcher, moved, Budget(usd=None))
     assert moved_book.allotment.usd is None, "a lifted ceiling still bounds the running share"
 
-    # An offshoot takes the rounds its parent has left; a cap the fork's seed names is the operator's.
+
+@pytest.mark.usefixtures("offline")
+def test_an_offshoot_takes_the_rounds_its_parent_left_and_names_no_money_of_its_own() -> None:
+    # A cap the fork's seed names is the operator's.
     left = ForkRemainder.of(rounds_closed=3, rounds=5)
     for overrides, expected in (
         (ConfigOverrides(), Budget(rounds=2)),
@@ -1648,7 +1777,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         assert left.under(overrides).budget == expected, (
             f"{overrides}: an offshoot ran past the rounds its parent left, or over its operator's"
         )
-    # A fork's money is its campaign's share (below), so no entry point's seed may name its own.
+    # A fork's money is its campaign's share, so no entry point's seed may name its own.
     for money in (Budget(usd=1.0), Budget(tokens=1_000)):
         with pytest.raises(ValidationError):
             ConfigOverrides(budget=money)
@@ -1660,38 +1789,22 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
             "a parent run past its cap left its offshoot no round, or an uncapped one invented a cap"
         )
 
-    # Spend is no remainder: forks of one campaign launched side by side hold ONE ceiling between
-    # them, so the second is admitted only what the first left.
-    root = CycleHop(campaign_id="camp-5", cycle_id="cycle_share0005")
-    forks = [
-        CycleHop(campaign_id="camp-5", cycle_id=f"cycle_share0005_fork_{name}")
-        for name in ("a", "b", "c")
-    ]
-    built_stores.campaigns.create_campaign(minted_campaign(root))
-    built_stores.campaigns.mint_cycle(root)
-    root_dir = built_stores.campaigns.cycle_dir(root)
+
+class _SharedCeiling(NamedTuple):
+    shared: JobRegistry
+    launch: Callable[[CycleHop, float | None], tuple[Any, HeldBudget]]
+    share: Callable[[HeldBudget], float | None]
+    bill: Callable[[CycleHop, float], None]
+
+
+@pytest.fixture
+def shared_ceiling(tmp_path: Path, built_stores: Stores) -> _SharedCeiling:
+    """The jobs dir every reader attaches to, with room for every fork, and launches on it."""
+    shared = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 4)
+    payer = account_of(built_stores)
 
     def bill(at: CycleHop, usd: float) -> None:
         CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(at))).append(billed_call(usd))
-
-    bill(root, 0.25)
-    for fork in forks:
-        built_stores.campaigns.mint_fork_cycle(
-            fork,
-            root_dir,
-            ForkSpec(
-                trigger=ForkTrigger.OPERATOR_REWIND,
-                reason="",
-                issued_by=SYSTEM_PRINCIPAL,
-                from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
-            ),
-            cut=CycleEventLog.open(CycleDir(root_dir)).next_offset,
-            cut_round=1,
-        )
-    fork_a, fork_b, fork_c = forks
-    # The jobs dir every reader attaches to, with room for every fork.
-    shared = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 4)
-    payer = account_of(built_stores)
 
     def launch(fork: CycleHop, usd: float | None) -> tuple[Any, HeldBudget]:
         job = shared.request_slot(
@@ -1722,6 +1835,38 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         assert job is not None
         return cycle_share(built_stores, job).usd
 
+    return _SharedCeiling(shared, launch, share, bill)
+
+
+# Each fork is admitted what the forks launched before it left of the one ceiling.
+@pytest.mark.usefixtures("offline")
+def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
+    built_stores: Stores, shared_ceiling: _SharedCeiling
+) -> None:
+    shared, launch, share, bill = shared_ceiling
+    root = CycleHop(campaign_id="camp-5", cycle_id="cycle_share0005")
+    forks = [
+        CycleHop(campaign_id="camp-5", cycle_id=f"cycle_share0005_fork_{name}")
+        for name in ("a", "b", "c")
+    ]
+    built_stores.campaigns.create_campaign(minted_campaign(root))
+    built_stores.campaigns.mint_cycle(root)
+    root_dir = built_stores.campaigns.cycle_dir(root)
+    bill(root, 0.25)
+    for fork in forks:
+        built_stores.campaigns.mint_fork_cycle(
+            fork,
+            root_dir,
+            ForkSpec(
+                trigger=ForkTrigger.OPERATOR_REWIND,
+                reason="",
+                issued_by=SYSTEM_PRINCIPAL,
+                from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
+            ),
+            cut=CycleEventLog.open(CycleDir(root_dir)).next_offset,
+            cut_round=1,
+        )
+    fork_a, fork_b, fork_c = forks
     _, held_a = launch(fork_a, 0.5)
     assert share(held_a) == pytest.approx(0.25), (
         "fork a was not admitted its ceiling less the spent"
@@ -1781,8 +1926,15 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         "an embedded run kept its share past its exit"
     )
 
-    # A raised ceiling is re-shared over every live cycle, never handed whole to one: A runs at $1,
-    # B is admitted at $3 beside it ($2), and the raise to $3 leaves A its $1, not B's money too.
+
+# The money-axis refusals read the pair's cycles while they live.
+@pytest.mark.usefixtures("offline")
+def test_a_raised_ceiling_is_reshared_over_every_live_cycle_never_handed_whole_to_one(
+    built_stores: Stores, shared_ceiling: _SharedCeiling
+) -> None:
+    shared, launch, share, _ = shared_ceiling
+    # A runs at $1, B is admitted at $3 beside it ($2), and the raise to $3 leaves A its $1.
+    eighth = SendBound(input_tokens=0, output_tokens=0, usd=0.125)
     pair = [CycleHop(campaign_id="camp-6", cycle_id=f"cycle_pair000{n}") for n in (1, 2)]
     built_stores.campaigns.create_campaign(minted_campaign(pair[0]))
     for cycle in pair:
@@ -1810,8 +1962,14 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0005"), 1.0)
     shared.release(open_c.job_id, StopReason.CONVERGED)
 
-    # A launch landing mid-reshare waits it out: A holds $1 of $1 while a raise to $3 re-shares,
-    # and B, launching at $3 meanwhile, is admitted on the shares as moved, never on a torn split.
+
+@pytest.mark.usefixtures("offline")
+def test_a_launch_landing_mid_reshare_waits_it_out(
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores, shared_ceiling: _SharedCeiling
+) -> None:
+    shared, launch, _, _ = shared_ceiling
+    # A holds $1 of $1 while a raise to $3 re-shares; B, launching at $3 meanwhile, is admitted
+    # on the shares as moved, never on a torn split.
     race = [CycleHop(campaign_id="camp-8", cycle_id=f"cycle_race000{n}") for n in (1, 2)]
     built_stores.campaigns.create_campaign(minted_campaign(race[0]))
     for cycle in race:
@@ -1866,13 +2024,32 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     for job in shared.list_holding_spend():
         if job.on_campaign(built_stores.campaigns.workspace, "camp-8"):
             shared.release(job.job_id, StopReason.CONVERGED)
-    # A ceiling its campaign has spent admits nothing, siblings or none.
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_ceiling_its_campaign_has_spent_admits_nothing(
+    built_stores: Stores, shared_ceiling: _SharedCeiling
+) -> None:
+    _, launch, _, bill = shared_ceiling
+    race = [CycleHop(campaign_id="camp-8", cycle_id=f"cycle_race000{n}") for n in (1, 2)]
+    built_stores.campaigns.create_campaign(minted_campaign(race[0]))
+    for cycle in race:
+        built_stores.campaigns.mint_cycle(cycle)
     bill(race[0], 3.0)
     with pytest.raises(QuotaExceededError):
         launch(race[1], 3.0)
 
-    # A job file has one writer at a time: a job retargeted by another process while the run
-    # stamps its start is never overwritten by the run's stale copy (bl5.B2).
+
+@pytest.mark.usefixtures("offline")
+def test_a_job_retargeted_mid_stamp_is_never_overwritten_by_the_runs_stale_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    built_stores: Stores,
+    shared_ceiling: _SharedCeiling,
+) -> None:
+    # A job file has one writer at a time (bl5.B2).
+    shared, _, _, _ = shared_ceiling
+    race = [CycleHop(campaign_id="camp-8", cycle_id=f"cycle_race000{n}") for n in (1, 2)]
     stamped = shared.create(
         user_id="u-stamp",
         principal_id="u-stamp",
@@ -1905,8 +2082,13 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     assert after.started_at is not None
     shared.release(stamped.job_id, StopReason.CONVERGED)
 
-    # Sharing divides the CAMPAIGN's ceiling, never what the account admits: a $10 campaign that
-    # has spent $3 shares the $7 left, and its account binds through the reserve.
+
+@pytest.mark.usefixtures("offline")
+def test_sharing_divides_the_campaigns_ceiling_never_what_the_account_admits(
+    tmp_path: Path, shared_ceiling: _SharedCeiling
+) -> None:
+    # A $10 campaign that has spent $3 shares the $7 left; its account binds through the reserve.
+    shared, _, _, _ = shared_ceiling
     delegate = workspace(
         tmp_path,
         IdentityContext(
@@ -1947,8 +2129,11 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     )
     shared.release(claim.job_id, StopReason.CONVERGED)
 
-    # A planned head-to-head is priced before it is minted, at what the archive measured a cell of
-    # its models costing and what an optimizer's own rounds cost here.
+
+@pytest.mark.usefixtures("offline")
+def test_a_planned_head_to_head_is_priced_at_its_archived_cells_and_optimizer_rounds(
+    built_stores: Stores,
+) -> None:
     bank = loop_session(built_stores, pipeline_schema([]), samples(6, "g"))
     on = [("llm_only", {"model": "X"})]
     for model, usd, seconds, rows in (
@@ -2057,13 +2242,9 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
 
 
 @pytest.mark.usefixtures("run_bound")
-def test_a_send_is_held_at_its_bound_until_its_bill_lands(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    offline: Router,
+def test_a_remote_cell_open_at_the_runs_wall_clock_is_cut_on_it(
+    tmp_path: Path, offline: Router
 ) -> None:
-    """A record of spend is only ever a BILL: an unreported send binds from its open hold."""
-    # A remote cell still open at the run's wall clock is CUT: the clock bounds every cell.
     offline.backend.faults = {"/matches": [Hang()]}
     jobs = tmp_path / "jobs"
     remote = backend_client(jobs, cell_envelope_s=cell_envelope_of(600.0))
@@ -2097,22 +2278,100 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "a run past its wall clock was not stopped on it"
     )
 
-    # Every level holds a send's whole bound, whatever such sends billed before.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_every_level_holds_a_sends_whole_bound_whatever_such_sends_billed_before() -> None:
     worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.125)
     for reserve in (0.5, None, 1.0):
         own = spend_book(0.5, usd_reserve=reserve)
         assert own.fits(worst, paid_by="host") == 4, f"reserve {reserve}: the bound holds"
         held = [
-            own.hold(worst, "backend", what="cell", paid_by="host", ledger="cells.jsonl")
+            own.hold(worst, _CELL, what="cell", paid_by="host", ledger="cells.jsonl")
             for _ in range(4)
         ]
         with pytest.raises(SendRefusedError):
-            own.hold(worst, "backend", what="cell", paid_by="host", ledger="cells.jsonl")
+            own.hold(worst, _CELL, what="cell", paid_by="host", ledger="cells.jsonl")
         billed = 0
         while own.exhausted() is None:
             own.charges.append(_bill(held.pop(), worst.usd or 0.0))
             billed += 1
         assert billed == 4, f"reserve {reserve}: the run stops on reaching its ceiling"
+
+
+# Each call's hold is read after the bills before it: the mean moves with every one.
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_with_overshoot_on_a_call_holds_its_nodes_mean_bill_in_the_run_after_the_first(
+    tmp_path: Path, built_stores: Stores
+) -> None:
+    hop = CycleHop(campaign_id="camp", cycle_id="cyc")
+    built_stores.campaigns.create_campaign(minted_campaign(hop))
+    built_stores.campaigns.mint_cycle(hop)
+    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    book = _armed(built_stores, hop, _held(built_stores, jobs, Budget(usd=1.0)))
+    worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.10)
+
+    def held(node: str, billed: float) -> Budget:
+        """What a call of *node* is held at, which then bills *billed* on 100 tokens."""
+        with _billing_on(CycleEventLog(tmp_path / "calls.jsonl"), book):
+            call = Admission(
+                book, CallLabel(node, "optimizer"), worst, model=None, provider=None, paid_by="host"
+            )
+            bound = list(money_on(built_stores.charges.path).holds.values())[-1].bound
+            call.settle(Billed(TokenAccount(input=60, output=40), billed))
+        return bound
+
+    _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=True)
+    assert held("judge", 0.02) == worst.budget, "a node's first call held less than its worst case"
+    assert held("judge", 0.04) == Budget(usd=0.02, tokens=100), (
+        "a node's second call held another figure than its first call's bill"
+    )
+    assert held("judge", 0.05).usd == pytest.approx(0.03), "the hold is not the node's mean bill"
+    assert held("other", 0.01) == worst.budget, "another node's bills sized a node's first call"
+    _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=False)
+    assert held("judge", 0.01) == worst.budget, "overshoot off still held a call below its worst"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_bill_past_its_overshoot_hold_draws_on_the_run_and_the_dashboard_serves_it(
+    tmp_path: Path, built_stores: Stores
+) -> None:
+    hop = CycleHop(campaign_id="camp", cycle_id="cyc")
+    campaign = minted_campaign(hop)
+    stored_campaign(built_stores, campaign)
+    minted_dataset(built_stores, campaign)
+    built_stores.campaigns.mint_cycle(hop)
+    ledger = CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(hop)))
+    ledger.append(run_wiring())
+    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    book = _armed(built_stores, hop, _held(built_stores, jobs, Budget(usd=1.0)))
+    _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=True)
+    worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.10)
+    with _billing_on(ledger, book):
+        for billed in (0.02, 0.05):
+            Admission(
+                book,
+                CallLabel("judge", "optimizer"),
+                worst,
+                model=None,
+                provider=None,
+                paid_by="host",
+            ).settle(Billed(TokenAccount(input=60, output=40), billed))
+    money = money_on(built_stores.charges.path)
+    assert money.drawn[book.hold_id].total.sent_usd == pytest.approx(0.07), (
+        "a bill past its hold drew less than its whole bill on the run's hold"
+    )
+    assert book.money_left().usd == pytest.approx(0.93), "the share counted only what was held"
+    dash = served_dashboard(built_stores, hop)
+    assert isinstance(dash, ServedDashboard) and dash.overshot is not None
+    assert dash.overshot.calls == 1 and dash.overshot.usd == pytest.approx(0.03), (
+        "the dashboard served another overshoot than the one call billed past its mean"
+    )
+    assert dash.run_limits.overshoot, "the dashboard served the switch off"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_sends_room_is_the_ceiling_less_bills_unpriced_sends_and_the_set_aside() -> None:
+    worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.125)
     owed = spend_book(0.5)
     _drawn(owed, 0.125, lapsed=True)
     assert owed.fits(worst, paid_by="host") == 3, "a send no bill priced left its room open"
@@ -2126,7 +2385,11 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "a send's room is the ceiling less EVERYTHING owed: bills, unpriced sends, the set-aside"
     )
 
-    # A price list that could not be fetched is an outage, never an unpriced call.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_price_list_that_could_not_be_fetched_is_an_outage_never_an_unpriced_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fetches: list[str] = []
 
     def down(url: str, **_kw: Any) -> Any:
@@ -2151,29 +2414,39 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     assert len(fetches) == 1, f"{len(fetches)} fetches — one per send, each a full timeout"
     assert run_stop_reason(outage) is StopReason.PRICE_LIST_UNREACHABLE, "an outage read as no rate"
 
-    # A controlled arm's ceiling is its search's incurred cost: a replay spends no BILL.
-    def replay(usd: float) -> TokenUsageRecord:
-        return billed_call(
-            usd, kind="backend", node="n", input_tokens=10, output_tokens=5, replay=True
-        )
 
+def _replay(usd: float) -> TokenUsageRecord:
+    return billed_call(usd, kind="backend", node="n", input_tokens=10, output_tokens=5, replay=True)
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_controlled_arms_ceiling_is_its_searchs_incurred_cost_a_replay_spends_no_bill(
+    tmp_path: Path,
+) -> None:
     metered: dict[CeilingMeter, CycleEventLog] = {}
     for meter in get_args(CeilingMeter):
         metered[meter] = CycleEventLog(tmp_path / meter / "ledger.jsonl")
-        metered[meter].append(replay(0.06))
-        metered[meter].append(replay(0.05))
+        metered[meter].append(_replay(0.06))
+        metered[meter].append(_replay(0.05))
     arm = spend_book(0.10, meters="search_incurred", metered_on=metered["search_incurred"].path)
     ordinary = spend_book(0.10, metered_on=metered["bill"].path)
     assert ordinary.exhausted() is None, "a replay billed nothing, so it spends no bill"
     assert arm.exhausted() == ErrorCategory.SPEND_CEILING, (
         "arms replay each other's cells: a ceiling on the BILL hands the second arm a bigger search"
     )
+
+
+# The replays that spend the share read on from the bench pass's bill.
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_bench_pass_eats_none_of_an_arms_search_budget_and_replays_spend_it(
+    tmp_path: Path,
+) -> None:
     searched = CycleEventLog(tmp_path / "fresh.jsonl")
     fresh = spend_book(0.10, meters="search_incurred", metered_on=searched.path)
-    searched.append(replay(0.09))
+    searched.append(_replay(0.09))
     pass_bound = SendBound(input_tokens=100, output_tokens=100, usd=5.0)
     # On the account's own key: one on the box's would meet the reserve (B2).
-    benched = fresh.hold(pass_bound, "bench", what="bench pass", paid_by="user", ledger="b")
+    benched = fresh.hold(pass_bound, _BENCH, what="bench pass", paid_by="user", ledger="b")
     fresh.charges.append(Release(hold_id=benched))
     searched.append(billed_call(5.0, kind="bench", node="b", output_tokens=1, key_source="user"))
     assert fresh.exhausted() is None, "the bench pass ate into the arm's search budget"
@@ -2185,12 +2458,17 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     ):
         pass
     # A replay draws no coupon: the search's share refuses once replays spend it.
-    searched.append(replay(0.02))
+    searched.append(_replay(0.02))
     small = SendBound(input_tokens=1, output_tokens=1, usd=0.02)
     with pytest.raises(SendRefusedError):
-        fresh.hold(small, "optimizer", what="o", paid_by="host", ledger="o")
+        fresh.hold(small, _OPTIMIZER, what="o", paid_by="host", ledger="o")
 
-    # No burst of sends records spend past its ceiling.
+
+# The killed send's hold is read beside the sends the burst left unreported.
+@pytest.mark.usefixtures("run_bound")
+def test_no_burst_of_sends_records_spend_past_its_ceiling_and_a_killed_hold_stays_out(
+    tmp_path: Path, offline: Router
+) -> None:
     wire = _priced_wire(offline)
     wire.flaky = True
     rng = wire.rng
@@ -2245,9 +2523,10 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         key_source="host",
         bound=Budget(usd=hold_usd, tokens=2_100),
         resource="optimizer",
+        node="o",
         ledger=charges.held_on(burst_ledger.path),
     )
-    reaped = {"hold_id": "reaped", "parent": None, "resource": None, "ledger": None}
+    reaped = {"hold_id": "reaped", "parent": None, "resource": None, "node": None, "ledger": None}
     charges.append(killed.model_copy(update=reaped))
     charges.append(killed)
     assert _unreported_sends(burst_ledger) == unreported, "a send out under a live job lapsed"
@@ -2261,10 +2540,27 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "a killed send's hold was not counted as out"
     )
     assert _unreported_sends(burst_ledger) == unreported + 1, "a killed send's hold went unread"
-    # A bill naming no price closes its hold in tokens alone; the money stays at the hold's bound.
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_bill_naming_no_price_closes_its_hold_in_tokens_and_keeps_its_money_held(
+    tmp_path: Path,
+) -> None:
+    hold_usd = 0.0036
+    charges = _charges()
     bare = CycleEventLog(tmp_path / "bare" / "ledger.jsonl")
     on_bare = charges.held_on(bare.path)
-    charges.append(killed.model_copy(update={"hold_id": "bare", "parent": None, "ledger": on_bare}))
+    charges.append(
+        Hold(
+            hold_id="bare",
+            parent=None,
+            key_source="host",
+            bound=Budget(usd=hold_usd, tokens=2_100),
+            resource="optimizer",
+            node="o",
+            ledger=on_bare,
+        )
+    )
     priceless = billed_call(node="bare", input_tokens=40, output_tokens=9, hold_id="bare").bill
     assert priceless is not None
     charges.append(priceless.model_copy(update={"ledger": on_bare}))
@@ -2272,8 +2568,13 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "a priceless bill freed its hold"
     )
 
-    # A nested run's send is admitted by its own book AND its root's, held and billed on the root's
-    # ledger.
+
+@pytest.mark.usefixtures("run_bound")
+def test_a_nested_runs_send_is_admitted_by_both_books_and_billed_on_its_roots_ledger(
+    tmp_path: Path, offline: Router
+) -> None:
+    _priced_wire(offline)
+    hold_usd = 0.0036
     root = CycleEventLog(tmp_path / "root.jsonl")
     book = spend_book(0.05)
     book.ledger = root
@@ -2301,7 +2602,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     room = (inner.money_left(), book.money_left())
     past_root = SendBound(input_tokens=0, output_tokens=0, usd=0.06)
     with pytest.raises(SendRefusedError):
-        inner.hold(past_root, "optimizer", what="past the root", paid_by="host", ledger="r")
+        inner.hold(past_root, _OPTIMIZER, what="past the root", paid_by="host", ledger="r")
     assert (inner.money_left(), book.money_left()) == room, (
         "a nested send past its ROOT's ceiling was admitted on its own book's room, or held "
         "half-way"
@@ -2320,7 +2621,10 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     assert book.spent.unreported_usd == pytest.approx(hold_usd), (
         "a nested send cut short stayed held on its own book and freed its root's"
     )
-    # An inner campaign whose provider reports no bill is not a free cell: cost reads our rate.
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_an_inner_campaign_whose_provider_reports_no_bill_is_not_a_free_cell() -> None:
     silent = SpendRollup()
     silent.bank(billed_call(node="n", input_tokens=10, output_tokens=5, rate_priced_usd=0.02))
     facts = inner_cell_facts(cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}))
@@ -2338,7 +2642,16 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "an inner campaign whose provider reported no bill read as a free cell"
     )
 
-    # A send that left and named no price stays held at its bound.
+
+# Each send's count reads on from the sends held before it.
+@pytest.mark.usefixtures("run_bound")
+def test_a_send_that_left_and_named_no_price_stays_held_at_its_bound(
+    tmp_path: Path, offline: Router
+) -> None:
+    wire = _priced_wire(offline)
+    hold_usd = 0.0036
+    cut = SendBound(input_tokens=600, output_tokens=1500, usd=hold_usd)
+    charges = _charges()
     held_ledger = CycleEventLog(tmp_path / "held.jsonl")
     book = spend_book(0.05)
     wire.broken_once = True
@@ -2385,7 +2698,11 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "a priceless hold left its bound"
     )
 
-    # One unit of work resends from one budget, whichever loop asks.
+
+@pytest.mark.usefixtures("run_bound")
+def test_one_unit_of_work_resends_from_one_budget_whichever_loop_asks(offline: Router) -> None:
+    wire = _priced_wire(offline)
+
     async def two_rungs() -> None:
         with scoped(send_budget=SendBudget(None, attempts=SEND_ATTEMPTS)):
             for _rung in range(2):
@@ -2411,7 +2728,20 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
     wire.down = False
 
-    # A backend cell is never sent again while it may still bill.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_repaired_nodes_resend_is_in_its_sums_never_held_again() -> None:
+    # Holding it again halted runs short of their cap.
+    repaired = {"step_tokens": {"n": {"attempts": 2, "input": 10, "output": 5, "cost_usd": 0.001}}}
+    bill, _ = cell_billing(pipeline_schema([]), {}, {"n": SendBound(40, 20, 0.004)})(repaired)
+    assert bill is not None and bill.unknown is None, "an answered attempt was held as unreported"
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_a_backend_cell_is_never_sent_again_while_it_may_still_bill(
+    tmp_path: Path, offline: Router
+) -> None:
+    jobs = tmp_path / "jobs"
     cell_ledger = CycleEventLog(tmp_path / "termnorm.jsonl")
     billed_step = {
         "step_tokens": {
@@ -2424,10 +2754,6 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             }
         }
     }
-    # A repaired node's resend is IN its sums: holding it again halted runs short of their cap.
-    repaired = {"step_tokens": {"n": {"attempts": 2, "input": 10, "output": 5, "cost_usd": 0.001}}}
-    bill, _ = cell_billing(pipeline_schema([]), {}, {"n": SendBound(40, 20, 0.004)})(repaired)
-    assert bill is not None and bill.unknown is None, "an answered attempt was held as unreported"
     attempt = SendBound(input_tokens=40, output_tokens=20, usd=0.004)
     deadline = {
         "detail": {"error_code": "llm_timeout", "retryable": False, "message": "no reply in 164s"},
@@ -2473,12 +2799,20 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     assert wallet.spent.unreported_tokens == 2 * 150 + 2 * 60, (
         "a cell that may bill freed its tokens"
     )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_relays_422_on_an_answer_that_failed_validation_may_have_billed() -> None:
     assert replied(422, headers=None, said="", answered_on=frozenset({422})).may_have_billed, (
         "the relay's 422 on an answer that failed validation is a generation: it may have billed"
     )
     assert not replied(422, headers=None, said="").may_have_billed, "a plain 422 read as billed"
 
-    # A container trial reruns on the budget its connector sized.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from promptpotter.connectors import harbor  # extras: harbor
 
     trials: list[int] = []
@@ -2505,12 +2839,25 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         f"{len(trials)} trials: a container cell reran past the budget its connector sized"
     )
 
-    # A DSPy cell bills each LM call, and its provider's failure is a hole.
+
+class _DspyCells(NamedTuple):
+    cell: Callable[..., dict[str, Any]]
+    lm_bills: Callable[[], list[TokenUsageRecord]]
+    sends: list[int]
+    rows: list[PipelineData]
+    purse: SpendBook
+
+
+@pytest.fixture
+def dspy_cells(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router) -> _DspyCells:
+    """A DSPy program's cells on the priced wire, each billed on one purse's ledger."""
     import dspy  # extras: dspy
     from dspy import lm15
 
     from promptpotter.connectors import dspy_module  # extras: dspy
 
+    _priced_wire(offline)
+    jobs = tmp_path / "jobs"
     monkeypatch.setattr(dspy_module, "held_wait", _no_wait)
     sends: list[int] = []
     script: list[Exception] = []
@@ -2580,6 +2927,16 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     def lm_bills() -> list[TokenUsageRecord]:
         return [r for r in _token_bills(dspy_ledger) if r.input_tokens]
 
+    return _DspyCells(dspy_cell, lm_bills, sends, rows, purse)
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_a_dspy_cell_bills_each_lm_call_and_its_row_states_the_price_a_replay_reads(
+    tmp_path: Path, dspy_cells: _DspyCells
+) -> None:
+    from promptpotter.connectors import dspy_module  # extras: dspy
+
+    dspy_cell, lm_bills, _, rows, purse = dspy_cells
     answered_cell = dspy_cell(2)
     assert answered_cell[dspy_module.SCORE_KEY] == 1.0, "a DSPy cell that answered scored another"
     assert answered_cell["step_tokens"][dspy_module.PROGRAM_NODE]["input"] == 2 * 11, (
@@ -2610,10 +2967,30 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     assert replay_arm.spent.sent_usd == pytest.approx(2 * call_usd), (
         "a replayed DSPy cell read as free"
     )
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_a_dspy_cell_past_its_bound_halts_and_bills_the_calls_it_made(
+    dspy_cells: _DspyCells,
+) -> None:
+    dspy_cell, lm_bills, sends, _, _ = dspy_cells
+    # An answered cell first, whose two bills the halted cell's two join.
+    dspy_cell(2)
     with pytest.raises(CellHaltedError):
         dspy_cell(3)
     assert len(sends) == 2, f"{len(sends)} calls sent under a bound sized on two"
     assert len(lm_bills()) == 4, "the calls a halted cell had made went unbilled"
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_a_dspy_cell_resends_a_5xx_once_and_reads_a_providers_failure_as_a_hole(
+    dspy_cells: _DspyCells,
+) -> None:
+    from dspy import lm15  # extras: dspy
+
+    from promptpotter.connectors import dspy_module  # extras: dspy
+
+    dspy_cell, _, sends, _, _ = dspy_cells
     resent = dspy_cell(1, lm15.ServerError("boom", status=500))
     assert resent[dspy_module.SCORE_KEY] == 1.0 and len(sends) == 2, "a 5xx was not resent once"
     for fail, raised, category in (
@@ -2628,8 +3005,23 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             dspy_cell(1, fail)
         assert hole.value.category is category, f"{fail!r}: a provider's failure scored a cell"
 
-    # A cell billed send by send, through the agent's model seam, reserves its bound and holds
-    # only what is out.
+
+class _AgentCells(NamedTuple):
+    agent_cell: Callable[[int], Coroutine[Any, Any, Any]]
+    seams: list[Any]
+    cut_short: list[bool]
+    three_answered: asyncio.Event
+    whole: SendBound
+
+
+@pytest.fixture
+def agent_cells(tmp_path: Path, offline: Router) -> _AgentCells:
+    """A cell billed send by send through the agent's model seam; its fourth turn hangs while
+    `cut_short` holds."""
+    from promptpotter.connectors import harbor  # extras: harbor
+
+    wire = _priced_wire(offline)
+    jobs = tmp_path / "jobs"
     turns: list[Any] = []
     seams: list[Any] = []
     cut_short = [True]
@@ -2651,8 +3043,6 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     agent = backend_client(
         jobs, execution="in_process", in_process_run=episode_run, holds_own_sends=True
     )
-    turns_ledger = CycleEventLog(tmp_path / "turns.jsonl")
-    purse = spend_book(1.0)
     whole = SendBound(input_tokens=100_000, output_tokens=50_000, usd=0.5)
 
     async def agent_cell(sample_id: int) -> Any:
@@ -2663,6 +3053,17 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
                 bound=whole,
                 billed=lambda _data: (None, None),
             )
+
+    return _AgentCells(agent_cell, seams, cut_short, three_answered, whole)
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_a_cell_cancelled_mid_episode_reserves_its_bound_and_holds_only_what_is_out(
+    tmp_path: Path, agent_cells: _AgentCells
+) -> None:
+    agent_cell, _, _, three_answered, whole = agent_cells
+    turns_ledger = CycleEventLog(tmp_path / "turns.jsonl")
+    purse = spend_book(1.0)
 
     async def cancel_mid_episode() -> None:
         running = asyncio.ensure_future(agent_cell(0))
@@ -2687,18 +3088,30 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
     assert purse.spent.unreported_usd == pytest.approx(out), "the book held another sum than is out"
     assert purse.fits(whole, paid_by="host") == 1, "a cell's bound was not reserved whole"
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_an_episodes_row_counts_the_tokens_its_sends_billed_and_no_reported_price(
+    tmp_path: Path, agent_cells: _AgentCells
+) -> None:
+    agent_cell, seams, cut_short, _, _ = agent_cells
+    turns_ledger = CycleEventLog(tmp_path / "turns.jsonl")
+    purse = spend_book(1.0)
     cut_short[0] = False
     with _billing_on(turns_ledger, purse):
         jumping_clock(agent_cell(1))
-    episode_bills = _token_bills(turns_ledger)[len(cut_bills) :]
+    episode_bills = _token_bills(turns_ledger)
     assert seams[-1].spent.input == sum(r.input_tokens for r in episode_bills), (
         "the cell's row counts other tokens than its sends billed"
     )
     assert seams[-1].cost_usd is None, (
         "sends that reported no cost summed to a REPORTED price: unknown, never a smaller one"
     )
-    # A resume counts each prior bill as its send did: an own key's off the coupon, a kind its
-    # meter skips on the box's key.
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_resume_counts_each_prior_bill_as_its_send_did(tmp_path: Path) -> None:
+    # An own key's off the coupon, a kind its meter skips on the box's key.
     prior = CycleEventLog(tmp_path / "prior.jsonl")
     prior_bills: tuple[tuple[TokenUsageKind, KeySource], ...] = (
         ("optimizer", "user"),
@@ -2715,7 +3128,12 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "a resume read an own key's bill as the box's, or lost a bill its meter skips"
     )
 
-    # An agent whose sends died on the provider's 5xx never measured the prompt.
+
+@pytest.mark.usefixtures("run_bound")
+def test_an_agent_whose_sends_died_on_a_5xx_never_measured_the_prompt(offline: Router) -> None:
+    from promptpotter.connectors import harbor  # extras: harbor
+
+    wire = _priced_wire(offline)
     wire.down = True
 
     async def downed_turn() -> Any:
@@ -2851,14 +3269,10 @@ _UNBOUNDED = (None, None)
 
 
 @pytest.mark.usefixtures("run_bound")
-def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
-    tmp_path: Path,
-    offline: Router,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+def test_a_price_off_our_rate_table_is_recorded_beside_spend_never_as_spend(
+    tmp_path: Path, offline: Router
 ) -> None:
-    """TWO units, because a price needs a rate on file and a token count never does (decisions.md § 0003).
-    The coupon bounds only what the box's keys pay: an account's own key spends past it."""
+    """TWO units, because a price needs a rate on file and a token count never does (decisions.md § 0003)."""
     offline.rates = {
         "openrouter/openai/gpt-4o": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6}
     }
@@ -2888,6 +3302,9 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "a price off our rate table was not recorded beside spend"
     )
 
+
+def _doors() -> tuple[tuple[Any, ...], ...]:
+    """Each paid door's admission per account: the coupon bounds only what the box's keys pay."""
     full = Budget(usd=_FACE.usd, tokens=_FACE.tokens)
     hand_set = Budget(usd=50.0, tokens=50_000)
     rows: tuple[tuple[Any, ...], ...] = (
@@ -3003,6 +3420,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             for door in ("turn", "bench", "noise-floor", "seed-screen", "probe-reasoning")
         ),
     )
+    return rows
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_every_paid_door_admits_its_declared_ceiling_and_holds_what_the_coupon_has_left(
+    tmp_path: Path,
+) -> None:
     for n, (
         door,
         issuer,
@@ -3013,7 +3437,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         spent,
         admits,
         reserves,
-    ) in enumerate(rows):
+    ) in enumerate(_doors()):
         at = tmp_path / f"door-{n}"
         at.mkdir()
         user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
@@ -3056,7 +3480,11 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             f"door {n}: the coupon held back another amount than it has left for the run"
         )
 
-    # A pass killed mid-bench leaves its bracket open; the next holder of the cycle closes it.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_cycle_retaken_after_a_killed_bench_pass_closes_its_dead_bracket(
+    tmp_path: Path,
+) -> None:
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     killed = _account_stores(tmp_path / "killed", issuer=_WEB, user=user, spent=None)
     CycleEventLog.open(CycleDir(killed.campaigns.cycle_dir(_HELD_HOP))).append(
@@ -3073,8 +3501,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "a cycle retaken after a killed bench pass read the dead bracket as a pass in flight"
     )
 
-    # The payer rule: the account's own key wins unasked, per provider; the box's key sends only
-    # on a live coupon, and its refusal names the provider an own key would free.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_an_accounts_own_key_wins_and_the_boxs_key_sends_only_on_a_live_coupon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Per provider; the box's refusal names the provider an own key would free.
+    user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     spent_out = _account_stores(
         tmp_path / "keys", issuer=_WEB, user=user, spent=_SPENT_THE_COUPON, own_key="openrouter"
     )
@@ -3125,35 +3558,47 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             "a provider no key holds read as paid"
         )
 
-    # In flight, the reserve binds only a send on the box's key; one on the account's own goes on.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_in_flight_the_reserve_binds_only_a_send_on_the_boxs_key() -> None:
     book = spend_book(None, usd_reserve=0.05)
     send = SendBound(input_tokens=1, output_tokens=1, usd=0.04)
     _drawn(book, 1.0, key_source="user", lapsed=False)
     assert book.exhausted() is None, "a run spending its own key stopped at the host's coupon"
-    book.hold(send, "optimizer", what="o", paid_by="host", ledger="o")
+    book.hold(send, _OPTIMIZER, what="o", paid_by="host", ledger="o")
     with pytest.raises(HostAllowanceExhaustedError) as past:
-        book.hold(send, "optimizer", what="o", paid_by="host", ledger="o")
+        book.hold(send, _OPTIMIZER, what="o", paid_by="host", ledger="o")
     assert run_stop_reason(past.value) is StopReason.HOST_ALLOWANCE, (
         "a run stopped past the coupon read as another stop"
     )
-    book.hold(send, "optimizer", what="o", paid_by="user", ledger="o")
-    # A Compare arm's bench sends, which its meter does not count, still draw the coupon's reserve.
+    book.hold(send, _OPTIMIZER, what="o", paid_by="user", ledger="o")
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_compare_arms_uncounted_bench_sends_still_draw_the_coupons_reserve(
+    tmp_path: Path,
+) -> None:
+    send = SendBound(input_tokens=1, output_tokens=1, usd=0.04)
     compared = CycleEventLog(tmp_path / "compared.jsonl")
     compared.append(billed_call(0.03, kind="bench"))
     graded = spend_book(None, usd_reserve=0.05, meters="search_incurred", metered_on=compared.path)
     with pytest.raises(HostAllowanceExhaustedError):
-        graded.hold(send, "bench", what="b", paid_by="host", ledger="b")
+        graded.hold(send, _BENCH, what="b", paid_by="host", ledger="b")
     with pytest.raises(SendRefusedError) as unpriced:
         graded.hold(
             SendBound(input_tokens=1, output_tokens=1, usd=None),
-            "diagnostic",
+            CallLabel("d", "diagnostic"),
             what="d",
             paid_by="host",
             ledger="d",
         )
     assert unpriced.value.category is ErrorCategory.NO_RATE, "an unpriced bench send went out"
 
-    # The free tier bounds what a run may ask for, off one table; granted and host accounts are not on it.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_the_free_tier_holds_an_ungranted_web_account_and_no_other(tmp_path: Path) -> None:
+    user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
+    hand_set = Budget(usd=50.0, tokens=50_000)
     for n, (issuer, face, on_tier) in enumerate(
         ((_WEB, None, True), (None, None, False), (_WEB, hand_set, False))
     ):
@@ -3163,7 +3608,21 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         assert free_tier.on_free_tier(stores) is on_tier, (
             f"account {n} sits on the wrong side of the tier"
         )
-    # The tier fences only what draws the coupon: an own-keyed provider's optimizer nodes go free.
+
+
+class _FreeFence(NamedTuple):
+    boxed: free_tier.FreeFence
+    keyed: free_tier.FreeFence
+    oss: str
+    config: CampaignConfig
+    schema: PipelineSchema
+    layered: CampaignConfig
+
+
+@pytest.fixture
+def free_fence(tmp_path: Path) -> _FreeFence:
+    """A web account's fence on the box's keys and on its own key, and a check-in laid under it."""
+    user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     boxed = free_tier.free_fence(
         _account_stores(tmp_path / "boxed", issuer=_WEB, user=user, spent=None), "termnorm"
     )
@@ -3176,15 +3635,6 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     assert boxed is not None and keyed is not None and boxed.task and keyed.task, (
         "a backend's cells, paid by the box whatever the account holds, left the tier's fence"
     )
-    assert "openrouter" in boxed.providers and "openrouter" not in keyed.providers, (
-        "the tier fenced a provider the account's own key pays, or freed one the box pays"
-    )
-    offline.rates = {"openai/dear": {"input_cost_per_token": 5e-8, "output_cost_per_token": 6e-7}}
-    assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
-    assert (pricing.route_priced("x", "openai"), pricing.route_priced("dear", "openai")) == (
-        False,
-        True,
-    ), "a dollar ceiling would admit a route no rate prices"
     oss = "openai/gpt-oss-20b:nitro"
     config = _budgeted(Budget(usd=None))
     schema = parse_pipeline_response(
@@ -3202,6 +3652,34 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         }
     )
     layered = free_tier.with_free_tier_layer(config, schema, boxed)
+    return _FreeFence(boxed, keyed, oss, config, schema, layered)
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_the_tier_fences_a_provider_only_where_the_boxs_key_pays_it(
+    free_fence: _FreeFence,
+) -> None:
+    boxed, keyed, _, _, _, _ = free_fence
+    assert "openrouter" in boxed.providers and "openrouter" not in keyed.providers, (
+        "the tier fenced a provider the account's own key pays, or freed one the box pays"
+    )
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_a_dollar_ceiling_admits_only_a_route_a_rate_prices(offline: Router) -> None:
+    offline.rates = {"openai/dear": {"input_cost_per_token": 5e-8, "output_cost_per_token": 6e-7}}
+    assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
+    assert (pricing.route_priced("x", "openai"), pricing.route_priced("dear", "openai")) == (
+        False,
+        True,
+    ), "a dollar ceiling would admit a route no rate prices"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_free_check_in_measures_on_twenty_cells_at_its_models_lowest_rung(
+    free_fence: _FreeFence,
+) -> None:
+    boxed, _, _, _, schema, layered = free_fence
     assert (
         layered.sp_budget_origin,
         layered.optimization.nodes["adaptive_queue"].config["sp_budget_round"],
@@ -3209,7 +3687,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     ) == (20, 20, {"llm_only": {"reasoning_effort": "low"}}), (
         "a free check-in measured on more cells, or launched above its model's lowest rung"
     )
-    # A searched model axis offers the tier's models alone: what the check-in offers, Start runs.
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_searched_model_axis_offers_and_starts_the_tiers_models_alone(
+    free_fence: _FreeFence,
+) -> None:
+    boxed, _, oss, config, _, _ = free_fence
     searched = parse_pipeline_response(
         {
             "nodes": {
@@ -3244,6 +3728,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "Start refused a model the free check-in offered, or ran one the tier does not list"
     )
 
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_start_refuses_on_the_free_tier_what_its_fence_leaves_outside(
+    free_fence: _FreeFence,
+) -> None:
+    boxed, keyed, oss, config, schema, layered = free_fence
+
     def optimizer_on(effort: str) -> CampaignConfig:
         luna = {"model": "openai/gpt-6-luna", "reasoning_effort": effort}
         overlay = {"optimization": {"nodes": {"l1_generate": {"config": luna}}}}
@@ -3270,7 +3761,10 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
     with pytest.raises(PayloadInvalidError):
         free_tier.refuse_outside_free_tier(off)
-    # One node-config merge: a later layer naming another model drops the earlier layer's route.
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_later_layer_naming_another_model_drops_the_earlier_layers_route() -> None:
     routed: dict[str, object] = {
         "pipeline_overlay": {"llm_only": {"model": "a/x", "route_order": ["Groq"]}}
     }
@@ -3278,7 +3772,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     assert moved["pipeline_overlay"] == {"llm_only": {"model": "b/y"}}, (
         "a campaign layer moved the model under a route naming the old model's hosts"
     )
-    # The fence walks every call the run sends (bl2.B4): a judge's model is fenced like a node's.
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_the_fence_walks_every_call_a_run_sends_a_judges_model_included(
+    free_fence: _FreeFence,
+) -> None:
+    boxed, _, oss, _, schema, layered = free_fence
     judge = {"name": "j", "stages": [{"model": "openai/dear", "provider": "openrouter"}]}
     judged = CampaignConfig.model_validate(
         merge_config_layers(
@@ -3292,7 +3792,9 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         judged, select_optimizer(judged.optimization), tiered_params, schema, boxed
     ) == ["the judge model openai/dear"], "a judge on a model the tier does not list ran free"
 
-    # A paid verb never bills a cycle its producer still holds.
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_paid_verb_never_bills_a_cycle_its_producer_still_holds(tmp_path: Path) -> None:
     operator = User(user_id="op", tenant_id="op", created_at="")
     held_stores = _account_stores(tmp_path / "held", issuer=None, user=operator, spent=None)
     cycle_dir = held_stores.campaigns.cycle_dir(_HELD_HOP)
@@ -3314,18 +3816,25 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     release_cycle(cycle_dir)
     asyncio.run(bill_held())
 
-    # A scoring pass holds a slot and its reservation: a launch admitted beside it must not spend
-    # the headroom the pass is already spending.
-    passing = workspace(
+
+def _web_account(tmp_path: Path, sub: str) -> Stores:
+    return workspace(
         tmp_path,
         IdentityContext(
-            user_id=UserId("sub-8"),
-            tenant_id=TenantId("sub-8"),
+            user_id=UserId(sub),
+            tenant_id=TenantId(sub),
             issuer=Issuer(_WEB),
             claims={},
             capabilities=frozenset(),
         ),
     )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside_it(
+    tmp_path: Path,
+) -> None:
+    passing = _web_account(tmp_path, "sub-8")
     passing.grant.save(CouponGrant(face=Budget(usd=1.0)))
     payer = account_of(passing)
     slots = JobRegistry.attach(passing.jobs_dir)
@@ -3370,20 +3879,11 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     )
     assert launch_beside().usd == pytest.approx(1.0), "the pass kept its reservation past its exit"
 
-    # A budget change leaves the arm it did not touch alone.
-    def web_account(sub: str) -> Stores:
-        return workspace(
-            tmp_path,
-            IdentityContext(
-                user_id=UserId(sub),
-                tenant_id=TenantId(sub),
-                issuer=Issuer(_WEB),
-                claims={},
-                capabilities=frozenset(),
-            ),
-        )
 
-    metered = web_account("sub-9")
+# The uncap arms over the round cap and token ceiling the changes before it moved.
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone(tmp_path: Path) -> None:
+    metered = _web_account(tmp_path, "sub-9")
     hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
     campaign = minted_campaign(hop)
     metered.campaigns.create_campaign(campaign)
@@ -3434,9 +3934,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "an uncap left the account nothing held back for the run"
     )
 
-    # A moved ceiling is the CAMPAIGN's: every cycle's spend counts against it once, a fork's
-    # walked prefix not twice, and what the parent billed past the cut counts too.
-    forker = web_account("sub-7")
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
+    tmp_path: Path,
+) -> None:
+    # A fork's walked prefix not twice, and what the parent billed past the cut counts too.
+    forker = _web_account(tmp_path, "sub-7")
     root = CycleHop(campaign_id="camp-7", cycle_id="cycle_budget0007")
     fork = CycleHop(campaign_id="camp-7", cycle_id="cycle_budget0007_fork_r1")
     forker.campaigns.create_campaign(minted_campaign(root))
@@ -3499,9 +4003,13 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "the reservation moved off the ceiling it backs"
     )
 
-    # Set-limits is an admission (bl2.B1): of two raises on one account's campaigns, the second
-    # reads the wallet after the first's reserve landed, so the reserves stand within the face.
-    racer = web_account("sub-8")
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_of_two_set_limits_raises_the_second_reads_the_wallet_after_the_firsts_reserve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Set-limits is an admission, so the reserves stand within the face.
+    racer = _web_account(tmp_path, "sub-8")
     racer.grant.save(CouponGrant(face=Budget(usd=0.30)))
     racing = JobRegistry(tmp_path / "jobs-8", capacity=lambda _live: 2)
     raced = [CycleHop(campaign_id=f"camp-8{n}", cycle_id=f"cycle_race80{n}") for n in (1, 2)]
@@ -3560,9 +4068,14 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         "before the first's reserve landed"
     )
 
-    # A live run holds its reserve less what it billed (bl2.B3): its spend counts once, so a
-    # launch beside it is quoted what the coupon can still pay.
-    biller = web_account("sub-6")
+
+# Each headroom reads the holds and bills the steps before it left on the account.
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Its spend counts once, so a launch beside it is quoted what the coupon can still pay.
+    biller = _web_account(tmp_path, "sub-6")
     biller.grant.save(CouponGrant(face=Budget(usd=0.30)))
     billed_hop = CycleHop(campaign_id="camp-6b", cycle_id="cycle_billed01")
     biller.campaigns.create_campaign(minted_campaign(billed_hop))
@@ -3598,6 +4111,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             key_source="host",
             bound=Budget(usd=0.02),
             resource="optimizer",
+            node="o",
             ledger="campaigns/camp-6b/cycles/cycle_forked01/events.jsonl",
         )
     )
@@ -3627,6 +4141,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             key_source="host",
             bound=Budget(usd=0.05),
             resource="optimizer",
+            node="o",
             ledger="campaigns/camp-6b/cycles/cycle_forked01/events.jsonl",
         )
     )
@@ -3655,6 +4170,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             key_source="host",
             bound=Budget(usd=0.04),
             resource="optimizer",
+            node="o",
             ledger="chat/events.jsonl",
         )
     )
@@ -3682,9 +4198,12 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         pytest.approx(unreported + 0.04)
     ), "a dead chat turn's open send stayed held, never read as unreported"
 
-    # A head-to-head is one door: every arm planned, priced and admitted before any takes a key,
-    # so a refused act leaves no arm behind; each arm runs the budget it declared, and a retry
-    # under the act's key answers the arms it minted.
+
+# Each act counts the campaigns and launches the acts before it minted.
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "duel"))
     monkeypatch.setenv(PROVIDER_KEYS[0], NOT_A_KEY)
     stores = local_stores(tenant=None)
@@ -3839,10 +4358,22 @@ def account_bound(built_stores: Stores) -> Iterator[None]:
         yield
 
 
-@pytest.mark.usefixtures("account_bound")
-def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
+class _SpentCampaign(NamedTuple):
+    root: str
+    stub: str
+    retried: str
+    stub_ledger: Path
+    retried_ledger: Path
+    spent_cycle: Callable[..., Path]
+    account_usd: Callable[[], float]
+    cleanup: Callable[[str], bool]
+    ceiling_counts_now: Callable[[], tuple[float, int]]
+    tombstones: Callable[[], list[SpendTombstoneRecord]]
+
+
+@pytest.fixture
+def spent_campaign(built_stores: Stores) -> _SpentCampaign:
+    """camp-2's root and two forks off it, each spent on the box's key, and readers of that spend."""
     stores = built_stores
     root = "cycle_root0000"
     stub, retried = f"{root}_fork_aaaa", f"{root}_fork_bbbb"
@@ -3873,12 +4404,47 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         workspace = CycleEventLog(CycleEventLog.workspace_path(stores.campaigns.workspace))
         return [r for _, r in workspace.iter() if isinstance(r, SpendTombstoneRecord)]
 
+    def ceiling_counts_now() -> tuple[float, int]:
+        counted = stores.campaigns.metered_spend("camp-2", "bill")
+        return counted.usd_amount, counted.token_amount
+
+    return _SpentCampaign(
+        root,
+        stub,
+        retried,
+        stub_ledger,
+        retried_ledger,
+        spent_cycle,
+        account_usd,
+        cleanup,
+        ceiling_counts_now,
+        tombstones,
+    )
+
+
+@pytest.mark.usefixtures("account_bound")
+def test_the_account_and_the_campaigns_ceiling_read_what_its_cycles_billed(
+    spent_campaign: _SpentCampaign,
+) -> None:
+    _, _, _, _, _, _, account_usd, _, ceiling_counts_now, _ = spent_campaign
     before = account_usd()
     assert before == pytest.approx(0.07 + 0.11 + 0.05), (
         "the account read another sum than its cycles billed"
     )
+    ceiling_counts = ceiling_counts_now()
+    assert ceiling_counts == pytest.approx((before, 3 * 2_800)), (
+        "the campaign's ceiling read another sum than its cycles metered"
+    )
 
-    # An admission whose hold cannot be written frees the book's room and charges the account nothing.
+
+@pytest.mark.usefixtures("account_bound")
+def test_an_admission_whose_hold_cannot_be_written_frees_its_room_and_charges_nothing(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, spent_campaign: _SpentCampaign
+) -> None:
+    stores = built_stores
+    root, _, _, _, _, _, account_usd, cleanup, _, _ = spent_campaign
+    before = account_usd()
+
     def unwritable_line(_book: ChargeBook, _line: object) -> None:
         raise OSError("the account's disk is full")
 
@@ -3906,14 +4472,15 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         "a cycle the delete REFUSES must not be banked: it keeps its rows, the same money twice"
     )
 
-    def ceiling_counts_now() -> tuple[float, int]:
-        counted = stores.campaigns.metered_spend("camp-2", "bill")
-        return counted.usd_amount, counted.token_amount
 
-    ceiling_counts = ceiling_counts_now()
-    assert ceiling_counts == pytest.approx((before, 3 * 2_800)), (
-        "the campaign's ceiling read another sum than its cycles metered"
-    )
+@pytest.mark.usefixtures("account_bound")
+def test_a_ledger_refusing_a_sends_first_part_keeps_its_later_parts_on_the_account(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, spent_campaign: _SpentCampaign
+) -> None:
+    stores = built_stores
+    root, _, _, _, _, _, account_usd, _, _, _ = spent_campaign
+    root_hop = CycleHop(campaign_id="camp-2", cycle_id=root)
+    before = account_usd()
 
     def unappendable(*_: object) -> None:
         raise OSError("the ledger's disk is full")
@@ -3940,11 +4507,30 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert account_usd() == pytest.approx(before), (
         "a ledger that refused a send's first part left its later parts off the account"
     )
+
+
+@pytest.mark.usefixtures("account_bound")
+def test_deleting_a_spent_stub_fork_keeps_its_money_on_the_account_and_the_ceiling(
+    spent_campaign: _SpentCampaign,
+) -> None:
+    _, stub, _, stub_ledger, _, _, account_usd, cleanup, ceiling_counts_now, _ = spent_campaign
+    before, ceiling_counts = account_usd(), ceiling_counts_now()
     assert cleanup(stub) and not stub_ledger.exists(), "a spent stub fork survived its delete"
     assert account_usd() == pytest.approx(before), "deleting a spent stub fork un-spent it"
     assert ceiling_counts_now() == pytest.approx(ceiling_counts), (
         "deleting a spent stub fork handed its money back to the campaign's ceiling"
     )
+
+
+@pytest.mark.usefixtures("account_bound")
+def test_a_crash_retried_between_bank_and_delete_counts_the_fork_once(
+    built_stores: Stores, spent_campaign: _SpentCampaign
+) -> None:
+    stores = built_stores
+    _, _, retried, _, retried_ledger, _, account_usd, cleanup, ceiling_counts_now, _ = (
+        spent_campaign
+    )
+    before, ceiling_counts = account_usd(), ceiling_counts_now()
     retried_hop = CycleHop(campaign_id="camp-2", cycle_id=retried)
     for _crashed_attempt in range(2):
         bank_spend(
@@ -3963,7 +4549,17 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert ceiling_counts_now() == pytest.approx(ceiling_counts), (
         "a crash retried between bank and delete counted the cycle's metered spend twice, or none"
     )
-    # A delete that dies after its bank and before the tree goes: the tombstone is its commit.
+
+
+# The pass and the manifest-less delete meet the campaign the torn delete left.
+@pytest.mark.usefixtures("account_bound")
+def test_a_delete_torn_at_its_tree_commits_at_its_tombstone_and_admits_nothing_after(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, spent_campaign: _SpentCampaign
+) -> None:
+    stores = built_stores
+    root, _, _, _, _, _, account_usd, _, ceiling_counts_now, _ = spent_campaign
+    root_hop = CycleHop(campaign_id="camp-2", cycle_id=root)
+    before, ceiling_counts = account_usd(), ceiling_counts_now()
     camp_dir = stores.campaigns.campaign_root_dir("camp-2")
     spent_before = campaign_spend(stores.campaigns, stores.charges, "camp-2")
     owned_sandbox = inner_sandbox(stores, "camp-2", root)
@@ -4027,6 +4623,13 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         "banked by the destroyer itself, under BOTH `keep_results` arms, so no caller can skip it"
     )
 
+
+@pytest.mark.usefixtures("account_bound")
+def test_a_reclaimed_orphan_sandbox_banks_only_the_spend_it_did_not_carry_out(
+    built_stores: Stores, spent_campaign: _SpentCampaign
+) -> None:
+    stores = built_stores
+    tombstones = spent_campaign.tombstones
     # An inner sandbox is a SIBLING of the tenant tree, so no account-wide walk reaches it.
     sandbox = inner_sandbox(stores, SANDBOX_CAMPAIGN, "orphaned-outer-cycle")
     inner_cycle = sandbox / "tenant" / "campaigns" / "innerds__20260101-000000" / "cycles"
@@ -4058,7 +4661,14 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         "a forwarded inner cycle was banked twice, or its own spend not at all"
     )
 
-    # A draft never minted is charged at its sends, and a Start's claim on it holds off a discard.
+
+@pytest.mark.usefixtures("account_bound")
+def test_a_drafts_sends_are_charged_and_a_starts_claim_holds_off_a_discard(
+    built_stores: Stores, spent_campaign: _SpentCampaign
+) -> None:
+    stores = built_stores
+    account_usd = spent_campaign.account_usd
+
     def spent_draft(draft_id: str, cost_usd: float) -> Path:
         draft_dir = stores.drafts.draft_dir(draft_id)
         _pay(CycleEventLog.open(CycleDir(draft_dir)), cost_usd, input_tokens=300, output_tokens=100)
@@ -4113,12 +4723,17 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         stores.drafts.claim(draft.draft_id)
     assert not draft_dir.exists(), "a Start on a discarded draft wrote its dir back"
 
-    # A framing paid before its cycle exists bills a draft with no check-in, and its discard keeps it.
-    async def framed(*_: object, ledger: CycleEventLog, **__: object) -> None:
-        _pay(ledger, 0.03, input_tokens=500, output_tokens=200)
-        raise PayloadInvalidError("refused after the framing", code="refused")
 
-    monkeypatch.setattr(mint, "commit_task_framing", framed)
+class _Framing(NamedTuple):
+    framing: Session
+    declared: RunDeclaration
+    rows: list[Sample]
+
+
+@pytest.fixture
+def unframed_session(built_stores: Stores) -> _Framing:
+    """A session on the drafted dataset, declared with no task framing."""
+    stores = built_stores
     unframed = {"optimization": {"degradation_threshold": 0.4}}
     write_yaml(
         stores.tenant_datasets.dataset_dir("drafted") / DEFINITION_FILE,
@@ -4133,12 +4748,40 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         dataset=resolve_dataset(stores, "drafted"),
     )
     declared = mint.declare(framing, CampaignConfig.model_validate(unframed), purpose=Optimize())
+    return _Framing(framing, declared, rows)
+
+
+@pytest.mark.usefixtures("account_bound")
+def test_a_framing_paid_before_its_cycle_exists_stays_billed_past_its_refused_mint(
+    built_stores: Stores,
+    monkeypatch: pytest.MonkeyPatch,
+    spent_campaign: _SpentCampaign,
+    unframed_session: _Framing,
+) -> None:
+    stores = built_stores
+    account_usd = spent_campaign.account_usd
+    framing, declared, rows = unframed_session
+    # The account before the framing bills.
+    with_draft = account_usd()
+
+    async def framed(*_: object, ledger: CycleEventLog, **__: object) -> None:
+        _pay(ledger, 0.03, input_tokens=500, output_tokens=200)
+        raise PayloadInvalidError("refused after the framing", code="refused")
+
+    monkeypatch.setattr(mint, "commit_task_framing", framed)
     with pytest.raises(PayloadInvalidError):
         asyncio.run(mint.mint_framed_cycle(framing, declared, rows, task_text="frame this"))
     assert not draft_dirs(stores.campaigns.workspace), "an unminted framing left its ledger"
     assert account_usd() == pytest.approx(with_draft + 0.03), "a refused mint un-spent its framing"
 
-    # A mint that dies before its commit leaves no campaign to list, run or bill.
+
+@pytest.mark.usefixtures("account_bound")
+def test_a_mint_that_dies_before_its_commit_leaves_no_campaign_to_list_run_or_bill(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, unframed_session: _Framing
+) -> None:
+    stores = built_stores
+    framing, declared, rows = unframed_session
+
     def _dies(*_: object) -> None:
         raise OSError("torn")
 
@@ -4150,7 +4793,34 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         "a mint that died before its cycle left a campaign with none"
     )
 
-    # A reset follows a reshape: it drops ledgers this build no longer reads and keeps the money.
+
+@pytest.mark.usefixtures("account_bound")
+def test_a_reset_over_a_reshaped_ledger_drops_it_and_keeps_the_accounts_money(
+    built_stores: Stores, spent_campaign: _SpentCampaign
+) -> None:
+    stores = built_stores
+    root, _, _, _, _, spent_cycle, account_usd, _, _, _ = spent_campaign
+    root_ledger = CycleEventLog.open(
+        CycleDir(stores.campaigns.cycle_dir(CycleHop(campaign_id="camp-2", cycle_id=root)))
+    )
+    # The sends the Activity pane sums beside the cycles': a two-part send, a draft's, a framing's.
+    with (
+        scoped(ledger=root_ledger),
+        scoped(book=spend_book(1.0)),
+        admitted(
+            CallLabel("backend", "backend"),
+            SendBound(input_tokens=2_000, output_tokens=800, usd=0.5),
+            model="openai/gpt-4o",
+            provider="openrouter",
+            paid_by="host",
+        ) as parts,
+    ):
+        parts.settle(
+            Billed(TokenAccount(input=10, output=5), 0.02),
+            Billed(TokenAccount(input=10, output=5), 0.03),
+        )
+    _pay(root_ledger, 0.04, input_tokens=300, output_tokens=100)
+    _pay(root_ledger, 0.03, input_tokens=500, output_tokens=200)
     framed_total = account_usd()
     stores.campaigns.create_campaign(minted_campaign(CycleHop(campaign_id="camp-3", cycle_id=root)))
     reshaped = spent_cycle(root, cost_usd=0.13, campaign_id="camp-3")
@@ -4173,8 +4843,15 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         "the Activity pane lost the sends of what was deleted, reset or never minted"
     )
 
-    # A settle whose ledger write fails still closes the book whole: its part billed and the
-    # remainder held, never the whole bound held again on top of the bill.
+
+@pytest.mark.usefixtures("account_bound")
+def test_a_settle_whose_ledger_write_fails_still_closes_its_book_whole(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stores = built_stores
+    root = "cycle_root0000"
+
+    # Its part billed and the remainder held, never the whole bound held again on top of the bill.
     def unwritable(_record: object, _ledger: object) -> None:
         raise OSError("the ledger's disk is full")
 
@@ -4204,8 +4881,15 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         "a settle that raised left its book holding another sum than it billed and kept held"
     )
 
-    # A projection that raises on a landed bill is its ledger's one warning: the part counts once,
-    # and the next bill lands with no second warning.
+
+@pytest.mark.usefixtures("account_bound")
+def test_a_projection_raising_on_a_landed_bill_is_its_ledgers_one_warning(
+    built_stores: Stores,
+) -> None:
+    stores = built_stores
+    root = "cycle_root0000"
+
+    # The part counts once, and the next bill lands with no second warning.
     class _Unwritable(Projection):
         def _handle_token_usage(self, record: TokenUsageRecord) -> None:  # noqa: ARG002 -- routed by its annotation
             raise OSError("the readout's disk is full")
@@ -4236,8 +4920,12 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     )
     assert warned == ["derived_file_stale"], "a projection's fault went unreported, or stormed"
 
-    # A campaign id is drawn again over a live campaign's dir, a tombstone's id, and an id a
-    # landing wiped whose charges still name its ledger.
+
+@pytest.mark.usefixtures("account_bound")
+def test_a_campaign_id_is_drawn_again_over_a_live_dir_a_tombstone_and_a_charged_id(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A charged id: one a landing wiped whose charges still name its ledger.
     campaigns = built_stores.campaigns
     prefix = dataset_id_prefix("ds1")
     live = campaigns.campaign_root_dir(f"{prefix}__aaaaaa") / "cycles"
@@ -4256,6 +4944,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
             key_source="host",
             bound=Budget(usd=0.1),
             resource="backend",
+            node="cell",
             ledger=built_stores.charges.held_on(campaigns.ledger(wiped)),
         )
     )

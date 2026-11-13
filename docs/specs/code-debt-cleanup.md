@@ -1204,7 +1204,7 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 ### batch/32 · ts-arch
 
 - **The treatment digest's edit probe patches `Path.read_text`**:
-  `tests/test_identity.py::test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_other`
+  `tests/test_identity.py::test_a_prompt_shaping_classs_method_rekeys_the_run`
   blocks keying `source_scan.py::prompt_source_digest` on a once-per-process tree hash (~250 ms per
   boot). Action: the probe writes the edit to a tree copy under a patched `_PACKAGE_ROOT`, then the tree
   key is process-cached. **Rides with:** ts-arch 3. **Re-test:** `git grep -n "read_text" -- tests/test_identity.py`.

@@ -116,7 +116,13 @@ export function RemotePanel({ model: m }: { model: RemoteModel }) {
       <SamplesInFlight model={m} />
       <div className="remote-panel-section">
         <div className="section-title">Finishing criteria</div>
-        <RunLimitsControl budget={m.budget} share={m.share} metered={m.metered} />
+        <RunLimitsControl
+          budget={m.budget}
+          overshoot={m.overshoot}
+          overshot={m.overshot}
+          share={m.share}
+          metered={m.metered}
+        />
       </div>
     </div>
   );

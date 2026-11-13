@@ -7,9 +7,10 @@ arithmetic: each journey recovers a known answer from data built to have one.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import pytest
@@ -256,10 +257,8 @@ def _anchored(delta: dict[str, float], *, mu: float = 0.0) -> DeltaRuler:
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
-    tmp_path: Path, offline: Router
-) -> None:
-    # Calibrated: eight samples clear any sample floor, so the arm count is the binding condition.
+def test_a_delta_ruler_warms_only_once_a_second_arm_answers() -> None:
+    # Eight samples clear any sample floor, so the arm count is the binding condition.
     arm_a = [Observation("a", str(sid), 1.0 if sid % 3 else 0.0) for sid in range(8)]
     arm_b = [Observation("b", str(sid), 1.0 if sid < 5 else 0.0) for sid in range(8)]
     flat = calibrate_delta_ruler(arm_a, 4, enable_2pl=False)
@@ -267,7 +266,10 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     warm = calibrate_delta_ruler(arm_a + arm_b, 4, enable_2pl=False)
     assert warm is not None and warm.calibration_model == "1PL", "a second arm left δ flat"
 
-    # One tenant ruler, versioned by its folds. C0 hits a quarter of the bank; its child changed nothing.
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_one_tenant_ruler_judges_an_arm_only_on_the_rows_it_may_read(tmp_path: Path) -> None:
+    # Versioned by its folds. C0 hits a quarter of the bank; its child changed nothing.
     pool40 = samples(40, "t", query="r")
     c0_hits = {s.key for s in pool40 if s.id % 4 == 3}
     race_rows = [
@@ -317,8 +319,14 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
         "an arm's rows were dropped as held by a line it never reads"
     )
 
-    # Drawn blind: the parent hits the easiest 16 of 40 cells on a graded ruler, and each round's
-    # cells must still be the pool's, or the election reads rows the held-out bench never would.
+
+# One warm round (~3 s to open) feeds both: its draws read it, then the re-entry folds on it.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_round_draws_fresh_cells_and_a_reentered_one_orders_on_the_lines_it_opened_on(
+    tmp_path: Path, offline: Router
+) -> None:
+    # The parent hits the easiest 16 of 40 cells on a graded ruler, and each round's cells must
+    # still be the pool's, or the election reads rows the held-out bench never would.
     graded_pool = samples(40, "TRUE", query="d")
     answered = offline.backend.matches
 
@@ -360,7 +368,6 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     assert parent_rate == pytest.approx(16 / 40, abs=0.08), (
         "the parent reads one rate on its rounds' cells and another on the pool"
     )
-    # Re-entered: a round orders its walk on the lines it opened on, never on a fold since.
     opened_on = drawing.cycle.difficulty.stamp.reach
     at = replace(drawing, round_num=3)
 
@@ -379,7 +386,9 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     drawing.cycle.difficulty.open_round(drawing.cycle.rounds, opened_on)
     assert ordered() == live, "a re-entered round walked an order its opening never drew"
 
-    # Covered: a shuffle led by the `easy` cells on the `small` model still reaches every level.
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_draw_led_by_one_level_still_covers_every_dataset_and_model_of_its_pool() -> None:
     pool = [
         Sample(id=i, query=f"{d}/{m}/{seed}", ground_truth=None, source_pin={"d": d, "m": m})
         for i, (d, m, seed) in enumerate(
@@ -392,18 +401,37 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
         assert len(covered) == 2, "a draw dropped a dataset or model of its pool"
     assert drawn[0].query == "easy/small/0", "the cover reordered a draw it already covered"
 
-    # Ordered: win opportunities first, a parent-hit probe every fourth slot.
+
+class _OrderPanel(NamedTuple):
+    ids: list[int]
+    cells: dict[int, str]
+    parent_grades: dict[str, float]
+    ordering: DeltaRuler
+    on_slot: dict[int, float]
+    hit_ids: set[int]
+
+
+@pytest.fixture
+def order_panel() -> _OrderPanel:
+    """24 slots, the parent hitting the first 9, a ruler carrying the first 20; slot 23 is ungraded."""
     ids = list(range(24))
     cells = {sid: f"k{sid}" for sid in ids}
     parent_grades = {f"k{sid}": 1.0 if sid < 9 else 0.0 for sid in range(23)}
     ordering = _anchored({f"k{sid}": float(sid % 7) for sid in range(20)}, mu=2.85)
     on_slot = {sid: ordering.delta[key] for sid, key in cells.items() if key in ordering.delta}
+    return _OrderPanel(ids, cells, parent_grades, ordering, on_slot, set(range(9)))
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_round_order_leads_with_win_opportunities_and_probes_a_parent_hit_every_fourth_slot(
+    order_panel: _OrderPanel,
+) -> None:
+    ids, cells, parent_grades, ordering, on_slot, hit_ids = order_panel
     order = build_round_order(parent_grades, ordering, cells, n_min=0)
     assert sorted(order) == ids
     assert build_round_order(parent_grades, ordering, cells, n_min=0) == order, (
         "the order is not reproducible"
     )
-    hit_ids = set(range(9))
     for pos in (4, 8, 12, 16):
         assert order[pos - 1] in hit_ids, f"position {pos} should be a parent-hit probe"
     assert not hit_ids & {order[i] for i in range(16) if (i + 1) % 4}, "a hit took a miss's slot"
@@ -416,13 +444,29 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     assert order.index(23) > max(order.index(sid) for sid in misses), "an unknown cell led a miss"
     hit_keys = [(-on_slot.get(sid, centre), sid) for sid in order if sid in hit_ids]
     assert hit_keys == sorted(hit_keys), "hit probes are not led by the hardest"
-    # Led: n_min cells θ is read on come first, so PoBB can cut at n_min, the probe kept.
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_round_order_walks_n_min_cells_on_the_ruler_first_and_keeps_its_probe(
+    order_panel: _OrderPanel,
+) -> None:
+    # PoBB can cut at n_min only once n_min θ-readable cells are walked.
+    _, cells, parent_grades, ordering, _, hit_ids = order_panel
+    order = build_round_order(parent_grades, ordering, cells, n_min=0)
     led = build_round_order(parent_grades, ordering, cells, n_min=6)
     assert all(cells[sid] in ordering.delta for sid in led[:6]), (
         "an off-ruler cell was walked before n_min θ-readable ones: no arm can be cut that early"
     )
     assert order.index(20) < 6 <= led.index(20), "guard: the strata alone walk off the ruler early"
     assert led[3] in hit_ids, "the lead dropped the regression probe"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_panel_with_no_parent_grade_opens_on_its_most_discriminating_cells(
+    order_panel: _OrderPanel,
+) -> None:
+    ids, cells, _, ordering, on_slot, _ = order_panel
+    centre = ordering.mu_delta
     unknown = build_round_order({}, ordering, cells, n_min=0)
     assert sorted(unknown) == ids
     spread = [abs(on_slot.get(sid, centre) - centre) for sid in unknown]
@@ -432,7 +476,10 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     easiest = min(on_slot, key=lambda sid: (on_slot[sid], sid))
     assert unknown.index(easiest) >= 6, "the panel's easiest cell must not lead the round"
 
-    # Read: a child on cells the judging scale does not carry stays off it until its round folds.
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_theta_off_the_judging_scale_is_withheld_and_its_caveat_names_why() -> None:
+    # A child on cells the judging scale does not carry stays off it until its round folds.
     fitted = _anchored({"1": 1.5, "2": -1.25, "3": 0.0})
     child = {sid: float(sid == "7") for sid in ("7", "8", "9")}
     assert fit_theta(child, fitted.entries()) is None, "a child read on unlinked cells carried a θ"
@@ -445,18 +492,40 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     ):
         served = theta_caveat(scale, read_on, all_miss=False)
         assert served is expected, "the pin cancels inside a lift, a skipped cell does not"
-    # The id names the δ, never key order; a cold cycle's names its OBJECTIVE.
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_ruler_id_names_its_delta_never_key_order_and_a_cold_one_names_its_objective() -> None:
+    fitted = _anchored({"1": 1.5, "2": -1.25, "3": 0.0})
     assert fitted.anchor_id == anchor_id_of({"3": 0.0, "2": -1.25, "1": 1.5}, 0.0, 2.0, "1PL")
     assert fitted.anchor_id != anchor_id_of({"1": 1.5, "2": -1.2500001, "3": 0.0}, 0.0, 2.0, "1PL")
     assert flat_ruler_id("acc") != flat_ruler_id("acc_minus_latency")
 
-    # Stratified: a stratum short of its share hands the rest on; an empty one takes nothing.
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_stratum_short_of_its_share_hands_the_rest_on_and_an_empty_one_takes_nothing() -> None:
     assert stratum_shares([2, 10, 10], 9) == [2, 4, 3]
     assert stratum_shares([0, 5], 4) == [0, 4]
     assert stratum_shares([1, 1], 5) == [1, 1]
     assert stratum_shares([30], 20) == [20]
 
-    # Traced: every round's ended-on individual re-read on ONE scale, whatever its election read.
+
+class _Traced(NamedTuple):
+    series_of: Callable[..., list[Any]]
+    closed: Callable[..., Any]
+    hits: dict[str, list[float]]
+    bank: list[Sample]
+    scope: RulerScope
+    warmed: Stores
+    tenant: RulerStore
+    frozen: int
+    run: list[Any]
+
+
+@pytest.fixture
+def traced(tmp_path: Path) -> _Traced:
+    """A run of four rounds on a warm tenant ruler, and the reader of its level series."""
+    scope = RulerScope(scorer="acc", dataset="ds")
     bank = samples(12, "t")
     scorer = Scorer(
         id="acc",
@@ -538,6 +607,14 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
         closed(2, {"b": hits["b"], "a": hits["a"]}, None, "a"),
         round_result(3, election=None, arms={}, cells={}),
     ]
+    return _Traced(series_of, closed, hits, bank, scope, warmed, tenant, frozen, run)
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_every_round_reads_its_standing_parent_on_the_one_scale_its_series_stamps(
+    traced: _Traced,
+) -> None:
+    series_of, _, _, _, _, warmed, tenant, _, run = traced
     [series] = series_of(OpenAt(), warmed, [run])
     levels = {rnd: series.level(rnd) for rnd in series.rounds}
     assert series.stamp.version == tenant.version() and series.stamp.excluded == ("a", "o"), (
@@ -554,12 +631,24 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     assert series.caveat is None and series.plateau() == pytest.approx(levels[3].theta), (
         "three rounds of one standing parent on one scale is the plateau"
     )
-    # A fork that picked `b`: both lines on one fit less both lines' parents, or UCB sums two scales.
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_fork_and_its_parent_line_read_their_levels_on_one_fit_less_both_lines_parents(
+    traced: _Traced,
+) -> None:
+    # Two scales would let UCB sum across them.
+    series_of, closed, hits, _, _, warmed, _, _, run = traced
     fork = [run[0], closed(1, {"a": hits["a"], "b": hits["b"]}, "b", "b")]
     line, forked = series_of(OpenAt(), warmed, [run, fork])
     assert line.stamp == forked.stamp and line.stamp.excluded == ("a", "b", "o"), (
         "two lines of one family read their levels on two scales"
     )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_series_reads_no_row_past_the_reach_its_reader_holds(traced: _Traced) -> None:
+    series_of, _, _, _, _, warmed, _, frozen, run = traced
     pin = RulerReach(version=frozen, own=None)
     [pinned] = series_of(CellOf(walks=None, ruler=pin), warmed, [run])  # type: ignore[arg-type]
     assert pinned.stamp.version == frozen and pinned.stamp.excluded == (), (
@@ -572,6 +661,13 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     assert own.stamp.excluded == ("a", "o") and other.stamp.excluded == (), (
         "an arm read another arm's lines past the freeze, or never its own"
     )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
+    tmp_path: Path, traced: _Traced
+) -> None:
+    series_of, _, _, bank, scope, _, _, _, run = traced
     lone = workspace(tmp_path / "lone")
     lone.ruler.fold(
         scope, [("f0", s.key, (s.id + 1) / 16) for s in bank], campaign="else", own=None
@@ -579,12 +675,6 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     [cold] = series_of(OpenAt(), lone, [run])
     assert cold.stamp.cold and cold.caveat is ThetaCaveat.COLD_RULER and cold.plateau() is None, (
         "a series on no δ scale read as one that differences"
-    )
-    # One fold, one scale: cells measuring two datasets, all folded under the run's scope, read it.
-    split = [s.model_copy(update={"measured_dataset": "other"}) if s.id % 2 else s for s in bank]
-    [mixed] = series_of(OpenAt(), warmed, [run], split)
-    assert mixed.caveat is None and mixed.plateau() == pytest.approx(series.plateau()), (
-        "a δ scale the fold wrote once read as several"
     )
     withheld = inner_cell_facts(
         cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)]).model_copy(
@@ -596,6 +686,17 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(
     )
     assert withheld.series_reason is ThetaCaveat.COLD_RULER, (
         "the withheld θ lift lost the caveat its series carries"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_cells_of_two_datasets_folded_under_one_scope_read_one_scale(traced: _Traced) -> None:
+    series_of, _, _, bank, _, warmed, _, _, run = traced
+    [series] = series_of(OpenAt(), warmed, [run])
+    split = [s.model_copy(update={"measured_dataset": "other"}) if s.id % 2 else s for s in bank]
+    [mixed] = series_of(OpenAt(), warmed, [run], split)
+    assert mixed.caveat is None and mixed.plateau() == pytest.approx(series.plateau()), (
+        "a δ scale the fold wrote once read as several"
     )
 
 

@@ -631,7 +631,10 @@ class RunLimitsProjection(Projection):
         # Last wins and names every cycle axis it stands, so laying each over the last is laying the last.
         if self._limits is not None:
             self._limits = self._limits.model_copy(
-                update={"budget": self._limits.budget.over(record.budget)}
+                update={
+                    "budget": self._limits.budget.over(record.budget),
+                    "overshoot": record.overshoot,
+                }
             )
 
     def value(self) -> RunLimits | None:

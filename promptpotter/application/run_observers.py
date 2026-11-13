@@ -98,7 +98,9 @@ def declare_run_wiring(
             measured_unit=session.backend_client.connector.measured_unit,
             measurement_node=selected.plan.measurement,
             run_limits=RunLimits(
-                budget=campaign_config.optimization.budget, optimizer=list(selected.limits)
+                budget=campaign_config.optimization.budget,
+                overshoot=session.store.campaigns.read_standing_budget(session.hop).overshoot,
+                optimizer=list(selected.limits),
             ),
             defaults_drift=defaults_drift(
                 campaign,

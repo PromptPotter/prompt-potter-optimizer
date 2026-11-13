@@ -16,7 +16,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NamedTuple
 from unittest import mock
 
 import httpx
@@ -129,6 +129,7 @@ from promptpotter.domain.cycle_paths import (
 from promptpotter.domain.hierarchy import (
     HierarchyCampaign,
     HierarchyCandidate,
+    HierarchyEntry,
     HierarchyRound,
     SubtreeCampaign,
     SubtreeCourse,
@@ -171,6 +172,7 @@ from promptpotter.infrastructure.store import archive_queries, measurement_archi
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
+    OpenAt,
     SampleFoldRow,
     bench_reads,
     list_populations,
@@ -357,9 +359,7 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
 
 
 @pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_the_archive_on_disk_keeps_every_paid_answer(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_archive_on_disk_keeps_every_paid_answer(built_stores: Stores) -> None:
     archive = built_stores.archive
     entry = filed_under(LLM_ONLY, "kept")
     other: Configs = [("llm_only", {"model": "Y"})]
@@ -390,7 +390,13 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert archive.population(entry) == held, "reindex destroyed an answer"
     assert all(archive.answer(ref) is not None for ref in refs), "reindex lost an address"
 
-    # A reader tailing a cell file rewritten under it skips no answer.
+
+# Each step reads on from where the feed's last advance left it.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_reader_tailing_a_cell_file_rewritten_under_it_skips_no_answer(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = built_stores.archive
     tailed: Configs = [("llm_only", {"model": "T"})]
     reader = MeasurementArchive(archive.base_dir)
     feed = ReplayFeed(reader, tailed)
@@ -434,10 +440,20 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert set(own.advance()) == {"k6", "k7"}, "an answer another process filed was stepped over"
     _bank(8)
     assert set(own.advance()) == {"k8"}
+    # A writer that died mid-append leaves a torn last line: the next append cuts it and lands whole.
+    with cells.open("ab") as torn:
+        torn.write(b'{"sample_key": "k_torn", "predi')
+    _bank(9)
+    assert set(own.advance()) == {"k9"}, "an answer filed past a crashed append was lost"
+    assert cells.read_bytes().endswith(b"}\n"), "the torn bytes merged into the next answer"
+    assert archive.detail_lines(file_key), "the cell file stopped reading after a crash"
 
-    # Four writers on one file at once: Windows runs `O_APPEND` as seek-then-write, so what keeps
-    # every row is the lock under `append_jsonl`, taken on a fresh handle per append.
-    racing = archive.base_dir / "racing.jsonl"
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_four_writers_on_one_file_at_once_keep_every_row(built_stores: Stores) -> None:
+    # Windows runs `O_APPEND` as seek-then-write, so what keeps every row is the lock under
+    # `append_jsonl`, taken on a fresh handle per append.
+    racing = built_stores.archive.base_dir / "racing.jsonl"
     writers = [
         threading.Thread(
             target=lambda w=w: [append_jsonl(racing, {"w": w, "n": n}) for n in range(50)]
@@ -454,15 +470,20 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert landed == [(w, n) for w in range(4) for n in range(50)], (
         "a concurrent append overwrote another writer's row"
     )
-    # A writer that died mid-append leaves a torn last line: the next append cuts it and lands whole.
-    with cells.open("ab") as torn:
-        torn.write(b'{"sample_key": "k_torn", "predi')
-    _bank(9)
-    assert set(own.advance()) == {"k9"}, "an answer filed past a crashed append was lost"
-    assert cells.read_bytes().endswith(b"}\n"), "the torn bytes merged into the next answer"
-    assert archive.detail_lines(file_key), "the cell file stopped reading after a crash"
 
-    # Compaction round-trips every field it moved; TWO filings, so a restore clears each stamp.
+
+class _Compacted(NamedTuple):
+    configs: Configs
+    bank: Bank
+    refs: dict[str, str]
+    whole: ArchiveEntry
+
+
+@pytest.fixture
+def compacted_rows(built_stores: Stores) -> _Compacted:
+    """The bank named `compacted` and its two rows, each holding every field compaction moves;
+    TWO filings, so a restore clears each stamp."""
+    archive = built_stores.archive
     compacted: Configs = [("llm_only", {"model": "C"})]
     compacted_bank = Bank.of(Sample(id=0, query=f"q{sid}", ground_truth="g") for sid in (1, 2))
     compacted_hash = compacted_bank.dataset_hash
@@ -486,6 +507,14 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
             },
         )
         [(_, compacted_refs[f"q{sid}"], _)] = filed(archive, [row], whole)
+    return _Compacted(compacted, compacted_bank, compacted_refs, whole)
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_compaction_round_trips_every_field_it_moved(
+    built_stores: Stores, compacted_rows: _Compacted
+) -> None:
+    archive, whole = built_stores.archive, compacted_rows.whole
     before = archive.population(whole)
     assert len(before) == 2 and not any(answer.compaction for answer in before)
     moved_out = compact_measurement_archive(built_stores, dataset="compacted", apply=True)
@@ -503,7 +532,12 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert (moved_back.files_touched, moved_back.conflicts) == (1, 0)
     assert archive.population(whole) == before, "a restore did not return every moved field"
 
-    # A controlled arm remembers only the answers its campaign walked.
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_controlled_arm_remembers_only_the_answers_its_campaign_walked(
+    built_stores: Stores,
+) -> None:
+    archive = built_stores.archive
     ds = Bank.of(Sample(id=0, query=f"k{i}", ground_truth="g") for i in range(2))
 
     def individual(name: str) -> ArchiveEntry:
@@ -569,6 +603,16 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert listed() == {"foreign", "shared", "origin"}, "the fence leaked out of the arm"
     assert remembered("shared") == ["no", "no"]
     assert sample_fold_rows(built_stores, dataset_hash=ds.dataset_hash) == [fold_row("x")]
+
+
+# The re-cut moves the name the relabel placed on the bank.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_relabel_or_a_recut_moves_a_name_and_every_paid_answer_reads_on(
+    built_stores: Stores, compacted_rows: _Compacted
+) -> None:
+    archive, campaigns = built_stores.archive, built_stores.campaigns
+    compacted, compacted_bank, compacted_refs, whole = compacted_rows
+    compacted_hash = compacted_bank.dataset_hash
 
     # A relabel moves a name onto a bank: it rewrites no paid row and no campaign, and every cell
     # filed under the bank replays on the samples the new name resolves to.
@@ -680,12 +724,31 @@ def _emit_round(
     return pick.id
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_inherits_them(
-    built_stores: Stores, offline: Router, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _on_parent() -> dict[str, Any]:
+    """A round whose arm and election end on the individual named `parent`."""
+    parent = prompted(instruction="parent")
+    return {
+        "arms": {ArmKey(parent.id): arm_state("parent", individual=parent)},
+        "election": election(ended_on=parent.id),
+    }
+
+
+def _adopted() -> RoundResult:
+    """Round 0, electing the origin."""
+    origin_slot = ArmSlot(round=0, idx=0, total=1)
+    return _round(
+        round=0,
+        arms={ArmKey("origin"): arm_state("origin", slot=origin_slot)},
+        election=election("origin"),
+    )
+
+
+# The absent-arm replays read the cut this race records.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_was_fit_on(
+    built_stores: Stores,
 ) -> None:
     stores = built_stores
-    # A cut the live race made past an errored cell replays on the cells it was fit on.
     parent = prompted(instruction="parent")
     hits = sheet(measurements([1.0] * 10))
     racing = seat(
@@ -693,10 +756,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         round_num=3,
         optimization={"elimination_n_min": 4, "nodes": {"pobb": {"config": {"epsilon": 0.30}}}},
     )
-    on_parent = {
-        "arms": {ArmKey(parent.id): arm_state("parent", individual=parent)},
-        "election": election(ended_on=parent.id),
-    }
+    on_parent = _on_parent()
     # The frontier holds every cell, answered by an individual that is not the parent.
     line = [_round(round=0, cells={ArmKey("origin"): hits}, **on_parent)]
     set_cycle(racing.cycle, line=line)
@@ -762,7 +822,13 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             f"{inputs.kind}: an absent arm's decision replayed"
         )
 
-    # A parent's charged error replays at the grade the live election read.
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_parents_charged_error_replays_at_the_grade_the_live_election_read(
+    built_stores: Stores,
+) -> None:
+    stores = built_stores
+    on_parent = _on_parent()
     scorer = scorer_of()
 
     def answered_by(model: str, answers: dict[int, str | None]) -> Any:
@@ -812,16 +878,10 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     assert selection.selected == walked_child, "guard: the live election charges the error"
     charged, ledger = _minted(stores, "cycle_charged_parent")
-    origin_slot = ArmSlot(round=0, idx=0, total=1)
-    adopted = _round(
-        round=0,
-        arms={ArmKey("origin"): arm_state("origin", slot=origin_slot)},
-        election=election("origin"),
-    )
     close_round(
         ledger,
         [
-            adopted,
+            _adopted(),
             _round(
                 round=1,
                 arms={walked_child: child_arm, read_parent.key: read_parent.state},
@@ -837,7 +897,22 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         "the replay read the parent's charged error as a cell nobody scored"
     )
 
-    # Rounds stand; a rewind retracts every election, close and crown past it, for every reader.
+
+class _ThreeRounds(NamedTuple):
+    hop: CycleHop
+    ledger: CycleEventLog
+    closed: list[RoundResult]
+    ids: list[str]
+    closing: Cycle
+    on_course: Callable[[], list[HierarchyCandidate]]
+    served: Callable[[], list[tuple[str, bool, bool]]]
+    selected: Callable[[], list[str]]
+
+
+@pytest.fixture
+def three_rounds(built_stores: Stores) -> _ThreeRounds:
+    """A campaign's line closed through c0..c2, and its readers of what stands."""
+    stores = built_stores
     closing = seat(stores).cycle
     hop = CycleHop(campaign_id="rewound__20260101-000000", cycle_id="cycle_rewound")
     stored_campaign(stores, minted_campaign(hop))
@@ -866,6 +941,15 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         )
         return [reader.selection.label for reader in readers]  # type: ignore[union-attr]
 
+    return _ThreeRounds(hop, ledger, closed, ids, closing, on_course, served, selected)
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_rewind_retracts_every_election_close_and_crown_past_it_for_every_reader(
+    built_stores: Stores, three_rounds: _ThreeRounds
+) -> None:
+    stores = built_stores
+    hop, _, _, ids, _, _, served, selected = three_rounds
     assert served() == [(i, True, True) for i in ids] and selected() == ["C2.1"] * 3, "guard"
     stores.campaigns.rewind_to_round(hop, 1)
     assert selected() == ["C1.1"] * 3, (
@@ -877,7 +961,14 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         "an election, close or crown stood past the rewind"
     )
     assert served() == [(ids[0], True, True)]
-    # A resume `--from 3` that halts on a divergence below it displaces no round past it.
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_resume_from_3_that_halts_on_a_divergence_below_it_displaces_no_round_past_it(
+    built_stores: Stores,
+) -> None:
+    stores = built_stores
+    closing = seat(stores).cycle
     halted = CycleHop(campaign_id="halted__20260101-000000", cycle_id="cycle_halted")
     stored_campaign(stores, minted_campaign(halted))
     stores.campaigns.mint_cycle(halted)
@@ -917,7 +1008,17 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert stores.campaigns.standing_rounds(halted, moment=None).last_closed == 4, (
         "a resume its divergence halted had already rewound the line"
     )
-    # Every live fold reads the rewind off its record: a re-entered round's arm folds its new walk.
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_reentered_rounds_arm_folds_only_its_new_walk(
+    built_stores: Stores, three_rounds: _ThreeRounds
+) -> None:
+    stores = built_stores
+    hop, ledger, closed, ids, *_ = three_rounds
+    stores.campaigns.rewind_to_round(hop, 1)
+    stores.campaigns.rewind_to_round(hop, 0)
+    # Every live fold reads the rewind off its record.
     folds = AnnouncedArms()
     walk = ArmRecord(round=1, arm=ArmKey(ids[1]), state=closed[1].arms[ArmKey(ids[1])])
     [cell] = arm_walk(
@@ -943,14 +1044,33 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert folds.fold(1, walk.arm) is None, (
         "a re-announced arm folded the cells of the pass a rewind retracted"
     )
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_an_uncrowned_rerun_of_a_rewound_round_never_takes_the_stand(
+    built_stores: Stores, three_rounds: _ThreeRounds
+) -> None:
+    stores = built_stores
+    hop, ledger, closed, ids, closing, on_course, served, _ = three_rounds
+    stores.campaigns.rewind_to_round(hop, 1)
+    stores.campaigns.rewind_to_round(hop, 0)
     again = _emit_round(closing, ledger, closed[:1], "c1_again", crowned=False)
     assert served() == [(ids[0], True, True), (again, True, False)]
     origin, held = on_course()
     assert (origin.facts.stands, held.facts.stands) == (True, False), (
         "an uncrowned re-run took the stand"
     )
-    # A ledger re-minted onto its freed inode, grown past the old one, is read as itself: an inode
-    # number outlives its file, so only the bytes tell the old file's tail from a new file.
+
+
+# An inode number outlives its file, so only the bytes tell the old file's tail from a new file.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_ledger_reminted_onto_its_freed_inode_grown_past_the_old_one_is_read_as_itself(
+    built_stores: Stores, three_rounds: _ThreeRounds
+) -> None:
+    stores = built_stores
+    hop, ledger, _, _, closing, *_ = three_rounds
+    # A reader indexed the old file before it was replaced.
+    stores.campaigns.standing_rounds(hop, moment=None)
     _, regrown = _minted(stores, "cycle_regrown")
     regrown_rounds: list[RoundResult] = []
     grown = [_emit_round(closing, regrown, regrown_rounds, f"d{n}") for n in range(6)]
@@ -959,7 +1079,14 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert stores.campaigns.standing_rounds(hop, moment=None).crowns == dict(enumerate(grown)), (
         "a re-minted ledger was read as the tail of the file it replaced"
     )
-    # An export this build cannot read is refused as an export: disposable, so a re-run remedies it.
+
+
+# Disposable, so a re-run remedies it.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_an_export_this_build_cannot_read_is_refused_as_an_export(
+    built_stores: Stores, three_rounds: _ThreeRounds
+) -> None:
+    stores, hop = built_stores, three_rounds.hop
     export_file = stores.campaigns.layout(hop).export
     export_file.write_text("{not an export", encoding="utf-8")
     with pytest.raises(FileUnreadableError) as unread_export:
@@ -967,8 +1094,14 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert unread_export.value.kind is FileKind.EXPORT, "an export was refused as another file"
     export_file.unlink()
 
-    # A close this build cannot read refuses its cycle to every reader of rounds, never half-read;
-    # the remedy it names deletes the campaign, paused as it is, and keeps the paid measurement.
+
+# Never half-read; the remedy it names deletes the campaign, paused as it is.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_an_unreadable_close_refuses_its_cycle_to_every_reader_and_the_remedy_keeps_paid_rows(
+    built_stores: Stores,
+) -> None:
+    stores = built_stores
+    closing, scorer = seat(stores).cycle, scorer_of()
     # `rewrite_lines` writes a fresh file: a ledger index takes a same-inode growth for an append.
     stranded = CycleHop(campaign_id="stranded__20260101-000000", cycle_id="cycle_stranded")
     stored_campaign(stores, minted_campaign(stranded))
@@ -1017,8 +1150,13 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         "the remedy took a paid measurement with the campaign"
     )
 
-    # A fork: an unmodified origin inherits the branch-point candidate's reading; an edited one
-    # rescores.
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_an_unmodified_fork_origin_inherits_the_branch_points_reading_and_an_edited_one_rescores(
+    built_stores: Stores,
+) -> None:
+    stores = built_stores
+    closing = seat(stores).cycle
     store = stores.campaigns
     prompt = {"instruction": "do the thing", "persona": "you are precise"}
     solving = pipeline_schema(
@@ -1028,7 +1166,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     close_round(
         ledger,
         [
-            adopted,
+            _adopted(),
             _round(
                 round=1,
                 arms={
@@ -1087,7 +1225,24 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         "an edited fork origin inherited a measurement it never earned"
     )
 
-    # An applied scenario forks at its round, keeps the parent's holdout and carries its criterion.
+
+class _Scenario(NamedTuple):
+    hop: CycleHop
+    log: CycleEventLog
+    rounds: list[RoundResult]
+    pick: ArmKey
+    drawn: PartitionRecord
+    unheld: tuple[RunPhaseRecord, CycleShareRecord]
+    closing: Cycle
+
+
+@pytest.fixture
+def scenario_line(built_stores: Stores) -> _Scenario:
+    """A paused line closed through s0, s1 on a drawn holdout, with a share the parent holds; its
+    campaign permits model `m` on node `a`."""
+    stores = built_stores
+    closing = seat(stores).cycle
+    store = stores.campaigns
     scenario, scenario_log = _minted(stores, "cycle_applyscenario")
     permits_m = CampaignConfig.model_validate(
         {
@@ -1111,10 +1266,17 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     for record in unheld:
         store.append(scenario, record)
+    return _Scenario(scenario, scenario_log, scenario_rounds, scenario_pick, drawn, unheld, closing)
 
-    # A rewind its launch refuses (no backend answers this dataset) has written nothing on its
-    # parent: no supersede, no inbox void, no moved pointer, no stub; nor does a cut past the
-    # parent's last close.
+
+# No supersede, no inbox void, no moved pointer, no stub; nor does a cut past the last close.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_rewind_its_launch_refuses_has_written_nothing_on_its_parent(
+    built_stores: Stores, scenario_line: _Scenario
+) -> None:
+    stores, store, scenario = built_stores, built_stores.campaigns, scenario_line.hop
+
+    # No backend answers this dataset, so the launch refuses.
     def parent_standing() -> tuple[object, ...]:
         index = store.load(scenario, moment=None)
         assert index is not None
@@ -1142,6 +1304,15 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         assert parent_standing() == standing, (
             f"a refused rewind at round {refused_round} left a stub or moved its parent"
         )
+
+
+# The steered forks cut from the applied scenario's fork, and from each other.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_its_criterion(
+    built_stores: Stores, scenario_line: _Scenario
+) -> None:
+    stores, store = built_stores, built_stores.campaigns
+    scenario, _, _, scenario_pick, drawn, unheld, _ = scenario_line
     criterion = "0.9 * accuracy + 0.1 * (1 - mean_latency_s)"
     fork_id = cut_operator_fork(
         stores=stores,
@@ -1206,8 +1377,18 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         )
     clean = store.load(applied, moment=None)
     assert clean is not None and not clean.human_intervened, "a clean fork was stamped babysat"
-    # A panel fork off a candidate sends only the operator's edit: with none it steers nothing and
-    # stamps no intervention, and it runs the candidate's own record, provider and route included.
+
+
+# With no edit it steers nothing and stamps no intervention.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_panel_fork_off_a_candidate_runs_its_record_and_sends_only_the_operators_edit(
+    built_stores: Stores, scenario_line: _Scenario
+) -> None:
+    stores, store = built_stores, built_stores.campaigns
+    scenario, scenario_log, scenario_rounds, *_, closing = scenario_line
+    campaign = owned_campaign(stores, scenario.campaign_id)
+    permitted = permitted_narrowing(stores, campaign)
+    # Provider and route included.
     candidate_record = {"a": {"model": "m", "provider": "p", "route_order": ["r"]}}
     candidate_key = _emit_round(
         closing, scenario_log, scenario_rounds, "s2", resolved_params=candidate_record
@@ -1236,7 +1417,19 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert panel_index is not None and not panel_index.human_intervened, (
         "a panel fork with no edit was stamped babysat"
     )
-    # A field cleared in the panel drops the candidate's value, and the layer below shows through.
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_field_cleared_in_the_panel_drops_the_candidates_value_and_the_layer_below_shows(
+    built_stores: Stores, scenario_line: _Scenario
+) -> None:
+    stores = built_stores
+    scenario, scenario_log, scenario_rounds, *_, closing = scenario_line
+    campaign = owned_campaign(stores, scenario.campaign_id)
+    candidate_record = {"a": {"model": "m", "provider": "p", "route_order": ["r"]}}
+    candidate_key = _emit_round(
+        closing, scenario_log, scenario_rounds, "s2", resolved_params=candidate_record
+    )
     cleared = ForkSeed(reset=["pipeline_overlay.a.route_order"])
     reset_fork = scenario.model_copy(
         update={
@@ -1255,8 +1448,17 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     }, "a cleared field forked with the candidate's value"
     with pytest.raises(ValidationError):
         ForkSeed(reset=["a.route_order"])
-    # A fork by another issuer than the one whose launch queued on its parent goes ahead and, on
-    # its own authority over the parent, withdraws that launch (bl1.B5).
+
+
+# It goes ahead on its own authority over the parent (bl1.B5).
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_fork_by_another_issuer_withdraws_the_launch_queued_on_its_parent(
+    built_stores: Stores,
+    scenario_line: _Scenario,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores, store, scenario = built_stores, built_stores.campaigns, scenario_line.hop
     room = [0]
     queue = JobRegistry(tmp_path / "fork_jobs", capacity=lambda _live: room[0])
     (parents_launch,) = request_jobs(
@@ -1292,12 +1494,26 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert store.launch_claim(scenario) is None, "a withdrawn launch still claims the parent"
     assert store.last(scenario, CycleSupersededRecord) is not None, "the fork never took"
 
-    # A fork's own ledger displaces its parent's prefix once.
+
+class _Displaced(NamedTuple):
+    parent: CycleHop
+    fork: CycleHop
+    prefix: list[str]
+    closed: list[RoundResult]
+    closing: Cycle
+
+
+@pytest.fixture
+def displaced_line(built_stores: Stores) -> _Displaced:
+    """A line closed through p0..p2 and a fork minted off it at round 3, holding no round of its
+    own yet."""
+    stores, store = built_stores, built_stores.campaigns
+    closing = seat(stores).cycle
     displaced = CycleHop(campaign_id="displaced__20260101-000000", cycle_id="cycle_displaced")
     stored_campaign(stores, minted_campaign(displaced))
     stores.campaigns.mint_cycle(displaced)
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(displaced)))
-    closed = []
+    closed: list[RoundResult] = []
     prefix = [_emit_round(closing, ledger, closed, f"p{n}") for n in range(3)]
     fork_hop = _mint_sibling(
         store,
@@ -1311,24 +1527,45 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         ),
         cut_round=3,
     )
+    return _Displaced(displaced, fork_hop, prefix, closed, closing)
+
+
+def _fork_own_rounds(stores: Stores, line: _Displaced) -> list[str]:
+    """The fork's own rounds over its parent's round 0: f1 crowned, f2 not."""
+    own = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(line.fork)))
+    forked = line.closed[:1]
+    return [
+        _emit_round(line.closing, own, forked, "f1"),
+        _emit_round(line.closing, own, forked, "f2", crowned=False),
+    ]
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_forks_own_ledger_displaces_its_parents_prefix_once(
+    built_stores: Stores, displaced_line: _Displaced
+) -> None:
+    store = built_stores.campaigns
+    displaced, fork_hop, prefix, *_ = displaced_line
 
     def candidates(hop: CycleHop) -> list[str]:
         return [key for _, key in store.standing_rounds(hop, moment=None).arms]
 
     assert candidates(fork_hop) == prefix, "the fork does not continue its parent's rounds"
-    own = CycleEventLog.open(CycleDir(store.cycle_dir(fork_hop)))
-    forked = closed[:1]
-    mine = [
-        _emit_round(closing, own, forked, "f1"),
-        _emit_round(closing, own, forked, "f2", crowned=False),
-    ]
+    mine = _fork_own_rounds(built_stores, displaced_line)
     stood = store.standing_rounds(fork_hop, moment=None)
     assert candidates(fork_hop) == [prefix[0], *mine], "a parent round stood beside the fork's own"
     assert [next(iter(r.close.arms)) for r in stood.rounds.values()] == [prefix[0], *mine]
     assert stood.crowns == {0: prefix[0], 1: mine[0]}
     assert candidates(displaced) == prefix, "the fork's rounds displaced its parent's own"
 
-    # A line stands on its origin until an election crowns another: a --diag line closes no round 0.
+
+# A --diag line closes no round 0.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_line_stands_on_its_origin_until_an_election_crowns_another(
+    built_stores: Stores,
+) -> None:
+    stores, store = built_stores, built_stores.campaigns
+    closing = seat(stores).cycle
     walked_only, origin_log = _minted(stores, "cycle_origin_only")
     walked_origin = ArmKey(prompted(instruction="w_origin").id)
     origin_slot = ArmSlot(round=0, idx=0, total=1)
@@ -1364,7 +1601,14 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         RoundArm(round=1, arm=crown),
     ), "a cut stands on a candidate other than the line's newest crown below it"
 
-    # A step's silence is the family's, wherever a window happens to cut the ray.
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_steps_silence_is_the_familys_wherever_a_window_cuts_the_ray(
+    built_stores: Stores, displaced_line: _Displaced
+) -> None:
+    stores, fork_hop = built_stores, displaced_line.fork
+    _fork_own_rounds(stores, displaced_line)
+
     def gaps(limit: int) -> dict[str, float]:
         ray = open_family_ray(stores, (fork_hop,), limit=limit, before=None).window()
         return {step.address: step.facts.gap_before_s for step in ray.steps}
@@ -1377,7 +1621,16 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             f"a {limit}-step window re-measured the silence before its first step"
         )
 
-    # A supersede ends its parent only where no producer holds it: a holder declares its own stop.
+
+# A holder declares its own stop; the hierarchy then reads the line the supersede moved.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_supersede_ends_its_parent_only_where_no_producer_holds_it(
+    built_stores: Stores, displaced_line: _Displaced, tmp_path: Path
+) -> None:
+    stores, store = built_stores, built_stores.campaigns
+    displaced, fork_hop, *_ = displaced_line
+    _fork_own_rounds(stores, displaced_line)
+
     def ended(hop: CycleHop) -> StopReason | None:
         index = store.load(hop, moment=None)
         assert index is not None
@@ -1456,11 +1709,98 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         "the course's standing names another pick's change than the candidate it stands"
     )
 
-    # ONE line resolver over a fork-of-a-fork-of-a-fork: every (course, round) reads off the course
-    # owning it, as the mint records say. The trunk crowns o, a, z; the kid cuts it at 2 and holds;
-    # the grand cuts the kid at 3 and crowns x; the great cuts the grand at 4; a steer takes the kid
-    # back to C0, another the grand to b, an arm of the trunk's round 1 never crowned; rewinds re-run
-    # the grand's round 1 and its round 3.
+
+def _ident(name: str) -> str:
+    return prompted(instruction=name).id
+
+
+def _course_of(hop: CycleHop) -> str:
+    return Subject.of((hop,)).address
+
+
+def _at(hop: CycleHop, rnd: int, name: str) -> str:
+    return Subject.of((hop,))._replace(round=rnd, candidate_id=ArmKey(_ident(name))).address
+
+
+def _trunk_picks(hops: dict[str, CycleHop]) -> tuple[str, str, str, str]:
+    """The trunk's origin o, its round-1 arms a and b, and the grand's x."""
+    family, grand = hops["family"], hops["grand"]
+    return (
+        _at(family, 0, "o"),
+        _at(family, 1, "a"),
+        _at(family, 1, "b"),
+        _at(grand, 3, "x"),
+    )
+
+
+# ONE line resolver over a fork-of-a-fork-of-a-fork: every (course, round) reads off the course
+# owning it, as the mint records say. The trunk crowns o, a, z; the kid cuts it at 2 and holds;
+# the grand cuts the kid at 3 and crowns x; the great cuts the grand at 4; a steer takes the kid
+# back to C0, another the grand to b, an arm of the trunk's round 1 never crowned; rewinds re-run
+# the grand's round 1 and its round 3.
+# One row per round closed, in ledger order: a course's first row mints it off `parent`, cut at
+# `cut` (a steer names the candidate it starts from); every row closes one round on it.
+_FAMILY_ROWS: list[
+    tuple[str, str, int, tuple[int, str] | None, list[str], str | None, str | None]
+] = [
+    # course, parent, cut, steered from, arms, crown, reference
+    ("family", "", 0, None, ["o"], "o", None),
+    ("family", "", 0, None, ["a", "b"], "a", "o"),
+    ("kid", "family", 2, None, ["y"], None, "a"),
+    ("family", "", 0, None, ["a", "z"], "z", None),
+    ("grand", "kid", 3, None, ["x"], "x", "a"),
+    ("great", "grand", 4, None, ["v"], "v", "x"),
+    ("steered", "kid", 0, (0, "o"), ["s"], "s", None),
+    ("rewound", "grand", 1, None, ["w"], "w", "o"),
+    ("redone", "grand", 3, None, ["q"], "q", "a"),
+    ("branched", "grand", 0, (1, "b"), ["p"], "p", None),
+    ("rerun", "grand", 0, (3, "a"), ["r"], "r", None),
+    ("relift", "grand", 0, (1, "o"), ["l"], "l", None),
+    ("mended", "grand", 3, None, ["m"], "m", "a"),
+    # A supersede fork of a supersede fork, cut below where every course above it was cut.
+    ("carried", "rewound", 2, None, ["d"], "d", "w"),
+    # A course already minted, cut again: `--from` in place, re-running round 1 after the fork.
+    ("rewound", "", 1, None, ["k"], "k", "o"),
+    # Two supersede forks of one course, the second cut above where the first branched, then the
+    # course re-run in place under both: the first still retires what the second stands on.
+    ("rival", "kid", 0, (0, "o"), ["c"], "c", None),
+    ("rival", "", 0, None, ["e", "f"], "e", "c"),
+    ("first", "rival", 1, None, ["i"], "i", "c"),
+    ("first", "", 0, None, ["n"], "n", "i"),
+    ("rival", "", 0, None, ["g"], "g", "e"),
+    ("second", "rival", 3, None, ["h"], "h", "g"),
+    ("rival", "", 2, None, ["j"], "j", "e"),
+    # An arm re-run away that only an offshoot's read holds, and no line stands on.
+    ("steered", "", 0, None, ["t"], "t", "s"),
+    ("glance", "steered", 0, (0, "s"), ["u"], "u", None),
+    ("steered", "", 1, None, ["t2"], "t2", "s"),
+    # Re-run in place BELOW an arm a cut still holds: that arm reads the line it ran on.
+    ("steered", "", 0, None, ["t3"], "t3", "t2"),
+    ("peek", "steered", 0, (2, "t3"), ["u2"], "u2", None),
+    ("steered", "", 1, None, ["t4"], "t4", "s"),
+]
+
+
+class _Family(NamedTuple):
+    stores: Stores
+    hops: dict[str, CycleHop]
+    line_of: dict[str, list[RoundResult]]
+    asks: dict[str, tuple[CycleHop, int, str, MeasurementRole]]
+    seed_key: ArmKey
+    tree: HierarchyEntry
+
+
+@pytest.fixture(scope="module")
+def family_tree(tmp_path_factory: pytest.TempPathFactory) -> _Family:
+    """Built once: every fact on it only reads."""
+    with scoped(memory=OpenAt()):
+        return _family(workspace(tmp_path_factory.mktemp("family")))
+
+
+def _family(stores: Stores) -> _Family:
+    """Every row of `_FAMILY_ROWS` closed, inner runs spawned by each ask, and the subtree read."""
+    store = stores.campaigns
+    closing = seat(stores).cycle
     family = CycleHop(campaign_id="family__20260101-000000", cycle_id="cycle_family")
     stored_campaign(
         stores,
@@ -1473,52 +1813,17 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         ),
     )
     stores.campaigns.mint_cycle(family)
-
-    def ident(name: str) -> str:
-        return prompted(instruction=name).id
-
-    # One row per round closed, in ledger order: a course's first row mints it off `parent`, cut at
-    # `cut` (a steer names the candidate it starts from); every row closes one round on it.
-    rows: list[tuple[str, str, int, tuple[int, str] | None, list[str], str | None, str | None]] = [
-        # course, parent, cut, steered from, arms, crown, reference
-        ("family", "", 0, None, ["o"], "o", None),
-        ("family", "", 0, None, ["a", "b"], "a", "o"),
-        ("kid", "family", 2, None, ["y"], None, "a"),
-        ("family", "", 0, None, ["a", "z"], "z", None),
-        ("grand", "kid", 3, None, ["x"], "x", "a"),
-        ("great", "grand", 4, None, ["v"], "v", "x"),
-        ("steered", "kid", 0, (0, "o"), ["s"], "s", None),
-        ("rewound", "grand", 1, None, ["w"], "w", "o"),
-        ("redone", "grand", 3, None, ["q"], "q", "a"),
-        ("branched", "grand", 0, (1, "b"), ["p"], "p", None),
-        ("rerun", "grand", 0, (3, "a"), ["r"], "r", None),
-        ("relift", "grand", 0, (1, "o"), ["l"], "l", None),
-        ("mended", "grand", 3, None, ["m"], "m", "a"),
-        # A supersede fork of a supersede fork, cut below where every course above it was cut.
-        ("carried", "rewound", 2, None, ["d"], "d", "w"),
-        # A course already minted, cut again: `--from` in place, re-running round 1 after the fork.
-        ("rewound", "", 1, None, ["k"], "k", "o"),
-        # Two supersede forks of one course, the second cut above where the first branched, then the
-        # course re-run in place under both: the first still retires what the second stands on.
-        ("rival", "kid", 0, (0, "o"), ["c"], "c", None),
-        ("rival", "", 0, None, ["e", "f"], "e", "c"),
-        ("first", "rival", 1, None, ["i"], "i", "c"),
-        ("first", "", 0, None, ["n"], "n", "i"),
-        ("rival", "", 0, None, ["g"], "g", "e"),
-        ("second", "rival", 3, None, ["h"], "h", "g"),
-        ("rival", "", 2, None, ["j"], "j", "e"),
-        # An arm re-run away that only an offshoot's read holds, and no line stands on.
-        ("steered", "", 0, None, ["t"], "t", "s"),
-        ("glance", "steered", 0, (0, "s"), ["u"], "u", None),
-        ("steered", "", 1, None, ["t2"], "t2", "s"),
-        # Re-run in place BELOW an arm a cut still holds: that arm reads the line it ran on.
-        ("steered", "", 0, None, ["t3"], "t3", "t2"),
-        ("peek", "steered", 0, (2, "t3"), ["u2"], "u2", None),
-        ("steered", "", 1, None, ["t4"], "t4", "s"),
-    ]
     restated_at_mint = {"mended": [1]}
     hops, line_of = {"family": family}, {"family": list[RoundResult]()}
-    for row_course, row_parent, row_cut, row_named, row_picks, row_crown, row_reference in rows:
+    for (
+        row_course,
+        row_parent,
+        row_cut,
+        row_named,
+        row_picks,
+        row_crown,
+        row_reference,
+    ) in _FAMILY_ROWS:
         if row_course in hops and row_cut:
             store.rewind_to_round(hops[row_course], row_cut - 1)
             del line_of[row_course][row_cut:]
@@ -1533,7 +1838,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                     row_cut,
                     None
                     if row_named is None
-                    else RoundArm(round=row_named[0], arm=ArmKey(ident(row_named[1]))),
+                    else RoundArm(round=row_named[0], arm=ArmKey(_ident(row_named[1]))),
                 ),
             )
             hops[row_course] = _mint_sibling(
@@ -1546,17 +1851,17 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 store.rebank_round(hops[row_course], lifted.restated(lifted.optimizer_state))
         line, n = line_of[row_course], len(line_of[row_course])
         arms = {
-            ArmKey(ident(p)): arm_state(p, slot=ArmSlot(round=n, idx=i, total=len(row_picks)))
+            ArmKey(_ident(p)): arm_state(p, slot=ArmSlot(round=n, idx=i, total=len(row_picks)))
             for i, p in enumerate(row_picks)
         }
         if row_reference is not None:
-            arms[ArmKey(ident(row_reference))] = arm_state(
+            arms[ArmKey(_ident(row_reference))] = arm_state(
                 row_reference,
-                slot=walked_slot(line, ArmKey(ident(row_reference))),
+                slot=walked_slot(line, ArmKey(_ident(row_reference))),
                 role=MeasurementRole.PARENT,
             )
             root = next(iter(line[0].arms))
-            assert line_reference(line, origin=root).arm == ident(row_reference), (
+            assert line_reference(line, origin=root).arm == _ident(row_reference), (
                 f"guard: a row re-reads off {row_course}'s line"
             )
         row_ended = row_crown or row_reference or row_picks[0]
@@ -1566,43 +1871,21 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 arms=arms,
                 reference=None if row_reference is None else line_reference(line, origin=root),
                 election=election(
-                    None if row_crown is None else ident(row_crown),
-                    ended_on=ident(row_ended),
+                    None if row_crown is None else _ident(row_crown),
+                    ended_on=_ident(row_ended),
                 ),
             )
         )
         close_round(
             CycleEventLog.open(CycleDir(store.cycle_dir(hops[row_course]))), line, cycle=closing
         )
-    restamp = walked_slot(line_of["family"], ArmKey(ident("a")))
-    assert restamp is not None and restamp.round == 2, (
-        "a re-read stamps a walk other than its latest"
-    )
-    # Each course by its first row, in mint order.
-    (
-        kid,
-        grand,
-        great,
-        steered,
-        rewound,
-        redone,
-        branched,
-        rerun,
-        relift,
-        mended,
-        carried,
-        rival,
-        first,
-        second,
-        glance,
-        peek,
-    ) = (hops[n] for n in list(dict.fromkeys(row[0] for row in rows))[1:])
+    grand, rewound, peek = hops["grand"], hops["rewound"], hops["peek"]
     # A round still measuring: its re-read is announced, and nothing has elected or closed.
     live = len(line_of["peek"])
     CycleEventLog.open(CycleDir(store.cycle_dir(peek))).append(
         ArmRecord(
             round=live,
-            arm=ArmKey(ident("u2")),
+            arm=ArmKey(_ident("u2")),
             state=arm_state(
                 "u2", slot=ArmSlot(round=0, idx=0, total=1), role=MeasurementRole.PARENT
             ),
@@ -1630,7 +1913,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             spawned,
             SpawnedBy(
                 round=rnd,
-                individual_id=ident(pick),
+                individual_id=_ident(pick),
                 role=role,
                 cycle_id=asker.cycle_id,
                 task=f"t/{name}",
@@ -1638,7 +1921,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         )
     # The run x asked closes its origin: its line continues the line of the candidate that asked.
     seeded = CycleHop(campaign_id="own__20260101-000000", cycle_id="cycle_own")
-    seed_key = ArmKey(ident("w0"))
+    seed_key = ArmKey(_ident("w0"))
     close_round(
         CycleEventLog.open(CycleDir(sandbox.campaigns.cycle_dir(seeded))),
         [
@@ -1651,10 +1934,25 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         cycle=closing,
     )
     tree = hierarchy_subtree(stores, Subject(family.campaign_id).address, None, None, moment=None)
+    return _Family(stores, hops, line_of, asks, seed_key, tree)
 
-    def course_of(hop: CycleHop) -> str:
-        return Subject.of((hop,)).address
 
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_reread_stamps_the_latest_walk_of_its_individual(family_tree: _Family) -> None:
+    restamp = walked_slot(family_tree.line_of["family"], ArmKey(_ident("a")))
+    assert restamp is not None and restamp.round == 2, (
+        "a re-read stamps a walk other than its latest"
+    )
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_an_inner_run_hangs_on_the_candidate_its_spawn_record_names(
+    family_tree: _Family,
+) -> None:
+    family, grand, rewound, peek = (
+        family_tree.hops[n] for n in ("family", "grand", "rewound", "peek")
+    )
+    asks, tree = family_tree.asks, family_tree.tree
     hung = {
         name: e.parent
         for e in entries_under(tree)
@@ -1662,33 +1960,49 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         for name in asks
         if f"{name}__" in e.address
     }
-
-    def at(hop: CycleHop, rnd: int, name: str) -> str:
-        return Subject.of((hop,))._replace(round=rnd, candidate_id=ArmKey(ident(name))).address
-
-    o, first_pick, b, x = (
-        at(family, 0, "o"),
-        at(family, 1, "a"),
-        at(family, 1, "b"),
-        at(grand, 3, "x"),
-    )
+    _, first_pick, _, x = _trunk_picks(family_tree.hops)
     assert hung == {
         "reread": first_pick,
-        "again": at(family, 2, "a"),
+        "again": _at(family, 2, "a"),
         "own": x,
-        "overlap": course_of(grand),
-        "unrun": at(rewound, 1, "w"),
-        "live": at(peek, 0, "u2"),
+        "overlap": _course_of(grand),
+        "unrun": _at(rewound, 1, "w"),
+        "live": _at(peek, 0, "u2"),
     }, "an inner run hung on a candidate other than the one its spawn record names"
 
-    # The bugs reviews found are rows here: the grand's cut round drawn twice, the steer's
-    # inherited anchor lost, the rewind's round 1 re-read off the wrong course's picks, and a
-    # retirement that is anything but "off the fork's line, within its reach".
+
+# The bugs reviews found are rows here: the grand's cut round drawn twice, the steer's
+# inherited anchor lost, the rewind's round 1 re-read off the wrong course's picks.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_every_candidates_line_reads_each_round_off_the_course_owning_it(
+    family_tree: _Family,
+) -> None:
+    (
+        family,
+        kid,
+        _grand,
+        great,
+        steered,
+        rewound,
+        redone,
+        branched,
+        rerun,
+        relift,
+        mended,
+        carried,
+        rival,
+        first,
+        second,
+        glance,
+        peek,
+    ) = family_tree.hops.values()
+    tree, seed_key = family_tree.tree, family_tree.seed_key
+    o, first_pick, b, x = _trunk_picks(family_tree.hops)
     head = [(0, [o]), (1, [first_pick])]
     crownless: tuple[int, list[str]] = (2, [])
     # A course lifting no round continues the line of the candidate it hangs from, through it.
-    steer = [(0, [o]), (0, [at(steered, 0, "s")])]
-    rivals = [(0, [o]), (0, [at(rival, 0, "c")])]
+    steer = [(0, [o]), (0, [_at(steered, 0, "s")])]
+    rivals = [(0, [o]), (0, [_at(rival, 0, "c")])]
     [own_seed] = [
         e.address
         for e in entries_under(tree)
@@ -1698,54 +2012,57 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         o: [(0, [o])],
         first_pick: head,
         b: [(0, [o]), (1, [b])],
-        **{c: [*head, (2, [c])] for c in (at(family, 2, "a"), at(family, 2, "z"), at(kid, 2, "y"))},
+        **{
+            c: [*head, (2, [c])]
+            for c in (_at(family, 2, "a"), _at(family, 2, "z"), _at(kid, 2, "y"))
+        },
         x: [*head, crownless, (3, [x])],
-        at(great, 4, "v"): [*head, crownless, (3, [x]), (4, [at(great, 4, "v")])],
+        _at(great, 4, "v"): [*head, crownless, (3, [x]), (4, [_at(great, 4, "v")])],
         own_seed: [*head, crownless, (3, [x]), (0, [own_seed])],
-        at(steered, 0, "s"): steer,
-        at(rewound, 1, "w"): [(0, [o]), (1, [at(rewound, 1, "w")])],
-        at(rewound, 1, "k"): [(0, [o]), (1, [at(rewound, 1, "k")])],
+        _at(steered, 0, "s"): steer,
+        _at(rewound, 1, "w"): [(0, [o]), (1, [_at(rewound, 1, "w")])],
+        _at(rewound, 1, "k"): [(0, [o]), (1, [_at(rewound, 1, "k")])],
         # Its parent re-ran round 1 in place after the cut; the fork's line still stands on w.
-        at(carried, 2, "d"): [(0, [o]), (1, [at(rewound, 1, "w")]), (2, [at(carried, 2, "d")])],
-        at(redone, 3, "q"): [*head, crownless, (3, [at(redone, 3, "q")])],
-        at(branched, 0, "p"): [(0, [o]), (1, [b]), (0, [at(branched, 0, "p")])],
-        at(rerun, 0, "r"): [*head, (0, [at(rerun, 0, "r")])],
-        at(relift, 0, "l"): [(0, [o]), (0, [at(relift, 0, "l")])],
+        _at(carried, 2, "d"): [(0, [o]), (1, [_at(rewound, 1, "w")]), (2, [_at(carried, 2, "d")])],
+        _at(redone, 3, "q"): [*head, crownless, (3, [_at(redone, 3, "q")])],
+        _at(branched, 0, "p"): [(0, [o]), (1, [b]), (0, [_at(branched, 0, "p")])],
+        _at(rerun, 0, "r"): [*head, (0, [_at(rerun, 0, "r")])],
+        _at(relift, 0, "l"): [(0, [o]), (0, [_at(relift, 0, "l")])],
         # The restated round 1 is the repair's own, whole: its arms are copies on its own line.
-        **{c: [(0, [o]), (1, [c]), crownless] for c in (at(mended, 1, "a"), at(mended, 1, "b"))},
-        at(mended, 3, "m"): [
+        **{c: [(0, [o]), (1, [c]), crownless] for c in (_at(mended, 1, "a"), _at(mended, 1, "b"))},
+        _at(mended, 3, "m"): [
             (0, [o]),
-            (1, [at(mended, 1, "a")]),
+            (1, [_at(mended, 1, "a")]),
             crownless,
-            (3, [at(mended, 3, "m")]),
+            (3, [_at(mended, 3, "m")]),
         ],
-        at(rival, 0, "c"): rivals,
-        **{n: [*rivals, (1, [n])] for n in (at(rival, 1, "e"), at(rival, 1, "f"))},
+        _at(rival, 0, "c"): rivals,
+        **{n: [*rivals, (1, [n])] for n in (_at(rival, 1, "e"), _at(rival, 1, "f"))},
         # A cut lifting the rival's origin continues the line that origin hangs from.
-        at(first, 1, "i"): [*rivals, (1, [at(first, 1, "i")])],
-        at(first, 2, "n"): [*rivals, (1, [at(first, 1, "i")]), (2, [at(first, 2, "n")])],
+        _at(first, 1, "i"): [*rivals, (1, [_at(first, 1, "i")])],
+        _at(first, 2, "n"): [*rivals, (1, [_at(first, 1, "i")]), (2, [_at(first, 2, "n")])],
         # Each read on the line it ran on: g on the rival's round 1 as the second's cut found it.
         **{
-            n: [*rivals, (1, [at(rival, 1, "e")]), (2, [n])]
-            for n in (at(rival, 2, "g"), at(rival, 2, "j"))
+            n: [*rivals, (1, [_at(rival, 1, "e")]), (2, [n])]
+            for n in (_at(rival, 2, "g"), _at(rival, 2, "j"))
         },
-        at(second, 3, "h"): [
+        _at(second, 3, "h"): [
             *rivals,
-            (1, [at(rival, 1, "e")]),
-            (2, [at(rival, 2, "g")]),
-            (3, [at(second, 3, "h")]),
+            (1, [_at(rival, 1, "e")]),
+            (2, [_at(rival, 2, "g")]),
+            (3, [_at(second, 3, "h")]),
         ],
         **{
             n: [*steer, (1, [n])]
-            for n in (at(steered, 1, "t"), at(steered, 1, "t2"), at(steered, 1, "t4"))
+            for n in (_at(steered, 1, "t"), _at(steered, 1, "t2"), _at(steered, 1, "t4"))
         },
-        at(steered, 2, "t3"): [*steer, (1, [at(steered, 1, "t2")]), (2, [at(steered, 2, "t3")])],
-        at(glance, 0, "u"): [*steer, (0, [at(glance, 0, "u")])],
-        at(peek, 0, "u2"): [
+        _at(steered, 2, "t3"): [*steer, (1, [_at(steered, 1, "t2")]), (2, [_at(steered, 2, "t3")])],
+        _at(glance, 0, "u"): [*steer, (0, [_at(glance, 0, "u")])],
+        _at(peek, 0, "u2"): [
             *steer,
-            (1, [at(steered, 1, "t2")]),
-            (2, [at(steered, 2, "t3")]),
-            (0, [at(peek, 0, "u2")]),
+            (1, [_at(steered, 1, "t2")]),
+            (2, [_at(steered, 2, "t3")]),
+            (0, [_at(peek, 0, "u2")]),
         ],
     }
     assert {
@@ -1753,34 +2070,74 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         for e in entries_under(tree)
         if isinstance(e, HierarchyCandidate)
     } == lines, "a candidate's line reads a round off a course that does not own it"
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_every_course_hangs_from_and_starts_at_the_candidates_its_mint_record_names(
+    family_tree: _Family,
+) -> None:
+    (
+        family,
+        kid,
+        grand,
+        great,
+        steered,
+        rewound,
+        redone,
+        branched,
+        rerun,
+        relift,
+        mended,
+        carried,
+        rival,
+        first,
+        second,
+        glance,
+        peek,
+    ) = family_tree.hops.values()
+    tree = family_tree.tree
+    o, first_pick, b, x = _trunk_picks(family_tree.hops)
     courses = {e.address: e for e in entries_under(tree) if isinstance(e, SubtreeCourse)}
     hangs = {
         family: (None, o),
         kid: (first_pick, o),
         grand: (first_pick, o),
         great: (x, o),
-        steered: (o, at(steered, 0, "s")),
+        steered: (o, _at(steered, 0, "s")),
         rewound: (o, o),
         redone: (first_pick, o),
-        branched: (b, at(branched, 0, "p")),
+        branched: (b, _at(branched, 0, "p")),
         # A steer naming a round's re-read hangs from the candidate that round re-read, lifted or not.
-        rerun: (first_pick, at(rerun, 0, "r")),
-        relift: (o, at(relift, 0, "l")),
+        rerun: (first_pick, _at(rerun, 0, "r")),
+        relift: (o, _at(relift, 0, "l")),
         # It hangs from the parent line's arm.
         mended: (first_pick, o),
-        carried: (at(rewound, 1, "w"), o),
-        rival: (o, at(rival, 0, "c")),
-        first: (at(rival, 0, "c"), at(rival, 0, "c")),
+        carried: (_at(rewound, 1, "w"), o),
+        rival: (o, _at(rival, 0, "c")),
+        first: (_at(rival, 0, "c"), _at(rival, 0, "c")),
         # Cut on g, which its parent has since re-run away: the cut still names g.
-        second: (at(rival, 2, "g"), at(rival, 0, "c")),
-        glance: (at(steered, 0, "s"), at(glance, 0, "u")),
-        peek: (at(steered, 2, "t3"), at(peek, 0, "u2")),
+        second: (_at(rival, 2, "g"), _at(rival, 0, "c")),
+        glance: (_at(steered, 0, "s"), _at(glance, 0, "u")),
+        peek: (_at(steered, 2, "t3"), _at(peek, 0, "u2")),
     }
     for hop, hangs_from in hangs.items():
-        course = courses[course_of(hop)]
+        course = courses[_course_of(hop)]
         assert (course.facts.from_candidate, course.facts.origin) == hangs_from, (
             f"{hop.cycle_id} hangs from, or starts at, a candidate its mint record does not name"
         )
+
+
+# A retirement is "off the fork's line, within its reach", and nothing else.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_cut_retires_exactly_the_arms_off_its_line_within_its_reach(
+    family_tree: _Family,
+) -> None:
+    family, kid, steered, rewound, mended, carried, rival, first = (
+        family_tree.hops[n]
+        for n in ("family", "kid", "steered", "rewound", "mended", "carried", "rival", "first")
+    )
+    tree = family_tree.tree
+    *_, x = _trunk_picks(family_tree.hops)
     by_addr = {e.address: e for e in entries_under(tree) if isinstance(e, HierarchyCandidate)}
     assert {
         address: tag.value
@@ -1790,23 +2147,43 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         # Off the line of ANY supersede fork the line passed through that reached it, named by the
         # lowest cut, the nearest link of a tie: the rewind takes the trunk's round 1 off its line,
         # `kid` its round 2 though `carried`, cut from `kid` at the same round, reached it too.
-        **dict.fromkeys((at(family, 1, n) for n in "ab"), course_of(rewound)),
-        **dict.fromkeys((at(family, 2, n) for n in "az"), course_of(kid)),
-        at(kid, 2, "y"): course_of(carried),
-        x: course_of(mended),
-        at(rewound, 1, "k"): course_of(carried),
+        **dict.fromkeys((_at(family, 1, n) for n in "ab"), _course_of(rewound)),
+        **dict.fromkeys((_at(family, 2, n) for n in "az"), _course_of(kid)),
+        _at(kid, 2, "y"): _course_of(carried),
+        x: _course_of(mended),
+        _at(rewound, 1, "k"): _course_of(carried),
         # The second's line stands on g, and the first still retires it.
         **dict.fromkeys(
-            (at(rival, r, n) for r, n in ((1, "e"), (1, "f"), (2, "g"), (2, "j"))), course_of(first)
+            (_at(rival, r, n) for r, n in ((1, "e"), (1, "f"), (2, "g"), (2, "j"))),
+            _course_of(first),
         ),
         # Re-run away by their own course, whether or not a line stands on them.
-        at(rewound, 1, "w"): course_of(rewound),
+        _at(rewound, 1, "w"): _course_of(rewound),
         **dict.fromkeys(
-            (at(steered, r, n) for r, n in ((1, "t"), (1, "t2"), (2, "t3"))), course_of(steered)
+            (_at(steered, r, n) for r, n in ((1, "t"), (1, "t2"), (2, "t3"))), _course_of(steered)
         ),
     }, "a cut retires an arm on its line, one past the reach of its branch, or names another cut"
-    # The mask reads the same lines: a lifted round keeps the crown its parent elected, and a
-    # parting dims every fork whose start was proposed past it, a steer from a later arm included.
+
+
+# A lifted round keeps the crown its parent elected, and a parting dims every fork whose start
+# was proposed past it, a steer from a later arm included.
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_the_mask_reads_the_lines_the_subtree_reads(family_tree: _Family) -> None:
+    stores = family_tree.stores
+    family, grand, great, rewound, redone, branched, rerun, mended, carried = (
+        family_tree.hops[n]
+        for n in (
+            "family",
+            "grand",
+            "great",
+            "rewound",
+            "redone",
+            "branched",
+            "rerun",
+            "mended",
+            "carried",
+        )
+    )
     mask = load_mask_record(stores, family.campaign_id, lens=None)
     crowned = {
         c.cycle_id: {
@@ -1815,11 +2192,11 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         for c in mask.cycles
     }
     assert crowned[great.cycle_id] == {
-        0: ident("o"),
-        1: ident("a"),
+        0: _ident("o"),
+        1: _ident("a"),
         2: None,
-        3: ident("x"),
-        4: ident("v"),
+        3: _ident("x"),
+        4: _ident("v"),
     }, "the mask crowns a lifted round other than where its parent elected it"
     parted = find_divergences(
         mask,
@@ -1830,8 +2207,18 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         h.cycle_id for h in (grand, great, rewound, redone, branched, rerun, mended, carried)
     }, "a parting dims a fork rooted before it, or keeps one proposed past it"
 
-    # A repair re-measures a holed round onto a branch, graded by whether any later round read the
-    # hole: its fingerprints decide EQUIVALENT against SUPERSEDE.
+
+class _Repair(NamedTuple):
+    repaired: Callable[..., tuple[CycleHop, CycleHop]]
+    fork_direction: Callable[[CycleHop], ForkDirection]
+    critique_of: Callable[[CycleHop], str]
+
+
+@pytest.fixture
+def repair(built_stores: Stores) -> _Repair:
+    """A repair re-measures a holed round onto a branch, graded by whether any later round read the
+    hole: its fingerprints decide EQUIVALENT against SUPERSEDE."""
+    stores = built_stores
     repair_bank = samples(4, "g")
     repair_origin, holed = prompted(instruction="origin"), ArmKey(prompted(instruction="c1").id)
 
@@ -1919,6 +2306,14 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         assert readout is not None, "guard: round 1 banked a critique"
         return readout["priority_fix"]
 
+    return _Repair(repaired, fork_direction, critique_of)
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_round_its_member_cannot_rederive_is_never_graded_on_a_branch(
+    built_stores: Stores, offline: Router, repair: _Repair
+) -> None:
+    stores, repaired = built_stores, repair.repaired
     offline.llm.says = lambda _body: httpx.Response(400, json={"error": "refused"})
     with pytest.raises(ConflictError):
         repaired("cycle_unrederived", consumed=False)
@@ -1930,6 +2325,13 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert [d.name for d in cycles.iterdir()] == ["cycle_unrederived"], (
         "a round its member could not re-derive was graded on a branch holding the stale state"
     )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_correction_no_later_round_read_branches_equivalent_with_a_fresh_critique(
+    offline: Router, repair: _Repair
+) -> None:
+    repaired, fork_direction, critique_of = repair
     offline.llm.says = lambda _body: json.dumps({"priority_fix": "framing: re-read the claim"})
     ran, unread_branch = repaired("cycle_unread", consumed=False)
     assert fork_direction(unread_branch) is ForkDirection.EQUIVALENT, (
@@ -1939,6 +2341,14 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         "the branch kept a critique distilled from the cell the repair re-measured"
     )
     assert critique_of(ran) == "framing: as recorded", "the repair rewrote the round its parent ran"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_correction_a_later_round_read_supersedes_its_parent(
+    offline: Router, repair: _Repair
+) -> None:
+    repaired, fork_direction, _ = repair
+    offline.llm.says = lambda _body: json.dumps({"priority_fix": "framing: re-read the claim"})
     _, read_branch = repaired("cycle_read", consumed=True)
     assert fork_direction(read_branch) is ForkDirection.SUPERSEDE, (
         "round 2's banked candidates were generated off the hole and carried across as equivalent"

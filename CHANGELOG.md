@@ -6,6 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **An overshoot switch, off by default** (`set-limits --overshoot on|off`, the webapp's run limits, `ChangeRunLimitsPayload.overshoot`): on, a call holds its node's mean billed cost in the run once one has billed, where every call holds its worst case; a bill past its hold draws on every hold above it, and the dashboard serves `run_limits.overshoot` and `overshot` (calls past their hold, and by how much in USD). Breaking on disk: the account's `charges.jsonl` is wiped (a hold names its node).
+
 ### Removed
 
 - **BREAKING — the `origin-gate` verb and the hold are gone**: a degraded origin halts its launch (`origin_gate` stop), and resuming it is the one proceed. The gate decides before the bench spends, so a launch it halts runs no pass: the origin's bench pass runs on the resume that proceeds. The command (CLI, REST, MCP, webapp button), its `GateDecision`, the terminal's typed `rescore`/`proceed`/`abort` and the activity feed's gate decision go; a command log holding an `origin-gate` command is run data and is not migrated.

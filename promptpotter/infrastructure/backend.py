@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.config.paths import MACHINE_DIR
+from promptpotter.config.paths import MACHINE_DIR, PRODUCERS_DIR
 from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
@@ -133,7 +133,9 @@ class MachineSlots:
     @asynccontextmanager
     async def hold(self) -> AsyncIterator[None]:
         with machine_step():
-            await claim_machine(compose_overlay=self._compose_overlay)
+            await claim_machine(
+                self._root.parent / PRODUCERS_DIR, compose_overlay=self._compose_overlay
+            )
         # One turn at a time: without it a run armed to the pool's depth holds every slot all round.
         turn = await self._wait(lambda: self._lock("turn"))
         try:
