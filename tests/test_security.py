@@ -828,7 +828,7 @@ def test_a_landing_closes_admission_once_no_live_job_runs_other_code_to_all_but_
         "a live run on other code did not hold the landing open"
     )
     assert registry.landing() is None, "a refused landing closed admission anyway"
-    registry.release(held.job_id, StopReason.CONVERGED)
+    registry.release(held.job_id, StopReason.TARGET_HIT)
     assert registry.close_for_landing(elsewhere) == [] and registry.landing() == elsewhere
     assert not registry.claim_next(waiting.job_id), "a landing let old code start a queued launch"
     with pytest.raises(ServiceUnavailableError):
@@ -2885,7 +2885,7 @@ def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_s
     minting = plan_landing(built_stores.projects_root, reset=False)
     assert minting.refused and not minting.torn, "a landing took a mint a held run may finish"
     assert [one.path for one in minting.unloadable] == [torn_dir]
-    holders.release(holding.job_id, StopReason.CONVERGED)
+    holders.release(holding.job_id, StopReason.TARGET_HIT)
     release_cycle(campaigns.cycle_dir(kept_hop))
     spent = campaign_spend(campaigns, built_stores.charges, torn_hop.campaign_id)
     assert spent != NOTHING_PAID
@@ -4024,7 +4024,7 @@ def test_a_task_reads_what_its_run_returned(launches: _Launches) -> None:
         (StopReason.PAUSED, True): "completed",
         (StopReason.SPEND_BUDGET, False): "failed",
         (StopReason.PAUSED, False): "cancelled",
-        (StopReason.CONVERGED, False): "completed",
+        (StopReason.TARGET_HIT, False): "completed",
         (StopReason.CRASHED, False): "failed",
     }
     for (reason, stepped), status in ended.items():
@@ -4093,7 +4093,7 @@ def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_wh
         assert lapsed is not None and lapsed.lapse == lapse, f"a {lapse} launch read {lapsed}"
     spent = launch()
     registry.move(spent.job_id, LaunchMove.ADMIT)
-    registry.release(spent.job_id, StopReason.CONVERGED)
+    registry.release(spent.job_id, StopReason.TARGET_HIT)
     assert quota.campaigns_today(registry, user_id) == 1, (
         "the daily quota counted a launch that spent nothing, or lost one that did"
     )
@@ -4115,7 +4115,7 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
     step = StartRunPayload(
         campaign_id=step_hop.campaign_id, cycle_id=step_hop.cycle_id, step_rounds=1
     )
-    endings = {"completed": StopReason.CONVERGED, "failed": StopReason.CRASHED, "cancelled": None}
+    endings = {"completed": StopReason.TARGET_HIT, "failed": StopReason.CRASHED, "cancelled": None}
     # A waiter re-polls at once, so one woken on an ended job raises without a wall-clock wait.
     monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
     for status, ending in endings.items():

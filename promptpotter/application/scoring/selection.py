@@ -4,7 +4,6 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.intelligence.rasch import (
-    arm_lift,
     candidate_abilities,
     graded_response,
     theta_cells,
@@ -184,34 +183,3 @@ def bar_subjects(
         posterior = wins > losses and lift.clears(admission, support=sign_posterior(wins, losses))
         subjects[key] = BarSubject(wins, losses, lift, posterior)
     return subjects
-
-
-class PriorRead(NamedTuple):
-    """The election's posterior of an arm over one prior, and the cells it stands on."""
-
-    p_better: float
-    paired: int
-    discordant: int
-
-
-def prior_read(
-    rows: CellSheet, prior: CellSheet, ruler: DeltaRuler | None, *, min_shared: int
-) -> PriorRead | None:
-    """A stopping rule, not a verdict: the election's fit and posterior with *prior* as the bar
-    (``candidate_abilities``), capped by the discordant cells both scored. A prior is read only on
-    *min_shared* such cells, so a parent still catching up is a prior."""
-    own, bar = paired_grades(rows), paired_grades(prior)
-    shared = [c for c in own if c in bar]
-    if len(shared) < max(min_shared, 1):
-        return None
-    lift = arm_lift(rows, prior, ruler)
-    if lift is None:
-        return None
-    wins, losses = discordance([own[c] for c in shared], [bar[c] for c in shared])
-    return PriorRead(lift.reach(sign_posterior(wins, losses)), len(shared), wins + losses)
-
-
-def capped_reach(wins: int, losses: int) -> tuple[float, float]:
-    """The least and most any θ posterior can read once capped by these discordant counts."""
-    bound = sign_posterior(wins, losses)
-    return min(0.5, bound), max(0.5, bound)

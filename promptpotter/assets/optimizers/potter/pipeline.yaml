@@ -102,13 +102,13 @@ nodes:
     description: >-
       L1 Score: runs each candidate over the dataset, computes composite_fitness.
     config: {}
-  # A candidate keeps measuring only while it could still beat the leader; the lock-in at the
-  # election's own bar re-reads it after every cell, so it ships off (`methods/candidate-elimination.md`).
+  # A candidate keeps measuring while its share of P(best of the field) holds; ε is a family-wise
+  # share, so a field of six reads 1/6 apiece on a tie (`methods/candidate-elimination.md`).
   pobb:
     type: eliminator
     config:
-      epsilon: 0.15
-      epsilon_floor: 0.15
+      epsilon: 0.05
+      epsilon_floor: 0.05
       epsilon_stop: true
   # The next parent: a θ lift over the parent its paired cells agree with (`elect_round_winner`).
   theta_election:

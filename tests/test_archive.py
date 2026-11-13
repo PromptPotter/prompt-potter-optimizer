@@ -826,14 +826,15 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
         else measurement(i, 1.0 if i == 4 else 0.0)
         for i in range(8)
     )
-    assert race_of().rule([]).check(walked.cells) is None, (
+    assert not race_of().close({ArmKey("c1"): walked.cells}), (
         "the parent's prior borrowed cells another individual answered"
     )
     set_cycle(
         racing.cycle, line=[*line, _round(round=1, cells={ArmKey(parent.id): hits}, **on_parent)]
     )
     race = race_of()
-    reading = race.judge(race.rule([]).check(walked.cells), ArmKey("c1"), {ArmKey("c1"): "C3.1"})
+    stop = race.close({ArmKey("c1"): walked.cells}).get(ArmKey("c1"))
+    reading = race.judge(stop, ArmKey("c1"), {ArmKey("c1"): "C3.1"})
     assert reading is not None and reading.context["gate"] == EliminationGate.EPSILON
     [cut] = racing.cycle.pending_decisions
     assert isinstance(cut.inputs_ref, EliminationCut)

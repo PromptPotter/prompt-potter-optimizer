@@ -47,7 +47,6 @@ if TYPE_CHECKING:
         Proposals,
         Selection,
     )
-    from promptpotter.application.scoring.query_loop import Walk
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.optimizer_state import StatePart
@@ -296,9 +295,6 @@ class _GateRace(nodes.Race):
     @property
     def block_size(self) -> int:
         return self._block_size
-
-    def rule(self, _ahead: Sequence[tuple[ArmKey, Walk | None]]) -> None:
-        return None
 
     def open_turn(self, _key: ArmKey) -> None:
         return None

@@ -267,16 +267,19 @@ def election_rows(drawn: CellSheet, on_panel: CellSheet, crowned: Collection[str
 
 
 def origin_panel(
-    origin_cells: Collection[int],
+    origin_cells: Sequence[int],
     *,
     line_cells: Collection[int],
     poolable: Collection[int],
     scope_of: Mapping[int, str],
     size: int,
 ) -> list[int]:
-    """*origin_cells* are the origin's own ROUND's, never every cell it was later read on."""
+    """*origin_cells* are the origin's own ROUND's in walk order, never every cell it was later read
+    on: its first cells are the ones the next round's draw walks first, so the panel costs no top-up
+    there, and a resumed round rebuilds it off the same banked rows."""
     by_scope: dict[str, list[int]] = {}
-    for sid in sorted(set(origin_cells) & set(poolable)):
+    pool = set(poolable)
+    for sid in (sid for sid in dict.fromkeys(origin_cells) if sid in pool):
         by_scope.setdefault(scope_of[sid], []).append(sid)
     sat = set(by_scope)
     for sid in sorted(set(line_cells) & set(poolable)):

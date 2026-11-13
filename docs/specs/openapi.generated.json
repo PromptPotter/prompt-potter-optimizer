@@ -9475,6 +9475,31 @@
         "title": "LiftEstimate",
         "type": "object"
       },
+      "LiftPrior": {
+        "additionalProperties": false,
+        "description": "The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their mean, τ² their\nobserved variance less their mean noise variance, floored at 0.",
+        "properties": {
+          "mu0": {
+            "title": "Mu0",
+            "type": "number"
+          },
+          "pairs": {
+            "title": "Pairs",
+            "type": "integer"
+          },
+          "tau": {
+            "title": "Tau",
+            "type": "number"
+          }
+        },
+        "required": [
+          "mu0",
+          "tau",
+          "pairs"
+        ],
+        "title": "LiftPrior",
+        "type": "object"
+      },
       "LiftProfile": {
         "additionalProperties": false,
         "description": "How many of a subject's own cells moved, by sign — a lift's BREADTH beside its mean. Served\nonly under a delta metric: a level has no zero to sit on either side of.",
@@ -15674,6 +15699,17 @@
           "health": {
             "$ref": "#/components/schemas/RoundHealth"
           },
+          "hold_up": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThetaLift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This round's promotion over the parent it beat, each read on every row it met in the cycle on `series_reading`'s one scale, its later rows as parent included: the lift that held beside the one it was crowned on. Null on a round that promoted nothing."
+          },
           "improved": {
             "anyOf": [
               {
@@ -15695,6 +15731,16 @@
               }
             ],
             "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where the round selected, on a held round the challenger `verdict_reason` names as its best, at round 0 the origin. `panel_precision` is measured on it. Null where the selector could read no arm."
+          },
+          "lift_prior": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LiftPrior"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "optimizer_facts": {
             "items": {
@@ -15800,7 +15846,8 @@
           "overlap",
           "panel_precision_verdict",
           "selection_movement",
-          "series_reading"
+          "series_reading",
+          "hold_up"
         ],
         "title": "ServedRound",
         "type": "object"
@@ -16269,7 +16316,6 @@
           "crashed",
           "diverged",
           "optimizer_abort",
-          "converged",
           "optimizer_exhausted",
           "hard_cap_reached",
           "target_hit",

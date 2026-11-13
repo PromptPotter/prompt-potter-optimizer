@@ -545,7 +545,7 @@ export interface HierarchyState {
 export interface RunStatus {
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** Null while the run has not stopped. */
-  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
 }
 
@@ -553,7 +553,7 @@ export interface RunStatus {
  * yet to reach. */
 export interface PauseReading {
   /** Null on an accepted pause the loop has yet to reach. */
-  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound' | 'owed';
   /** Who or what asked, in the declarer's own words. */
   detail: string;
@@ -988,7 +988,7 @@ export interface BenchStatus {
 export interface PassStop {
   /** The walk's own end, or the run stop that cut the pass: a pause mid-walk, a
    * spent budget before it was sent. */
-  cause: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'parameter_refused' | 'pipeline_error' | 'consecutive_errors';
+  cause: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'parameter_refused' | 'pipeline_error' | 'consecutive_errors';
   /** The backend's dominant warning, where errors ended the pass. */
   warning: string | null;
 }
@@ -1615,7 +1615,7 @@ export interface ServedDashboard {
   state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
   optimizer_step: string | null;
   state_since: string;
-  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
   measuring_arm: ArmName | null;
   rounds: ServedRound[];
@@ -1737,6 +1737,7 @@ export interface ServedRound {
   overlap: OverlapReading;
   panel_precision: PanelPrecision | null;
   optimizer_facts: OptimizerFact[];
+  lift_prior: LiftPrior | null;
   /** Which lever `panel_precision` calls for, null where it is. Beside the reading
    * and not on it: `PanelPrecision` is hashed into the L4 estimator's
    * identity. */
@@ -1748,6 +1749,11 @@ export interface ServedRound {
    * withholds it from differencing; null where no scored cell sits on the
    * scale. */
   series_reading: SeriesReading | null;
+  /** This round's promotion over the parent it beat, each read on every row it met
+   * in the cycle on `series_reading`'s one scale, its later rows as parent
+   * included: the lift that held beside the one it was crowned on. Null on a
+   * round that promoted nothing. */
+  hold_up: ThetaLift | null;
 }
 
 /** One candidate as `dashboard.json` serves it, the same shape live or closed. */
@@ -1823,6 +1829,15 @@ export interface OptimizerFact {
   kind: 'stat' | 'note';
 }
 
+/** The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their
+ * mean, τ² their observed variance less their mean noise variance, floored at
+ * 0. */
+export interface LiftPrior {
+  mu0: number;
+  tau: number;
+  pairs: number;
+}
+
 /** A round's level as its series read it, under the one caveat that withholds it. */
 export interface SeriesReading {
   /** The round's level: the individual it ended on, read on the series' one scale */
@@ -1871,6 +1886,12 @@ export interface RulerOwn {
 export interface RulerScope {
   scorer: string;
   dataset: string;
+}
+
+/** θ over a bar's θ, and the noise of the DIFFERENCE, never either side's own SE. */
+export interface ThetaLift {
+  value: number;
+  se: number;
 }
 
 /** The latest verify or bench pass on one arm, as its records left it. */
@@ -2370,12 +2391,6 @@ export interface ArmFit {
   theta_caveat: 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
   vs_reference: PairedReading | null;
   lift: ThetaLift | null;
-}
-
-/** θ over a bar's θ, and the noise of the DIFFERENCE, never either side's own SE. */
-export interface ThetaLift {
-  value: number;
-  se: number;
 }
 
 /** A layer restating a round as electing another arm than its selector's, and
@@ -5439,7 +5454,7 @@ export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_se
 export type CellSetName = 'origin_panel' | 'reference_cells' | 'bench_split' | 'measured_by_both';
 
 // promptpotter.domain.phases::StopReason
-export type StopReason = 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
+export type StopReason = 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
 
 // promptpotter.domain.phases::StopOutcome
 export type StopOutcome = 'success' | 'halted' | 'failed' | 'paused';
@@ -6017,7 +6032,6 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "target_hit": { label: "Target reached", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "lives_exhausted": { label: "Out of lives", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "hard_cap_reached": { label: "Arm cap", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
-  "converged": { label: "Converged", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "optimizer_exhausted": { label: "Optimizer out of moves", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "rebased_to_fork": { label: "Rebased to fork", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
   "paused": { label: "Paused", outcome: "paused", category: "operator", halts_mid_round: true, has_traceback: false, next_step: "Resuming picks it up at the next checkpoint.", grades_selection: false, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }] },
@@ -6228,7 +6242,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [READING_STATE_INFO, ["read", "not_asked", "pending", "not_held", "no_holdout", "held_elsewhere", "pass_stopped", "past_tolerance", "member_unscoreable", "under_two_cells", "no_selection", "same_individual", "run_failed", "scope_differs", "measurand_differs", "dataset_differs", "cell_set_differs", "instrument_differs"]],
   [DASHBOARD_STATE_PAUSE_WORDS, ["init", "origin", "proposing", "scoring", "between_samples", "between_candidates", "optimizer_step", "bench", "stopped"]],
   [RUN_PHASE_INFO, ["queued", "starting", "running", "scoring", "paused", "gate", "detached", "terminal"]],
-  [STOP_REASON_INFO, ["rounds_budget", "target_hit", "lives_exhausted", "hard_cap_reached", "converged", "optimizer_exhausted", "rebased_to_fork", "paused", "panel_cut", "adapter_output_owed", "optimizer_abort", "spend_budget", "token_budget", "host_allowance", "wall_clock", "origin_gate", "backend_unreachable", "provider_credit_exhausted", "provider_throttled", "price_list_unreachable", "no_rate", "crashed", "input_refused", "not_admitted", "producer_vanished", "render_error", "diverged", "optimizer_timeout"]],
+  [STOP_REASON_INFO, ["rounds_budget", "target_hit", "lives_exhausted", "hard_cap_reached", "optimizer_exhausted", "rebased_to_fork", "paused", "panel_cut", "adapter_output_owed", "optimizer_abort", "spend_budget", "token_budget", "host_allowance", "wall_clock", "origin_gate", "backend_unreachable", "provider_credit_exhausted", "provider_throttled", "price_list_unreachable", "no_rate", "crashed", "input_refused", "not_admitted", "producer_vanished", "render_error", "diverged", "optimizer_timeout"]],
   [MOVABLE_AGENT_LABELS, ["proposer", "optimizer"]],
   [NODE_KIND_INFO, ["io", "llm", "tool", "retriever", "cache", "measurement", "member"]],
   [POOL_SOURCE_INFO, ["library", "partition"]],

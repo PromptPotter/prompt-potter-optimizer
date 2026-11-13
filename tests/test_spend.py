@@ -1971,7 +1971,7 @@ def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
 
     with pytest.raises(QuotaExceededError):
         asyncio.run(embedded())
-    shared.release(job_b.job_id, StopReason.CONVERGED)
+    shared.release(job_b.job_id, StopReason.TARGET_HIT)
     asyncio.run(embedded())
     assert built_stores.campaigns.holder(fork_c) is None, (
         "an embedded run kept its share past its exit"
@@ -2007,11 +2007,11 @@ def test_a_raised_ceiling_is_reshared_over_every_live_cycle_never_handed_whole_t
     with pytest.raises(QuotaExceededError):
         launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0003"), None)
     for job in (job_a, job_b6):
-        shared.release(job.job_id, StopReason.CONVERGED)
+        shared.release(job.job_id, StopReason.TARGET_HIT)
     open_c, _ = launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0004"), None)
     with pytest.raises(QuotaExceededError):
         launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0005"), 1.0)
-    shared.release(open_c.job_id, StopReason.CONVERGED)
+    shared.release(open_c.job_id, StopReason.TARGET_HIT)
 
 
 @pytest.mark.usefixtures("offline")
@@ -2074,7 +2074,7 @@ def test_a_launch_landing_mid_reshare_waits_it_out(
     )
     for job in shared.list_holding_spend():
         if job.on_campaign(built_stores.campaigns.workspace, "camp-8"):
-            shared.release(job.job_id, StopReason.CONVERGED)
+            shared.release(job.job_id, StopReason.TARGET_HIT)
 
 
 @pytest.mark.usefixtures("offline")
@@ -2131,7 +2131,7 @@ def test_a_job_retargeted_mid_stamp_is_never_overwritten_by_the_runs_stale_copy(
         "a job retargeted mid-stamp was overwritten by the run's stale job file"
     )
     assert after.started_at is not None
-    shared.release(stamped.job_id, StopReason.CONVERGED)
+    shared.release(stamped.job_id, StopReason.TARGET_HIT)
 
 
 @pytest.mark.usefixtures("offline")
@@ -2178,7 +2178,7 @@ def test_sharing_divides_the_campaigns_ceiling_never_what_the_account_admits(
     assert claim_held is not None and cycle_share(delegate, claim_held).usd == pytest.approx(7.0), (
         "a share was cut from its account's claim, not the campaign's $7 left"
     )
-    shared.release(claim.job_id, StopReason.CONVERGED)
+    shared.release(claim.job_id, StopReason.TARGET_HIT)
 
 
 @pytest.mark.usefixtures("offline")
@@ -4001,7 +4001,7 @@ def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside
                 sends=_CELLS,
             )[1]
         finally:
-            slots.release(launch.job_id, StopReason.CONVERGED)
+            slots.release(launch.job_id, StopReason.TARGET_HIT)
 
     async def pass_beside() -> None:
         async with paid_pass(
@@ -4379,7 +4379,7 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
         """The arm's own process, run and exited: its slot handed back, nothing spent."""
         spec = held.job_spec(mode)
         detached.append(spec)
-        await asyncio.to_thread(held.start.job_registry.release, spec.job_id, StopReason.CONVERGED)
+        await asyncio.to_thread(held.start.job_registry.release, spec.job_id, StopReason.TARGET_HIT)
         return asyncio.create_task(asyncio.sleep(0))
 
     monkeypatch.setattr(run_job_mod, "spawn_job", ran_elsewhere)

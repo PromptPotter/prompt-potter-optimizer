@@ -35,7 +35,7 @@ from promptpotter.shared.run_scope import run_scope
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.application.scoring.query_loop import QueryLoopResult
+    from promptpotter.application.scoring.query_loop import BlockRace, QueryLoopResult
     from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.io import HeldLock
@@ -254,8 +254,10 @@ async def score_search_points[K: Hashable](
     kind: MeasurementRole,
     sample_index: SampleIndex | None = None,
     held: CellSheet = NO_CELLS,
+    blocks: BlockRace[K] | None = None,
 ) -> dict[K, ScoredWalk]:
-    """Each point on its own rows, in ONE pass: the slowest walk sets the wall clock, never their sum."""
+    """Each point on its own rows, in ONE pass: the slowest walk sets the wall clock, never their sum;
+    *blocks* races them as a round's arms are raced."""
     row = PASSES[kind]
     # Opened inside the filing too: the walk's cells run in a copy of the context taken here.
     with filed_as(row.spend):
@@ -272,7 +274,7 @@ async def score_search_points[K: Hashable](
             for key, (search_point, dataset, measured) in points.items()
         }
         try:
-            cut = await run_walks(walks, session, keep_cut=row.keeps)
+            cut = await run_walks(walks, session, keep_cut=row.keeps, blocks=blocks)
         except (KeyboardInterrupt, asyncio.CancelledError, StopLoop, SendRefusedError) as halt:
             if not row.keeps:
                 raise

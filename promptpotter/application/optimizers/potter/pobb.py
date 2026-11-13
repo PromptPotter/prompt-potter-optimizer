@@ -1,32 +1,35 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict
 
-from promptpotter.application.intelligence.rasch import theta_cells
-from promptpotter.application.optimizers.nodes import RaceSnapshot
-from promptpotter.application.scoring.selection import (
-    PairedGrade,
-    PriorRead,
-    capped_reach,
-    cells_read,
-    discordance,
-    paired_grades,
-    prior_read,
+import numpy as np
+
+from promptpotter.application.intelligence.rasch import (
+    Observation,
+    fit_rasch,
+    responses_of,
+    theta_cells,
 )
+from promptpotter.application.optimizers.nodes import RaceSnapshot
+from promptpotter.application.scoring.selection import discordant
 from promptpotter.domain.cycle_paths import Lens
-from promptpotter.domain.paired_reading import PriorStanding
+from promptpotter.domain.paired_reading import ArmKey, PriorStanding
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, Grade, GradedCell, MeasuredCell
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
     from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
-    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.ruler import DeltaRuler
-    from promptpotter.domain.sample import Sample
+
+
+# θ draws per field member, enough that a p_best near ε reads the same across seeds.
+_DRAWS = 4000
 
 
 class EliminationGate(StrEnum):
@@ -95,18 +98,33 @@ def wire_sheet(sheet: CellSheet) -> dict[str, dict[str, float | None]]:
     }
 
 
-def prior_reads(
-    sheet: CellSheet, priors: Mapping[ArmKey, CellSheet], ruler: DeltaRuler | None, *, n_min: int
-) -> dict[ArmKey, PriorRead]:
-    return {
-        pid: read
-        for pid, prior in priors.items()
-        if (read := prior_read(sheet, prior, ruler, min_shared=n_min)) is not None
+def field_p_best(
+    field: Mapping[ArmKey, CellSheet], cells: Collection[str]
+) -> tuple[dict[ArmKey, float], dict[ArmKey, NDArray[np.float64]]]:
+    """Each member's posterior probability of being the field's best on *cells*: one hierarchical
+    Rasch fit of the field, θ and δ together, and a Monte Carlo over its θ draws, seeded by the read
+    so a replay draws the same. The shares sum to 1."""
+    fit = fit_rasch(
+        [
+            Observation(key, cell, y)
+            for key in field
+            for cell, y in responses_of(field[key]).items()
+            if cell in cells
+        ]
+    )
+    if not fit.theta:
+        return {}, {}
+    rng = np.random.default_rng(len(cells))
+    draws = {
+        ArmKey(key): rng.normal(fit.theta[key], fit.theta_se[key], _DRAWS) for key in fit.theta
     }
+    best = np.argmax(np.vstack(list(draws.values())), axis=0)
+    shares = np.bincount(best, minlength=len(draws)) / _DRAWS
+    return dict(zip(draws, map(float, shares), strict=True)), draws
 
 
 class PoBBCheck:
-    """Each prior is read on the candidate's exact cells; ``docs/methods/candidate-elimination.md``."""
+    """A family-wise p_best on PoBB's joint posterior; ``docs/methods/candidate-elimination.md``."""
 
     name = "elimination"
 
@@ -118,6 +136,7 @@ class PoBBCheck:
         n_samples: int,
         ruler: DeltaRuler | None,
         parent: ArmKey,
+        on_snapshot: Callable[[RaceSnapshot], None] | None = None,
     ) -> None:
         # The SAME δ scale the round-winner election reads; ``None`` ⇒ flat, the ruler still cold.
         self.ruler = ruler
@@ -129,15 +148,6 @@ class PoBBCheck:
         self.n_samples = n_samples
         # The GRADED rows, never a binarized hit, degenerate on a graded backend.
         self.priors: dict[ArmKey, CellSheet] = {}
-        self._current: ArmKey | None = None
-        self._on_snapshot: Callable[[RaceSnapshot], None] | None = None
-
-    def set_current(
-        self,
-        key: ArmKey,
-        on_snapshot: Callable[[RaceSnapshot], None] | None = None,
-    ) -> None:
-        self._current = key
         self._on_snapshot = on_snapshot
 
     def register_completed(self, results: Iterable[GradedCell], *, key: ArmKey) -> None:
@@ -152,108 +162,52 @@ class PoBBCheck:
         scale = min(1.0, max(0.0, (n - self.n_min) / max(self.n_min, 1)))
         return self.epsilon_floor + (self.epsilon - self.epsilon_floor) * scale
 
-    def check(self, results: Sequence[GradedCell]) -> StopSignal | None:
-        n = len(results)
-        if n < self.n_min:
-            return None
-        parent = self.priors.get(self.parent, NO_CELLS)
+    def check(
+        self, field: Mapping[ArmKey, CellSheet], standing: Collection[ArmKey]
+    ) -> dict[ArmKey, PoBBStop]:
+        """An arm is cut when its posterior P(best of parent and every arm standing) falls below ε(n)."""
+        racing = [key for key in standing if key != self.parent]
+        if not racing:
+            return {}
+        shared = set.intersection(*({c.key for c in field[key].scoreable} for key in racing))
+        walked = [c.key for c in field[racing[0]].scoreable if c.key in shared]
+        parent = [c.key for c in field.get(self.parent, NO_CELLS).scoreable]
         # Every posterior gate and the ε ramp read the depth the election's coverage floor counts.
-        read = cells_read("ability", results, [c.key for c in parent.scoreable], self.ruler)
-        if read < self.n_min:
-            return None
-        sheet = race_sheet(results)
-        reads = prior_reads(sheet, self.priors, self.ruler, n_min=self.n_min)
-        if not reads:
-            return None
-        leader = min(reads, key=lambda k: reads[k].p_better)
-        p_best = reads[leader].p_better
-        paired_breakdown = {
-            # The graded cells the fit read, never `n`, which counts errored rows too.
-            pid: PriorStanding(p_better=r.p_better, n_paired=r.paired, n_discordant=r.discordant)
-            for pid, r in reads.items()
-        }
-
-        if self._on_snapshot is not None and self._current is not None:
-            self._on_snapshot(
-                RaceSnapshot(
-                    p_best=float(p_best),
-                    current=self._current,
-                    n_samples=n,
-                    paired_breakdown=paired_breakdown,
+        cells = list(theta_cells(dict.fromkeys(walked), parent, self.ruler))
+        if len(cells) < self.n_min:
+            return {}
+        p_best, draws = field_p_best(field, cells)
+        bar = self.epsilon_at(len(cells))
+        stops: dict[ArmKey, PoBBStop] = {}
+        for key in (key for key in racing if key in draws):
+            rivals = {pid: field[pid] for pid in draws if pid != key}
+            paired_breakdown = {
+                pid: PriorStanding(
+                    p_better=float(np.mean(draws[key] > draws[pid])),
+                    n_paired=len(cells),
+                    n_discordant=sum(discordant(field[key], rival)),
                 )
+                for pid, rival in rivals.items()
+            }
+            n = len(field[key].cells)
+            if self._on_snapshot is not None:
+                self._on_snapshot(RaceSnapshot(p_best[key], key, n, paired_breakdown))
+            if not self.epsilon_stop or p_best[key] >= bar:
+                continue
+            stops[key] = PoBBStop(
+                self.name,
+                "eliminated",
+                {
+                    "p_best": p_best[key],
+                    "leader": max(rivals, key=p_best.__getitem__),
+                    "queries_scored": n,
+                    "total_queries": self.n_samples,
+                    "n_priors": len(rivals),
+                    "gate": EliminationGate.EPSILON,
+                    "epsilon": float(bar),
+                },
+                cells=cells,
+                priors=rivals,
+                paired_breakdown=paired_breakdown,
             )
-
-        # ε is the ONLY gate; the priors include the round's parent (`potter/race.py`).
-        bar = self.epsilon_at(read)
-        if not self.epsilon_stop or p_best >= bar:
-            return None
-        return PoBBStop(
-            self.name,
-            "eliminated",
-            {
-                "p_best": float(p_best),
-                "leader": leader,
-                "queries_scored": n,
-                "total_queries": self.n_samples,
-                "n_priors": len(reads),
-                "gate": EliminationGate.EPSILON,
-                "epsilon": float(bar),
-            },
-            cells=[cell.key for cell in sheet.scoreable],
-            priors=dict(self.priors),
-            paired_breakdown=paired_breakdown,
-        )
-
-    def earliest_stop(
-        self,
-        results: Sequence[GradedCell],
-        upcoming: Sequence[tuple[Sample, GradedCell | None]],
-        *,
-        unresolved: Mapping[ArmKey, Iterable[GradedCell]] | None = None,
-    ) -> int | None:
-        """An ``unresolved`` candidate may never become a prior: graded where its rows say, anything elsewhere, never counted on."""
-        if not self.epsilon_stop:
-            return None
-        grades = paired_grades(cell for cell in results if cell.scored)
-        cells = list(grades)
-        # A prior may become one: an arm ahead still walking.
-        priors = {pid: paired_grades(sheet) for pid, sheet in self.priors.items()} | {
-            pid: paired_grades(rows)
-            for pid, rows in (unresolved or {}).items()
-            if pid not in self.priors
-        }
-        for m, (sample, row) in enumerate(upcoming, start=len(results) + 1):
-            if row is None or row.scored:
-                cells.append(sample.key)
-            if row is not None and row.scored:
-                grades.update(paired_grades([row]))
-            if m < self.n_min:
-                continue
-            # Cold, a catch-up may yet give the parent any cell, and a depth below what `check` will
-            # read lands the horizon past its stop: so it counts the most it could read.
-            read = len(theta_cells(dict.fromkeys(cells), cells, self.ruler))
-            if not priors or read < self.n_min:
-                continue
-            # Whatever θ reads, the sign cap bounds the gate (`capped_reach`), an open cell either way.
-            if any(
-                capped_reach(*_reach(cells, grades, g))[0] < self.epsilon_at(read)
-                for g in priors.values()
-            ):
-                return m
-        return None
-
-
-_UNSOLVED = PairedGrade(0.0, 0.0)
-_SOLVED = PairedGrade(1.0, 1.0)
-
-
-def _reach(
-    cells: Sequence[str],
-    candidate: Mapping[str, PairedGrade],
-    prior: Mapping[str, PairedGrade],
-) -> tuple[int, int]:
-    """The candidate's discordant (wins, losses) over *prior* on *cells*, every cell either lacks
-    read as a loss: the least support the sign cap can give."""
-    return discordance(
-        [candidate.get(s, _UNSOLVED) for s in cells], [prior.get(s, _SOLVED) for s in cells]
-    )
+        return stops

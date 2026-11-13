@@ -26,19 +26,17 @@ PoBB (Russo 2016) assumes i.i.d. observation; the shared order front-loads the s
 
 ## The θ rule
 
-Every candidate, the first raced against the parent alone, once read on `elimination_n_min` cells its θ is read on (`selection.py::cells_read` over `rasch.py::theta_cells`, never rows walked — [`verdict-resolution.md`](verdict-resolution.md) § The round order), after every query:
+PoBB is a **block race** (`potter/race.py::PoBBRace`): every arm walks the panel at once and, at each checkpoint they share (potter's `Panel.block_size` is one cell), the field — the parent and every arm still standing — is read together (`pobb.py::PoBBCheck.check`):
 
-1. Read each prior sharing `elimination_n_min` scored cells with the candidate; one that cannot be caught up is **excluded, never zero-filled**.
-2. Fit as the election does, the prior as the bar (`rasch.py::candidate_abilities`): each `θ` and Laplace `se` on the cycle's fixed δ ruler; warm, the prior on every cell it scored, cold on the cells it shares.
-3. `P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))`, closed form; `p_best = min` over priors.
-4. Bound it by what the DISCORDANT pairs support — `shared/statistics.py::sign_posterior` over `selection.py::discordance`. Concordant cells move θ but cannot say which arm is better, and few observations do not keep the gate conservative: ties narrow both `se`. Support is DIRECTIONAL: contradicting pairs collapse the claim to 0.5 (a bare magnitude would license 0.9375 for an arm that lost 3 of 3); it can only spare an arm. **Discordance counts VERDICTS (`Grade.fitness`), never the objective** — a cost term would make a verbose arm lose every tie; cost reaches the comparison through θ alone (`selection.py::paired_grades`).
-5. Stop when `p_best < ε(n)` — eliminated (graded by depth: `epsilon_floor`; switch `epsilon_stop`). PoBB stops no leader: an arm ahead walks its whole panel, since a bar re-read after every cell is optional stopping (on a walk front-loaded with the parent's misses it locked 4/4 against the parent's 1/4 at 93.8%, an arm whose verify read 1.000 → 0.600). **An arm that ran its panel joins the priors** (`runner/round.py::_conclude_arm`), so every later arm races it; an eliminated one never does.
+1. The cells read are those every standing arm scored that θ is read on (`rasch.py::theta_cells`, never rows walked — [`verdict-resolution.md`](verdict-resolution.md) § The round order); under `elimination_n_min` of them nothing is cut. A rival with no row on them is **excluded, never zero-filled**.
+2. One hierarchical Rasch fit of the whole field on those cells, θ and δ together (`rasch.py::fit_rasch`), and a Monte Carlo over its θ draws, seeded by the read (`pobb.py::field_p_best`): `p_best` is each arm's posterior probability of being the field's best. The shares sum to 1, so the multiplicity of a wide field is inside the statement and slot order enters nowhere. A pairwise "credibly worse than some rival" cut was slot-dependent (serial, 0.25 → 0.63 by slot) or, raced against every sibling, cut a planted better arm 11.8% of the time against serial's 7.1%; the joint fit cuts it 4.7% at ε 0.05, flat by slot.
+3. Stop when `p_best < ε(n)` — eliminated (graded by depth: `epsilon_floor`; switch `epsilon_stop`). **An arm that ran its panel joins the priors** (`runner/round.py::_conclude_arm`), so it stays in the field of its top-up; an eliminated one never does.
 
-The **same ability the round election ranks by** (one pairing, `application/scoring/selection.py::prior_read`, for the live check and the resume replayer), so the two cannot disagree, valid on partial prefixes.
+The **origin panel's top-up is one more stretch of the same race** (`runner/round.py::read_origin_panel`): a cut there lands as the arm's `Cut`, which `runner/round.py::panel_triggers` reads, so the monitor never buys it back.
 
-**The election's bar reads step 4's posterior on its own confidence.** The election admits an arm on
-a raw θ lift above `domain/ruler.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND step 4's
-bounded `P(θ_arm > θ_parent)` above potter's `theta_election` `admission` — never PoBB's ε, which
+**The election's bar** admits an arm on
+a raw θ lift above `domain/ruler.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND its
+`P(θ_arm > θ_parent)` bounded by what the DISCORDANT pairs support (`shared/statistics.py::sign_posterior`; directional, so contradicting pairs collapse the claim to 0.5; **discordance counts VERDICTS, `Grade.fitness`, never the objective**) above potter's `theta_election` `admission` — never PoBB's ε, which
 says when to stop BUYING an arm, not when to promote one. An `admission` below `sign_posterior(1, 0)`
 = 0.75 is refused, so one discordant cell never promotes. Admission is bounded; the election RANKS on
 the unbounded posterior (bounding it moved a banked crown across a 0.0007 gap). **A pick's crowning
@@ -59,15 +57,13 @@ No reading crowns an arm its paired verdicts contradict.
 
 ## Two regimes
 
-- **Early — high-signal.** `P(cand > prior)` turns lopsided in 3–5 queries (Wilcoxon needed ≥8 at α=0.2, being variance-agnostic).
-- **Late — low-signal.** Gaps ≤0.02; a near-tie (`P(best) ≈ 0.5`) rides to the cap and the θ election picks.
-
-`p_best` is a minimised pairwise comparison — a bound on P(best), not the joint posterior — so a cut spares rather than overreaches.
+- **Early — high-signal.** A field member clearly behind loses its share in 3–5 queries (Wilcoxon needed ≥8 at α=0.2, being variance-agnostic).
+- **Late — low-signal.** Gaps ≤0.02; near-ties share `p_best` evenly, ride to the cap, and the θ election picks.
 
 ## Tunable knobs
 
 - potter's `pobb` `epsilon_stop` — the one stop's switch, shipped on (capo-pobb reads the same `pobb` config).
-- potter's `pobb` `epsilon` (`0.15` in its manifest), under 0.5. A stop ends measurement; it is **not** a verdict and never removes the candidate from the election (`is_leader_eligible`). **A stopped arm buys no cell after its stop**: the election reads it on its draw (`runner/round.py::measure_population`) and no `PanelTrigger` seats it on the origin panel (`runner/round.py::panel_triggers`); only a stopped arm the election PICKS is topped up, as every line member is.
+- potter's `pobb` `epsilon` (`0.05` in its manifest: the planted-arm bar holds there and misses at 0.10), under 0.5. A stop ends measurement; it is **not** a verdict and never removes the candidate from the election (`is_leader_eligible`). **A stopped arm buys no cell after its stop**: the election reads it on its draw (`runner/round.py::measure_population`) and no `PanelTrigger` seats it on the origin panel (`runner/round.py::panel_triggers`); only a stopped arm the election PICKS is topped up, as every line member is.
 - potter's `theta_election` `admission` (`0.85` in its manifest) — the election's own bar (§ The θ rule).
 - potter's `pobb` `epsilon_floor` — ε at `elimination_n_min`, ramping linearly to `epsilon` over the next `elimination_n_min` cells read (`PoBBCheck.epsilon_at`). Equal to `epsilon` (as shipped) = a flat bar. **The bar ramps IN only, and nothing guards the tail** — else every late loser spends its budget; the price is that `PairedReading.reference_level` refuses an arm stopped short of a parent cell (`selected_by_stop`), so it ranks on θ alone. Aggression belongs here, never in `elimination_n_min`; a floor above `epsilon` goes flat and `epsilon_floor_inverted` reports it.
 - `OptimizationConfig.elimination_n_min` (default `6`) — the one min-samples floor, gating PoBB **and** ruler warmth (δ≡0 ⇒ θ = logit-fitness until this many grade-A samples bank): difficulty and ability become trustworthy at one threshold.
@@ -82,19 +78,17 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 | 2 | **Stale-data protocol** — a cached result classifies infra or fatal (`is_deprecated`); a repaired, answered row replays | every degraded query | — | annotated + possibly re-measured / swapped | — | `scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
-| 5 | **`PoBBCheck`** — paired `P(best) < ε(n)`, behind `epsilon_stop` | every query | `n_min` | eliminated; records `elimination_cut` | — | `optimizers/potter/pobb.py` |
+| 5 | **`PoBBCheck`** — the field's `P(best) < ε(n)`, behind `epsilon_stop` | every checkpoint | `n_min` | eliminated; records `elimination_cut` | — | `optimizers/potter/pobb.py` |
 
 The first signal ends the candidate: fatal beats rate beats PoBB.
 
 **Each rule answers how EARLY it could fire** — early, never late — so a look-ahead walk launches a cell only if no rule can fire before it, and a cut discards at most one call. A pause, skip or budget stop keeps what is paid for and starts nothing; an in-flight call is cancelled only where that stops its bill; no cell starts that the spend book cannot hold at its bound.
 
-**Candidates walk at once and decide in turn**: a later candidate may measure ahead but is checked and cut only once every earlier one is decided, so its priors are a serial round's.
-
 **One comparator, one stop rule — do not add a sixth.** No unpaired answer-collapse cut: one label on a hardest-first `n_min` prefix is no reading against the parent, which the posterior already takes; one answer where the parent answered apart on the same cells is refused at the election instead (`domain/arms.py::is_electable`). No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
 
 ## CAPO's race — the `blocks` sampler and the `paired_t` eliminator
 
-CAPO's survival selection (arXiv 2504.16005 §4, App. B) takes PoBB's row 5 for its own manifest. A **block race**: the race answers `blocks` where PoBB answers `rule`; `run_walks(blocks=)` turns every live arm once per block and the race's `close` decides them together. `DegradationCheck` still runs per arm.
+CAPO's survival selection (arXiv 2504.16005 §4, App. B) takes PoBB's row 5 for its own manifest. A **block race**, as PoBB's: `run_walks(blocks=)` turns every live arm once per block and the race's `close` decides them together. `DegradationCheck` still runs per arm.
 
 - **`blocks` (sampler)** — `block_size` (b), `max_blocks` (z_max): the first `max_blocks` whole blocks of the search split in bank order, the same every round, never shuffled (App. C.4); `Panel.block_size` hands the boundaries over; a pool short of one block refuses.
 - **`paired_t` (eliminator)** — `alpha`, `length_penalty` (γ), and μ = the `population` selector's `size` (one knob). At each block's close every live arm meets every other in a one-sided paired t (`shared/statistics.py::paired_mean_t`) on CAPO's objective over the same k blocks; arms that μ others significantly beat are cut together off pre-cut readings — App. B's `n_sig_better ≥ μ` (§4's prose says "more than") — with no multiple-test correction, as CAPO races. At μ or fewer the race is settled (`locked_in`), and only then or at `max_blocks`: a survivor set above μ walks the next block (App. B, `while |P| > μ and i < z_max`). A first block that cuts the set to μ settles the race there, as CAPO's does — with c offspring and μ parents a common case, since γ makes an offspring longer than a parent it ties on fitness significantly worse on every shared cell — so `max_blocks` binds only where cuts come slower. `Elimination.context.gate` reads `outscored` / `settled`, with its `block` and `raced_against`; the stream's `p_best` is the smallest `p_better`.

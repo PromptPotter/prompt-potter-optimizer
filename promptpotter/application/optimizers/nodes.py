@@ -48,10 +48,10 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.knobs import CouplingSeverity
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.scoring.query_loop import BlockRace, Walk
+    from promptpotter.application.scoring.query_loop import BlockRace
     from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
-    from promptpotter.domain.arms import Concluded, Elimination, Proposal
+    from promptpotter.domain.arms import Concluded, Cut, Elimination, Proposal
     from promptpotter.domain.campaign_config import ArmGateMode
     from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.dashboard_rows import OptimizerLimit
@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
-    from promptpotter.domain.validators import StopRule, StopSignal
+    from promptpotter.domain.validators import StopSignal
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 
@@ -448,6 +448,11 @@ class RoundContext:
         held = self.walks.get(read.key)
         self.walks[read.key] = ArmWalk(read, asked) if held is None else held.continued(read, asked)
 
+    def cut_on(self, key: ArmKey, state: Cut) -> None:
+        """Its race stopped it past its draw: the walk keeps its rows, the arm reads cut."""
+        held = self.walks[key]
+        self.walks[key] = ArmWalk(ReadArm(key, state, held.arm.rows), held.asked)
+
 
 @dataclass(frozen=True)
 class Panel:
@@ -624,7 +629,7 @@ class RaceSnapshot:
 
 
 class Race(Protocol):
-    """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``rule`` stops one walk, ``blocks`` every live one.
+    """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``blocks`` stops every live walk at once.
     A race whose arms all walk one panel keeps no prior, so it inherits ``priors``, ``admit`` and ``catch_up``."""
 
     @property
@@ -636,9 +641,12 @@ class Race(Protocol):
         return {}
 
     @property
-    def blocks(self) -> BlockRace[ArmKey] | None: ...
+    def blocks(self) -> BlockRace[ArmKey]: ...
 
-    def rule(self, ahead: Sequence[tuple[ArmKey, Walk | None]]) -> StopRule | None: ...
+    @property
+    def top_up(self) -> BlockRace[ArmKey] | None:
+        """The race walked on over the origin panel's top-up; ``None`` where it ends with the draw."""
+        return None
 
     def open_turn(self, key: ArmKey) -> None: ...
 

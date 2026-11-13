@@ -607,7 +607,17 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **The never / partly / always spread contradicts the headline beside it**:
   `application/scoring/measurement_log.py::_cycle_cells` pools every candidate the cycle ran, so
   `domain/cells.py::hit_spread` reads a sample only C0 saw as "never". Action: the spread reads the
-  headline's own cells. **Rides with:** rk-dec 2.
+  headline's own cells. **Rides with:** readings.
+- **No door but the browser reads the noise-walk readout**: rk-dec-2 serves `lift_prior` and
+  `hold_up` on the round channel, but no test reads them on the CLI, MCP or embedded doors. Action: each
+  door renders them off the same served round. **Rides with:** narr. **Re-test:** the offline world's
+  CLI round readout names μ0 and τ.
+- **`hold_up` is withheld on a flat ruler**, so the offline world never shows it: the readout
+  cannot be seen in the harness that proves the doors. Action: the offline world banks one round whose
+  ruler separates arms. **Rides with:** tests-w.
+
+### valid (after rk-dec, before the behaviour keys)
+
 - **A resume asks "is this still valid" five ways**: `resume.py`'s consumed set and prompt hashes,
   `jobs/mint.py`'s defaults drift, seven members' `replay()` (capo, gepa, levi, the election, the race)
   and `round_packages` / `rederive`. Action: one validity check: `resume.py::_divergence` becomes

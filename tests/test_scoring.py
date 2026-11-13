@@ -154,7 +154,7 @@ from promptpotter.application.optimizers.potter.knobs import (
     PoBBKnobs,
 )
 from promptpotter.application.optimizers.potter.members import L1Generate
-from promptpotter.application.optimizers.potter.pobb import PoBBCheck
+from promptpotter.application.optimizers.potter.pobb import PoBBCheck, field_p_best
 from promptpotter.application.optimizers.potter.records import (
     L1Readout,
     L2Memory,
@@ -224,7 +224,6 @@ from promptpotter.application.scoring.selection import (
     crowning_cells,
     elect_round_winner,
     level_band,
-    prior_read,
     readable_lifts,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
@@ -3043,10 +3042,12 @@ def trailing() -> _Trailing:
             ruler=None,
             parent=parent,
         )
-        check.register_completed(sheet(measurements([1.0] * 28)), key=ArmKey("winner"))
-        check.register_completed(sheet(measurements([1.0] * parent_cells)), key=parent)
-        check.set_current(ArmKey("arm"))
-        return check.check(sheet(measurements([0.0] * misses + [1.0] * (n - misses))).cells)
+        field = {
+            ArmKey("winner"): sheet(measurements([1.0] * n)),
+            parent: sheet(measurements([1.0] * parent_cells)),
+            ArmKey("arm"): sheet(measurements([0.0] * misses + [1.0] * (n - misses))),
+        }
+        return check.check(field, [ArmKey("winner"), ArmKey("arm")]).get(ArmKey("arm"))
 
     return _Trailing(cfg, parent, behind_perfect_prior)
 
@@ -3082,16 +3083,13 @@ def test_an_arm_behind_a_perfect_prior_is_cut_on_the_epsilon_that_fired(
     trailing: _Trailing,
 ) -> None:
     behind_perfect_prior = trailing.behind_perfect_prior
-    # A single adverse cell caps p_best at 0.25 (`sign_posterior`), so the ramp below it spares it.
+    # The field shares one fit, so a single adverse cell leaves the arm a share above the ramp.
     assert behind_perfect_prior(6, 1) is None and behind_perfect_prior(9, 1) is None, (
         "one adverse cell was cut"
     )
     cut = behind_perfect_prior(9, 2)
     assert cut is not None and cut.check_result["epsilon"] == pytest.approx(0.225), (
         "the decision archives the bar that FIRED, never the configured ε"
-    )
-    assert behind_perfect_prior(6, 2) is not None, (
-        "two behind is still cut at the floor: the reprieve is for a width, not for a loser"
     )
     assert behind_perfect_prior(9, 2, parent_cells=5) is None, (
         "cut under the coverage floor: cold, the election reads θ on the cells the parent answered"
@@ -3115,24 +3113,25 @@ def test_an_arm_is_never_cut_on_cells_its_rival_never_sat(trailing: _Trailing) -
         ruler=None,
         parent=parent,
     )
-    unpaired.register_completed(
-        sheet(measurements([1.0] * 8, sample_ids=list(range(8)))), key=ArmKey("lucky_leader")
+    field = {
+        ArmKey("lucky_leader"): sheet(measurements([1.0] * 8, sample_ids=list(range(8)))),
+        parent: sheet(measurements([0.0] * 20)),
+        ArmKey("challenger"): sheet(measurements([0.0] * 5, sample_ids=[9, 12, 13, 14, 8])),
+    }
+    assert not unpaired.check(field, [ArmKey("challenger")]), (
+        "an arm was cut on cells its rival never sat"
     )
-    unpaired.register_completed(sheet(measurements([0.0] * 20)), key=parent)
-    unpaired.set_current(ArmKey("challenger"))
-    challenger = sheet(measurements([0.0] * 5, sample_ids=[9, 12, 13, 14, 8]))
-    assert unpaired.check(challenger.cells) is None, "an arm was cut on cells its rival never sat"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_cost_terms_tie_breaks_never_pin_p_best_at_a_coin(trailing: _Trailing) -> None:
     cfg, parent, _ = trailing
     longer, terse_parent = _charged_by_length()
-    charged = PoBBCheck(cfg, n_min=6, n_samples=34, ruler=None, parent=parent)
-    charged.register_completed(terse_parent, key=parent)
     standings: list[node_contract.RaceSnapshot] = []
-    charged.set_current(ArmKey("l"), on_snapshot=standings.append)
-    charged.check(longer.cells)
+    charged = PoBBCheck(
+        cfg, n_min=6, n_samples=34, ruler=None, parent=parent, on_snapshot=standings.append
+    )
+    charged.check({parent: terse_parent, ArmKey("l"): longer}, [ArmKey("l")])
     assert standings[-1].p_best > 0.5, "a cost term's tie-breaks pinned p_best at a coin"
 
 
@@ -3186,7 +3185,7 @@ def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trail
         ruler=None,
         parent=parent,
     )
-    assert unpaired_check.check(constant) is None, (
+    assert not unpaired_check.check({ArmKey("c"): sheet(constant)}, [ArmKey("c")]), (
         "one label on an n_min prefix, read against no parent, cut an arm the panel never judged"
     )
     # Collapse is read against the parent's answers on the same cells.
@@ -3245,38 +3244,20 @@ def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trail
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_on_a_graded_backend_p_best_discriminates_and_concordant_cells_never_reach_epsilon() -> (
-    None
-):
+def test_the_fields_p_best_sums_to_one_discriminates_graded_rows_and_reads_no_slot() -> None:
     def uncharged(*values: float) -> CellSheet:
         return sheet(measurement(i, v, objective=v) for i, v in enumerate(values))
 
-    def p_over(rows: CellSheet, bar: CellSheet, ruler: Any = None) -> float:
-        read = prior_read(rows, bar, ruler, min_shared=1)
-        assert read is not None
-        return read.p_better
-
+    cells = [str(i) for i in range(12)]
     strong, weak = uncharged(*[0.66] * 12), uncharged(*[0.30] * 12)
-    p_strong = p_over(strong, weak)
-    assert p_strong > 0.9, f"graded gate failed to discriminate: {p_strong}"
-    assert p_over(weak, strong) < 0.1
-    assert abs(p_over(weak, weak) - 0.5) < 1e-9, "a tie reads as a coin"
-    epsilon = pobb_knobs().epsilon
-    # The probe is also the EASIEST cell in the prefix, which tempts a fit to read it as decisive.
-    warm = delta_ruler(
-        {0: 2.90, 1: 3.01, 2: 2.66, 3: 1.39, 4: 2.85, 5: 2.95},
-        mu=2.6,
-        sigma=0.6,
-        se=0.4,
-        sigma_theta=1.0,
-    )
-    nothing_solved = uncharged(*[0.0] * 6)
-    p_thin = p_over(nothing_solved, uncharged(0.0, 0.0, 0.0, 1.0, 0.0, 0.0), warm)
-    assert p_thin == pytest.approx(0.25), f"one adverse cell may not reach past 0.25: {p_thin}"
-    assert p_thin > epsilon, "a one-cell verdict must not be cuttable"
-    p_wide = p_over(nothing_solved, uncharged(1.0, 0.0, 1.0, 1.0, 0.0, 0.0), warm)
-    assert p_wide == pytest.approx(0.0625), f"three adverse cells support a cut: {p_wide}"
-    assert p_wide < epsilon, "the width is there — ε decides"
+    field = {ArmKey("a"): weak, ArmKey("b"): strong, ArmKey("c"): weak}
+    p_best, _ = field_p_best(field, cells)
+    assert sum(p_best.values()) == pytest.approx(1.0), "the field's shares do not sum to 1"
+    assert p_best[ArmKey("b")] > 0.8, f"graded rows failed to discriminate: {p_best}"
+    reordered, _ = field_p_best(dict(reversed(field.items())), cells)
+    assert reordered == p_best, "the order the field was walked in moved an arm's p_best"
+    ties, _ = field_p_best({ArmKey("a"): weak, ArmKey("c"): weak}, cells)
+    assert ties[ArmKey("a")] == pytest.approx(0.5, abs=0.03), "a tie reads as a coin"
 
 
 @pytest.mark.usefixtures("optimizing_memory")

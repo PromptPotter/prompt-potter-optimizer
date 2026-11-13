@@ -102,6 +102,9 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
   );
   const precision = precise?.panel_precision ?? null;
   const advice = precise?.panel_precision_verdict;
+  // served: the noise walk, the generator's lift prior off the latest round's own arm-vs-parent pairs.
+  const walked = rounds.filter((r) => r.lift_prior).at(-1) ?? null;
+  const held = rounds.filter((r) => r.hold_up).at(-1) ?? null;
 
   // Before a round completes there is no signal to show, and the time-ray already says a round runs.
   if (!rounds.some((r) => r.round > 0)) return null;
@@ -134,6 +137,15 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
           ) : null}
         </>
       )}
+      {walked?.lift_prior ? (
+        <p className="note-lede">
+          Round {walked.round}&rsquo;s arms lift μ0 {fmtLogits(walked.lift_prior.mu0)} over their
+          parent, τ {fmtLogits(walked.lift_prior.tau)} across {walked.lift_prior.pairs} pairs.
+          {held?.hold_up
+            ? ` Round ${held.round}'s promotion holds ${fmtLogits(held.hold_up.value)} ± ${fmtLogits(held.hold_up.se)} over the parent it beat.`
+            : ""}
+        </p>
+      ) : null}
     </CardFrame>
   );
 });

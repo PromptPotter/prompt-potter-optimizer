@@ -45,7 +45,7 @@ from promptpotter.application.runner.bench import (
 )
 from promptpotter.application.runner.inner.tasks import pin_inner_ruler
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
-from promptpotter.application.scoring.arm_states import conclude, measuring, refuse
+from promptpotter.application.scoring.arm_states import conclude, cut_past_draw, measuring, refuse
 from promptpotter.application.scoring.catch_up import CatchUpPool
 from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.application.scoring.paired import (
@@ -144,16 +144,16 @@ if TYPE_CHECKING:
         Selection,
         Selector,
     )
+    from promptpotter.application.scoring.query_loop import BlockRace
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
     from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.arms import Measuring, Proposed
+    from promptpotter.domain.arms import Elimination, Measuring, Proposed
     from promptpotter.domain.command_kinds import SubmittedArm
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell, Scorer
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
@@ -256,7 +256,7 @@ def round_origin_panel(cycle: Cycle, scoring_pool: list[Sample]) -> list[int]:
     origin_round = next(rr for rr in cycle.rounds if rr.round == ordered[0].arm.round)
     filed = cycle.session.measured_dataset
     return origin_panel(
-        pairs.measured(origin_round.results),
+        pairs.walked(origin_round.results),
         line_cells=set[int]().union(
             *(pairs.measured(pairs.cells_of(s, held)) for s in ordered[1:])
         ),
@@ -273,8 +273,10 @@ async def read_origin_panel(
     scoring_pool: list[Sample],
     *,
     buys: bool,
-) -> dict[str, CellSheet]:
-    """Each member on the panel cells its draw left, for the election to pool; where *buys* is false the archive alone answers."""
+    race: Race | None,
+) -> tuple[dict[str, CellSheet], dict[ArmKey, Elimination]]:
+    """Each member on the panel cells its draw left, for the election to pool; where *buys* is false the archive alone answers.
+    The round's *race* walks on over what it buys, and each arm it reads as beaten there is returned cut."""
     want = set(panel)
     gaps = {
         step.opt_sp.id: (step, samples)
@@ -285,16 +287,22 @@ async def read_origin_panel(
             ]
         )
     }
-    if buys:
+    if not buys:
         return {
-            member: scored.sheet for member, scored in (await _measure_gaps(cycle, gaps)).items()
-        }
-    return {
-        member: reread_cells(
-            cycle.points.job(step.opt_sp), samples, cycle.session, kind=MeasurementRole.OVERLAP
-        )
-        for member, (step, samples) in gaps.items()
-    }
+            member: reread_cells(
+                cycle.points.job(step.opt_sp), samples, cycle.session, kind=MeasurementRole.OVERLAP
+            )
+            for member, (step, samples) in gaps.items()
+        }, {}
+    top_up = None if race is None else race.top_up
+    scored = await _measure_gaps(cycle, gaps, top_up=top_up)
+    cuts: dict[ArmKey, Elimination] = {}
+    if race is not None and top_up is not None:
+        labels = {ArmKey(member): step.arm.label for member, (step, _) in gaps.items()}
+        for member, walk in scored.items():
+            if (cut := race.judge(walk.signal, ArmKey(member), labels)) is not None:
+                cuts[ArmKey(member)] = cut
+    return {member: walk.sheet for member, walk in scored.items()}, cuts
 
 
 async def measure_overlap(
@@ -444,9 +452,13 @@ class _OriginPanelPairs:
     def cells_of(step: LineStep, held: InRunCells) -> CellSheet:
         return held.sheet(step.opt_sp.id, RoleScope.REPORT)
 
+    def walked(self, rows: Iterable[GradedCell]) -> list[int]:
+        """By bank slot, in the order the rows were walked: the panel is served as the sample ids the
+        operator selects on."""
+        return list(dict.fromkeys(self._slot_of[cell.key] for cell in rows if cell.scored))
+
     def measured(self, rows: Iterable[GradedCell]) -> set[int]:
-        """By bank slot: the panel is served as the sample ids the operator selects on."""
-        return {self._slot_of[key] for key in measured_cells(rows)}
+        return set(self.walked(rows))
 
     def read(
         self,
@@ -457,8 +469,8 @@ class _OriginPanelPairs:
         paid: dict[str, int],
     ) -> PairedReading:
         return read_pair(
-            a=self._member(a, held, paid),
-            b=self._member(b, held, paid),
+            a=self._member(a, held, panel, paid),
+            b=self._member(b, held, panel, paid),
             cell_set=CellSetName.ORIGIN_PANEL,
             cells=[self._key_of[sid] for sid in panel],
             masked=False,
@@ -509,13 +521,16 @@ class _OriginPanelPairs:
             pass_role=None,
         )
 
-    def _member(self, step: LineStep, held: InRunCells, paid: dict[str, int]) -> MemberRows:
+    def _member(
+        self, step: LineStep, held: InRunCells, panel: set[int], paid: dict[str, int]
+    ) -> MemberRows:
+        sheet = self.cells_of(step, held)
         return MemberRows(
             address=self._address(step),
-            sheet=self.cells_of(step, held),
+            sheet=sheet,
             bought=paid.get(step.opt_sp.id, 0),
-            # The top-up is what completes a member an eliminator stopped short of the panel.
-            cut=False,
+            # Its walk over the panel, the raced top-up included, stopped short of it.
+            cut=bool(panel - self.measured(sheet)),
             scope=RoleScope.REPORT,
             instrument_id=self._instrument,
             dataset_hash=self._dataset,
@@ -524,18 +539,22 @@ class _OriginPanelPairs:
 
 
 async def _measure_gaps(
-    cycle: Cycle, gaps: Mapping[str, tuple[LineStep, list[Sample]]]
+    cycle: Cycle,
+    gaps: Mapping[str, tuple[LineStep, list[Sample]]],
+    *,
+    top_up: BlockRace[ArmKey] | None = None,
 ) -> dict[str, ScoredWalk]:
-    """Every member's gaps in ONE pass, each on its OWN configuration, never the round subject's."""
+    """Every member's gaps in ONE pass, each on its OWN configuration, never the round subject's;
+    *top_up* races them on."""
     if not gaps:
         return {}
     for step, samples in gaps.values():
         logger.info(
             "overlap: measuring %s on %d cell(s) of the origin panel", step.arm.label, len(samples)
         )
-    scored = await score_search_points(
+    raced = await score_search_points(
         {
-            member: (
+            ArmKey(member): (
                 cycle.points.job(step.opt_sp),
                 samples,
                 step.opt_sp.id,
@@ -545,7 +564,9 @@ async def _measure_gaps(
         cycle.session,
         # One run per (member, cell set), so a re-run of the same round replays it free.
         kind=MeasurementRole.OVERLAP,
+        blocks=top_up,
     )
+    scored = {member: raced[ArmKey(member)] for member in gaps}
     for member, walk in scored.items():
         if walk.stopped is not None:
             step, samples = gaps[member]
@@ -568,7 +589,7 @@ async def measure_population(
     selector: Selector,
 ) -> MeasuredRound:
     cycle = ctx.cycle
-    arms, rows, cut = await _walk_population(
+    arms, rows, cut, race = await _walk_population(
         ctx, population, panel, eliminator, keep_cut=selector.elects_partial
     )
     # Clamped so a tiny dataset stays electable.
@@ -596,7 +617,7 @@ async def measure_population(
         ctx, cycle.parent, cycle.parent_point, cells, role=MeasurementRole.PARENT
     )
     origin_panel_slots = round_origin_panel(cycle, pool)
-    on_panel = await read_origin_panel(
+    on_panel, topped_cuts = await read_origin_panel(
         cycle,
         [
             *(
@@ -613,7 +634,21 @@ async def measure_population(
         origin_panel_slots,
         pool,
         buys=cut is None,
+        race=race,
     )
+    for key, elimination in topped_cuts.items():
+        topped = arms[key]
+        assert isinstance(topped, Measured), "only an arm walked to its draw's end is topped up"
+        arms[key] = stopped = cut_past_draw(topped, elimination)
+        ctx.cut_on(key, stopped)
+        ctx.ledger.append(
+            ArmRecord(
+                round=ctx.round_num,
+                arm=key,
+                state=stopped,
+                anchors=cycle.session.state.view_context.anchors(),
+            )
+        )
     crowned = crowning_cells(cycle.rounds, parent.key)
 
     def pooled(key: ArmKey, drawn: CellSheet) -> CellSheet:
@@ -838,7 +873,7 @@ async def _walk_population(
     eliminator: Eliminator | None,
     *,
     keep_cut: bool,
-) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopReason | None]:
+) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopReason | None, Race | None]:
     cycle = ctx.cycle
     round_num = ctx.round_num
     schema = cycle.session.pipeline_schema
@@ -869,18 +904,18 @@ async def _walk_population(
     skipped = session.store.campaigns.standing_rounds(session.hop, moment=None).skipped
     walks: dict[ArmKey, Walk | None] = {}
     for key, arm in proposed.items():
-        # The arms before this one still being walked may yet become priors.
-        rule = race.rule(list(walks.items())) if race is not None else None
-        checks = [] if rule is None else [rule]
-        walks[key] = _open_arm(
-            ctx, arm, sps[key], panel.order, checks, skipped.get((round_num, key))
-        )
+        walks[key] = _open_arm(ctx, arm, sps[key], panel.order, skipped.get((round_num, key)))
 
     blocks = race.blocks if race is not None else None
 
     def on_turn(key: ArmKey, block: int | None) -> None:
         if race is not None:
             race.open_turn(key)
+        held = states[key].block
+        racing = sum(1 for w in walks.values() if w is not None and w.outcome is None)
+        # A turn inside a block race files the arm once per checkpoint that moved the field.
+        if block and held is not None and held["racing"] == racing:
+            return
         states[key] = states[key].model_copy(
             update={
                 "n_priors": race.n_priors if race is not None else 0,
@@ -890,7 +925,7 @@ async def _walk_population(
                     "n": block + 1,
                     "of": -(-len(order) // blocks.block_size),
                     "size": blocks.block_size,
-                    "racing": sum(1 for w in walks.values() if w is not None and w.outcome is None),
+                    "racing": racing,
                 },
             }
         )
@@ -930,7 +965,7 @@ async def _walk_population(
             rows[key] = rows[key].merged(taken)
             ctx.walked(ReadArm(key, concluded[key], taken), asked[key])
     ranked = [key for key in proposed if key in concluded]
-    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut
+    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut, race
 
 
 def _open_arm(
@@ -938,7 +973,6 @@ def _open_arm(
     arm: Proposed,
     sp: JobSearchPoint,
     dataset: list[Sample],
-    checks: list[StopRule],
     skip_at: int | None,
 ) -> Walk | None:
     if arm.refused:
@@ -948,7 +982,6 @@ def _open_arm(
         dataset,
         ctx.cycle.session,
         kind=MeasurementRole.PANEL,
-        checks=checks,
         sample_index=ctx.cycle.sample_index,
         # Handed to the gateway rather than bound here, so no re-entrant asker inherits it.
         measured=arm.individual.id,

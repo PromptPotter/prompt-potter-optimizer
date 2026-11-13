@@ -44,8 +44,6 @@ class StopReason(enum.StrEnum):
     CRASHED = "crashed"
     DIVERGED = "diverged"
     OPTIMIZER_ABORT = "optimizer_abort"
-    CONVERGED = "converged"
-    # The optimizer's own word; ``CONVERGED`` is the bench's reading of the standing.
     OPTIMIZER_EXHAUSTED = "optimizer_exhausted"
     HARD_CAP = "hard_cap_reached"
     TARGET_HIT = "target_hit"
@@ -545,9 +543,6 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
         ),
         StopReason.HARD_CAP: StopReasonInfo(
             "Arm cap", StopOutcome.SUCCESS, StopCategory.LIMIT, False, False, "", True, ()
-        ),
-        StopReason.CONVERGED: StopReasonInfo(
-            "Converged", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ()
         ),
         StopReason.OPTIMIZER_EXHAUSTED: StopReasonInfo(
             "Optimizer out of moves",

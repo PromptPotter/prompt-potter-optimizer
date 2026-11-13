@@ -9,6 +9,7 @@ from pydantic import Field
 from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.arms import ArmState, Proposed, arm_name
 from promptpotter.domain.bench import BandedValue
+from promptpotter.domain.crowning_bar import LiftPrior, lift_prior
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual, overlap_line
@@ -16,7 +17,7 @@ from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.results_health import floor_said, health_reading
 from promptpotter.domain.round_health import DegradationHealth, HealthGrade, HealthReading
-from promptpotter.domain.ruler import LevelSeries, SeriesReading
+from promptpotter.domain.ruler import LevelSeries, SeriesReading, ThetaLift
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import Budget
@@ -297,6 +298,8 @@ class RoundSummary(FrozenModel):
     # ``None`` on a non-L4 round. The VERDICT rides `candidates[].reading.vs_reference`.
     panel_precision: PanelPrecision | None = None
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
+    # The noise walk: the generator's N(μ0, τ²) off this round's own arm-vs-parent θ lifts.
+    lift_prior: LiftPrior | None = None
 
     @classmethod
     def of(cls, closed: RoundStatement) -> RoundSummary:
@@ -329,6 +332,9 @@ class RoundSummary(FrozenModel):
             overlap=closed.overlap,
             panel_precision=closed.panel_precision,
             optimizer_facts=closed.optimizer_facts,
+            lift_prior=None
+            if election is None
+            else lift_prior(f.lift for f in election.fit.values() if f.lift is not None),
         )
 
 
@@ -346,6 +352,11 @@ class ServedRound(RoundSummary):
     series_reading: SeriesReading | None = Field(
         description="This round's level on the cycle's `LevelSeries`, read under the caveat that "
         "withholds it from differencing; null where no scored cell sits on the scale."
+    )
+    hold_up: ThetaLift | None = Field(
+        description="This round's promotion over the parent it beat, each read on every row it met "
+        "in the cycle on `series_reading`'s one scale, its later rows as parent included: the lift "
+        "that held beside the one it was crowned on. Null on a round that promoted nothing."
     )
 
 
@@ -424,6 +435,12 @@ def served_rounds(
             else precision_verdict(closed.panel_precision),
             selection_movement=movement,
             series_reading=None if series is None else series.reading(closed.round),
+            hold_up=None
+            if series is None
+            or not closed.improved
+            or (now := series.level(closed.round)) is None
+            or (then := series.level(closed.round - 1)) is None
+            else now.lift_over(then),
         )
         for closed, movement in zip(ordered, movements, strict=True)
     ]

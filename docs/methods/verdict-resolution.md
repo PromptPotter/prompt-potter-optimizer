@@ -71,6 +71,11 @@ disk (`(ns)` beside its `p`). Degenerate candidates (a constant
 answer, a scorer-gaming shape) are caught before they count, and the layer that validates a fix is
 never the one that proposed it.
 
+**A campaign drifting on noise is served, never inferred** (`dashboard_rows.py::ServedRound`): each
+round's `lift_prior` is the generator's N(μ0, τ²) off its own arm-vs-parent θ lifts (μ0 < 0 with τ ≈ 0
+is a generator walking on noise), and a promoting round's `hold_up` is its pick over the parent it beat
+on the `LevelSeries` scale, its later rows as parent included; a flat ruler withholds it.
+
 **θ is the verdict; fitness is not** — raw fitness moves without ability:
 
 - **The subset moves.** `per_round_resubset` is on, so consecutive rounds are different exams.

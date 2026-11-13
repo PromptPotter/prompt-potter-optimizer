@@ -613,6 +613,8 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
     selection_movement: [],
     series_reading: null,
     optimizer_facts: [],
+    lift_prior: null,
+    hold_up: null,
     ...over,
   };
 }

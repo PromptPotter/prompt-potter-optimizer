@@ -112,6 +112,14 @@ def refuse(arm: Measuring) -> Cut:
     return Cut(**_concluded_fields(arm), reason=Invalid())
 
 
+def cut_past_draw(arm: Measured, elimination: Elimination) -> Cut:
+    """Its race stopped it on the origin panel's top-up, past its draw's end."""
+    return Cut(
+        **{name: getattr(arm, name) for name in _CARRIED},
+        reason=Eliminated(elimination=elimination),
+    )
+
+
 def conclude(
     arm: Measuring, scored: ScoredWalk, *, round_num: int, elimination: Elimination | None = None
 ) -> Concluded:

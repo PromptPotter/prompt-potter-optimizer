@@ -1156,7 +1156,6 @@
               "crashed",
               "diverged",
               "optimizer_abort",
-              "converged",
               "optimizer_exhausted",
               "hard_cap_reached",
               "target_hit",
