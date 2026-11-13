@@ -17,7 +17,7 @@ the true winner in 41.5% of runs within 20 cells, against PoBB's 74.5%, which it
 **The rule:** a mixture likelihood ratio over a N(0, 1.5²) prior on each arm's θ, closed by Ville's
 inequality ([2210.01948](https://arxiv.org/abs/2210.01948) §2.9,
 [1512.04922](https://arxiv.org/abs/1512.04922) §5.2). It is model-based, so it stays valid under the
-hard-first walk; the model-free Hsu & Shekhar sequence would need random cell picks.
+hard-first walk; a model-free sequence would need random cell picks.
 
 **Owed before quoting:** re-run on the landed rule (level α/K per arm, so a round holds its stated
 level; no backfills on a warm ruler); move the simulation script into the repo so the table can be

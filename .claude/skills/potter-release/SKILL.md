@@ -75,6 +75,8 @@ history stays rewritable until the box has passed.
 
 ## 6. Tag, publish, confirm
 
+- [ ] `python scripts/gate.py --release` again, right before the tag: `publish.yml` audits the lock after the
+      tag is out, and an advisory published since prep refuses the upload (v0.8.20's cost a moved tag).
 - [ ] `git tag -a vX.Y.Z -m "vX.Y.Z" <commit>` → `git push origin vX.Y.Z`.
 - [ ] `gh release create vX.Y.Z --title "…" --notes-file <the body file>` fires `publish.yml`, which checks
       the tag against `pyproject.toml` and `CITATION.cff` before uploading.

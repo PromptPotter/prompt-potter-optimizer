@@ -22,10 +22,11 @@ units, `ss -tlnp`.
 
 `promptpotter.service` runs the FastAPI app and the built webapp. **Its environment is
 `/etc/promptpotter.env`** (`ENV_FILE` in `deploy-linux/deploy.config`; root `0600`, so an edit is the operator's
-`sudo` — back it up first). The admin bot loads it, then `/etc/promptpotter-admin-bot.env` over it. The
-checkout's `<install-dir>/.env` is a divergent copy only the login user's CLI reads: an edit there reaches no
-service. Read what a running service holds from `/proc/$(systemctl show <unit> -p MainPID --value)/environ` —
-names or a value's hash, never a value. An edit lands only when the operator restarts the service.
+`sudo` — back it up first). The admin bot loads it, then `/etc/promptpotter-admin-bot.env` over it. **The
+checkout's `<install-dir>/.env` reaches the services too**, under it: settings read it as their env file
+(`config/paths.py::env_file_path`), and on this box `TERMNORM_TOKEN` is held only there. Read what a running
+service holds from `/proc/$(systemctl show <unit> -p MainPID --value)/environ` (the `/etc` file alone), names
+or a value's hash, never a value. An edit lands only when the operator restarts the service.
 
 **Before calling a deployed behaviour broken, check the code the box runs** (`git log --oneline -1` in the
 install dir). **`update.sh` force-matches tracked files to origin**, destroying hand edits — run

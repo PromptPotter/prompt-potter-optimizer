@@ -128,9 +128,10 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   reads (`InjectionBundle` goes), one admit door per arm role for the catch-up pool, L1 told the rows to
   win from the parent's own information, a cell's optimizer in `domain/l4` terms with its cells resolved
   once, and `ab` re-fitting the whole ruler (re-keys potter's prompts).
-- **rk-dec:** the crowning bar's statistic a switch (today's the default), USD the matched axis, the
-  origin walk inside its door, and three shipped-off knobs hard-wired (`pobb.lock_in`,
-  `origin_gate: critical_only`, `convergence_patience`; operator, 2026-11-12).
+- **rk-dec:** the crowning bar's statistic a switch (today's the default, an empirical-Bayes reading
+  beside it), USD the matched axis, the origin walk inside its door, three shipped-off knobs hard-wired
+  (`pobb.lock_in`, `origin_gate: critical_only`, `convergence_patience`; operator, 2026-11-12), and
+  the race made symmetric and carried through the top-up (§ Optimizer tuning, items 1–4).
 - **valid:** one validity check for resume and fork (`ab_replay`'s verdict), one mint writer, one way
   onto a fork, and a copy that revalidates.
 - **hubs:** record kinds in family modules and round facts as kind-keyed slices, so a feature adds a
@@ -305,6 +306,31 @@ then the same lift in less wall clock, on an official dataset with a natural ori
 path:** replicate the nearest climbing setting; screen library blocks without the optimizer; screen the
 optimizer model per method and per step ([`../../paper/notes/model-per-method.md`](../../paper/notes/model-per-method.md));
 combine the winners.
+
+**Read off banked rounds (2026-11-13, offline, no spend).** rk-dec builds 1–4, each with its falsifier.
+
+1. **The PoBB cut depends on an arm's slot.** An arm is compared with the parent plus every sibling
+   decided before it, so later slots face more chances to be cut: 0.15 in slot 0, 0.33 in slot 4
+   (z=3.37, 128 five-arm rounds), with arm quality flat across slots. Cut arms in slots 3–4 are
+   +0.41 θ (se 0.12) better than cut arms in slots 0–1. The fix compares every arm with the parent and
+   every other arm at the checkpoint they share.
+2. **Promotions do not hold up.** 50 promotions claimed +0.63 θ and read −0.14 ± 0.16 on fresh rows.
+   The generator's mean variant lift μ0 is negative on all six datasets, and its true spread τ is
+   about 0 on four, so a flat-prior bar promotes the luckiest of K noisy reads. An empirical-Bayes
+   reading under the measured prior would have held 40 of the 50 (fresh −0.17 ± 0.17). It becomes a
+   reading on rk-dec's switch, and each reading is scored offline by the fresh lift of what it
+   promotes. A noise promotion also resets the stall clock, so the first three-held run on
+   hotpotqa-cb lands about 1.5–2 rounds late.
+3. **The origin-panel top-up has no stop rule.** It is 36% of gsma's fresh round cells. Carrying the
+   arm's race through it saves 8–33% of top-up rows, and the election held in 95 of 95 replayed rounds.
+4. **Round 1's origin panel is sorted by slot id, not the origin's walk order.** So round 1 tops each
+   arm up onto the cells the cold draw missed: about 30% of its fresh cells (29.0 against 24.9 rows
+   per uncut arm, 55 campaigns).
+5. **Serve μ0, τ and promotion hold-up every round.** This is the early-AUC instrument L4 lacks:
+   where μ0 < 0 and τ ≈ 0 no bar yields lift, and the lever is `l1_generate`. Its falsifier is
+   untested: τ from rounds 1–2 against the lineage's fresh θ trend from round 3 on.
+6. **Three arms instead of five** would give +9% lift per dollar and −27% lift per round. This is a
+   derivation only, and it matters only where τ > 0.
 
 ## L4 closure
 

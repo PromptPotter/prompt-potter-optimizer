@@ -50,7 +50,7 @@ source "$HERE/hardening.sh"
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
 bad()  { printf '  \033[1;31m✗\033[0m %s\n' "$*"; }
-# The commit $2 names on origin after the fetch; a branch name is origin's copy, never the box's.
+# The commit $2 names on origin after the fetch; a branch or tag name is origin's copy, never the box's.
 resolve_ref() {
   if [[ -z "$2" ]]; then git -C "$1" rev-parse --verify --quiet '@{u}^{commit}'; return; fi
   git -C "$1" rev-parse --verify --quiet "refs/remotes/origin/$2^{commit}" \
@@ -58,8 +58,9 @@ resolve_ref() {
     || git -C "$1" rev-parse --verify --quiet "$2^{commit}"
 }
 # Fetch and print the ONE commit of origin $2 names: a deploy that cannot name its commit cannot be checked.
+# `--force` takes a tag origin moved; without it git keeps the box's copy and the deploy lands that.
 fetch_target() {
-  git -C "$1" fetch --quiet --tags origin
+  git -C "$1" fetch --quiet --tags --force origin || { bad "the fetch from origin failed" >&2; exit 1; }
   resolve_ref "$1" "$2" || { bad "'$2' names nothing on origin — a tag, a branch or a commit" >&2; exit 1; }
 }
 # Mirror commit $2 and say which.

@@ -13,10 +13,11 @@ recalled. What the code already enforces is named by its symbol only.
    ([`../concepts/l4.md`](../concepts/l4.md) owns the invariant). Source:
    [Auditing Harness Tampering](https://arxiv.org/abs/2609.00069) (read) — tampering persisting in
    the *best-scoring* lineage, 18.3% to 84.6% across audited systems.
-2. **Early stopping must be defensible under optional stopping** (the preprint). A fixed-α test repeated under
-   optional stopping inflates false positives; the field's answer is a confidence sequence from test
-   supermartingales, valid at any stopping time ([Hsu & Shekhar](https://arxiv.org/abs/2607.17409),
-   read). PoBB's ε is a bar on a posterior reading, not an anytime-valid error rate; the preprint
+2. **Early stopping must be defensible under optional stopping** (the preprint). Derived, no source:
+   a fixed-α test read after every round and stopped at the first pass errs more often than α, since
+   each look is another chance to cross. A confidence sequence (a test supermartingale, which by
+   Ville's inequality crosses 1/α with probability at most α over all time) holds at any stopping
+   time. PoBB's ε is a bar on a posterior reading, not an anytime-valid error rate; the preprint
    reports how the two differ on the same rounds.
 3. **Budget-matched comparison is what reviewers ask for first** (the bench, the preprint). Gains shrink or reverse
    at matched rollout budgets ([LEVI](https://arxiv.org/abs/2605.09764), abstract read).

@@ -1879,6 +1879,22 @@ async def test_a_refusing_providers_notice_carries_neither_the_secret_nor_its_ow
     assert "the-old-secret" not in told and "secret is invalid" not in told
 
 
+async def test_a_backend_with_no_address_is_on_every_check_and_never_told(
+    offline: Router, oidc: _Oidc, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A box deployed green with its backend unaddressed: the roster had dropped it unsaid.
+    monkeypatch.setattr(settings_mod.settings, "TERMNORM_URL", "")
+    offline.token_endpoints["oauth2.googleapis.com/token"] = (400, {"error": "invalid_grant"})
+    checked = await health.check(oidc.projects)
+    backends = [c for c in checked if c.probe.name == "backend:termnorm"]
+    assert [c.reading.state for c in backends] == ["unverified"], (
+        "an unaddressed backend went unsaid"
+    )
+    assert backends[0].change is None and health.notice(backends[0]) is None, (
+        "an unaddressed backend was recorded or told as broken"
+    )
+
+
 @pytest.mark.usefixtures("offline")
 async def test_an_accounts_trail_holds_its_sign_in_consent_and_commands_in_time_order(
     ada_signed_in: _SignedIn,

@@ -1724,11 +1724,19 @@ _LOCK_STAMP = _PINNED / "gate-lock.sha256"
 
 
 def _install_digest(extras: list[str]) -> str:
+    """The project's own version is no pin: a release bumps it and installs nothing else, and a
+    checkout reads it off `pyproject.toml` (`settings.py::_app_version`), never the venv."""
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     declared = {key: pyproject["project"].get(key) for key in _INSTALL_KEYS}
     declared["build-system"] = pyproject.get("build-system")
+    lock = tomllib.loads((REPO / "uv.lock").read_text(encoding="utf-8"))
+    own = pyproject["project"]["name"]
+    lock["package"] = [
+        {key: value for key, value in package.items() if package["name"] != own or key != "version"}
+        for package in lock.get("package", [])
+    ]
     return digest(
-        (REPO / "uv.lock").read_bytes(),
+        json.dumps(lock, sort_keys=True).encode(),
         json.dumps(declared, sort_keys=True).encode(),
         " ".join(extras).encode(),
     ).hex()

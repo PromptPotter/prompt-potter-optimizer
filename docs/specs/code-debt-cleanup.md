@@ -1641,12 +1641,12 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 
 ### batch/31 · box
 
-- **The box holds the app's environment twice**: the services load `/etc/promptpotter.env`, and the login
-  user's CLI reads the checkout's `.env` through `config/paths.py::env_file_path`, so they drift. One
-  file serves both; which one is the operator's (read access for the login user, or SELinux under
-  `$HOME`). The repo half stands (`config/paths.py:126-132` falls back to the checkout `.env` unless
-  `PROMPTPOTTER_ENV_FILE` is set, and no deploy script sets it for the login shell); the live half is
-  unchecked, since it needs the live box. **Rides with:** box 1.
+- **The box holds the app's environment twice**: the services load `/etc/promptpotter.env`, and both
+  they and the login user's CLI read the checkout's `.env` under it through `config/paths.py::env_file_path`,
+  since no unit or shell sets `PROMPTPOTTER_ENV_FILE`. Checked live 2026-11-13: the app resolves the checkout
+  `.env`, and `TERMNORM_TOKEN` is held only there. One file serves both; which one is the operator's (read
+  access for the login user, or SELinux under `$HOME`), and the token moves into it first. **Rides with:**
+  box 1.
 - **`promptpotter/__init__.py` acts at import, on the process and on the data root**: `:4` sets
   `OPENBLAS_NUM_THREADS`, a fact of the process, not the package, and `hold_private(user_data_root())`
   writes the data root before any process's landing. Action: the unit and the process launcher set the

@@ -42,7 +42,12 @@ class Probe(NamedTuple):
 
 
 def _backend(name: str) -> Probe:
+    connector = connectors.CONNECTORS.get(name)
+
     async def check() -> Reading:
+        # No address is no answer: said on every check, never recorded or told as broken.
+        if (unset := connector.unconfigured()) is not None:
+            return Reading("unverified", unset)
         # Any refusal a launch would get is broken: a missing extra refuses it as surely.
         refused = await probe_backend(name)
         if refused is None:
@@ -50,7 +55,9 @@ def _backend(name: str) -> Probe:
         return Reading("broken", str(refused))
 
     return Probe(
-        f"backend:{name}", check, f"bring {name} up at {connectors.CONNECTORS.get(name).base_url()}"
+        f"backend:{name}",
+        check,
+        connector.unconfigured() or f"bring {name} up at {connector.base_url()}",
     )
 
 
@@ -150,8 +157,8 @@ def _operator_channel(token: str) -> Probe:
 
 
 def probes() -> list[Probe]:
-    """The roster: every remote backend service, every configured sign-in provider, every LLM key,
-    and the operator's channel where one is configured."""
+    """The roster: every remote backend service, an unaddressed one included, every configured
+    sign-in provider, every LLM key, and the operator's channel where one is configured."""
     paths = default_identity_paths()
     bundle = build_identity_bundle(paths)
     redeem = {
@@ -162,7 +169,7 @@ def probes() -> list[Probe]:
         *(
             _backend(name)
             for name, connector in connectors.CONNECTORS.table.items()
-            if connector.execution == "remote_http" and connector.base_url()
+            if connector.execution == "remote_http"
         ),
         *(_signin(provider, call, paths.provider_config) for provider, call in redeem.items()),
         *(_llm_key(provider, spec, key) for provider, (spec, key) in keyed_specs().items()),
