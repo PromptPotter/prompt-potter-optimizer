@@ -996,11 +996,11 @@ def test_the_data_root_reaches_no_other_user_whoever_launches_under_whatever_uma
         narrowed.chmod(0o700)
         opened.chmod(0o755)
 
-        def not_owner(*_: object) -> None:
+        def not_owner(*_: object, **__: object) -> None:
             raise PermissionError
 
-        monkeypatch.setattr(os, "chmod", not_owner)
-        with pytest.raises(DataRootExposedError) as refused:
+        with monkeypatch.context() as denied, pytest.raises(DataRootExposedError) as refused:
+            denied.setattr(os, "chmod", not_owner)
             hold_private(opened)
         assert refused.value.details == {"path": str(opened)}
 
@@ -1683,8 +1683,8 @@ def test_a_survivors_write_and_a_bill_reach_the_disk_before_they_return(
     synced: list[Path] = []
     real_open, real_fsync = os.open, os.fsync
 
-    def open_(path: str | os.PathLike[str], flags: int, mode: int = 0o777) -> int:
-        fd = real_open(path, flags, mode)
+    def open_(path: str | os.PathLike[str], *how: Any, **at: Any) -> int:
+        fd = real_open(path, *how, **at)
         opened[fd] = Path(path)
         return fd
 
@@ -1692,28 +1692,29 @@ def test_a_survivors_write_and_a_bill_reach_the_disk_before_they_return(
         synced.append(opened[fd])
         real_fsync(fd)
 
-    monkeypatch.setattr(os, "open", open_)
-    monkeypatch.setattr(os, "fsync", fsync)
-    user = account.account_of(built_stores)
-    user_file = built_stores.base_dir / USER_FILE
-    # Windows opens no directory to sync (`io.py::_sync_dir`), so the replace is the last fsync there.
-    replaced, *directory = synced[-1 - (sys.platform != "win32") :]
-    assert replaced.suffix == ".tmp" and os.path.samefile(replaced.parent, user_file.parent), (
-        f"an account's write was not synced before its replace: {synced}"
-    )
-    assert all(os.path.samefile(one, user_file.parent) for one in directory), (
-        f"an account's directory was not synced after its replace: {synced}"
-    )
-    book = ChargeBook(built_stores.base_dir)
-    bill = billed_call(0.1, hold_id=user.user_id).money
-    assert isinstance(bill, Bill)
-    book.append(bill)
-    assert os.path.samefile(synced[-1], book.path), (
-        "a bill line returned before it reached the disk"
-    )
-    synced.clear()
-    write_json(built_stores.base_dir / "run.json", {})
-    assert synced == [], "run data paid a sync"
+    with monkeypatch.context() as spied:
+        spied.setattr(os, "open", open_)
+        spied.setattr(os, "fsync", fsync)
+        user = account.account_of(built_stores)
+        user_file = built_stores.base_dir / USER_FILE
+        # Windows opens no directory to sync (`io.py::_sync_dir`): the replace is its last fsync.
+        replaced, *directory = synced[-1 - (sys.platform != "win32") :]
+        assert replaced.suffix == ".tmp" and os.path.samefile(replaced.parent, user_file.parent), (
+            f"an account's write was not synced before its replace: {synced}"
+        )
+        assert all(os.path.samefile(one, user_file.parent) for one in directory), (
+            f"an account's directory was not synced after its replace: {synced}"
+        )
+        book = ChargeBook(built_stores.base_dir)
+        bill = billed_call(0.1, hold_id=user.user_id).money
+        assert isinstance(bill, Bill)
+        book.append(bill)
+        assert os.path.samefile(synced[-1], book.path), (
+            "a bill line returned before it reached the disk"
+        )
+        synced.clear()
+        write_json(built_stores.base_dir / "run.json", {})
+        assert synced == [], "run data paid a sync"
 
 
 @pytest.mark.usefixtures("offline")

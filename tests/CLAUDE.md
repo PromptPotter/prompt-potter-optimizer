@@ -22,5 +22,6 @@
 - No pytest-mock: `monkeypatch`, stdlib `unittest.mock` when needed. <!-- probe: git grep -cE "mocker" -- tests/*.py == 0 -->
 - **Every network edge is answered by `scripts/offline_world.py`** (the `offline` fixture); never a stub client or a patched `get_llm_client`. <!-- probe: git grep -cE "setattr\(.*get_llm_client" -- tests/*.py == 0 -->
 - **Never fake a strict model** with a `SimpleNamespace` (it survives a field rename with every gate green); build the real model via `factories.py`, adding a parameter, never a builder an existing one can express.
+- **A spy on a process global (`os`, `shutil`, `time`) stands for the act it measures alone** (`with monkeypatch.context()`) and passes the real signature through (`*args, **kwargs`): the fixture's `monkeypatch` is undone after pytest's `tmp_path` cleanup, whose POSIX walk opens by `dir_fd`. <!-- probe: git grep -cE "monkeypatch\.setattr\((os|shutil|time)," -- tests/*.py == 0 -->
 - **No test waits on the wall clock** (`factories.on_jumping_clock`); bound a thread race by an event the writer sets. <!-- probe: git grep -cE "time\.sleep\(" -- tests/*.py == 0 -->
 - **`measurement` stamps an `objective` that DIVERGES from `fitness`, deliberately**: pass `objective=fitness` where a test means them equal. No frozen cycle fixtures, on either side ([`webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture).
