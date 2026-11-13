@@ -85,7 +85,7 @@ class JobSearchPoint(FrozenModel):
         )
 
 
-# Operator-authored, never measured, frozen for the run: `application/optimizers/potter/CLAUDE.md` § L2.
+# Operator-authored, never measured, frozen for the run: `application/optimizers/potter/CLAUDE.md` § L2 — what.
 FRAMING_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {
         "domain",

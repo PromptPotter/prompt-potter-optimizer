@@ -1,4 +1,4 @@
-"""Reporting rows: every field defaults (`CLAUDE.md` § Tolerance is scoped by what a payload is FOR)."""
+"""Reporting rows: every field defaults (`domain/CLAUDE.md` § Tolerance is scoped by what a payload is FOR)."""
 
 from __future__ import annotations
 

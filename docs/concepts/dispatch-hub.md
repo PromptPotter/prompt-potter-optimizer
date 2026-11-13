@@ -184,6 +184,8 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 - **`block_pool`** ← the `BlockPool` slice through `InjectionBundle.block_window()`, gated by the node's `block_access`: the value space of a prompt FIELD. `closed` narrows each field's wire schema to the window (`potter/validators.py::l1_blocks_in_pool`); `off` renders empty.
 - **`demo_pool`** ← `InjectionBundle.demo_pool` + the node's `k_max`: the value space of the `shots` slot — the parent's shots first (the one place L1 sees them), then a `pool_window` rotating by round. `L1_MANDATORY`; silent with no pool or `k_max: 0`. `potter/validators.py::l1_shots_in_demo_pool` rejects an id outside the pool, a repeat, or a list past `k_max`.
 - **`recombination_pool`** ← `Lineage.measured` ranked on `Lineage.theta`: the top `pool_window` marked main, then the rest, and the loci a main may take — the value space of the `recombinations` slot. `L1_MANDATORY` as its one carrier; silent at `recombine: 0`, under another `recombination_host`, or with no two tradable entries, which withdraws the slot. `l2_recombination_pool` is the same pool on `l2_context`'s floor under `recombination_host: l2_context`.
+- **`plan`** ← `L3Memory.plan`, L3's strategic replan, which every layer's prompt reads until L3 writes the next one; silent before L3 first fires.
+- **`l1_overrides`** ← `L2Memory.steered("l1_generate")`, the numeric steer L2 laid over `l1_generate` key by key; silent while L2 has laid none.
 - **`l1_layout`** — a structural input and a signal, resolved ONE way for every node (`dispatch/prompts.py::node_layout`: a layer's steer, else an outer's declared edit, else the floor). On `l2_context`'s floor too, since an edit names a panel and its target slot.
 - **`l1_signal_catalogue`** (L2/L3 only) ← `NODE_LAYOUTS["l1_generate"].mandatory` — the one layout rule no JSON Schema states: after an edit, each mandatory signal still sits under SOME slot, binding the MERGED layout. Absent from `l1_generate`'s `possible`.
 
@@ -208,7 +210,7 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 | `mutation_memory` | per edit `label`🧩 `fitness`🧩 against the parent's, `composite_fitness`🧩, `changed`🧩 (a param's value, a field's `changed_words`🧩, `shots`🧩), `gained`🧩 `lost`🧩, `same_idea`🧩 · the cells edits keep missing, `lost`🧩 of `tried`🧩 |
 | `measurand` | `composite_fitness`🧩 · frontier `theta`🧩 `se`🧩 · `evaluators`🧩 under a charged formula |
 | `detectable_move` | `detectable_rows`🧩 of `latest_sample_keys`🧩 at `admission`🧩 |
-| `confounds` | `COLD_RULER`🧩 `FLAT_RULER`🧩 `COLLAPSED_BAND`🧩 (`round_span`🧩 `ruler_span`🧩) `UNMEASURED_DELTA`🧩 (`unlinked`🧩) `PRIOR_PINNED`🧩 (`pinned_share`🧩) · a subset moved whole (`latest_sample_keys`🧩, `prev_sample_keys`🧩) |
+| `confounds` | the frontier's `caveat`🧩 in `THETA_CAVEAT_INFO`'s `label`🧩 `detail`🧩, with its number (`round_span`🧩 `ruler_span`🧩, `unlinked`🧩, `pinned_share`🧩) · a subset moved whole (`latest_sample_keys`🧩, `prev_sample_keys`🧩) |
 | `budget_state` | `round_num`🧩 `budget_rounds`🧩 `spend_used_usd`🧩 `spend_budget_usd`🧩 |
 | `rebase_capability` | `fork_proposal`🧩 (`reason`🧩 `unlock_schema_field_rename`🧩 `stand_on`🧩) · ELECTIONS `picked`🧩 `locked_in`🧩 `unelected`🧩 |
 | `terminate_capability` | `terminate_proposal`🧩 (`reason`🧩) · `terminate_offer`🧩 |
