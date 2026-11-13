@@ -24,14 +24,10 @@
   .round-axis-label{display:none}
   .round-tab{min-width:30px;height:30px;min-height:30px;font-size:var(--text-xs)}
   .hs-mini-btn{height:26px}
-  /* `--touch-floor` INHERITS: a container retunes the floor for its subtree without out-specifying the rule that sets it. */
-  .run-card,.round-axis{--touch-floor:0px}
   .run-card{font-size:var(--text-sm)}
   .hsp-row{font-size:var(--text-xs);line-height:1.5}
   .hsp-spread{flex-direction:row;align-items:baseline;gap:var(--space-8);width:100%;justify-content:space-between;border-left:0;border-top:1px solid var(--color-border);padding:var(--space-4) 0 0}
   .wf-hero-arrow{flex:0 1 auto;min-width:14px;max-width:32px}
-  /* Not position:fixed — `.connector` itself carries a transform. */
-  .connector-pop{left:0;transform:none;min-width:0;max-width:calc(100vw - 48px)}
 
   /* `both-edges` centres a desktop column; on a phone it is 2× a scrollbar width of dead margin. */
   .content{scrollbar-gutter:auto}
@@ -54,15 +50,21 @@
   .hs-mini-btn.resizable::after{opacity:1}
 }
 
-/* Gated on (pointer:coarse), not width: a touchscreen laptop gets the 44px floor too. */
-@media (pointer:coarse){
-  button:not(.account-nav-item),
-  a[role="button"],
-  input[type="submit"],
-  input[type="button"]{
-    min-block-size:var(--touch-floor,var(--touch-target-min));
-    min-inline-size:var(--touch-floor,var(--touch-target-min));
+/* Gated on (pointer:coarse), not width: a touchscreen laptop gets the 44px floor too. A hit area,
+   never layout; a button that unsets `all` re-declares `position:relative`, or it spans its ancestor. */
+@layer ui.reset {
+  @media (pointer:coarse){
+    button,
+    :is(.figure-value,.connector) > [tabindex]{position:relative}
+    button::before,
+    :is(.figure-value,.connector) > [tabindex]::before{
+      content:"";position:absolute;inset:50% auto auto 50%;translate:-50% -50%;
+      inline-size:max(100%,var(--touch-target-min));block-size:max(100%,var(--touch-target-min));
+    }
   }
+}
+
+@media (pointer:coarse){
   input:not([type]),
   input[type="text"],
   input[type="email"],

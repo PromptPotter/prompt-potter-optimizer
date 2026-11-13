@@ -27,7 +27,10 @@ for (const vp of WIDTHS) {
     });
 
     test("every view fits its viewport", async ({ page, rich, isMobile }) => {
-      test.skip(isMobile, "mob 2: the 44px touch floor is layout, so the Candidates header overruns its card");
+      test.skip(
+        isMobile && vp.width <= 412,
+        "held (operator): the one-row primitive's overflow strategy; the Candidates header overruns its card",
+      );
       for (const views of ["", DASHBOARD_VIEWS, "/compare", "/samples/files", "/samples/spend"]) {
         await open(page, `${rich.addr}${views}`);
         await noSidewaysScroll(page);

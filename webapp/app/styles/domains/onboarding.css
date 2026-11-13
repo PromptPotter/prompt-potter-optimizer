@@ -38,7 +38,7 @@
 .prompt-snippet-tag{display:flex;align-items:center;gap:var(--space-4);padding:2px var(--space-4) 0 var(--space-6);font-size:var(--text-xs);color:var(--color-accent)}
 .prompt-snippet-source{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .prompt-snippet-edited{font-size:var(--text-xs)}
-.prompt-snippet-drop{all:unset;margin-left:auto;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;cursor:pointer;color:var(--color-text-secondary)}
+.prompt-snippet-drop{all:unset;position:relative;margin-left:auto;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;cursor:pointer;color:var(--color-text-secondary)}
 .prompt-snippet-drop:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
 .prompt-snippet-drop:focus-visible{outline:2px solid var(--color-accent)}
 .prompt-snippet-input{border:0;background:transparent}
@@ -63,7 +63,7 @@
 .snippet[draggable=true]{cursor:grab}
 .snippet[draggable=true]:active{cursor:grabbing}
 .snippet:has(.snippet-pick:hover){border-color:var(--color-accent)}
-.snippet-pick{all:unset;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-6);align-items:start;cursor:pointer;border-radius:var(--border-radius-sm)}
+.snippet-pick{all:unset;position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-6);align-items:start;cursor:pointer;border-radius:var(--border-radius-sm)}
 .snippet-pick:hover .snippet-text{color:var(--color-text-primary)}
 .snippet-pick:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 .snippet-add{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--color-background-tint-icon);color:var(--color-accent);font-size:var(--text-lg);font-weight:600;line-height:1}

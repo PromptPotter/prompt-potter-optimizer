@@ -22,7 +22,9 @@ test.describe("records", () => {
 
   test("Files opens a document without crashing the view", async ({ page, rich }) => {
     await open(page, `${rich.addr}/files`);
-    const entries = page.locator("#view-files .tree-pane").getByRole("button");
+    const tree = page.locator("#view-files .tree-pane");
+    await expect(tree).toBeVisible();
+    const entries = tree.getByRole("button");
     const n = await entries.count();
     test.skip(n === 0, "this campaign has written no files yet");
     await entries.first().click();

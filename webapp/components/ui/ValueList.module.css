@@ -13,7 +13,6 @@
   width: 100%;
   min-width: 0;
   /* Skinned and sized as the base field (`foundation/base.css`): it stands in a field's place. */
-  --touch-floor: 0px;
   font: inherit;
   text-align: left;
   padding: 1px var(--space-4);

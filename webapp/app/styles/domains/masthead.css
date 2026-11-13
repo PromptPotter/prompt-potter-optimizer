@@ -16,7 +16,7 @@
 .figure-btn{padding:2px var(--space-8);font-size:var(--text-xs)}
 .run-back{display:none}
 /* A figure's label is its view's door. */
-.figure-door{all:unset;display:inline-flex;align-items:center;padding:2px var(--space-4);border-radius:2px;cursor:pointer;font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit}
+.figure-door{all:unset;position:relative;display:inline-flex;align-items:center;padding:2px var(--space-4);border-radius:2px;cursor:pointer;font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit}
 .figure-door:hover:not(.is-lit){color:var(--color-text-primary)}
 /* Inset: the figure row scrolls, so a ring drawn outside the door is clipped. */
 .figure-door:focus-visible{outline:2px solid var(--color-accent);outline-offset:-2px}
