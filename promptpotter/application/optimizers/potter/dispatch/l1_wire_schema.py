@@ -97,7 +97,7 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
     return None
 
 
-# A slot whose panel produced nothing is withdrawn (`optimizers/potter/CLAUDE.md` § L1).
+# A slot whose panel produced nothing is withdrawn: L1 cannot fill a value space it was not shown.
 _SLOT_PANEL: dict[str, str] = {
     "prompt_fields_updates": "rendered_prompt",
     "pipeline_overlay": "pipeline_param_catalogue",

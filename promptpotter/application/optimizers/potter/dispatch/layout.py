@@ -33,10 +33,10 @@ L1_MANDATORY: frozenset[str] = frozenset(
 L1_LAYOUT_SLOTS: tuple[str, ...] = tuple(L1Layout.model_fields)
 
 VOLATILE_SLOT: str = L1_LAYOUT_SLOTS[-1]
-"""The provider's prefix-cache boundary: a changing panel ahead of it voids the discount on every byte behind (`dispatch-hub.md` § L1 layout)."""
+"""The provider's prefix-cache boundary: a changing panel ahead of it voids the discount on every byte behind (`dispatch-hub.md` § L1 layout — L2's structural edit surface)."""
 
 PREFIX_STABLE_PANELS: frozenset[str] = frozenset({"task_context"})
-"""Membership is a claim about a WRITER, never a renderer: re-read both before adding a name (`dispatch-hub.md` § L1 layout)."""
+"""Membership is a claim about a WRITER, never a renderer: re-read both before adding a name (`dispatch-hub.md` § L1 layout — L2's structural edit surface)."""
 
 _OPTIMIZER_ORDER = OptimizerPromptTemplate.RENDER_ORDER
 assert _OPTIMIZER_ORDER[-1] == VOLATILE_SLOT, (

@@ -62,7 +62,7 @@ from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import evidence_starved_node, ran_to_output_ceiling
-from promptpotter.domain.ruler import ThetaCaveat, ThetaLift
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading, ThetaCaveat, ThetaLift
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import (
     CellSheet,
@@ -1112,46 +1112,32 @@ def _r_detectable_move(b: InjectionBundle) -> list[Item]:
     ]
 
 
+def _caveat_measure(a: AbilityReading, units: str) -> str:
+    """The number behind a caveat, where it has one; its words are `THETA_CAVEAT_INFO`'s."""
+    match a.caveat:
+        case ThetaCaveat.FLAT_RULER | ThetaCaveat.COLLAPSED_BAND if (
+            a.round_span is not None and a.ruler_span is not None
+        ):
+            return (
+                f" This round's {units} span {a.round_span:.2f} logits"
+                f" on a ruler spanning {a.ruler_span:.2f}."
+            )
+        case ThetaCaveat.UNMEASURED_DELTA:
+            return f" {a.unlinked} of this round's {units} carry no difficulty."
+        case ThetaCaveat.PRIOR_PINNED if a.pinned_share is not None:
+            return f" {a.pinned_share:.0%} of this round's {units} got the default."
+        case _:
+            return ""
+
+
 @signal("confounds", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
 def _r_confounds(b: InjectionBundle) -> list[Item]:
     d = b.digest
     rows: list[str] = []
-    a = d.ability
-    caveat = a.caveat if a is not None else None
-    if caveat is ThetaCaveat.COLD_RULER:
-        rows.append(
-            "COLD RULER — no difficulty scale yet, so θ is logit-fitness, each arm read beside "
-            "the parent on the cells both answered. Read each arm's lift, never a level."
-        )
-    elif a is not None and caveat in (ThetaCaveat.FLAT_RULER, ThetaCaveat.COLLAPSED_BAND):
-        cause = (
-            "the ruler itself spans almost nothing, so no draw could have been wider"
-            if caveat is ThetaCaveat.FLAT_RULER
-            else "the draw took a thin slice of a wider ruler"
-        )
-        rows.append(
-            f"COLLAPSED BAND — the {unit_plural(b.measured_unit)} this round's θ was read on span "
-            f"{a.round_span:.2f} logits on a ruler spanning {a.ruler_span:.2f}; {cause}. Inside a "
-            f"band that narrow every {b.measured_unit} is equally hard, "
-            "so θ is logit-fitness plus a constant and ranking on it ranks on fitness."
-        )
-    elif a is not None and caveat is ThetaCaveat.UNMEASURED_DELTA:
-        rows.append(
-            f"UNMEASURED DIFFICULTY — {a.unlinked} of this round's "
-            f"{unit_plural(b.measured_unit)} carry no δ: no arm already on the ruler answered "
-            "them, so θ leaves them out and each arm's θ is read on the rest. Read the lift, "
-            "never the level."
-        )
-    elif a is not None and caveat is ThetaCaveat.PRIOR_PINNED and a.pinned_share is not None:
-        rows.append(
-            f"PRIOR-PINNED DIFFICULTY — {a.pinned_share:.0%} of this round's "
-            f"{unit_plural(b.measured_unit)} sit on a δ the ruler hands to several cells at "
-            "once. That is the prior, not a reading: every arm that ever saw them answered "
-            "the same way, so nothing measured how hard they are. θ still counts them, and "
-            "the value they are pinned to moves as the ruler grows — so a θ that rose since "
-            "last round may be the scale shifting under an unchanged prompt rather than an "
-            "arm improving. Read the lift, never the level."
-        )
+    if (a := d.ability) is not None and a.caveat is not None:
+        info = THETA_CAVEAT_INFO[a.caveat]
+        measure = _caveat_measure(a, unit_plural(b.measured_unit))
+        rows.append(f"{info.label} — {info.detail}{measure}")
     if d.prev_sample_keys and not (d.latest_sample_keys & d.prev_sample_keys):
         rows.append(
             f"SUBSET MOVED WHOLE — this round shares no {b.measured_unit} with the one before it, "

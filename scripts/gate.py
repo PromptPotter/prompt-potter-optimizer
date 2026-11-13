@@ -19,7 +19,7 @@ import threading
 import time
 import tomllib
 import urllib.parse
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import cache
@@ -727,27 +727,52 @@ def _link_target(rel: str, target: str) -> str:
     return posixpath.normpath(posixpath.join(posixpath.dirname(rel), cited)) if cited else rel
 
 
+def _heading_claim(claim: str, path: Path, name: str) -> str | None:
+    """*name* names exactly one heading of *path*: the longest prefix of the name ending on a word
+    boundary that matches any heading must match only one."""
+    headings = _headings(path)
+    words = " ".join(name.replace("`", "").split())
+    for cut in reversed([m.start() for m in re.finditer(r"(?<=\w)(?!\w)", words)]):
+        hit = re.compile(rf"(?<![\w-]){re.escape(words[:cut])}(?![\w-]|\.\w)")
+        if matched := [h for h in headings if hit.search(h)]:
+            return (
+                f"{claim}: matches {len(matched)} headings: {matched}" if len(matched) > 1 else None
+            )
+    return f"{claim}: matches no heading"
+
+
 def _section_claims(rel: str, prose: str, tree: frozenset[str]) -> list[str]:
-    """Each `[...](doc.md) § Name` names exactly one heading there: the longest prefix of the
-    name ending on a word boundary that matches any heading must match only one."""
+    """Each section a doc's link names is exactly one heading of the linked doc."""
     failures = []
     for target, name in _SECTION_CLAIM.findall(prose):
         at = _link_target(rel, target)
         if not at.endswith(".md") or at.startswith("../") or at not in tree:
             continue  # a sibling checkout's page, a section of no markdown file, or `_link_claims`'s
-        path = REPO / at
         claim = f"  {rel}: `{target}` § {' '.join(name.split())}"
-        headings = _headings(path)
-        words = " ".join(name.replace("`", "").split())
-        cuts = [m.start() for m in re.finditer(r"(?<=\w)(?!\w)", words)]
-        for cut in reversed(cuts):
-            hit = re.compile(rf"(?<![\w-]){re.escape(words[:cut])}(?![\w-]|\.\w)")
-            if matched := [h for h in headings if hit.search(h)]:
-                if len(matched) > 1:
-                    failures.append(f"{claim}: matches {len(matched)} headings: {matched}")
-                break
-        else:
-            failures.append(f"{claim}: matches no heading")
+        if failure := _heading_claim(claim, REPO / at, name):
+            failures.append(failure)
+    return failures
+
+
+# Code cites a doc by the tail of its path, backticked, linked or bare: `dispatch-hub.md` § Mechanics.
+_CODE_SECTION_CLAIM = re.compile(
+    r"([\w./-]+\.md)`?\)?[ \t]*§[ \t]*((?:[^.,;()\[\]|·*<\s`]|\.(?=\w))(?:[^.,;()\[\]|·*<`\n]|\.(?=\w))*)"
+)
+
+
+def _code_section_claims(listed: Sequence[str], tails: Mapping[str, list[Path]]) -> list[str]:
+    """Each doc section a source file cites names one doc, by a tail of its path, and one heading
+    there: a docstring's pointer drifts like a doc's."""
+    failures = []
+    for rel in (p for p in listed if p.endswith(".py")):
+        text = (REPO / rel).read_text(encoding="utf-8")
+        for cited, name in _CODE_SECTION_CLAIM.findall(text) if "§" in text else ():
+            claim = f"  {rel}: `{cited}` § {' '.join(name.split())}"
+            found = tails.get("/".join(p for p in cited.split("/") if p not in ("", ".", "..")), [])
+            if len(found) != 1:
+                failures.append(f"{claim} names {len(found)} docs; qualify the path")
+            elif failure := _heading_claim(claim, found[0], name):
+                failures.append(failure)
     return failures
 
 
@@ -868,6 +893,7 @@ def _doc_claims(_: Selection) -> Outcome:
                     continue
                 if not defined:
                     failures.append(f"{claim} names nothing defined there")
+    failures += _code_section_claims(listed, tails)
     tracker = (REPO / _TRACKER).read_text(encoding="utf-8")
     urgent = " ".join(tracker.partition("\n## URGENT")[2].partition("\n## ")[0].split())
     failures += [
