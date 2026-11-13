@@ -538,6 +538,17 @@ class SpendBook:
         self.set_aside_usd = usd
         self.set_aside_tokens = tokens
 
+    @property
+    def nested(self) -> bool:
+        return self.enclosing is not None
+
+    def file(self, record: TokenUsageRecord, ledger: CycleEventLog) -> None:
+        """A call's usage on *ledger*, a replay's included; a nested run's lands on its root's
+        ledger first, the copy money is summed off."""
+        if self.nested:
+            self.root().mirror(record)
+        append_record(record, ledger)
+
     def mirror(self, record: TokenUsageRecord) -> None:
         """The root ledger's copy of a nested run's call, which its meter counts."""
         if self.ledger is None:
@@ -700,22 +711,9 @@ class Admission:
             ),
             money=bill,
             served_by=part.served_by,
-            mirrored=self._root is not self._book,
+            mirrored=self._book.nested,
         )
-        # The root's copy is the one money is summed off: it lands before the nested run's own.
-        if self._root is not self._book:
-            self._root.mirror(record)
-        append_record(record, self._ledger)
-
-    def _charge(self, price: CallPrice, tokens: int) -> Bill:
-        bill = Bill(
-            hold_id=self._hold_id,
-            key_source=self._paid_by,
-            price=price,
-            tokens=tokens,
-        )
-        self._charges.append(bill)
-        return bill
+        self._book.file(record, self._ledger)
 
     def close(self, outcome: SendOutcome) -> None:
         if outcome.reported is not None:
@@ -726,14 +724,21 @@ class Admission:
             self.release()
 
     def settle(self, *parts: Billed, unknown: SendBound | None = None) -> None:
-        """Every part is on the account before any ledger write can raise past the rest."""
+        """Every part is on the account, in one append, before any ledger write can raise."""
         self._finish()
         priced = [self._price(part) for part in parts]
-        bills = [self._charge(one.price, one.tokens) for one in priced]
+        bills = [
+            Bill(
+                hold_id=self._hold_id, key_source=self._paid_by, price=one.price, tokens=one.tokens
+            )
+            for one in priced
+        ]
+        closing: list[Lapse | Release] = []
         if unknown is not None:
-            self._charges.append(Lapse(hold_id=self._hold_id, bound=unknown.budget))
+            closing.append(Lapse(hold_id=self._hold_id, bound=unknown.budget))
         elif not parts:
-            self._charges.append(Release(hold_id=self._hold_id))
+            closing.append(Release(hold_id=self._hold_id))
+        self._charges.append(*bills, *closing)
         for one, bill in zip(priced, bills, strict=True):
             self._write(one, bill)
 

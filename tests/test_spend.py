@@ -93,6 +93,7 @@ from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
     RunStart,
     admit_and_share,
+    claim_cycle,
     open_spend_book,
     paid_call,
     paid_pass,
@@ -214,6 +215,7 @@ from promptpotter.domain.run_records import (
     Lapse,
     LaunchAnswer,
     PhaseRecord,
+    PricedKeyRecord,
     Release,
     RoundEnteredRecord,
     RoundWarningRecord,
@@ -290,6 +292,7 @@ from promptpotter.infrastructure.store.io import read_lines, rmtree_robust, writ
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
+    campaign_cycles_dir,
     dataset_id_prefix,
     draft_dirs,
 )
@@ -335,6 +338,7 @@ from promptpotter.shared.identity import (
 from promptpotter.shared.measurement_context import (
     MeasuredPass,
     MeasurementRole,
+    enter_instrument_mode,
     measured_pass,
 )
 from promptpotter.shared.run_scope import scoped
@@ -801,7 +805,9 @@ async def _walk(
     cap_usd: float | None = None,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset))
-    telemetry.bind_priced(set())
+    # The walk's own campaign, which priced nothing yet.
+    campaign = stores.projects_root / "walks" / uuid.uuid4().hex
+    telemetry.bind_priced(campaign)
     # An individual of its own, so a walk replays only the cells of the one it resumes.
     sp = resumes or JobSearchPoint(
         pipeline_params=PipelineParams().with_nodes({"search": {"walk": uuid.uuid4().hex}})
@@ -846,7 +852,7 @@ async def _walk(
     )
 
     # The walk's own ledger: what each launch recorded of the look-ahead it was sent under.
-    started = CycleEventLog.open(CycleDir(stores.projects_root / "walks" / uuid.uuid4().hex))
+    started = CycleEventLog.open(CycleDir(campaign_cycles_dir(campaign) / "walk"))
     with (
         scoped(ledger=started),
         mock.patch.object(query_loop, "measure_sample", _measure),
@@ -1346,6 +1352,16 @@ async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
     assert cancelled.is_set(), "the inner campaign outlived its envelope and kept spending"
 
 
+async def test_an_inner_run_spawns_no_inner_campaign() -> None:
+    async def _from_inside() -> None:
+        enter_instrument_mode(spawned_in=0)
+        await spawn.run_inner_cycle(Sample(id=0, query="q", ground_truth=None), {})
+
+    with pytest.raises(CellUnscoreableError) as refused:
+        await asyncio.create_task(_from_inside())
+    assert refused.value.spent == {}, "a refused spawn held money it never sent"
+
+
 @pytest.mark.usefixtures("run_bound")
 @on_jumping_clock
 async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_the_ceiling(
@@ -1374,7 +1390,7 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
             await judge_call.ask(JudgeStage(model="m", provider="openai"), "grade", judge="j")
 
     # Another campaign's run banks both replies; this arm only ever replays them.
-    telemetry.bind_priced(set())
+    telemetry.bind_priced(tmp_path / "other")
     with _billing_on(CycleEventLog(tmp_path / "other.jsonl"), spend_book()):
         await round_calls()
 
@@ -1391,7 +1407,8 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
         for s in reread
     }
     # The ceiling already spent: no cell fits, and the control reads it as reached.
-    ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
+    campaign = tmp_path / "campaign"
+    ledger = CycleEventLog.open(CycleDir(campaign_cycles_dir(campaign) / "cycle"))
     ledger.append(billed_call(0.02, kind="optimizer", node="spent"))
     arm = spend_book(0.02, meters="search_incurred", metered_on=ledger.path)
     session = loop_session(
@@ -1418,8 +1435,11 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
         )
     feed = _filed(built_stores, picked, session)
     with scoped(ledger=ledger):
-        # The stopped launch priced the cells it took.
-        telemetry.bind_priced({feed.cell_key(s.key) for s in reread[:3]})
+        # The stopped launch, a cycle of the same campaign, priced the cells it took.
+        stopped = CycleEventLog.open(CycleDir(campaign_cycles_dir(campaign) / "stopped"))
+        for s in reread[:3]:
+            stopped.append(PricedKeyRecord(priced_key=feed.cell_key(s.key)))
+        telemetry.bind_priced(campaign)
         with scoped(book=arm):
             walk = open_walk(picked, reread, session, kind=MeasurementRole.PANEL, measured=None)
             halted = await _stopped_by_operator(
@@ -1428,10 +1448,8 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
             bench = await score_search_point(
                 graded, reread, session, kind=MeasurementRole.BENCH, measured=None
             )
-            # The stopped launch made the round's calls; the resumed one learns them off the ledger.
-            telemetry.bind_priced(set())
+            # The first round's calls are priced; the second reads them off the ledger.
             await round_calls()
-            telemetry.bind_priced(scan_ledger_priced_keys([ledger.path]))
             await round_calls()
     assert [c.key for c in walk.results] == [s.key for s in reread[:3]], (
         "the ceiling held back a re-read"
@@ -1915,7 +1933,8 @@ def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
     # An embedded run holds a share through the same admission, and never a machine slot.
     async def held_embedded(held: HeldBudget) -> tuple[None, CycleResult]:
         assert held.admitted.usd == pytest.approx(1.0)
-        run = shared.running_job_for(built_stores.campaigns.workspace, fork_c)
+        holder = built_stores.campaigns.holder(fork_c)
+        run = None if holder is None else holder.run
         assert run is not None and cycle_share(built_stores, run).usd == pytest.approx(0.5), (
             "an embedded run held no share, or another one"
         )
@@ -1940,7 +1959,7 @@ def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
         asyncio.run(embedded())
     shared.release(job_b.job_id, StopReason.CONVERGED)
     asyncio.run(embedded())
-    assert shared.running_job_for(built_stores.campaigns.workspace, fork_c) is None, (
+    assert built_stores.campaigns.holder(fork_c) is None, (
         "an embedded run kept its share past its exit"
     )
 
@@ -2585,6 +2604,79 @@ def test_a_bill_naming_no_price_closes_its_hold_in_tokens_and_keeps_its_money_he
     assert unreported_under(charges, bare.path).host.unreported_usd == pytest.approx(hold_usd), (
         "a priceless bill freed its hold"
     )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_settled_call_leaves_the_money_fold_at_the_next_line(tmp_path: Path) -> None:
+    book = spend_book(1.0)
+    bound = SendBound(input_tokens=0, output_tokens=100, usd=0.01)
+    with _billing_on(CycleEventLog(tmp_path / "ledger.jsonl"), book):
+        sends = [
+            Admission(book, _OPTIMIZER, bound, model=None, provider=None, paid_by="host")
+            for _ in range(3)
+        ]
+        for send in sends:
+            send.settle(Billed(TokenAccount(input=10, output=5), 0.001))
+        Admission(book, _OPTIMIZER, bound, model=None, provider=None, paid_by="host")
+    money = money_on(book.charges.path)
+    assert set(money.holds) == set(money.open) and len(money.open) == 2, (
+        "a settled call stayed in the fold past its settle"
+    )
+    assert money.drawn[book.hold_id].total.sent_usd == pytest.approx(0.003), (
+        "a call that left the fold took its bill off the job's hold"
+    )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(tmp_path: Path) -> None:
+    root = CycleEventLog(tmp_path / "root.jsonl")
+    book = spend_book(0.05, meters="search_incurred", metered_on=root.path)
+    book.ledger = root
+    inner = spend_book(5.0, enclosing=book)
+    price = telemetry.call_price(
+        "optimizer",
+        TokenAccount(input=10, output=5),
+        model=None,
+        provider=None,
+        cost_usd=0.01,
+        recorded=None,
+    )
+    with _billing_on(CycleEventLog(tmp_path / "nested.jsonl"), inner):
+        telemetry.emit_replay_usage(
+            node="cell",
+            usage=TokenAccount(input=10, output=5),
+            duration_s=0.0,
+            price=price,
+            served_by=None,
+        )
+    assert money_on(root.path).metered["search_incurred"].usd_amount == pytest.approx(0.01), (
+        "a nested run's replay reached its root's search-incurred meter at another price"
+    )
+
+
+@pytest.mark.usefixtures("run_bound")
+def test_a_key_two_cycles_of_one_campaign_read_is_priced_once(tmp_path: Path) -> None:
+    campaign = tmp_path / "campaign"
+    telemetry.bind_priced(campaign)
+    claims = []
+    for cycle in ("a", "b"):
+        with scoped(ledger=CycleEventLog.open(CycleDir(campaign_cycles_dir(campaign) / cycle))):
+            claims.append(telemetry.claim_campaign_price("cell"))
+    assert claims == [True, False], "a second cycle of the campaign priced a key again"
+
+
+def test_a_rates_file_rewritten_under_a_live_reader_reprices_its_next_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rates = tmp_path / "rates.json"
+    monkeypatch.setattr(pricing, "BUNDLED_PATH", rates)
+    for usd in (0.000001, 0.0000025):
+        row = {"input_cost_per_token": usd, "output_cost_per_token": usd}
+        listed = {"models": {"gpt-x": row | {"litellm_provider": "openai"}}}
+        rates.write_text(json.dumps(listed), encoding="utf-8")
+        assert pricing.lookup_rate("gpt-x", "openai") == Rate(usd, usd), (
+            "a rewritten rates file left the reader on the rates it read before"
+        )
 
 
 @pytest.mark.usefixtures("run_bound")
@@ -3905,7 +3997,7 @@ def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone(tmp_path: Path) 
     hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
     campaign = minted_campaign(hop)
     metered.campaigns.create_campaign(campaign)
-    registry = JobRegistry(tmp_path / "jobs-3", capacity=lambda _live: 1)
+    registry = JobRegistry(metered.jobs_dir, capacity=lambda _live: 1)
     job = registry.request_slot(
         user_id="sub-9",
         principal_id="sub-9",
@@ -3913,6 +4005,7 @@ def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone(tmp_path: Path) 
         holder=CampaignLaunch("ds1"),
         hop=hop,
     )
+    claim_cycle(metered, hop, job.job_id)
     assert job.holds_slot, "an empty box must hand out a slot, not a place in line"
     _admitted(metered, registry, job.job_id, Budget(usd=0.30, tokens=5_000_000))
     hold_moved(metered, hop, Budget(usd=0.15, tokens=2_500_000))
@@ -3985,7 +4078,7 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
     )
     bill(root, 0.1)
     bill(fork, 0.3)
-    registry = JobRegistry(tmp_path / "jobs-7", capacity=lambda _live: 1)
+    registry = JobRegistry(forker.jobs_dir, capacity=lambda _live: 1)
     job = registry.request_slot(
         user_id="sub-7",
         principal_id="sub-7",
@@ -3993,6 +4086,7 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
         holder=CampaignLaunch("ds1"),
         hop=fork,
     )
+    claim_cycle(forker, fork, job.job_id)
     _admitted(forker, registry, job.job_id, Budget(usd=0.8))
     hold_moved(forker, fork, Budget(usd=0.8))
     forker.grant.save(CouponGrant(face=Budget(usd=1.0)))
@@ -4813,7 +4907,7 @@ def test_a_mint_that_dies_before_its_commit_leaves_no_campaign_to_list_run_or_bi
 
 
 @pytest.mark.usefixtures("account_bound")
-def test_a_reset_over_a_reshaped_ledger_drops_it_and_keeps_the_accounts_money(
+def test_a_reset_over_a_reshaped_ledger_drops_it_and_the_accounts_charges_with_it(
     built_stores: Stores, spent_campaign: _SpentCampaign
 ) -> None:
     stores = built_stores
@@ -4848,18 +4942,17 @@ def test_a_reset_over_a_reshaped_ledger_drops_it_and_keeps_the_accounts_money(
     write_jsonl(reshaped, lines)
     with pytest.raises(LedgerUnreadableError):
         billed_spend([reshaped])
-    apply_reset(plan_reset(stores.projects_root, tenant_id=None, staged={}))
-    assert not stores.campaigns.iter_campaign_dirs(), "a reset kept a campaign it cannot read"
-    assert account_usd() == pytest.approx(framed_total + 0.13), (
-        "a reset over a reshaped ledger dropped the account's spend with it"
-    )
     activity = account_activity(stores, window="1d", group_by="model")
-    assert activity.total_spend_usd == pytest.approx(account_usd()), (
+    assert activity.total_spend_usd == pytest.approx(framed_total + 0.13), (
         "the Activity pane read another bill than the account's charges"
     )
     assert activity.total_tokens == 4 * 2_800 + 400 + 700 + 2 * 15, (
-        "the Activity pane lost the sends of what was deleted, reset or never minted"
+        "the Activity pane lost the sends of what was deleted or never minted"
     )
+    apply_reset(plan_reset(stores.projects_root, tenant_id=None, staged={}))
+    assert not stores.campaigns.iter_campaign_dirs(), "a reset kept a campaign it cannot read"
+    # The account's charges are run data until the operator is no longer a solo developer (§0011).
+    assert account_usd() == 0.0, "a reset kept the account's charges"
 
 
 @pytest.mark.usefixtures("account_bound")

@@ -159,9 +159,6 @@ class Job:
     def hop(self) -> CycleHop:
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
 
-    def holds(self, workspace: WorkspaceDir, hop: CycleHop) -> bool:
-        return self.workspace == str(workspace) and self.hop == hop
-
     def on_campaign(self, workspace: WorkspaceDir, campaign_id: str) -> bool:
         return self.workspace == str(workspace) and self.campaign_id == campaign_id
 

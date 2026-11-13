@@ -13,16 +13,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
-
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.interlock import (
-    AdmissionGate,
-    producer_alive,
-    reclaim_producer,
-    this_producer,
-    this_producer_lock,
-)
+from promptpotter.application.jobs.interlock import AdmissionGate, reclaim_producer, this_producer
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.config.paths import ENDED_JOBS_DIR
 from promptpotter.config.settings import CODE_REVISION, settings
@@ -36,27 +28,14 @@ from promptpotter.domain.job import (
     JobHolder,
     JobLapse,
     JobStage,
-    ScoringPass,
     SlotHolder,
 )
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.refusal import Refusal
-from promptpotter.infrastructure.store.io import (
-    open_text_robust,
-    unlink_robust,
-    validate_path_component,
-    write_json,
-)
+from promptpotter.infrastructure.holders import job_path, producer_alive, read_job
+from promptpotter.infrastructure.store.io import unlink_robust, write_json
 from promptpotter.shared.clock import iso_z, utcnow_iso
-from promptpotter.shared.errors import (
-    ConflictError,
-    FileKind,
-    FileUnreadableError,
-    NotFoundError,
-    PotterError,
-    ServiceUnavailableError,
-    validation_reason,
-)
+from promptpotter.shared.errors import ConflictError, PotterError, ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -234,9 +213,6 @@ class JobRegistry:
     def jobs_dir(self) -> Path:
         return self._dir
 
-    def claimant_lock(self) -> Path:
-        return this_producer_lock(self._dir)
-
     def adopt(self, job_id: str) -> Job | None:
         """The job as this process adopted it; ``None`` where it was released first."""
         adopted = {"producer_id": this_producer(self._dir), "code_revision": CODE_REVISION}
@@ -325,22 +301,7 @@ class JobRegistry:
         return self._read(self._path(job_id))
 
     def _read(self, path: Path) -> Job | None:
-        """``None``: no such job, or one deleted since the listing; a file that does not load raises."""
-        raw: str | bytes
-        if (staged := self._staged.get(path)) is not None:
-            raw = staged
-        else:
-            try:
-                with open_text_robust(path) as fh:
-                    raw = fh.read()
-            except FileNotFoundError:
-                return None
-        try:
-            return JOB_ADAPTER.validate_json(raw)
-        except ValidationError as exc:
-            raise FileUnreadableError(
-                FileKind.JOB, path=str(path), reason=validation_reason(exc, shown=1)
-            ) from exc
+        return read_job(path, self._staged.get(path))
 
     def list_all(self, *, user_id: str | None = None) -> list[Job]:
         """Released jobs included, until `reap_orphans` ends one launched before today."""
@@ -385,28 +346,6 @@ class JobRegistry:
 
     def _live(self, wanted: Callable[[Job], bool], *, user_id: str | None) -> list[Job]:
         return [j for j in self.list_all(user_id=user_id) if wanted(j) and self.in_flight(j)]
-
-    def running_job_for(self, workspace: WorkspaceDir, hop: CycleHop) -> Job | None:
-        """The RUN holding *hop*, however started: a scoring pass on it bills no ceiling of the cycle's."""
-        return next(
-            (
-                j
-                for j in self.list_holding_spend()
-                if j.holds(workspace, hop) and not isinstance(j.holder, ScoringPass)
-            ),
-            None,
-        )
-
-    def pass_on(self, workspace: WorkspaceDir, hop: CycleHop) -> Job | None:
-        """A scoring pass billing *hop*: a run there would be a second biller its ceiling never sees."""
-        return next(
-            (
-                j
-                for j in self.list_running()
-                if j.holds(workspace, hop) and isinstance(j.holder, ScoringPass)
-            ),
-            None,
-        )
 
     def list_launches(self, *, user_id: str | None = None) -> list[Job]:
         """Campaign launches in flight, queued included: what an account's concurrency limit holds."""
@@ -469,11 +408,7 @@ class JobRegistry:
         write_json(at or self._path(job.job_id), JOB_ADAPTER.dump_python(job, mode="json"))
 
     def _path(self, job_id: str) -> Path:
-        try:
-            return self._dir / f"{validate_path_component(job_id)}.json"
-        except ValueError:
-            # Names no file this registry could hold, so no job: refused as any absent one is.
-            raise NotFoundError(f"no job {job_id!r}") from None
+        return job_path(self._dir, job_id)
 
     def _ended_path(self, job_id: str) -> Path:
         return self._path(job_id).parent / ENDED_JOBS_DIR / f"{job_id}.json"

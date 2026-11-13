@@ -98,7 +98,8 @@ def grant_principal(
     account as its own delegate, which would hand it its delegator's tenant as a grant (bl4.B8)."""
     if sub_principal_user_id == delegated_by_user_id:
         raise ValueError(f"cannot delegate {delegated_by_user_id!r} to itself")
-    # Read and rewritten under the file's write lock: two edits never both read it (bl2.B10).
+    # Read and rewritten under the file's write lock: two edits never both read it (bl2.B10). The
+    # audit line lands first, so a crash leaves an intent on record, never an unrecorded effect.
     with write_lock(path):
         grants = _grants(path)
         if delegated_by_user_id in grants:
@@ -106,6 +107,13 @@ def grant_principal(
                 f"cannot delegate from {delegated_by_user_id!r}: it is itself a sub-principal "
                 "(one-level delegation only)"
             )
+        _append_audit(
+            audit_path,
+            action="grant",
+            sub_principal=sub_principal_user_id,
+            actor=actor,
+            detail=f"by={delegated_by_user_id} caps={sorted(capabilities)}",
+        )
         _write(
             path,
             {
@@ -117,13 +125,6 @@ def grant_principal(
                 ),
             },
         )
-    _append_audit(
-        audit_path,
-        action="grant",
-        sub_principal=sub_principal_user_id,
-        actor=actor,
-        detail=f"by={delegated_by_user_id} caps={sorted(capabilities)}",
-    )
 
 
 def revoke_principal(
@@ -132,13 +133,13 @@ def revoke_principal(
     with write_lock(path):
         grants = _grants(path)
         removed = sub_principal_user_id in grants
+        _append_audit(
+            audit_path,
+            action="revoke",
+            sub_principal=sub_principal_user_id,
+            actor=actor,
+            detail="removed" if removed else "absent",
+        )
         if removed:
             _write(path, {k: v for k, v in grants.items() if k != sub_principal_user_id})
-    _append_audit(
-        audit_path,
-        action="revoke",
-        sub_principal=sub_principal_user_id,
-        actor=actor,
-        detail="removed" if removed else "absent",
-    )
     return removed

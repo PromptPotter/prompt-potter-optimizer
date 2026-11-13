@@ -542,30 +542,27 @@ row it closes.
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
   `git grep -n "rewrite_slot" -- promptpotter/connectors/termnorm.py` is empty.
 
-### batch/26 · payer (on rk-run's tip: the assembled one, beside rk-dec)
+### payer-2 (the wallet door, after holders)
 
-- **Every connector declares its cells the box's to pay**, the inner (L4) one included
-  (`runner/inner/spawn.py:138`, `cell_payer="host"`), though each inner send is keyed per call
-  (`bench/llm_call.py` → `coupon.py::keyed_client` → `paying_key`, the account's own key first). So
-  `quota.py::sends_on` prices `BackendCells(…, "host")`, which draws the coupon, and an own-key account
-  past its coupon is refused `host_allowance_exhausted` on `promptpotter-self`. Root: a connector whose
-  every send is admitted at the send under `paying_key` declares no cell payer
-  (`connectors/protocol.py::Connector.cell_payer: KeySource | None`), and `sends_on` lists the
-  providers its sends draw. **Rides with:** payer 1 (who pays a connector's send), with harbor's raise
-  below. Its Owns are every holder of the widened type: `connectors/protocol.py::Connector.cell_payer`
-  (xconn's file after), `runner/inner/spawn.py:138`, `runner/mint.py:129`,
-  `application/free_tier.py:75` (`free_fence`'s `task=` read),
-  `infrastructure/backend.py`'s `cell_payer` reads (`:312,422,426`), the `paid_by=CONNECTOR.cell_payer`
-  lines of `connectors/{harbor,dspy_module}.py`, `scoring/query_loop.py:627` (`self.payer`), the
-  `paid_by: KeySource` consumers `llm/base.py:130` and `llm/registry.py:126,145`, and
-  `jobs/quota.py::sends_on`. **Re-test:** an own-key account at a used-up coupon runs one
-  `promptpotter-self` cell.
-- **A connector raises its own `NoApiKeyError`**: `connectors/harbor.py::_AgentModel` checks its own
-  `cell_payer` literal and is the third raiser beside `coupon.py::keyed_client`, because `keyed_client`
-  lives in `application/`, where a connector cannot reach it. Action: a connector's send takes its key
-  through the one door, and the raise is `keyed_client`'s alone. **Rides with:** payer 1, the row
-  above's root; its Owns hold `connectors/harbor.py::_AgentModel`. **Re-test:**
-  `git grep -n "NoApiKeyError(" -- promptpotter/connectors` is empty.
+payer 1's premise was false at landing 47: an L4 cell's inner target cells go to the inner dataset's
+connector (TermNorm on the live panel), which draws the coupon, so refusing an own-key account past its
+coupon on `promptpotter-self` is right; the row closed unbuilt.
+
+- **A connector raises its own `NoApiKeyError`**: `connectors/harbor.py::_AgentModel` re-implements the
+  payer rule (the box's key only, its own raise) because `coupon.py::keyed_client` lives in
+  `application/`, out of a connector's reach (`gate.py::_LAYERING`), though every import of `coupon.py`
+  is `infrastructure/` or `domain/`; `dspy_module.py` and `harbor.py` pass `CONNECTOR.cell_payer` for
+  sends made on the box's env key. Root: the wallet door (`paying_key`, `unpaid`, `read_coupon`,
+  `Coupon`, `AccountWallet`, `AllowanceState`, `ProviderSend` / `BackendCells`, `keyed_client`) moves to
+  one `infrastructure/` module and `_AgentModel` takes `keyed_client`; the account-key verbs stay in
+  `application/` under a name that says so. **Flag:** terminus-2's sends go own-key-first for an own-key
+  account. **Rides with:** payer-2. **Re-test:** `git grep -n "NoApiKeyError(" -- promptpotter/connectors` is empty.
+- **A hold that draws no wallet hides its coupon-drawing children** (latent): `read_model.py::Money._below`
+  and `spend_book.py::SpendBook._out` skip a non-coupon hold with all its descendants, and `_past_cells`
+  takes a coupon send's bound off a cell's share; no hold is anything but `"host"` or a `"user"` leaf
+  today, so it bites the first time a `"user"` hold has a host-paid child. Root: on the coupon, a hold
+  counts its own bound only where it draws the coupon, else what its children keep; `_past_cells` takes
+  off only a cell of the same wallet. **Rides with:** payer-2.
 
 ### batch/26 · addr
 
@@ -638,35 +635,25 @@ row it closes.
   `format.ts::shortId`, `compare/EvidenceCharts.tsx` and `evidence/read.py`. **Re-test:**
   `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
 
-### holders (after the holds nest, beside passes)
+### holders-2 (the rows holders left at landing 48; beside life)
 
-- **Every hold names its holder its own way**: `Job.producer_id`, `LaunchClaimRecord.claimant_lock`,
-  the cycle lock, a bill's ledger path (whose liveness is asked of the cycle lock), the send set and
-  object identity; six readers ask "who holds X" (`admission.py::refuse_taken_cycle`,
-  `maintenance/reset.py::holder_in_reach` and `::_claimed`, `identity/default_claim.py`,
-  `runtime_flags.py::derive_run_state`, the shared-cycle refusals), and the bugs sit at the joins. The
-  holds nest covers money's run, cell and call; the campaign share and the slot, claim and cycle side
-  stay apart, though machine → account → campaign → cycle is one nest for slots and money alike.
-  Action: one `Hold` (id, resource, parent, holder = the job id, bound, state asked | held | settled)
-  and one `holder_of(resource)` fold with a death rule per kind; the six readers read it. The hot-path
-  OS locks (archive cell claims, machine slots, draft claims, the gate) and the rate meters stay
-  native; the cycle lock stays as the hold's kernel-backed index. ≈−0.9k lines. It closes, by their
-  Re-tests, admit-2's rows on the double release, the refused seat's observers, the embedded and inner
-  opens, the hand-rolled start releases, the fork cut before admission, the mint without a claim, the
-  queued launch dying with its asker and the inner seat minted before admission; money's default claim
-  moving a scored tree; passb-2's paused pass read as selecting and the command whose filer died.
-  **Rides with:** holders.
-- **Data the operator wipes is migrated**: `maintenance/migrations/` reshapes job files
-  (`job_ending`, `job_refusal`, `retired_ending`: run data §0011 never migrates), authored data
-  (`fitness_knobs`, `pack_tags`) and consent (`consent_trail`, `consent_by_principal`), and
-  `store/data_root.py` keeps an account's consent trail, coupon grant, charges, uploads, authored
-  datasets and block packs as SURVIVOR. Until the operator is no longer a solo developer, only who an
-  account is survives: the user and its API keys (operator, 2026-11-12); the install's identity and
-  configuration rows (`.env`, provider config, grants, the host) are the machine's and stay. Action:
-  those account rows' fate is RUN, so a landing drops what no longer loads (each reader taking an
-  absent file as a fresh account's); the seven migrations go with their `migrate.py` rows and
-  `test_security.py`'s legs; §0011 names the narrowing and when it ends. **Rides with:** holders.
-  **Re-test:** `migrate.py::MIGRATIONS` holds only `grant ceiling` and `host account`.
+holders landed one holder identity (`infrastructure/holders.py::holder_of`, the job its holder, the
+producer token its death rule), only accounts surviving, one release per hold and the money fold over
+open holds. These rows were in its brief and not built.
+
+- **Two death rules stand beside the one holder** (holders' census): `jobs/registry.py::_orphaned` (an
+  in-process task, else the producer lock) beside `infrastructure/holders.py::live_job` (the lock
+  alone), and `JobRegistry.list_all` raises on one unloadable job file, so every listing (the sweep,
+  quota) stops on it. Root: one death rule, `holders.py::producer_alive`, and a listing that names the
+  file it cannot load. **Rides with:** holders-2. **Re-test:** `git grep -c "def _orphaned" -- promptpotter` is 0.
+- **A landing keeps a RUN file that loads but no longer folds** (holders' census): a charge book written
+  before landing 48, with another writer's line between a settle's parts, folds the late Bill without its
+  draw, and a late Lapse raises KeyError; it still parses, so `landing.py::plan_landing` keeps it (the
+  box's books; 0 locally). Beside it: `Fate.RUN`'s docstring says a non-loading RUN file refuses a
+  landing, while `plan_landing` drops it unasked, and the SURVIVOR refusal's remedy names `MIGRATIONS`
+  for a job file no migration is owed. Root: a landing proves a RUN file by its fold, not its parse,
+  and the two texts say what the code does. **Rides with:** holders-2. **Re-test:** a charge book with
+  interleaved settle parts is dropped at a landing.
 - **Nothing is ever fsynced**: `store/io.py`'s atomic write and `write_bytes` run mkstemp → write →
   `os.replace` with no fsync of the file or its directory, and the ledger and bill appends flush
   without one. A process crash is covered (the replace is atomic; a torn line is cut); a kernel crash
@@ -674,20 +661,7 @@ row it closes.
   empty grants file refuses the server's start as corrupt; a lost bill line under-charges. Action:
   durability is a column on `data_root.py`'s kinds: a SURVIVOR write fsyncs the file before the
   replace and the directory after it, and the bill appends fsync; run data stays fast. **Rides with:**
-  holders. **Re-test:** a SURVIVOR kind's write path calls fsync on file and directory.
-- **A crash between a gate and its fact wedges or loses it** (a static crash-point pass, ✓ where
-  re-read at the line): ✓ `jobs/launcher/admission.py:121-125` stamps the job released before
-  `release_run` (`:129`) closes the account hold, and the reaper skips released jobs (`registry.py:448`),
-  so a crash between them holds headroom open for good; ✓ `identity/default_claim.py:40` renames the
-  account directory before `:44-47` rewrites its `user.json`, so a crash leaves `user_id="default"`
-  and every later host sign-in refuses "both exist"; ✓ `spend_book.py:713` books a settle's Bills one at
-  a time before the ledger (`:718-719`), so a crash leaves parts unbilled (reported: the first Bill
-  already closed the hold, `read_model.py:945`) or the campaign under-metered; ✓ `grants.py:109→120`,
-  `:136→137` (reported: `blocklist.py:97→98`, `:111→112`) write the effect before its audit line.
-  Action: append the idempotent fact first and stamp the gate last (the `Release` before the job's
-  released stamp); `user.json` rewritten inside the directory before the rename, so the rename commits;
-  one `append_jsonl(path, *rows)` per fact (`io.py:533`) and billed money metered off the charge book;
-  the intent line first, as consent does (`account.py:173`). **Rides with:** holders.
+  holders-2. **Re-test:** a SURVIVOR kind's write path calls fsync on file and directory.
 - **A cell claim's release deletes the next holder's row** (✓, model-checked):
   `measurement_archive.py:609-614` drops the claim row with no held-check, so `publish` releasing an
   errored cell early and the walk's `finally` releasing again deletes the next holder's live row, and a
@@ -695,26 +669,12 @@ row it closes.
   discarded at a cut, and a third walk pays the cell twice. Decided (orchestrator, the model's option
   (a)): the holder files the row at publish, and `CLAIM_ROW` / `claimed_cell` go, so every modelled
   invariant holds and the first fault goes with them; a cell past a cut is banked, already paid.
-  **Rides with:** holders. **Re-test:** a cell claim has no row a release deletes;
+  **Rides with:** holders-2. **Re-test:** a cell claim has no row a release deletes;
   `git grep -c "CLAIM_ROW" -- promptpotter` is 0.
-- **The money fold copies the account's lifetime book on every send** (✓, a hot-path pass):
-  `read_model.py:969-985`'s `_Money.value()` copies holds, drawn, bills and usage and deep-copies
-  `by_round`, `_view` resets on every feed (`:912`), each send appends a Hold, and `spend_book` reads it
-  two or more times per send (`:252`, `:394-421`): O(holds ever) per send, quadratic over the account's
-  life, on a SURVIVOR file never compacted. Root: the fold keeps aggregates and the open holds only;
-  a settled bill leaves the fold state. Beside it (reported): inner and outer L4 replays reach
-  `search_incurred` at $0 because the root mirror runs only in `Admission._write` (`spend_book.py:522-535`,
-  `:686-689`), so a compare's metered price depends on run order; and a fork leaves partial inner
-  campaigns in the parent's sandbox that only the server sweep reclaims (`reaper.py:30-54`), never a
-  CLI-only run. **Rides with:** holders.
-- **A live depth-2 L4 sandbox is reclaimed as an orphan** (✓, a two-process pass): `spawn.py:185` records
-  `owned_by = ctx.inside[-1]`, sandboxes sit flat under the shared root (`tasks.py:604-610`,
-  `layout.py:122-140`), and a depth-1 inner cycle spawns depth-2 cells (`MAX_INSTRUMENT_DEPTH` 2,
-  `spawn.py:422-423`); `reaper.py:43-48` loads the owner from `tenant_workspace(projects_root)`, which
-  answers None for an owner living inside a sandbox, so it calls `delete_inner_sandbox` with no producer
-  lock and no `destroying`. Root: the owner record carries the whole `inside` chain, and the reclaim asks
-  the owner's producer lock, never a failed load. **Rides with:** holders (the reaper's holder read).
-  **Re-test:** a depth-2 cell's sandbox survives a sweep while its owner runs.
+- **A fork's partial inner campaigns are reclaimed only by the server sweep**: a fork leaves them in the
+  parent's sandbox, and `jobs/reaper.py` runs in the server alone, so a CLI-only run never reclaims
+  them. Root: the fork's own exit reclaims what it abandoned, asking `holder_of`. **Rides with:**
+  holders-2.
 - **Three files are rewritten whole with no lock** (✓ the first): `user_store.py:71-72` `save` rewrites the
   user list (a SURVIVOR) while `account.py::accept_terms` (`:362-377`), `set_user_settings` (`:349-352`)
   and `quota.py:1049-1050`'s `set_concurrent_cycles` interleave, so a lost acceptance re-asks consent;
@@ -723,7 +683,7 @@ row it closes.
   editor", and stub-fork cleanup restores the session pointer over a launch's write
   (`session_pointer.py:43-71`, `run_observers.py:193`). Root: a terms acceptance is a fold of
   `consent.jsonl`, and every whole-file rewrite is a locked rewrite (`wallet_store.py:97-113`'s shape) or
-  an appended last-wins record; the user list's reshape ships its migration. **Rides with:** holders
+  an appended last-wins record; the user list's reshape ships its migration. **Rides with:** holders-2
   (survivor writes). **Re-test:** two concurrent settings writes and an acceptance all survive.
 - **Maintenance verbs race the writers they do not ask** (reported): `reindex`
   (`archive_maintenance.py:535-536`) checks no writer and has no dry run; `measurement_archive.py::_register`
@@ -733,26 +693,16 @@ row it closes.
   producer lock across a whole ledger scan (`stores.py:121-138`) while `hold_cycle` waits 1 s
   (`producer_lock.py:13,24`), so a resume racing the sweep is refused `producer_live`. Root: each verb asks
   `holder_of` for the writers it races, `_register` appends under `appending`, and the reaper takes the
-  lock per cycle. **Rides with:** holders. **Re-test:** a reindex beside a live writer refuses, naming it.
-- **Per-process memos stand in for on-disk money facts**: the API server prices on the rates it read at
-  boot (`pricing.py:211`'s `lru_cache` by path; the only refresh is `runner/mint.py:123`, in the run's own
-  process; server readers `preflight.py:415`, `pipeline_resolve.py:886`, `telemetry.py:126`,
-  `capabilities.py:78`) (✓); reported: the Compare priced-key set is a `ContextVar` snapshot
-  (`telemetry.py:253-280`, bound at `mint.py:122`), so two processes holding cycles of one campaign each
-  meter one replay and `search_incurred` drains twice, against "metered once per campaign"; rate buckets
-  are per process (`quota.py:107-130`, `:175-210`), so two servers give twice the stranger rate its
-  docstring promises; `ReplayFeed._seen` is a count cursor (`measurement_archive.py:634-656`) where
-  `_LedgerTail` keys a `FileMark`. Root: the rates key on `file_sig` through `read_model.derived`, as
-  `capabilities.py:91-114` does, and `cache_clear` goes; the priced-key check-then-append is
-  campaign-scoped under one write lock; the bucket's docstring states per process or the bucket moves on
-  disk; the feed keys a `FileMark`. **Rides with:** holders (the money files). **Re-test:** a rates file
-  edited under a live server re-prices its next preflight.
+  lock per cycle. **Rides with:** holders-2. **Re-test:** a reindex beside a live writer refuses, naming it.
+- **The stranger rate buckets are per process** (reported): `jobs/quota.py`'s buckets live in memory, so
+  two servers give twice the stranger rate its docstring promises. Root: the docstring states per
+  process, or the bucket moves on disk. **Rides with:** holders-2.
 - **Two per-process liveness locks share one jobs dir** (filed by paths): `jobs/interlock.py::this_producer`
   (`jobs/producers/<pid>-<hex>.lock`) and `docker_host.py::CONTAINER_PRODUCER`
   (`jobs/machine/producers/<hex>.lock`) each mint and hold a token per process. Root: one producer token
   per process and home, held in `infrastructure/producer_lock.py`, which both labels containers and
   admits jobs; `CONTAINER_PRODUCER`'s import-time readers (`connectors/harbor.py:1129`, the compose
-  overlay's env) take it from the claim. **Rides with:** holders (one holder identity). **Re-test:**
+  overlay's env) take it from the claim. **Rides with:** holders-2 (one holder identity). **Re-test:**
   `git grep -c "CONTAINER_PRODUCER" -- promptpotter` is 0.
 
 ### life (after holders, beside cfg)
@@ -2089,14 +2039,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   and `landing.py::landing_key` keys migrations by name (`sorted(MIGRATIONS)`), so a reader's or a
   migration's body change never lands again. **Rides with:** rel. **Re-test:** edit a migration's body;
   `landing_key()` moves.
-- **Survivor migrations are unchained**: `maintenance/migrations/consent_by_principal.py` reads
-  `consent.jsonl` from disk, blind to the lines `consent_trail` stages into it in the same landing
-  (`landing.py::_staged`), so an owner-plus-delegate account last landed before v0.8.19 gets its
-  delegate's acceptance, and nothing runs it again. Root: each migration reads the root as staged so
-  far, as `JobRegistry.as_staged` does. Beside it (reported by the test split, unverified): a landing
-  in a tree with no account user file stages no respell of an authored definition's retired knobs.
-  **Rides with:** rel. **Re-test:** a landing over a pre-v0.8.19 consent trail keys each acceptance by
-  its own principal, and a landing with no user file respells a definition's retired knob.
 
 ## Held — no wave-4 chain yet
 

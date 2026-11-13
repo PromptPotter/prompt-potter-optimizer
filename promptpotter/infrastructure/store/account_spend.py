@@ -75,7 +75,26 @@ class WorkspaceBank(NamedTuple):
         return Subject(campaign_id, "") in self.subjects
 
 
-LedgerIndex.readers(_Tombstones)
+class _Bills:
+    """An account's bills, for the activity windows; opened by that read alone, never by a send."""
+
+    records: ClassVar[RecordClasses] = (Bill,)
+
+    def __init__(self) -> None:
+        self._bills: list[Bill] = []
+        self._view: tuple[Bill, ...] | None = None
+
+    def feed(self, bill: Bill) -> None:
+        self._bills.append(bill)
+        self._view = None
+
+    def value(self) -> tuple[Bill, ...]:
+        if self._view is None:
+            self._view = tuple(self._bills)
+        return self._view
+
+
+LedgerIndex.readers(_Tombstones, _Bills)
 
 
 def _summed(ledgers: Iterable[Path]) -> Spent:
@@ -128,7 +147,7 @@ def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
 def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[Bill]:
     return [
         bill
-        for bill in money_on(charges.path).bills
+        for bill in LedgerIndex.of(charges.path).view(_Bills)
         if since <= datetime.fromisoformat(bill.timestamp).timestamp() < until
     ]
 

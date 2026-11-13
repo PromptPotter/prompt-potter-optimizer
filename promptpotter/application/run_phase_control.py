@@ -14,7 +14,6 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.run_records import FlightRecord, FlightWaiting, PhaseRecord
 from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.infrastructure.producer_lock import (
-    cycle_held_here,
     hold_cycle,
     hold_pass,
     release_cycle,
@@ -210,10 +209,8 @@ class CycleHold:
         (hold_pass if scoring_pass else hold_cycle)(self._dir)
 
     def release(self) -> None:
-        """A second release voids nothing."""
         try:
-            if cycle_held_here(self._dir):
-                self._stores.void_inbox(self._hop)
+            self._stores.void_inbox(self._hop)
         finally:
             (release_pass if self._pass else release_cycle)(self._dir)
 

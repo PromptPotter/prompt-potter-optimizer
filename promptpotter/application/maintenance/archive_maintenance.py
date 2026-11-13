@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, computed_field
 
+from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.l4.proxies import inner_facts_of
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
@@ -53,8 +54,9 @@ def iter_cycle_ledgers(root: pathlib.Path) -> list[pathlib.Path]:
 
 def archive_writers(root: pathlib.Path) -> int:
     n = 0
+    jobs = jobs_dir(root)
     for ledger_path in iter_cycle_ledgers(root):
-        if producer_attached(ledger_path.parent.parent):
+        if producer_attached(ledger_path.parent.parent, jobs):
             n += 1
     return n
 

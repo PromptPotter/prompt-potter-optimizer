@@ -1455,12 +1455,11 @@ def test_a_field_cleared_in_the_panel_drops_the_candidates_value_and_the_layer_b
 def test_a_fork_by_another_issuer_withdraws_the_launch_queued_on_its_parent(
     built_stores: Stores,
     scenario_line: _Scenario,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     stores, store, scenario = built_stores, built_stores.campaigns, scenario_line.hop
     room = [0]
-    queue = JobRegistry(tmp_path / "fork_jobs", capacity=lambda _live: room[0])
+    queue = JobRegistry(stores.jobs_dir, capacity=lambda _live: room[0])
     (parents_launch,) = request_jobs(
         stores=stores, job_registry=queue, holder=CampaignLaunch("ds1"), hop=scenario
     )
@@ -1491,7 +1490,7 @@ def test_a_fork_by_another_issuer_withdraws_the_launch_queued_on_its_parent(
     assert withdrawn is not None and withdrawn.lapse == "withdrawn", (
         "a fork left its parent's queued launch to run beside it"
     )
-    assert store.launch_claim(scenario) is None, "a withdrawn launch still claims the parent"
+    assert store.holder(scenario) is None, "a withdrawn launch still claims the parent"
     assert store.last(scenario, CycleSupersededRecord) is not None, "the fork never took"
 
 

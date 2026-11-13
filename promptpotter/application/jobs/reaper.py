@@ -40,12 +40,14 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
         if owner is None:
             # Not provably an orphan, so KEPT.
             continue
-        workspace = tenant_workspace(projects_root, owner.tenant_id)
+        owner_store = CampaignStore(
+            tenant_workspace(projects_root, owner.tenant_id), jobs_dir(projects_root)
+        )
         owner_hop = CycleHop(campaign_id=owner.campaign_id, cycle_id=owner.cycle_id)
-        if CampaignStore(workspace).load(owner_hop, moment=None) is not None:
+        if owner_store.load(owner_hop, moment=None) is not None:
             continue
         try:
-            CampaignStore(workspace).delete_inner_sandbox(sandbox, campaign_id=owner.campaign_id)
+            owner_store.delete_inner_sandbox(sandbox, campaign_id=owner.campaign_id)
         except OSError as exc:
             logger.warning("could not reclaim orphan inner sandbox %s: %s", sandbox, exc)
             continue

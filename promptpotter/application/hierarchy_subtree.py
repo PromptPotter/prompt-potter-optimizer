@@ -386,11 +386,7 @@ class _Build:
                 "children": [self._course(course, courses) for course in courses],
                 "facts": SubtreeCampaignFacts(
                     **_fields(entry.facts),
-                    deletable_stubs=len(
-                        deletable_stubs(
-                            stores, JobRegistry.attach(stores.jobs_dir), campaign.root_hop
-                        )
-                    ),
+                    deletable_stubs=len(deletable_stubs(stores, campaign.root_hop)),
                 ),
             }
         )

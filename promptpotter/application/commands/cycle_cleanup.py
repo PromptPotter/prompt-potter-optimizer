@@ -38,7 +38,7 @@ async def cleanup_empty_cycles(
     async def _apply() -> None:
         for _pass in range(2):
             deleted = False
-            for stub in deletable_stubs(stores, dispatcher.job_registry, hop):
+            for stub in deletable_stubs(stores, hop):
                 # Asked again at the act: one a run or a pass took since the list stays.
                 with (
                     contextlib.suppress(CycleBusyError),

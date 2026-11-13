@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from promptpotter.application.jobs.coupon import face_of
+from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.spend import NOTHING_PAID, Budget, PaidSpend
 from promptpotter.infrastructure.identity.default_claim import is_host_account
@@ -34,7 +35,8 @@ def read_install_spend(projects_root: Path) -> list[AccountUsage]:
             rows.append(_unreadable_row(account.workspace, account.user.why))
             continue
         try:
-            rows.append(_account_row(account.user, account.workspace))
+            campaigns = CampaignStore(account.workspace, jobs_dir(projects_root))
+            rows.append(_account_row(account.user, campaigns))
         except (OSError, LedgerUnreadableError, FileUnreadableError) as exc:
             # A ledger that will not scan is the same row as a `user.json` that will not load.
             rows.append(_unreadable_row(account.workspace, f"{type(exc).__name__}: {exc}"))
@@ -55,8 +57,8 @@ def _unreadable_row(tenant_dir: WorkspaceDir, why: str) -> AccountUsage:
     )
 
 
-def _account_row(user: User, tenant_dir: WorkspaceDir) -> AccountUsage:
-    campaigns = CampaignStore(tenant_dir)
+def _account_row(user: User, campaigns: CampaignStore) -> AccountUsage:
+    tenant_dir = campaigns.workspace
     return AccountUsage(
         user_id=user.user_id,
         email=user.email,

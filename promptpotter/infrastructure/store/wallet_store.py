@@ -120,9 +120,10 @@ class ChargeBook:
         self.account_dir = account_dir
         self.path = account_dir / CHARGES_FILE
 
-    def append(self, line: ChargeLine) -> None:
+    def append(self, *lines: ChargeLine) -> None:
+        """One fact's *lines* in one locked write, so no crash or other writer lands between them."""
         self.account_dir.mkdir(parents=True, exist_ok=True)
-        append_line(self.path, line.model_dump_json().encode("utf-8"))
+        append_line(self.path, "\n".join(line.model_dump_json() for line in lines).encode("utf-8"))
 
     def held_on(self, ledger: Path) -> str:
         return Path(os.path.relpath(ledger, self.account_dir)).as_posix()

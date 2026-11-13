@@ -88,19 +88,23 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landed 47:** passes 1-2: one declared `Pass` row per pass kind above the one walk, so verify, the
   bench and the noise floor send at the backend's ceiling with degradation checks, and
   `bench_trigger: each_round` goes (operator, 2026-11-12).
-- **holders**, beside **passes 3**: one holder identity and one `holder_of` fold for slots, claims,
-  cycles and money (admit-2's and passb-2's hold rows close), only accounts survive (seven migrations
-  go), and a survivor write or a bill append is fsynced. passes 3: no diagnostic verb, one list campaign
-  set by its arms and replicates whose readings the dashboard serves (the seed screen and
-  probe-reasoning go). After holders, **passes 4**: a retry acts once and a dead filer's command ends,
-  judged by holders' death rule.
+- **landed 48:** holders: one holder identity (`holder_of`, the job its holder, the producer token its
+  death rule) for slots, claims, cycles and money, so admit-2's and passb-2's hold rows close; only
+  accounts survive a landing (seven migrations go); one release per hold, each fact before its gate; the
+  money fold over open holds; L4 runs one level deep (operator, 2026-11-13: depth 2 is a security risk,
+  its re-enable recipe in `docs/concepts/l4.md`). payer 1 closed unbuilt (its premise was false).
+- **passes 3**, beside cfg: no diagnostic verb, one list campaign set by its arms and replicates whose
+  readings the dashboard serves (the seed screen and probe-reasoning go). Then **passes 4**: a retry
+  acts once and a dead filer's command ends, judged by holders' death rule.
 - **mob 2**, beside any engine chain whose Owns hold no webapp file: on a phone a card header folds its
   trailing actions into ⋯ (operator, 2026-11-13), the masthead id and setup line placed by it, and the
   phone walk's back step.
-- **cfg**, beside payer and **life**: the merge rule declared per key by the node document's schema,
-  one fold with a provenance stamp per key; a model per inner node rides it (one L4 re-key). payer
-  reads the free-tier pair. life: one explicit launch lifecycle (asked → admitted → held → running →
-  ended), each exit a declared transition, `Hold` its data.
+- **cfg**, beside **life**, **holders-2** and **payer-2**: the merge rule declared per key by the node
+  document's schema, one fold with a provenance stamp per key; a model per inner node rides it (one L4
+  re-key). life: one explicit launch lifecycle (asked → admitted → held → running → ended), each exit a
+  declared transition, `Hold` its data. holders-2: the rows holders left (fsync, the cell-claim row, the
+  whole-file rewrites, the maintenance races, one death rule, a landing proving a RUN file by its fold).
+  payer-2: the wallet door below the connectors.
 - **rk-opt 10+:** the reply cache keyed on the schema sent, potter's renderers reading the node's own
   reads (`InjectionBundle` goes), one admit door per arm role for the catch-up pool, L1 told the rows to
   win from the parent's own information, a cell's optimizer in `domain/l4` terms with its cells resolved

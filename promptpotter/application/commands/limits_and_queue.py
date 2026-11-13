@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
-from promptpotter.application.jobs.launcher.admission import campaign_sends, withdraw_queued
+from promptpotter.application.jobs.launcher.admission import campaign_sends
 from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.spend import MONEY_AXES
 from promptpotter.shared.errors import NotFoundError
@@ -83,7 +83,7 @@ async def cancel_queued_run(dispatched: Dispatched[CancelQueuedRunPayload]) -> A
         if (
             job is None
             or job.principal_id != acting_principal(stores.identity).id
-            or not withdraw_queued(stores, registry, job_id)
+            or registry.cancel_queued(job_id) is None
         ):
             raise NotFoundError("Not found", code="not_found")
 

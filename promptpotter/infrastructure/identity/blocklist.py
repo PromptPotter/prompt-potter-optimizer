@@ -88,16 +88,24 @@ def list_blocked(path: Path) -> list[str]:
 
 def block_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
     normalized = _normalize(email)
-    # Read and rewritten under the file's write lock: two edits never both read it.
+    # Read and rewritten under the file's write lock: two edits never both read it. The audit line
+    # lands first, so a crash leaves an intent on record, never an unrecorded effect.
     with write_lock(path):
         current = list_blocked(path)
         before = len(current)
-        if normalized not in current:
+        added = normalized not in current
+        if added:
             current = sorted({*current, normalized})
+        _append_audit(
+            audit_path,
+            action="block",
+            email=normalized,
+            actor=actor,
+            before=before,
+            after=len(current),
+        )
+        if added:
             _write_emails(path, current)
-    _append_audit(
-        audit_path, action="block", email=normalized, actor=actor, before=before, after=len(current)
-    )
     return current
 
 
@@ -106,15 +114,17 @@ def unblock_email(path: Path, email: str, *, actor: str, audit_path: Path) -> li
     with write_lock(path):
         current = list_blocked(path)
         before = len(current)
-        if normalized in current:
+        removed = normalized in current
+        if removed:
             current = [e for e in current if e != normalized]
+        _append_audit(
+            audit_path,
+            action="unblock",
+            email=normalized,
+            actor=actor,
+            before=before,
+            after=len(current),
+        )
+        if removed:
             _write_emails(path, current)
-    _append_audit(
-        audit_path,
-        action="unblock",
-        email=normalized,
-        actor=actor,
-        before=before,
-        after=len(current),
-    )
     return current

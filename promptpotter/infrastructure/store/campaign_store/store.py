@@ -24,7 +24,7 @@ from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.export import PromptExport, parse_prompt_export
-from promptpotter.domain.phases import LaunchStage, StopReason
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.run_records import (
     ComparisonExit,
@@ -37,8 +37,6 @@ from promptpotter.domain.run_records import (
     ForkGradedRecord,
     ForkSpec,
     InterventionRecord,
-    LaunchClaimRecord,
-    LaunchReleasedRecord,
     LeftComparisonRecord,
     PipelineRead,
     ResolvedRunRecord,
@@ -55,6 +53,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.spend import NOTHING_METERED, Budget, CeilingMeter
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.value_tree import ValueLeaf
+from promptpotter.infrastructure.holders import CycleHolder, holder_of
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
 from promptpotter.infrastructure.projections.cycle_index import (
@@ -78,7 +77,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_cycle_facts,
     scan_each_last,
     scan_last,
-    scan_launch_claim,
     scan_ledger_metered,
     scan_left_comparison,
     scan_resolved_run,
@@ -102,6 +100,7 @@ from promptpotter.infrastructure.store.layout import (
     campaign_root_dir_for,
     campaigns_root_dir_for,
     cycle_dir_for,
+    cycle_ledgers,
     dataset_id_prefix,
     head_to_head_path,
     read_sandbox_owner,
@@ -158,8 +157,10 @@ def _ledger_meters(ledgers: Iterable[Path]) -> dict[CeilingMeter, Budget]:
 
 
 class CampaignStore:
-    def __init__(self, base_dir: WorkspaceDir):
+    def __init__(self, base_dir: WorkspaceDir, jobs_dir: Path):
         self._base_dir = base_dir
+        # The machine's: a cycle's holder is one of its jobs.
+        self._jobs_dir = jobs_dir
 
     @property
     def workspace(self) -> WorkspaceDir:
@@ -173,8 +174,7 @@ class CampaignStore:
         deleted campaign nor one the account's charges name, which outlive every landing's wipe."""
         prefix = dataset_id_prefix(dataset_name) if dataset_name else "campaign"
         bank = workspace_bank(self._base_dir)
-        holds = money_on(charges.path).holds.values()
-        charged = {PurePosixPath(hold.ledger) for hold in holds if hold.ledger is not None}
+        charged = {PurePosixPath(ledger) for ledger in money_on(charges.path).ledgers}
         while True:
             campaign_id = f"{prefix}__{secrets.token_hex(3)}"
             held = charges.held_on(self.campaign_root_dir(campaign_id))
@@ -251,7 +251,7 @@ class CampaignStore:
                     campaign.name,
                     file_sig(CampaignLayout(campaign).manifest),
                     *(
-                        (cycle.name, *run_state_stamps(cycle))
+                        (cycle.name, *run_state_stamps(cycle, self._jobs_dir))
                         for cycle in sorted(campaign_cycles_dir(campaign).glob("*"))
                     ),
                 )
@@ -271,11 +271,7 @@ class CampaignStore:
         return sorted(p for p in cycles.glob("*") if p.is_dir())
 
     def campaign_cycle_ledgers(self, campaign_id: str) -> list[Path]:
-        return [
-            ledger
-            for cycle_dir in self.campaign_cycle_dirs(campaign_id)
-            if (ledger := CycleLayout(cycle_dir).ledger).is_file()
-        ]
+        return cycle_ledgers(self.campaign_root_dir(campaign_id))
 
     def metered_spend(self, campaign_id: str, meter: CeilingMeter) -> Budget:
         """Each cycle's OWN appends once (a fork's prefix is its parent's), and what a deleted cycle metered."""
@@ -648,26 +644,8 @@ class CampaignStore:
         until = None if moment is None else moment.span(ledger).until
         return scan_cycle_facts(ledger, until).superseded_by
 
-    def claim_launch(
-        self,
-        hop: CycleHop,
-        *,
-        stage: LaunchStage,
-        job_id: str,
-        claimant_lock: Path,
-    ) -> None:
-        self.append(
-            hop,
-            LaunchClaimRecord(stage=stage, job_id=job_id, claimant_lock=str(claimant_lock)),
-        )
-
-    def launch_claim(self, hop: CycleHop) -> LaunchClaimRecord | None:
-        return scan_launch_claim(self.ledger(hop))
-
-    def release_claim(self, hop: CycleHop, *, job_id: str, detail: str) -> None:
-        claim = self.launch_claim(hop)
-        if claim is not None and claim.job_id == job_id:
-            self.append(hop, LaunchReleasedRecord(job_id=job_id, detail=detail))
+    def holder(self, hop: CycleHop) -> CycleHolder | None:
+        return holder_of(self._jobs_dir, self.cycle_dir(hop))
 
     def enumerate_cycles(self) -> list[tuple[CycleHop, CycleIndex]]:
         """Every cycle of every campaign in this store whose ledger folds to an index."""

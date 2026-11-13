@@ -104,7 +104,8 @@ class QuotaExceededError(PotterError):
         self.code = code
 
 
-# Process-wide: survives the request scope, not a restart — abuse-bound, not audit-bound.
+# Per process: survives the request scope, not a restart, and each server grants a stranger its
+# own rate — abuse-bound, not audit-bound.
 _rate_buckets: dict[str, tuple[float, float]] = {}  # bucket key → (tokens, last_refill_ts)
 _rate_lock = threading.Lock()
 
@@ -874,7 +875,7 @@ def change_budget(
     armed = campaigns.armed_budget(hop)
     change = requested
     with job_registry.admission_gate():
-        job = job_registry.running_job_for(campaigns.workspace, hop)
+        job = None if (held := campaigns.holder(hop)) is None else held.run
         # Rounds and a clock are no money: a change naming neither money axis reads no wallet.
         if requested.named & MONEY_AXES:
             change, reserve = _clamped(

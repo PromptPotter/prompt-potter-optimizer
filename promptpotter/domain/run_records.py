@@ -36,7 +36,6 @@ from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     ErrorRecord,
     GateKind,
-    LaunchStage,
     PauseCause,
     RunPhase,
     StopOutcome,
@@ -465,8 +464,10 @@ class CallPrice(FrozenModel):
 
 
 class Hold(FrozenModel):
-    """A run's or a call's hold on the account's money, open until a bill or a release closes it; a
-    later hold of the same id restates its bound."""
+    """A hold, filed on the book of what it holds: on the account's charge book a run's or a call's
+    money, open until a bill or a release closes it (a later hold of the same id restates its
+    bound); on a cycle's ledger a job's claim of that cycle, until its run declares itself or the
+    job dies (`infrastructure/holders.py`)."""
 
     record_type: Literal["hold"] = "hold"
     hold_id: str
@@ -483,6 +484,19 @@ class Hold(FrozenModel):
     # The ledger a call's sends land on, relative to the account; ``None`` on a job's or a cell's.
     ledger: str | None
     timestamp: str = Field(default_factory=utcnow_iso)
+
+    @classmethod
+    def of_job(cls, job_id: str, bound: Budget, *, parent: str | None) -> Hold:
+        """A job's own hold, its id the job's: its sends draw on the box's key unless a call's says."""
+        return cls(
+            hold_id=job_id,
+            parent=parent,
+            key_source="host",
+            bound=bound,
+            resource=None,
+            node=None,
+            ledger=None,
+        )
 
 
 class Bill(FrozenModel):
@@ -1335,25 +1349,6 @@ class LeftComparisonRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class LaunchClaimRecord(FrozenModel):
-    """Stands only while its process lives: ``claimant_lock`` is the OS lock that process holds."""
-
-    record_type: Literal["launch_claim"] = "launch_claim"
-    stage: LaunchStage
-    job_id: str
-    claimant_lock: str
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
-class LaunchReleasedRecord(FrozenModel):
-    """Ends that launch's :class:`LaunchClaimRecord` with no run, and without ending the cycle."""
-
-    record_type: Literal["launch_released"] = "launch_released"
-    job_id: str
-    detail: str
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
 class SpawnedRecord(FrozenModel):
     """Appended at every open, so the last names the work-item the cycle last measured for."""
 
@@ -1379,10 +1374,9 @@ CycleRecord = Annotated[
     | ErrorRecord
     | ForkGradedRecord
     | HealthRecord
+    | Hold
     | InterventionRecord
-    | LaunchClaimRecord
     | LaunchClockRecord
-    | LaunchReleasedRecord
     | LeftComparisonRecord
     | LLMCallProgressRecord
     | LLMCallRecord

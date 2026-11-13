@@ -6,7 +6,6 @@ from typing import Any, Literal, NamedTuple
 from pydantic import Field
 
 from promptpotter.application.jobs.quota import next_launch_budget
-from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.campaign import ceiling_meter
@@ -640,9 +639,7 @@ def served_dashboard(
             lookahead_auto=armed.lookahead is not None and armed.lookahead.auto,
             verify=scan_ledger_verify(CycleLayout(cycle_path).ledger),
             orphaned=any(mark.state == "running" for mark in state.verification)
-            and not run.producer.attached
-            and JobRegistry.attach(stores.jobs_dir).pass_on(stores.campaigns.workspace, hop)
-            is None,
+            and stores.campaigns.holder(hop) is None,
             fork_remainder=_remainder(stores, hop, limits),
             campaign_metered=None
             if meter is None

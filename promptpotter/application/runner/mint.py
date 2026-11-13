@@ -18,7 +18,7 @@ from promptpotter.application.initialization.scoring_scope import cycle_partitio
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.jobs.launcher.admission import open_spend_book
+from promptpotter.application.jobs.launcher.admission import claim_cycle, open_spend_book
 from promptpotter.application.jobs.quota import cycle_share, land_job, move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import measured_address
@@ -46,7 +46,6 @@ from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.spend_book import filed
 from promptpotter.infrastructure.llm.telemetry import bind_priced
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.run_scope import rescope, run_scope
 
@@ -118,7 +117,7 @@ async def open_launch(
     dataset = list(partition.search)
     # Before this launch takes a cell: a re-read of a cell the campaign priced prices nothing.
     campaigns = session.store.campaigns
-    bind_priced(scan_ledger_priced_keys(campaigns.campaign_cycle_ledgers(session.campaign_id)))
+    bind_priced(campaigns.campaign_root_dir(session.campaign_id))
     refresh_rates_in_background()
     # SET, never a `min`: admission already layered seed and standing.
     campaign_config = campaign_config.model_copy(
@@ -214,6 +213,7 @@ def _rebase_held(session: Session, parent: CycleHop) -> None:
             tokens=None if live.tokens is None else max(0, live.tokens - spent.token_amount),
         )
         land_job(session.store, job_registry, job.job_id, session.hop, allotment)
+        claim_cycle(session.store, session.hop, job.job_id)
     stand_held_budget(session.store, session.hop, held)
 
 

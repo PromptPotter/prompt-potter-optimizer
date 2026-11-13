@@ -74,7 +74,7 @@ Each entry is a boundary and why it sits there. Paths are under `promptpotter/` 
 
 ## 0011 — What outlives a release
 
-- **Run data is disposable; a survivor is not.** A survivor says who an account is and what it agreed to, what it authored, what it was charged and launched today, or who the host is; a cache is content-keyed and paid for; the rest is run data a reshape wipes. **One table names every file**: `infrastructure/store/data_root.py::KINDS`. A file no row names is a bug in the table. `reset` is that table applied.
+- **Run data is disposable; a survivor is not.** A survivor says who an account is (its user and its API keys), what the install is configured with, what launched today (a job, which a landing reads for the runs in flight), or who the host is. What an account agreed to, authored and was charged is run data until the operator is no longer a solo developer (operator, 2026-11-12); a cache is content-keyed and paid for; the rest is run data a reshape wipes. **One table names every file**: `infrastructure/store/data_root.py::KINDS`. A file no row names is a bug in the table. `reset` is that table applied.
 - **A survivor is migrated, never wiped; run data is never migrated.** A reshape of a survivor ships a one-shot migration as a release step, never a reader of two shapes, deleted in the release after it lands.
 - **A landing proves the whole data root as its migrations would leave it, then writes it, and nothing rolls back after**, and every process lands the root at its entry, once per record schema. A survivor that does not load refuses the landing, and so does a file no row names; a cache or run data that does not load is dropped unasked.
 

@@ -4,10 +4,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.config.paths import ACCOUNTS_LOCK
+from promptpotter.config.paths import ACCOUNTS_LOCK, jobs_dir
 from promptpotter.config.settings import LOCK_TIMEOUT, settings
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.infrastructure.runtime_flags import producer_attached
+from promptpotter.infrastructure.holders import holder_of
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import held_lock
 from promptpotter.infrastructure.store.user_store import User, UserStore, read_accounts
@@ -21,8 +21,9 @@ logger = logging.getLogger(__name__)
 
 def claim_default(*, projects_root: Path, user_id: str, email: str | None) -> str | None:
     """The host's account takes the terminal's: ONE act under the accounts lock, so no sign-in
-    opens either directory meanwhile. ``None`` once claimed; else why it refused, the terminal's
-    tree left in place so the host's next sign-in asks again."""
+    opens either directory meanwhile, refused while any job or run holds a terminal cycle
+    (`holders.py::holder_of`). ``None`` once claimed; else why it refused, the terminal's tree
+    left in place so the host's next sign-in asks again."""
     with held_lock(projects_root / ACCOUNTS_LOCK, wait_s=LOCK_TIMEOUT):
         user_dir = projects_root / user_id
         default_dir = projects_root / TERMINAL_IDENTITY_ID
@@ -30,21 +31,23 @@ def claim_default(*, projects_root: Path, user_id: str, email: str | None) -> st
             return None
         if user_dir.exists():
             return f"both {default_dir} and {user_dir} exist: merge or remove one, then sign in"
-        terminal = CampaignStore(WorkspaceDir(default_dir))
+        jobs = jobs_dir(projects_root)
+        terminal = CampaignStore(WorkspaceDir(default_dir), jobs)
         if any(
-            producer_attached(cycle_dir)
+            holder_of(jobs, cycle_dir) is not None
             for campaign_id in terminal.list_campaign_ids()
             for cycle_dir in terminal.campaign_cycle_dirs(campaign_id)
         ):
             return f"a run holds a cycle under {default_dir}: pause it or let it end, then sign in"
-        default_dir.rename(user_dir)
-        logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
-        users = UserStore(user_dir)
-        # The terminal's record becomes the signer's, so the account reads as the declared one.
+        # The terminal's record becomes the signer's before the rename, which commits the claim: a
+        # crash between the two leaves the terminal's tree for the next sign-in to claim again.
+        users = UserStore(default_dir)
         if (held := users.load()) is not None:
             users.save(
                 held.model_copy(update={"user_id": user_id, "tenant_id": user_id, "email": email})
             )
+        default_dir.rename(user_dir)
+        logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
     return None
 
 

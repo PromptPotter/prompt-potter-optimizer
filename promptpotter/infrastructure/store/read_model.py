@@ -821,24 +821,23 @@ class Money(NamedTuple):
     spent: Spent
     # Each hold no bill or release closed yet.
     open: dict[str, Hold]
-    # Each hold, at its latest bound.
+    # Each hold at its latest bound, while open or while a kept hold or an unreported send names it.
     holds: dict[str, Hold]
-    # What was drawn under each hold, by every call beneath it: its bills, a lapse at its bound,
-    # an unpriced bill's bound money.
+    # What was drawn under each kept hold, by every call beneath it: its bills, a lapse at its
+    # bound, an unpriced bill's bound money.
     drawn: dict[str, PaidSpend]
     # The holds a bill closed in tokens alone, naming neither a provider's figure nor a rate's
     # price: the bound's money stays held.
     unpriced: tuple[Hold, ...]
     # Each send a lapse closed, at what it may have cost.
     lapsed: tuple[Hold, ...]
-    bills: tuple[Bill, ...]
-    # Every call, a replay included, as each meter counts it.
-    usage: tuple[TokenUsageRecord, ...]
+    # Every ledger a hold's sends landed on (`Hold.ledger`).
+    ledgers: frozenset[str]
     metered: dict[CeilingMeter, Budget]
     by_round: dict[int, SpendRollup]
     calls: int
     worked_s: float
-    # By (job hold, node): what a call of the node holds at with `overshoot` on.
+    # By (open job hold, node): what a call of the node holds at with `overshoot` on.
     by_node: dict[tuple[str, str], NodeCalls]
     # By the ledger a call's sends land on (`Hold.ledger`).
     overshot: dict[str, Overshoot]
@@ -913,7 +912,8 @@ class Money(NamedTuple):
 class _Money:
     """THE fold of money: a hold opens under its parent, each bill closes a call's and draws on
     every hold above it, a release closes one, a lapse closes a call's and draws what it may have
-    cost, a replay is priced and charges nothing."""
+    cost, a replay is priced and charges nothing. It keeps aggregates and the holds still named:
+    a settle's lines land in one append, so a closed call leaves at the first line naming another."""
 
     records: ClassVar[RecordClasses] = get_args(MoneyRecord)
 
@@ -922,18 +922,24 @@ class _Money:
         self._open: dict[str, Hold] = {}
         self._drawn: dict[str, PaidSpend] = {}
         self._holds: dict[str, Hold] = {}
-        self._unpriced: dict[str, Hold] = {}
-        self._lapsed: list[Hold] = []
-        self._bills: list[Bill] = []
-        self._usage: list[TokenUsageRecord] = []
+        # How many kept holds name each kept hold as their parent.
+        self._children: dict[str, int] = {}
+        # The call a bill closed, whose settle's later lines may still name it.
+        self._settling: str | None = None
+        # Unreported sends, kept with every hold above them for the books that file them.
+        self._unreported: set[str] = set()
+        # Replaced, never mutated, so a view shares them: they grow past what one send changes.
+        self._unpriced: tuple[Hold, ...] = ()
+        self._lapsed: tuple[Hold, ...] = ()
+        self._ledgers: frozenset[str] = frozenset()
+        self._overshot: dict[str, Overshoot] = {}
         self._usd: dict[CeilingMeter, float] = dict.fromkeys(get_args(CeilingMeter), 0.0)
         self._tokens: dict[CeilingMeter, int] = dict.fromkeys(get_args(CeilingMeter), 0)
         self._by_round: dict[int, SpendRollup] = {}
         self._calls = 0
         self._worked_s = 0.0
-        # What each call's bills drew, by its hold.
+        # What each kept call's bills drew, by its hold.
         self._cost: dict[str, UserSpend] = {}
-        self._overshot: dict[str, Overshoot] = {}
         self._by_node: dict[tuple[str, str], NodeCalls] = {}
         # A copy, since the next feed banks into the live rollups; one per feed, not per read.
         self._view: Money | None = None
@@ -941,25 +947,66 @@ class _Money:
     def feed(self, record: MoneyRecord) -> None:
         self._view = None
         match record:
+            case Bill() | Lapse() if record.hold_id == self._settling:
+                pass
+            case _:
+                self._settled()
+        match record:
             case Hold():
                 self._hold(record)
             case Bill():
                 self._bill(record, mirrored=False)
             case Release():
-                self._open.pop(record.hold_id, None)
+                self._close(record.hold_id)
             case Lapse():
-                self._open.pop(record.hold_id, None)
                 lapsed = self._holds[record.hold_id].model_copy(update={"bound": record.bound})
-                self._lapsed.append(lapsed)
+                self._lapsed = (*self._lapsed, lapsed)
+                self._unreported.add(record.hold_id)
                 self._draw(lapsed.parent, _unreported_of(lapsed))
+                self._settling = None
+                self._close(record.hold_id)
             case TokenUsageRecord():
                 self._call(record)
             case _:
                 assert_never(record)
 
     def _hold(self, hold: Hold) -> None:
+        if hold.hold_id not in self._holds and hold.parent in self._holds:
+            self._children[hold.parent] = self._children.get(hold.parent, 0) + 1
         self._holds[hold.hold_id] = hold
         self._open[hold.hold_id] = hold
+        if hold.ledger is not None and hold.ledger not in self._ledgers:
+            self._ledgers = self._ledgers | {hold.ledger}
+
+    def _settled(self) -> None:
+        settled, self._settling = self._settling, None
+        if settled is not None:
+            self._leave(settled)
+
+    def _close(self, hold_id: str) -> None:
+        self._open.pop(hold_id, None)
+        self._leave(hold_id)
+
+    def _leave(self, hold_id: str | None) -> None:
+        """*hold_id* and each closed hold above it leave once no kept hold, settle or unreported
+        send names them."""
+        while (
+            hold_id is not None
+            and hold_id in self._holds
+            and hold_id not in self._open
+            and hold_id not in self._unreported
+            and hold_id != self._settling
+            and not self._children.get(hold_id)
+        ):
+            held = self._holds.pop(hold_id)
+            self._drawn.pop(hold_id, None)
+            self._cost.pop(hold_id, None)
+            self._children.pop(hold_id, None)
+            if held.resource is None:
+                self._by_node = {k: v for k, v in self._by_node.items() if k[0] != hold_id}
+            hold_id = held.parent
+            if hold_id in self._children:
+                self._children[hold_id] -= 1
 
     def _bill(self, bill: Bill, *, mirrored: bool) -> None:
         paid = PaidSpend.of(bill.key_source, _billed(bill))
@@ -967,23 +1014,24 @@ class _Money:
             self._spent.cost.plus(paid),
             self._spent.billed if mirrored else self._spent.billed.plus(paid),
         )
-        self._bills.append(bill)
         # A bill names a hold of another trail where a nested run's copy is carried onto its root.
         if (held := self._holds.get(bill.hold_id)) is None:
             return
+        self._settling = held.hold_id
         self._draw(held.parent, paid)
         self._open.pop(held.hold_id, None)
-        if bill.price.bill_or_rate_usd is None and held.hold_id not in self._unpriced:
-            self._unpriced[held.hold_id] = held
+        if bill.price.bill_or_rate_usd is None and held.hold_id not in self._unreported:
+            self._unpriced = (*self._unpriced, held)
+            self._unreported.add(held.hold_id)
             unpriced = _unpriced_of(held)
             self._draw(held.parent, unpriced)
             paid = paid.plus(unpriced)
         self._cost_of(held, paid.total)
 
     def _draw(self, above: str | None, paid: PaidSpend) -> None:
-        while above is not None:
+        while above is not None and above in self._holds:
             self._drawn[above] = self._drawn.get(above, NOTHING_PAID).plus(paid)
-            above = self._holds[above].parent if above in self._holds else None
+            above = self._holds[above].parent
 
     def _cost_of(self, call: Hold, part: UserSpend) -> None:
         """*part* of what *call* drew, filed under its node at the job it runs under, and on its
@@ -996,17 +1044,16 @@ class _Money:
             was = 0.0 if before is None else max(0.0, before.at_most_usd - held)
             if (past := max(0.0, cost.at_most_usd - held)) > was:
                 overshot = self._overshot.get(call.ledger, NO_OVERSHOOT)
-                self._overshot[call.ledger] = overshot.past(was, past)
+                self._overshot = {**self._overshot, call.ledger: overshot.past(was, past)}
         job = call.parent
         # A cell between a call and its job carries a resource; a job's hold carries none.
         while job in self._holds and self._holds[job].resource is not None:
             job = self._holds[job].parent
-        if job is not None and call.node is not None:
+        if job is not None and job in self._holds and call.node is not None:
             key = (job, call.node)
             self._by_node[key] = self._by_node.get(key, NO_CALLS).plus(part, first=first)
 
     def _call(self, usage: TokenUsageRecord) -> None:
-        self._usage.append(usage)
         for meter in self._usd:
             usd, tokens = metered(usage, meter)
             if usd is not None:
@@ -1026,16 +1073,15 @@ class _Money:
                 dict(self._open),
                 dict(self._holds),
                 dict(self._drawn),
-                tuple(self._unpriced.values()),
-                tuple(self._lapsed),
-                tuple(self._bills),
-                tuple(self._usage),
+                self._unpriced,
+                self._lapsed,
+                self._ledgers,
                 {m: Budget.amount(self._usd[m], self._tokens[m]) for m in self._usd},
                 {n: held.model_copy(deep=True) for n, held in self._by_round.items()},
                 self._calls,
                 self._worked_s,
                 dict(self._by_node),
-                dict(self._overshot),
+                self._overshot,
             )
         return self._view
 

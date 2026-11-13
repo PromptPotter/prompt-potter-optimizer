@@ -1,4 +1,4 @@
-"""Who may admit, and whether a job's producer is alive: both OS file locks over the jobs dir."""
+"""Who may admit, and the process a job's producer is: both OS file locks over the jobs dir."""
 
 from __future__ import annotations
 
@@ -11,15 +11,11 @@ import threading
 from collections.abc import Iterator
 from pathlib import Path
 
-from promptpotter.config.paths import ADMISSION_LOCK, LANDING_FILE, PRODUCERS_DIR
+from promptpotter.config.paths import ADMISSION_LOCK, LANDING_FILE
 from promptpotter.config.settings import CODE_REVISION, LOCK_TIMEOUT
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.store.io import (
-    read_text_optional,
-    take_lock,
-    validate_path_component,
-    write_text,
-)
+from promptpotter.infrastructure.holders import producer_alive, producer_path
+from promptpotter.infrastructure.store.io import read_text_optional, take_lock, write_text
 from promptpotter.shared.errors import ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
@@ -72,7 +68,7 @@ def this_producer(jobs_dir: Path) -> str:
         if producer_id is not None:
             return producer_id
         producer_id = f"{os.getpid()}-{secrets.token_hex(4)}"
-        path = _producer_path(jobs_dir, producer_id)
+        path = producer_path(jobs_dir, producer_id)
         # A clean exit retires its own file: its jobs are terminal, so no probe would reclaim it.
         if not producer_lock.take(path):
             raise RuntimeError(f"producer file {path} is held before this process minted it")
@@ -88,35 +84,15 @@ def minted_producer(jobs_dir: Path) -> str | None:
         return _tokens.get(jobs_dir.resolve())
 
 
-def this_producer_lock(jobs_dir: Path) -> Path:
-    return _producer_path(jobs_dir, this_producer(jobs_dir))
-
-
-def producer_alive(jobs_dir: Path, producer_id: str) -> bool:
-    """An unstamped id reads as gone."""
-    if not producer_id:
-        return False
-    try:
-        path = _producer_path(jobs_dir, producer_id)
-    except ValueError:
-        return False
-    return producer_lock.held(path)
-
-
 def reclaim_producer(jobs_dir: Path, producer_id: str) -> None:
     """A dead producer's file, unlinked by the sweep once it released that producer's job."""
     if not producer_id or producer_alive(jobs_dir, producer_id):
         return
     with contextlib.suppress(OSError):
-        _producer_path(jobs_dir, producer_id).unlink()
+        producer_path(jobs_dir, producer_id).unlink()
 
 
 def _retire(path: Path) -> None:
     producer_lock.release(path)
     with contextlib.suppress(OSError):
         path.unlink()
-
-
-def _producer_path(jobs_dir: Path, producer_id: str) -> Path:
-    validate_path_component(producer_id)
-    return jobs_dir / PRODUCERS_DIR / f"{producer_id}.lock"

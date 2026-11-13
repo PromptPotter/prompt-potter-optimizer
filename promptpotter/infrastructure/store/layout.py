@@ -110,6 +110,15 @@ def campaign_cycles_dir(campaign_root: Path) -> Path:
     return campaign_root / "cycles"
 
 
+def cycle_ledgers(campaign_root: Path) -> list[Path]:
+    cycles = campaign_cycles_dir(campaign_root)
+    return [
+        ledger
+        for cycle_dir in sorted(p for p in cycles.glob("*") if p.is_dir())
+        if (ledger := CycleLayout(cycle_dir).ledger).is_file()
+    ]
+
+
 def cycle_dir_for(tenant_root: WorkspaceDir, hop: CycleHop) -> Path:
     campaign_root = campaign_root_dir_for(tenant_root, hop.campaign_id)
     return campaign_cycles_dir(campaign_root) / validate_path_component(hop.cycle_id)

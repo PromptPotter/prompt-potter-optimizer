@@ -21,7 +21,7 @@ import time
 import zipfile
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import date
 from pathlib import Path
 from types import ModuleType
 from typing import Any, NamedTuple, cast
@@ -110,6 +110,7 @@ from promptpotter.application.initialization.scoring_scope import verb_ledger
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
+from promptpotter.application.jobs.launcher.admission import request_jobs
 from promptpotter.application.jobs.launcher.launch import Inline
 from promptpotter.application.jobs.launcher.mint_and_start import (
     OriginIncompleteError,
@@ -252,11 +253,12 @@ from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
+from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phases import PauseCause, RunPhase, StopReason
+from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,
     normalize_model_id,
@@ -296,7 +298,6 @@ from promptpotter.domain.run_records import (
     ConfigOverrides,
     CycleSeed,
     CycleSeedRecord,
-    LaunchClaimRecord,
     PipelineRead,
     RoundWarningRecord,
     ScoringLockedRecord,
@@ -309,7 +310,7 @@ from promptpotter.infrastructure.identity import blocklist, grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.registry import default_routes
-from promptpotter.infrastructure.producer_lock import cycle_held, release, take
+from promptpotter.infrastructure.producer_lock import cycle_held
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
     DashboardCheckout,
@@ -339,7 +340,6 @@ from promptpotter.infrastructure.store.session_pointer import read_active_pointe
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.presentation.cli.commands import new as cli_new
-from promptpotter.shared.clock import iso_z
 from promptpotter.shared.errors import (
     LANDING_REMEDY,
     CellUnscoreableError,
@@ -3074,7 +3074,6 @@ def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
 
 
 def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_lives(
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     built_stores: Stores,
     decl: _Declared,
@@ -3100,23 +3099,13 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     def acked(command_id: str) -> str | None:
         return stores.commands.book().status(command_id)
 
-    # A pause filed while a live launch claims the cycle (bl1.B11), QUEUED before its STARTING
-    # re-claim, or while the launch folds its ledger (bl1.B10), is that launch's to take.
-    claimant = tmp_path / "claimant.lock"
-    assert take(claimant)
-    stores.campaigns.claim_launch(
-        opened.hop, stage=RunPhase.QUEUED, job_id="claimed", claimant_lock=claimant
+    # A pause filed while a live launch claims the cycle (bl1.B11), queued, or while the launch
+    # folds its ledger (bl1.B10), is that launch's to take.
+    queue = JobRegistry(stores.jobs_dir, capacity=lambda _live: 0)
+    (claiming,) = request_jobs(
+        stores=stores, job_registry=queue, holder=CampaignLaunch("ds1"), hop=opened.hop
     )
     claimed = pause("claimed")
-    stores.campaigns.append(
-        opened.hop,
-        LaunchClaimRecord(
-            stage=RunPhase.STARTING,
-            job_id="claimed",
-            claimant_lock=str(claimant),
-            timestamp=iso_z(datetime.now(UTC) + timedelta(minutes=1)),
-        ),
-    )
     folding: list[str] = []
     voids = Stores.void_inbox
 
@@ -3130,7 +3119,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     assert read_active_pointer(stores.base_dir) == opened.hop, (
         "a run held its cycle, and the latest launch names another"
     )
-    release(claimant)
+    queue.cancel_queued(claiming.job_id)
     assert [acked(claimed), acked(folding[0])] == ["accepted"] * 2, (
         "the launch voided a pause filed under its own claim or hold"
     )
@@ -3150,7 +3139,10 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
         opened, observers, StopReason.ROUNDS_BUDGET, interrupted_by=PauseCause.INTERRUPT
     )
     late = pause("late")
+    # The drain, then the run's `finally`: draining alone keeps the cycle held.
     observers.drain_all()
+    assert cycle_held(root_dir), "a drain released the cycle it only drains"
+    observers.release()
     assert not LedgerIndex.of(wired_ledger.path).pinned and not cycle_held(root_dir), (
         "a released run kept its ledger's projections or its cycle"
     )

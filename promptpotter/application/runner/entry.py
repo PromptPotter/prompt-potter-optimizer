@@ -290,7 +290,10 @@ async def _run_single_cycle(
             # On the parent's own ledger, as a rebase's close ends it, before its readout names the fork.
             declare_run_stop(session, observers, StopReason.REBASED, interrupted_by=pause_cause)
             observers.drain_all()
-            observers = onto_fork(cycle.session, forked_from, observers, prep=prep)
+            parent = observers
+            observers = onto_fork(cycle.session, forked_from, parent, prep=prep)
+            # Held through the fork's mint, which moves the campaign's holds off it.
+            parent.release()
         session = cycle.session
         close_init(cycle, observers.ledger)
         declare_round_allowance(session, step_rounds)

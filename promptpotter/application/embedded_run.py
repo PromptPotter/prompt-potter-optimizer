@@ -15,6 +15,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     campaign_at,
+    claim_cycle,
     probe_backend,
     refuse_campaign,
     slotless_share,
@@ -170,6 +171,7 @@ async def run_campaign(
                     running.hop,
                     held.share,
                 )
+                claim_cycle(stores, running.hop, held.job_id)
             return await run_optimization(
                 list(running.session.bank.samples),
                 running.cycle,

@@ -25,7 +25,6 @@ from promptpotter.application.commands.dispatcher import (
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.startability import offered_dataset
-from promptpotter.application.jobs.launcher.admission import withdraw_queued
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.head_to_head import (
     AdmittedHeadToHead,
@@ -375,8 +374,9 @@ async def _leave_parent(dispatcher: CommandDispatcher, cut: ForkCut) -> None:
     otherwise its run paused; a parent no pause reaches is left as it stands, its refusal the
     pause's own outcome, filed on the parent's log."""
     stores, parent = dispatcher.stores, cut.parent
-    claim = stores.campaigns.launch_claim(parent)
-    if claim is not None and withdraw_queued(stores, dispatcher.job_registry, claim.job_id):
+    holder = stores.campaigns.holder(parent)
+    job = None if holder is None else holder.job
+    if job is not None and dispatcher.job_registry.cancel_queued(job.job_id):
         return
     pause = PauseCyclePayload(
         campaign_id=parent.campaign_id,

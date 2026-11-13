@@ -101,7 +101,7 @@ class Stores:
         return self.commands.book().controls(self.subject(hop))
 
     def run_state(self, hop: CycleHop) -> RunState:
-        state = derive_run_state(self.campaigns.cycle_dir(hop), self.inbox(hop))
+        state = derive_run_state(self.campaigns.cycle_dir(hop), self.inbox(hop), self.jobs_dir)
         return state._replace(inner=self.inner)
 
     def void_inbox(self, hop: CycleHop, *, before: float | None = None) -> None:
@@ -130,7 +130,8 @@ class Stores:
             facts = scan_cycle_facts(layout.ledger)
             if facts.minted is None or facts.ended is not None:
                 return False
-            if reason is StopReason.PRODUCER_VANISHED and not run_owed(layout.cycle_dir):
+            owed = run_owed(layout.cycle_dir, self.jobs_dir)
+            if reason is StopReason.PRODUCER_VANISHED and not owed:
                 return False
             self.declare_stop(hop, RunPhaseRecord.stop(reason))
             return True
@@ -214,7 +215,7 @@ def build_stores(
         # dataset or the ruler an L4 cell reads is not state.
         tenant_datasets=TenantDatasetStore(account),
         ruler=RulerStore(account),
-        campaigns=CampaignStore(tenant_dir),
+        campaigns=CampaignStore(tenant_dir, paths.jobs_dir(shared)),
         drafts=DraftStore(tenant_dir),
         archive=MeasurementArchive.at(home.root),
         optimizer_reuse=LLMReuseCache(home.root, paths.OPTIMIZER_REUSE_DIR),

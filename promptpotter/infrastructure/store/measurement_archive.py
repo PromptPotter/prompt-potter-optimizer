@@ -630,18 +630,19 @@ class ReplayFeed:
         self._archive = archive
         self._node_configs = node_configs
         self._file_keys = [config_key(node_configs[:n]) for n in range(1, len(node_configs) + 1)]
-        self._seen: dict[str, int] = {}
+        self._marks: dict[str, FileMark] = {}
         self._served: dict[str, tuple[bool, str, str]] = {}
 
     def advance(self) -> dict[str, FiledAnswer]:
         """Each cell's answer where it changed: a live row before a deprecated one, then A before
         B, then the oldest, so a later diagnostic rescore never displaces what a run measured."""
         banked: list[FiledAnswer] = []
-        with self._archive._lock:
-            for file_key in self._file_keys:
-                rows = self._archive._file(file_key).rows
-                banked.extend(rows[self._seen.get(file_key, 0) :])
-                self._seen[file_key] = len(rows)
+        for file_key in self._file_keys:
+            read = read_rows_past(
+                self._archive.cell_path(file_key), answer_of, self._marks.get(file_key, ABSENT)
+            )
+            banked.extend(read.rows)
+            self._marks[file_key] = read.mark
         fresh: dict[str, FiledAnswer] = {}
         for answer in banked:
             cell = answer.cell

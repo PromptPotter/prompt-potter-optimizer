@@ -421,11 +421,11 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     query = sample.query
     depth = instrument_depth()
     if depth >= MAX_INSTRUMENT_DEPTH:
-        raise RuntimeError(
-            f"promptpotter connector: inner recursion is already {depth} level(s) deep "
-            f"(MAX_INSTRUMENT_DEPTH={MAX_INSTRUMENT_DEPTH}); refusing to spawn another inner "
-            "campaign. An inner dataset whose own backend_type is 'promptpotter' recurses "
-            "without bound — check the inner_benchmark named in the dataset's panel."
+        raise CellUnscoreableError(
+            f"promptpotter connector: an inner run {depth} level(s) deep spawns no inner campaign "
+            f"(MAX_INSTRUMENT_DEPTH={MAX_INSTRUMENT_DEPTH}): the inner dataset's own backend_type "
+            "is 'promptpotter' — name an inner_benchmark on another backend in the panel.",
+            spent={},
         )
     cell = _resolve_inner_cell(sample, payload)
     minted: list[CycleHop] = []

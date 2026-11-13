@@ -88,7 +88,6 @@ from promptpotter.application.jobs.launcher.admission import (
     paid_pass,
     refuse_taken_cycle,
     request_jobs,
-    withdraw_queued,
 )
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.launch import Launched
@@ -155,7 +154,7 @@ from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.hierarchy import SubtreeCampaign
-from promptpotter.domain.job import JOB_ADAPTER, CampaignLaunch, Job, ScoringPass
+from promptpotter.domain.job import CampaignLaunch, Job, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
@@ -261,8 +260,6 @@ from promptpotter.infrastructure.store.stores import Stores, descend_store, tena
 from promptpotter.infrastructure.store.user_store import (
     CONSENT_FILE,
     USER_FILE,
-    ConsentLine,
-    ConsentRecord,
     User,
     UserStore,
     count_accounts,
@@ -1445,6 +1442,26 @@ def test_the_hosts_first_sign_in_takes_the_terminals_account_in_one_act_or_asks_
 
 
 @pytest.mark.usefixtures("offline")
+def test_a_pass_registered_on_a_terminal_cycle_refuses_the_hosts_claim(tmp_path: Path) -> None:
+    projects = tmp_path / "projects"
+    terminal = workspace(tmp_path)
+    scored = CycleHop(campaign_id="terminal-camp", cycle_id="cycle_terminal")
+    stored_campaign(terminal, minted_campaign(scored))
+    minted_dataset(terminal, minted_campaign(scored))
+    terminal.campaigns.mint_cycle(scored)
+    request_jobs(
+        stores=terminal,
+        job_registry=JobRegistry(terminal.jobs_dir, capacity=lambda _live: 1),
+        holder=ScoringPass("bench"),
+        hop=scored,
+    )
+    assert claim_default(projects_root=projects, user_id="owner-9", email=None) is not None, (
+        "the host's claim moved a tree a registered pass scores"
+    )
+    assert (projects / "default" / "campaigns" / "terminal-camp").is_dir()
+
+
+@pytest.mark.usefixtures("offline")
 def test_the_hosts_delegate_acts_in_the_hosts_tenant_and_is_not_the_host(
     monkeypatch: pytest.MonkeyPatch, delegation: _Delegation
 ) -> None:
@@ -1972,10 +1989,11 @@ def held_cycle(built_stores: Stores) -> _HeldCycle:
         # Attachment reads no command: a standing pause moves it for no cycle, held, claimed or free.
         asked = Controls(pause=PauseAsk("pause", acting_principal(built_stores.identity), "now"))
         held = built_stores.run_state(hop).producer.attached
+        jobs = built_stores.jobs_dir
         assert (
-            producer_attached(cycle_dir)
+            producer_attached(cycle_dir, jobs)
             is held
-            is derive_run_state(cycle_dir, asked).producer.attached
+            is derive_run_state(cycle_dir, asked, jobs).producer.attached
         )
 
     def delete_refused(jobs: JobRegistry) -> None:
@@ -2106,10 +2124,10 @@ async def test_a_launch_holds_its_cycle_from_the_moment_it_is_accepted_and_a_ful
             stores=built_stores, verb="bench", hop=hop, declared=Budget(), sends=()
         ):
             pass
-    assert withdraw_queued(built_stores, registry, job.job_id), "a queued launch stayed queued"
+    assert registry.cancel_queued(job.job_id), "a queued launch stayed queued"
     assert not built_stores.run_state(hop).producer.attached, "a withdrawn launch held its cycle"
     attached_alike()
-    refuse_taken_cycle(built_stores, registry, hop)
+    refuse_taken_cycle(built_stores, hop)
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
@@ -2435,7 +2453,7 @@ def test_a_reset_asks_again_at_its_act_and_never_refills_the_daily_launch_quota(
     (job,) = request_jobs(
         stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
     )
-    withdraw_queued(built_stores, registry, job.job_id)
+    registry.cancel_queued(job.job_id)
     planned = plan_reset(built_stores.projects_root, tenant_id=None, staged={})
     assert planned.refusal is None
     since_jobs, since = _pass_started(built_stores, hop)
@@ -2498,7 +2516,6 @@ async def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_
     old = {"record_type": "account_event", "user_id": "u", "timestamp": "2026-01-02T00:00:00Z"}
     append_jsonl(events, old | {"event": "signed_in", "subject": "google", "device": "phone"})
     append_jsonl(events, old | {"event": "request_refused", "subject": "x", "device": None})
-    users = UserStore(campaigns.workspace)
     # The identity survivors the base wrote are migrated, never wiped.
     identity = IdentityPaths(data_root / IDENTITY_DIR)
     # The host's claim marker, over the terminal's record its claim renamed under the host's id.
@@ -2520,55 +2537,7 @@ async def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_
             }
         },
     )
-    # The owner accepted v0, then v1; its delegate accepted v1 after it, over the one record.
-    accepts = (("u", "v0", "2025-12-30"), ("u", "v1", "2025-12-31"), ("sub", "v1", "2026-01-01"))
-    for by, version, day in accepts:
-        users.record(
-            ConsentLine(event="terms_accepted", user_id=by, subject=version, at=f"{day}T00:00:00Z")
-        )
-    before = users.consent_trail()
-    consent = {"version": "v1", "accepted_at": "2026-01-01T00:00:00Z"}
-    write_json(
-        Path(campaigns.workspace) / USER_FILE,
-        user.model_dump(mode="json") | {"terms_accepted": consent},
-    )
-    # A pack built before its tags were refused from repeating Source and Method keeps the rest.
-    cited = {
-        "kind": "cited",
-        "work": "2401.00001",
-        "locator": "§2",
-        "verbatim": True,
-        "via": [],
-        "technique_family": "role-play",
-        "role": "persona",
-        "evolved_or_authored": "authored",
-        "evolved_on_model": None,
-        "reported": {
-            "task_family": None,
-            "benchmark": None,
-            "evaluated_on_models": [],
-            "score": None,
-            "lift": None,
-            "baseline": None,
-        },
-        "notes": None,
-    }
-    pack = Path(campaigns.workspace) / "block_packs" / "p" / "pack.json"
-    work = {"first_author": "A", "year": 2024, "title": "T", "license": "cc-by"}
-    write_json(
-        pack,
-        {
-            "works": {"2401.00001": work},
-            "snippets": [
-                {
-                    "text": "You are an expert.",
-                    "suits": ["persona"],
-                    "tags": ["2401.00001", "expert", "role-play"],
-                    "provenance": cited,
-                }
-            ],
-        },
-    )
+    before = identity.grants.read_bytes()
     # Run data that does not load is the landing's own to drop; a file no row names refuses it,
     # asked to reset or not, and a refused landing writes nothing.
     write_json(stray, {})
@@ -2578,7 +2547,7 @@ async def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_
         with pytest.raises(ConflictError):
             apply_landing(built_stores.projects_root, refused)
     assert [one.path for one in refused.runs] == [] and refused.reset is not None
-    assert refused.staged and users.consent_trail() == before, "a refused landing wrote"
+    assert refused.staged and identity.grants.read_bytes() == before, "a refused landing wrote"
     assert events.is_file(), "a refused landing dropped run data"
     stray.unlink()
     # What a retired writer left under a campaign is run data no reader takes.
@@ -2603,8 +2572,6 @@ async def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_
     since_jobs.release(since.job_id)
     apply_landing(built_stores.projects_root, plan_landing(built_stores.projects_root, reset=False))
     assert not events.exists(), "a landing kept run data this build cannot read"
-    landed_pack = BlockPack.model_validate_json(pack.read_bytes())
-    assert [s.tags for s in landed_pack.snippets] == [("expert",)], "a pack lost a tag of its own"
     host = UserStore(host_dir).load()
     assert not marker.exists() and host is not None, "a landing kept the claim marker"
     assert (host.user_id, host.email) == ("h", "h@x.com") and host_user_id(
@@ -2612,17 +2579,8 @@ async def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_
     ) == "h", "a landing lost the host"
     regranted = read_grant(identity.grants, "sub")
     assert regranted is not None and regranted.delegated_by == "u", "a landing lost a grant"
-    migrated = users.load()
-    assert migrated is not None and migrated.terms_accepted == {
-        "u": ConsentRecord(version="v1", accepted_at="2025-12-31T00:00:00Z"),
-        "sub": ConsentRecord(version="v1", accepted_at="2026-01-01T00:00:00Z"),
-    }, "a landing lost an owner's own acceptance its delegate's had written over"
-    trail = users.consent_trail()
-    assert [line.device for line in trail if line.at == old["timestamp"]] == ["phone"], (
-        "a sign-in was lost from the account's consent trail"
-    )
     again = plan_landing(built_stores.projects_root, reset=False)
-    assert not again.staged and not again.refused and users.consent_trail() == trail, (
+    assert not again.staged and not again.refused, (
         "a second landing migrated again, or left the tree unproven"
     )
 
@@ -2677,107 +2635,6 @@ def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_s
         not torn_dir.exists()
         and campaign_spend(campaigns, built_stores.charges, torn_hop.campaign_id) == spent
     ), "a torn mint was kept, or its spend left the account's bill with it"
-
-
-@pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_a_job_released_before_its_release_named_an_ending_migrates_off_its_own_record(
-    built_stores: Stores,
-) -> None:
-    # Ledgers unread: a refusal refused, any other orphaned (no live producer speaks for it), so
-    # a run released today lands without waiting on a sweep.
-    campaigns = built_stores.campaigns
-    jobs = JobRegistry(built_stores.jobs_dir, capacity=lambda _live: 0)
-
-    def released_before(**bent: object) -> Path:
-        job = jobs.create(
-            user_id="u",
-            principal_id="u",
-            workspace=campaigns.workspace,
-            hop=CycleHop(campaign_id="", cycle_id=""),
-            holder=CampaignLaunch("ds1"),
-            stage=RunPhase.QUEUED,
-        )
-        old = {
-            key: value
-            for key, value in JOB_ADAPTER.dump_python(job, mode="json").items()
-            if key not in ("ending", "stepped", "lapse")
-        }
-        written = jobs.jobs_dir / f"{job.job_id}.json"
-        write_json(written, old | {"released_at": old["created_at"]} | bent)
-        return written
-
-    old_jobs = {
-        released_before(stage=RunPhase.STARTING.value, refusal="over budget"): "refused",
-        released_before(): "orphaned",
-        released_before(
-            stage=RunPhase.RUNNING.value, admitted_at="2026-01-02T00:00:00Z"
-        ): "orphaned",
-    }
-    # A run that stopped on the retired `perfect_score` hit its target, its refusal unread as one:
-    # its empty words are `job_refusal`'s too, and one migration stages the path.
-    stopped_perfect = released_before(ending="perfect_score", refusal="")
-    # A live job, a survivor, wrote its unrefused refusal as the empty words, and its launch as
-    # every install wrote one.
-    survivor = jobs.create(
-        user_id="u",
-        principal_id="u",
-        workspace=campaigns.workspace,
-        hop=CycleHop(campaign_id="", cycle_id=""),
-        holder=CampaignLaunch("ds1"),
-        stage=RunPhase.QUEUED,
-    )
-    live_file = jobs.jobs_dir / f"{survivor.job_id}.json"
-    launch_as_written = {"dataset_name": "ds1", "draft_id": None, "kind": "campaign_launch"}
-    write_json(
-        live_file,
-        JOB_ADAPTER.dump_python(survivor, mode="json")
-        | {"refusal": "", "holder": launch_as_written},
-    )
-    mapped = plan_landing(built_stores.projects_root, reset=False)
-    assert not mapped.refused, f"the landing refused the old jobs: {mapped.refusal}"
-    apply_landing(built_stores.projects_root, mapped)
-    landed_jobs = {path: jobs.get(path.stem) for path in old_jobs}
-    assert {path: job and job.lapse for path, job in landed_jobs.items()} == old_jobs, (
-        "a migrated job lost how it ended"
-    )
-    refused_words = [job.refusal.message for job in landed_jobs.values() if job and job.refusal]
-    landed_live = jobs.get(survivor.job_id)
-    assert refused_words == ["over budget"] and landed_live and landed_live.refusal is None, (
-        "a migrated job's refusal lost its words, or a live one read as refused"
-    )
-    assert landed_live.holder == CampaignLaunch("ds1"), "a live launch lost what it launched"
-    landed_perfect = jobs.get(stopped_perfect.stem)
-    assert landed_perfect and landed_perfect.ending is StopReason.TARGET_HIT, (
-        "a job that stopped on the retired ending no longer loads, or lost that it hit its target"
-    )
-    assert landed_perfect.refusal is None and landed_perfect.lapse is None
-
-
-@pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_an_authored_definitions_retired_knobs_land_respelled_however_its_yaml_quotes_them(
-    built_stores: Stores,
-) -> None:
-    # The account the definition is filed under: with no account file the landing stages nothing.
-    user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
-    UserStore(built_stores.campaigns.workspace).save(user)
-    knobbed = built_stores.tenant_datasets.dataset_dir("knobbed") / DEFINITION_FILE
-    knobbed.parent.mkdir(parents=True)
-    old_knobs = (
-        "campaign:\n  display_metric: accuracy\n  optimization:\n"
-        "    halt_at_accuracy: 0.9\n    accuracy_ceiling: 0.95\n"
-        "pipeline:\n  \"display_metric\": 'accuracy'\n"
-        'panel: {display_metric: "accuracy"}\n'
-        "source:\n  'display_metric' : accuracy\n  scoring: accuracy_given_attempted\n"
-    )
-    knobbed.write_text(old_knobs, encoding="utf-8")
-    apply_landing(built_stores.projects_root, plan_landing(built_stores.projects_root, reset=False))
-    assert knobbed.read_text(encoding="utf-8") == (
-        "campaign:\n  display_metric: fitness\n  optimization:\n"
-        "    halt_at_fitness: 0.9\n    fitness_ceiling: 0.95\n"
-        "pipeline:\n  \"display_metric\": 'fitness'\n"
-        'panel: {display_metric: "fitness"}\n'
-        "source:\n  'display_metric' : fitness\n  scoring: accuracy_given_attempted\n"
-    ), "a quoted retired knob outlived the landing, or a real rate's name was respelled"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -3904,10 +3761,9 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         launched = ran.result.launch
         assert launched.hop == step_hop, "a queued step recorded no cycle its job knew"
         if ending is None:
-            assert withdraw_queued(caller.stores, queuing, launched.job_id)
+            assert queuing.cancel_queued(launched.job_id)
         else:
             queuing.release(launched.job_id, ending)
-            caller.stores.campaigns.release_claim(step_hop, job_id=launched.job_id, detail="ran")
         # Its queue waiter wakes on the ended job and raises into a release of its own.
         await asyncio.gather(*waiter, return_exceptions=True)
         with pytest.MonkeyPatch.context() as later:

@@ -26,6 +26,7 @@ from promptpotter.infrastructure.store.io import (
     write_bytes,
     write_text,
 )
+from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.shared.errors import ErrorCategory, SendRefusedError
 from promptpotter.shared.hashing import stable_hash
 
@@ -140,7 +141,6 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
 
     stripped = _strip_upstream(raw)
     write_text(cache_path(), json.dumps({"models": stripped}, indent=0, separators=(",", ":")))
-    _rates_at.cache_clear()
     logger.info("spend: refreshed %d model rates → %s", len(stripped), cache_path())
     return True
 
@@ -204,11 +204,16 @@ def _as_tokens(raw: object) -> int | None:
 
 
 def load_rates() -> RateTable:
-    """Kept by where it reads: a home set after the first read reads its own rates."""
-    return _rates_at(BUNDLED_PATH, cache_path())
+    """Kept by where it reads and what the files hold: a rates file any process rewrites re-prices
+    every reader's next send."""
+    fetched = cache_path()
+    return derived(
+        ("rates", BUNDLED_PATH, fetched),
+        sig=(file_sig(BUNDLED_PATH), file_sig(fetched)),
+        compute=lambda: _rates_at(BUNDLED_PATH, fetched),
+    )
 
 
-@functools.lru_cache(maxsize=1)
 def _rates_at(bundled_path: Path, fetched_path: Path) -> RateTable:
     bundled = _read_models(bundled_path)
     fetched = _read_models(fetched_path)

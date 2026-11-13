@@ -711,7 +711,7 @@ def forked_at_init(stores: Stores, parent: CycleHop, fork: CycleHop) -> None:
     ]
     if [r["spend"] is not None for r in rebased] != [True]:
         raise SystemExit(f"offline run: the parent ended on {rebased}, not one REBASED with spend")
-    if producer_attached(layout.cycle_dir):
+    if producer_attached(layout.cycle_dir, stores.jobs_dir):
         raise SystemExit("offline run: the fork left its parent's producer lock held")
     last = layout.readout.read_text(encoding="utf-8").rstrip().splitlines()[-1]
     if fork.cycle_id not in last:

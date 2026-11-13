@@ -17,12 +17,7 @@ from pydantic import TypeAdapter, model_validator
 
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.launcher.admission import (
-    RunStart,
-    campaign_at,
-    claim_cycle,
-    refuse_campaign,
-)
+from promptpotter.application.jobs.launcher.admission import RunStart, campaign_at, refuse_campaign
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.pipeline_resolve import cycle_config
@@ -87,7 +82,7 @@ class JobSpec(StrictModel):
 
 
 async def spawn_job(held: HeldRun, mode: RunMode) -> asyncio.Task[None]:
-    """Returns only once the run's process holds the job and its claim (`run_job`): a spawner
+    """Returns only once the run's process holds the job (`run_job`): a spawner
     gone before that, its producer lock with it, would leave a job a reconciling read releases
     under its child. Answers the task that ends when the run's process exits."""
     start, stores, hop = held.start, held.session.store, held.session.hop
@@ -110,7 +105,7 @@ async def spawn_job(held: HeldRun, mode: RunMode) -> asyncio.Task[None]:
 
     def _await_exit() -> None:
         child.wait()
-        # A loop closed first is a server gone: its shutdown cancelled `watch`, which has nothing to release.
+        # A loop closed first is a server gone: its shutdown cancelled the exit's task.
         with contextlib.suppress(RuntimeError):
             loop.call_soon_threadsafe(exited.set)
 
@@ -119,10 +114,6 @@ async def spawn_job(held: HeldRun, mode: RunMode) -> asyncio.Task[None]:
 
     async def watch() -> None:
         await exited.wait()
-        # Releases only the claim of a child that died before its run declared itself; one that ran has consumed it.
-        stores.campaigns.release_claim(
-            spec.hop, job_id=spec.job_id, detail="its process exited before the run began"
-        )
 
     exited_task = asyncio.create_task(watch(), name=f"job-{spec.job_id}")
     start.job_registry.attach_task(spec.job_id, exited_task)
@@ -147,7 +138,7 @@ def _start(spec: JobSpec, log_path: Path) -> subprocess.Popen[bytes]:
     return child
 
 
-# The one line a run's process says on its stdout: it holds the job and its claim.
+# The one line a run's process says on its stdout: it holds the job.
 _ADOPTED = b"adopted\n"
 
 
@@ -293,11 +284,11 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
         shared_root=spec.shared_root,
     )
     job_registry = JobRegistry(spec.jobs_dir, capacity=resolve_run_capacity)
+    # The job, its claim with it, now lives and dies with THIS process: a run killed before it
+    # declares itself leaves the cycle free.
     if (adopted := job_registry.adopt(spec.job_id)) is None:
         logger.warning("job %s was cleared before its process started — not running", spec.job_id)
         return None
-    # The claim now lives and dies with THIS process: a run killed before it declares itself leaves the cycle free.
-    claim_cycle(stores, job_registry, adopted, spec.hop)
     start = RunStart(stores, job_registry, adopted)
     _tell_spawner()
     try:

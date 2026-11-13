@@ -12,7 +12,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Literal, NamedTuple
 
-from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root
+from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root, jobs_dir
 from promptpotter.config.settings import LOCK_TIMEOUT, TERMS_VERSION, settings
 from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.domain.said import Tone
@@ -484,7 +484,7 @@ def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail],
     for account, found in _scanned(projects_root, accounts, unreadable):
         recent = [line for line in found if (epoch_seconds(line.at) or 0.0) >= since]
         if recent and not isinstance(account.user, Torn):
-            store = CampaignStore(account.workspace)
+            store = CampaignStore(account.workspace, jobs_dir(projects_root))
             trails.append(
                 AccountTrail(
                     _who(account),

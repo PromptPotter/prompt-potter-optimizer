@@ -124,8 +124,8 @@ from promptpotter.shared.worded import Worded
 
 
 class Fate(Enum):
-    # Who an account is, what it holds, was charged and launched today, or who the host is: kept, and
-    # one that does not load refuses a landing until a migration rewrites it.
+    # Who an account is, what the install is configured with, what launched today, or who the host
+    # is: kept, and one that does not load refuses a landing until a migration rewrites it.
     SURVIVOR = "SURVIVOR"
     # Kept while it loads, and dropped by a landing once it does not, which says so: what is
     # content-keyed and paid for, or a sign-in its person makes again.
@@ -141,7 +141,6 @@ class Scope(Enum):
 
     INSTALL = ("",)
     ACCOUNT = (f"{PROJECTS_DIR}/*",)
-    SANDBOX = (f"{INNER_SANDBOXES_DIR}/*/*",)
     WORKSPACE = (f"{PROJECTS_DIR}/*", f"{INNER_SANDBOXES_DIR}/*/*")
     ARCHIVE_HOME = (f"{PROJECTS_DIR}/*", f"{ARCHIVE_HOMES_DIR}/*")
 
@@ -296,36 +295,43 @@ INSTALL_KINDS: tuple[Kind, ...] = (
 )
 
 
-def _authored(name: str, glob: str, shape: Shape) -> tuple[Kind, Kind]:
-    """What an account authored outlives a release; an inner sandbox's copy is its run's."""
-    return (
-        Kind(name, Scope.ACCOUNT, glob, _SURVIVOR, shape),
-        Kind(f"sandbox {name}", Scope.SANDBOX, glob, Fate.RUN, shape),
-    )
-
-
 _DATASETS = "datasets"
+_RUN = Fate.RUN
 
 ACCOUNT_KINDS: tuple[Kind, ...] = (
     Kind("user", Scope.ACCOUNT, USER_FILE, _SURVIVOR, TypeAdapter(User)),
-    Kind("consent trail", Scope.ACCOUNT, CONSENT_FILE, _SURVIVOR, TypeAdapter(ConsentLine)),
-    Kind("grant", Scope.ACCOUNT, GRANT_FILE, _SURVIVOR, TypeAdapter(CouponGrant)),
+    Kind("consent trail", Scope.ACCOUNT, CONSENT_FILE, _RUN, TypeAdapter(ConsentLine)),
+    Kind("grant", Scope.ACCOUNT, GRANT_FILE, _RUN, TypeAdapter(CouponGrant)),
     Kind("api keys", Scope.ACCOUNT, API_KEYS_FILE, _SURVIVOR, HELD_KEYS),
-    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _SURVIVOR, TypeAdapter(ChargeLine)),
+    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _RUN, TypeAdapter(ChargeLine)),
     Kind("bank", Scope.ACCOUNT, f"{BANKS_DIR}/*.json", Fate.CACHE, read_bank),
     # An upload definition's `source:` reads it.
-    Kind(
-        "upload", Scope.ACCOUNT, f"{UPLOADS_DIR}/**", _SURVIVOR, Opaque("an uploaded file's bytes")
-    ),
+    Kind("upload", Scope.ACCOUNT, f"{UPLOADS_DIR}/**", _RUN, Opaque("an uploaded file's bytes")),
     # A file two rows name takes the first one's shape.
-    *_authored("dataset definition", f"{_DATASETS}/**/{DEFINITION_FILE}", definition_layer),
-    *_authored("dataset framing", f"{_DATASETS}/**/{FRAMING_FILE}", dataset_framing),
-    *_authored("dataset origin", f"{_DATASETS}/**/{ORIGIN_FILE}", origin_layer),
-    *_authored("dataset file", f"{_DATASETS}/**", Opaque("a dataset's own file, its connector's")),
-    *_authored("task context", f"{TASK_CONTEXT_DIR}/*.yaml", read_task_context),
-    *_authored("bank labels", f"{BANKS_DIR}/{LABELS_FILE}", TypeAdapter(BankLabel)),
-    *_authored("account block pack", _BLOCK_PACK, TypeAdapter(BlockPack)),
-    *_authored("model capability override", CAPABILITY_FILE, _WALKED),
+    Kind(
+        "dataset definition",
+        Scope.WORKSPACE,
+        f"{_DATASETS}/**/{DEFINITION_FILE}",
+        _RUN,
+        definition_layer,
+    ),
+    Kind(
+        "dataset framing", Scope.WORKSPACE, f"{_DATASETS}/**/{FRAMING_FILE}", _RUN, dataset_framing
+    ),
+    Kind("dataset origin", Scope.WORKSPACE, f"{_DATASETS}/**/{ORIGIN_FILE}", _RUN, origin_layer),
+    Kind(
+        "dataset file",
+        Scope.WORKSPACE,
+        f"{_DATASETS}/**",
+        _RUN,
+        Opaque("a dataset's own file, its connector's"),
+    ),
+    Kind("task context", Scope.WORKSPACE, f"{TASK_CONTEXT_DIR}/*.yaml", _RUN, read_task_context),
+    Kind(
+        "bank labels", Scope.WORKSPACE, f"{BANKS_DIR}/{LABELS_FILE}", _RUN, TypeAdapter(BankLabel)
+    ),
+    Kind("account block pack", Scope.WORKSPACE, _BLOCK_PACK, _RUN, TypeAdapter(BlockPack)),
+    Kind("model capability override", Scope.WORKSPACE, CAPABILITY_FILE, _RUN, _WALKED),
 )
 
 

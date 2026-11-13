@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
@@ -34,7 +33,6 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.spend import MONEY_AXES, Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SpendBook
-from promptpotter.infrastructure.producer_lock import held
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
@@ -134,13 +132,11 @@ class RunObservers:
         rescope(book=book)
 
     def drain_all(self) -> None:
-        try:
-            self.projecting.close()
-            # The SSE stream is no projection — it tails the on-disk ledger — so nothing drains it.
-            if (book := run_scope().book) is not None and book.ledger is self.ledger:
-                rescope(book=book.enclosing)
-        finally:
-            self.release()
+        """Drains only: the release is the run's `finally` and the fork handoff's."""
+        self.projecting.close()
+        # The SSE stream is no projection — it tails the on-disk ledger — so nothing drains it.
+        if (book := run_scope().book) is not None and book.ledger is self.ledger:
+            rescope(book=book.enclosing)
 
     @property
     def cycle_dir(self) -> CycleDir:
@@ -164,10 +160,10 @@ def build_run_observers(
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
     # A launch holds its cycle from its job's first live claim, else from here: a pause filed since
     # is its to take, a QUEUED one included.
-    claim = session.store.campaigns.launch_claim(session.hop)
+    holder = session.store.campaigns.holder(session.hop)
     held_since = (
-        epoch_seconds(claim.timestamp)
-        if claim is not None and held(Path(claim.claimant_lock))
+        epoch_seconds(holder.since)
+        if holder is not None and not holder.declared and holder.since is not None
         else None
     ) or time.time()
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.

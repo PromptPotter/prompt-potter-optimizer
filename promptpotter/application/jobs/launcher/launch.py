@@ -150,7 +150,7 @@ def admit(
     )
     if inline is not None and job.queued:
         if inline.no_wait:
-            refuse_as_busy(stores, job_registry, job)
+            refuse_as_busy(job_registry, job)
         oldest = next(iter(job_registry.list_running()), None)
         order = job_registry.queue_order()
         logger.warning(

@@ -14,12 +14,12 @@ from promptpotter.domain.phases import (
     RunState,
 )
 from promptpotter.domain.run_records import RunPhaseRecord
+from promptpotter.infrastructure.holders import holder_of
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
-from promptpotter.infrastructure.producer_lock import cycle_held, held, pass_held
+from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     Progress,
     scan_last,
-    scan_launch_claim,
     scan_ledger_progress,
 )
 from promptpotter.infrastructure.store.command_log import Controls
@@ -95,7 +95,12 @@ def read_run_state(
     return RunState(RunPhase.RUNNING if producer.attached else RunPhase.DETACHED, producer)
 
 
-def derive_run_state(cycle_dir: Path, inbox: Controls) -> RunState:
+def _claimed(cycle_dir: Path, jobs_dir: Path) -> LaunchStage | None:
+    holder = holder_of(jobs_dir, cycle_dir)
+    return None if holder is None else holder.stage
+
+
+def derive_run_state(cycle_dir: Path, inbox: Controls, jobs_dir: Path) -> RunState:
     ledger = CycleLayout(cycle_dir).ledger
     last = scan_last([LedgerSpan(ledger)], RunPhaseRecord)
     declared = "" if last is None else last.run_phase.value
@@ -105,7 +110,6 @@ def derive_run_state(cycle_dir: Path, inbox: Controls) -> RunState:
     progress = scan_ledger_progress(ledger) if producer_held else Progress()
     # A pause is asked of a producer: with none holding the cycle, a RUNNING one is owed (SILENT).
     asked = inbox.pause if producer_held and (scoring or not terminal) else None
-    claim = None if producer_held else scan_launch_claim(ledger)
     now = time.time()
     run = read_run_state(
         terminal=terminal,
@@ -120,7 +124,7 @@ def derive_run_state(cycle_dir: Path, inbox: Controls) -> RunState:
         open_for_s=None
         if progress.waiting_since is None
         else max(0.0, now - progress.waiting_since),
-        claimed=None if claim is None or not held(Path(claim.claimant_lock)) else claim.stage,
+        claimed=None if producer_held else _claimed(cycle_dir, jobs_dir),
         gate=None if last is None else last.gate,
         drafts=0 if last is None else len(last.drafts),
     )
@@ -149,26 +153,23 @@ def derive_run_state(cycle_dir: Path, inbox: Controls) -> RunState:
     )
 
 
-def run_owed(cycle_dir: Path) -> bool:
+def run_owed(cycle_dir: Path, jobs_dir: Path) -> bool:
     """`SILENT`'s fact without its lock read: the run declared RUNNING, no live launch claiming it.
     Read under the producer lock, where `derive_run_state` would see its reader's own hold."""
-    ledger = CycleLayout(cycle_dir).ledger
-    last = scan_last([LedgerSpan(ledger)], RunPhaseRecord)
-    claim = scan_launch_claim(ledger)
-    live_claim = claim is not None and held(Path(claim.claimant_lock))
-    return last is not None and last.run_phase is RunPhase.RUNNING and not live_claim
+    last = scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], RunPhaseRecord)
+    owed = last is not None and last.run_phase is RunPhase.RUNNING
+    return owed and _claimed(cycle_dir, jobs_dir) is None
 
 
-def producer_attached(cycle_dir: Path) -> bool:
+def producer_attached(cycle_dir: Path, jobs_dir: Path) -> bool:
     """Attachment reads no command: a pause never moves it (`read_run_state`)."""
-    return derive_run_state(cycle_dir, Controls()).producer.attached
+    return derive_run_state(cycle_dir, Controls(), jobs_dir).producer.attached
 
 
-def run_state_stamps(cycle_dir: Path) -> tuple[int | None, ...]:
+def run_state_stamps(cycle_dir: Path, jobs_dir: Path) -> tuple[int | None, ...]:
     """What moves `derive_run_state`, in ns: the files it reads and two edges no write marks."""
     layout = CycleLayout(cycle_dir)
     edge = _beat_stale_after(cycle_dir)
-    claim = scan_launch_claim(layout.ledger)
     return (
         newest_mtime_ns(layout.cycle_dir),
         # The producer lock: a directory's mtime sees a child's create AND unlink.
@@ -176,6 +177,6 @@ def run_state_stamps(cycle_dir: Path) -> tuple[int | None, ...]:
         newest_mtime_ns(layout.ledger),
         # A pass that dies writes nothing: past this edge its served mark reads its process gone.
         None if edge is None or time.time() < edge else int(edge * 1e9),
-        # A live claim ends with its process, which no write marks: it never 304s.
-        time.time_ns() if claim is not None and held(Path(claim.claimant_lock)) else None,
+        # A live claim ends with its job's producer, which no write marks: it never 304s.
+        time.time_ns() if _claimed(cycle_dir, jobs_dir) is not None else None,
     )

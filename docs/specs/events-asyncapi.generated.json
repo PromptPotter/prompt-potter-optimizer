@@ -2344,10 +2344,9 @@
             "flight": "#/components/schemas/FlightRecord",
             "fork_graded": "#/components/schemas/ForkGradedRecord",
             "health": "#/components/schemas/HealthRecord",
+            "hold": "#/components/schemas/Hold",
             "intervention": "#/components/schemas/InterventionRecord",
-            "launch_claim": "#/components/schemas/LaunchClaimRecord",
             "launch_clock": "#/components/schemas/LaunchClockRecord",
-            "launch_released": "#/components/schemas/LaunchReleasedRecord",
             "left_comparison": "#/components/schemas/LeftComparisonRecord",
             "llm_call": "#/components/schemas/LLMCallRecord",
             "llm_call_progress": "#/components/schemas/LLMCallProgressRecord",
@@ -2427,16 +2426,13 @@
             "$ref": "#/components/schemas/HealthRecord"
           },
           {
+            "$ref": "#/components/schemas/Hold"
+          },
+          {
             "$ref": "#/components/schemas/InterventionRecord"
           },
           {
-            "$ref": "#/components/schemas/LaunchClaimRecord"
-          },
-          {
             "$ref": "#/components/schemas/LaunchClockRecord"
-          },
-          {
-            "$ref": "#/components/schemas/LaunchReleasedRecord"
           },
           {
             "$ref": "#/components/schemas/LeftComparisonRecord"
@@ -3513,6 +3509,91 @@
         "title": "HealthRecord",
         "type": "object"
       },
+      "Hold": {
+        "additionalProperties": false,
+        "description": "A hold, filed on the book of what it holds: on the account's charge book a run's or a call's\nmoney, open until a bill or a release closes it (a later hold of the same id restates its\nbound); on a cycle's ledger a job's claim of that cycle, until its run declares itself or the\njob dies (`infrastructure/holders.py`).",
+        "properties": {
+          "bound": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "hold_id": {
+            "title": "Hold Id",
+            "type": "string"
+          },
+          "key_source": {
+            "enum": [
+              "host",
+              "user"
+            ],
+            "title": "Key Source",
+            "type": "string"
+          },
+          "ledger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ledger"
+          },
+          "node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "record_type": {
+            "const": "hold",
+            "default": "hold",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenUsageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hold_id",
+          "parent",
+          "key_source",
+          "bound",
+          "resource",
+          "node",
+          "ledger"
+        ],
+        "title": "Hold",
+        "type": "object"
+      },
       "IndividualLineage": {
         "additionalProperties": false,
         "description": "The provenance of one mint: its edges, variations and words; it names no individual.",
@@ -4016,45 +4097,6 @@
         "title": "LLMCallStartRecord",
         "type": "object"
       },
-      "LaunchClaimRecord": {
-        "additionalProperties": false,
-        "description": "Stands only while its process lives: ``claimant_lock`` is the OS lock that process holds.",
-        "properties": {
-          "claimant_lock": {
-            "title": "Claimant Lock",
-            "type": "string"
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          },
-          "record_type": {
-            "const": "launch_claim",
-            "default": "launch_claim",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "stage": {
-            "enum": [
-              "queued",
-              "starting"
-            ],
-            "title": "Stage",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "stage",
-          "job_id",
-          "claimant_lock"
-        ],
-        "title": "LaunchClaimRecord",
-        "type": "object"
-      },
       "LaunchClockRecord": {
         "additionalProperties": false,
         "description": "Banked by the cycle holding the campaign's line, at every launch end, a pause's included.",
@@ -4087,36 +4129,6 @@
           "clock"
         ],
         "title": "LaunchClockRecord",
-        "type": "object"
-      },
-      "LaunchReleasedRecord": {
-        "additionalProperties": false,
-        "description": "Ends that launch's :class:`LaunchClaimRecord` with no run, and without ending the cycle.",
-        "properties": {
-          "detail": {
-            "title": "Detail",
-            "type": "string"
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          },
-          "record_type": {
-            "const": "launch_released",
-            "default": "launch_released",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "job_id",
-          "detail"
-        ],
-        "title": "LaunchReleasedRecord",
         "type": "object"
       },
       "LeftComparisonRecord": {
@@ -5936,10 +5948,9 @@
               "flight",
               "fork_graded",
               "health",
+              "hold",
               "intervention",
-              "launch_claim",
               "launch_clock",
-              "launch_released",
               "left_comparison",
               "llm_call_progress",
               "llm_call",

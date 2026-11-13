@@ -52,7 +52,7 @@ from promptpotter.domain.phases import (
     StopReason,
     stop_reason_outcome,
 )
-from promptpotter.domain.run_records import RunPhaseRecord
+from promptpotter.domain.run_records import Hold, RunPhaseRecord
 from promptpotter.domain.spend import (
     MONEY_AXES,
     NOTHING_METERED,
@@ -113,9 +113,13 @@ class RunStart:
     def release(
         self, ended: CycleResult | BaseException | None = None, *, stamps: CycleHop | None = None
     ) -> None:
-        """A raise is the cycle's stop on *stamps* (a refused one ``NOT_ADMITTED``), and off a
-        cycle the claim goes; a result is what the run returned; nothing, a pass that returned. An
-        admitted job's hold on the account closes with it."""
+        """A raise is the cycle's stop on *stamps* (a refused one ``NOT_ADMITTED``); a result is
+        what the run returned; nothing, a pass that returned. Every hold the job holds closes with
+        it: its hold on the account by a `Release`, filed first so a crash before the job's stamp
+        leaves an unreleased job the reaper still ends; its claim of a cycle as it reads released."""
+        held = self.job_registry.get(self.job_id)
+        if held is not None and held.admitted and not held.released:
+            release_run(self.stores, self.job_id)
         match ended:
             case BaseException():
                 job = self.job_registry.release(self.job_id, ended)
@@ -125,32 +129,23 @@ class RunStart:
                 job = self.job_registry.release(
                     self.job_id, ended.stop_reason, stepped=ended.stepped
                 )
-        if job is not None and job.admitted:
-            release_run(self.stores, self.job_id)
         if isinstance(ended, BaseException):
             self._fail(job, ended, stamps)
 
     def land(self, hop: CycleHop, held: HeldBudget) -> None:
         """The job onto the cycle its hold just minted, its share with it; a slotted job claims the
-        cycle off the job as it stands now: promoted out of the queue, its stage the one the cycle
-        reads."""
+        cycle."""
         land_job(self.stores, self.job_registry, self.job_id, hop, held.share)
-        if not isinstance(self.job.holder, CampaignLaunch):
-            return
-        promoted = self.job_registry.get(self.job_id)
-        if promoted is None:
-            raise RuntimeError(f"job {self.job_id} was cleared while its cycle was minted")
-        claim_cycle(self.stores, self.job_registry, promoted, hop)
+        claim_cycle(self.stores, hop, self.job_id)
 
     def _fail(self, job: Job | None, exc: BaseException, stamps: CycleHop | None) -> None:
+        """Off a cycle the job's release is its claim's: nothing more to stamp."""
+        if stamps is None:
+            return
         stop_reason = StopReason.NOT_ADMITTED if job is None or job.ending is None else job.ending
         stores = self.stores
         # Best-effort — it must never mask *exc*.
         try:
-            if stamps is None:
-                if job is not None and job.hop != UNRESOLVED_HOP:
-                    stores.campaigns.release_claim(job.hop, job_id=self.job_id, detail=str(exc))
-                return
             stores.declare_stop(
                 stamps,
                 RunPhaseRecord.stop(
@@ -271,7 +266,7 @@ def request_jobs(
                 launches=count,
             )
         if hop != UNRESOLVED_HOP:
-            refuse_taken_cycle(stores, job_registry, hop)
+            refuse_taken_cycle(stores, hop)
         if count > 1 and not job_registry.has_room(count):
             raise _machine_busy(job_registry)
         jobs = [
@@ -284,10 +279,15 @@ def request_jobs(
             )
             for _ in range(count)
         ]
-        # A pass takes no claim: it never queues, and holds the cycle itself once admitted (`paid_pass`).
-        if hop != UNRESOLVED_HOP and isinstance(holder, CampaignLaunch):
-            claim_cycle(stores, job_registry, jobs[0], hop)
+        if hop != UNRESOLVED_HOP:
+            claim_cycle(stores, hop, jobs[0].job_id)
         return jobs
+
+
+def claim_cycle(stores: Stores, hop: CycleHop, job_id: str) -> None:
+    """The job's hold on *hop*, on the cycle's ledger, filed where the job first names the cycle:
+    it lives and dies with the job (`holders.py::holder_of`)."""
+    stores.campaigns.append(hop, Hold.of_job(job_id, Budget(), parent=None))
 
 
 @contextmanager
@@ -305,43 +305,35 @@ def destroying(
             else [cycle_id]
         )
         for one in cycle_ids:
-            refuse_taken_cycle(
-                stores, job_registry, CycleHop(campaign_id=campaign_id, cycle_id=one)
-            )
+            refuse_taken_cycle(stores, CycleHop(campaign_id=campaign_id, cycle_id=one))
         yield
 
 
-def deletable_stubs(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> list[CycleHop]:
+def deletable_stubs(stores: Stores, hop: CycleHop) -> list[CycleHop]:
     """What `cleanup-empty-cycles` at *hop* deletes now, the count `/hierarchy` serves and the list
     the command walks alike: its root's stub forks (`CampaignStore.stub_forks`) that no run or pass
     holds (`refuse_taken_cycle`). The act asks again, under the gate (`destroying`)."""
     free: list[CycleHop] = []
     for stub in stores.campaigns.stub_forks(hop):
         try:
-            refuse_taken_cycle(stores, job_registry, stub)
+            refuse_taken_cycle(stores, stub)
         except CycleBusyError:
             continue
         free.append(stub)
     return free
 
 
-def refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> None:
-    """ONE check for launches, passes and destroyers alike, asked under the admission gate: a run
-    attached, or a pass scoring it."""
-    run = stores.run_state(hop)
-    # The pass first: it registers before it holds the cycle, and holding reads as attached.
-    if (holder := job_registry.pass_on(stores.campaigns.workspace, hop)) is not None:
-        status = RunPhase.SCORING.value
-    elif run.producer.attached:
-        claim = stores.campaigns.launch_claim(hop)
-        holder = (
-            job_registry.running_job_for(stores.campaigns.workspace, hop)
-            if claim is None
-            else job_registry.get(claim.job_id)
-        )
-        status = run.run_phase.value
-    else:
+def refuse_taken_cycle(stores: Stores, hop: CycleHop) -> None:
+    """ONE check for launches, passes and destroyers alike, asked under the admission gate: the
+    cycle's holder (`holders.py::holder_of`)."""
+    if (held := stores.campaigns.holder(hop)) is None:
         return
+    holder = held.job
+    status = (
+        RunPhase.SCORING.value
+        if holder is not None and isinstance(holder.holder, ScoringPass)
+        else stores.run_state(hop).run_phase.value
+    )
     raise CycleBusyError(
         job_id="unregistered" if holder is None else holder.job_id,
         status=status,
@@ -352,20 +344,9 @@ def refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop)
     )
 
 
-def claim_cycle(stores: Stores, job_registry: JobRegistry, job: Job, hop: CycleHop) -> None:
-    if job.stage is RunPhase.RUNNING:
-        raise RuntimeError(f"job {job.job_id} is running: its cycle is held, not claimed")
-    stores.campaigns.claim_launch(
-        hop,
-        stage=job.stage,
-        job_id=job.job_id,
-        claimant_lock=job_registry.claimant_lock(),
-    )
-
-
-def refuse_as_busy(stores: Stores, job_registry: JobRegistry, job: Job) -> NoReturn:
+def refuse_as_busy(job_registry: JobRegistry, job: Job) -> NoReturn:
     # A REFUSAL takes its queue entry with it: one left behind starts the run later.
-    withdraw_queued(stores, job_registry, job.job_id)
+    job_registry.cancel_queued(job.job_id)
     raise _machine_busy(job_registry)
 
 
@@ -376,16 +357,6 @@ def _machine_busy(job_registry: JobRegistry) -> MachineBusyError:
         holder_user="" if oldest is None else oldest.user_id,
         started_at=None if oldest is None else oldest.started_at,
     )
-
-
-def withdraw_queued(stores: Stores, job_registry: JobRegistry, job_id: str) -> bool:
-    if (withdrawn := job_registry.cancel_queued(job_id)) is None:
-        return False
-    if withdrawn.hop != UNRESOLVED_HOP:
-        stores.campaigns.release_claim(
-            withdrawn.hop, job_id=job_id, detail="withdrawn from the queue"
-        )
-    return True
 
 
 async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
@@ -399,8 +370,6 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
             # Asked again past the wait: the slot door's claim held off an archive or a delete,
             # never a definition moved while the job waited.
             refuse_campaign(stores, campaign_at(stores, hop))
-            if (promoted := job_registry.get(job.job_id)) is not None:
-                claim_cycle(stores, job_registry, promoted, hop)
 
     t0 = time.perf_counter()
     if (down := await probe_backend(request.backend_type(stores))) is not None:
@@ -549,7 +518,7 @@ def _arm_jobs(
             )
             # A lone arm the door queued: an arm never waits on another machine.
             if jobs[0].queued:
-                refuse_as_busy(stores, job_registry, jobs[0])
+                refuse_as_busy(job_registry, jobs[0])
             return jobs
         case EmbeddedRun():
             return [
@@ -639,6 +608,8 @@ async def slotless_share[S](
             holder=holder,
         ),
     )
+    if hop is not None:
+        claim_cycle(stores, hop, start.job_id)
     try:
         declared, asked = declare_run_budget(
             config.optimization.budget, stores=stores, hop=hop, requested=requested
@@ -733,7 +704,7 @@ async def paid_pass(
         hop=UNRESOLVED_HOP if hop is None else hop,
     )
     if job.queued:
-        refuse_as_busy(stores, job_registry, job)
+        refuse_as_busy(job_registry, job)
     start = RunStart(stores, job_registry, job)
     holding: CycleHold | None = None
     try:

@@ -36,10 +36,9 @@ from promptpotter.domain.run_records import (
     ForkDirection,
     ForkGradedRecord,
     ForkSpec,
+    Hold,
     InterventionRecord,
-    LaunchClaimRecord,
     LaunchClockRecord,
-    LaunchReleasedRecord,
     LeftComparisonRecord,
     PhaseRecord,
     PipelineRead,
@@ -269,31 +268,30 @@ class _CycleFacts:
         return self._held
 
 
-class _LaunchClaim:
-    records: ClassVar[RecordClasses] = (LaunchClaimRecord, LaunchReleasedRecord, RunPhaseRecord)
+class CycleHold(NamedTuple):
+    """The last job's hold on the cycle, and whether a run declared itself since."""
+
+    hold: Hold
+    declared: bool
+
+
+class _CycleHold:
+    records: ClassVar[RecordClasses] = (Hold, RunPhaseRecord)
 
     def __init__(self) -> None:
-        self._found: LaunchClaimRecord | None = None
+        self._found: CycleHold | None = None
 
-    def feed(self, record: LaunchClaimRecord | LaunchReleasedRecord | RunPhaseRecord) -> None:
+    def feed(self, record: Hold | RunPhaseRecord) -> None:
         match record:
             case RunPhaseRecord():
-                self._found = None
-            case LaunchClaimRecord(job_id=job_id):
-                first = self._found
-                # A job's re-claim moves its stage only: the job holds the cycle since its first claim.
-                self._found = (
-                    record
-                    if first is None or first.job_id != job_id
-                    else record.model_copy(update={"timestamp": first.timestamp})
-                )
-            case LaunchReleasedRecord(job_id=job_id):
-                if self._found is not None and job_id == self._found.job_id:
-                    self._found = None
+                if self._found is not None:
+                    self._found = self._found._replace(declared=True)
+            case Hold():
+                self._found = CycleHold(record, declared=False)
             case _:
                 assert_never(record)
 
-    def value(self) -> LaunchClaimRecord | None:
+    def value(self) -> CycleHold | None:
         return self._found
 
 
@@ -751,7 +749,7 @@ LedgerIndex.readers(
     _LeftComparison,
     _LaunchClocks,
     _CycleFacts,
-    _LaunchClaim,
+    _CycleHold,
     _Standing,
     _Answers,
     _Verification,
@@ -813,8 +811,8 @@ def scan_campaign_ceiling(root_ledger: Path) -> Budget:
     return Budget() if held is None else held.budget
 
 
-def scan_launch_claim(ledger_path: Path) -> LaunchClaimRecord | None:
-    return _view(ledger_path, _LaunchClaim)
+def scan_cycle_hold(ledger_path: Path) -> CycleHold | None:
+    return _view(ledger_path, _CycleHold)
 
 
 def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
