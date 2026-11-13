@@ -54,9 +54,9 @@ inverse-gamma prior so `φ→0` cannot report infinite confidence. **A sheet who
 underdispersion (measured `φ = 0.10`, θ_se 0.28 where the information gives 0.89).
 
 **1PL by default; a dataset graduates to 2PL where it wins held-out CV** (`enable_2pl_graduation`, on).
-2PL is the field default, so 1PL is what needs defending —
-[`../research/external-constraints.md`](../research/external-constraints.md) § The preprint carries the
-benchmarks. 2PL adds per-sample discrimination `aₛ`; it graduates per dataset, behind the same θ
+1PL is the minimum: one difficulty per sample, and θ subset-invariant across whichever samples were
+scored. 2PL adds per-sample discrimination `aₛ`, a second parameter per sample that a thin dataset
+cannot pin down, so it graduates per dataset, behind the same θ
 interface, only when it clears a BIC gate and beats 1PL on held-out CV log-likelihood by a margin
 (`intelligence/rasch.py::graduate_ruler_model`), so a thin dataset never regresses.
 
@@ -169,9 +169,9 @@ a re-ask replays the content-addressed caches, which is why the L4 panel carries
 *Between* → `aₛ`. **Screen a whole dataset before wiring it, then pick the subset inside one** — the
 hard-sample leaderboard, `pick_value` below.
 
-Source: **`p1`, [arXiv:2604.08801](https://arxiv.org/abs/2604.08801)** (its *system* / *user prompt*
-= our *candidate* / *sample*) — justification for the open `aₛ`-weighted subset pick. **A small
-high-separation subset beats a large one**, and **a later edition of a dated benchmark is a
+Why the open `aₛ`-weighted subset pick: a sample's information about θ is `aₛ²·p(1−p)`, so at equal
+calls **a small high-separation subset beats a large one**. And a benchmark dated after the target
+model's training cutoff cannot be in its training data, so **a later edition of a dated benchmark is a
 contamination-resistant held-out set** (one year's AIME → the next; not a substitute for a canonical
 split).
 

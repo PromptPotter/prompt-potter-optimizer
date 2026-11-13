@@ -267,20 +267,11 @@ Every optimizer, peers included, is a manifest the bench runs, the held-out benc
 
 - **Composite fitness (C2):** P2 per-candidate rollup (after P3) · P3
   `compile_post_aggregate_fitness(formula)` · P4 a `pareto` selector with an eliminator reading the front.
-- **SIFT's members:** the self-proposer; the parent selector `P(i) ∝ exp(−α·r_BT − β·r_acc − η·log(1+v))`;
-  a pairwise judge with regularized Bradley-Terry; the `fixed_gate` eliminator.
 - **One PUCT acquisition `Q + c·P·√ΣN/(1+N)`** in place of the greedy pick
   (`application/scoring/selection.py::elect_round_winner`) and UCB1 rebase: P a predicted lift banked
   first as an inert field beside realized θ lift, Q measured θ, the rebase forfeit its cost term; no learned value model until a surrogate's held-out error is below
   the lifts chased. Open: θ for unmeasured children; forest vs round normalization; whether a cut arm is
   a legal parent.
-
-## SIFT reproduction
-
-A `sift` preset (a frozen sampler, `fixed_gate`, no controller, one variant per round); the paper is the
-ablation ladder from it. **S1** the judge, parent selector and `fixed_gate` on `justlogic/d234`, closing
-when SIFT-on-prompts vs SIFT-on-prompts + PoBB is served by `evidence` · **S2** the self-proposer · **S3**
-code artifacts + Polyglot, only if S1 makes it worth it.
 
 ## TypeQL bench
 
@@ -317,8 +308,7 @@ What is true of L4 is [`../concepts/l4.md`](../concepts/l4.md)'s. Owed:
 5. **Cross-sample terms, unbuilt:** area-under-lift-vs-budget; `mean lift − λ·std` through the post-aggregate
    formula, never the election rank key; PoBB-decisive promotion over inner arms
    (`application/scoring/selection.py::prior_read`).
-6. **Self-adopt mode (unbuilt, off by default)** — SIFT's ([`../research/landscape.md`](../research/landscape.md))
-   loop with our statistics in its gates: on a **decisive** outer election the winner's overrides become
+6. **Self-adopt mode (unbuilt, off by default)** — on a **decisive** outer election the winner's overrides become
    the outer campaign's `optimization.nodes` overlay and the outer cycle forks onto it; the instrument is
    never adopted. Preconditions: a held-out panel of other task families scored only by the adoption gate,
    worst-case non-inferiority per family, anchor to C0 with rollback by fork, a leakage lint on the
@@ -340,8 +330,8 @@ order: (1) `mix` on the opening node, a knob, then the mode head-to-head (PAID),
 cells, with a fresh individual as donor separating recombination from macro-mutation; (2) L4 reach,
 `mix` and access as levers (`application/optimizers/nodes.py::LlmNode.outer_levers`), the instrument
 never; (3) a pool fed while a campaign runs, its writers declared, a write a record at a round boundary,
-a controlled arm taking none; (4) parent and survivor rules past `tournament`, ranked on θ alone, and the
-paper compositions (EvoPrompt, PhaseEvo, GEPA's merge). Never a shipped block library.
+a controlled arm taking none; (4) parent and survivor rules past `tournament`, ranked on θ alone, and
+crossover (GEPA's merge). Never a shipped block library.
 
 ## Survey round
 
