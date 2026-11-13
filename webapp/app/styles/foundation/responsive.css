@@ -13,6 +13,7 @@
     flex:1 1 auto;min-width:0;max-width:min(238px,100%);
     padding:var(--space-4) var(--space-10);gap:var(--space-4);
   }
+  .wf-hero-node.llm.wf-hero-node-multi{min-width:0;max-width:100%}
   .wf-hero-node.llm .lbl{font-size:var(--text-md)}
   .wf-hero-node.llm .head{gap:var(--space-6)}
   .wf-hero-node.llm .ico svg{width:18px;height:18px}

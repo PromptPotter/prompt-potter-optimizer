@@ -1,6 +1,6 @@
 
 /* `both-edges` keeps the spine at the unit header's x: a one-edge gutter biases the centre. */
-.content{flex:1;overflow-y:auto;scrollbar-gutter:stable both-edges;padding:var(--space-18);container-type:inline-size;container-name:content}
+.content{flex:1;overflow-y:auto;scrollbar-gutter:stable both-edges;padding:var(--space-18)}
 
 @media (max-width:880px){
   .content{padding:var(--space-12)}

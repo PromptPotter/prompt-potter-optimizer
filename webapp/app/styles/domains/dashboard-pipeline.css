@@ -126,10 +126,6 @@
 }
 /* A ring folds to its box (`layoutGrid` `maxCols`), so it takes the whole width it is given. */
 .wf-hero-node.llm.wf-hero-node-multi.is-ring{width:100%;max-width:none}
-/* Here, not in responsive.css: domains/ load after foundation/, so the same override there loses at equal specificity. */
-@media (max-width:640px){
-  .wf-hero-node.llm.wf-hero-node-multi{min-width:0;max-width:100%}
-}
 /* The top padding is glow room: `pulse-active` reaches 14px and the rail's own clip would shave the halo. */
 .wf-hero-multi-rail{max-width:100%;padding-top:8px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-behavior:smooth}
 /* No height: one contradicting the strip's `height={CELL_H}` makes `meet` scale the level instead of shortening it. */

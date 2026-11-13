@@ -80,7 +80,7 @@
 @media (min-width:640px){
   .snippet-library-search{font-size:var(--text-sm)}
 }
-@media (min-width:880px){
+@media not all and (max-width:880px){
   .prompt-lib{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);align-items:start}
   .prompt-lib > .snippet-library{position:sticky;top:var(--space-6)}
   .snippet-list{max-height:calc(var(--box-scroll-max) * .6)}
