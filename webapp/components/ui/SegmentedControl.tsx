@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
+import { HoverCard } from "./HoverCard";
 import s from "./SegmentedControl.module.css";
 
 export interface Segment<T extends string> {
@@ -7,7 +8,8 @@ export interface Segment<T extends string> {
   // An icon label REQUIRES `ariaLabel`.
   label: ReactNode;
   ariaLabel?: string;
-  title?: string;
+  // What the segment reads, or why it is off: a HoverCard, so a tap reads it too.
+  hint?: string;
   disabled?: boolean;
   fill?: "full" | "part" | undefined;
 }
@@ -32,19 +34,25 @@ export function SegmentedControl<T extends string>({
     <span className={cx(s.group, size === "lg" && s.lg, className)} role="group" aria-label={ariaLabel}>
       {options.map((o) => {
         const on = o.value === value;
-        return (
+        const segment = (
           <button
             key={o.value}
             type="button"
             className={cx(s.segment, o.fill && s[o.fill], on && s.on)}
             aria-pressed={on}
             aria-label={o.ariaLabel}
-            title={o.title}
             disabled={o.disabled}
             onClick={() => onChange(o.value)}
           >
             {o.label}
           </button>
+        );
+        return o.hint ? (
+          <HoverCard key={o.value} content={o.hint}>
+            {segment}
+          </HoverCard>
+        ) : (
+          segment
         );
       })}
     </span>

@@ -230,7 +230,7 @@ function segmentFor(c: ArmRow, verdict: CandidateVerdict | undefined): Segment<s
         </>
       ),
       ariaLabel: `${arm.label}, rejected`,
-      title: reason ?? "Rejected by validation before it ran.",
+      hint: reason ?? "Rejected by validation before it ran.",
     };
   }
   const fitness = own?.fitness?.value;

@@ -10,6 +10,7 @@ import {
   Button,
   CopyButton,
   Dialog,
+  HoverCard,
   IconSliders,
   Toolbar,
   ToolbarSpacer,
@@ -50,15 +51,13 @@ export function OptimizerCard() {
           {status}
         </span>
         <ToolbarSpacer />
-        <CopyButton
-          data={roundNodes}
-          disabled={Object.keys(roundNodes).length === 0}
-          title={
-            Object.keys(roundNodes).length === 0
-              ? "No node of this round has finished yet"
-              : "Copy the viewed round's nodes as JSON"
-          }
-        />
+        {Object.keys(roundNodes).length === 0 ? (
+          <HoverCard content="No node of this round has finished yet">
+            <CopyButton data={roundNodes} disabled title="Copy the viewed round's nodes as JSON" />
+          </HoverCard>
+        ) : (
+          <CopyButton data={roundNodes} title="Copy the viewed round's nodes as JSON" />
+        )}
         <Button
           variant="ghost"
           className={cx("workflow-mech", clashCount > 0 && "has-clash")}

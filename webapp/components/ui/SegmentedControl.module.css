@@ -16,13 +16,14 @@
   background: transparent;
   color: var(--color-text-secondary);
   border: 0;
-  border-right: 0.5px solid var(--color-border);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 
-.segment:last-child {
-  border-right: 0;
+/* A hinted segment sits in its HoverCard's span, so the divider follows the group's own child. */
+.group > .segment:not(:last-child),
+.group > :not(:last-child) > .segment {
+  border-right: 0.5px solid var(--color-border);
 }
 
 .lg .segment {

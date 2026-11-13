@@ -89,7 +89,7 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
             label: String(d.cells),
             fill: d.fill ?? undefined,
             disabled: pending || !d.pickable,
-            title: lookaheadDepthLabel(d),
+            hint: lookaheadDepthLabel(d),
           }))}
         />
       </span>
