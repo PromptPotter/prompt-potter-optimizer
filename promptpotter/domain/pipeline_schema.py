@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal, NamedTuple, get_args
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from promptpotter.domain.layer_fold import Lay
 from promptpotter.domain.pipeline_params import (
     PARAM_FORBIDDEN_KEYS,
     RESERVED_NODE_NAMES,
@@ -44,7 +45,7 @@ SCHEMA_OWNED_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozen
     {*OUTPUT_CONTRACT_KEYS, "schema_family", "schema_version"}
 )
 
-# `pipeline_params.py::apply_node_overlay` merges an `object` one level; an `array` replaces wholesale.
+# `pipeline_params.py::node_rule` merges an `object` one level; an `array` replaces wholesale.
 NESTED_PARAM_TYPES: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {"object", "array"}
 )
@@ -704,24 +705,9 @@ class NodeSearchNarrowing(FrozenModel):
     ``param_allowed_values`` REPLACES its value space, so an operator may ADD a value.
     """
 
-    param_keys: list[str] | None = None
-    prompt_fields_held: list[str] = Field(default_factory=list)
+    param_keys: Annotated[list[str] | None, Lay.SUBSET] = None
+    prompt_fields_held: Annotated[list[str], Lay.UNION] = Field(default_factory=list)
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
-
-    def over(self, later: "NodeSearchNarrowing") -> "NodeSearchNarrowing":
-        """*later* laid on this one by part, as ``PipelineSchema.narrow`` lays this one on the dataset's."""
-        keys = later.param_keys
-        if self.param_keys is not None:
-            keys = (
-                list(self.param_keys) if keys is None else [k for k in keys if k in self.param_keys]
-            )
-        held = [*self.prompt_fields_held]
-        held += [f for f in later.prompt_fields_held if f not in held]
-        return NodeSearchNarrowing(
-            param_keys=keys,
-            prompt_fields_held=held,
-            param_allowed_values={**self.param_allowed_values, **later.param_allowed_values},
-        )
 
 
 class ParamIntent(FrozenModel):
@@ -762,7 +748,7 @@ def narrowing_of(
 class ManifestNodeOverlay(FrozenModel):
     """One optimizer node's delta over its manifest's ``config``."""
 
-    config: dict[str, Any] = Field(default_factory=dict)
+    config: Annotated[dict[str, Any], Lay.CALL] = Field(default_factory=dict)
 
 
 DEFAULT_PIPELINE = "default"

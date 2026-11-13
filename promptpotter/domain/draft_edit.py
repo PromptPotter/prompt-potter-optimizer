@@ -45,8 +45,7 @@ class PartialOptimizationConfig(
 
 class ConfigEdit(_partial(CampaignConfig, optimization=OptimizationOverrides)):  # type: ignore[misc]
     """A check-in edit's ``config``, by `CampaignConfig`'s own paths. Only the fields sent move
-    anything: its ``exclude_unset`` dump is the layer `campaign_config.py::merge_config_layers`
-    lays."""
+    anything: its ``exclude_unset`` dump is a layer of `campaign_config.py::CAMPAIGN_RULE`'s fold."""
 
 
 class PartialCampaignConfig(_partial(CampaignConfig, optimization=PartialOptimizationConfig)):  # type: ignore[misc]
@@ -85,7 +84,7 @@ class EditDraftPatch(StrictModel):
     raw_task_description: str | None = Field(default=None, max_length=16384, pattern=r"\S")
     config: ConfigEdit | None = Field(
         default=None,
-        description="Laid over the draft's config by `campaign_config.py::merge_config_layers`. "
+        description="Laid over the draft's config by `CampaignConfig`'s rule per key. "
         "A string `scoring` names the criterion whole; a `scoring` "
         "mapping is folded into the criterion the draft runs, key by key: `matcher` picks "
         "the per-sample matcher, `dials` the composite's weights (the empty string clears them), "

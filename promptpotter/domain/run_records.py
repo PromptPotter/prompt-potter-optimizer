@@ -44,8 +44,8 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.pipeline_params import (
     NodeCall,
     PipelineParams,
-    apply_node_overlay,
     laid_calls,
+    lay_nodes,
 )
 from promptpotter.domain.pipeline_schema import (
     CapabilityMenu,
@@ -958,7 +958,7 @@ class CycleSeed(FrozenModel):
     optimizer_narrowing: dict[str, NodeSearchNarrowing] = Field(
         default_factory=dict,
         description="Per-fork search-space lock edits, laid on its parent's by part "
-        "(`NodeSearchNarrowing.over`): `param_keys` subsets, `prompt_fields_held` joins, "
+        "(`NodeSearchNarrowing`'s fields): `param_keys` subsets, `prompt_fields_held` joins, "
         "`param_allowed_values` replaces per param. Empty for an unedited fork or a "
         "campaign-from-origin seed.",
     )
@@ -980,7 +980,7 @@ class CycleSeed(FrozenModel):
 
     def runs(self) -> dict[str, dict[str, Any]]:
         """Each node's config the fork runs: its candidate's record under the operator's edit."""
-        return apply_node_overlay(self.origin_params or {}, laid_calls(self.pipeline_overlay), None)
+        return lay_nodes(self.origin_params or {}, laid_calls(self.pipeline_overlay))
 
 
 class WallClock(FrozenModel):

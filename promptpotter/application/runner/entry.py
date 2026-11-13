@@ -39,7 +39,7 @@ from promptpotter.application.runner.termination import (
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import run_clamp
-from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, apply_config_overrides
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, seed_layer
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import (
     SELF_PAUSE_CAUSE,
@@ -379,7 +379,7 @@ def _mint_and_rebase_fork(
         .past_cut(cut)
         .under(rebase_req.config_overrides or ConfigOverrides())
     )
-    prep = replace(prep, campaign_config=apply_config_overrides(prep.campaign_config, overrides))
+    prep = replace(prep, campaign_config=prep.campaign_config.overlaid(seed_layer(overrides)))
     held = store.standing_rounds(parent, moment=None).rounds
     learned = held[max(held)].close.optimizer_state
     new_cycle_id = cut_fork(

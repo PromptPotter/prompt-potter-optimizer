@@ -29,14 +29,13 @@ from promptpotter.domain.campaign_config import (
     ArmGateMode,
     CampaignConfig,
     OptimizationConfig,
-    lay_node_overlays,
 )
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
 from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-from promptpotter.domain.pipeline_params import NodeCall
+from promptpotter.domain.pipeline_params import NodeCall, lay_nodes
 from promptpotter.domain.pipeline_schema import (
     DEFAULT_PIPELINE,
     ManifestNodeOverlay,
@@ -349,15 +348,18 @@ def _inner_optimization(
 ) -> OptimizationConfig:
     """An inner cycle's selection key: its nodes under the inner gate. ``n_samples=None`` leaves
     the sampler's size out, which is what the identity hashes."""
-    laid: dict[str, ManifestNodeOverlay] = {}
-    for layer in (opt.nodes, nodes, depth_nodes):
-        laid = lay_node_overlays(laid, layer)
-    inner = opt.model_copy(update={"nodes": laid, "arm_gate": INNER_ARM_GATE})
+    layers = [{n: o.config for n, o in layer.items()} for layer in (opt.nodes, nodes, depth_nodes)]
+    inner = _with_nodes(opt.model_copy(update={"arm_gate": INNER_ARM_GATE}), lay_nodes(*layers))
     sampler = select_optimizer(inner).sampler
     if n_samples is None or sampler.size_knob is None:
         return inner
-    size = {sampler.name: ManifestNodeOverlay(config={sampler.size_knob: n_samples})}
-    return inner.model_copy(update={"nodes": lay_node_overlays(laid, size)})
+    size = {sampler.name: {sampler.size_knob: n_samples}}
+    return _with_nodes(inner, lay_nodes(*layers, size))
+
+
+def _with_nodes(opt: OptimizationConfig, laid: Mapping[str, dict[str, Any]]) -> OptimizationConfig:
+    nodes = {n: ManifestNodeOverlay(config=cfg) for n, cfg in laid.items()}
+    return opt.model_copy(update={"nodes": nodes})
 
 
 # `problem_description` and `answer_format` are absent: they carry the injection slots and the output contract.

@@ -729,6 +729,7 @@ async def forked_twice(stores: Stores, fork: CycleHop, rounds: int) -> None:
             stores=stores,
             hop=fork,
             from_round=from_round,
+            cleared={},
             seed=CycleSeed(),
             keep_rounds=True,
         ).take(stores)

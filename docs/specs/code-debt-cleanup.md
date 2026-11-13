@@ -261,9 +261,8 @@ row it closes.
   reads an arm with no shared cells as a 0.0 mean, so a replay over a round that lacks the arm confirms
   it instead of answering it absent. Action: an arm with no shared cells is absent, as in the race's
   replay. **Re-test:** `pytest tests/test_archive.py -k replays_its_decisions` covers `population_kept`.
-- **`tests/test_identity.py` reaches the spawn's private `_laid_arm`** (`_l4_arm`, `_l4_laid`, the depth
-  step). Action: `_laid_arm` and `_one_model` ride `cfg`, and the journey drives `_open_seat` over an
-  offline inner campaign. **Rides with:** rk-dec 3. **Re-test:** `grep -n "_laid_arm" tests/test_identity.py` is empty.
+- **`tests/test_identity.py` lays the spawn's arm beside its seat** (`_l4_arm`, `_l4_laid`, the depth
+  step). Action: the journey drives `_open_seat` over an offline inner campaign. **Rides with:** rk-dec 3.
 - **The browser inks a served state from its own map**: `webapp/lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`
   and `PipelineFlow`'s `tone`. Action: they go once a served word row carries its `Tone`
   (`domain/said.py`). **Re-test:** `git grep -n "MOVEMENT_CLASS" -- webapp/lib`.
@@ -461,11 +460,6 @@ row it closes.
 - **An operator's authored arm is refused a field they held**: `bench/children.py::carried_writes`
   refuses every child a `prompt_fields_held` field. Decided (2026-11-10): the operator's arm writes it;
   `carried_writes` refuses children only. **Rides with:** rk-run 5.
-- **Two node-config merges disagree**: `campaign_config.py::merge_config_layers` deep-merges campaign
-  documents, while `pipeline_params.py::apply_node_overlay` merges one level, typed by schema. Decided
-  (decision 19): the overlay rule — a new value replaces the old, only object-typed params merge their
-  keys, a model changed without a route drops the old route — folded into `ParamLayers`. **Rides with:**
-  rk-run 7. **Re-test:** `git grep -c "merge_config_layers" -- promptpotter` is 0 or holds no node rule.
 - **A field cleared in the steer panel cannot drop a candidate's value**: a fork's seed only adds over
   the candidate it forks. Action: the steer sends `EditDraftPatch.reset`'s delete. **Rides with:**
   rk-run 7. **Re-test:** clear a field in `SteerForkPanel`; the fork launches without the candidate's value.
@@ -824,24 +818,25 @@ open holds. These rows were in its brief and not built.
   **Rides with:** passes 4, after holders; its Owns gain `domain/command_events.py` (passb-2 3's stopped
   pass rides this row). **Re-test:** kill a verify mid-pass; its command reads ended.
 
-### cfg (the re-key window, beside payer)
+### cfg-2 (what cfg left at landing 50; the re-key window)
 
-- **The merge rule is chosen by the door, not declared by the document**: `runner/inner/spawn.py`'s
-  `_laid_arm` and `potter/records.py`'s `steered_onto` merge by dict spread, skipping
-  `pipeline_params.py`'s rule that a new model drops `route_order`; `pipeline_manifest.py`'s `laid_over`
-  passes no types, so an object knob is replaced whole; "" means unchanged, emptied, no write, reset or
-  inherit by site; reset has two path grammars (`draft_patch.py`, `command_kinds.py`); the patch check
-  is spelled about five times, healing in some and raising in others. Action: a layer is (name, a patch
-  or a function of the fold so far); a patch sets, clears or merges per path, by the rule the
-  document's schema declares for that key; one fold returns the document and a provenance stamp per key
-  (`pipeline_resolve.py::ParamLayers` already is this for target params). `merge_config_layers`, the
-  knob-layer projections, `apply_config_overrides`, `_laid_arm` / `_one_model`, the `steered*` memory,
-  both reset grammars and the browser's "" handling go; ≈−0.9k lines. About 58 of the engine's 611
-  `dict[str, Any]` sites are node-config bags, the same overlay typed two ways (`dict[str, NodeCall]`
-  on `CycleSeed`, `dict[str, dict[str, Any]]` on `ForkSeed`): each becomes the one typed document. It closes rk-run's two-merges,
-  cleared-steer-field, relabel and `config_map` rows, admit-2's untyped steer and retired-knob rows,
-  ren 8's node-config census, the pipeline-switch row by explicit layer names, and rk-dec 3 (a model
-  per inner node rides it). One L4 re-key and its wipe. **Rides with:** cfg.
+cfg landed the one layered-document fold (`domain/layer_fold.py`) and every door laying through it. Left:
+the defaults' one home (about 40 config constructions and the `exclude_defaults` identity re-key), the
+patch check spelled once, the browser's "" handling and the `steered*` memory as a fold layer.
+
+- **A proposal carries the overlay before it is stripped**: `node_context.py:629` builds
+  `Proposal(overlay=asked)` from the unstripped overlay, so a hallucinated node reaches
+  `l1.py::parse_population` and `PipelineParams.overlaid`'s heal is load-bearing. Action: `Proposal`
+  carries `carried_writes`' stripped config. This moves L1's conviction checks, and then the patch check
+  is spelled once and raises. **Rides with:** cfg-2.
+- **The merge rule is chosen by the door, not declared by the document**: "" means unchanged,
+  emptied, no write, reset or inherit by site; the patch check is spelled about five times, healing in
+  some and raising in others. Action: the `steered*` memory and the browser's "" handling go. About 58
+  of the engine's 611 `dict[str, Any]` sites are node-config bags, the same overlay typed two ways
+  (`dict[str, NodeCall]` on `CycleSeed`, `dict[str, dict[str, Any]]` on `ForkSeed`): each becomes the
+  one typed document. It closes rk-run's cleared-steer-field and relabel rows, admit-2's untyped steer
+  and retired-knob rows, ren 8's node-config census and the pipeline-switch row by explicit layer
+  names. **Rides with:** cfg.
 - **Target-prompt field order is a shared constant**: `domain/CLAUDE.md` rules that field order is
   the node's (`NodePromptInfo.fields`), never a shared constant, yet `optimizer_template.py::PROMPT_FIELDS`
   orders a target's parts (`pipeline_responses.py:341`, the library's `suits`) and seeds a connector's
@@ -900,9 +895,6 @@ open holds. These rows were in its brief and not built.
 - **The election has no one-arm read**: `scoring/selection.py:177` fits a prior through
   `candidate_abilities({"read": rows}, …)`, a fake arm key. Action: a one-arm read on the election's fit.
   **Rides with:** rk-dec 2. **Re-test:** `git grep -n '{"read": ' -- promptpotter/application/scoring/selection.py`.
-- **An L4 arm's model answers every inner node**: `runner/inner/spawn.py::_one_model` lays the first
-  edit's model on every llm node. Action: an L4 arm can name a model per inner node. **Rides with:**
-  rk-dec 3. **Re-test:** an arm naming a model on `l1_critique` alone answers it on that node only.
 - **Round 0 is walked before the cycle's init closes**: `origin.py::establish_campaign_origin` walks it
   outside its door, `runner/loop.py::open_origin_round` holds its close and gate, and
   `bench/node_context.py::rewalk_origin` walks it again for the repair; `origin.py::lock_criterion`
@@ -969,8 +961,7 @@ open holds. These rows were in its brief and not built.
   bypasses the 49 classes' `model_validator`s (`OptimizerState`'s slices in `runner/entry.py`,
   `CycleSeed` in `fork_siblings.py`, the command payloads `commands/dispatcher.py` rewrites); about
   100 update keys are string literals no rename or mypy sees, so a stale key lands unrefused while the
-  renamed field keeps its old value; and `CampaignConfig` has a validating constructor
-  (`effective_config`) beside a copying one (`campaign_config.py::apply_config_overrides`). No live
+  renamed field keeps its old value. No live
   breach found in the sites sampled. Action: `StrictModel.model_copy` revalidates whenever `update` is
   given, and a probe keeps the count from rising. **Rides with:** valid 3. **Re-test:** a copy with a
   stale key or a state its validator refuses raises.

@@ -23,7 +23,7 @@ from promptpotter.application.scoring.formula.compiler import (
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.domain.arms import ArmState, Cut, arm_elimination, is_electable
-from promptpotter.domain.campaign_config import CampaignConfig, apply_config_overrides
+from promptpotter.domain.campaign_config import CampaignConfig, seed_layer
 from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Lens
@@ -229,7 +229,7 @@ def load_mask_record(
         crowns = lines[cid].crowns
         hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
         scorer = scorer_of(
-            apply_config_overrides(cycle_config(stores, campaign, hop).config, overrides),
+            cycle_config(stores, campaign, hop).config.overlaid(seed_layer(overrides)),
             verifier_graded=False,
         )
         # The mask names slots in the bank the cycle drew; its rows pair on keys.

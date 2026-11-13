@@ -12,7 +12,6 @@ from pydantic.fields import FieldInfo
 from pydantic_core import to_jsonable_python
 
 from promptpotter.application import optimizers
-from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, knob_label
 from promptpotter.domain.pipeline_schema import KnobLayer, KnobLayers
 from promptpotter.domain.said import Tone
@@ -402,8 +401,9 @@ def _knob_rows(
     return rows
 
 
-def config_map(config: CampaignConfig, laid_by: KnobLayers) -> ConfigMapResponse:
-    selected = select_optimizer(config.optimization)
+def config_map(
+    config: CampaignConfig, selected: SelectedOptimizer, laid_by: KnobLayers
+) -> ConfigMapResponse:
     rows = _knob_rows(config, selected, laid_by)
     groups = [
         ConfigEstimandGroup(

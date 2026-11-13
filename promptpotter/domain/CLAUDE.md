@@ -7,7 +7,7 @@ No I/O, no async (`scripts/gate.py::_LAYERING`). Every model inherits `StrictMod
 - **`ForkSpec.keep_rounds` names the act** (unset `operator_steered`, set `operator_rewind`); `cut_fork` is its one writer. <!-- probe: git grep -cE "ForkSpec\(" -- promptpotter/*.py <= 2 -->
 - **Two θ are differenced only through `AbilityReading.comparable_to` / `.lift_over`**, and a lift is judged only by `ThetaLift.clears` <!-- probe: git grep -cE "\.theta - " -- promptpotter/*.py <= 1 -->; a cell the `DeltaRuler` does not carry enters no θ.
 - **`CycleHop` is the `(campaign, cycle)` address** (`Session.hop`, `Job.hop`), never re-paired from two `str`s.
-- **`pipeline_params.py::PipelineParams` is built only by reading the laid document it dumps back to**, so whatever it builds reads back; `STEPS_KEY`, `NodeCall`'s fields and `apply_node_overlay` are the one spelling of the key, the call-key rosters and the node fold. <!-- probe: git grep -cE "== .steps." -- promptpotter/*.py == 0 -->
+- **`pipeline_params.py::PipelineParams` is built only by reading the laid document it dumps back to**, so whatever it builds reads back; `STEPS_KEY`, `NodeCall`'s fields and `node_rule` are the one spelling of the key, the call-key rosters and the node fold's rule. <!-- probe: git grep -cE "== .steps." -- promptpotter/*.py == 0 -->
 - **The estimator digest hashes `l4/proxies`**, so only what decides a cell's number lives there.
 - **`spend.py::TokenAccount` IS the carrier**: never hand-convert it at a call site.
 - **`deprecated` names the fatal-warning sample lifecycle only** (`is_deprecated`, `CellFold.deprecated`), never a back-compat shim: do not delete it as one.

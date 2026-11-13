@@ -11,9 +11,9 @@ from pydantic import ValidationError
 from promptpotter import connectors
 from promptpotter.application.datasets.authored import (
     ConfigLayers,
-    campaign_config_over,
     dataset_campaign_block,
     load_dataset_campaign_config,
+    selected_config,
 )
 from promptpotter.application.datasets.draft_campaign import (
     UPLOAD_DEFINITION_KEYS,
@@ -31,9 +31,8 @@ from promptpotter.application.free_tier import (
     FreeFence,
     free_fence,
     free_task_models,
-    free_tier,
+    free_tier_layers,
     free_tier_overlay,
-    with_free_tier_layer,
 )
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.coupon import Send
@@ -61,14 +60,15 @@ from promptpotter.domain.arms import Concluded
 from promptpotter.domain.bench import PartitionRecord, partition_bank, restored_partition
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
 from promptpotter.domain.campaign_config import (
+    CAMPAIGN_RULE,
     CampaignConfig,
     CycleConfig,
-    OptimizationConfig,
+    LaidSpan,
     effective_config,
-    scoring_locked,
 )
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.cycle_paths import CycleHop, Subject
+from promptpotter.domain.layer_fold import Layer, fold_layers
 from promptpotter.domain.opt_search_point import render_prompt
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
@@ -80,8 +80,8 @@ from promptpotter.domain.pipeline_overlay import (
 from promptpotter.domain.pipeline_params import (
     NodeCall,
     PipelineParams,
-    apply_node_overlay,
     laid_calls,
+    node_rule,
 )
 from promptpotter.domain.pipeline_parsing import (
     merge_node_blocks,
@@ -200,21 +200,22 @@ class ParamLayers:
     recorded: Mapping[str, Any] = field(default_factory=dict)
 
     def fold(self) -> FoldedParams:
-        params = PipelineParams().with_steps(list(self.schema.active_steps))
+        layers = [
+            Layer(source, functools.partial(self._running, source)) for source in PARAM_LAYERS
+        ]
+        folded = fold_layers(node_rule(self.schema), layers)
+        provenance: dict[str, dict[str, ParamSource]] = {
+            node: dict(stamps) for node, stamps in folded.stamped().items()
+        }
+        return FoldedParams(self._params(folded.document), provenance)
+
+    def _params(self, nodes: Mapping[str, Mapping[str, Any]]) -> PipelineParams:
+        return PipelineParams().with_steps(list(self.schema.active_steps)).with_nodes(nodes)
+
+    def _running(self, source: ParamLayer, laid: Mapping[str, Any]) -> dict[str, Any]:
         running = self.schema.running
-        provenance: dict[str, dict[str, ParamSource]] = {}
-        for source in PARAM_LAYERS:
-            laid = {
-                node: dict(cfg)
-                for node, cfg in self._layer(source, params).items()
-                if node in running
-            }
-            params = params.with_nodes(
-                apply_node_overlay(
-                    params.laid_nodes, laid, self.schema, source=source, provenance=provenance
-                )
-            )
-        return FoldedParams(params, provenance)
+        layer = self._layer(source, self._params(laid))
+        return {node: cfg for node, cfg in layer.items() if node in running}
 
     def _layer(self, source: ParamLayer, params: PipelineParams) -> Mapping[str, Any]:
         match source:
@@ -372,7 +373,7 @@ def _draft_local(stores: Stores, draft: DraftFile) -> dict[str, Any]:
     dataset's own file."""
     match draft.basis:
         case UploadBasis() as upload:
-            half = campaign_config_over(campaign_defaults(), draft.config)
+            half = ConfigLayers(campaign_defaults(), draft.config).config()
             return upload_pipeline_json(upload, half.pipeline_overlay)
         case DatasetBasis(dataset=name):
             return runnable_definition(resolve_dataset(stores, name)).pipeline
@@ -585,41 +586,18 @@ def laid_config(
     stores: Stores, layers: ConfigLayers, *, connector: str, schema: PipelineSchema | None
 ) -> LaidConfig:
     """THE read of a run's config, the draft's and the mint's: the dataset's block, the door's
-    edit, then a free account's tier, bound to each node of *schema* (``None`` binds none). The
-    edit's ``scoring`` is the criterion whole, so it replaces the dataset's."""
-    dataset = layers.laid_dataset()
-    config = campaign_config_over(dataset, layers.campaign)
+    edit, then a free account's tier, bound to each node of *schema* (``None`` binds none)."""
+    folded = layers.folded()
+    config = selected_config(folded.document)
     fence = free_fence(stores, connector)
-    if fence is not None:
-        config = with_free_tier_layer(config, schema, fence)
-    tiered = fence is not None and (fence.task or bool(fence.providers))
-    set_by = _set_by(
-        [
-            ("dataset", dataset),
-            ("campaign", layers.campaign),
-            ("free_tier", free_tier().campaign if tiered else {}),
-        ]
-    )
-    held = {node: overlay.config for node, overlay in config.optimization.nodes.items()}
-    return LaidConfig(
-        config, {node: {key: set_by[node][key] for key in cfg} for node, cfg in held.items()}
-    )
-
-
-def _set_by(
-    blocks: Sequence[tuple[KnobLayer, Mapping[str, Any]]],
-) -> dict[str, dict[str, KnobLayer]]:
-    """As `merge_config_layers` lays *blocks*: a layer naming another optimizer drops every knob."""
-    held = OptimizationConfig.model_fields["optimizer"].default
-    out: dict[str, dict[str, KnobLayer]] = {}
-    for layer, block in blocks:
-        optimization = block.get("optimization") or {}
-        if "optimizer" in optimization and optimization["optimizer"] != held:
-            held, out = optimization["optimizer"], {}
-        for node, overlay in (optimization.get("nodes") or {}).items():
-            for key in (overlay or {}).get("config") or {}:
-                out.setdefault(node, {})[key] = layer
-    return out
+    if fence is not None and (tier := free_tier_layers(schema, fence)):
+        folded = fold_layers(CAMPAIGN_RULE, tier, under=folded)
+        config = CampaignConfig.model_validate(folded.document)
+    knob_layers = {
+        node: {key: folded.stamps[("optimization", "nodes", node, "config", key)] for key in held}
+        for node, held in ((n, o.config) for n, o in config.optimization.nodes.items())
+    }
+    return LaidConfig(config, knob_layers)
 
 
 def laid_session(session: Session, layers: ConfigLayers) -> tuple[Session, CampaignConfig]:
@@ -691,7 +669,7 @@ def cycle_config(stores: Stores, campaign: Campaign, hop: CycleHop | None) -> Cy
     campaigns = stores.campaigns
     if hop is None:
         root_lock = campaigns.last(campaign.root_hop, ScoringLockedRecord)
-        return CycleConfig.laid(scoring_locked(declared, root_lock), [])
+        return CycleConfig.laid(declared, [LaidSpan(seed=None, scoring_lock=root_lock)])
     return CycleConfig.laid(declared, campaigns.read_laid_spans(hop))
 
 
@@ -1074,9 +1052,8 @@ def fork_preview(stores: Stores, campaign_id: str, overlay: dict[str, Any]) -> F
 
 def campaign_config_map(stores: Stores, campaign_id: str) -> ConfigMapResponse:
     campaign = owned_campaign(stores, campaign_id)
-    cycle = cycle_config(stores, campaign, campaign.root_hop)
-    laid_by = cycle.knob_layers(recorded_read(stores, campaign.root_hop).knob_layers)
-    return config_map(cycle.config, laid_by)
+    m = _campaign_merge(stores, campaign, Subject(campaign_id))
+    return config_map(m.cfg, m.optimizer, m.knob_layers)
 
 
 async def resolve_pipeline_for_dataset(

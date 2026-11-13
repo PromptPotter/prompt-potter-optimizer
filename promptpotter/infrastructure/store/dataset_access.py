@@ -157,7 +157,7 @@ def _card(section: Mapping[str, Any]) -> DatasetCard | None:
 class DatasetDefinition:
     directory: Path
     pipeline: dict[str, Any]
-    # Root first; application folds them by `campaign_config.py::merge_config_layers`.
+    # Root first; application folds them by `campaign_config.py::CAMPAIGN_RULE`.
     campaign_layers: tuple[dict[str, Any], ...]
     source: dict[str, Any]
     panel: dict[str, Any] | None

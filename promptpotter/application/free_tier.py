@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+import functools
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, NamedTuple
 
 from promptpotter import connectors
@@ -10,11 +11,12 @@ from promptpotter.application.jobs.coupon import paying_key
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
-from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER, Bounds, FreeTier
 from promptpotter.domain.judges import JudgeStage
+from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
-from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+from promptpotter.domain.pipeline_schema import KnobLayer, PipelineNode, PipelineSchema
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.spend import draws_coupon
 from promptpotter.infrastructure.identity.default_claim import is_host
@@ -78,20 +80,26 @@ def free_fence(stores: Stores, connector: str) -> FreeFence | None:
     )
 
 
-def with_free_tier_layer(
-    config: CampaignConfig, schema: PipelineSchema | None, fence: FreeFence
-) -> CampaignConfig:
+def free_tier_layers(schema: PipelineSchema | None, fence: FreeFence) -> list[Layer[KnobLayer]]:
     """The tier's layer where anything the run sends draws the coupon, plus per fenced task node
     of *schema* each searched axis narrowed to its model's bounds within what the node permits
     (the model axis to the tier's models). ``None`` reads no node; what an unset param launches
     at is `free_tier_overlay`'s."""
     if not fence.task and not fence.providers:
-        return config
+        return []
     tier = free_tier()
-    merged = merge_config_layers(config.model_dump(mode="json", exclude_unset=True), tier.campaign)
-    if schema is None or not fence.task:
-        return CampaignConfig.model_validate(merged)
+    layers: list[Layer[KnobLayer]] = [Layer("free_tier", tier.campaign)]
+    if schema is not None and fence.task:
+        layers.append(Layer("free_tier", functools.partial(_bounded_narrowing, schema, tier)))
+    return layers
+
+
+def _bounded_narrowing(
+    schema: PipelineSchema, tier: FreeTier, laid: Mapping[str, Any]
+) -> dict[str, Any]:
+    config = CampaignConfig.model_validate(laid)
     space = schema.narrow(config.optimizer_narrowing)
+    narrowing: dict[str, Any] = {}
     for node, _, bounds in _bounded_nodes(config, space, tier):
         kept = node.param_allowed_values
         allowed = {p: [v for v in vs if p not in kept or v in kept[p]] for p, vs in bounds.items()}
@@ -99,10 +107,8 @@ def with_free_tier_layer(
         if "model" in node.param_keys:
             options = space.model_options(node)
             allowed["model"] = [m for m in tier.task_models if m in options]
-        merged = merge_config_layers(
-            merged, {"optimizer_narrowing": {node.name: {"param_allowed_values": allowed}}}
-        )
-    return CampaignConfig.model_validate(merged)
+        narrowing[node.name] = {"param_allowed_values": allowed}
+    return {"optimizer_narrowing": narrowing}
 
 
 def free_tier_overlay(

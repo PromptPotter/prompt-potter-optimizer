@@ -2525,7 +2525,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/NodeSearchNarrowing"
             },
-            "description": "Per-fork search-space lock edits, laid on its parent's by part (`NodeSearchNarrowing.over`): `param_keys` subsets, `prompt_fields_held` joins, `param_allowed_values` replaces per param. Empty for an unedited fork or a campaign-from-origin seed.",
+            "description": "Per-fork search-space lock edits, laid on its parent's by part (`NodeSearchNarrowing`'s fields): `param_keys` subsets, `prompt_fields_held` joins, `param_allowed_values` replaces per param. Empty for an unedited fork or a campaign-from-origin seed.",
             "title": "Optimizer Narrowing",
             "type": "object"
           },

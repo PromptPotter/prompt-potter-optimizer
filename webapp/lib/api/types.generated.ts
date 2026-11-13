@@ -3945,11 +3945,11 @@ export interface EditDraftPatch {
   slug: string | null;
   connector: string | null;
   raw_task_description: string | null;
-  /** Laid over the draft's config by `campaign_config.py::merge_config_layers`. A
-   * string `scoring` names the criterion whole; a `scoring` mapping is folded
-   * into the criterion the draft runs, key by key: `matcher` picks the per-
-   * sample matcher, `dials` the composite's weights (the empty string clears
-   * them), `per_sample` and `per_cell` set those formulas. */
+  /** Laid over the draft's config by `CampaignConfig`'s rule per key. A string
+   * `scoring` names the criterion whole; a `scoring` mapping is folded into
+   * the criterion the draft runs, key by key: `matcher` picks the per-sample
+   * matcher, `dials` the composite's weights (the empty string clears them),
+   * `per_sample` and `per_cell` set those formulas. */
   config: ConfigEdit | null;
   /** Dotted paths, by this patch's own fields, of the draft's own values to drop
    * before the rest is laid, so the layer below shows through:
@@ -3971,8 +3971,8 @@ export interface EditDraftPatch {
 }
 
 /** A check-in edit's ``config``, by `CampaignConfig`'s own paths. Only the fields
- * sent move anything: its ``exclude_unset`` dump is the layer
- * `campaign_config.py::merge_config_layers` lays. */
+ * sent move anything: its ``exclude_unset`` dump is a layer of
+ * `campaign_config.py::CAMPAIGN_RULE`'s fold. */
 export interface ConfigEdit {
   /** Origin eval budget — how many bank samples the origin (C0) is scored on at
    * check-in. The bench's, whatever the optimizer: a round's own panel is its

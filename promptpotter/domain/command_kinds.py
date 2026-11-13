@@ -27,6 +27,7 @@ from promptpotter.domain.draft_edit import (
     OptimizationOverrides,
     PartialCampaignConfig,
 )
+from promptpotter.domain.layer_fold import clears
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.phases import (
     INNER_ARMS_REFUSAL,
@@ -614,15 +615,19 @@ class ForkSeed(StrictModel):
     def _budget_rides_the_payload(self) -> ForkSeed:
         if self.config_overrides.budget.named:
             raise ValueError("a fork's budget is the payload's own `budget`, not the seed's")
-        parts = [p.split(".") for p in self.reset]
-        if bad := [p for p in parts if len(p) != 3 or p[0] != "pipeline_overlay"]:
-            raise ValueError(f"a reset path names `pipeline_overlay.<node>.<key>`: {bad}")
+        clears(self.reset, _FORK_RESETS)
         return self
 
     @property
-    def dropped(self) -> list[tuple[str, str]]:
-        """Each reset path as its (node, key)."""
-        return [(node, key) for _, node, key in (p.split(".") for p in self.reset)]
+    def cleared(self) -> dict[str, dict[str, object]]:
+        """The reset as a patch of the forked candidate's node document."""
+        cleared: dict[str, dict[str, object]] = clears(self.reset, _FORK_RESETS).get(
+            "pipeline_overlay", {}
+        )
+        return cleared
+
+
+_FORK_RESETS = (("pipeline_overlay", "*", "*"),)
 
 
 class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCLE):

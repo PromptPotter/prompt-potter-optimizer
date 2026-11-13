@@ -7,7 +7,7 @@ from typing import Any, Literal, Self
 from pydantic import Field, TypeAdapter, ValidationError, model_validator
 
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS, OptimizerPromptTemplate
-from promptpotter.domain.pipeline_params import CALL_CONFIG_KEYS, lay_node_config
+from promptpotter.domain.pipeline_params import CALL_CONFIG_KEYS, lay_nodes
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import FrozenModel
@@ -99,12 +99,12 @@ class PipelineManifest(FrozenModel):
         return self
 
     def laid_over(self, overlay: Mapping[str, Mapping[str, Any]]) -> PipelineManifest:
+        laid = lay_nodes(
+            {name: node.config for name, node in self.nodes.items()},
+            {name: cfg for name, cfg in overlay.items() if name in self.nodes},
+        )
         nodes = {
-            name: node.model_copy(
-                update={"config": lay_node_config(node.config, overlay[name], {})}
-            )
-            if name in overlay
-            else node
+            name: node.model_copy(update={"config": laid[name]})
             for name, node in self.nodes.items()
         }
         return self.model_copy(update={"nodes": nodes})

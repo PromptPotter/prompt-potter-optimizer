@@ -118,7 +118,7 @@ from promptpotter.domain.bench import DatasetSplit, PartitionRecord, partition_b
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
-    apply_config_overrides,
+    seed_layer,
 )
 from promptpotter.domain.command_kinds import DeleteCampaignPayload, ForkCyclePayload, ForkSeed
 from promptpotter.domain.cycle_paths import (
@@ -1319,6 +1319,7 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
         hop=scenario,
         from_round=2,
         from_candidate_id="",
+        cleared={},
         seed=CycleSeed(config_overrides=ConfigOverrides(scoring=criterion)),
         keep_rounds=True,
     ).take(stores)
@@ -1342,7 +1343,7 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
     seed = store.read_laid_spans(applied)[-1].seed
     assert seed is not None, "a rewind's seed rode no record of its own"
     base = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
-    assert apply_config_overrides(base, seed.config_overrides).scoring == criterion
+    assert base.overlaid(seed_layer(seed.config_overrides)).scoring == criterion
     assert base.scoring is None, "applying a scenario wrote through to its base config"
     # A steer outside what the campaign permits is the babysit act, and a fork of that fork lays
     # its seed over its parent's: a steer back inside the menu still runs babysat, and its mint
@@ -1354,7 +1355,7 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
             ForkSeed(pipeline_overlay={"a": {"model": model}}), stores, campaign, hop
         )
         cycle_id = cut_operator_fork(
-            stores=stores, hop=hop, from_round=2, seed=seed, keep_rounds=True
+            stores=stores, hop=hop, from_round=2, cleared={}, seed=seed, keep_rounds=True
         ).take(stores)
         return hop.model_copy(update={"cycle_id": cycle_id})
 
@@ -1402,6 +1403,7 @@ def test_a_panel_fork_off_a_candidate_runs_its_record_and_sends_only_the_operato
                 hop=scenario,
                 from_round=2,
                 from_candidate_id=candidate_key,
+                cleared={},
                 seed=parse_cycle_seed(no_edit, stores, campaign, scenario),
             ).take(stores)
         }
@@ -1438,7 +1440,7 @@ def test_a_field_cleared_in_the_panel_drops_the_candidates_value_and_the_layer_b
                 hop=scenario,
                 from_round=2,
                 from_candidate_id=candidate_key,
-                dropped=cleared.dropped,
+                cleared=cleared.cleared,
                 seed=parse_cycle_seed(cleared, stores, campaign, scenario),
             ).take(stores)
         }

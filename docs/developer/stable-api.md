@@ -83,7 +83,7 @@ Every name `application/embedded_run.py`'s `__all__` exports (`run_head_to_head`
 - **`origin_gate` defaults to `strict`**: `run_campaign` ends `origin_gate` on an unhealthy round 0, before the bench spends; resumed still unhealthy, it passes. Under `arm_gate` `review` / `author` every round blocks until a `submit-arms` command answers.
 - The readout lands in the cycle's `readout.log` whatever the host passes; `readout_sink=print` shows it as written.
 
-Nothing on this path imports a server: `pip install promptpotter` is the engine, `[api]` adds the API and the dashboard. `campaign_config_over(dataset_campaign_block(dataset), {"optimization": {…}})` (`application/datasets/authored.py`) shapes a dataset's `campaign` for one launch: a sparse `optimization` mapping merged before validation, so an unknown knob raises — the merge `pipeline_resolve.py::laid_config` makes for a web mint, a check-in and the terminal.
+Nothing on this path imports a server: `pip install promptpotter` is the engine, `[api]` adds the API and the dashboard. `ConfigLayers(dataset_campaign_block(dataset), {"optimization": {…}}).config()` (`application/datasets/authored.py`) shapes a dataset's `campaign` for one launch: a sparse `optimization` mapping merged before validation, so an unknown knob raises — the merge `pipeline_resolve.py::laid_config` makes for a web mint, a check-in and the terminal.
 
 ## 5c. The export artifact
 

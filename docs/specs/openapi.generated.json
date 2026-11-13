@@ -3924,7 +3924,7 @@
       },
       "ConfigEdit": {
         "additionalProperties": false,
-        "description": "A check-in edit's ``config``, by `CampaignConfig`'s own paths. Only the fields sent move\nanything: its ``exclude_unset`` dump is the layer `campaign_config.py::merge_config_layers`\nlays.",
+        "description": "A check-in edit's ``config``, by `CampaignConfig`'s own paths. Only the fields sent move\nanything: its ``exclude_unset`` dump is a layer of `campaign_config.py::CAMPAIGN_RULE`'s fold.",
         "properties": {
           "bench_trigger": {
             "anyOf": [
@@ -5757,7 +5757,7 @@
                 "type": "null"
               }
             ],
-            "description": "Laid over the draft's config by `campaign_config.py::merge_config_layers`. A string `scoring` names the criterion whole; a `scoring` mapping is folded into the criterion the draft runs, key by key: `matcher` picks the per-sample matcher, `dials` the composite's weights (the empty string clears them), `per_sample` and `per_cell` set those formulas."
+            "description": "Laid over the draft's config by `CampaignConfig`'s rule per key. A string `scoring` names the criterion whole; a `scoring` mapping is folded into the criterion the draft runs, key by key: `matcher` picks the per-sample matcher, `dials` the composite's weights (the empty string clears them), `per_sample` and `per_cell` set those formulas."
           },
           "connector": {
             "anyOf": [

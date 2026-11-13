@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from functools import reduce
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -12,7 +11,9 @@ from promptpotter.application.datasets.tabular_ingest import read_candidate_libr
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
 from promptpotter.application.scoring.judges.registry import judge_instrument
-from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
+from promptpotter.domain.campaign_config import CAMPAIGN_RULE, CampaignConfig
+from promptpotter.domain.layer_fold import Folded, Layer, fold_layers
+from promptpotter.domain.pipeline_schema import KnobLayer
 from promptpotter.domain.scoring import Scorer
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
@@ -48,7 +49,8 @@ class AuthoredDataset:
 
 
 def _campaign_block(definition: DatasetDefinition | None) -> dict[str, Any]:
-    return {} if definition is None else reduce(merge_config_layers, definition.campaign_layers, {})
+    layers = () if definition is None else definition.campaign_layers
+    return fold_layers(CAMPAIGN_RULE, [Layer("dataset", layer) for layer in layers]).document
 
 
 def dataset_campaign_block(dataset: ResolvedDataset) -> dict[str, Any]:
@@ -82,19 +84,6 @@ def load_dataset_campaign_config(dataset: ResolvedDataset) -> CampaignConfig:
     )
 
 
-def campaign_config_over(block: dict[str, Any], over: Mapping[str, Any]) -> CampaignConfig:
-    """*over*, a partial config, laid over *block*, the keys a config's layers SET; the optimizer
-    it names must select."""
-    try:
-        out = CampaignConfig.model_validate(merge_config_layers(block, over))
-    except ValidationError as exc:
-        raise PayloadInvalidError(
-            validation_reason(exc, shown=1), code="campaign_config_invalid"
-        ) from exc
-    select_optimizer(out.optimization)
-    return out
-
-
 class ConfigLayers(NamedTuple):
     """A run's config as a door hands it to the mint: the dataset's ``campaign`` block, and the
     door's edit, the keys it SETS (`pipeline_resolve.py::laid_config` lays them)."""
@@ -111,22 +100,38 @@ class ConfigLayers(NamedTuple):
 
     def over(self, optimization: Mapping[str, Any]) -> ConfigLayers:
         """*optimization* laid into the edit, last."""
-        edit = merge_config_layers(dict(self.campaign), {"optimization": dict(optimization)})
-        return self._replace(campaign=edit)
+        layers = [
+            Layer("campaign", self.campaign),
+            Layer("campaign", {"optimization": optimization}),
+        ]
+        return self._replace(campaign=fold_layers(CAMPAIGN_RULE, layers).document)
 
-    def laid_dataset(self) -> dict[str, Any]:
-        """The dataset's block under the edit: the edit's ``scoring`` is the criterion whole, so it
-        replaces the dataset's."""
-        return {
-            k: v
-            for k, v in self.dataset.items()
-            if k != "scoring" or "scoring" not in self.campaign
-        }
+    def folded(self) -> Folded[KnobLayer]:
+        layers: list[Layer[KnobLayer]] = [
+            Layer("dataset", self.dataset),
+            Layer("campaign", self.campaign),
+        ]
+        return fold_layers(CAMPAIGN_RULE, layers)
 
     def block(self) -> dict[str, Any]:
         """Both layers' keys, the edit last: what an upload's Start records as its definition's
         ``campaign``, so a later campaign on it starts where this one did."""
-        return merge_config_layers(self.laid_dataset(), dict(self.campaign))
+        return self.folded().document
+
+    def config(self) -> CampaignConfig:
+        """Both layers laid; the optimizer it names must select."""
+        return selected_config(self.folded().document)
+
+
+def selected_config(document: Mapping[str, Any]) -> CampaignConfig:
+    try:
+        out = CampaignConfig.model_validate(document)
+    except ValidationError as exc:
+        raise PayloadInvalidError(
+            validation_reason(exc, shown=1), code="campaign_config_invalid"
+        ) from exc
+    select_optimizer(out.optimization)
+    return out
 
 
 def scorer_of(config: CampaignConfig, *, verifier_graded: bool) -> Scorer:

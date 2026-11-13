@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter import connectors
@@ -32,9 +31,10 @@ from promptpotter.application.scoring.formula.compiler import (
     spell_dials,
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
-from promptpotter.domain.campaign_config import merge_config_layers
+from promptpotter.domain.campaign_config import CAMPAIGN_RULE
 from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit
+from promptpotter.domain.layer_fold import Layer, clears, fold_layers, rules_of
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
     ANSWER_FIELDS_KEY,
@@ -111,8 +111,9 @@ async def plan_draft_patch(
     was = draft_pipeline(stores, draft, held)
     sent = {} if patch.config is None else patch.config.model_dump(mode="json", exclude_unset=True)
     if patch.config is not None:
+        layers = [Layer("draft", config), Layer("edit", sent)]
         config = _stamp_optimizer(
-            merge_config_layers(config, sent), was.config.optimization.optimizer
+            fold_layers(CAMPAIGN_RULE, layers).document, was.config.optimization.optimizer
         )
         if "scoring" in sent:
             config["scoring"] = _folded_scoring(
@@ -169,33 +170,22 @@ async def plan_draft_patch(
     )
 
 
+_EDIT_RULE = rules_of(EditDraftPatch)
+_DRAFT_RESETS = (
+    ("config", "optimization", "nodes", "*", "config", "*"),
+    ("origin_prompts", "*", "*"),
+)
+
+
 def _reset(draft: DraftFile, paths: list[str]) -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
-    """*draft*'s config and origin prompts less each of its own values a reset path names; a
-    container left empty goes with it, so a reset draft reads as never edited there."""
-    config = copy.deepcopy(draft.config)
-    prompts = {step: dict(fields) for step, fields in draft.origin_prompts.items()}
-    for path in paths:
-        match path.split("."):
-            case ["config", "optimization", "nodes", node, "config", key]:
-                _drop(config, ["optimization", "nodes", node, "config", key])
-            case ["origin_prompts", step, field]:
-                _drop(prompts, [step, field])
-            case _:
-                raise PayloadInvalidError(
-                    f"patch.reset {path!r} names no value a draft holds: a reset path is "
-                    "`config.optimization.nodes.<node>.config.<key>` or "
-                    "`origin_prompts.<step>.<field>`."
-                )
-    return config, prompts
-
-
-def _drop(held: dict[str, Any], path: list[str]) -> None:
-    head, *rest = path
-    inner = held.get(head)
-    if rest and isinstance(inner, dict):
-        _drop(inner, rest)
-    if not rest or inner == {}:
-        held.pop(head, None)
+    """*draft*'s config and origin prompts less each of its own values a reset path names."""
+    try:
+        reset = clears(paths, _DRAFT_RESETS)
+    except ValueError as exc:
+        raise PayloadInvalidError(f"patch.reset: {exc}") from exc
+    held = {"config": draft.config, "origin_prompts": draft.origin_prompts}
+    laid = fold_layers(_EDIT_RULE, [Layer("draft", held), Layer("reset", reset)]).document
+    return laid.get("config", {}), laid.get("origin_prompts", {})
 
 
 def _description_keys(pipeline: DraftPipeline) -> dict[str, list[str]]:
@@ -226,7 +216,7 @@ def _stamp_optimizer(config: dict[str, Any], running: str) -> dict[str, Any]:
     """An edit's ``optimization.nodes`` naming no optimizer addressed *running*, the one the draft
     ran before it. Named on the partial, since a partial cannot see its basis: an upload's connector
     switch moves the basis's optimizer beneath it, and a switch drops the nodes it addressed
-    (`campaign_config.py::merge_config_layers`)."""
+    (`OptimizationConfig.nodes`' `ScopedBy`)."""
     optimization = _block(config.get("optimization"))
     if "nodes" not in optimization or "optimizer" in optimization:
         return config

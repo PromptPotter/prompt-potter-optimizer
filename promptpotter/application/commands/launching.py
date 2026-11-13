@@ -322,7 +322,7 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
             hop=hop,
             from_round=payload.round,
             from_candidate_id=payload.candidate_id,
-            dropped=payload.seed.dropped,
+            cleared=payload.seed.cleared,
             seed=seed,
             keep_rounds=payload.keep_rounds,
             reason=payload.reason,

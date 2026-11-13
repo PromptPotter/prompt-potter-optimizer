@@ -7,6 +7,7 @@ from typing import Any, cast
 from pydantic import Field
 
 from promptpotter.domain.optimizer_state import RoundOutput, StateSlice
+from promptpotter.domain.pipeline_params import lay_nodes
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
@@ -77,9 +78,9 @@ class L2Memory(StateSlice, kind="l2_memory"):
         return L1Layout.model_validate(layout)
 
     def steered_onto(self, node: str, config: Mapping[str, Any]) -> L2Memory:
-        held = self.steer.get(node)
-        laid = ManifestNodeOverlay(config={**(held.config if held is not None else {}), **config})
-        return self.model_copy(update={"steer": {**self.steer, node: laid}})
+        laid = lay_nodes({n: o.config for n, o in self.steer.items()}, {node: config})
+        steer = {n: ManifestNodeOverlay(config=cfg) for n, cfg in laid.items()}
+        return self.model_copy(update={"steer": steer})
 
 
 class L3Memory(StateSlice, kind="l3_memory"):

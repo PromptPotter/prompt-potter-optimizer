@@ -19,13 +19,12 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
+from promptpotter.domain.layer_fold import Laid, Lay, Layer, Rule, fold_layers
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
-    from collections.abc import MutableMapping
-
-    from promptpotter.domain.pipeline_schema import ParamSource, PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +195,7 @@ class PipelineParams(FrozenModel):
         if not overlay:
             return self
         declared = {n.name for n in schema.declared_nodes}
-        nodes = apply_node_overlay(self.laid_nodes, overlay, schema)
+        nodes = lay_nodes(self.laid_nodes, overlay, schema=schema)
         for node in nodes.keys() - declared:
             logger.warning("Dropping LLM override for undeclared node %r", node)
         return self.with_nodes({n: c for n, c in nodes.items() if n in declared})
@@ -207,40 +206,21 @@ class PipelineParams(FrozenModel):
 RESERVED_NODE_NAMES = frozenset(PipelineParams.model_fields)
 
 
-def lay_node_config(
-    existing: Mapping[str, object], cfg: Mapping[str, object], param_types: Mapping[str, str]
-) -> dict[str, object]:
-    """The one node-config merge: a new value replaces the old and only an ``object`` param merges its keys."""
-    laid = {**existing, **cfg}
-    # A route names ONE model's hosts: a new model without one takes its own default.
-    if "route_order" not in cfg and cfg.get("model", existing.get("model")) != existing.get(
-        "model"
-    ):
-        laid.pop("route_order", None)
-    for param, incoming in cfg.items():
-        prior = existing.get(param)
-        if (
-            param_types.get(param) == "object"
-            and isinstance(prior, dict)
-            and isinstance(incoming, dict)
-        ):
-            laid[param] = {**prior, **incoming}
-    return laid
+def node_rule(schema: PipelineSchema | None) -> Rule:
+    """A node document's rule: each node a call, an ``object`` param *schema* declares laid key by key."""
+
+    def rule(at: tuple[str, ...]) -> Laid:
+        if len(at) == 1:
+            return Laid(Lay.CALL)
+        node = schema.get_node(at[0]) if schema is not None and len(at) == 2 else None
+        typed = node is not None and node.param_types.get(at[1]) == "object"
+        return Laid(Lay.KEYS if typed else Lay.WHOLE)
+
+    return rule
 
 
-def apply_node_overlay(
-    base: Mapping[str, Mapping[str, Any]],
-    overlay: Mapping[str, Mapping[str, Any]],
-    schema: PipelineSchema | None,
-    *,
-    source: ParamSource | None = None,
-    provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
+def lay_nodes(
+    *layers: Mapping[str, Mapping[str, Any]], schema: PipelineSchema | None = None
 ) -> dict[str, dict[str, Any]]:
-    merged = {node: dict(cfg) for node, cfg in base.items()}
-    for node, cfg in overlay.items():
-        node_obj = schema.get_node(node) if schema else None
-        param_types = node_obj.param_types if node_obj else {}
-        merged[node] = lay_node_config(merged.get(node, {}), cfg, param_types)
-        if provenance is not None and source is not None:
-            provenance.setdefault(node, {}).update(dict.fromkeys(cfg, source))
-    return merged
+    """*layers* of a node document, each over the last, by `node_rule`."""
+    return fold_layers(node_rule(schema), [Layer("node", layer) for layer in layers]).document

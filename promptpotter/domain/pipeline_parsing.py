@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import copy
 from collections.abc import Mapping, Sequence
 from typing import Any, NoReturn
 
 from pydantic import BaseModel, ValidationError
 
+from promptpotter.domain.layer_fold import Laid, Lay, Layer, fold_layers
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
@@ -60,29 +60,18 @@ _MERGED_NODE_SUB_BLOCKS = ("config", "optimizer", "prompt_info")
 _MERGED_OPTIMIZER_MAPS = ("param_allowed_values", "param_descriptions")
 
 
-def merge_node_blocks(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+def _block_rule(at: tuple[str, ...]) -> Laid:
+    keyed = (
+        len(at) == 1
+        or (len(at) == 2 and at[1] in _MERGED_NODE_SUB_BLOCKS)
+        or (len(at) == 3 and at[1] == "optimizer" and at[2] in _MERGED_OPTIMIZER_MAPS)
+    )
+    return Laid(Lay.KEYS if keyed else Lay.WHOLE)
+
+
+def merge_node_blocks(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
     """``param_keys`` is a SET declaration, so it replaces: a layer restating the axes answers for all."""
-    out = copy.deepcopy(base)
-    for node_name, node_def in overlay.items():
-        if not isinstance(node_def, dict):
-            continue
-        dst = out.setdefault(node_name, {})
-        for key, val in node_def.items():
-            if key in _MERGED_NODE_SUB_BLOCKS and isinstance(val, dict):
-                block = dst.setdefault(key, {})
-                for sub, sub_val in val.items():
-                    if (
-                        key == "optimizer"
-                        and sub in _MERGED_OPTIMIZER_MAPS
-                        and isinstance(sub_val, dict)
-                        and isinstance(block.get(sub), dict)
-                    ):
-                        block[sub] = {**block[sub], **sub_val}
-                    else:
-                        block[sub] = sub_val
-            else:
-                dst[key] = val
-    return out
+    return fold_layers(_block_rule, [Layer("base", base), Layer("overlay", overlay)]).document
 
 
 def strip_lone_surrogates(obj: Any) -> Any:

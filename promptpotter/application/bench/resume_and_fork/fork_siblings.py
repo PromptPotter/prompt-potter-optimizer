@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -16,7 +16,7 @@ from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import PipelineParams, lay_nodes
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
@@ -254,17 +254,15 @@ def cut_operator_fork(
     from_round: int,
     seed: CycleSeed,
     from_candidate_id: str = "",
-    dropped: Sequence[tuple[str, str]] = (),
+    cleared: Mapping[str, Mapping[str, Any]],
     keep_rounds: bool = False,
     reason: str = "",
 ) -> ForkCut:
-    """*dropped*: each (node, key) of the candidate's record the fork runs without."""
+    """*cleared*: the reset the candidate's record runs under (`ForkSeed.cleared`)."""
     campaign = owned_campaign(stores, hop.campaign_id)
     named = RoundArm(round=from_round, arm=ArmKey(from_candidate_id)) if from_candidate_id else None
     if named is not None and (params := _candidate_params(stores, hop, named)) is not None:
-        for node, key in dropped:
-            params.get(node, {}).pop(key, None)
-        seed = seed.model_copy(update={"origin_params": params})
+        seed = seed.model_copy(update={"origin_params": lay_nodes(params, cleared)})
     # Against what the parent's nodes permit, so the child lays over what its parent ran.
     seed = declare_steered_values(seed, permitted_narrowing(stores, campaign, hop))
     if not keep_rounds:

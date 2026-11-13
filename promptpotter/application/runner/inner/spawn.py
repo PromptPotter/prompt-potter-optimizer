@@ -23,7 +23,6 @@ from promptpotter.application.jobs.mint import (
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     resolved_overrides,
-    select_optimizer,
 )
 from promptpotter.application.pipeline_resolve import laid_session
 from promptpotter.application.run_observers import build_run_observers
@@ -57,8 +56,8 @@ from promptpotter.domain.l4.proxies import (
     inner_cell_facts,
     inner_cell_report,
 )
+from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import SpawnedBy
 from promptpotter.domain.spend import Budget
@@ -134,10 +133,9 @@ def inner_campaign_id(
     role: MeasurementRole = MeasurementRole.PANEL,
 ) -> str:
     """Content, never asker: the TREATMENT, never the budget, so a deepened cell continues the rounds already banked."""
-    edits, model = _one_model(overrides)
     # The estimator too: one that reads a new per-round fact never continues a campaign lacking it.
     digest = stable_hash(
-        [spec.treatment(), resolved_overrides(edits), model, _purpose(role), estimator], length=6
+        [spec.treatment(), resolved_overrides(overrides), _purpose(role), estimator], length=6
     )
     return f"{dataset_id_prefix(spec.inner_dataset)}__{digest}"
 
@@ -264,36 +262,11 @@ class _Opened(NamedTuple):
     optimizer: SelectedOptimizer
 
 
-_ONE_CHOICE = ("model", "provider")
-
-
-def _one_model(overrides: Overrides) -> tuple[Overrides, dict[str, str]]:
-    """The arm's edits less who answers, and the ONE model every inner node answers by: the first edit naming one."""
-    edits = {
-        node: {k: v for k, v in edit.items() if k not in _ONE_CHOICE}
-        for node, edit in overrides.items()
-    }
-    for edit in overrides.values():
-        if isinstance(model := edit.get("model"), str) and model:
-            provider = edit.get("provider")
-            named = {"provider": provider} if isinstance(provider, str) and provider else {}
-            return edits, {"model": model, **named}
-    return edits, {}
-
-
-def _laid_arm(config: CampaignConfig, overrides: Overrides) -> CampaignConfig:
-    """The arm's edit laid into the cell's own overlay, last: the selection refuses what no render can apply."""
-    if not overrides:
-        return config
-    edits, model = _one_model(overrides)
-    every = select_optimizer(config.optimization).llm_nodes if model else ()
-    nodes = dict(config.optimization.nodes)
-    for node in dict.fromkeys([*edits, *every]):
-        held = nodes[node].config if node in nodes else {}
-        laid = {**held, **edits.get(node, {}), **(model if node in every else {})}
-        nodes[node] = ManifestNodeOverlay(config=laid)
-    optimization = config.optimization.model_copy(update={"nodes": nodes})
-    return config.model_copy(update={"optimization": optimization})
+def arm_layer(overrides: Overrides) -> Layer[str]:
+    """An arm's edit, each node's on that node alone, laid last over the cell's own overlay: the
+    selection refuses what no render can apply."""
+    nodes = {node: {"config": edit} for node, edit in overrides.items()}
+    return Layer("arm", {"optimization": {"nodes": nodes}} if nodes else {})
 
 
 async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
@@ -336,7 +309,7 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
         n_search=len(search),
     )
     try:
-        armed = _laid_arm(instrument, cell.overrides)
+        armed = instrument.overlaid(arm_layer(cell.overrides))
         # The instrument stands in for the cell dataset's block: the outer campaign set every knob.
         session, config = laid_session(
             session, ConfigLayers({}, armed.model_dump(mode="json", exclude_unset=True))

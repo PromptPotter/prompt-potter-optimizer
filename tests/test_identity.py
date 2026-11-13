@@ -385,7 +385,7 @@ def _l4_laid(optimizer: str, overrides: dict[str, dict[str, Any]]) -> OptimizerC
     bare = CampaignConfig.model_validate(
         {"optimization": {"optimizer": optimizer, "degradation_threshold": 0.0}}
     )
-    return spawn._laid_arm(bare, overrides).optimization
+    return bare.overlaid(spawn.arm_layer(overrides)).optimization
 
 
 def _l4_selected(optimizer: str, overrides: dict[str, dict[str, Any]]) -> SelectedOptimizer:
@@ -658,11 +658,13 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
         assert overlay_refusal.value.code == "optimizer_overlay", (
             f"{unusable}: an unusable L4 mutation ran as the floor under its arm's name"
         )
-    # An arm's model answers every inner node, whichever node its edit names it on.
+    # An arm's model answers the inner node its edit names, and no other.
     answered = _l4_selected("potter", {"l1_critique": {"model": "qwen/qwen3.7-flash"}})
-    assert {answered.node_config(n).model for n in answered.llm_nodes} == {"qwen/qwen3.7-flash"}, (
-        "an L4 arm's model answered one inner node, the rest the manifest's"
-    )
+    models = {n: answered.node_config(n).model for n in answered.llm_nodes}
+    assert models == {
+        n: "qwen/qwen3.7-flash" if n == "l1_critique" else potter.node_config(n).model
+        for n in answered.llm_nodes
+    }, "an L4 arm's model on l1_critique answered another inner node"
     # A drafted prompt edit rides the overlay: the node runs it, its hash reads it, L4's still wins.
     drafted = select_optimizer(
         OptimizerChoice(
@@ -694,20 +696,17 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
             )
         )
     both = select_optimizer(
-        spawn._laid_arm(
-            CampaignConfig.model_validate(
-                {
-                    "optimization": {
-                        "optimizer": "capo",
-                        "degradation_threshold": 0.0,
-                        "nodes": {
-                            "capo_mutate": {"config": {"instruction": "Reword {{instruction}}"}}
-                        },
-                    }
+        CampaignConfig.model_validate(
+            {
+                "optimization": {
+                    "optimizer": "capo",
+                    "degradation_threshold": 0.0,
+                    "nodes": {"capo_mutate": {"config": {"instruction": "Reword {{instruction}}"}}},
                 }
-            ),
-            _CAPO_MUTATED,
-        ).optimization
+            }
+        )
+        .overlaid(spawn.arm_layer(_CAPO_MUTATED))
+        .optimization
     )
     assert runs(both) == "Rephrase [Sort it.] to sort the list.", "a draft edit beat L4's"
     assert both.prompt_hashes() == _l4_selected("capo", _CAPO_MUTATED).prompt_hashes(), (

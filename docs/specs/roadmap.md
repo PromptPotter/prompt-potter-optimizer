@@ -96,15 +96,17 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landed 49:** recipes: a recipe names no benchmark (seven unbacked recipes go, justlogic and
   HotpotQA are `columns` mappings with byte-identical banks), and the panel templates are asset files
   (`harbor_tasks`, `repo_file`); every cut re-keys, its rows unchanged.
-- **passes 3**, beside cfg: no diagnostic verb, one list campaign set by its arms and replicates whose
+- **landed 50:** cfg: every layered document rides one fold (`domain/layer_fold.py`) and every door lays
+  its patch through it; an L4 arm's model answers only the node it names (rk-dec 3), so every L4 cell
+  and every treatment digest re-keys.
+- **passes 3**: no diagnostic verb, one list campaign set by its arms and replicates whose
   readings the dashboard serves (the seed screen and probe-reasoning go). Then **passes 4**: a retry
   acts once and a dead filer's command ends, judged by holders' death rule.
 - **mob 2**, beside any engine chain whose Owns hold no webapp file: on a phone a card header folds its
   trailing actions into ⋯ (operator, 2026-11-13), the masthead id and setup line placed by it, and the
   phone walk's back step.
-- **cfg**, beside **life**, **holders-2** and **payer-2**: the merge rule declared per key by the node
-  document's schema, one fold with a provenance stamp per key; a model per inner node rides it (one L4
-  re-key). life: one explicit launch lifecycle (asked → admitted → held → running → ended), each exit a
+- **life**, **holders-2** and **payer-2**, then **cfg-2** (the defaults' one home, the patch check
+  spelled once after a proposal carries the stripped overlay, the browser's "" handling). life: one explicit launch lifecycle (asked → admitted → held → running → ended), each exit a
   declared transition, `Hold` its data. holders-2: the rows holders left (fsync, the cell-claim row, the
   whole-file rewrites, the maintenance races, one death rule, a landing proving a RUN file by its fold).
   payer-2: the wallet door below the connectors.

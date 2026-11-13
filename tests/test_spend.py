@@ -153,10 +153,10 @@ from promptpotter.domain.arms import CutKind
 from promptpotter.domain.bench import BenchRefusal
 from promptpotter.domain.campaign import Optimize, RunDeclaration
 from promptpotter.domain.campaign_config import (
+    CAMPAIGN_RULE,
     CampaignConfig,
     CycleConfig,
     OptimizationConfig,
-    merge_config_layers,
 )
 from promptpotter.domain.cells import PinnedCell
 from promptpotter.domain.checkin_draft import DatasetBasis
@@ -179,6 +179,7 @@ from promptpotter.domain.l4.proxies import (
     inner_cell_facts,
     inner_cell_report,
 )
+from promptpotter.domain.layer_fold import Layer, fold_layers
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
@@ -3761,7 +3762,7 @@ def free_fence(tmp_path: Path) -> _FreeFence:
             "pipelines": {"default": ["llm_only"]},
         }
     )
-    layered = free_tier.with_free_tier_layer(config, schema, boxed)
+    layered = config.overlaid(*free_tier.free_tier_layers(schema, boxed))
     return _FreeFence(boxed, keyed, oss, config, schema, layered)
 
 
@@ -3819,7 +3820,7 @@ def test_a_searched_model_axis_offers_and_starts_the_tiers_models_alone(
             "available_models": ["openai/dear", *free_tier.free_tier().task_models],
         }
     )
-    tiered = free_tier.with_free_tier_layer(config, searched, boxed)
+    tiered = config.overlaid(*free_tier.free_tier_layers(searched, boxed))
     offered = searched.narrow(tiered.optimizer_narrowing)
     llm_only = offered.get_node("llm_only")
     assert llm_only is not None and offered.model_options(llm_only) == list(
@@ -3848,9 +3849,7 @@ def test_start_refuses_on_the_free_tier_what_its_fence_leaves_outside(
     def optimizer_on(effort: str) -> CampaignConfig:
         luna = {"model": "openai/gpt-6-luna", "reasoning_effort": effort}
         overlay = {"optimization": {"nodes": {"l1_generate": {"config": luna}}}}
-        return CampaignConfig.model_validate(
-            merge_config_layers(layered.model_dump(mode="json", exclude_unset=True), overlay)
-        )
+        return layered.overlaid(Layer("campaign", overlay))
 
     for run, effort, steps, fence, outside in (
         (layered, "low", ["llm_only"], boxed, 0),
@@ -3878,8 +3877,9 @@ def test_a_later_layer_naming_another_model_drops_the_earlier_layers_route() -> 
     routed: dict[str, object] = {
         "pipeline_overlay": {"llm_only": {"model": "a/x", "route_order": ["Groq"]}}
     }
-    moved = merge_config_layers(routed, {"pipeline_overlay": {"llm_only": {"model": "b/y"}}})
-    assert moved["pipeline_overlay"] == {"llm_only": {"model": "b/y"}}, (
+    later = {"pipeline_overlay": {"llm_only": {"model": "b/y"}}}
+    moved = fold_layers(CAMPAIGN_RULE, [Layer("dataset", routed), Layer("campaign", later)])
+    assert moved.document["pipeline_overlay"] == {"llm_only": {"model": "b/y"}}, (
         "a campaign layer moved the model under a route naming the old model's hosts"
     )
 
@@ -3890,11 +3890,7 @@ def test_the_fence_walks_every_call_a_run_sends_a_judges_model_included(
 ) -> None:
     boxed, _, oss, _, schema, layered = free_fence
     judge = {"name": "j", "stages": [{"model": "openai/dear", "provider": "openrouter"}]}
-    judged = CampaignConfig.model_validate(
-        merge_config_layers(
-            layered.model_dump(mode="json", exclude_unset=True), {"judges": {"j": judge}}
-        )
-    )
+    judged = layered.overlaid(Layer("campaign", {"judges": {"j": judge}}))
     tiered_params = PipelineParams.model_validate(
         {"steps": ["llm_only"], "llm_only": {"model": oss, "reasoning_effort": "low"}}
     )

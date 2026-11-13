@@ -10,7 +10,7 @@ from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,
     pin_default_routes,
 )
-from promptpotter.domain.pipeline_params import PipelineParams, apply_node_overlay
+from promptpotter.domain.pipeline_params import PipelineParams, lay_nodes
 from promptpotter.domain.search_point import (
     SHOTS_KEY,
     JobSearchPoint,
@@ -329,7 +329,7 @@ class OptSearchPoint(FrozenModel):
         )
         if not overlay:
             return written
-        laid = apply_node_overlay(self.pipeline_params.laid_nodes, overlay, schema)
+        laid = lay_nodes(self.pipeline_params.laid_nodes, overlay, schema=schema)
         return written.configured(self.pipeline_params.with_nodes(laid), schema)
 
     @classmethod

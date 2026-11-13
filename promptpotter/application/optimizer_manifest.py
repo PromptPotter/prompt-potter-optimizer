@@ -288,7 +288,7 @@ class SelectedOptimizer:
     # Validated once, at selection: each llm node's config, and each member's knobs.
     node_configs: Mapping[str, NodeConfig]
     node_knobs: Mapping[str, StrictModel]
-    # Each llm node's outer levers as laid (an L4 cell's, `spawn.py::_laid_arm`), refused at selection where unusable.
+    # Each llm node's outer levers as laid (an L4 cell's, `spawn.py::arm_layer`), refused at selection where unusable.
     node_levers: Mapping[str, Mapping[str, Any]]
 
     @property
