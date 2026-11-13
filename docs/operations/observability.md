@@ -32,4 +32,4 @@ The structured finding goes to the round's audit, folded off the ledger (`projec
 
 ## Reading what L2 wrote
 
-`rounds/round_NNNN.json::optimizer_state.slices.l2_memory.steer.l1_generate.config` is everything L2 moved; a fire that changed nothing there bought nothing. The rendered L2 prompt and parsed answer are `nodes.l2_context` in the round's audit twin, served at `/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}/audit` (`application/cycle_reads.py::round_audit`). `task_context` is operator-authored. Deep dive: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md).
+`rounds/round_NNNN.json::optimizer_state.slices.l2_memory.steer.l1_generate.config` is everything L2 moved; a fire that changed nothing there bought nothing. The rendered L2 prompt and parsed answer are `nodes.l2_context` in the round's audit twin, served at `/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}/audit` (`application/cycle_reads.py::round_audit`). `task_context` is operator-authored. Deep dive: [`../concepts/dispatch-hub.md`](../concepts/dispatch-hub.md).

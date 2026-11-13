@@ -109,7 +109,7 @@ transient abort are not second verdicts. An L1 validation failure reaches L1's o
 
 **New prompt information is one new injection renderer.** **Everything that reaches a model is
 bounded where it is PRODUCED**; a composition site selects whole items, never cuts one —
-[`developer/dispatch-hub.md`](developer/dispatch-hub.md) § Every item that reaches an LLM carries an upper limit.
+[`concepts/dispatch-hub.md`](concepts/dispatch-hub.md) § Every item that reaches an LLM carries an upper limit.
 
 ### Four entities (outermost → innermost)
 

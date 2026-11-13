@@ -33,7 +33,7 @@ Potter's controller chooses between its manifest's `pipelines:` entries round by
 nothing on it. Lazy; higher layers constrain lower ones; no layer rewrites `task_context` — no L1/L2/L3 wire
 schema has a field for it. **Rules route, never diagnose or stop**: pure predicates over a frozen snapshot,
 first match wins, once per round. Which preemptors fire L2 before patience runs out:
-[`../developer/dispatch-hub.md`](../developer/dispatch-hub.md) § Trigger — when L2 fires.
+[`dispatch-hub.md`](dispatch-hub.md) § Trigger — when L2 fires.
 
 A *healthy* round is L1-critique's job; a *systemic fault* (evidence starvation) routes to L2, which self-heals
 or — on a fault no prompt move can fix — emits `terminate_proposal`, the one stop a layer authors: the run halts

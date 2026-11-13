@@ -1,7 +1,7 @@
 # application/optimizers/potter/ — potter's L1 / L2 / L3 agent contracts
 
 <dispatch-first>
-**Fix a bad prompt in the dispatch hub** (`dispatch/`, `DispatchHub.fill`, routed per [`dispatch-hub.md`](../../../../docs/developer/dispatch-hub.md)), the one place shaping may be creative; a bad block is reshaped at source, never patched downstream.
+**Fix a bad prompt in the dispatch hub** (`dispatch/`, `DispatchHub.fill`, routed per [`dispatch-hub.md`](../../../../docs/concepts/dispatch-hub.md)), the one place shaping may be creative; a bad block is reshaped at source, never patched downstream.
 </dispatch-first>
 
 ## Origin = conservative floor

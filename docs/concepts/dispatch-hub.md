@@ -1,10 +1,141 @@
 # Dispatch hub + L1 layout + L2 internals
 
-Potter's `dispatch/` fills the `{{placeholders}}` of its optimizer prompts; `L1Layout` is the structural surface L2 edits, and L2 is one entry in the same hub (`potter/members.py::L2Context`). Concept role: [`../concepts/the-loop.md`](../concepts/the-loop.md).
+Potter's `dispatch/` fills the `{{placeholders}}` of its optimizer prompts; `L1Layout` is the structural surface L2 edits, and L2 is one entry in the same hub (`potter/members.py::L2Context`). Concept role: [`the-loop.md`](the-loop.md).
 
 Every optimizer LLM node renders an `OptimizerPromptTemplate`, whose `RENDER_ORDER` is cut for the provider prefix cache; the target prompt has no class — each prompt node declares its fields in render order (`NodePromptInfo.fields`), and that order sits inside the archive key. **No prompt site summarizes its own data**: a name not in `injection_table()` does not enter a prompt. The hub is stateless: `injection_table()` (`dispatch/injections/registry.py`) is built from the `@signal("<name>", …)` decorator at each renderer's definition site, and selection refuses a `{{slot}}` not in it by the config address holding it (`LayoutNode.unknown_slots`), so a typo fails at `new`. A new injection is one pure `_r_<name>(bundle) -> list[Item]` renderer there (`[]` when its source is empty), reached through a node's `NODE_LAYOUTS[node].floor` or `.extras`.
 
 `citable`: may an `l1_generate` variant name this panel in `evidence_grounding`? True for panels that REPORT; False for the value-space menus and the prompt under edit — citing those grounds a mutation in its own subject. `citable_fields(layout, exploration_budget, rendered)` intersects the flag with the live layout and what rendered, fills the wire schema's enum, and the round banks it as `L1Readout.l1_citable`, which `evidence_grounding_present` reads.
+
+## Injection map
+
+Every registered signal (left) and the optimizer nodes it fills (right). A plain edge into a node is that node's floor, `dispatch/layout.py::NODE_LAYOUTS`; `critique_axes` alone is filled into prose, `l1_critique`'s instruction.
+
+- **Amber pill** — an optimizer node: the four LLM prompts, plus L1_SCORE, the deterministic measured round.
+- **Orange** — a deterministic input; **white** — one an LLM node wrote.
+- **Dashed box** — an edge leaving it reaches every panel inside.
+- **Red edge** — an LLM node's output: the loops that close the optimizer.
+- **Dotted edge** — an extra: a layout edit may place it there, the floor does not.
+- **Thick edge** — L2's steer, a node overlay on `l1_generate`, not a panel (§ How L2 steers L1).
+
+```mermaid
+flowchart LR
+  classDef det fill:#FFA500,stroke:#cc7a00,color:#000
+  classDef proc fill:#fff3d6,stroke:#f59e0b,stroke-width:4px,color:#000
+
+  L1G([L1_GENERATE]):::proc
+  L1S([L1_SCORE]):::proc
+  L1C([L1_CRITIQUE]):::proc
+  L2P([L2_CONTEXT]):::proc
+  L3P([L3_PLAN]):::proc
+
+  subgraph FRAME[" "]
+    CONF[confounds]:::det
+    BUD[budget_state]:::det
+  end
+  subgraph STRAT[" "]
+    MEAS[measurand]:::det
+    PLAN[plan]
+    CRIT[critique]
+  end
+  subgraph ROWS[" "]
+    DM[detectable_move]:::det
+    FS[failing_samples]:::det
+    ST[sample_transcripts]:::det
+    NAR["inner_narratives<br/>(L4)"]:::det
+    MM[mutation_memory]:::det
+  end
+  subgraph MENUS[" "]
+    TC["task_context<br/>operator-authored, frozen"]:::det
+    PPC[pipeline_param_catalogue]:::det
+    BP[block_pool]:::det
+    DP[demo_pool]:::det
+    RCP[recombination_pool]:::det
+    AD[answer_distribution]:::det
+    EP[escalation_panel]:::det
+  end
+  RP["rendered_prompt<br/>the parent under edit"]
+  L1W[l1_wounds]:::det
+  subgraph HEALTH[" "]
+    DIAG[diagnostics]:::det
+    EH[evidence_health]:::det
+  end
+  subgraph UPPER[" "]
+    GB[guard_breaches]
+    AXM[axis_memory]:::det
+    SK[skill_tiers]:::det
+    REB[rebase_capability]:::det
+    TER[terminate_capability]:::det
+  end
+  subgraph L2IN[" "]
+    LAY[l1_layout]
+    OVR["l1_overrides<br/>n_variants · temperature"]
+    NOTE[l3_to_l2_note]
+    CAT[l1_signal_catalogue]:::det
+    L2R[l2_recombination_pool]:::det
+  end
+  CAX["critique_axes<br/>in the instruction's prose"]:::det
+  style FRAME fill:none,stroke:#888,stroke-dasharray: 5 5
+  style STRAT fill:none,stroke:#888,stroke-dasharray: 5 5
+  style ROWS fill:none,stroke:#888,stroke-dasharray: 5 5
+  style MENUS fill:none,stroke:#888,stroke-dasharray: 5 5
+  style HEALTH fill:none,stroke:#888,stroke-dasharray: 5 5
+  style UPPER fill:none,stroke:#888,stroke-dasharray: 5 5
+  style L2IN fill:none,stroke:#888,stroke-dasharray: 5 5
+
+  %% LLM-produced (red, links 0-7)
+  L1G -->|candidates| L1S
+  L1C --> CRIT
+  L3P --> PLAN
+  L3P --> NOTE
+  L2P --> LAY
+  L2P --> OVR
+  L2P --> GB
+  L3P --> GB
+
+  %% the measured round
+  L1S --> ROWS
+  L1S --> HEALTH
+  L1S --> L1W
+  L1S -->|theta_election| RP
+
+  %% floors
+  FRAME --> L1G
+  FRAME --> L1C
+  FRAME --> L2P
+  FRAME --> L3P
+  STRAT --> L1G
+  STRAT --> L2P
+  STRAT --> L3P
+  ROWS --> L1G
+  ROWS --> L1C
+  MENUS --> L1G
+  RP --> L1G
+  RP --> L2P
+  L1W --> L1G
+  L1W --> L1C
+  L1W --> L3P
+  HEALTH --> L1C
+  HEALTH --> L2P
+  HEALTH --> L3P
+  UPPER --> L2P
+  UPPER --> L3P
+  L2IN --> L2P
+  CAX --> L1C
+
+  %% extras
+  DIAG -.-> L1G
+  AXM -.-> L1G
+  AXM -.-> L1C
+  MEAS -.-> L1C
+  TC -.-> L2P
+  TC -.-> L3P
+
+  %% L2's steer
+  LAY ==> L1G
+  OVR ==> L1G
+
+  linkStyle 0,1,2,3,4,5,6,7 stroke:#B22222,stroke-width:2px
+```
 
 ## Reference
 
@@ -43,7 +174,8 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 
 - **`axis_memory`** ← `Cycle.axes()` → `AxisIndex.digest` — per-locus effect size over the closed rounds' arms (`OptSearchPoint.loci()` against each round fold's fitness); a semantic critique ranks prompt-field loci alone (`AxisImpact.kind`).
 - **Panels** (`injections/panels.py`): `escalation_panel` (stall depth + `exploration_budget`; gates the `stall_exploration` citation) · `evidence_health` (per-node failure rates — an upstream fault no param mutation fixes) · `answer_distribution` (the collapse detector; `domain/scoring.py::enumerable_truth_labels` owns the rule, shared with the election's collapse refusal, and `constant_answer` the floor, which the origin round's health serves paired) · `failing_samples` (one row per miss, easiest-first on the locked δ ruler; once clustered, only rows the clusters span; never a tally by label) · `sample_transcripts` (the whole trace; a looping one, `dispatch/bundle.py::LOOP_NOVELTY`, head and tail; `panels.py::_query_excerpt` keeps the line naming the gold answer) · `inner_narratives` (each row as its PAIRED difference from the origin on the same seed) · `mutation_memory` (each edit that separated from its parent or collapsed to one label, `panels.py::_Edit.verdict`, with the cells it gained and lost, `application/scoring/paired.py::flipped_keys`; an edit inside the noise is left out, never shown as a loss) · the **decision frame**: `measurand` (what ELECTS, θ ± se), `detectable_move` (in rows), `confounds` (silent when none), `budget_state` (the one non-citable member).
-- **Capability directives** (`injections/layer_state.py`: `rebase_capability`, `terminate_capability`) ride the layout channel — on the `l2_context`/`l3_plan` floors AND mandatory sets, so no prose rewrite can drop them; the config bit is the one way to silence one. `reelect_capability` rides `rebase_capability`'s directive: it adds `fork_proposal.stand_on` and the ELECTIONS table (each round's pick and how it won, its later reads as parent, the arms it beat), the one carrier of the labels `stand_on` names, so it renders only beside the field. The base prompts' one prose token, `{{n_variants}}`, is guarded by `potter/validators.py::l1_inner_placeholders_intact` on the MERGED params.
+- **Capability directives** (`injections/layer_state.py`: `rebase_capability`, `terminate_capability`) ride the layout channel — on the `l2_context`/`l3_plan` floors AND mandatory sets, so no prose rewrite can drop them; the config bit is the one way to silence one. `reelect_capability` rides `rebase_capability`'s directive: it adds `fork_proposal.stand_on` and the ELECTIONS table (each round's pick and how it won, its later reads as parent, the arms it beat), the one carrier of the labels `stand_on` names, so it renders only beside the field. `l1_generate`'s prose token `{{n_variants}}` is guarded by `potter/validators.py::l1_inner_placeholders_intact` on the MERGED params.
+- **Directives a layer cannot cite**: `critique_axes` (the axes a critique may name, the running nodes' param keys, `layer_state.py::critique_axes`; the same list `critique` filters `suggested_axes` by) · `skill_tiers` (the SKILL.md tier ladder, rendered only where the target is delivered on demand, on the `l2_context` and `l3_plan` floors) · `l3_to_l2_note` (L3's note to L2, `L3Memory.note`, on `l2_context`'s floor).
 
 **Current state:**
 
@@ -55,10 +187,48 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 - **`l1_layout`** — a structural input and a signal, resolved ONE way for every node (`dispatch/prompts.py::node_layout`: a layer's steer, else an outer's declared edit, else the floor). On `l2_context`'s floor too, since an edit names a panel and its target slot.
 - **`l1_signal_catalogue`** (L2/L3 only) ← `NODE_LAYOUTS["l1_generate"].mandatory` — the one layout rule no JSON Schema states: after an edit, each mandatory signal still sits under SOME slot, binding the MERGED layout. Absent from `l1_generate`'s `possible`.
 
+### The fields each signal renders
+
+🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_overrides` (`n_variants`🧩, `temperature`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
+
+| Signal | Fields |
+|---|---|
+| `diagnostics` | STATUS `fires`🧩 `stall_count`🧩 · body `samples`🧩 (`terminal_node`🧩 `query`🧩 `predicted`🧩 `ground_truth`🧩 `rank`🧩 `gt_in_source`🧩 `gt_in_ranked`🧩) `near_misses`🧩 `rank_buckets`🧩 `top_k_accuracy`🧩 `error_rate`🧩 `warning_rate`🧩 `l1_yield`🧩 · EVOLUTION `l1_stall_depth`🧩 `overlap.advance`🧩 `headline`🧩 `vs_parent`🧩 `triggered_rates`🧩 |
+| `l1_wounds` | validation `axis`🧩 `value`🧩 `reason`🧩 `allowed`🧩 `l1_parse_failure`🧩 · runtime `owner`🧩 `dominant_warning`🧩 `degraded_rate`🧩 `total_scored`🧩 `observed_config`🧩 |
+| `guard_breaches` | `validator_id`🧩 `evidence`🧩, per layer |
+| `critique` | `priority_fix`🧩 `suggested_axes`🧩 `failure_highlights`🧩 (`mechanism`🧩 `sample_ids`🧩 `claim`🧩) |
+| `task_context` | `domain`🧩 `pipeline_purpose`🧩 `data_characteristics`🧩 `optimization_goals`🧩 `key_challenges`🧩 `upstream_context`🧩 `downstream_context`🧩; never `raw_description`🧩 |
+| `axis_memory` | `axis_rankings`🧩 `top_values`🧩 `exhausted_axes`🧩 `persistent_failures`🧩 `failure_clusters`🧩 |
+| `escalation_panel` | `exploration_budget`🧩 `l1_stall_depth`🧩 |
+| `evidence_health` | `node_failure_rates`🧩 `evidence_starved_node`🧩 |
+| `answer_distribution` | the `graded_answer`🧩 tally · the `enumerable_truth_labels`🧩 tally · `constant_answer`🧩 against the round's fitness |
+| `failing_samples` | `sample_tag`🧩 `delta`🧩 `query`🧩 `span`🧩 `ground_truth`🧩 `predicted`🧩 `reasoning_trace`🧩 · verifier-graded `fitness`🧩 `outcome_note`🧩 `turns`🧩 `step_tokens`🧩 |
+| `sample_transcripts` | `sample_tag`🧩 `query`🧩 `reasoning_trace`🧩 `span`🧩 `ground_truth`🧩 `predicted`🧩 · verifier-graded `fitness`🧩 · `judge_readings`🧩 · a lost cell's `lost`🧩 `tried`🧩 `by`🧩 |
+| `inner_narratives` | `sample_tag`🧩 `query`🧩 `held_out_lift`🧩 `mean_round_delta`🧩 `mean_parent_level_se`🧩 `paired`🧩 `reasoning_trace`🧩 |
+| `mutation_memory` | per edit `label`🧩 `fitness`🧩 against the parent's, `composite_fitness`🧩, `changed`🧩 (a param's value, a field's `changed_words`🧩, `shots`🧩), `gained`🧩 `lost`🧩, `same_idea`🧩 · the cells edits keep missing, `lost`🧩 of `tried`🧩 |
+| `measurand` | `composite_fitness`🧩 · frontier `theta`🧩 `se`🧩 · `evaluators`🧩 under a charged formula |
+| `detectable_move` | `detectable_rows`🧩 of `latest_sample_keys`🧩 at `admission`🧩 |
+| `confounds` | `COLD_RULER`🧩 `FLAT_RULER`🧩 `COLLAPSED_BAND`🧩 (`round_span`🧩 `ruler_span`🧩) `UNMEASURED_DELTA`🧩 (`unlinked`🧩) `PRIOR_PINNED`🧩 (`pinned_share`🧩) · a subset moved whole (`latest_sample_keys`🧩, `prev_sample_keys`🧩) |
+| `budget_state` | `round_num`🧩 `budget_rounds`🧩 `spend_used_usd`🧩 `spend_budget_usd`🧩 |
+| `rebase_capability` | `fork_proposal`🧩 (`reason`🧩 `unlock_schema_field_rename`🧩 `stand_on`🧩) · ELECTIONS `picked`🧩 `locked_in`🧩 `unelected`🧩 |
+| `terminate_capability` | `terminate_proposal`🧩 (`reason`🧩) · `terminate_offer`🧩 |
+| `critique_axes` | each `open_prompt_fields`🧩 locus, its `shots`🧩, each running node's `param_keys`🧩 |
+| `skill_tiers` | `VALID`🧩 `NO REPEATS`🧩 `LIFT`🧩 |
+| `l3_to_l2_note` | `note`🧩 |
+| `plan` | `plan`🧩 |
+| `rendered_prompt` | `[node.field]`🧩 per `prompt_fields`🧩, a closed one marked held · the inner nodes' `[node.field]`🧩 per `RENDER_ORDER`🧩 |
+| `pipeline_param_catalogue` | `node_param_keys`🧩 `param_options`🧩 `param_indistinct`🧩 `param_descriptions`🧩 `prose_ceiling`🧩 · `output_schema_descriptions.<path>`🧩 · `response_format`🧩 + the matcher's `note`🧩 |
+| `block_pool` | per field `id`🧩 (closed only) `text`🧩 |
+| `demo_pool` | the parent's `shots`🧩 per node, `shot_k_max`🧩 · each row's `sample_tag`🧩 `query`🧩 `ground_truth`🧩 |
+| `recombination_pool`, `l2_recombination_pool` | each entry's `id`🧩 `theta`🧩 `main`🧩 and `recombination_loci`🧩 values · answered as `main`🧩 `donor`🧩 `from_donor`🧩 `changes_description`🧩 |
+| `l1_layout` | `persona`🧩 `task_intent`🧩 `thinking_style`🧩 `problem_description`🧩 · the `possible`🧩 panels in no slot |
+| `l1_overrides` | `n_variants`🧩 `temperature`🧩 |
+| `l1_signal_catalogue` | `mandatory`🧩 less `silent_l1_panels`🧩 |
+
 ## Mechanics
 
 - `InjectionBundle` is built once over the cycle's LAST round, which the bench folds in (`Cycle.absorb_round`) before its adapters run, so `l1_critique` reads the round it distils.
-- No optimizer prose token names an injection and every `problem_description` body is empty, so the template carries no per-ROUND value behind the stable prefix.
+- Two prose tokens fill a value: `{{n_variants}}` in `l1_generate` (a caller extra) and `{{critique_axes}}` in `l1_critique`'s instruction (a signal, filled after the layout panels). Every `problem_description` body is empty: its panels come from the layout.
 - **`L1_MANDATORY` is two kinds**: a field L1 cannot OPERATE without (parent prompt, plan, framing, mutation surface, failure digest), and the sole carrier of a state L1 must not enter BLIND (`answer_distribution`, `measurand` + `confounds`, `failing_samples`). Missing after a merged edit fires `l1_layout_missing_mandatory`, a guard breach routing to L3.
 
 ## L1 layout — L2's structural edit surface

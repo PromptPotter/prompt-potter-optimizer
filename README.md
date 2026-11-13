@@ -41,10 +41,24 @@
 
 | You built it with | How PromptPotter meets it |
 |---|---|
-| **An agent framework, a managed agent service or a workflow builder** — LangGraph, CrewAI, the OpenAI Agents SDK, Bedrock Agents, n8n, Dify, or plain FastAPI | A `Connector` declaration; an HTTP backend's default wire is `POST /matches` and `GET /pipeline`, and the knobs your pipeline declares become what is tuned ([backend integration](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md)) |
+| **An agent framework, a managed agent service or a workflow builder** — LangGraph, CrewAI, the OpenAI Agents SDK, Bedrock Agents, n8n, Dify, or plain FastAPI | A `Connector` declaration; an HTTP backend's default endpoints are `POST /matches` and `GET /pipeline`, the body its connector's, and the knobs your pipeline declares become what is tuned ([backend integration](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md)) |
 | **DSPy** | `PromptPotterOpt`, where you would reach for GEPA ([dspy-optimizer](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md)) |
 | **An agent in a sandbox** | Each candidate runs as a [Harbor](https://github.com/laude-institute/harbor) trial, graded by the task's own checker |
 | **OpenRouter, OpenAI, Anthropic, Groq** | Any of them, for your pipeline and for the optimizer |
+
+```
+┌──────────────────────┐                                    ┌──────────────────────┐
+│  Your backend        │  GET  /pipeline  ───────────────►  │  PromptPotter        │
+│  (any pipeline)      │   {nodes, pipelines}, read live    │                      │
+│                      │   at run init + every draft read   │  generates candidates│
+│  runs one query      │                                    │  scores + critiques  │
+│  per call            │  POST /matches   ◄───────────────  │  elects, iterates    │
+│                      │   {query, steps, node_config}      │                      │
+│                      │                                    │                      │
+│                      │  answer + step_tokens         ──►  │  hands back          │
+│                      │   + diagnostics.warnings           │  export.json         │
+└──────────────────────┘                                    └──────────────────────┘
+```
 
 **What you get back:** `export.json` — the winning prompt and settings by field name, with the evidence behind them. We never load, host, route or hot-swap anything in your production path.
 
@@ -103,6 +117,14 @@ Already in DSPy? `from promptpotter.presentation.teleprompter import PromptPotte
 | **REST API** | Every control verb the webapp issues, for when another system drives the campaign. |
 | **Embedded in Python** | A host program drives one campaign inside its own event loop; the DSPy optimizer is the simple-case entry. |
 
+## What is stable, what is beta
+
+| | What it covers |
+|---|---|
+| 🟢&nbsp;**Stable** | • the campaign loop from the CLI, the local webapp and `/potter-run`<br>• the HTTP connector and its `export.json`<br>• pause, resume, rewind (`resume --from N`) and fork<br>• the head-to-head bench: GEPA, CAPO and the rest under one grader and one budget<br>• the zero-spend offline run |
+| 🟡&nbsp;**Beta** | • the hosted app and the team box (accounts, delegates, API keys, the wallet)<br>• the MCP host tools<br>• embedded Python, whose surface still changes between releases<br>• the n8n, Harbor and DSPy connectors |
+| 🧪&nbsp;**Research** | • L4 self-optimization (`promptpotter-self`), run from a checkout |
+
 ## How the search works
 
 <p align="center">
@@ -124,7 +146,7 @@ git clone https://github.com/PromptPotter/prompt-potter-optimizer && cd prompt-p
 python scripts/gate.py          # every check CI runs; the first run builds .venv from uv.lock
 ```
 
-The optimizer is itself a pipeline of nodes, so it can be pointed at its own optimizer prompts ([self-optimization, L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/l4.md)), and every optimizer runs end to end at zero spend ([`offline-run.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/offline-run.md)). Start at **[the developer guide](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/README.md#developer--seams-no-single-file-shows)**, then [`CONTRIBUTING.md`](CONTRIBUTING.md).
+The optimizer is itself a pipeline of nodes, so it can be pointed at its own optimizer prompts ([self-optimization, L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/l4.md)), and every optimizer runs end to end at zero spend ([`offline-run.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/offline-run.md)). The repo is also a launchpad for a codebase agents maintain: `scripts/gate.py` runs every CI check, its doc-claim probes fail a doc whose cited code moved, and the offline run replayed against `main` says whether a change moves any decision the loop makes, so an agent can land a large refactor and prove it. Start at **[the developer guide](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/README.md#developer--seams-no-single-file-shows)**, then [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Limitations
 

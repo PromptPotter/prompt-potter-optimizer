@@ -53,7 +53,7 @@ The layout (`dataset.yaml` with `source:` / `pipeline:` / `campaign:` / `panel:`
 
 ## 4. DispatchHub injection keys
 
-The contract is the mechanism, not the slot list: `dispatch/injections/registry.py::injection_table()`, per-slot detail in [`dispatch-hub.md`](dispatch-hub.md) § Reference.
+The contract is the mechanism, not the slot list: `dispatch/injections/registry.py::injection_table()`, per-slot detail in [`dispatch-hub.md`](../concepts/dispatch-hub.md) § Reference.
 
 ## 4b. Roots — where the package reads and writes
 

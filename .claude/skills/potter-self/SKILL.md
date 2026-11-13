@@ -110,7 +110,7 @@ Parse failures, no-ops and verbatim duplicates were measured absent: no edit the
 **Edit etiquette.** One edit per pass; no hidden defaults. No new response field from the prompt side
 (`L1Variant` is `extra="forbid"`; `targets_rows` is the shipped answer to semantic restatement, not to be
 re-prescribed in prose). A new `{{slot}}` is an `@signal` renderer
-([`dispatch-hub.md`](../../../docs/developer/dispatch-hub.md)), never a summary at the prompt site.
+([`dispatch-hub.md`](../../../docs/concepts/dispatch-hub.md)), never a summary at the prompt site.
 
 ## Authored mode — you are the proposer
 

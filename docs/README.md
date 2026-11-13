@@ -7,7 +7,7 @@ PromptPotter tunes prompts and pipeline configs against a labelled dataset: maxi
 | Folder | Start at |
 |--------|----------|
 | [`manual/`](manual/README.md) | Install → first campaign → reading output → troubleshooting |
-| [`concepts/`](concepts/the-loop.md) | How the loop works |
+| [`concepts/`](concepts/the-loop.md) | How the loop works; what each optimizer prompt reads: [the dispatch hub](concepts/dispatch-hub.md) |
 | [`operations/`](operations/persistence-and-state.md) | Running it: the `.promptpotter/` tree, resume/rewind/fork, backends, observability |
 | [`methods/`](methods/verdict-resolution.md) | The θ model and the spend-control procedures that read it |
 | [`research/`](research/benchmarks.md) | Benchmarks, the admission bar, what a number may claim |
@@ -21,7 +21,6 @@ Every change is placed on [`architecture.md`](architecture.md) §0 + §0.5.
 | Page | Owns |
 |---|---|
 | [conventions](developer/conventions.md) | Style, code shape, naming, git |
-| [dispatch-hub](developer/dispatch-hub.md) | How an optimizer prompt is filled: injections, bounds, the L1 layout, L2 |
 | [node-standard](developer/node-standard.md) | The `pipeline.yaml` contract and the node types |
 | [stable-api](developer/stable-api.md) | What an outside program may rely on, the SSE contract included |
 | [offline-run](developer/offline-run.md) | Proving a change does not move what the loop decides |
