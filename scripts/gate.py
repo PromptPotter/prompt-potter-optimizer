@@ -1798,6 +1798,19 @@ def _surplus(uv: str, owner: Path, extras: list[str]) -> list[str]:
     return sorted(named(" - ") - named(" + "))
 
 
+def _with_builders(checks: list[Check]) -> list[Check]:
+    """`checks` plus every builder their `after` names, transitively, so `--only playwright` never
+    reads a product older than its sources."""
+    named = {c.name: c for c in CHECKS}
+    pulled, todo = list(checks), list(checks)
+    while todo:
+        for builder in (named[name] for name in todo.pop().after):
+            if builder not in pulled:
+                pulled.append(builder)
+                todo.append(builder)
+    return pulled
+
+
 def _reexec_pinned() -> None:
     # From another interpreter, `mypy` resolves different stubs than `uv.lock` pins.
     if os.environ.get(_REEXEC):
@@ -1915,8 +1928,9 @@ def main() -> int:
             have = ", ".join(c.name for c in CHECKS)
             parser.error(f"no such check: {', '.join(unknown)} (have: {have})")
         checks = [c for c in CHECKS if c.name in asked]
-    if not args.push and any(c.kind == "py" for c in checks):
-        # Before the selection, which parses sources another interpreter's `ast` may not read.
+    if not args.push and any(c.kind == "py" for c in _with_builders(checks)):
+        # Before the selection, which parses sources another interpreter's `ast` may not read, and
+        # over the builders the run will pull in: `--web` runs walk-world, a py check.
         # A push re-execs nowhere: each checkout pins its own, and a path pinned here names this tree.
         _reexec_pinned()
 
@@ -1932,14 +1946,7 @@ def main() -> int:
             if not c.landing and any(reads(path, c.inputs() or ()) for path in sel.changed)
         ]
     if not args.staged:
-        # `--only playwright` brings its builders along, so it never reads a product older than its sources.
-        named = {c.name: c for c in CHECKS}
-        todo = list(checks)
-        while todo:
-            for builder in (named[name] for name in todo.pop().after):
-                if builder not in checks:
-                    checks.append(builder)
-                    todo.append(builder)
+        checks = _with_builders(checks)
     checks.sort(key=CHECKS.index)
     if args.push:
         return _prove_tips(sys.stdin.read(), checks)
