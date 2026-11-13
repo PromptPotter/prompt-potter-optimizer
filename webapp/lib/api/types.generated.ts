@@ -6201,5 +6201,4 @@ export const RECENT_STEP_S = 90;
 //    codec never produced. The browser has no such downstream boundary.
 export const CYCLE_PATH_HOP_SEP = "~";
 export const CYCLE_PATH_UNIT_SEP = "::";
-export const ID_COMPONENT_RE = /^[a-zA-Z0-9_.-]+$/;
-export const ALL_DOTS_RE = /^\.+$/;
+export const ID_COMPONENT_RE = /^(?:(?!(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?![a-zA-Z0-9_-]))[a-zA-Z0-9_.-]*[a-zA-Z0-9_-])$/i;

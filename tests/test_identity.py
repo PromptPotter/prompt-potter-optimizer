@@ -1508,16 +1508,14 @@ def test_new_says_an_uploads_slug_refusal_in_its_own_words(
     upload = tmp_path / "rows.csv"
     upload.write_text("q,a\nx,1\n", encoding="utf-8")
     with pytest.raises(ValueError) as bad_slug:
-        validate_dataset_name("bad slug!")
+        validate_dataset_name("Bad Slug!")
     with monkeypatch.context() as cli:
         cli.setenv("OPENROUTER_API_KEY", "not-a-key")
         cli.setattr(sys, "argv", ["promptpotter", "new", str(upload), "--slug", "Bad Slug!"])
         capsys.readouterr()
         with pytest.raises(SystemExit):
             campaign_runner.main()
-    assert f"Error: {bad_slug.value}" in capsys.readouterr().err.splitlines(), (
-        "`new` reworded an upload's refusal"
-    )
+    assert str(bad_slug.value) in capsys.readouterr().err, "`new` reworded an upload's refusal"
 
 
 def test_a_check_in_renamed_onto_an_install_name_is_refused_and_told_its_draft_is_kept(

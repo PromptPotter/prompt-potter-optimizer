@@ -21,7 +21,7 @@ from pydantic import (
 
 from promptpotter.domain.campaign import Arm, ArmName, Compare
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.dataset_name import validate_dataset_name
+from promptpotter.domain.dataset_name import DatasetName, validate_dataset_name
 from promptpotter.domain.draft_edit import (
     EditDraftPatch,
     OptimizationOverrides,
@@ -1009,7 +1009,9 @@ class IngestUploadPayload(CommandPayload, kind=CommandKind.INGEST_UPLOAD):
     model_config = ConfigDict(val_json_bytes="base64", ser_json_bytes="base64")
 
     filename: str = Field(default="", max_length=256)
-    slug: str | None = Field(default=None, max_length=64, description="Optional slug override.")
+    slug: DatasetName | None = Field(
+        default=None, max_length=64, description="Optional slug override."
+    )
     # The bytes ride the act, never its record: the upload store keeps them (`record_upload`).
     blob: UploadBytes = Field(
         exclude=True,

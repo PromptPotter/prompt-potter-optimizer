@@ -91,7 +91,7 @@ async def ingest_draft(
     kept = stores.tenant_datasets.keep_upload(blob, file_extension(filename))
     record_upload(stores, filename=filename, kept=kept)
     table = read_tabular(blob, filename)
-    base_slug = (slug or default_slug_from_filename(filename or "upload")).lower()
+    base_slug = slug or default_slug_from_filename(filename or "upload")
     try:
         validate_dataset_name(base_slug)
     except ValueError as exc:

@@ -9,7 +9,12 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.store.io import read_bytes_optional, unlink_robust, write_json
+from promptpotter.infrastructure.store.io import (
+    read_bytes_optional,
+    unlink_robust,
+    validate_path_component,
+    write_json,
+)
 
 DEFAULT_SESSION_TTL_S = 60 * 60 * 24 * 7
 
@@ -71,9 +76,10 @@ class OIDCSessionStore:
 
     def _path(self, session_id: str) -> Path | None:
         """``None`` for an id that names no file: the cookie is the caller's input."""
-        if not session_id or "/" in session_id or "\\" in session_id:
+        try:
+            return self._dir / f"{validate_path_component(session_id)}.json"
+        except ValueError:
             return None
-        return self._dir / f"{session_id}.json"
 
 
 def _live(path: Path) -> SessionData | None:
