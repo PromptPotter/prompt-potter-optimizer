@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import enum
+from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Literal, assert_never, get_args
+from typing import Annotated, ClassVar, Literal, NamedTuple, assert_never, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
+from promptpotter.domain.phases import (
+    LaunchStage,
+    RunPhase,
+    StopOutcome,
+    StopReason,
+    stop_reason_outcome,
+)
 from promptpotter.domain.refusal import Refusal
 
-# The slot is held before the mint resolves the cycle it will name; `update_target` fills it in.
+# The slot is held before the mint resolves the cycle it will name; its LAND fills it in.
 UNRESOLVED_HOP = CycleHop(campaign_id="", cycle_id="")
 
 JobStage = LaunchStage | Literal[RunPhase.RUNNING]
@@ -84,6 +93,49 @@ class PaidCall:
 # (`JobRegistry.release`): `refused` was never admitted; `withdrawn` left the queue unrun;
 # `orphaned` lost its producer.
 JobLapse = Literal["refused", "withdrawn", "orphaned"]
+
+
+# Where a launch stands, read off its job's stamps (`Job.state`): ADMITTED holds its money on no
+# named cycle yet, HELD names the cycle it holds. It moves only by a `LAUNCH_MOVES` row.
+LaunchState = enum.StrEnum("LaunchState", ["ASKED", "ADMITTED", "HELD", "RUNNING", "ENDED"])
+# How an ended launch left (`Job.exit`).
+LaunchExit = enum.StrEnum("LaunchExit", ["REFUSED", "CANCELLED", "PAUSED", "CRASHED", "RELEASED"])
+# CLAIM: the queue's head takes its slot, still asked; LAND: onto the cycle its mint named, or a
+# running launch onto the fork it rebased on.
+LaunchMove = enum.StrEnum("LaunchMove", ["CLAIM", "ADMIT", "LAND", "START", "END"])
+
+_S = LaunchState
+_LIVE = frozenset(_S) - {_S.ENDED}
+# THE launch lifecycle, (sources, targets) per move: anything else raises `LaunchMoveError`.
+LAUNCH_MOVES: Mapping[LaunchMove, tuple[AbstractSet[LaunchState], AbstractSet[LaunchState]]] = {
+    LaunchMove.CLAIM: ({_S.ASKED}, {_S.ASKED}),
+    LaunchMove.ADMIT: ({_S.ASKED}, {_S.ADMITTED, _S.HELD}),
+    LaunchMove.LAND: ({_S.ADMITTED, _S.RUNNING}, {_S.HELD, _S.RUNNING}),
+    LaunchMove.START: ({_S.ADMITTED, _S.HELD}, {_S.RUNNING}),
+    LaunchMove.END: (_LIVE, {_S.ENDED}),
+}
+# Each exit, from the states it may leave: only a queued launch is withdrawn.
+LAUNCH_EXITS = {**dict.fromkeys(LaunchExit, _LIVE), LaunchExit.CANCELLED: {_S.ASKED}}
+_LAPSE_EXITS: Mapping[JobLapse, LaunchExit] = {
+    "refused": LaunchExit.REFUSED,
+    "withdrawn": LaunchExit.CANCELLED,
+    "orphaned": LaunchExit.CRASHED,
+}
+_OUTCOME_EXITS = {StopOutcome.PAUSED: LaunchExit.PAUSED, StopOutcome.FAILED: LaunchExit.CRASHED}
+
+
+class LaunchMoveError(RuntimeError):
+    """A move the lifecycle does not declare: the caller's bug, never a refusal to serve."""
+
+
+class JobEnding(NamedTuple):
+    """What an END stamps: a run's `StopReason` (*stepped* where it paused at its round
+    allowance), or a lapse where no run returned; all unset is a scoring pass that returned."""
+
+    ending: StopReason | None = None
+    stepped: bool = False
+    lapse: JobLapse | None = None
+    refusal: Refusal | None = None
 
 
 SlotHolder = Annotated[CampaignLaunch | ScoringPass, Field(discriminator="kind")]
@@ -182,6 +234,26 @@ class Job:
     def holds_spend(self) -> bool:
         """Its reservation and its share bind the account and the campaign while this holds."""
         return not self.released and self.stage in SLOT_STAGES
+
+    @property
+    def state(self) -> LaunchState:
+        if self.released:
+            return LaunchState.ENDED
+        if self.stage is RunPhase.RUNNING:
+            return LaunchState.RUNNING
+        if not self.admitted:
+            return LaunchState.ASKED
+        return LaunchState.ADMITTED if self.hop == UNRESOLVED_HOP else LaunchState.HELD
+
+    @property
+    def exit(self) -> LaunchExit | None:
+        if not self.released:
+            return None
+        if self.lapse is not None:
+            return _LAPSE_EXITS[self.lapse]
+        if self.ending is None:
+            return LaunchExit.RELEASED
+        return _OUTCOME_EXITS.get(stop_reason_outcome(self.ending), LaunchExit.RELEASED)
 
     @property
     def holds_slot(self) -> bool:

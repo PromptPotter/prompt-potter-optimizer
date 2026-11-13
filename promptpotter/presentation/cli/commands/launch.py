@@ -152,7 +152,7 @@ async def run_inline(held: HeldRun, *, mode: RunMode) -> CycleResult:
     hop = held.session.hop
     pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
     with ctrl_c_pauses(held.session.store, [pause]):
-        result, _observers = await held.run_inline(
+        _, result = await held.run_inline(
             mode=mode, readout_sink=functools.partial(print, flush=True)
         )
     return result

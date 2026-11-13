@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-from promptpotter.application.jobs.coupon import keyed_client
 from promptpotter.application.optimizer_manifest import bound_determinism
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_overlay import pinned_route
@@ -36,6 +35,7 @@ from promptpotter.infrastructure.llm.send_pacing import (
     throttle_stall_given_to,
 )
 from promptpotter.infrastructure.llm.spend_book import CallLabel
+from promptpotter.infrastructure.llm.wallet import keyed_client
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.shared.errors import OptimizerTimeoutError
 from promptpotter.shared.hashing import shapes_optimizer_prompt

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import secrets
 import threading
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.interlock import AdmissionGate, reclaim_producer, this_producer
+from promptpotter.application.jobs.interlock import AdmissionGate
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.config.paths import ENDED_JOBS_DIR
 from promptpotter.config.settings import CODE_REVISION, settings
@@ -22,20 +23,30 @@ from promptpotter.domain.campaign import CampaignRefusedError
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.job import (
     JOB_ADAPTER,
+    LAUNCH_EXITS,
+    LAUNCH_MOVES,
     UNRESOLVED_HOP,
     CampaignLaunch,
     Job,
+    JobEnding,
     JobHolder,
-    JobLapse,
-    JobStage,
+    LaunchMove,
+    LaunchMoveError,
     SlotHolder,
 )
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.refusal import Refusal
-from promptpotter.infrastructure.holders import job_path, producer_alive, read_job
+from promptpotter.infrastructure import producer_lock
+from promptpotter.infrastructure.holders import in_flight, job_path, read_job
+from promptpotter.infrastructure.producer_lock import this_producer
 from promptpotter.infrastructure.store.io import unlink_robust, write_json
 from promptpotter.shared.clock import iso_z, utcnow_iso
-from promptpotter.shared.errors import ConflictError, PotterError, ServiceUnavailableError
+from promptpotter.shared.errors import (
+    ConflictError,
+    FileUnreadableError,
+    PotterError,
+    ServiceUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +54,8 @@ logger = logging.getLogger(__name__)
 _QUEUE_POLL_S = 2.0
 # How long a reaped job's ending stays readable by its id.
 _ENDED_KEPT = timedelta(days=7)
+# Each job file a listing could not load, named once per process: every poll lists the jobs.
+_named: set[str] = set()
 
 
 def launch_interrupted(exc: BaseException) -> bool:
@@ -72,12 +85,11 @@ class JobRegistry:
         self._dir = jobs_dir
         self._staged = staged or {}
         # Made by its first write (a job, a lock), never here: a landing's plan reads it and writes nothing.
-        # Reentrant: under `admission_gate`, `_orphaned` and `release` retake it.
+        # Reentrant: under `admission_gate`, `release` retakes it.
         self._lock = threading.RLock()
         # Its cross-process peer, nesting the same way.
         self._gate = AdmissionGate(jobs_dir)
         self._capacity = capacity
-        self._tasks: dict[str, asyncio.Task[None]] = {}
 
     def create(
         self,
@@ -87,8 +99,9 @@ class JobRegistry:
         workspace: WorkspaceDir,
         hop: CycleHop,
         holder: JobHolder,
-        stage: JobStage = RunPhase.STARTING,
+        stage: LaunchStage = RunPhase.STARTING,
     ) -> Job:
+        """A launch ASKED: with a slot (``STARTING``) or a place in the queue."""
         with self.admission_gate():
             if (landing := self._gate.landing()) is not None:
                 raise ServiceUnavailableError(
@@ -134,7 +147,9 @@ class JobRegistry:
         with self.admission_gate():
             running = self.list_running()
             live = len(running)
-            stage: JobStage = RunPhase.STARTING if live < self._capacity(live) else RunPhase.QUEUED
+            stage: LaunchStage = (
+                RunPhase.STARTING if live < self._capacity(live) else RunPhase.QUEUED
+            )
             return self.create(
                 user_id=user_id,
                 principal_id=principal_id,
@@ -185,19 +200,56 @@ class JobRegistry:
             first = next(iter(self.queue_order()), None)
             if first is None or first.job_id != job_id:
                 return False
-            return self._stamp(job_id, lambda _: {"stage": RunPhase.STARTING}) is not None
+            return self.move(job_id, LaunchMove.CLAIM) is not None
 
     def cancel_queued(self, job_id: str) -> Job | None:
         """The job withdrawn; ``None`` where it is no longer queued. Whose act it is, the caller asks."""
         with self.admission_gate():
             job = self.get(job_id)
-            return None if job is None or not job.queued else self._end(job_id, lapse="withdrawn")
+            if job is None or not job.queued:
+                return None
+            return self.move(job_id, LaunchMove.END, ended=JobEnding(lapse="withdrawn"))
 
-    def mark_admitted(self, job_id: str) -> None:
-        self._stamp(job_id, lambda _: {"admitted_at": utcnow_iso()})
+    def move(
+        self,
+        job_id: str,
+        move: LaunchMove,
+        *,
+        hop: CycleHop | None = None,
+        ended: JobEnding | None = None,
+    ) -> Job | None:
+        """THE one writer of a launch's phase, every door's: *move* by its `LAUNCH_MOVES` row, a LAND
+        onto *hop*, an END stamping *ended*. ``None`` where the job is gone, or an END finds it
+        ended (stamped once: a queue waiter waking on a job already ended raises into a second
+        release); an undeclared move raises `LaunchMoveError`."""
+        sources, targets = LAUNCH_MOVES[move]
+        stamp: dict[str, Any]
+        match move:
+            case LaunchMove.CLAIM:
+                stamp = {"stage": RunPhase.STARTING}
+            case LaunchMove.ADMIT:
+                stamp = {"admitted_at": utcnow_iso()}
+            case LaunchMove.LAND:
+                assert hop is not None, "a launch lands on a cycle"
+                stamp = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id}
+            case LaunchMove.START:
+                stamp = {"stage": RunPhase.RUNNING, "started_at": utcnow_iso()}
+            case LaunchMove.END:
+                stamp = {"released_at": utcnow_iso(), **(ended or JobEnding())._asdict()}
 
-    def update_target(self, job_id: str, *, hop: CycleHop) -> None:
-        self._stamp(job_id, lambda _: {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id})
+        def change(job: Job) -> Mapping[str, Any] | None:
+            if move is LaunchMove.END and job.released:
+                return None
+            if job.state not in sources:
+                raise LaunchMoveError(f"job {job_id} is {job.state}: no {move} from there")
+            moved = replace(job, **stamp)
+            if moved.state not in targets:
+                raise LaunchMoveError(f"job {job_id}: {move} from {job.state} reads {moved.state}")
+            if (left := moved.exit) is not None and job.state not in LAUNCH_EXITS[left]:
+                raise LaunchMoveError(f"job {job_id} is {job.state}: no {left} exit from there")
+            return stamp
+
+        return self._stamp(job_id, change)
 
     def _stamp(self, job_id: str, change: Callable[[Job], Mapping[str, Any] | None]) -> Job | None:
         """The one read-modify-write of a job file, read and persisted under the gate: a stamp
@@ -230,13 +282,6 @@ class JobRegistry:
                 self._gate.close_for(target)
             return held
 
-    def attach_task(self, job_id: str, task: asyncio.Task[None]) -> None:
-        with self._lock:
-            self._tasks[job_id] = task
-
-    def mark_started(self, job_id: str) -> None:
-        self._stamp(job_id, lambda _: {"stage": RunPhase.RUNNING, "started_at": utcnow_iso()})
-
     def release(
         self, job_id: str, ended: StopReason | BaseException | None = None, *, stepped: bool = False
     ) -> Job | None:
@@ -251,37 +296,19 @@ class JobRegistry:
                 return None
             match ended:
                 case StopReason():
-                    stamped = self._end(job_id, ending=ended, stepped=stepped)
+                    ending = JobEnding(ending=ended, stepped=stepped)
                 case BaseException() if job.queued:
-                    stamped = self._end(job_id, lapse="withdrawn")
+                    ending = JobEnding(lapse="withdrawn")
                 case BaseException() if isinstance(ended, CampaignRefusedError) or (
                     not job.admitted and not launch_interrupted(ended)
                 ):
                     refused = ended if isinstance(ended, PotterError) else PotterError(str(ended))
-                    stamped = self._end(job_id, lapse="refused", refusal=Refusal.of(refused))
+                    ending = JobEnding(lapse="refused", refusal=Refusal.of(refused))
                 case BaseException():
-                    stamped = self._end(job_id, ending=run_stop_reason(ended))
+                    ending = JobEnding(ending=run_stop_reason(ended))
                 case None:
-                    stamped = self._end(job_id)
-            return stamped or job
-
-    def _end(
-        self,
-        job_id: str,
-        *,
-        ending: StopReason | None = None,
-        stepped: bool = False,
-        lapse: JobLapse | None = None,
-        refusal: Refusal | None = None,
-    ) -> Job | None:
-        stamp = {"ending": ending, "stepped": stepped, "lapse": lapse, "refusal": refusal}
-        # Stamped once: a queue waiter waking on a job already ended raises into a second release.
-        ended = self._stamp(
-            job_id, lambda job: None if job.released else {"released_at": utcnow_iso(), **stamp}
-        )
-        with self._lock:
-            self._tasks.pop(job_id, None)
-        return ended
+                    ending = JobEnding()
+            return self.move(job_id, LaunchMove.END, ended=ending) or job
 
     def launched_by(self, job_ids: Sequence[str], *, principal_id: str) -> list[Job] | None:
         """Each of *job_ids* as *principal_id* launched it, a reaped one as its release stamped it;
@@ -293,7 +320,7 @@ class JobRegistry:
         if not job_ids or len(known) != len(jobs):
             return None
         for job in known:
-            if not job.released and self._orphaned(job):
+            if not job.released and not self.in_flight(job):
                 job.released_at, job.lapse = utcnow_iso(), "orphaned"
         return known
 
@@ -304,24 +331,22 @@ class JobRegistry:
         return read_job(path, self._staged.get(path))
 
     def list_all(self, *, user_id: str | None = None) -> list[Job]:
-        """Released jobs included, until `reap_orphans` ends one launched before today."""
-        out = [
-            job
-            for path in self._dir.glob("*.json")
-            if (job := self._read(path)) is not None and user_id in (None, job.user_id)
-        ]
+        """Released jobs included, until `reap_orphans` ends one launched before today. A file that
+        does not load is named in the log and left out, never raised out of every listing; a
+        landing refuses on it (a job file is a survivor)."""
+        out: list[Job] = []
+        for path in self._dir.glob("*.json"):
+            try:
+                job = self._read(path)
+            except FileUnreadableError as exc:
+                if str(path) not in _named:
+                    _named.add(str(path))
+                    logger.error("job listing leaves out %s: %s", path, exc)
+                continue
+            if job is not None and user_id in (None, job.user_id):
+                out.append(job)
         out.sort(key=lambda j: j.created_at, reverse=True)
         return out
-
-    def _orphaned(self, job: Job) -> bool:
-        """``_tasks`` holds only THIS process's jobs: "no task" is not "dead" — ask the producer lock."""
-        with self._lock:
-            task = self._tasks.get(job.job_id)
-        if task is not None and not task.done():
-            return False
-        # Adopted: ask the lock — on Windows the spawned process is the venv launcher, not the run.
-        adopted = task is not None and job.producer_id != this_producer(self._dir)
-        return not ((task is None or adopted) and producer_alive(self._dir, job.producer_id))
 
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
         """Oldest first, and a plain read: a job whose producer is gone is left out, never released."""
@@ -341,8 +366,8 @@ class JobRegistry:
         return out
 
     def in_flight(self, job: Job) -> bool:
-        """Unreleased, its producer alive: what every live listing reads, and the daily quota."""
-        return not job.released and not self._orphaned(job)
+        """`holders.py::in_flight` over this jobs dir: what every live listing reads, and the quota."""
+        return in_flight(self._dir, job)
 
     def _live(self, wanted: Callable[[Job], bool], *, user_id: str | None) -> list[Job]:
         return [j for j in self.list_all(user_id=user_id) if wanted(j) and self.in_flight(j)]
@@ -393,19 +418,28 @@ class JobRegistry:
                     if not job.launched_on(today):
                         self._persist(job, at=self._ended_path(job.job_id))
                         unlink_robust(self._path(job.job_id))
-                elif self._orphaned(job):
+                elif not self.in_flight(job):
                     logger.warning(
                         "job %s claims %s but its producer is gone — releasing",
                         job.job_id,
                         job.stage.value,
                     )
-                    self._end(job.job_id, lapse="orphaned")
-                    reclaim_producer(self._dir, job.producer_id)
+                    self.move(job.job_id, LaunchMove.END, ended=JobEnding(lapse="orphaned"))
+                    # An unstamped or unspellable id names no file.
+                    with contextlib.suppress(ValueError):
+                        producer_lock.reclaim_producer(
+                            producer_lock.producer_path(self._dir, job.producer_id)
+                        )
                     reaped.append(job)
         return reaped
 
     def _persist(self, job: Job, *, at: Path | None = None) -> None:
-        write_json(at or self._path(job.job_id), JOB_ADAPTER.dump_python(job, mode="json"))
+        """A live job file is a survivor (`data_root.py::Kind.durable`); an ended one is run data."""
+        write_json(
+            at or self._path(job.job_id),
+            JOB_ADAPTER.dump_python(job, mode="json"),
+            durable=at is None,
+        )
 
     def _path(self, job_id: str) -> Path:
         return job_path(self._dir, job_id)

@@ -291,6 +291,13 @@ class Budget(FrozenModel):
             raise ValueError(f"{self!r} carries no token amount")
         return self.tokens
 
+    @property
+    def run_out(self) -> bool:
+        """Read on what is LEFT: nothing on some axis it bounds."""
+        return (self.usd is not None and self.usd <= 0) or (
+            self.tokens is not None and self.tokens <= 0
+        )
+
     @classmethod
     def amount(cls, usd: float, tokens: int) -> Budget:
         return cls(usd=round(usd, 6), tokens=tokens)

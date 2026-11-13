@@ -10,11 +10,12 @@ from promptpotter.application.bench.round_analysis import mended_round
 from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import ArmState, Concluded, is_leader_eligible
+from promptpotter.domain.cell_fold import repairable_holes
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.run_records import ForkDirection, ForkTrigger
 from promptpotter.infrastructure.llm.telemetry import at_round
-from promptpotter.shared.errors import ConflictError, ErrorCategory
+from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -26,7 +27,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.run_records import RoundProposedRecord
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import GradedCell
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
         StandingRound,
@@ -36,13 +36,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _repairable_hole(cell: GradedCell) -> bool:
-    """``HALTED`` is no hole: the declared bound cuts the next attempt at the same place."""
-    return cell.facts.errored and cell.facts.error_category is not ErrorCategory.HALTED
-
-
 def _holed(t: RoundResult, key: ArmKey, arm: ArmState) -> bool:
-    return is_leader_eligible(arm) and any(map(_repairable_hole, t.rows(key)))
+    return is_leader_eligible(arm) and repairable_holes(t.rows(key)) > 0
 
 
 def _first_divergent_arm(t: RoundResult) -> ArmKey | None:
@@ -139,7 +134,7 @@ async def repair_incomplete_rounds(
                 )
                 continue
             sp = cycle.points.measured(arm)
-            missing = sum(map(_repairable_hole, rows))
+            missing = repairable_holes(rows)
             # ONE walk, whole: the archive never replays an errored cell, so it sends exactly the
             # holes, and the composite is the GATEWAY's over the full panel.
             scored = await score_search_point(
@@ -290,7 +285,7 @@ async def rewalk_lost_origin(cycle: Cycle, dataset: list[Sample], ledger: CycleE
         return
     assert origin.election is not None and head is not None, "round 0 ends on its origin"
     rows = origin.rows(origin.election.ended_on)
-    holes = sum(map(_repairable_hole, rows))
+    holes = repairable_holes(rows)
     if not holes and len(rows) >= head.expected_samples:
         return
     ctx = RoundContext(cycle=cycle, round_num=0, ledger=ledger)

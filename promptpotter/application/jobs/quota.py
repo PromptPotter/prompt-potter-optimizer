@@ -11,21 +11,9 @@ from typing import NamedTuple, assert_never, get_args
 from pydantic import Field
 
 from promptpotter import connectors
-from promptpotter.application.account import account_of, account_or_opening
+from promptpotter.application.account import AccountKey, account_of, account_or_opening
 from promptpotter.application.free_tier import model_calls, tier_ceiling
 from promptpotter.application.jobs.capacity import SlotBound
-from promptpotter.application.jobs.coupon import (
-    ALLOWANCE_STATE_INFO,
-    AccountKey,
-    AccountWallet,
-    BackendCells,
-    ProviderSend,
-    Send,
-    paying_key,
-    provider_send,
-    read_coupon,
-    unpaid,
-)
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
@@ -69,6 +57,17 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.spend_book import SpendBook
+from promptpotter.infrastructure.llm.wallet import (
+    ALLOWANCE_STATE_INFO,
+    AccountWallet,
+    BackendCells,
+    ProviderSend,
+    Send,
+    paying_key,
+    provider_send,
+    read_coupon,
+    unpaid,
+)
 from promptpotter.infrastructure.store.account_spend import account_bill, campaign_spend
 from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.infrastructure.store.stores import Stores, tenant_stores
@@ -140,7 +139,7 @@ class _Meter(NamedTuple):
 
 def _new_campaign(stores: Stores, hop: CycleHop) -> bool:
     """A stranger's fresh mint, a check-in's Start included (it names no cycle yet): what the
-    launch rate and the daily ceiling meter. The host is exempt: they bound a stranger on its key."""
+    launch rate (per server process) and the daily ceiling (per home) meter. The host is exempt: they bound a stranger on its key."""
     return not is_host(stores.identity) and hop == UNRESOLVED_HOP
 
 
@@ -166,7 +165,7 @@ def _slot_meter(stores: Stores, holder: JobHolder, hop: CycleHop) -> _Meter | No
             return _verb_meter(stores, verb)
         case PaidCall(bucket=bucket):
             return _verb_meter(stores, bucket)
-        # Neither asks the slot door: an embedded run is a declared exemption (`slotless_share`).
+        # Neither asks the slot door: an embedded run is a declared exemption (`admit_slotless`).
         case EmbeddedRun() | InnerRun():
             return None
         case _:
@@ -230,7 +229,8 @@ _WRITE_PER_S = 1.0
 
 def refuse_request_rate(identity: IdentityContext, *, read: bool) -> None:
     """A read is what a poll repeats, so it has the wider bucket; a write is every other request, a
-    free verb's included. The host is exempt, as from every bucket that meters a stranger."""
+    free verb's included. The host is exempt, as from every bucket that meters a stranger. Each
+    bucket is this server process's (`_rate_buckets`): N servers over one home grant N times the rate."""
     if is_host(identity):
         return
     principal = acting_principal(identity).id
@@ -772,15 +772,6 @@ def hold_moved(stores: Stores, hop: CycleHop, allotment: Budget) -> None:
     stores.campaigns.append(hop, CycleShareRecord(allotment=allotment))
 
 
-def land_job(
-    stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, allotment: Budget
-) -> None:
-    """A job onto the cycle it now spends on, its share with it, together under the gate."""
-    with job_registry.admission_gate():
-        hold_moved(stores, hop, allotment)
-        job_registry.update_target(job_id, hop=hop)
-
-
 def move_campaign_money(
     money: Budget, *, stores: Stores, job_registry: JobRegistry, campaign_id: str
 ) -> None:
@@ -967,7 +958,7 @@ def _reserve(budget: Budget, headroom: Budget) -> Budget:
 
 
 def _contended(subject: str) -> RateLimitedError:
-    """The ``request_slot``→``mark_admitted`` window: retryable, as an exhausted ceiling is not."""
+    """The ``request_slot``→ADMIT window: retryable, as an exhausted ceiling is not."""
     return RateLimitedError(
         f"Another launch on this account is still being admitted, so {subject} cannot be "
         f"quoted yet. Retry in a moment.",
@@ -1053,6 +1044,7 @@ def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
             code="concurrency_above_machine",
             details={"requested": limit, "machine_ceiling": ceiling},
         )
-    updated = account_of(stores).model_copy(update={"max_concurrent_cycles": limit})
-    stores.users.save(updated)
-    return updated
+    account_of(stores)
+    return stores.users.update(
+        lambda user: user.model_copy(update={"max_concurrent_cycles": limit})
+    )

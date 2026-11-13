@@ -107,7 +107,7 @@ row it closes.
   (`account.keys` among them), so a host can file `set-sample-lookahead`, `set-api-key` and
   `remove-api-key`, though `Press.host` is false on each. "The absence is the boundary" holds only at the
   doors that enumerate their kinds (`host_surface.py`). Action: a call names its door, and `open` refuses
-  a kind whose `press` excludes that door. **Rides with:** life (every door moves through one
+  a kind whose `press` excludes that door. **Rides with:** life-2 (every door moves through one
   transition). **Re-test:** a `set-api-key` call filed through `host_dispatcher` refuses.
 - **`acompile` lands twice per compile**: `presentation/teleprompter.py::acompile` calls `enter()` for its
   stores, then `run_campaign(…, stores=stores)` enters again (`embedded_run.py:130`); every
@@ -173,7 +173,7 @@ row it closes.
   it with the paused exit code; noise-floor's catch goes. **Rides with:** passb-2 3. **Re-test:**
   `git grep -lE "except PassStoppedError" -- promptpotter/presentation` names `campaign_runner.py` alone.
 - **`line_run` reads a paused pass as selecting**: a pass with a pause asked reads `PAUSED`
-  (`infrastructure/runtime_flags.py:88`), so `runner/bench.py::line_run` takes its hold for the loop's.
+  (`infrastructure/run_state.py:82`), so `runner/bench.py::line_run` takes its hold for the loop's.
   Action: the pass's hold is read by its bracket (`producer_lock.pass_held`). **Rides with:** passb-2 3.
   **Re-test:** a bench pass with a pause asked reads `selecting=False`.
 - **A bench pass's served delta is always zero**: `runner/bench.py::_bench_counted` (called at `:769`, `:780`
@@ -536,28 +536,6 @@ row it closes.
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
   `git grep -n "rewrite_slot" -- promptpotter/connectors/termnorm.py` is empty.
 
-### payer-2 (the wallet door, after holders)
-
-payer 1's premise was false at landing 47: an L4 cell's inner target cells go to the inner dataset's
-connector (TermNorm on the live panel), which draws the coupon, so refusing an own-key account past its
-coupon on `promptpotter-self` is right; the row closed unbuilt.
-
-- **A connector raises its own `NoApiKeyError`**: `connectors/harbor.py::_AgentModel` re-implements the
-  payer rule (the box's key only, its own raise) because `coupon.py::keyed_client` lives in
-  `application/`, out of a connector's reach (`gate.py::_LAYERING`), though every import of `coupon.py`
-  is `infrastructure/` or `domain/`; `dspy_module.py` and `harbor.py` pass `CONNECTOR.cell_payer` for
-  sends made on the box's env key. Root: the wallet door (`paying_key`, `unpaid`, `read_coupon`,
-  `Coupon`, `AccountWallet`, `AllowanceState`, `ProviderSend` / `BackendCells`, `keyed_client`) moves to
-  one `infrastructure/` module and `_AgentModel` takes `keyed_client`; the account-key verbs stay in
-  `application/` under a name that says so. **Flag:** terminus-2's sends go own-key-first for an own-key
-  account. **Rides with:** payer-2. **Re-test:** `git grep -n "NoApiKeyError(" -- promptpotter/connectors` is empty.
-- **A hold that draws no wallet hides its coupon-drawing children** (latent): `read_model.py::Money._below`
-  and `spend_book.py::SpendBook._out` skip a non-coupon hold with all its descendants, and `_past_cells`
-  takes a coupon send's bound off a cell's share; no hold is anything but `"host"` or a `"user"` leaf
-  today, so it bites the first time a `"user"` hold has a host-paid child. Root: on the coupon, a hold
-  counts its own bound only where it draws the coupon, else what its children keep; `_past_cells` takes
-  off only a cell of the same wallet. **Rides with:** payer-2.
-
 ### batch/26 · addr
 
 - **A sibling's kind is parsed from its id**: `infrastructure/store/layout.py::sibling_kind` regexes root
@@ -629,103 +607,32 @@ coupon on `promptpotter-self` is right; the row closed unbuilt.
   `format.ts::shortId`, `compare/EvidenceCharts.tsx` and `evidence/read.py`. **Re-test:**
   `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
 
-### holders-2 (the rows holders left at landing 48; beside life)
+### holders-3 (what holders-2 left at landing 51)
 
-holders landed one holder identity (`infrastructure/holders.py::holder_of`, the job its holder, the
-producer token its death rule), only accounts surviving, one release per hold and the money fold over
-open holds. These rows were in its brief and not built.
+holders-2 landed one death rule (`infrastructure/holders.py::in_flight`), durable SURVIVOR writes, a
+cell claim filed at publish, locked edits and maintenance verbs that ask the holders they race. Left:
 
-- **Two death rules stand beside the one holder** (holders' census): `jobs/registry.py::_orphaned` (an
-  in-process task, else the producer lock) beside `infrastructure/holders.py::live_job` (the lock
-  alone), and `JobRegistry.list_all` raises on one unloadable job file, so every listing (the sweep,
-  quota) stops on it. Root: one death rule, `holders.py::producer_alive`, and a listing that names the
-  file it cannot load. **Rides with:** holders-2. **Re-test:** `git grep -c "def _orphaned" -- promptpotter` is 0.
-- **A landing keeps a RUN file that loads but no longer folds** (holders' census): a charge book written
-  before landing 48, with another writer's line between a settle's parts, folds the late Bill without its
-  draw, and a late Lapse raises KeyError; it still parses, so `landing.py::plan_landing` keeps it (the
-  box's books; 0 locally). Beside it: `Fate.RUN`'s docstring says a non-loading RUN file refuses a
-  landing, while `plan_landing` drops it unasked, and the SURVIVOR refusal's remedy names `MIGRATIONS`
-  for a job file no migration is owed. Root: a landing proves a RUN file by its fold, not its parse,
-  and the two texts say what the code does. **Rides with:** holders-2. **Re-test:** a charge book with
-  interleaved settle parts is dropped at a landing.
-- **Nothing is ever fsynced**: `store/io.py`'s atomic write and `write_bytes` run mkstemp → write →
-  `os.replace` with no fsync of the file or its directory, and the ledger and bill appends flush
-  without one. A process crash is covered (the replace is atomic; a torn line is cut); a kernel crash
-  or power loss is not: a replaced file can come back empty and the last appended lines vanish. An
-  empty grants file refuses the server's start as corrupt; a lost bill line under-charges. Action:
-  durability is a column on `data_root.py`'s kinds: a SURVIVOR write fsyncs the file before the
-  replace and the directory after it, and the bill appends fsync; run data stays fast. **Rides with:**
-  holders-2. **Re-test:** a SURVIVOR kind's write path calls fsync on file and directory.
-- **A cell claim's release deletes the next holder's row** (✓, model-checked):
-  `measurement_archive.py:609-614` drops the claim row with no held-check, so `publish` releasing an
-  errored cell early and the walk's `finally` releasing again deletes the next holder's live row, and a
-  waiter buys the cell again. Beside it (reported): a waiter files a look-ahead row its holder later
-  discarded at a cut, and a third walk pays the cell twice. Decided (orchestrator, the model's option
-  (a)): the holder files the row at publish, and `CLAIM_ROW` / `claimed_cell` go, so every modelled
-  invariant holds and the first fault goes with them; a cell past a cut is banked, already paid.
-  **Rides with:** holders-2. **Re-test:** a cell claim has no row a release deletes;
-  `git grep -c "CLAIM_ROW" -- promptpotter` is 0.
-- **A fork's partial inner campaigns are reclaimed only by the server sweep**: a fork leaves them in the
-  parent's sandbox, and `jobs/reaper.py` runs in the server alone, so a CLI-only run never reclaims
-  them. Root: the fork's own exit reclaims what it abandoned, asking `holder_of`. **Rides with:**
-  holders-2.
-- **Three files are rewritten whole with no lock** (✓ the first): `user_store.py:71-72` `save` rewrites the
-  user list (a SURVIVOR) while `account.py::accept_terms` (`:362-377`), `set_user_settings` (`:349-352`)
-  and `quota.py:1049-1050`'s `set_concurrent_cycles` interleave, so a lost acceptance re-asks consent;
-  reported beside it: a label rename (`workspace_edits.py:82-90` → `store.py:355-361`) rewrites
-  `campaign.json` outside the gate, racing archive / unarchive against `persistence-and-state.md`'s "one
-  editor", and stub-fork cleanup restores the session pointer over a launch's write
-  (`session_pointer.py:43-71`, `run_observers.py:193`). Root: a terms acceptance is a fold of
-  `consent.jsonl`, and every whole-file rewrite is a locked rewrite (`wallet_store.py:97-113`'s shape) or
-  an appended last-wins record; the user list's reshape ships its migration. **Rides with:** holders-2
-  (survivor writes). **Re-test:** two concurrent settings writes and an acceptance all survive.
-- **Maintenance verbs race the writers they do not ask** (reported): `reindex`
-  (`archive_maintenance.py:535-536`) checks no writer and has no dry run; `measurement_archive.py::_register`
-  (`:419-430`) checks then appends outside `appending`, so duplicate fold keys land (`_live_rows` keeps
-  the last, `_built_index` the first); `reset` unlinks `.*.tmp` (`data_root.py:567`, `reset.py:193-196`)
-  without the file locks, and a server with no jobs passes `holder_in_reach`; the reaper holds the
-  producer lock across a whole ledger scan (`stores.py:121-138`) while `hold_cycle` waits 1 s
-  (`producer_lock.py:13,24`), so a resume racing the sweep is refused `producer_live`. Root: each verb asks
-  `holder_of` for the writers it races, `_register` appends under `appending`, and the reaper takes the
-  lock per cycle. **Rides with:** holders-2. **Re-test:** a reindex beside a live writer refuses, naming it.
-- **The stranger rate buckets are per process** (reported): `jobs/quota.py`'s buckets live in memory, so
-  two servers give twice the stranger rate its docstring promises. Root: the docstring states per
-  process, or the bucket moves on disk. **Rides with:** holders-2.
-- **Two per-process liveness locks share one jobs dir** (filed by paths): `jobs/interlock.py::this_producer`
-  (`jobs/producers/<pid>-<hex>.lock`) and `docker_host.py::CONTAINER_PRODUCER`
-  (`jobs/machine/producers/<hex>.lock`) each mint and hold a token per process. Root: one producer token
-  per process and home, held in `infrastructure/producer_lock.py`, which both labels containers and
-  admits jobs; `CONTAINER_PRODUCER`'s import-time readers (`connectors/harbor.py:1129`, the compose
-  overlay's env) take it from the claim. **Rides with:** holders-2 (one holder identity). **Re-test:**
-  `git grep -c "CONTAINER_PRODUCER" -- promptpotter` is 0.
+- **`reindex` has no dry run**: `archive_maintenance.py::reindex_measurement_archive` refuses beside a
+  live writer (`code=archive_writers`) but rebuilds the index the moment it is asked, while
+  `archive_maintenance.py::compact_measurement_archive` plans unless `apply`. Root: one plan/apply
+  pair, like compact. **Rides with:** holders-3. **Re-test:** a `reindex` without `--apply` writes
+  nothing and names what it would rebuild.
+- **An atomic write's temporary is unlocked between its close and its replace**:
+  `store/io.py::write_bytes` holds its `_try_lock` on the temporary only until `os.fdopen` closes it,
+  so `_atomic_replace` runs on an unlocked temporary; a reset in that gap unlinks it and the replace
+  raises, and on Windows a probe of an empty locked temporary may read it as unheld. Root: on POSIX
+  the lock is held through the replace. **Rides with:** holders-3. **Re-test:** a reset racing a write
+  between its close and its replace leaves the write whole.
 
-### life (after holders, beside cfg)
+### life-2 (what life left at landing 51)
 
-- **The launch lifecycle is an implicit state machine**: fix-commit touches since 2026-09-15 put
-  `campaign_store/store.py` (15), `jobs/quota.py` (13), `domain/run_records.py` (12), `jobs/mint.py`
-  (12), `runner/entry.py` (10), `launcher/mint_and_start.py` (10), `launcher/checkin.py` (9),
-  `commands/launching.py` (9), `commands/dispatcher.py` (9), `domain/command_kinds.py` (8),
-  `runner/inner/spawn.py` (8), `run_observers.py` (8) and `launcher/admission.py` (8) on top; about ten
-  of the thirteen are mint → admit → hold → start → release, spread over ~10 files with no transition
-  table. holders fixes who holds; the fix density is the missing lifecycle. Action: one explicit
-  lifecycle (asked → admitted → held → running → ended), each exit a declared transition, `Hold` its
-  data; every door moves a launch only through it. The reconciler it replaces:
-  `infrastructure/runtime_flags.py` holds no flags; `read_run_state` takes 11 inputs (6 bools, 2
-  clocks, the claim, the gate, the drafts) through an 8-rule precedence ladder over five sources (the
-  ledger's last `RunPhaseRecord`, the producer lock, the pass lock, the inbox's pause, the launch
-  claim's lock) and heartbeat mtimes, on every read; with the table its inputs are the declared state
-  and lock liveness, and the file is renamed to what it holds (`run_state.py`). The contracts are
-  hidden: since 2026-05-01, in commits of 25 files or fewer, with no import edge either way,
-  `runner/entry.py` co-changes with `live_dashboard/state.py` 34 times (47% of its changes) and with
-  `runtime_flags.py` 21 (66%), `launcher/checkin.py` with `cli/commands/new.py` 20,
-  `campaign_store/store.py` with `cli/commands/reset.py` 13 (62%), `resume_and_fork/repair.py` with
-  `runner/round.py` 7 of 7; `embedded_run.py` spells its own launch beside `launcher/head_to_head.py`'s
-  admitted one and co-changes with `cli/commands/new.py`, which neither imports. **Rides with:** life.
-  **Re-test:** the chain's census lists every write of a launch's phase; one transition function
-  remains.
+life landed the launch lifecycle as data (`domain/job.py`'s `LAUNCH_MOVES`, one `JobRegistry.move`),
+the reconciler's rename to `run_state.py`, the contracts as imports, and the opener owning the backend
+client. Left:
+
 - **A blocking lock runs on the event loop** (✓): the admission gate's RLock is taken on worker threads
   that scan every ledger and on the loop (`admit()` at `launch.py:134-162`, from async launch `:173` and
-  `launching.py:348`; the registry's `mark_started`, `release`, `cancel_queued`), and the file gate
+  `launching.py:348`; the registry's `move`, `release`, `cancel_queued`), and the file gate
   `io.py::take_lock` polls with `time.sleep` up to `LOCK_TIMEOUT` = 5 s (`interlock.py:50-58`); also on
   the loop: the dispatcher's `_applied` ack (a locked command-log append), a grants read in the OIDC
   middleware per request, `headers.py:56-61,98` reading `build-id.txt` per response, the auth callback's
@@ -733,37 +640,36 @@ open holds. These rows were in its brief and not built.
   a blocking lock (`take_lock` with wait > 0, the admission gate) refuses on the event-loop thread, and
   each async door offloads once. Beside it (filed by paths, whose landing moved the upload parse off the
   loop): `loaders.py:433` and `startability.py:195` re-read a kept upload on the loop at every bank read
-  (`read_kept_table`). **Rides with:** life (every door moves through one transition).
+  (`read_kept_table`). **Rides with:** life-2 (every door moves through one transition).
 - **The CLI composes answers the server should own** (reported unless ✓): `machine-status` joins
   `account_bound`; a pass's second Ctrl+C hard-codes "resume" (`campaign_runner.py:91-98`); the drift
   pivot (`resume_command.py:175-194`) should be `ConfigDriftError` carrying `NextAct("mint-campaign")`;
   readiness is checked twice (`new.py:248-254` vs `launching.py:444-446`) with two `draft_served`
-  fetches. **Rides with:** life.
-- **The job registry globs every job file per question** (✓): `JobRegistry.list_all` globs and
-  validates every `jobs/*.json` (`registry.py:340-348`), and `list_running`, `list_queued`, `pass_on` each
-  call it again, some under the admission gate (`reap_orphans`, `share_campaign_ceiling`); every L4 inner
-  cell mints a job, and wallet reads on each store frame run `reap_orphans` under the gate. Root: a
-  writer-maintained live-jobs index; reaping moves to the sweep. **Rides with:** life.
-- **Nothing owns the backend HTTP client's lifetime** (✓, a leak pass): `BackendClient.http` opens an
-  `httpx.AsyncClient` lazily (`backend.py:186-195`), and `wiring.py:284`'s revision read opens it at every
-  termnorm and harbor session (`termnorm.py:151-152`, `harbor.py:1538-1539`); seven openers meet three
-  closes of three shapes (`embedded_run.py:147,157` an exit stack, `spawn.py:396-399` a finally,
-  `mint_and_start.py:149-150` on refusal only). Never closed: the server launch (`launch.py:62-87` →
-  `HeldRun` → detach, `run_job.py:265`), `NewCycle.open` when `mint_framed_cycle` raises
-  (`mint_and_start.py:104-114`), `open_checkin` (`checkin.py:180`; its finally releases the claim alone),
-  `head_to_head.py:87,99`, `scoring_scope.py:139-162`'s `open_diagnostic` (already an async context
-  manager, never acloses), and the L4 seat (`spawn.py:371` → `init_services`, raising at `:316`, `:323`,
-  `:358` or in mint before the try at `:376`), so every unscoreable cell leaks one client per round. Root:
-  the opener owns the lifetime: `init_services` / `bind_cycle_session` become async context managers,
-  `HeldRun` closes after `spawn_job` hands off, every door enters one, and the ad-hoc closes go.
-  **Rides with:** life (every door through one transition). **Re-test:** a refused, an unscoreable and a
-  handed-off launch each leave no open client.
-- **The run-state stamp misses a quiet producer's death** (✓): `runtime_flags.py:174` relies on "a
-  directory's mtime sees a child's create AND unlink", but `producer_lock.py:35-39` `release` never
-  unlinks, so the dashboard answers 304 on attached or WEDGED until the sweep writes a stop record. Root:
-  the stamp carries `held(cycle)` and `held(pass)`, the OS facts `derive_run_state` already reads, and the
-  comment goes. **Rides with:** life 2 (the reconciler). **Re-test:** a producer killed between ticks
-  reads ended at the next poll.
+  fetches. **Rides with:** life-2.
+- **The job registry globs every job file per question** (✓): `jobs/registry.py::JobRegistry.list_all`
+  globs and validates every `jobs/*.json`, and `list_running`, `list_queued`, `pass_on` each call it
+  again, some under the admission gate (`reap_orphans`, `share_campaign_ceiling`); every L4 inner cell
+  mints a job, and wallet reads on each store frame run `reap_orphans` under the gate. Root: a
+  writer-maintained live-jobs index; reaping moves to the sweep. **Rides with:** life-2.
+- **A job file that does not load is logged, not reported**: `jobs/registry.py::JobRegistry.list_all`
+  skips it after one `logger.error` per process, and only a landing names it, so an operator reading
+  `machine-status` or the queue never learns a job is missing from the count. Root: a served read
+  reports it. **Rides with:** life-2. **Re-test:** a job file that does not load is named in a served
+  read.
+- **A withdrawn head-to-head leaks its source's client**: `launcher/head_to_head.py`'s `DatasetArms` and
+  `CheckinArms` close their `closing` stack only in `launched()`; `withdraw` is sync and never acloses
+  it, so a head-to-head withdrawn before its launch leaves its source's backend client open. Action: an
+  async withdraw closes the source stack. **Rides with:** life-2. **Re-test:** withdraw a head-to-head
+  and read its client closed.
+- **The runner reads the live dashboard's state through**: `runner/entry.py:167,305` walks
+  `observers.dashboard.live.state.spend` for the spend it hands the run's end and the origin round,
+  instead of asking the projection. Root: the projection answers its spend itself, and the walks go.
+  **Rides with:** life-2. **Re-test:** `git grep -n "dashboard.live.state" -- promptpotter/application/runner` is empty.
+- **The test session builds backend clients nobody closes**: `tests/factories.py:422`'s `backend_client`
+  builds a `BackendClient` beside the opener, so after `test_spend`, `test_identity` and `test_security`
+  two clients are still open (life's probe), both test-built. Root: a test opens its client through the
+  opener that owns its lifetime. **Rides with:** life-2. **Re-test:** after those three suites, a probe
+  on `BackendClient` reads no open client.
 
 ### passes (links 1-2 landed at 47; link 3 beside holders, link 4 after it)
 
@@ -1341,30 +1247,27 @@ phone-375/393/412 × "every view fits" and × "lineage forest fits" (the Candida
 - **`main.py`'s CORS still allows `If-Modified-Since`**, which no client sends since the dashboard reads
   by ETag. Action: the header leaves `allow_headers`. **Rides with:** la 2. **Re-test:**
   `git grep -n "If-Modified-Since" -- promptpotter/main.py` is empty.
-- **The run-state derivation cannot move into `stores.py`**: `infrastructure/runtime_flags.py`'s
+- **The run-state derivation cannot move into `stores.py`**: `infrastructure/run_state.py`'s
   `derive_run_state`, `run_owed`, `read_run_state` and `run_state_stamps` read the ledger and the producer
   lock that `store/stores.py::Stores.declare_stop` and `::declare_ended` write, but `stores.py` imports
-  `CampaignStore`, and `campaign_store/store.py:68,254` (`run_state_stamps`) reads the run state, so
-  the move closes an import loop. life renames the file (`runtime_flags.py` → `run_state.py`), so this
-  row keeps only the leg: life's `run_state.py` (the derivation, `run_owed`, the stamps and
-  `RECENT_STEP_S`) imports neither `stores.py` nor `campaign_store/`, and both read it.
-  **Rides with:** la 2, a regroup by subject, after life's rename; its Owns gain the import lines la
-  already takes (`store/stores.py`, `maintenance/archive_maintenance.py`, `identity/default_claim.py`,
-  `campaign_store/store.py`, `scripts/{build_ts_types,offline_run}.py`, `tests/test_security.py`) and
-  `llm/heartbeat.py`'s doc line (`cycle_reads.py` imports none of it). **Re-test:**
-  `python scripts/gate.py --only layering` is green with `stores.py` reading life's `run_state.py`.
-- **`run_owed` re-derives `SILENT`'s fact beside `derive_run_state`**: `runtime_flags.py::run_owed`
+  `CampaignStore`, and `campaign_store/store.py:67` (`run_state_stamps`) reads the run state, so the
+  move closes an import loop. The row keeps only the leg: `run_state.py` (the derivation, `run_owed`,
+  the stamps and `RECENT_STEP_S`) imports neither `stores.py` nor `campaign_store/`, and both read it.
+  **Rides with:** la 2, a regroup by subject; its Owns gain the import lines la already takes
+  (`store/stores.py`, `campaign_store/store.py`, `scripts/{build_ts_types,offline_run}.py`,
+  `tests/test_security.py`) and `llm/heartbeat.py`'s doc line (`cycle_reads.py` imports none of it).
+  **Re-test:** `python scripts/gate.py --only layering` is green with `stores.py` reading `run_state.py`.
+- **`run_owed` re-derives `SILENT`'s fact beside `derive_run_state`**: `run_state.py::run_owed`
   reads the last phase and the launch claim again, because `derive_run_state` cannot tell a lock
   holder's own hold from a producer's. Root: the derivation takes the reader's hold as an input.
-  **Rides with:** la 2, with life's rename above, in the same files. **Re-test:**
+  **Rides with:** la 2, in the same files as the row above. **Re-test:**
   `git grep -c "def run_owed" -- promptpotter` is 0.
-- **Two spellings of "a producer holds it"**: `runtime_flags.py::producer_attached` derives the whole run
+- **Two spellings of "a producer holds it"**: `run_state.py::producer_attached` derives the whole run
   state, ledger and inbox included, to answer a lock probe, while `campaign_store/store.py::run_held_cycles`
   asks `producer_lock.cycle_held` directly. The `account_spend` readers are gone (df701cd20). Root:
-  `producer_attached` (`runtime_flags.py:162-164`) goes, and its readers ask `producer_lock.cycle_held`
-  (`maintenance/archive_maintenance.py:57`, `scripts/offline_run.py:714`, `tests/test_security.py:1511`;
-  `identity/default_claim.py:35`'s read goes with money 5). **Rides with:** la 2, with life's rename
-  above, in the same files. **Re-test:**
+  `producer_attached` (`run_state.py:156-158`) goes, and its readers ask `producer_lock.cycle_held`
+  (`scripts/offline_run.py:714`, `tests/test_security.py:2052`). **Rides with:** la 2, in the same
+  files as the rows above. **Re-test:**
   `git grep -n "producer_attached" -- promptpotter scripts tests` is empty.
 - **The connector registry names an application module by string**: `connectors/__init__.py::_APPLICATION_BUILT_INS`
   loads the recursion's connector from `application/` by name. Root: it registers where the application
@@ -1766,11 +1669,10 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 - **Archive hygiene before the next bulk delete**: (1) reclaim, a dataset-scoped destructive `delete`,
   dry-run by default, refusing while a producer can append; (2) attribution, an L4 outer cell stamps the
   runs its inner campaign produced; (3) the entry-to-run lookup (which runs an archive entry serves,
-  so a delete names what it breaks; not `pipeline_schema.py::reach_map`, a node's reach); (4) `reindex`, a maintenance write with no
-  dry-run and no live-writer refusal, whose help promises "GC orphaned runs" that
-  `archive_maintenance.py::reindex_measurement_archive` does not do, takes reclaim's refusal and its help
-  says what it does. **Rides with:** small 3. **Re-test:** `compact-archive inventory`; `reindex`
-  under a live producer refuses.
+  so a delete names what it breaks; not `pipeline_schema.py::reach_map`, a node's reach); (4) `reindex`'s
+  help promises "GC orphaned runs" that `archive_maintenance.py::reindex_measurement_archive` does not
+  do, and says what it does (its dry run rides holders-3). **Rides with:** small 3. **Re-test:**
+  `compact-archive inventory`.
 - **An immutable record is written four ways**: `FrozenModel`, `StrictModel`, `NamedTuple` and frozen
   `dataclass`. Action: `docs/developer/conventions.md` names one per role (a record crossing a seam, a
   local value); a file converts when a chain touches it, never a sweep. **Rides with:** small 5.
@@ -1796,6 +1698,10 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   `ValueError` out of `ingest_draft` (a 500 for `café.csv`). Root: `fullmatch` in `safe_name`, one
   containment rule, and a derived slug built in the dataset-name charset. **Rides with:** small.
   **Re-test:** `café.csv` uploads under a refused-or-derived slug, never a 500.
+- **A budget's remainder has two shapes** (payer-2's symptom): `jobs/quota.py::_Left` (signed, per
+  axis) repeats the "nothing left on a bounded axis" test that `domain/spend.py::Budget.run_out` owns.
+  Root: one shape of a budget's remainder, and `_Left` goes. **Rides with:** small. **Re-test:**
+  `git grep -c "class _Left(" -- promptpotter/application/jobs/quota.py` is 0.
 
 ### batch/31 · box
 
@@ -1977,7 +1883,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   **Re-test:** a landing from a reftable clone names why.
 - **Run data is stat'ed bare outside `store/io.py`**: `store/read_model.py::file_sig`, six more
   `.stat()` sites (`optimizer_manifest.py:96`, `pricing.py:114`, `event_stream.py:49`,
-  `runtime_flags.py:38`, `measurement_archive.py:480`, `private_root.py:32`) and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger
+  `run_state.py:39`, `measurement_archive.py:480`, `private_root.py:32`) and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger
   past `MAX_PATH` reads as absent. Root: the data root spelled once in its long form (`config/paths.py`),
   so every derived path carries it; `scripts/processes.py::long_path` (`a46a02722`, the gate's cache root
   alone) is a second speller beside `store/io.py::_long_path`, and goes with it, or its definition says

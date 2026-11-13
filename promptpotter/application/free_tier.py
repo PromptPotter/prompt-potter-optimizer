@@ -7,7 +7,6 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, NamedTuple
 
 from promptpotter import connectors
-from promptpotter.application.jobs.coupon import paying_key
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
@@ -21,6 +20,7 @@ from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.spend import draws_coupon
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.llm.registry import providers
+from promptpotter.infrastructure.llm.wallet import paying_key
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError

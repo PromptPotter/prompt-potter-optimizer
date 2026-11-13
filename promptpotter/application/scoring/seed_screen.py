@@ -236,125 +236,127 @@ async def _screen(
     model: str | None,
     provider: str | None,
 ) -> SeedScreenOutcome:
-    session = await init_services(dataset_name=dataset_name, identity=identity, stores=stores)
-    all_samples = session.bank.samples
-    if not all_samples:
-        raise DiagnosticError(f"dataset {dataset_name!r} loaded zero samples.")
+    async with init_services(
+        dataset_name=dataset_name, identity=identity, stores=stores
+    ) as session:
+        all_samples = session.bank.samples
+        if not all_samples:
+            raise DiagnosticError(f"dataset {dataset_name!r} loaded zero samples.")
 
-    campaign_config = (
-        CampaignConfig.model_validate({})
-        if session.dataset is None
-        else load_dataset_campaign_config(session.dataset)
-    )
-    solver = session.pipeline_schema.prompt_nodes()
-    if model and not solver:
-        raise DiagnosticError(
-            f"dataset {dataset_name!r} declares no prompt node to pin --model on."
+        campaign_config = (
+            CampaignConfig.model_validate({})
+            if session.dataset is None
+            else load_dataset_campaign_config(session.dataset)
         )
-    if model:
-        # The ENVIRONMENT pin an L4 pool cell carries (`panel.tasks[].inner_model`), laid on the
-        # dataset's own node config, so a (dataset, solver) pair is screened as its cell would run.
-        po = dict(campaign_config.pipeline_overlay)
-        for node in solver:
-            po[node.name] = NodeCall.model_validate(
-                {
-                    **po.get(node.name, NodeCall()).laid_keys(),
-                    "model": model,
-                    **({"provider": provider} if provider else {}),
-                }
-            )
-        campaign_config = campaign_config.model_copy(update={"pipeline_overlay": po})
-    session = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
-    with arm_diagnostic_scoring(session, campaign_config):
-        pipeline_params = session.pipeline_params
-        # The run's C0 framing: the origin must be the prompt the campaign will actually score.
-        origin = resolve_origin_opt_search_point(
-            session.dataset,
-            pipeline_params=pipeline_params,
-            schema=session.pipeline_schema,
-        )
-        if unprompted := [node.name for node in solver if not origin.prompt(node.name).fields]:
-            # A campaign's check-in writes the missing prompt; a screen has none, so a bare question
-            # would be graded under no answer grammar and the matcher's misses read as the model's.
+        solver = session.pipeline_schema.prompt_nodes()
+        if model and not solver:
             raise DiagnosticError(
-                f"dataset {dataset_name!r} authors no starting prompt for {unprompted} in its "
-                "origin.yaml, so its origin is the bare question. Write one before screening."
+                f"dataset {dataset_name!r} declares no prompt node to pin --model on."
             )
-        origin_sp = session.points(campaign_framing(stores, campaign_config, session.dataset)).job(
-            origin
-        )
+        if model:
+            # The ENVIRONMENT pin an L4 pool cell carries (`panel.tasks[].inner_model`), laid on the
+            # dataset's own node config, so a (dataset, solver) pair is screened as its cell would run.
+            po = dict(campaign_config.pipeline_overlay)
+            for node in solver:
+                po[node.name] = NodeCall.model_validate(
+                    {
+                        **po.get(node.name, NodeCall()).laid_keys(),
+                        "model": model,
+                        **({"provider": provider} if provider else {}),
+                    }
+                )
+            campaign_config = campaign_config.model_copy(update={"pipeline_overlay": po})
+        session = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
+        with arm_diagnostic_scoring(session, campaign_config):
+            pipeline_params = session.pipeline_params
+            # The run's C0 framing: the origin must be the prompt the campaign will actually score.
+            origin = resolve_origin_opt_search_point(
+                session.dataset,
+                pipeline_params=pipeline_params,
+                schema=session.pipeline_schema,
+            )
+            if unprompted := [node.name for node in solver if not origin.prompt(node.name).fields]:
+                # A campaign's check-in writes the missing prompt; a screen has none, so a bare question
+                # would be graded under no answer grammar and the matcher's misses read as the model's.
+                raise DiagnosticError(
+                    f"dataset {dataset_name!r} authors no starting prompt for {unprompted} in its "
+                    "origin.yaml, so its origin is the bare question. Write one before screening."
+                )
+            origin_sp = session.points(
+                campaign_framing(stores, campaign_config, session.dataset)
+            ).job(origin)
 
-        readings: list[SeedReading] = []
-        for seed in seeds:
-            bank = draw_bank(all_samples, n_samples, seed)
-            # Refuses a mixed bank BEFORE the loop buys `repeat` passes over it.
-            bank_floor = class_floor(bank)
-            reads: list[float] = []
-            latencies: list[float] = []
-            all_rows: list[GradedCell] = []
-            cost_usd: float | None = None
-            n_scored = 0
-            # A screen answers for no campaign, so its bills land on the workspace's ledger.
-            with verb_ledger(stores, None):
-                passes = await replicates(origin_sp, bank, session, max(1, repeat))
-            for i, passed in enumerate(passes):
-                rows = passed.sheet.cells
-                scored = [cell.hit for cell in rows]
-                if not scored:
-                    raise DiagnosticError(
-                        f"seed {seed} pass {i}: the origin pass returned no scoreable row — the "
-                        "screen measured nothing and must not report a bank on that basis."
-                    )
-                reads.append(sum(scored) / len(scored))
-                n_scored = len(scored)
-                pass_latencies, pass_cost = _call_cost_and_latency(rows)
-                latencies += pass_latencies
-                if pass_cost is not None:
-                    cost_usd = (cost_usd or 0.0) + pass_cost
-                all_rows += rows
-            reading = SeedReading(
-                seed=seed,
-                n=n_scored,
-                class_floor=bank_floor,
-                origin_reads=tuple(reads),
-                latencies=tuple(latencies),
-                cost_usd=cost_usd,
-                answer_modal_share=modal_answer_share(all_rows),
-            )
-            readings.append(reading)
-            margin = reading.reasoning_margin
-            logger.info(
-                f"seed {seed}: floor "
-                f"{'--' if reading.class_floor is None else f'{reading.class_floor:.3f}'} "
-                f"origin {reading.origin_fitness:.3f} "
-                f"(spread {reading.origin_spread:.3f} over {len(reads)}) "
-                f"margin {'--' if margin is None else f'{margin:+.3f}'} +/-{reading.margin_se:.3f} "
-                f"lat {'--' if reading.latency_median is None else f'{reading.latency_median:.1f}s'}"
-                f"/{'--' if reading.latency_mean is None else f'{reading.latency_mean:.1f}s'} "
-                f"{'--' if reading.cost_per_pass is None else usd_text(reading.cost_per_pass)}/pass"
-                + (" REWARDS COLLAPSE" if reading.rewards_collapse else "")
-            )
+            readings: list[SeedReading] = []
+            for seed in seeds:
+                bank = draw_bank(all_samples, n_samples, seed)
+                # Refuses a mixed bank BEFORE the loop buys `repeat` passes over it.
+                bank_floor = class_floor(bank)
+                reads: list[float] = []
+                latencies: list[float] = []
+                all_rows: list[GradedCell] = []
+                cost_usd: float | None = None
+                n_scored = 0
+                # A screen answers for no campaign, so its bills land on the workspace's ledger.
+                with verb_ledger(stores, None):
+                    passes = await replicates(origin_sp, bank, session, max(1, repeat))
+                for i, passed in enumerate(passes):
+                    rows = passed.sheet.cells
+                    scored = [cell.hit for cell in rows]
+                    if not scored:
+                        raise DiagnosticError(
+                            f"seed {seed} pass {i}: the origin pass returned no scoreable row — the "
+                            "screen measured nothing and must not report a bank on that basis."
+                        )
+                    reads.append(sum(scored) / len(scored))
+                    n_scored = len(scored)
+                    pass_latencies, pass_cost = _call_cost_and_latency(rows)
+                    latencies += pass_latencies
+                    if pass_cost is not None:
+                        cost_usd = (cost_usd or 0.0) + pass_cost
+                    all_rows += rows
+                reading = SeedReading(
+                    seed=seed,
+                    n=n_scored,
+                    class_floor=bank_floor,
+                    origin_reads=tuple(reads),
+                    latencies=tuple(latencies),
+                    cost_usd=cost_usd,
+                    answer_modal_share=modal_answer_share(all_rows),
+                )
+                readings.append(reading)
+                margin = reading.reasoning_margin
+                logger.info(
+                    f"seed {seed}: floor "
+                    f"{'--' if reading.class_floor is None else f'{reading.class_floor:.3f}'} "
+                    f"origin {reading.origin_fitness:.3f} "
+                    f"(spread {reading.origin_spread:.3f} over {len(reads)}) "
+                    f"margin {'--' if margin is None else f'{margin:+.3f}'} +/-{reading.margin_se:.3f} "
+                    f"lat {'--' if reading.latency_median is None else f'{reading.latency_median:.1f}s'}"
+                    f"/{'--' if reading.latency_mean is None else f'{reading.latency_mean:.1f}s'} "
+                    f"{'--' if reading.cost_per_pass is None else usd_text(reading.cost_per_pass)}/pass"
+                    + (" REWARDS COLLAPSE" if reading.rewards_collapse else "")
+                )
 
-        # No ledger event: a screen has no cycle to file it, so it is the one pass on a side file.
-        readings.sort(key=lambda r: r.rank_key)
-        solver_tag = "" if model is None else "-" + re.sub(r"[^A-Za-z0-9.-]+", "-", model)
-        path = (
-            stores.base_dir
-            / DIAGNOSTICS_DIR
-            / f"seed-screen-{dataset_id_prefix(dataset_name)}{solver_tag}-{utcnow_iso()[:10]}.json"
-        )
-        write_json(
-            path,
-            {
-                "ts": utcnow_iso(),
-                "dataset": dataset_name,
-                "solver": model,
-                "provider": provider,
-                "n_samples": n_samples,
-                "readings": [r.as_dict() for r in readings],
-            },
-        )
-        logger.info("seed-screen: wrote %d reading(s) -> %s", len(readings), path)
-        return SeedScreenOutcome(
-            dataset_name=dataset_name, solver=model, readings=readings, artifact_path=str(path)
-        )
+            # No ledger event: a screen has no cycle to file it, so it is the one pass on a side file.
+            readings.sort(key=lambda r: r.rank_key)
+            solver_tag = "" if model is None else "-" + re.sub(r"[^A-Za-z0-9.-]+", "-", model)
+            path = (
+                stores.base_dir
+                / DIAGNOSTICS_DIR
+                / f"seed-screen-{dataset_id_prefix(dataset_name)}{solver_tag}-{utcnow_iso()[:10]}.json"
+            )
+            write_json(
+                path,
+                {
+                    "ts": utcnow_iso(),
+                    "dataset": dataset_name,
+                    "solver": model,
+                    "provider": provider,
+                    "n_samples": n_samples,
+                    "readings": [r.as_dict() for r in readings],
+                },
+            )
+            logger.info("seed-screen: wrote %d reading(s) -> %s", len(readings), path)
+            return SeedScreenOutcome(
+                dataset_name=dataset_name, solver=model, readings=readings, artifact_path=str(path)
+            )

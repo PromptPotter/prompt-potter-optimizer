@@ -143,19 +143,20 @@ async def open_diagnostic(
     if campaign is None:
         raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
     cycle = cycle_config(stores, campaign, hop)
-    session = configure_and_apply_pipeline(await bind_cycle_session(stores, campaign, hop), cycle)
     config = cycle.config
-    # Its cycle's pause stops the pass; the loop's skip and look-ahead are the loop's to spend.
-    session.state.control = RunControl(
-        commands=stores.commands,
-        enclosing=(stores.subject(hop),),
-        acting=() if acting is None else (acting,),
-    )
-    # Its scope spawns as `run_optimization`'s: a pp-self point's connector dispatches no inner run without it.
-    with arm_diagnostic_scoring(session, config):
-        yield OpenedDiagnostic(
-            campaign, session, config, campaign_framing(stores, config, session.dataset)
+    async with bind_cycle_session(stores, campaign, hop) as bound:
+        session = configure_and_apply_pipeline(bound, cycle)
+        # Its cycle's pause stops the pass; the loop's skip and look-ahead are the loop's to spend.
+        session.state.control = RunControl(
+            commands=stores.commands,
+            enclosing=(stores.subject(hop),),
+            acting=() if acting is None else (acting,),
         )
+        # Its scope spawns as `run_optimization`'s: a pp-self point's connector dispatches no inner run without it.
+        with arm_diagnostic_scoring(session, config):
+            yield OpenedDiagnostic(
+                campaign, session, config, campaign_framing(stores, config, session.dataset)
+            )
 
 
 def cycle_partition(

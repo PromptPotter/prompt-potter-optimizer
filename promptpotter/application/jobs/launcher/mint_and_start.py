@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -9,7 +11,6 @@ from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.draft_build import draft_task_context
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.initialization.wiring import bind_cycle_session, init_services
-from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.launcher.admission import campaign_sends
 from promptpotter.application.jobs.mint import (
     OpenedCycle,
@@ -25,6 +26,7 @@ from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch
 from promptpotter.domain.spend import Budget
+from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     own_definition,
@@ -98,20 +100,21 @@ class FreshMint:
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return sends_on(stores, self.campaign_config(stores), self.backend_type(stores))
 
-    async def open(self, stores: Stores) -> OpenedCycle:
+    @asynccontextmanager
+    async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
         """The session, then the mint: a refused one writes nothing."""
         t0 = time.perf_counter()
-        session = await init_services(
+        async with init_services(
             dataset_name=self.dataset_name, identity=stores.identity, stores=stores
-        )
-        logger.info("mint[%s]: init_services=%.2fs", self.dataset_name, time.perf_counter() - t0)
-        session, config = laid_session(session, self.layers)
-        return await mint_framed_cycle(
-            session,
-            declare(session, config, purpose=Optimize()),
-            session.bank.samples,
-            task_text=self.task_text,
-        )
+        ) as session:
+            logger.info("mint[%s]: init=%.2fs", self.dataset_name, time.perf_counter() - t0)
+            session, config = laid_session(session, self.layers)
+            yield await mint_framed_cycle(
+                session,
+                declare(session, config, purpose=Optimize()),
+                session.bank.samples,
+                task_text=self.task_text,
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,16 +143,13 @@ class ExistingCycle:
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return campaign_sends(stores, self.hop)
 
-    async def open(self, stores: Stores) -> OpenedCycle:
+    @asynccontextmanager
+    async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
         """The cycle on disk, bound and drift-checked: in the admitting process, and again in a
-        detached run's own. A refusal closes the client it opened; the opened cycle's caller closes it after."""
-        session = await bind_cycle_session(stores, self.campaign, self.hop)
-        try:
+        detached run's own."""
+        async with bind_cycle_session(stores, self.campaign, self.hop) as session:
             plan = resolve_resume(session, self.campaign, session.bank.samples)
-        except BaseException:
-            await session.backend_client.aclose()
-            raise
-        return OpenedCycle(plan.cycle, plan.session, plan.optimizer)
+            yield OpenedCycle(plan.cycle, plan.session, plan.optimizer)
 
 
 def commit_upload_definition(

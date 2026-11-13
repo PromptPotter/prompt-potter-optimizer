@@ -79,25 +79,16 @@ from promptpotter.application.head_to_head_price import (
 )
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs import interlock, mint, quota
-from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.account_activity import account_activity
-from promptpotter.application.jobs.coupon import (
-    AllowanceState,
-    BackendCells,
-    ProviderSend,
-    keyed_client,
-    paying_key,
-    provider_send,
-)
 from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
     RunStart,
     admit_and_share,
+    admit_slotless,
     claim_cycle,
     open_spend_book,
     paid_call,
     paid_pass,
-    slotless_share,
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
@@ -172,7 +163,13 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun, PaidCall
+from promptpotter.domain.job import (
+    UNRESOLVED_HOP,
+    CampaignLaunch,
+    EmbeddedRun,
+    LaunchMove,
+    PaidCall,
+)
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.proxies import (
     OuterSampleProxies,
@@ -244,6 +241,7 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.domain.validators import StopSignal
 from promptpotter.domain.verification import RescoreCount
+from promptpotter.infrastructure import holders
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -269,6 +267,14 @@ from promptpotter.infrastructure.llm.spend_book import (
     bound_account,
     replied,
     reserved,
+)
+from promptpotter.infrastructure.llm.wallet import (
+    AllowanceState,
+    BackendCells,
+    ProviderSend,
+    keyed_client,
+    paying_key,
+    provider_send,
 )
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.base import Projection
@@ -354,7 +360,7 @@ def run_bound(tmp_path: Path) -> Iterator[None]:
 def _admitted(stores: Stores, registry: JobRegistry, job_id: str, reserve: Budget) -> None:
     """Admitted as `admit_and_share` admits it: its hold on the account, then the stamp."""
     hold_run(stores, job_id, reserve, parent=None)
-    registry.mark_admitted(job_id)
+    registry.move(job_id, LaunchMove.ADMIT)
 
 
 def _reserve_of(stores: Stores, job_id: str) -> Budget:
@@ -1037,6 +1043,7 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
         cycle=CycleConfig.laid(launched_config, []),
         budget=held,
         optimizer=select_optimizer(launched_config.optimization),
+        closing=contextlib.AsyncExitStack(),
     )
     spec = launched.job_spec(mode)
     book = _armed(stores, None, spec.budget)
@@ -1229,14 +1236,17 @@ async def test_what_comes_back_behind_a_stalled_head_is_banked_priced_and_never_
 
 @pytest.mark.usefixtures("run_bound", "offline")
 @on_jumping_clock
-async def test_a_cell_past_where_a_rule_could_cut_is_never_banked(built_stores: Stores) -> None:
+async def test_a_cell_paid_past_where_a_rule_cut_is_banked_and_never_taken(
+    built_stores: Stores,
+) -> None:
+    # Its holder files a claimed cell's answer as its claim retires, so a waiter replays it.
     dataset = _dataset()
     head = dataset[0].id
     capped = await _walk(
         built_stores, dataset, armed=4, max_cells=4, cut_at=2, pause_after_call=2, stall=head
     )
-    assert set(capped["banked"]) == {head, dataset[1].id}, (
-        "a cell past where a rule could cut was banked: the serial walk would not have measured it"
+    assert set(capped["banked"]) == {s.id for s in dataset[:3]}, (
+        "a cell paid past where a rule cut was lost, or one never paid was banked"
     )
 
 
@@ -1945,7 +1955,7 @@ def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
         return None, cycle_result([], None, [])
 
     async def embedded() -> None:
-        await slotless_share(
+        start, held = await admit_slotless(
             _budgeted(Budget(usd=1.0)),
             stores=built_stores,
             holder=EmbeddedRun("ds1"),
@@ -1953,8 +1963,9 @@ def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
             requested=Budget(),
             step_rounds=None,
             sends=_CELLS,
-            run=held_embedded,
         )
+        _, ended = await held_embedded(held)
+        start.release(ended)
 
     with pytest.raises(QuotaExceededError):
         asyncio.run(embedded())
@@ -2095,7 +2106,7 @@ def test_a_job_retargeted_mid_stamp_is_never_overwritten_by_the_runs_stale_copy(
         hop=race[1],
         holder=CampaignLaunch("ds1"),
     )
-    shared.mark_admitted(stamped.job_id)
+    shared.move(stamped.job_id, LaunchMove.ADMIT)
     api = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 4)
     interleaved = [False]
     read_job = shared.get
@@ -2103,16 +2114,16 @@ def test_a_job_retargeted_mid_stamp_is_never_overwritten_by_the_runs_stale_copy(
     def read_then_moved(job_id: str) -> Any:
         job = read_job(job_id)
         with contextlib.suppress(ServiceUnavailableError):
-            api.update_target(job_id, hop=race[0])
+            api.move(job_id, LaunchMove.LAND, hop=race[0])
             interleaved[0] = True
         return job
 
     with monkeypatch.context() as patched:
         patched.setattr(interlock, "LOCK_TIMEOUT", 0.0)
         patched.setattr(shared, "get", read_then_moved)
-        shared.mark_started(stamped.job_id)
+        shared.move(stamped.job_id, LaunchMove.START)
         if not interleaved[0]:
-            api.update_target(stamped.job_id, hop=race[0])
+            api.move(stamped.job_id, LaunchMove.LAND, hop=race[0])
     after = shared.get(stamped.job_id)
     assert after is not None and after.hop == race[0], (
         "a job retargeted mid-stamp was overwritten by the run's stale job file"
@@ -3335,10 +3346,10 @@ def _running(stores: Stores, registry: JobRegistry, *, admitted: bool, reserve: 
         workspace=WorkspaceDir(registry.jobs_dir),
         hop=UNRESOLVED_HOP,
         holder=CampaignLaunch(dataset_name="d"),
-        stage=RunPhase.RUNNING,
     )
     if admitted:
         _admitted(stores, registry, held.job_id, reserve)
+        registry.move(held.job_id, LaunchMove.START)
 
 
 async def _paid_door(door: str, stores: Any) -> None:
@@ -4297,7 +4308,7 @@ def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.06)
     unreported = money_on(biller.charges.path).unreported.host.unreported_usd
     with monkeypatch.context() as dead:
-        dead.setattr(registry_module, "producer_alive", lambda *_: False)
+        dead.setattr(holders, "producer_alive", lambda *_: False)
         assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.11), (
             "a crashed run held the coupon until a sweep"
         )
@@ -4431,6 +4442,49 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
     assert len(campaigns()) == len(minted) + 2 and len(detached) == 4, (
         "a retry under the act's key minted or launched its arms again"
     )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_hold_on_the_accounts_own_key_holds_back_what_its_host_paid_children_keep() -> None:
+    charges = _charges()
+    holds: tuple[tuple[str, str | None, KeySource, float], ...] = (
+        ("own", None, "user", 1.0),
+        ("host", "own", "host", 0.3),
+    )
+    for hold_id, parent, key_source, usd in holds:
+        charges.append(
+            Hold(
+                hold_id=hold_id,
+                parent=parent,
+                key_source=key_source,
+                bound=Budget(usd=usd),
+                resource="optimizer",
+                node="o",
+                ledger=None,
+            )
+        )
+    assert money_on(charges.path).held_back(None).usd == pytest.approx(0.3), (
+        "a host-paid send under an own-key hold held none of the coupon, or the own key's bound did"
+    )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_host_paid_send_in_an_own_key_cell_asks_the_reserve_its_whole_bound() -> None:
+    book = spend_book(None, usd_reserve=0.4)
+    book.charges.append(
+        Hold(
+            hold_id="own-cell",
+            parent=book.hold_id,
+            key_source="user",
+            bound=Budget(usd=0.9),
+            resource="backend",
+            node="cell",
+            ledger=None,
+        )
+    )
+    send = SendBound(input_tokens=0, output_tokens=100, usd=0.5)
+    with scoped(reservation="own-cell"), pytest.raises(HostAllowanceExhaustedError):
+        book.hold(send, _OPTIMIZER, what="a send", paid_by="host", ledger=None)
 
 
 # 6. Spend outlives what spent it

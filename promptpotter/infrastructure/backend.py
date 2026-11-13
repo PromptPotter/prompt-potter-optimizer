@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.config.paths import MACHINE_DIR, PRODUCERS_DIR
+from promptpotter.config.paths import MACHINE_DIR
 from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
@@ -106,8 +106,11 @@ class _CellSends:
 
 
 class MachineSlots:
-    def __init__(self, root: Path, capacity: int, *, compose_overlay: Path | None) -> None:
-        self._root = root
+    def __init__(
+        self, jobs_dir: Path, name: str, capacity: int, *, compose_overlay: Path | None
+    ) -> None:
+        self._jobs_dir = jobs_dir
+        self._root = jobs_dir / MACHINE_DIR / name
         self._capacity = capacity
         self._compose_overlay = compose_overlay
 
@@ -133,9 +136,7 @@ class MachineSlots:
     @asynccontextmanager
     async def hold(self) -> AsyncIterator[None]:
         with machine_step():
-            await claim_machine(
-                self._root.parent / PRODUCERS_DIR, compose_overlay=self._compose_overlay
-            )
+            await claim_machine(self._jobs_dir, compose_overlay=self._compose_overlay)
         # One turn at a time: without it a run armed to the pool's depth holds every slot all round.
         turn = await self._wait(lambda: self._lock("turn"))
         try:
@@ -162,7 +163,8 @@ class BackendClient:
         self._http: httpx.AsyncClient | None = None
         self._machine_slots = (
             MachineSlots(
-                jobs_dir / MACHINE_DIR / connector.name,
+                jobs_dir,
+                connector.name,
                 connector.max_cells_in_flight,
                 compose_overlay=connector.compose_overlay,
             )

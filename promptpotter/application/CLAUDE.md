@@ -33,10 +33,11 @@ L4's law is `domain/l4/`; this package runs it, and the `promptpotter` connector
 
 ## Run admission (`jobs/`)
 
-- **Every slot is asked at `jobs/launcher/admission.py::request_jobs`** (a launch, the one ask that may queue; a head-to-head's arms, all or none; a scoring pass), from `commands/launching.py`. <!-- probe: git grep -cE "promptpotter\.application\.commands" -- promptpotter/application/jobs/*.py == 0 --> A path reserving its own slot is the bug: the machine cannot report occupancy it was not told about. `embedded_run.py` and an inner run are the declared exemption (`slotless_share`: no slot, a ceiling share and a reservation).
+- **Every slot is asked at `jobs/launcher/admission.py::request_jobs`** (a launch, the one ask that may queue; a head-to-head's arms, all or none; a scoring pass), from `commands/launching.py`. <!-- probe: git grep -cE "promptpotter\.application\.commands" -- promptpotter/application/jobs/*.py == 0 --> A path reserving its own slot is the bug: the machine cannot report occupancy it was not told about. `embedded_run.py` and an inner run are the declared exemption (`admit_slotless`: no slot, a ceiling share and a reservation).
 - **An entry point hands DATA, never a callable**: a `LaunchRequest` arm, a `RunMode`, `Inline` where a person watches.
 - **A paid verb outside a run is admitted inside the application function**: a scoring pass through `paid_pass` (a slot, refused `machine_busy`, never queued), one LLM call through `jobs/launcher/admission.py::paid_call` (a slotless job, so its hold closes with it or its dead producer); both refuse a taken cycle.
 - **A server-launched run executes in its own process** (`jobs/launcher/run_job.py`); a queued job's intent never leaves the process that authenticated it, so a restart drops the queue.
+- **A launch moves only by a `domain/job.py::LAUNCH_MOVES` row, through `JobRegistry.move`** (asked → admitted → held → running → ended; each exit a `LaunchExit`), at every door: no other code writes a job's stage, admission, hop or release. <!-- probe: git grep -cE "(admitted_at|started_at|released_at).: utcnow_iso" -- promptpotter/*.py == 3 -->
 - **A job file is written by `JobRegistry._stamp` under the admission gate**; a second writer overwrites a release or a retarget. <!-- probe: git grep -cE "_persist\(" -- promptpotter/application/jobs/registry.py == 4 -->
 
 ## Backend overlay

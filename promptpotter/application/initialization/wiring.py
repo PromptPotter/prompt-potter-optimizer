@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -225,6 +226,7 @@ def complete_registries(*, every_treatment: bool = True) -> None:
             connector.completion_check()
 
 
+@asynccontextmanager
 async def init_services(
     dataset_name: str,
     *,
@@ -232,21 +234,23 @@ async def init_services(
     stores: Stores | None = None,
     program: object | None = None,
     served: ServedPipeline | None = None,
-) -> Session:
+) -> AsyncIterator[Session]:
     """A session on what *dataset_name*'s definition names: a campaign's own is bound by
     `bind_cycle_session`, on the connector its mint froze. *stores* is the ONE way to relocate the
     tree: the L4 inner runner passes a sandboxed one. *served* is a check-in Start's one backend
-    read, under which it landed the definition."""
+    read, under which it landed the definition. Its backend client closes as the block exits."""
     if stores is None:
         stores = build_stores(identity, projects_root=default_projects_root())
     dataset = resolve_dataset(stores, dataset_name)
     connector = connectors.CONNECTORS.get(runnable_definition(dataset).backend_type)
-    return await _open_session(
+    async with _session(
         stores, dataset, connector, identity=identity, program=program, served=served
-    )
+    ) as session:
+        yield session
 
 
-async def _open_session(
+@asynccontextmanager
+async def _session(
     stores: Stores,
     dataset: ResolvedDataset,
     connector: Connector,
@@ -254,7 +258,8 @@ async def _open_session(
     identity: IdentityContext,
     program: object | None = None,
     served: ServedPipeline | None = None,
-) -> Session:
+) -> AsyncIterator[Session]:
+    """THE opener of a backend client, and its one closer: every door enters it as a block."""
     await ensure_model_capabilities(Path(stores.base_dir))
     dataset_name = dataset.name
     definition = runnable_definition(dataset)
@@ -273,50 +278,54 @@ async def _open_session(
         jobs_dir=stores.jobs_dir,
     )
     logger.info("Backend: %s %s", connector.name, client.base_url)
+    try:
+        if served is None:
+            served = await served_pipeline(stores, connector, experiment=experiment)
+        declaration = served.over(definition.pipeline)
+        pipeline_schema = parse_pipeline_response(declaration)
+        logger.info("Pipeline: %s (%d nodes)", dataset.name, len(pipeline_schema.nodes))
+        _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
+        _verify_observation_names(pipeline_schema, connector, dataset_name)
+        backend_revision = await _read_backend_revision(client, connector)
+        bank, candidate_library = session_bank(
+            stores, dataset, connector=connector, experiment=experiment
+        )
+        # By hash, never a label: every answer this session files names a bank the store holds.
+        stores.tenant_datasets.put_bank(bank)
+        logger.info("Dataset: %s (%d samples)", dataset_name, len(bank.samples))
+        # After the samples, never before: the invariant is about the schema AND the bank together.
+        _warn_if_labels_have_no_ranker(pipeline_schema, bank.samples, connector)
+        yield Session(
+            store=stores,
+            backend_client=client,
+            pipeline_schema=pipeline_schema,
+            pipeline_read=PipelineRead(
+                declaration=declaration,
+                dataset_overlay=pipeline_node_overlay(definition.pipeline),
+            ),
+            backend_revision=backend_revision,
+            bank=bank,
+            candidate_library=candidate_library,
+            dataset_name=dataset_name,
+            dataset=dataset,
+            identity=identity,
+        )
+    finally:
+        await client.aclose()
 
-    if served is None:
-        served = await served_pipeline(stores, connector, experiment=experiment)
-    declaration = served.over(definition.pipeline)
-    pipeline_schema = parse_pipeline_response(declaration)
-    logger.info("Pipeline: %s (%d nodes)", dataset.name, len(pipeline_schema.nodes))
-    _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
-    _verify_observation_names(pipeline_schema, connector, dataset_name)
-    backend_revision = await _read_backend_revision(client, connector)
-    bank, candidate_library = session_bank(
-        stores, dataset, connector=connector, experiment=experiment
-    )
-    # By hash, never a label: every answer this session files names a bank the store holds.
-    stores.tenant_datasets.put_bank(bank)
-    logger.info("Dataset: %s (%d samples)", dataset_name, len(bank.samples))
-    # After the samples, never before: the invariant is about the schema AND the bank together.
-    _warn_if_labels_have_no_ranker(pipeline_schema, bank.samples, connector)
-    return Session(
-        store=stores,
-        backend_client=client,
-        pipeline_schema=pipeline_schema,
-        pipeline_read=PipelineRead(
-            declaration=declaration,
-            dataset_overlay=pipeline_node_overlay(definition.pipeline),
-        ),
-        backend_revision=backend_revision,
-        bank=bank,
-        candidate_library=candidate_library,
-        dataset_name=dataset_name,
-        dataset=dataset,
-        identity=identity,
-    )
 
-
+@asynccontextmanager
 async def bind_cycle_session(
     stores: Stores,
     campaign: Campaign,
     hop: CycleHop,
-) -> Session:
-    """Bound, never configured: a resume's drift refusal reads the schema before the config lands."""
-    session = await _open_session(
+) -> AsyncIterator[Session]:
+    """Bound, never configured: a resume's drift refusal reads the schema before the config lands.
+    Its backend client closes as the block exits."""
+    async with _session(
         stores,
         resolve_dataset(stores, campaign.dataset_name),
         connectors.CONNECTORS.get(campaign.connector),
         identity=stores.identity,
-    )
-    return session.bound(hop, purpose=campaign.declaration.purpose)
+    ) as session:
+        yield session.bound(hop, purpose=campaign.declaration.purpose)

@@ -154,7 +154,7 @@ from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.hierarchy import SubtreeCampaign
-from promptpotter.domain.job import CampaignLaunch, Job, ScoringPass
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job, LaunchMove, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
@@ -178,9 +178,12 @@ from promptpotter.domain.prompt_block import (
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
 from promptpotter.domain.run_records import (
+    Bill,
     ForkDirection,
     ForkSpec,
     ForkTrigger,
+    Hold,
+    Lapse,
     LaunchedEffect,
     LaunchedJob,
     RunPhaseRecord,
@@ -231,7 +234,7 @@ from promptpotter.infrastructure.identity.session import OIDCSessionStore, Sessi
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
-from promptpotter.infrastructure.runtime_flags import derive_run_state, producer_attached
+from promptpotter.infrastructure.run_state import derive_run_state, producer_attached
 from promptpotter.infrastructure.store.account_spend import campaign_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
 from promptpotter.infrastructure.store.data_root import Fate, classify
@@ -268,6 +271,7 @@ from promptpotter.infrastructure.store.visit_records import (
     VisitRecord,
     default_visit_record_store,
 )
+from promptpotter.infrastructure.store.wallet_store import ChargeBook
 from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, _off_catalogue, app
 from promptpotter.presentation import admin_bot
 from promptpotter.presentation.api.deps import build_stores_from_identity
@@ -1631,15 +1635,81 @@ def test_a_delegate_accepts_terms_for_itself_and_leaves_its_delegators_standing(
         return read.terms_accepted_version
 
     account.accept_terms(owner, TERMS_VERSION)
-    owners_consent = account.account_of(owner).terms_accepted
     assert accepted(owner) == TERMS_VERSION and accepted(delegate) is None, (
         "a delegate stood on its delegator's acceptance"
     )
     account.accept_terms(delegate, TERMS_VERSION)
     assert accepted(delegate) == TERMS_VERSION
-    assert account.account_of(owner).terms_accepted.items() >= owners_consent.items(), (
-        "a delegate's accept overwrote its delegator's"
+    assert accepted(owner) == TERMS_VERSION, "a delegate's accept overwrote its delegator's"
+
+
+@pytest.mark.usefixtures("offline")
+def test_concurrent_account_edits_and_an_acceptance_all_survive(built_stores: Stores) -> None:
+    # Each edit reads and replaces the account under its write lock; the acceptance is appended.
+    user = account.account_of(built_stores)
+    edits = 40
+
+    def bump() -> None:
+        for _ in range(edits):
+            built_stores.users.update(
+                lambda held: held.model_copy(
+                    update={"max_campaigns_per_day": held.max_campaigns_per_day + 1}
+                )
+            )
+
+    racers = [threading.Thread(target=bump) for _ in range(2)]
+    for racer in racers:
+        racer.start()
+    account.accept_terms(built_stores, TERMS_VERSION)
+    account.set_user_settings(built_stores, account.UserSettings(demo_mode_enabled=False))
+    for racer in racers:
+        racer.join()
+    held = account.account_of(built_stores)
+    assert held.max_campaigns_per_day == user.max_campaigns_per_day + 2 * edits, "an edit was lost"
+    assert not held.demo_mode_enabled, "a preference was lost to a concurrent edit"
+    read = account.me(built_stores, held, configured=())
+    assert read.terms_accepted_version == TERMS_VERSION, "an acceptance was lost to an edit"
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_survivors_write_and_a_bill_reach_the_disk_before_they_return(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: dict[int, Path] = {}
+    synced: list[Path] = []
+    real_open, real_fsync = os.open, os.fsync
+
+    def open_(path: str | os.PathLike[str], flags: int, mode: int = 0o777) -> int:
+        fd = real_open(path, flags, mode)
+        opened[fd] = Path(path)
+        return fd
+
+    def fsync(fd: int) -> None:
+        synced.append(opened[fd])
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "open", open_)
+    monkeypatch.setattr(os, "fsync", fsync)
+    user = account.account_of(built_stores)
+    user_file = built_stores.base_dir / USER_FILE
+    # Windows opens no directory to sync (`io.py::_sync_dir`), so the replace is the last fsync there.
+    replaced, *directory = synced[-1 - (sys.platform != "win32") :]
+    assert replaced.suffix == ".tmp" and os.path.samefile(replaced.parent, user_file.parent), (
+        f"an account's write was not synced before its replace: {synced}"
     )
+    assert all(os.path.samefile(one, user_file.parent) for one in directory), (
+        f"an account's directory was not synced after its replace: {synced}"
+    )
+    book = ChargeBook(built_stores.base_dir)
+    bill = billed_call(0.1, hold_id=user.user_id).money
+    assert isinstance(bill, Bill)
+    book.append(bill)
+    assert os.path.samefile(synced[-1], book.path), (
+        "a bill line returned before it reached the disk"
+    )
+    synced.clear()
+    write_json(built_stores.base_dir / "run.json", {})
+    assert synced == [], "run data paid a sync"
 
 
 @pytest.mark.usefixtures("offline")
@@ -1829,10 +1899,9 @@ async def test_an_accounts_trail_holds_its_sign_in_consent_and_commands_in_time_
     ], "an account event left no line or left two, or the merge lost the order"
     ada = stores.users.load()
     assert ada is not None
-    assert (trail.lines[2].at, trail.lines[4].at) == (
-        ada.created_at,
-        ada.terms_accepted[str(identity.user_id)].accepted_at,
-    ), "one fact carries two times: the account file says one and its record another"
+    assert trail.lines[2].at == ada.created_at, (
+        "one fact carries two times: the account file says one and its record another"
+    )
     assert {line.actor for line in trail.lines[2:5]} == trail.own == {str(identity.user_id)}
     for keep_results in (True, False):
         stores.campaigns.delete_campaign(
@@ -2088,7 +2157,7 @@ def test_a_campaign_refusal_past_a_spawns_handoff_ends_the_admitted_job_refused_
         hop=hop,
         holder=CampaignLaunch("ds1"),
     )
-    past.mark_admitted(handed.job_id)
+    past.move(handed.job_id, LaunchMove.ADMIT)
     RunStart(built_stores, past, handed).release(
         CampaignRefusedError(CampaignRefusal.NOT_ACTIVE, "archived past its handoff")
     )
@@ -2493,6 +2562,69 @@ def test_a_landing_drops_a_cache_this_build_cannot_read_unasked_and_a_file_no_ro
     assert [str(fold) in line for line in dropped] == [True], f"a cache dropped unsaid: {dropped}"
     assert stamp is not None and stamp.said == dropped, "the stamp lost what the landing dropped"
     assert UserStore(campaigns.workspace).load() == user, "a landing dropped a survivor"
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_landing_drops_a_charge_book_whose_settle_another_writer_split(
+    built_stores: Stores,
+) -> None:
+    def hold(hold_id: str) -> Hold:
+        return Hold(
+            hold_id=hold_id, parent=None, key_source="host", bound=Budget(usd=1.0),
+            resource=None, node=None, ledger=None,
+        )  # fmt: skip
+
+    def bill(hold_id: str) -> Bill:
+        bill = billed_call(0.1, hold_id=hold_id).money
+        assert isinstance(bill, Bill)
+        return bill
+
+    book = ChargeBook(built_stores.campaigns.workspace)
+    book.append(hold("whole"), bill("whole"), Lapse(hold_id="whole", bound=Budget(usd=0.1)))
+    assert not plan_landing(built_stores.projects_root, reset=False).runs, "a whole settle dropped"
+    # Written before one fact landed in one append: another writer's hold between a settle's parts.
+    for line in (
+        hold("split"),
+        bill("split"),
+        hold("other"),
+        Lapse(hold_id="split", bound=Budget()),
+    ):
+        book.append(line)
+    found = plan_landing(built_stores.projects_root, reset=False)
+    assert [one.path for one in found.runs] == [book.path], "a book that does not fold was kept"
+    assert not found.refused, "a run file no live run reaches refused the landing"
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_landing_carries_an_acceptance_off_the_account_file_onto_its_consent_trail(
+    built_stores: Stores,
+) -> None:
+    workspace = built_stores.campaigns.workspace
+    user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
+    accepted = {"version": TERMS_VERSION, "accepted_at": "2026-02-01T00:00:00Z"}
+    write_json(workspace / USER_FILE, user.model_dump() | {"terms_accepted": {"d": accepted}})
+    landing = plan_landing(built_stores.projects_root, reset=False)
+    assert not landing.refused, f"an account written before the reshape refused: {landing.refusal}"
+    apply_landing(built_stores.projects_root, landing)
+    users = UserStore(workspace)
+    assert users.load() == user, "the account changed beyond its terms record"
+    assert users.accepted_terms("d") == TERMS_VERSION, "a landing asked a person's consent again"
+    assert users.accepted_terms("u") is None, "an acceptance was stood on by another principal"
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_job_listing_names_a_job_file_it_cannot_load_and_lists_the_rest(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    registry = JobRegistry.attach(tmp_path / "jobs")
+    kept = registry.create(
+        user_id="u", principal_id="u", workspace=WorkspaceDir(tmp_path / "w"),
+        hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
+    )  # fmt: skip
+    torn = tmp_path / "jobs" / "torn.json"
+    torn.write_text("{", encoding="utf-8")
+    assert [job.job_id for job in registry.list_running()] == [kept.job_id], "a torn file hid a job"
+    assert str(torn) in caplog.text, "a job file the listing left out went unnamed"
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
@@ -3673,7 +3805,8 @@ def test_every_jobs_cancel_is_resolved_before_any_is_dispatched(
     running, queued = launch(), launch()
     assert queued.queued and not running.queued
     run_hop = CycleHop(campaign_id="c1", cycle_id="k1")
-    registry.update_target(running.job_id, hop=run_hop)
+    registry.move(running.job_id, LaunchMove.ADMIT)
+    registry.move(running.job_id, LaunchMove.LAND, hop=run_hop)
     running = registry.get(running.job_id) or running
     workspace = caller.stores.campaigns.workspace
     run_dir = cycle_dir_for(workspace, run_hop)
@@ -3702,12 +3835,10 @@ def test_every_jobs_cancel_is_resolved_before_any_is_dispatched(
 async def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_what_spent(
     host_tenant: _HostTenant, launches: _Launches
 ) -> None:
-    # Its run's task ended without a release: the producer is gone, so the launch never will end.
+    # Its run's process died without a release: no lock holds its producer, so it never will end.
     caller, (registry, launch, read) = host_tenant.caller, launches
     running = launch()
-    died = asyncio.ensure_future(asyncio.sleep(0))
-    await died
-    registry.attach_task(running.job_id, died)
+    registry._stamp(running.job_id, lambda _: {"producer_id": "1-dead"})
     assert read(running) == "failed", "a launch whose run died reads as still working"
     # The daily quota counts a launch admitted or in flight, never one that spent nothing: any
     # raise in the queue withdraws it, one before its admission refuses it, and a launch whose
@@ -3723,7 +3854,7 @@ async def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_o
         lapsed = registry.release(job.job_id, thrown)
         assert lapsed is not None and lapsed.lapse == lapse, f"a {lapse} launch read {lapsed}"
     spent = launch()
-    registry.mark_admitted(spent.job_id)
+    registry.move(spent.job_id, LaunchMove.ADMIT)
     registry.release(spent.job_id, StopReason.CONVERGED)
     assert quota.campaigns_today(registry, user_id) == 1, (
         "the daily quota counted a launch that spent nothing, or lost one that did"

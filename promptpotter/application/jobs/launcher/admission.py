@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of
-from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.quota import (
     admit_launch,
     call_book,
@@ -18,7 +17,6 @@ from promptpotter.application.jobs.quota import (
     declare_run_budget,
     hold_moved,
     hold_run,
-    land_job,
     move_campaign_money,
     next_launch_budget,
     release_run,
@@ -39,6 +37,7 @@ from promptpotter.domain.job import (
     EmbeddedRun,
     InnerRun,
     Job,
+    LaunchMove,
     PaidCall,
     ScoringPass,
     ScoringVerb,
@@ -62,6 +61,7 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import LiveCycle, SpendBook, draws_on
+from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.account_spend import unreported_under
 from promptpotter.infrastructure.store.dataset_access import (
     definition_version,
@@ -136,7 +136,6 @@ class RunStart:
         """The job onto the cycle its hold just minted, its share with it; a slotted job claims the
         cycle."""
         land_job(self.stores, self.job_registry, self.job_id, hop, held.share)
-        claim_cycle(self.stores, hop, self.job_id)
 
     def _fail(self, job: Job | None, exc: BaseException, stamps: CycleHop | None) -> None:
         """Off a cycle the job's release is its claim's: nothing more to stamp."""
@@ -288,6 +287,17 @@ def claim_cycle(stores: Stores, hop: CycleHop, job_id: str) -> None:
     """The job's hold on *hop*, on the cycle's ledger, filed where the job first names the cycle:
     it lives and dies with the job (`holders.py::holder_of`)."""
     stores.campaigns.append(hop, Hold.of_job(job_id, Budget(), parent=None))
+
+
+def land_job(
+    stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, allotment: Budget
+) -> None:
+    """THE LAND of a launch: onto the cycle its mint named, or a running one onto its fork; its
+    share, its job's hop and its claim of the cycle together under the gate."""
+    with job_registry.admission_gate():
+        hold_moved(stores, hop, allotment)
+        job_registry.move(job_id, LaunchMove.LAND, hop=hop)
+        claim_cycle(stores, hop, job_id)
 
 
 @contextmanager
@@ -456,7 +466,7 @@ def admit_and_share(
         hold_run(
             stores, job.job_id, reserve, parent=None if enclosing is None else draws_on(enclosing)
         )
-        job_registry.mark_admitted(job.job_id)
+        job_registry.move(job.job_id, LaunchMove.ADMIT)
         if hop is not None:
             hold_moved(stores, hop, allotment)
             move_campaign_money(
@@ -579,7 +589,7 @@ def open_spend_book(
     return book
 
 
-async def slotless_share[S](
+async def admit_slotless(
     config: CampaignConfig,
     *,
     stores: Stores,
@@ -588,10 +598,9 @@ async def slotless_share[S](
     requested: Budget,
     step_rounds: int | None,
     sends: tuple[Send, ...],
-    run: SharedRun[S],
-) -> tuple[S, CycleResult]:
-    """A run's admission with no slot, taken BEFORE anything paid: the job, then its hold, then
-    *run* under it, whose result the job's release records. An inner run's share is of what the
+) -> tuple[RunStart, HeldBudget]:
+    """THE admission with no slot, taken BEFORE anything paid: the job ASKED, then ADMITTED under
+    its hold (HELD on *hop*); a refusal releases it. An inner run's share is of what the
     enclosing run's book has left at its spawn."""
     enclosing = run_scope().book if isinstance(holder, InnerRun) else None
     if isinstance(holder, InnerRun) and enclosing is None:
@@ -626,7 +635,34 @@ async def slotless_share[S](
             sends=sends,
             enclosing=enclosing,
         )
-        job_registry.mark_started(start.job_id)
+    except BaseException as exc:
+        start.release(exc)
+        raise
+    return start, held
+
+
+async def slotless_share[S](
+    config: CampaignConfig,
+    *,
+    stores: Stores,
+    holder: InnerRun,
+    hop: CycleHop,
+    sends: tuple[Send, ...],
+    run: SharedRun[S],
+) -> tuple[S, CycleResult]:
+    """An inner run on the cycle its spawn minted: admitted (`admit_slotless`), then *run* under
+    its hold, whose result the job's release records."""
+    start, held = await admit_slotless(
+        config,
+        stores=stores,
+        holder=holder,
+        hop=hop,
+        requested=Budget(),
+        step_rounds=None,
+        sends=sends,
+    )
+    try:
+        start.job_registry.move(start.job_id, LaunchMove.START)
         ran = await run(held)
     except BaseException as exc:
         start.release(exc)
@@ -653,7 +689,7 @@ def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[RunSta
             book = call_book(stores, provider, job_registry=job_registry, hold_id=start.job_id)
             # Unbounded: it holds what its calls out hold (`Money.held_back`), and closes with its job.
             hold_run(stores, start.job_id, Budget(), parent=None)
-            job_registry.mark_admitted(start.job_id)
+            job_registry.move(start.job_id, LaunchMove.ADMIT)
         except BaseException as exc:
             start.release(exc)
             raise
@@ -741,7 +777,7 @@ async def paid_pass(
             opened=time.monotonic(),
             live=False,
         )
-        job_registry.mark_started(job.job_id)
+        job_registry.move(job.job_id, LaunchMove.START)
         with scoped(
             account=stores,
             book=book,

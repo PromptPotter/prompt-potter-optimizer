@@ -26,6 +26,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     admitted,
     answered,
 )
+from promptpotter.infrastructure.llm.wallet import ENV_KEY_PAYER
 from promptpotter.shared.errors import (
     CellHaltedError,
     CellUnscoreableError,
@@ -174,7 +175,7 @@ class _CellSends:
                 max_tokens=max_tokens,
             )
             admission = hold.enter_context(
-                admitted(_SEND, bound, model=model, provider=provider, paid_by=CONNECTOR.cell_payer)
+                admitted(_SEND, bound, model=model, provider=provider, paid_by=ENV_KEY_PAYER)
             )
         except SendRefusedError as refused:
             raise self.end(refused) from None

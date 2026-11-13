@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -60,7 +62,6 @@ from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import SpawnedBy
-from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.store.io import write_text
 from promptpotter.infrastructure.store.layout import (
@@ -69,6 +70,7 @@ from promptpotter.infrastructure.store.layout import (
     sandbox_owner_path,
 )
 from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     CellSendRefusedError,
     CellUnscoreableError,
@@ -269,67 +271,66 @@ def arm_layer(overrides: Overrides) -> Layer[str]:
     return Layer("arm", {"optimization": {"nodes": nodes}} if nodes else {})
 
 
-async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
+@asynccontextmanager
+async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
     ctx, spec = cell.ctx, cell.spec
     # The campaign that exists decides, never an id its origin content derives: a drifted origin
     # reaches the drift refusal rather than a fresh root.
     campaign = store.campaigns.load_campaign(cell.campaign_id)
     if campaign is not None and (refused := campaign_refusal(store, campaign)) is not None:
         raise CellUnscoreableError(str(refused), spent={}) from refused
-    session = await init_services(
-        dataset_name=spec.inner_dataset,
-        identity=ctx.identity,
-        stores=store,
-    )
-    session.state.control = RunControl(
-        commands=store.commands, enclosing=ctx.enclosing, acting=ctx.acting
-    )
-    all_samples = session.bank.samples
-    if not all_samples:
-        raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
-    n = min(max(spec.n_samples, spec.n_samples_origin or 0), len(all_samples))
-    # The draw `seed-screen` chose the seeds under: drawn differently, the bank is one nobody screened.
-    search = draw_bank(all_samples, n, spec.run_seed)
-    bench = draw_bench(all_samples, search, spec.n_samples_bench, spec.run_seed)
-    if len(bench) < spec.n_samples_bench:
-        # Before anything is minted or sent: a short bench is a panel geometry error, not a measurement.
-        raise CellUnscoreableError(
-            f"inner dataset {spec.inner_dataset!r} holds {len(all_samples)} rows; the bank takes "
-            f"{len(search)} and leaves {len(bench)} for a bench of {spec.n_samples_bench}. Lower "
-            "`n_samples_origin` / `n_samples_bench` or give the cell a larger dataset.",
-            spent={},
+    async with init_services(
+        dataset_name=spec.inner_dataset, identity=ctx.identity, stores=store
+    ) as session:
+        session.state.control = RunControl(
+            commands=store.commands, enclosing=ctx.enclosing, acting=ctx.acting
         )
-    train_data = [*search, *bench]
-    instrument = inner_instrument_config(
-        spec,
-        CampaignConfig.model_validate(
-            dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)
-        ),
-        solver=session.pipeline_schema.prompt_nodes(),
-        n_search=len(search),
-    )
-    try:
-        armed = instrument.overlaid(arm_layer(cell.overrides))
-        # The instrument stands in for the cell dataset's block: the outer campaign set every knob.
-        session, config = laid_session(
-            session, ConfigLayers({}, armed.model_dump(mode="json", exclude_unset=True))
-        )
-        declaration = declare(session, config, purpose=ctx.purpose)
-        if campaign is None:
-            minted = mint(
-                resolve_cycle_plan(session, declaration, train_data),
-                campaign_id=cell.campaign_id,
-                adopting=None,
+        all_samples = session.bank.samples
+        if not all_samples:
+            raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
+        n = min(max(spec.n_samples, spec.n_samples_origin or 0), len(all_samples))
+        # The draw `seed-screen` chose the seeds under: drawn differently, the bank is one nobody screened.
+        search = draw_bank(all_samples, n, spec.run_seed)
+        bench = draw_bench(all_samples, search, spec.n_samples_bench, spec.run_seed)
+        if len(bench) < spec.n_samples_bench:
+            # Before anything is minted or sent: a short bench is a panel geometry error, not a measurement.
+            raise CellUnscoreableError(
+                f"inner dataset {spec.inner_dataset!r} holds {len(all_samples)} rows; the bank takes "
+                f"{len(search)} and leaves {len(bench)} for a bench of {spec.n_samples_bench}. Lower "
+                "`n_samples_origin` / `n_samples_bench` or give the cell a larger dataset.",
+                spent={},
             )
-            session, cycle, optimizer = minted.session, minted.cycle, minted.optimizer
-        else:
-            session, cycle, optimizer = _continue_inner_campaign(session, campaign, train_data)
-    except PayloadInvalidError as refused:
-        if refused.code != "optimizer_overlay":
-            raise
-        # The arm's fault, banked on its cell in the selection's own words, before anything is sent.
-        raise CellUnscoreableError(str(refused), spent={}) from refused
-    return _Opened(session, cycle, train_data, class_floor(search), optimizer)
+        train_data = [*search, *bench]
+        instrument = inner_instrument_config(
+            spec,
+            CampaignConfig.model_validate(
+                dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)
+            ),
+            solver=session.pipeline_schema.prompt_nodes(),
+            n_search=len(search),
+        )
+        try:
+            armed = instrument.overlaid(arm_layer(cell.overrides))
+            # The instrument stands in for the cell dataset's block: the outer campaign set every knob.
+            session, config = laid_session(
+                session, ConfigLayers({}, armed.model_dump(mode="json", exclude_unset=True))
+            )
+            declaration = declare(session, config, purpose=ctx.purpose)
+            if campaign is None:
+                minted = mint(
+                    resolve_cycle_plan(session, declaration, train_data),
+                    campaign_id=cell.campaign_id,
+                    adopting=None,
+                )
+                session, cycle, optimizer = minted.session, minted.cycle, minted.optimizer
+            else:
+                session, cycle, optimizer = _continue_inner_campaign(session, campaign, train_data)
+        except PayloadInvalidError as refused:
+            if refused.code != "optimizer_overlay":
+                raise
+            # The arm's fault, banked on its cell in the selection's own words, before anything is sent.
+            raise CellUnscoreableError(str(refused), spent={}) from refused
+        yield _Opened(session, cycle, train_data, class_floor(search), optimizer)
 
 
 async def _run_inner_campaign(
@@ -341,20 +342,19 @@ async def _run_inner_campaign(
     store = claim_sandbox(cell.ctx)
     # Over the seat too: its init reads what this cell remembers.
     with scoped(memory=enter_inner_cell(cell.ctx, store.campaigns, cell.campaign_id)):
-        opened = await _open_seat(cell, store)
-        session, config = opened.session, opened.cycle.config
-        session.store.campaigns.record_spawned(session.hop, SpawnedBy.model_validate(spawned_by))
-        minted.append(session.hop)
-        observers = build_run_observers(session=session, campaign_config=config)
-        try:
+        async with _open_seat(cell, store) as opened:
+            session, config = opened.session, opened.cycle.config
+            session.store.campaigns.record_spawned(
+                session.hop, SpawnedBy.model_validate(spawned_by)
+            )
+            minted.append(session.hop)
+            observers = build_run_observers(session=session, campaign_config=config)
             # Each send is admitted by its own book AND the ROOT's; its share bounds every checkpoint.
             _, result = await slotless_share(
                 config,
                 stores=session.store,
                 holder=InnerRun(cell.spec.inner_dataset),
                 hop=session.hop,
-                requested=Budget(),
-                step_rounds=None,
                 sends=(),
                 run=lambda held: run_optimization(
                     opened.train_data,
@@ -366,10 +366,6 @@ async def _run_inner_campaign(
                     optimizer=opened.optimizer,
                 ),
             )
-        finally:
-            # The optimizer LLM clients are process-SHARED: never shut one down.
-            with contextlib.suppress(Exception):
-                await session.backend_client.aclose()
     # Reported, never enforced: one origin pass sits inside its own error bar.
     origin_fitness = (
         None
@@ -389,6 +385,17 @@ async def _run_inner_campaign(
     return result
 
 
+def _reclaim_forks_partial(cell: _InnerCell, hop: CycleHop) -> None:
+    """A fork's cell abandoning the inner campaign it minted reclaims it at its own exit, where no
+    holder has it: it lies in the parent's sandbox (`claim_sandbox`), which no sweep reclaims while
+    the parent stands, and a CLI-only run runs no sweep."""
+    if cell.ctx.enclosing[-1].cycle_id == cell.ctx.inside[-1].cycle_id:
+        return
+    store = sandbox_stores(cell.ctx).campaigns
+    if store.holder(hop) is None:
+        store.delete_campaign(cell.campaign_id, keep_results=False, changed_at=utcnow_iso())
+
+
 async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, Any]:
     """One cell: an inner hop in the asker's sandbox, read by one law."""
     query = sample.query
@@ -402,6 +409,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
         )
     cell = _resolve_inner_cell(sample, payload)
     minted: list[CycleHop] = []
+    fresh = sandbox_stores(cell.ctx).campaigns.load_campaign(cell.campaign_id) is None
     # Captured in the OUTER task: the inner task's context copy rebinds the round.
     spawned_by = _spawn_provenance(cell.ctx, current_round(), query)
 
@@ -425,6 +433,8 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
             inner_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await inner_task
+        if fresh and minted:
+            _reclaim_forks_partial(cell, minted[0])
         raise
     if (refused := _REFUSALS.get(result.stop_reason)) is not None:
         # The inner run spends the outer's key and ceiling, so the refusal halts the walk for every later cell.

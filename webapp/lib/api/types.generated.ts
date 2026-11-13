@@ -6204,7 +6204,7 @@ export const SAMPLE_TAG_DIGITS = 3;
 // How often an open call beats (infrastructure/llm/heartbeat.py::HEARTBEAT_INTERVAL_S).
 export const HEARTBEAT_INTERVAL_S = 10;
 // The shortest silence between two ray steps worth marking. Mirror of
-// infrastructure/runtime_flags.py::RECENT_STEP_S, the window a producer reads `live` in.
+// infrastructure/run_state.py::RECENT_STEP_S, the window a producer reads `live` in.
 export const RECENT_STEP_S = 90;
 
 // The cycle-address grammar. Mirror of domain/cycle_paths.py, which owns it and

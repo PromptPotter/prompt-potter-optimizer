@@ -1,8 +1,9 @@
 """An account's life, written and read back.
 
 Each fact is stamped ONCE and written to the account's consent trail before ``user.json``, so no
-account and no consent exists without its record; a write that fails between the two repeats the
-record on the retry, which reads as the same fact twice and never as one missing.
+account exists without its record; a write that fails between the two repeats the record on the
+retry, which reads as the same fact twice and never as one missing. A terms acceptance is its
+consent line alone (`user_store.py::UserStore.accepted_terms`).
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ import logging
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Literal, NamedTuple
+
+from pydantic import Field, SecretStr
 
 from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root, jobs_dir
 from promptpotter.config.settings import LOCK_TIMEOUT, TERMS_VERSION, settings
@@ -33,6 +36,7 @@ from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.identity.provider_config import ProviderIdentity
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.store.account_trail import (
     TrailLine,
     in_time_order,
@@ -45,7 +49,6 @@ from promptpotter.infrastructure.store.user_store import (
     AccountDir,
     ConsentEvent,
     ConsentLine,
-    ConsentRecord,
     Torn,
     User,
     count_accounts,
@@ -56,6 +59,7 @@ from promptpotter.shared.errors import (
     ConflictError,
     FileUnreadableError,
     LedgerUnreadableError,
+    PayloadInvalidError,
     PotterError,
 )
 from promptpotter.shared.identity import (
@@ -318,7 +322,7 @@ def me(stores: Stores, user: User | None, *, configured: Iterable[str]) -> MeRes
     ``None`` for an account not opened yet, which has accepted no terms. Consent is the acting
     principal's: a delegate accepts for itself, never by its delegator's acceptance."""
     identity = stores.identity
-    accepted = None if user is None else user.terms_accepted.get(acting_principal(identity).id)
+    accepted = None if user is None else stores.users.accepted_terms(acting_principal(identity).id)
     email, provider = identity.email, identity.provider
     return MeResponse(
         user_id=str(identity.user_id),
@@ -332,7 +336,7 @@ def me(stores: Stores, user: User | None, *, configured: Iterable[str]) -> MeRes
         capabilities=sorted(identity.capabilities),
         access_state=identity.access_state,
         terms_version=TERMS_VERSION,
-        terms_accepted_version=None if accepted is None else accepted.version,
+        terms_accepted_version=accepted,
     )
 
 
@@ -347,8 +351,8 @@ def user_settings(stores: Stores) -> UserSettings:
 
 
 def set_user_settings(stores: Stores, settings_sent: UserSettings) -> UserSettings:
-    user = account_of(stores)
-    stores.users.save(user.model_copy(update=settings_sent.model_dump()))
+    account_of(stores)
+    stores.users.update(lambda user: user.model_copy(update=settings_sent.model_dump()))
     return settings_sent
 
 
@@ -368,12 +372,9 @@ def accept_terms(stores: Stores, version: str) -> TermsConsent:
             code="terms_version_stale",
             details={"expected": TERMS_VERSION, "received": version},
         )
-    consent = ConsentRecord(version=version, accepted_at=utcnow_iso())
-    user = account_of(stores)
-    accepted = {**user.terms_accepted, acting_principal(stores.identity).id: consent}
-    user = user.model_copy(update={"terms_accepted": accepted})
-    _consent(stores, "terms_accepted", at=consent.accepted_at, subject=version)
-    stores.users.save(user)
+    account_of(stores)
+    # The acceptance IS its consent line (`UserStore.accepted_terms`): no account rewrite loses it.
+    _consent(stores, "terms_accepted", at=utcnow_iso(), subject=version)
     return TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=version)
 
 
@@ -556,3 +557,39 @@ def grant(sub_user_id: str, *, delegator: str, capabilities: frozenset[str], act
         actor=actor,
         audit_path=paths.grants_audit,
     )
+
+
+# An account's own provider keys; who pays a send is `infrastructure/llm/wallet.py::paying_key`'s.
+def check_provider(provider: str) -> str:
+    if provider not in providers():
+        raise PayloadInvalidError(
+            f"No provider is named {provider!r}. Known: {', '.join(sorted(providers()))}.",
+            code="unknown_provider",
+        )
+    return provider
+
+
+class AccountKey(StrictModel):
+    provider: str
+    last4: str = Field(description="The key's last four characters: all that is ever served back.")
+    added_at: str
+
+
+# Far above any provider's key, far below what a form field should carry.
+_KEY_CHARS = 512
+
+
+def put_account_key(stores: Stores, provider: str, secret: SecretStr) -> AccountKey:
+    """Stored as given: the provider is the one that says whether it is good, at the first send."""
+    raw = secret.get_secret_value()
+    if not raw or raw != raw.strip() or any(c.isspace() for c in raw) or len(raw) > _KEY_CHARS:
+        raise PayloadInvalidError(
+            f"A {provider} key is one unbroken string of at most {_KEY_CHARS} characters.",
+            code="api_key_malformed",
+        )
+    held = stores.api_keys.put(check_provider(provider), secret)
+    return AccountKey(provider=provider, last4=held.last4, added_at=held.added_at)
+
+
+def remove_account_key(stores: Stores, provider: str) -> bool:
+    return stores.api_keys.remove(check_provider(provider))

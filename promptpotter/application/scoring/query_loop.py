@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import CatchUps, CaughtUp
-    from promptpotter.infrastructure.store.measurement_archive import CellClaim
+    from promptpotter.infrastructure.store.io import HeldLock
     from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 logger = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ class QueryLoopState:
     deprecated_samples: dict[int, MeasuredCell]
     recorder: WalkRecorder
     # ``None`` where nothing is archived or the walk re-measures on purpose.
-    claim_cell: Callable[[Sample], Awaitable[tuple[MeasuredCell | None, CellClaim | None]]] | None
+    claim_cell: Callable[[Sample], Awaitable[tuple[MeasuredCell | None, HeldLock | None]]] | None
     cell_keys: Mapping[int, str]
     # Replays the bound meter prices nothing for: none waits on the ceiling or takes a spend stop.
     rereads: frozenset[int]
@@ -229,27 +229,21 @@ async def _maybe_recover_degraded(
 
 @dataclass
 class _Acquired:
-    """Carries no side effect: every append, persist and ledger write belongs to :meth:`Walk.take`."""
+    """Carries no side effect but a claimed cell's archive row, filed before its claim retires so a
+    waiter replays it: every other append, persist and ledger write belongs to :meth:`Walk.take`.
+    A claimed cell a cut discards stays filed, already paid."""
 
     sample: Sample
     idx: int
     result: GradedCell
     fresh: bool
     deprecated_display: GradedCell | None = None
-    # Held until the row is on disk or discarded, so no other walk measures the cell meanwhile.
-    claim: CellClaim | None = None
 
 
 def _returned_row(cell: asyncio.Task[_Acquired]) -> GradedCell | None:
     if not cell.done() or cell.cancelled() or cell.exception() is not None:
         return None
     return cell.result().result
-
-
-def _release_claim(cell: asyncio.Task[_Acquired]) -> None:
-    returned = cell.done() and not cell.cancelled() and cell.exception() is None
-    if returned and (claim := cell.result().claim) is not None:
-        claim.release()
 
 
 def _quiet(call: asyncio.Future[Any]) -> None:
@@ -260,7 +254,7 @@ def _quiet(call: asyncio.Future[Any]) -> None:
 
 async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[int]) -> _Acquired:
     cached = ctx.cached_sample_results.get(sample.id)
-    claim: CellClaim | None = None
+    claim: HeldLock | None = None
     if cached is None and ctx.claim_cell is not None:
         claiming.add(idx)
         try:
@@ -281,20 +275,19 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
         result = await _maybe_recover_degraded(result, sample, ctx)
         if sample.id in ctx.deprecated_samples:
             result = replace(result, retry_of_deprecated_cache=True)
-        if claim is not None:
-            claim.publish(result, grade=ctx.recorder.provenance(result))
         graded = ctx.scorer.grade(result)
-    except BaseException:
         if claim is not None:
-            claim.release()
-        raise
+            # The holder files the answer under its claim: the waiter it released replays it.
+            graded = ctx.recorder.take(graded)
+    finally:
+        if claim is not None:
+            claim.retire()
     return _Acquired(
         sample=sample,
         idx=idx,
         result=graded,
         fresh=True,
         deprecated_display=deprecated_display,
-        claim=claim,
     )
 
 
@@ -391,14 +384,10 @@ class Walk:
         elif acq.deprecated_display is not None:
             ctx.sample_scored(acq.deprecated_display, acq.sample, acq.idx, n, running=None)
 
-        try:
-            # Before the snapshot below, which names the cell by its answer's address.
-            taken = ctx.recorder.take(acq.result)
-            self.results.append(taken)
-            running = ctx.running(self.results)
-        finally:
-            if acq.claim is not None:
-                acq.claim.release()
+        # Before the snapshot below, which names the cell by its answer's address.
+        taken = ctx.recorder.take(acq.result)
+        self.results.append(taken)
+        running = ctx.running(self.results)
 
         # Asked of every row, replays included: the stale-data protocol re-measures a replayed cell.
         category = taken.facts.error_category
@@ -519,14 +508,12 @@ class Walk:
             )
         for cell in self.finished.values():
             _quiet(cell)
-            _release_claim(cell)
         self.drop_claim_waits()
         draining = list(self.running.values())
         for cell in draining:
             if cancel:
                 cell.cancel()
             cell.add_done_callback(_quiet)
-            cell.add_done_callback(_release_claim)
         self.running, self.finished = {}, {}
         return draining
 
@@ -867,7 +854,7 @@ class _ScoringPhase[K: Hashable]:
                     walk.n,
                 )
                 # Raises the refusal `hold` would, naming the ceiling that binds, and holds nothing.
-                book.refuse_unless_room(cell, self.label.kind, NEXT_CELL, self.payer)
+                book.refuse_unless_room((cell, cell), self.label.kind, NEXT_CELL, self.payer)
             raise RuntimeError(
                 f"scoring phase stalled: nothing out and nothing to take at query "
                 f"{len(walk.results)}/{walk.n}"

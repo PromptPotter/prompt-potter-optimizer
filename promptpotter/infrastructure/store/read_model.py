@@ -9,6 +9,7 @@ from bisect import bisect_right
 from collections import OrderedDict, deque
 from collections.abc import Callable, Hashable, Iterable, Sequence
 from functools import partial
+from io import BytesIO
 from itertools import islice
 from pathlib import Path
 from typing import (
@@ -22,11 +23,12 @@ from typing import (
     runtime_checkable,
 )
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from promptpotter.domain.run_records import (
     RECORD_ADAPTER,
     Bill,
+    ChargeLine,
     CycleRecord,
     Hold,
     Lapse,
@@ -871,17 +873,17 @@ class Money(NamedTuple):
 
     def _below(self, hold_id: str, host: bool) -> tuple[float, int]:
         below = [
-            self.kept(child, host=host)
-            for child in self.open.values()
-            if child.parent == hold_id and (not host or draws_coupon(child.key_source))
+            self.kept(child, host=host) for child in self.open.values() if child.parent == hold_id
         ]
         return sum(u for u, _ in below), sum(t for _, t in below)
 
     def kept(self, hold: Hold, *, host: bool) -> tuple[float, int]:
         """What *hold* still holds of the money above it (*host*: of the coupon): on a bounded
         axis its bound less what was drawn under it, never below what its open children hold; on
-        an unbounded one what they hold."""
+        an unbounded one, or on the coupon where it draws no coupon, what they hold."""
         usd, tokens = self._below(hold.hold_id, host)
+        if host and not draws_coupon(hold.key_source):
+            return usd, tokens
         bound, spent = hold.bound, self._spent(hold.hold_id, host)
         return (
             usd if bound.usd is None else max(usd, bound.usd - spent.at_most_usd),
@@ -904,7 +906,7 @@ class Money(NamedTuple):
         roots = [
             self.kept(hold, host=True)
             for hold in self.open.values()
-            if hold.parent is None and draws_coupon(hold.key_source) and hold.hold_id != excluding
+            if hold.parent is None and hold.hold_id != excluding
         ]
         return Budget.amount(sum(u for u, _ in roots), sum(t for _, t in roots))
 
@@ -1092,3 +1094,29 @@ LedgerIndex.readers(_Money)
 def money_on(subject: Path, until: int | None = None) -> Money:
     """*subject* is a ledger, or an account's charge book (`ChargeBook.path`)."""
     return LedgerIndex.of(subject).view(_Money, until)
+
+
+_CHARGE_LINE: TypeAdapter[ChargeLine] = TypeAdapter(ChargeLine)
+
+
+def charge_book_fold(raw: bytes) -> Money:
+    """A charge book's bytes, folded as `money_on` folds the file: what proves one at a landing
+    (`data_root.py::Folded`). A settle another writer's line split refuses, which a book written
+    before each fact landed in one append can hold: folded on, its late Bill draws nothing and its
+    late Lapse raises."""
+    fold = _Money()
+    seen: set[str] = set()
+    for line in complete_lines(BytesIO(raw)):
+        if not line.strip():
+            continue
+        record = _CHARGE_LINE.validate_json(line)
+        if isinstance(record, Hold):
+            seen.add(record.hold_id)
+        elif (
+            isinstance(record, Bill | Lapse)
+            and record.hold_id in seen
+            and record.hold_id not in fold._holds
+        ):
+            raise ValueError(f"hold {record.hold_id}'s settle is split by another line")
+        fold.feed(record)
+    return fold.value()

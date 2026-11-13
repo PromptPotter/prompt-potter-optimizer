@@ -12,6 +12,8 @@ import asyncio
 import contextvars
 import dataclasses
 import json
+import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -81,6 +83,7 @@ from promptpotter.application.jobs.launcher.launch import Admitted, Inline
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
+    reindex_measurement_archive,
     restore_measurement_archive,
 )
 from promptpotter.application.mask.divergence import VerdictOutcome, find_divergences
@@ -316,20 +319,23 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     assert set(on_wider) == {0}, "a cell replayed onto a sample whose content it never measured"
     assert on_wider[0].query == "q_aime_14"
 
-    # Two walks never buy one cell: the waiter reads the answer its holder publishes.
-    holder, waiter = (
-        ReplayFeed(MeasurementArchive(tmp_path / "cells"), LLM_ONLY) for _ in range(2)
-    )
-    held = holder.claim("k_held")
-    assert held is not None and waiter.claim("k_held") is None, "two walks bought one cell"
-    held.publish(MeasuredCell(sample_key="k_held", predicted="p"), grade="B")
-    beside = waiter.claim("k_beside")
+    # Two walks never buy one cell: the holder files the answer before its claim retires, and the
+    # waiter that takes the claim next replays it; a second release frees nobody's claim.
+    claims = MeasurementArchive(tmp_path / "cells")
+    holder, waiter = (ReplayFeed(claims, LLM_ONLY) for _ in range(2))
+    row = archive_row("q_held")
+    held = holder.claim(row.sample_key)
+    assert held is not None and waiter.claim(row.sample_key) is None, "two walks bought one cell"
+    beside = waiter.claim(archive_row("q_beside").sample_key)
     assert beside is not None, "one cell's claim held another sample of its configuration"
-    assert waiter.claimed_cell("k_beside") is None
-    published = waiter.claimed_cell("k_held")
-    assert published is not None and published.predicted == "p", "the waiter lost the paid answer"
-    held.release()
-    beside.release()
+    filed(claims, [row])
+    held.retire()
+    taken = waiter.claim(row.sample_key)
+    assert taken is not None and row.sample_key in waiter.advance(), "the waiter lost the answer"
+    held.retire()
+    assert holder.claim(row.sample_key) is None, "a second release freed the next holder's claim"
+    taken.retire()
+    beside.retire()
 
     # Rows banked under one formula read under another exactly as a fresh run would.
     wider_panel = samples(10)
@@ -389,6 +395,43 @@ def test_the_archive_on_disk_keeps_every_paid_answer(built_stores: Stores) -> No
     assert {e.config_key for e in archive.list_all(dataset_hash="kept")} == described
     assert archive.population(entry) == held, "reindex destroyed an answer"
     assert all(archive.answer(ref) is not None for ref in refs), "reindex lost an address"
+
+
+_HOLD_CYCLE = """
+import sys
+from pathlib import Path
+from promptpotter.infrastructure.store.io import take_lock
+assert take_lock(Path(sys.argv[1]), wait_s=0) is not None
+print("held", flush=True)
+sys.stdin.read()
+"""
+
+
+def test_a_reindex_beside_a_run_in_another_process_refuses_naming_its_cycle(
+    built_stores: Stores,
+) -> None:
+    """A row the run lands mid-rewrite lands in no index: its writer is asked, never raced."""
+    cycle_dir = built_stores.campaigns.cycle_dir(CycleHop(campaign_id="camp", cycle_id="cyc"))
+    layout = CycleLayout(cycle_dir)
+    layout.ledger.parent.mkdir(parents=True)
+    layout.ledger.touch()
+    run = subprocess.Popen(
+        [sys.executable, "-c", _HOLD_CYCLE, str(layout.producer_lock)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert run.stdin is not None and run.stdout is not None
+    try:
+        assert run.stdout.readline().strip() == "held"
+        with pytest.raises(ConflictError) as refused:
+            reindex_measurement_archive(built_stores)
+        assert refused.value.code == "archive_writers"
+        assert "cyc, held by its run" in str(refused.value), "the refusal named no writer"
+    finally:
+        run.stdin.close()
+        run.wait()
+    assert reindex_measurement_archive(built_stores) == {"indexed": 0, "undescribed": 0}
 
 
 # Each step reads on from where the feed's last advance left it.

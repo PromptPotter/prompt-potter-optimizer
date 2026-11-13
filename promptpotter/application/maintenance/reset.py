@@ -12,7 +12,7 @@ from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.store.data_root import PRODUCER_LOCKS, Fate, Kind, classify
+from promptpotter.infrastructure.store.data_root import LIVE_LOCKS, Fate, Kind, classify
 from promptpotter.infrastructure.store.draft_store import DraftStore
 from promptpotter.infrastructure.store.io import (
     iter_files,
@@ -107,11 +107,12 @@ def holder_in_reach(
     jobs: Iterable[Job], roots: Iterable[Path], locks: Iterable[Path]
 ) -> str | None:
     """THE guard of the wipes that read no ledger (a reset's drops, a landing's run wipe), asked
-    at the plan and again at the act under the admission gate: who holds one of *locks* (producer
-    locks), or a live job whose run reaches a root (`_reaches`)."""
+    at the plan and again at the act under the admission gate: who holds one of *locks*
+    (`data_root.py::LIVE_LOCKS`, a process's token), or a live job whose run reaches a root
+    (`_reaches`)."""
     for lock in locks:
         if producer_lock.held(lock):
-            return f"a live producer of {lock.parent}"
+            return f"the live writer holding {lock}"
     resolved = [root.resolve() for root in roots]
     for job in jobs:
         if any(_reaches(job, root) for root in resolved):
@@ -120,7 +121,9 @@ def holder_in_reach(
 
 
 def _live(roots: tuple[Path, ...], drops: tuple[Drop, ...], registry: JobRegistry) -> str | None:
-    locks = (drop.path for drop in drops if drop.kind in PRODUCER_LOCKS)
+    # A process serving this home with no job in flight still writes any tenant's tree.
+    locks = [drop.path for drop in drops if drop.kind in LIVE_LOCKS]
+    locks += producer_lock.other_producers(registry.jobs_dir)
     held = holder_in_reach(live_jobs(registry), roots, locks)
     return None if held is None else f"{held} is live in reach — pause or stop it first"
 

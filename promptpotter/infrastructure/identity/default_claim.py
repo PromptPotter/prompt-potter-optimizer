@@ -42,9 +42,11 @@ def claim_default(*, projects_root: Path, user_id: str, email: str | None) -> st
         # The terminal's record becomes the signer's before the rename, which commits the claim: a
         # crash between the two leaves the terminal's tree for the next sign-in to claim again.
         users = UserStore(default_dir)
-        if (held := users.load()) is not None:
-            users.save(
-                held.model_copy(update={"user_id": user_id, "tenant_id": user_id, "email": email})
+        if users.load() is not None:
+            users.update(
+                lambda held: held.model_copy(
+                    update={"user_id": user_id, "tenant_id": user_id, "email": email}
+                )
             )
         default_dir.rename(user_dir)
         logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)

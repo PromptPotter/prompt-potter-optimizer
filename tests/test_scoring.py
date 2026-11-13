@@ -960,6 +960,11 @@ def test_a_connectors_declared_dial_parses_and_anchors_as_a_core_one_does() -> N
     assert l4_dials is not None and l4_dials["rounds"].anchor == pytest.approx(4.0)
 
 
+async def _init(dataset_name: str, stores: Stores) -> None:
+    async with init_services(dataset_name, identity=stores.identity, stores=stores):
+        pass
+
+
 @pytest.mark.usefixtures("offline")
 def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_owner_binds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1057,7 +1062,7 @@ def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_o
             )
             connectors.CONNECTORS.complete()
             try:
-                asyncio.run(init_services("observed", identity=stores.identity, stores=stores))
+                asyncio.run(_init("observed", stores))
             except PayloadInvalidError as exc:
                 # Past this door, the next refusal is the dataset's empty bank.
                 return "refused_observation_keys" in exc.details

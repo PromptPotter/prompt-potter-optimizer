@@ -28,15 +28,16 @@ from promptpotter.application.notices import tell_landed
 from promptpotter.application.optimizer_manifest import checkin_manifest
 from promptpotter.config.paths import default_projects_root, jobs_dir, user_data_root
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.data_root import (
     CHECKIN_SHADOW,
     KINDS,
     LANDED_SCHEMA_FILE,
+    LIVE_LOCKS,
     LOAD_ERRORS,
     OPTIMIZER_SHADOW,
-    PRODUCER_LOCKS,
     Fate,
     Found,
     Staged,
@@ -108,13 +109,21 @@ class Landing(NamedTuple):
 
     @property
     def refused(self) -> Refused | None:
-        if survivors := tuple(
-            one.path for one in self.unloadable if one.found.kind.fate is Fate.SURVIVOR
+        survivors = [one for one in self.unloadable if one.found.kind.fate is Fate.SURVIVOR]
+        if migrated := tuple(
+            one.path for one in survivors if one.found.kind.shape is not JOB_ADAPTER
         ):
             return Refused(
                 "a survivor does not load, and no migration maps it",
-                survivors,
+                migrated,
                 "the landed code owes one (`maintenance/migrate.py::MIGRATIONS`)",
+            )
+        if survivors:
+            # A job file is owed no migration: the code that wrote it is the code its run ends on.
+            return Refused(
+                "a job file does not load",
+                tuple(one.path for one in survivors),
+                "let its run end on the code that wrote it, then move the file out of the jobs dir",
             )
         if self.reset is not None and self.reset.refusal is not None:
             return Refused(self.reset.refusal, ())
@@ -305,13 +314,13 @@ def _shadow_why(path: Path, found: Found) -> str | None:
 
 
 def _locks(data_root: Path, unit: Path) -> list[Path]:
-    """The producer locks under the run *unit* as it stands now: a producer holding one owns the
-    run's files, never the landing's to drop."""
+    """The live locks under the run *unit* as it stands now: a writer holding one owns the run's
+    files, never the landing's to drop."""
     return [
         path
         for path, _st in (iter_files(unit) if unit.is_dir() else ())
         if (found := classify(PurePosixPath(path.relative_to(data_root).as_posix()))) is not None
-        and found.kind in PRODUCER_LOCKS
+        and found.kind in LIVE_LOCKS
     ]
 
 
@@ -355,7 +364,8 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
     kept: list[Unloadable] = []
     with registry.admission_gate() if landing.reset is None else resetting(landing.reset, registry):
         for one in landing.staged:
-            write_bytes(one.path, one.data)
+            # A staged file is a survivor's (`data_root.py::Kind.durable`).
+            write_bytes(one.path, one.data, durable=True)
         for cache in landing.caches:
             unlink_robust(cache.path)
         jobs = live_jobs(registry)

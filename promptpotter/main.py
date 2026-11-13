@@ -27,7 +27,6 @@ from promptpotter.application.account import record_refusal
 from promptpotter.application.commands.dispatcher import command_answer
 from promptpotter.application.cycle_reads import FEED_SUBJECT_HEADER
 from promptpotter.application.datasets.startability import offer_faults
-from promptpotter.application.jobs.interlock import minted_producer
 from promptpotter.application.jobs.quota import RateLimitedError
 from promptpotter.application.jobs.reaper import periodic_sweep
 from promptpotter.application.jobs.registry import JobRegistry
@@ -46,6 +45,7 @@ from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody, Stri
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.outbound import notify_operator
+from promptpotter.infrastructure.producer_lock import minted_producer, this_producer
 from promptpotter.presentation.api.deps import (
     auth_is_open,
     build_stores_from_identity,
@@ -115,6 +115,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # The registry ends cycles whose JOB is proven dead; the sweep clears dead cycles it never saw.
     projects_root = default_projects_root()
     registry = JobRegistry.attach(jobs_dir(projects_root))
+    # Held for the server's life, so a reset elsewhere reads it live with no job in flight.
+    this_producer(registry.jobs_dir)
     app.state.job_registry = registry
     sweep_task = asyncio.create_task(periodic_sweep(projects_root))
     yield

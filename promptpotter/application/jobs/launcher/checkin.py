@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
@@ -11,7 +12,6 @@ from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.loaders import Source, cut_bank, definition_source
 from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.launcher.mint_and_start import (
     assert_origin_ready,
     commit_upload_definition,
@@ -43,6 +43,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.spend import Budget
+from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.dataset_access import claim_own_definition, own_definition
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import Stores
@@ -86,21 +87,22 @@ class CheckinStart:
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return draft_sends(stores, owned_draft(stores, self.claim.draft_id))
 
-    async def open(self, stores: Stores) -> OpenedCycle:
+    @asynccontextmanager
+    async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
         """Nothing before the slot is HELD touches the draft: it lands, mints and closes here."""
         draft_id = self.claim.draft_id
         served = await draft_served(stores, owned_draft(stores, draft_id))
-        opened = await open_checkin(stores, draft_id, served, overlays=[{}])
-        session, config = laid_session(opened.session, opened.layers)
-        plan = resolve_cycle_plan(
-            session,
-            declare(session, config, purpose=Optimize()),
-            session.bank.samples,
-            origin_override=opened.origin_override,
-        )
-        minted = mint(plan, campaign_id=fresh_campaign_id(session), adopting=draft_id)
-        stores.drafts.close(draft_id)
-        return minted
+        async with open_checkin(stores, draft_id, served, overlays=[{}]) as opened:
+            session, config = laid_session(opened.session, opened.layers)
+            plan = resolve_cycle_plan(
+                session,
+                declare(session, config, purpose=Optimize()),
+                session.bank.samples,
+                origin_override=opened.origin_override,
+            )
+            minted = mint(plan, campaign_id=fresh_campaign_id(session), adopting=draft_id)
+            stores.drafts.close(draft_id)
+            yield minted
 
 
 def _land_draft(
@@ -164,23 +166,21 @@ class OpenedCheckin:
     origin_override: dict[str, NodePrompt] | None
 
 
+@asynccontextmanager
 async def open_checkin(
     stores: Stores,
     draft_id: str,
     served: ServedPipeline,
     *,
     overlays: Sequence[Mapping[str, JsonValue]],
-) -> OpenedCheckin:
+) -> AsyncIterator[OpenedCheckin]:
     """*overlays* are what each campaign the Start mints lays over the draft's `optimization`;
     *served* is the Start's one backend read, taken once its slot is held."""
     draft = owned_draft(stores, draft_id)
     pipeline = draft_pipeline(stores, draft, served)
     assert_origin_ready(draft, pipeline)
     origin_override = _land_draft(stores, draft, pipeline, overlays)
-    session = await init_services(
-        dataset_name=draft.dataset_name,
-        identity=stores.identity,
-        stores=stores,
-        served=served,
-    )
-    return OpenedCheckin(draft, session, pipeline.layers, origin_override)
+    async with init_services(
+        dataset_name=draft.dataset_name, identity=stores.identity, stores=stores, served=served
+    ) as session:
+        yield OpenedCheckin(draft, session, pipeline.layers, origin_override)

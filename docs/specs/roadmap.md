@@ -99,17 +99,23 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landed 50:** cfg: every layered document rides one fold (`domain/layer_fold.py`) and every door lays
   its patch through it; an L4 arm's model answers only the node it names (rk-dec 3), so every L4 cell
   and every treatment digest re-keys.
+- **landed 51:** payer-2, holders-2 and life: the wallet door sits below the connectors
+  (`infrastructure/llm/wallet.py`) and a hold that draws no wallet counts its children; one death rule,
+  durable survivors, a cell claim filed at publish, locked edits and maintenance verbs that ask the
+  holders they race; the launch lifecycle as data (one `JobRegistry.move`), the reconciler renamed to
+  `run_state.py`, and the opener owning the backend client. capo-pobb and potter re-key.
 - **passes 3**: no diagnostic verb, one list campaign set by its arms and replicates whose
   readings the dashboard serves (the seed screen and probe-reasoning go). Then **passes 4**: a retry
   acts once and a dead filer's command ends, judged by holders' death rule.
 - **mob 2**, beside any engine chain whose Owns hold no webapp file: on a phone a card header folds its
   trailing actions into ⋯ (operator, 2026-11-13), the masthead id and setup line placed by it, and the
   phone walk's back step.
-- **life**, **holders-2** and **payer-2**, then **cfg-2** (the defaults' one home, the patch check
-  spelled once after a proposal carries the stripped overlay, the browser's "" handling). life: one explicit launch lifecycle (asked → admitted → held → running → ended), each exit a
-  declared transition, `Hold` its data. holders-2: the rows holders left (fsync, the cell-claim row, the
-  whole-file rewrites, the maintenance races, one death rule, a landing proving a RUN file by its fold).
-  payer-2: the wallet door below the connectors.
+- **cfg-2**: the defaults' one home, the patch check spelled once after a proposal carries the
+  stripped overlay, the browser's "" handling.
+- **life-2** and **holders-3** after it. life-2: no blocking lock on the event loop, the server
+  composing what the CLI prints, a writer-kept live-jobs index, a served read naming a job file that
+  does not load, and no client left open by a withdrawn head-to-head or the tests. holders-3: `reindex`
+  planned before it is applied, and an atomic write's temporary locked through its replace.
 - **rk-opt 10+:** the reply cache keyed on the schema sent, potter's renderers reading the node's own
   reads (`InjectionBundle` goes), one admit door per arm role for the catch-up pool, L1 told the rows to
   win from the parent's own information, a cell's optimizer in `domain/l4` terms with its cells resolved

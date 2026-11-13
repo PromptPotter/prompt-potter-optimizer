@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Coroutine
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import Any
 
@@ -65,9 +66,10 @@ async def hold(request: LaunchRequest, start: RunStart) -> HeldRun:
     after stamps the minted cycle; an existing cycle's is never stamped, so it stays as resumable
     as it was. A check-in's claim ends with this hold however it ends."""
     stamps: CycleHop | None = None
+    closing = AsyncExitStack()
     try:
         held = await admit_and_hold(request, start)
-        opened = await request.open(start.stores)
+        opened = await closing.enter_async_context(request.open(start.stores))
         if request.hop == UNRESOLVED_HOP:
             stamps = opened.hop
             start.land(opened.hop, held)
@@ -78,9 +80,10 @@ async def hold(request: LaunchRequest, start: RunStart) -> HeldRun:
                 opened.hop.cycle_id,
                 start.job_id,
             )
-        return HeldRun.of(start, opened, held)
+        return HeldRun.of(start, opened, held, closing)
     except BaseException as exc:
         start.release(exc, stamps=stamps)
+        await closing.aclose()
         raise
     finally:
         if isinstance(request, CheckinStart):

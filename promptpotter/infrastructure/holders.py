@@ -9,7 +9,6 @@ from typing import NamedTuple
 
 from pydantic import ValidationError
 
-from promptpotter.config.paths import PRODUCERS_DIR
 from promptpotter.domain.job import JOB_ADAPTER, Job, ScoringPass
 from promptpotter.domain.phases import LaunchStage, RunPhase
 from promptpotter.infrastructure import producer_lock
@@ -52,28 +51,21 @@ def read_job(path: Path, staged: bytes | None = None) -> Job | None:
         ) from exc
 
 
-def producer_path(jobs_dir: Path, producer_id: str) -> Path:
-    validate_path_component(producer_id)
-    return jobs_dir / PRODUCERS_DIR / f"{producer_id}.lock"
-
-
 def producer_alive(jobs_dir: Path, producer_id: str) -> bool:
     """An unstamped id reads as gone."""
     if not producer_id:
         return False
     try:
-        path = producer_path(jobs_dir, producer_id)
+        path = producer_lock.producer_path(jobs_dir, producer_id)
     except ValueError:
         return False
     return producer_lock.held(path)
 
 
-def live_job(jobs_dir: Path, job_id: str) -> Job | None:
-    """The job's death rule: released, or its producer gone, it holds nothing."""
-    job = read_job(job_path(jobs_dir, job_id))
-    if job is None or job.released or not producer_alive(jobs_dir, job.producer_id):
-        return None
-    return job
+def in_flight(jobs_dir: Path, job: Job) -> bool:
+    """THE death rule: a job holds while unreleased and its producer's lock is held, whichever
+    process asks; no in-process task stands in for the lock."""
+    return not job.released and producer_alive(jobs_dir, job.producer_id)
 
 
 class CycleHolder(NamedTuple):
@@ -104,7 +96,8 @@ def holder_of(jobs_dir: Path, cycle_dir: Path) -> CycleHolder | None:
     """Who holds the cycle: the live job whose hold its ledger names last, until that job's run
     declares itself; from then on, while the cycle lock is held."""
     held = scan_cycle_hold(CycleLayout(cycle_dir).ledger)
-    job = None if held is None else live_job(jobs_dir, held.hold.hold_id)
+    job = None if held is None else read_job(job_path(jobs_dir, held.hold.hold_id))
+    job = job if job is not None and in_flight(jobs_dir, job) else None
     since = None if held is None else held.hold.timestamp
     if job is not None and held is not None and not held.declared:
         return CycleHolder(job, since, declared=False)

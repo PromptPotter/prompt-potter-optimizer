@@ -1,9 +1,10 @@
-"""The host coupon and the one payer rule ([decisions.md](../../../docs/decisions.md) § 0003).
+"""The wallet door: the host coupon and the one payer rule ([decisions.md](../../../docs/decisions.md)
+§ 0003), below the connectors so a cell's sends go through it too.
 
 A send on a provider goes out on the account's own key for it, else on the box's, which the host's
-coupon meters; a backend's cells go out on whatever its connector declares (`Connector.cell_payer`).
-What the coupon has left is DERIVED, from the face (`grant.json`, else the box's default) less what
-the account's charges say the box's keys paid; nothing counts it down.
+coupon meters; a send a library makes on the process environment's key is the box's
+(`ENV_KEY_PAYER`). What the coupon has left is DERIVED, from the face (`grant.json`, else the box's
+default) less what the account's charges say the box's keys paid; nothing counts it down.
 """
 
 from __future__ import annotations
@@ -11,8 +12,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from enum import StrEnum
 from typing import NamedTuple
-
-from pydantic import Field, SecretStr
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.said import Tone
@@ -28,16 +27,10 @@ from promptpotter.domain.spend import (
     money_text,
     usd_text,
 )
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.llm.base import ProviderKey
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
-from promptpotter.infrastructure.llm.registry import (
-    get_llm_client,
-    host_key,
-    host_key_attr,
-    providers,
-)
+from promptpotter.infrastructure.llm.registry import get_llm_client, host_key, host_key_attr
 from promptpotter.infrastructure.llm.spend_book import bound_account, require_spend_book
 from promptpotter.infrastructure.store.account_spend import account_bill
 from promptpotter.infrastructure.store.stores import Stores
@@ -46,8 +39,10 @@ from promptpotter.shared.errors import (
     HostAllowanceExhaustedError,
     LaunchRefusalReason,
     NoApiKeyError,
-    PayloadInvalidError,
 )
+
+# A send on the process env's key (litellm under DSPy, an installed agent): the env holds the box's.
+ENV_KEY_PAYER: KeySource = "host"
 
 
 def face_of(grant: CouponGrant | None, *, host: bool) -> Budget:
@@ -86,10 +81,7 @@ class Coupon(NamedTuple):
 
     @property
     def exhausted(self) -> bool:
-        left = self.left
-        return (left.usd is not None and left.usd <= 0.0) or (
-            left.tokens is not None and left.tokens <= 0
-        )
+        return self.left.run_out
 
 
 def read_coupon(stores: Stores, paid: PaidSpend | None = None) -> Coupon:
@@ -274,47 +266,11 @@ def keyed_client(provider: str) -> OpenAICompatibleClient:
     key = paying_key(stores.api_keys.load(), provider)
     if key is None:
         raise unpaid(provider)
-    if draws_coupon(key.paid_by):
-        left = require_spend_book(what).root().coupon_left()
-        if (left.usd is not None and left.usd <= 0.0) or (
-            left.tokens is not None and left.tokens <= 0
-        ):
-            raise AccountWallet(read_coupon(stores), left).refused(
-                ProviderSend(provider, key.paid_by), what="this account"
-            )
+    if (
+        draws_coupon(key.paid_by)
+        and (left := require_spend_book(what).root().coupon_left()).run_out
+    ):
+        raise AccountWallet(read_coupon(stores), left).refused(
+            ProviderSend(provider, key.paid_by), what="this account"
+        )
     return get_llm_client(provider, key)
-
-
-def check_provider(provider: str) -> str:
-    if provider not in providers():
-        raise PayloadInvalidError(
-            f"No provider is named {provider!r}. Known: {', '.join(sorted(providers()))}.",
-            code="unknown_provider",
-        )
-    return provider
-
-
-class AccountKey(StrictModel):
-    provider: str
-    last4: str = Field(description="The key's last four characters: all that is ever served back.")
-    added_at: str
-
-
-# Far above any provider's key, far below what a form field should carry.
-_KEY_CHARS = 512
-
-
-def put_account_key(stores: Stores, provider: str, secret: SecretStr) -> AccountKey:
-    """Stored as given: the provider is the one that says whether it is good, at the first send."""
-    raw = secret.get_secret_value()
-    if not raw or raw != raw.strip() or any(c.isspace() for c in raw) or len(raw) > _KEY_CHARS:
-        raise PayloadInvalidError(
-            f"A {provider} key is one unbroken string of at most {_KEY_CHARS} characters.",
-            code="api_key_malformed",
-        )
-    held = stores.api_keys.put(check_provider(provider), secret)
-    return AccountKey(provider=provider, last4=held.last4, added_at=held.added_at)
-
-
-def remove_account_key(stores: Stores, provider: str) -> bool:
-    return stores.api_keys.remove(check_provider(provider))

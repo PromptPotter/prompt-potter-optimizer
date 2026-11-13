@@ -25,12 +25,12 @@ from promptpotter.infrastructure.store.io import (
     HeldLock,
     PairWrite,
     append_jsonl,
+    appending,
     file_stat,
     read_lines,
     replace_lines,
     rewrite_pair,
     take_lock,
-    unlink_robust,
     write_json,
 )
 from promptpotter.infrastructure.store.read_model import (
@@ -64,9 +64,8 @@ class ArchiveFile(Enum):
     CONFIG = ("configs", ".json", True)
     CELLS = ("cells", ".jsonl", True)
     COLD = ("cold", ".jsonl.gz", True)
-    # One walk's claim on a cell: the lock, and the row its holder publishes under it.
+    # One walk's claim on a cell: held until its holder filed the cell's answer, or gave it up.
     CLAIM_LOCK = ("claims", ".lock", True)
-    CLAIM_ROW = ("claims", ".json", True)
     SAMPLE_FOLD = ("sample_folds", ".jsonl", True)
 
     def __init__(self, folder: str, suffix: str, keyed: bool) -> None:
@@ -160,10 +159,6 @@ def answer_of(line: str | bytes) -> FiledAnswer:
     if not isinstance(row, dict):
         raise ValueError(f"a cell line holds an answer, not a {type(row).__name__}")
     return FiledAnswer.from_wire(row)
-
-
-def claimed_row(raw: bytes) -> MeasuredCell:
-    return MeasuredCell.from_wire(json.loads(raw))
 
 
 def answer_line(answer: FiledAnswer) -> str:
@@ -422,11 +417,11 @@ class MeasurementArchive:
                 config_path, entry.model_dump(mode="json", include=set(ArchiveConfig.model_fields))
             )
         fold_key = _fold_key(entry.config_key, entry.dataset_hash)
-        if fold_key in self._live_rows():
-            return
-        append_jsonl(
-            self._index_path(), {_INDEX_FOLD_KEY: fold_key, **entry.model_dump(mode="json")}
-        )
+        row = {_INDEX_FOLD_KEY: fold_key, **entry.model_dump(mode="json")}
+        # Asked and appended under the index's write lock: two processes never both land one key.
+        with appending(self._index_path()) as put:
+            if fold_key not in self._live_rows():
+                put(json.dumps(row, ensure_ascii=False).encode("utf-8"))
 
     def answer(self, ref: str) -> FiledAnswer | None:
         file_key, _, _ = ref.partition(".")
@@ -590,35 +585,6 @@ class MeasurementArchive:
             yield from self.population(entry)
 
 
-class CellClaim:
-    """An OS lock the kernel drops with its holder: no expiry, so none can time a live holder out."""
-
-    def __init__(self, lock: HeldLock, row_path: Path) -> None:
-        self._lock = lock
-        self.row_path = row_path
-
-    def publish(self, cell: MeasuredCell, *, grade: str) -> None:
-        if cell.errored or not meets_grade(grade, REUSABLE_MIN_GRADE) or is_deprecated(cell):
-            self.release()
-            return
-        # Windows refuses the replace while a waiter reads a past holder's row of this same cell.
-        with contextlib.suppress(PermissionError):
-            write_json(self.row_path, cell.wire())
-
-    def release(self) -> None:
-        # The row goes first: one standing with the lock free is no live holder's.
-        try:
-            _drop_row(self.row_path)
-        finally:
-            self._lock.retire()
-
-
-def _drop_row(path: Path) -> None:
-    # Windows refuses the delete while a waiter reads the row; the next claimer's drop removes it.
-    with contextlib.suppress(PermissionError):
-        unlink_robust(path)
-
-
 class ReplayFeed:
     """Drawn from EVERY dataset: a cell is the sample's content under a configuration, never its panel."""
 
@@ -655,23 +621,12 @@ class ReplayFeed:
                 fresh[key] = answer
         return fresh
 
-    def claim(self, sample_key: str) -> CellClaim | None:
-        key = self.cell_key(sample_key)
-        lock = take_lock(self._archive.path(ArchiveFile.CLAIM_LOCK, key), wait_s=0)
-        if lock is None:
-            return None
-        claim = CellClaim(lock, self._archive.path(ArchiveFile.CLAIM_ROW, key))
-        # A holder unlinks its row before it unlocks, so a row found here outlived its holder.
-        _drop_row(claim.row_path)
-        return claim
+    def claim(self, sample_key: str) -> HeldLock | None:
+        """An OS lock the kernel drops with its holder, so none can time a live holder out; its
+        holder files the cell's answer before it retires the lock, which a waiter then replays."""
+        return take_lock(
+            self._archive.path(ArchiveFile.CLAIM_LOCK, self.cell_key(sample_key)), wait_s=0
+        )
 
     def cell_key(self, sample_key: str) -> str:
         return _cell_key(self._node_configs, sample_key)
-
-    def claimed_cell(self, sample_key: str) -> MeasuredCell | None:
-        path = self._archive.path(ArchiveFile.CLAIM_ROW, self.cell_key(sample_key))
-        try:
-            return read_file(path, claimed_row)
-        except PermissionError:
-            # Windows: a holder is unlinking or replacing it this instant — the next poll reads again.
-            return None

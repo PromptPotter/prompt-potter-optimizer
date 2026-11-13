@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import logging
 from collections.abc import Mapping, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, NamedTuple, assert_never, get_args
 
@@ -35,7 +36,6 @@ from promptpotter.application.free_tier import (
     free_tier_overlay,
 )
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.knobs import ConfigMapResponse, bench_defaults_pin, config_map
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
@@ -116,6 +116,7 @@ from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.pricing import remembered_priced
 from promptpotter.infrastructure.llm.registry import default_routes
+from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     campaign_defaults,
@@ -347,11 +348,9 @@ async def served_pipeline(
     """Read live at every moment that needs it; raises ``BackendUnreachableError``, never a stand-in."""
     served: Mapping[str, Any] | None = None
     if connector.serves_pipeline:
-        client = BackendClient(connector, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir)
-        try:
+        probe = BackendClient(connector, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir)
+        async with aclosing(probe) as client:
             served = await client.fetch_pipeline()
-        finally:
-            await client.aclose()
     elif connector.pipeline_declaration is not None:
         served = connector.pipeline_declaration(stores, experiment)
     return ServedPipeline(connector.name, served)

@@ -13,7 +13,7 @@ from promptpotter.domain.phases import ErrorRecord, ProducerState, RunState, Sto
 from promptpotter.domain.run_records import CycleSupersededRecord, RunPhaseRecord
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.runtime_flags import derive_run_state, run_owed
+from promptpotter.infrastructure.run_state import derive_run_state, run_owed
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls
@@ -123,15 +123,22 @@ class Stores:
         producer's only where its run is still owed, read under the lock (a pause since stands)."""
         layout = self.campaigns.layout(hop)
         lock = layout.producer_lock
-        # A held cycle's producer declares its own stop; asked first, so no caller waits out a live hold.
-        if producer_lock.held(lock) or not producer_lock.take(lock):
-            return False
-        try:
+
+        def ends() -> bool:
             facts = scan_cycle_facts(layout.ledger)
             if facts.minted is None or facts.ended is not None:
                 return False
-            owed = run_owed(layout.cycle_dir, self.jobs_dir)
-            if reason is StopReason.PRODUCER_VANISHED and not owed:
+            return reason is not StopReason.PRODUCER_VANISHED or run_owed(
+                layout.cycle_dir, self.jobs_dir
+            )
+
+        # A held cycle's producer declares its own stop; asked first, so no caller waits out a live
+        # hold, and the whole scan is read before the lock, so a resume never waits it out.
+        if producer_lock.held(lock) or not ends() or not producer_lock.take(lock):
+            return False
+        try:
+            # Asked again off the index the first read built: only the lines since are parsed.
+            if not ends():
                 return False
             self.declare_stop(hop, RunPhaseRecord.stop(reason))
             return True

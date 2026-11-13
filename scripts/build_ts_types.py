@@ -31,7 +31,7 @@ from promptpotter.domain.said import TONES
 from promptpotter.domain.sample import SAMPLE_TAG_DIGITS
 from promptpotter.domain.spend import RATE_PRICED_LABEL
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
-from promptpotter.infrastructure.runtime_flags import RECENT_STEP_S
+from promptpotter.infrastructure.run_state import RECENT_STEP_S
 from promptpotter.main import API_ROUTERS, app
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.shared.worded import Worded, registered
@@ -403,7 +403,7 @@ def _emit_live_windows() -> str:
         "// How often an open call beats (infrastructure/llm/heartbeat.py::HEARTBEAT_INTERVAL_S).\n"
         f"export const HEARTBEAT_INTERVAL_S = {HEARTBEAT_INTERVAL_S:g};\n"
         "// The shortest silence between two ray steps worth marking. Mirror of\n"
-        "// infrastructure/runtime_flags.py::RECENT_STEP_S, the window a producer reads `live` in.\n"
+        "// infrastructure/run_state.py::RECENT_STEP_S, the window a producer reads `live` in.\n"
         f"export const RECENT_STEP_S = {RECENT_STEP_S:g};"
     )
 

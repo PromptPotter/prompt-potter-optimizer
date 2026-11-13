@@ -46,6 +46,9 @@ if sys.platform == "win32":
         with contextlib.suppress(OSError):
             os.unlink(name)
 
+    def _sync_dir(path: Path) -> None:
+        """Windows opens no directory to sync; NTFS journals the rename itself."""
+
 else:
     import fcntl
 
@@ -73,6 +76,14 @@ else:
             os.unlink(name)
         _unlock(fd)
         os.close(fd)
+
+    def _sync_dir(path: Path) -> None:
+        """The replace itself made durable: the directory entry a rename wrote."""
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 def validate_path_component(name: str) -> str:
@@ -217,28 +228,29 @@ def _tmp_beside(path: Path) -> tuple[int, str]:
     return tempfile.mkstemp(dir=parent, prefix=".", suffix=".tmp")
 
 
-def _atomic_write(path: Path, write_fn: Callable[[IO[str]], object]) -> None:
-    fd, tmp = _tmp_beside(path)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            write_fn(f)
-        _atomic_replace(tmp, path)
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+def _synced(f: IO[Any]) -> None:
+    f.flush()
+    os.fsync(f.fileno())
 
 
-def write_bytes(path: Path, data: bytes) -> None:
+def write_bytes(path: Path, data: bytes, *, durable: bool = False) -> None:
+    """*durable* (a `data_root.py::Kind.durable` row's writer) fsyncs the file before the replace and
+    its directory after, so a power loss never brings it back empty; run data stays fast."""
     fd, tmp = _tmp_beside(path)
+    # Held until the file closes, so a wipe reads the temporary as a write in flight.
+    _try_lock(fd)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
+            if durable:
+                _synced(f)
         _atomic_replace(tmp, path)
     except Exception:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
+    if durable:
+        _sync_dir(path)
 
 
 def write_json(
@@ -246,13 +258,14 @@ def write_json(
     data: Any,
     *,
     default: Callable[[Any], Any] | None = None,
+    durable: bool = False,
 ) -> None:
     text = json.dumps(data, indent=2, ensure_ascii=False, default=default)
-    _atomic_write(path, lambda f: f.write(text))
+    write_bytes(path, text.encode("utf-8"), durable=durable)
 
 
 def write_text(path: Path, content: str) -> None:
-    _atomic_write(path, lambda f: f.write(content))
+    write_bytes(path, content.encode("utf-8"))
 
 
 def file_stat(path: Path) -> os.stat_result:
@@ -472,34 +485,35 @@ _APPENDED: dict[str, tuple[int, int, int]] = {}
 _APPENDED_HELD = 4096
 
 
-def append_line(path: Path, line: bytes) -> range:
+def append_line(path: Path, line: bytes, *, durable: bool = False) -> range:
     """Reopened per call, never held: a held handle blocks a stub fork's delete on Windows.
 
     Under the lock no append is in flight, so an unterminated last line is a crashed one: it is cut
     back to the last newline before this line lands. No reader counted those bytes (`complete_lines`,
     `FileMark.end`), and the append that wrote them never returned. A file still ending where this
-    process's last append left it is opened append-only: it ends on a line written whole."""
-    with appending(path) as put:
+    process's last append left it is opened append-only: it ends on a line written whole.
+    *durable* fsyncs the line before it returns (`write_bytes`)."""
+    with appending(path, durable=durable) as put:
         return put(line)
 
 
 @contextlib.contextmanager
-def appending(path: Path) -> Iterator[Callable[[bytes], range]]:
+def appending(path: Path, *, durable: bool = False) -> Iterator[Callable[[bytes], range]]:
     """`append_line` held: what is read of *path* under it is what the line lands after, so a
     writer refusing a line the file already holds refuses it inside the write."""
     name = _long_path(path)
     with write_lock(path):
-        yield lambda line: _append_held(name, line + b"\n")
+        yield lambda line: _append_held(name, line + b"\n", durable=durable)
 
 
-def _append_held(name: str, data: bytes) -> range:
+def _append_held(name: str, data: bytes, *, durable: bool) -> range:
     with open_append(name) as f:
         st = os.fstat(f.fileno())
         if not st.st_size or _APPENDED.get(name) == (st.st_ino, st.st_size, st.st_mtime_ns):
-            return _landed(name, f, data)
+            return _landed(name, f, data, durable=durable)
     _cut_unterminated(name)
     with open_append(name) as f:
-        return _landed(name, f, data)
+        return _landed(name, f, data, durable=durable)
 
 
 def open_append(path: Path | str) -> IO[bytes]:
@@ -508,9 +522,12 @@ def open_append(path: Path | str) -> IO[bytes]:
     return os.fdopen(os.open(path, flags, 0o600), "ab")
 
 
-def _landed(name: str, f: IO[bytes], data: bytes) -> range:
+def _landed(name: str, f: IO[bytes], data: bytes, *, durable: bool) -> range:
     f.write(data)
-    f.flush()
+    if durable:
+        _synced(f)
+    else:
+        f.flush()
     end = f.tell()
     if len(_APPENDED) >= _APPENDED_HELD:
         _APPENDED.clear()
@@ -528,10 +545,10 @@ def _cut_unterminated(name: str) -> None:
                 f.truncate(size - len(_last_line(f, size)))
 
 
-def append_jsonl(path: Path, *rows: dict[str, Any]) -> range:
+def append_jsonl(path: Path, *rows: dict[str, Any], durable: bool = False) -> range:
     """THE appender of JSON rows: every row lands in one locked write, at the byte range returned."""
     lines = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
-    return append_line(path, lines.encode("utf-8"))
+    return append_line(path, lines.encode("utf-8"), durable=durable)
 
 
 class FileMark(NamedTuple):
@@ -740,10 +757,8 @@ def replace_lines[T](path: Path, build: Callable[[], tuple[Iterable[str], T]]) -
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
-    _atomic_write(
-        path,
-        lambda f: f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
-    )
+    text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    write_bytes(path, text.encode("utf-8"))
 
 
 def newest_mtime_ns(*paths: Path) -> int | None:

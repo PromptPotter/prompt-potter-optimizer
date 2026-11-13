@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, NamedTuple
 
@@ -8,9 +9,9 @@ from pydantic import Field
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import Device
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.store.io import append_jsonl, write_json
+from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_lock
 from promptpotter.infrastructure.store.read_model import read_file, read_rows
-from promptpotter.shared.errors import FileUnreadableError
+from promptpotter.shared.errors import FileUnreadableError, NotFoundError
 
 USER_FILE = "user.json"
 CONSENT_FILE = "consent.jsonl"
@@ -20,7 +21,8 @@ ConsentEvent = Literal["account_created", "signed_in", "terms_accepted"]
 
 class ConsentLine(FrozenModel):
     """An act the account's standing rests on; ``user_id`` is the acting principal, a delegate's own
-    id in its delegator's tenant."""
+    id in its delegator's tenant. A terms acceptance's ``at`` is SERVER-stamped, never
+    client-supplied: its legal weight rests on that clock."""
 
     event: ConsentEvent
     user_id: str
@@ -31,23 +33,10 @@ class ConsentLine(FrozenModel):
     at: str
 
 
-class ConsentRecord(FrozenModel):
-    """``accepted_at`` is SERVER-stamped, never client-supplied: its legal weight rests on that clock."""
-
-    version: str
-    accepted_at: str
-
-
 class User(FrozenModel):
     user_id: str
     tenant_id: str
     email: str | None = None
-    terms_accepted: dict[str, ConsentRecord] = Field(
-        default_factory=dict,
-        description="Provable Terms-acceptance record (version + server-stamped timestamp) per "
-        "acting principal: the account's own and each delegate's. Absent until it clears the "
-        "consent gate.",
-    )
     max_concurrent_cycles: int = Field(default=2, ge=1)
     max_campaigns_per_day: int = Field(default=1000, ge=1)
     demo_mode_enabled: bool = Field(
@@ -59,6 +48,8 @@ class User(FrozenModel):
 
 
 class UserStore:
+    """Both files survive a landing, so each write is durable (`data_root.py::Kind.durable`)."""
+
     def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir
 
@@ -69,13 +60,36 @@ class UserStore:
         return read_file(self._path(), User.model_validate_json)
 
     def save(self, user: User) -> None:
-        write_json(self._path(), user.model_dump())
+        """An opening or a re-keying: the whole record, under the write lock `update` holds."""
+        with write_lock(self._path()):
+            self._write(user)
+
+    def update(self, change: Callable[[User], User]) -> User:
+        """THE edit of a standing account, read and replaced under its write lock, so two edits
+        (a preference, a host-set limit) never lose one."""
+        with write_lock(self._path()):
+            if (user := self.load()) is None:
+                raise NotFoundError(f"no account in {self._base_dir}")
+            self._write(changed := change(user))
+        return changed
+
+    def _write(self, user: User) -> None:
+        write_json(self._path(), user.model_dump(), durable=True)
 
     def record(self, line: ConsentLine) -> None:
-        append_jsonl(self._base_dir / CONSENT_FILE, line.model_dump(mode="json"))
+        append_jsonl(self._base_dir / CONSENT_FILE, line.model_dump(mode="json"), durable=True)
 
     def consent_trail(self) -> list[ConsentLine]:
         return read_rows(self._base_dir / CONSENT_FILE, ConsentLine.model_validate_json)
+
+    def accepted_terms(self, principal_id: str) -> str | None:
+        """The terms version *principal_id* last accepted, a fold of the trail: appended, so no
+        rewrite of the account loses an acceptance."""
+        accepted = None
+        for line in self.consent_trail():
+            if line.event == "terms_accepted" and line.user_id == principal_id:
+                accepted = line.subject
+        return accepted
 
 
 def account_dirs(projects_root: Path) -> list[WorkspaceDir]:

@@ -9,7 +9,6 @@ from contextlib import suppress
 
 import httpx
 
-from promptpotter.application.jobs.coupon import keyed_client
 from promptpotter.domain.judges import JudgeStage, JudgeVerdict
 from promptpotter.domain.scoring import NO_RESULT, MeasuredCell
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, silence_detail
@@ -21,6 +20,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
     current_round,
 )
+from promptpotter.infrastructure.llm.wallet import keyed_client
 from promptpotter.infrastructure.store.llm_reuse_cache import hash_call
 from promptpotter.shared.errors import (
     CellSendRefusedError,

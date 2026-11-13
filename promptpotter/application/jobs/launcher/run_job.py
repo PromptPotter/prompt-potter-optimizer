@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import threading
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
@@ -26,6 +27,7 @@ from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.paths import READOUT_POINTER, user_data_root
 from promptpotter.domain.campaign import CampaignRefusedError
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import LaunchMove
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.spend import Budget, HeldBudget
@@ -41,7 +43,6 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.mint import OpenedCycle
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.campaign_config import CycleConfig
     from promptpotter.domain.results import CycleResult
 
@@ -116,7 +117,6 @@ async def spawn_job(held: HeldRun, mode: RunMode) -> asyncio.Task[None]:
         await exited.wait()
 
     exited_task = asyncio.create_task(watch(), name=f"job-{spec.job_id}")
-    start.job_registry.attach_task(spec.job_id, exited_task)
     logger.info("job %s runs in process %s (log %s)", spec.job_id, child.pid, log_path)
     return exited_task
 
@@ -181,8 +181,10 @@ async def run_held_job(
     budget: HeldBudget,
     optimizer: SelectedOptimizer,
     readout_sink: Callable[[str], None] | None = None,
-) -> tuple[CycleResult, RunObservers]:
-    start.job_registry.mark_started(start.job_id)
+) -> tuple[Session, CycleResult]:
+    """THE run of a held launch at every door: START, the run, its END. Answers the session the
+    run ENDED on (`run_optimization`)."""
+    start.job_registry.move(start.job_id, LaunchMove.START)
     # Unstamped until its observers stand: nothing of this launch reached the cycle before, whose
     # own producer may still be running it.
     stamps: CycleHop | None = None
@@ -191,7 +193,7 @@ async def run_held_job(
             session=session, campaign_config=cycle.config, readout_sink=readout_sink
         )
         stamps = session.hop
-        _, result = await run_optimization(
+        ended, result = await run_optimization(
             list(session.bank.samples),
             cycle,
             session=session,
@@ -206,7 +208,7 @@ async def run_held_job(
         start.release(exc, stamps=None if launch_interrupted(exc) else stamps)
         raise
     start.release(result)
-    return result, observers
+    return ended, result
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,16 +216,20 @@ class HeldRun:
     """A launch past everything that can refuse it: its machine slot held and its ceiling admitted
     (``launcher.admission``), its cycle on disk, a session bound to that cycle. A launch arrives
     here by ``launch.py::hold`` and an arm by its head-to-head's mint, and what is left is the
-    run-invocation, the ONE thing an entry point owns: :meth:`detach` or :meth:`run_inline`."""
+    run-invocation, the ONE thing an entry point owns: :meth:`detach` or :meth:`run_inline`, each
+    closing what opened its session (*closing*) once the run is handed off or ended."""
 
     start: RunStart
     session: Session
     cycle: CycleConfig
     budget: HeldBudget
     optimizer: SelectedOptimizer
+    closing: AsyncExitStack
 
     @classmethod
-    def of(cls, start: RunStart, opened: OpenedCycle, budget: HeldBudget) -> HeldRun:
+    def of(
+        cls, start: RunStart, opened: OpenedCycle, budget: HeldBudget, closing: AsyncExitStack
+    ) -> HeldRun:
         """The config the cycle reads back as, which a detached run rebuilds, never the one a mint
         was made from."""
         session = opened.session
@@ -236,6 +242,7 @@ class HeldRun:
             cycle=cycle_config(stores, campaign, hop),
             budget=budget,
             optimizer=opened.optimizer,
+            closing=closing,
         )
 
     def job_spec(self, mode: RunMode) -> JobSpec:
@@ -254,25 +261,27 @@ class HeldRun:
         )
 
     async def detach(self, *, mode: RunMode) -> asyncio.Task[None]:
-        return await spawn_job(self, mode)
+        async with self.closing:
+            return await spawn_job(self, mode)
 
     async def run_inline(
         self, *, mode: RunMode, readout_sink: Callable[[str], None] | None
-    ) -> tuple[CycleResult, RunObservers]:
+    ) -> tuple[Session, CycleResult]:
         session = self.session
         readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
         # The PATH, never a copy: parallel runs each own their cycle's readout, and one copy interleaves.
         with contextlib.suppress(OSError):
             write_text(user_data_root() / READOUT_POINTER, f"{readout}\n")
-        return await run_held_job(
-            self.start,
-            self.session,
-            self.cycle,
-            mode=mode,
-            budget=self.budget,
-            optimizer=self.optimizer,
-            readout_sink=readout_sink,
-        )
+        async with self.closing:
+            return await run_held_job(
+                self.start,
+                self.session,
+                self.cycle,
+                mode=mode,
+                budget=self.budget,
+                optimizer=self.optimizer,
+                readout_sink=readout_sink,
+            )
 
 
 async def run_job(spec: JobSpec) -> StopOutcome | None:
@@ -299,27 +308,29 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
         logger.warning("job %s refused past its handoff: %s", spec.job_id, refused)
         start.release(refused)
         return StopOutcome.FAILED
-    try:
-        opened = await ExistingCycle(spec.hop, campaign, Budget()).open(stores)
-    except BaseException as exc:
-        logger.exception("job %s could not bind its session", spec.job_id)
-        start.release(exc, stamps=spec.hop)
-        return StopOutcome.FAILED
-
-    try:
-        result, _observers = await run_held_job(
-            start,
-            opened.session,
-            opened.cycle,
-            mode=spec.mode,
-            budget=spec.budget,
-            optimizer=opened.optimizer,
-        )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        return StopOutcome.PAUSED
-    except Exception:
-        logger.exception("job %s failed", spec.job_id)
-        return StopOutcome.FAILED
+    async with AsyncExitStack() as closing:
+        try:
+            opened = await closing.enter_async_context(
+                ExistingCycle(spec.hop, campaign, Budget()).open(stores)
+            )
+        except BaseException as exc:
+            logger.exception("job %s could not bind its session", spec.job_id)
+            start.release(exc, stamps=spec.hop)
+            return StopOutcome.FAILED
+        try:
+            _, result = await run_held_job(
+                start,
+                opened.session,
+                opened.cycle,
+                mode=spec.mode,
+                budget=spec.budget,
+                optimizer=opened.optimizer,
+            )
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            return StopOutcome.PAUSED
+        except Exception:
+            logger.exception("job %s failed", spec.job_id)
+            return StopOutcome.FAILED
     return stop_reason_outcome(result.stop_reason)
 
 

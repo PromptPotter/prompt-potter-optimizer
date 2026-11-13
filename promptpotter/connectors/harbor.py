@@ -43,22 +43,16 @@ from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.docker_host import (
-    CONTAINER_PRODUCER,
     PACKAGE_CACHE_PROXY,
-    PRODUCER_SCRATCH,
     docker,
     docker_daemon_fault,
     ensure_package_cache,
     forget_package_cache,
+    machine_producer,
     machine_step,
+    producer_scratch,
 )
-from promptpotter.infrastructure.llm.registry import (
-    get_llm_client,
-    host_key,
-    host_key_attr,
-    openai_compat_spec,
-    providers,
-)
+from promptpotter.infrastructure.llm.registry import openai_compat_spec, providers
 from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, drawn_budget
@@ -70,12 +64,12 @@ from promptpotter.infrastructure.llm.spend_book import (
     reservation_left,
 )
 from promptpotter.infrastructure.llm.telemetry import emit_backend_warning, rate_priced_usd
+from promptpotter.infrastructure.llm.wallet import ENV_KEY_PAYER, keyed_client
 from promptpotter.shared.errors import (
     CellInfrastructureError,
     CellUnscoreableError,
     ContextOverflowError,
     ErrorCategory,
-    NoApiKeyError,
     SendRefusedError,
     cell_failure,
     is_provider_credit_refusal,
@@ -139,7 +133,6 @@ _DISCARDED_SENDER_KEYS = frozenset(
     }
 )
 
-_TRIALS_ROOT = PRODUCER_SCRATCH
 # Read by the compose overlay, which interpolates it into the producer label.
 _PRODUCER_ENV = "PROMPTPOTTER_HARBOR_PRODUCER"
 
@@ -730,7 +723,7 @@ def _read_trajectory(path: Path) -> list[dict[str, Any]]:
 
 
 def _trial_root(result: TrialResult) -> Path:
-    return _TRIALS_ROOT / str(result.trial_name)
+    return producer_scratch() / str(result.trial_name)
 
 
 class _StepLogs(NamedTuple):
@@ -1126,10 +1119,10 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
 def _trial_config(episode: _Episode, skills: list[str]) -> Any:
     from harbor.models.trial import config as harbor_config
 
-    os.environ[_PRODUCER_ENV] = CONTAINER_PRODUCER
+    os.environ[_PRODUCER_ENV] = machine_producer()
     return harbor_config.TrialConfig(
         task=_task_config(episode.task, episode.task_root, harbor_config),
-        trials_dir=_TRIALS_ROOT,
+        trials_dir=producer_scratch(),
         agent=harbor_config.AgentConfig(
             name=episode.agent_name,
             model_name=episode.harbor_model_name,
@@ -1174,8 +1167,8 @@ def _chat_message(turn: Mapping[str, Any]) -> ChatMessage:
 
 
 class _AgentModel:
-    """terminus-2's model (``agent._llm``): each of its sends goes out on the registry's client,
-    admitted, paced and billed there, on the box's key (``CONNECTOR.cell_payer``)."""
+    """terminus-2's model (``agent._llm``): each of its sends goes out on the wallet door's client
+    (`keyed_client`), admitted, paced and billed there, on the account's own key first."""
 
     def __init__(self, model: str | None, provider: str | None, send: Mapping[str, Any]) -> None:
         if not model or not provider:
@@ -1183,16 +1176,7 @@ class _AgentModel:
                 f"harbor connector: a trial reached its agent naming model {model!r} on provider "
                 f"{provider!r}, which `_refuse_send_faults` refuses before a cell is bought."
             )
-        payer = CONNECTOR.cell_payer
-        if payer != "host":
-            raise RuntimeError(
-                f"harbor connector: its cells draw the {payer!r} wallet, and only the box's "
-                "keys are in a cell's reach."
-            )
-        key = host_key(provider)
-        if key is None:
-            raise NoApiKeyError(provider=provider, key=host_key_attr(provider))
-        self._client = get_llm_client(provider, key)
+        self._client = keyed_client(provider)
         self._model, self._provider, self._send = model, provider, dict(send)
         self.usage = TokenAccount()
         self._answered = 0
@@ -1311,7 +1295,7 @@ async def _installed_run(trial: Trial, episode: _Episode) -> TrialResult:
         reservation_left(),
         model=model,
         provider=provider,
-        paid_by=CONNECTOR.cell_payer,
+        paid_by=ENV_KEY_PAYER,
     ) as admission:
         try:
             result = await trial.run()

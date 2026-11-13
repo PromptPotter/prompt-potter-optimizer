@@ -116,7 +116,7 @@ from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
-from promptpotter.infrastructure.runtime_flags import producer_attached
+from promptpotter.infrastructure.run_state import producer_attached
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,

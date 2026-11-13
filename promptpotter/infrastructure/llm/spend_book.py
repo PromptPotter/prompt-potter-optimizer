@@ -162,6 +162,19 @@ def _times(left: float, each: float | None) -> int:
     return int(left / each)
 
 
+# What one send asks of a book's share, and of its reserve of the coupon.
+type Asks = tuple[SendBound, SendBound]
+
+
+def _past(bound: SendBound, left: tuple[float | None, int | None]) -> SendBound:
+    usd, tokens = bound.usd, bound.tokens
+    if usd is not None and left[0] is not None:
+        usd = max(0.0, usd - max(0.0, left[0]))
+    if tokens is not None and left[1] is not None:
+        tokens = max(0, tokens - max(0, left[1]))
+    return SendBound(input_tokens=0, output_tokens=tokens, usd=usd, unpriced=bound.unpriced)
+
+
 def _admits(left: float, each: float | None, reserve: bool) -> int:
     """The ceiling admits while any of it is left, so a run stops AT its cap; the reserve is what
     bounds the calls out when it is reached."""
@@ -319,7 +332,7 @@ class SpendBook:
             kind = _resource(hold)
             if hold.parent != self.hold_id or kind == beside:
                 continue
-            if draws_coupon(hold.key_source) if host else self.binds(kind):
+            if host or self.binds(kind):
                 held_usd, held_tokens = money.kept(hold, host=host)
                 usd, tokens = usd + held_usd, tokens + held_tokens
         return usd, tokens
@@ -363,10 +376,10 @@ class SpendBook:
         return None
 
     def _room(
-        self, bound: SendBound, beside: TokenUsageKind | None, paid_by: KeySource
+        self, asks: Asks, beside: TokenUsageKind | None, paid_by: KeySource
     ) -> Iterator[tuple[ErrorCategory, bool, int]]:
         """The campaign's share binds every send it meters; the coupon's reserve every one on the
-        box's key; each holds the send's whole bound."""
+        box's key; each holds what the send asks of it."""
         money = self._money()
         share_usd, share_tokens = self._left(money, host=False, beside=beside)
         held_usd, held_tokens = (
@@ -374,10 +387,12 @@ class SpendBook:
         )
         for reserve, left in ((False, share_usd), (True, held_usd)):
             if left is not None:
-                yield ErrorCategory.SPEND_CEILING, reserve, _admits(left, bound.usd, reserve)
+                n = _admits(left, asks[reserve].usd, reserve)
+                yield ErrorCategory.SPEND_CEILING, reserve, n
         for reserve, left_t in ((False, share_tokens), (True, held_tokens)):
             if left_t is not None:
-                yield ErrorCategory.TOKEN_CEILING, reserve, _admits(left_t, bound.tokens, reserve)
+                n = _admits(left_t, asks[reserve].tokens, reserve)
+                yield ErrorCategory.TOKEN_CEILING, reserve, n
 
     # These two plan cells alone, on what the cell's connector declares pays it.
     def fits(
@@ -388,7 +403,7 @@ class SpendBook:
         return min(
             (
                 n
-                for _, reserve, n in self._room(bound, kind, paid_by)
+                for _, reserve, n in self._room((bound, bound), kind, paid_by)
                 if reserve or kind is None or self.binds(kind)
             ),
             default=sys.maxsize,
@@ -405,11 +420,9 @@ class SpendBook:
     ) -> str:
         """THE door a call's or a cell's hold opens through: refused where a level has no room for
         it, then one write on the account, under its run's open cell or else its job."""
-        parent = draws_on(self)
-        money = self._money()
+        parent, money = draws_on(self), self._money()
         for book, filed_as in self._levels(label.kind):
-            past = book._past_cells(money, bound, parent)
-            book.refuse_unless_room(past, filed_as, what, paid_by)
+            book.refuse_unless_room(book._past_cells(money, bound, parent), filed_as, what, paid_by)
         hold_id = uuid.uuid4().hex
         self.charges.append(
             Hold(
@@ -439,23 +452,21 @@ class SpendBook:
             unpriced=bound.unpriced,
         )
 
-    def _past_cells(self, money: Money, bound: SendBound, parent: str) -> SendBound:
+    def _past_cells(self, money: Money, bound: SendBound, parent: str) -> Asks:
         """What *bound* asks of this book past what each cell between *parent* and its job still
-        holds: a cell's reservation stops a cell, never the estimate."""
-        usd, tokens = bound.usd, bound.tokens
+        holds: a cell's reservation stops a cell, never the estimate; on the reserve, only a cell
+        drawing the coupon holds any of it."""
+        share = reserve = bound
         above = parent
         while above != self.hold_id:
             cell = money.holds[above]
             if cell.resource is not None:
-                left_usd, left_tokens = money.left(cell)
-                if usd is not None and left_usd is not None:
-                    usd = max(0.0, usd - max(0.0, left_usd))
-                if tokens is not None and left_tokens is not None:
-                    tokens = max(0, tokens - max(0, left_tokens))
+                share = _past(share, left := money.left(cell))
+                reserve = _past(reserve, left) if draws_coupon(cell.key_source) else reserve
             if cell.parent is None:
                 raise RuntimeError(f"hold {parent} draws on no hold of job {self.hold_id}")
             above = cell.parent
-        return SendBound(input_tokens=0, output_tokens=tokens, usd=usd, unpriced=bound.unpriced)
+        return share, reserve
 
     def _levels(self, kind: TokenUsageKind) -> Iterator[tuple[SpendBook, TokenUsageKind]]:
         """This book and every book enclosing it, each with the kind it files *kind* as, where it
@@ -467,13 +478,13 @@ class SpendBook:
             book, kind = book.enclosing, _ENCLOSED
 
     def refuse_unless_room(
-        self, bound: SendBound, kind: TokenUsageKind, what: str, paid_by: KeySource
+        self, asks: Asks, kind: TokenUsageKind, what: str, paid_by: KeySource
     ) -> None:
         """*kind* as this book files it: the share refuses only a send it meters."""
-        self.refuse_unpriced(bound, kind, what, paid_by)
-        for category, reserve, n in self._room(bound, None, paid_by):
+        self.refuse_unpriced(asks[0], kind, what, paid_by)
+        for category, reserve, n in self._room(asks, None, paid_by):
             if n < 1 and (reserve or self.binds(kind)):
-                refusal = self._refusal(category, reserve, bound, what)
+                refusal = self._refusal(category, reserve, asks[reserve], what)
                 if reserve:
                     # Whether a key of the account's own would pay this send is not the book's to know.
                     raise HostAllowanceExhaustedError(

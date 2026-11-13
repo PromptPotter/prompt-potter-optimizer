@@ -16,17 +16,10 @@ from pydantic import Field, SecretStr, TypeAdapter
 from promptpotter.domain.run_records import ChargeLine
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.store.io import (
-    append_line,
-    take_lock,
-    write_json,
-    write_lock_name,
-)
+from promptpotter.infrastructure.store.io import append_line, write_json, write_lock
 from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import FileKind
-
-_KEYS_LOCK_WAIT_S = 5.0
 
 GRANT_FILE = "grant.json"
 API_KEYS_FILE = "api_keys.json"
@@ -95,12 +88,8 @@ class TenantApiKeyStore:
         return removed
 
     def _rewrite(self, change: Callable[[dict[str, HeldKey]], dict[str, HeldKey]]) -> None:
-        lock = take_lock(
-            self.path.with_name(write_lock_name(self.path.name)), wait_s=_KEYS_LOCK_WAIT_S
-        )
-        if lock is None:
-            raise TimeoutError(f"{self.path} is held by another write")
-        try:
+        """A survivor (`data_root.py::Kind.durable`), read and replaced under its write lock."""
+        with write_lock(self.path):
             keys = change(self.load())
             write_json(
                 self.path,
@@ -108,9 +97,8 @@ class TenantApiKeyStore:
                     p: {"secret": k.secret.get_secret_value(), "added_at": k.added_at}
                     for p, k in keys.items()
                 },
+                durable=True,
             )
-        finally:
-            lock.release()
 
 
 class ChargeBook:
@@ -123,7 +111,9 @@ class ChargeBook:
     def append(self, *lines: ChargeLine) -> None:
         """One fact's *lines* in one locked write, so no crash or other writer lands between them."""
         self.account_dir.mkdir(parents=True, exist_ok=True)
-        append_line(self.path, "\n".join(line.model_dump_json() for line in lines).encode("utf-8"))
+        raw = "\n".join(line.model_dump_json() for line in lines).encode("utf-8")
+        # Durable (`data_root.py::Kind.durable`): a bill line a power loss takes under-charges.
+        append_line(self.path, raw, durable=True)
 
     def held_on(self, ledger: Path) -> str:
         return Path(os.path.relpath(ledger, self.account_dir)).as_posix()

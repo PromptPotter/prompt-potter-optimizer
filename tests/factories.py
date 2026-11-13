@@ -24,9 +24,9 @@ from promptpotter.application.initialization.scoring_scope import session_scope
 from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
-from promptpotter.application.jobs.launcher.admission import slotless_share
+from promptpotter.application.jobs.launcher.admission import admit_slotless, land_job
 from promptpotter.application.jobs.mint import declare, mint_framed_cycle
-from promptpotter.application.jobs.quota import land_job, sends_on
+from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -675,64 +675,71 @@ async def run_init_round(
     source = definition_source(resolve_dataset(stores, LAUNCHED_DATASET))
     assert source is not None, f"{LAUNCHED_DATASET} names a source"
     stores.tenant_datasets.record_cut(source.identity, Bank.of(bank))
-    session = await init_services(
+    async with init_services(
         dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=enter(stores)
-    )
-    session, config = laid_session(session, ConfigLayers({}, raw))
-    declaration = declare(session, config, purpose=Optimize())
-    opened: list[RoundContext] = []
+    ) as session:
+        session, config = laid_session(session, ConfigLayers({}, raw))
+        declaration = declare(session, config, purpose=Optimize())
+        opened: list[RoundContext] = []
 
-    async def run(held: HeldBudget) -> tuple[None, CycleResult]:
-        minted = await mint_framed_cycle(
-            session,
-            declaration,
-            session.bank.samples,
-            task_text=None,
+        async def run(held: HeldBudget) -> tuple[None, CycleResult]:
+            minted = await mint_framed_cycle(
+                session,
+                declaration,
+                session.bank.samples,
+                task_text=None,
+            )
+            running, cycle_config = minted.session, minted.cycle
+            land_job(
+                stores, JobRegistry.attach(stores.jobs_dir), held.job_id, running.hop, held.share
+            )
+            observers = build_run_observers(session=running, campaign_config=cycle_config.config)
+            start_launch(running)
+            determinism = cycle_config.config.optimization.determinism
+            try:
+                with (
+                    at_round(0),
+                    scoped(
+                        ledger=observers.ledger,
+                        account=running.store,
+                        optimizer=minted.optimizer,
+                        determinism=run_clamp(determinism, running.purpose),
+                    ),
+                    session_scope(running),
+                ):
+                    prep = await open_launch(
+                        list(running.bank.samples),
+                        cycle_config,
+                        session=running,
+                        observers=observers,
+                        budget=held,
+                    )
+                    cycle, _ = await open_cycle(
+                        prep, session=running, ledger=observers.ledger, mode=RunMode()
+                    )
+                    close_init(cycle, observers.ledger)
+            finally:
+                observers.release()
+            opened.append(RoundContext(cycle, round_num, ledger=cycle_ledger(cycle)))
+            return None, cycle_result([], None, [], cost=0.0)
+
+        start, held = await admit_slotless(
+            config,
+            stores=stores,
+            holder=EmbeddedRun(session.measured_dataset),
+            hop=None,
+            requested=Budget(),
+            step_rounds=None,
+            sends=sends_on(stores, config, declaration.environment.connector),
         )
-        running, cycle_config = minted.session, minted.cycle
-        land_job(stores, JobRegistry.attach(stores.jobs_dir), held.job_id, running.hop, held.share)
-        observers = build_run_observers(session=running, campaign_config=cycle_config.config)
-        start_launch(running)
-        determinism = cycle_config.config.optimization.determinism
         try:
-            with (
-                at_round(0),
-                scoped(
-                    ledger=observers.ledger,
-                    account=running.store,
-                    optimizer=minted.optimizer,
-                    determinism=run_clamp(determinism, running.purpose),
-                ),
-                session_scope(running),
-            ):
-                prep = await open_launch(
-                    list(running.bank.samples),
-                    cycle_config,
-                    session=running,
-                    observers=observers,
-                    budget=held,
-                )
-                cycle, _ = await open_cycle(
-                    prep, session=running, ledger=observers.ledger, mode=RunMode()
-                )
-                close_init(cycle, observers.ledger)
-        finally:
-            observers.release()
-        opened.append(RoundContext(cycle, round_num, ledger=cycle_ledger(cycle)))
-        return None, cycle_result([], None, [], cost=0.0)
-
-    await slotless_share(
-        config,
-        stores=stores,
-        holder=EmbeddedRun(session.measured_dataset),
-        hop=None,
-        requested=Budget(),
-        step_rounds=None,
-        sends=sends_on(stores, config, declaration.environment.connector),
-        run=run,
-    )
-    (ctx,) = opened
-    return ctx
+            _, ended = await run(held)
+        except BaseException as exc:
+            start.release(exc)
+            raise
+        start.release(ended)
+        (ctx,) = opened
+        return ctx
 
 
 def cycle_ledger(cycle: Cycle) -> CycleEventLog:

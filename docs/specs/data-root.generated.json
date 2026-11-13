@@ -53,16 +53,6 @@
       ],
       "shape": null
     },
-    "archive claim_row": {
-      "fate": "CACHE",
-      "patterns": [
-        "projects/*/measurements/claims/*.json",
-        ".archives/*/measurements/claims/*.json"
-      ],
-      "shape": {
-        "reader": "promptpotter.infrastructure.store.measurement_archive::claimed_row"
-      }
-    },
     "archive cold": {
       "fate": "CACHE",
       "patterns": [
@@ -394,6 +384,69 @@
           "main"
         ],
         "title": "CheckinPipelineManifest",
+        "type": "object"
+      }
+    },
+    "consent trail": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/consent.jsonl"
+      ],
+      "shape": {
+        "$defs": {
+          "Device": {
+            "enum": [
+              "phone",
+              "tablet",
+              "computer"
+            ],
+            "title": "Device",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "description": "An act the account's standing rests on; ``user_id`` is the acting principal, a delegate's own\nid in its delegator's tenant. A terms acceptance's ``at`` is SERVER-stamped, never\nclient-supplied: its legal weight rests on that clock.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Device"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "event": {
+            "enum": [
+              "account_created",
+              "signed_in",
+              "terms_accepted"
+            ],
+            "title": "Event",
+            "type": "string"
+          },
+          "subject": {
+            "default": "",
+            "title": "Subject",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event",
+          "user_id",
+          "at"
+        ],
+        "title": "ConsentLine",
         "type": "object"
       }
     },
@@ -2391,28 +2444,6 @@
         "projects/*/user.json"
       ],
       "shape": {
-        "$defs": {
-          "ConsentRecord": {
-            "additionalProperties": false,
-            "description": "``accepted_at`` is SERVER-stamped, never client-supplied: its legal weight rests on that clock.",
-            "properties": {
-              "accepted_at": {
-                "title": "Accepted At",
-                "type": "string"
-              },
-              "version": {
-                "title": "Version",
-                "type": "string"
-              }
-            },
-            "required": [
-              "version",
-              "accepted_at"
-            ],
-            "title": "ConsentRecord",
-            "type": "object"
-          }
-        },
         "additionalProperties": false,
         "properties": {
           "created_at": {
@@ -2452,14 +2483,6 @@
           "tenant_id": {
             "title": "Tenant Id",
             "type": "string"
-          },
-          "terms_accepted": {
-            "additionalProperties": {
-              "$ref": "#/$defs/ConsentRecord"
-            },
-            "description": "Provable Terms-acceptance record (version + server-stamped timestamp) per acting principal: the account's own and each delegate's. Absent until it clears the consent gate.",
-            "title": "Terms Accepted",
-            "type": "object"
           },
           "user_id": {
             "title": "User Id",

@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
@@ -59,10 +60,12 @@ class HeadToHeadLaunched(LaunchOutcome):
 
 @dataclass(frozen=True, slots=True)
 class DatasetArms:
-    """Arms on a committed dataset: a framing it still owes is paid once, for every arm."""
+    """Arms on a committed dataset: a framing it still owes is paid once, for every arm. *closing*
+    closes what opened the session every arm shares, once the act ends (`launched`)."""
 
     session: Session
     layers: ConfigLayers
+    closing: AsyncExitStack
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +75,7 @@ class CheckinArms:
 
     claim: DraftClaim
     opened: OpenedCheckin
+    closing: AsyncExitStack
 
 
 type ArmSource = DatasetArms | CheckinArms
@@ -84,10 +88,11 @@ async def _probe(backend_type: str) -> None:
 
 async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
     await _probe(runnable_definition(dataset).backend_type)
-    session = await init_services(
-        dataset_name=dataset.name, identity=stores.identity, stores=stores
+    closing = AsyncExitStack()
+    session = await closing.enter_async_context(
+        init_services(dataset_name=dataset.name, identity=stores.identity, stores=stores)
     )
-    return DatasetArms(session, ConfigLayers.of(dataset, None))
+    return DatasetArms(session, ConfigLayers.of(dataset, None), closing)
 
 
 async def checkin_arms(
@@ -96,7 +101,11 @@ async def checkin_arms(
     served = await draft_served(stores, owned_draft(stores, claim.draft_id))
     await _probe(served.connector)
     overlays = [request.declared_optimization(arm) for arm in request.arms]
-    return CheckinArms(claim, await open_checkin(stores, claim.draft_id, served, overlays=overlays))
+    closing = AsyncExitStack()
+    opened = await closing.enter_async_context(
+        open_checkin(stores, claim.draft_id, served, overlays=overlays)
+    )
+    return CheckinArms(claim, opened, closing)
 
 
 def _opened(source: ArmSource) -> tuple[Session, ConfigLayers, OpenedCheckin | None]:
@@ -188,8 +197,9 @@ class AdmittedHeadToHead(LaunchOutcome):
                 for arm, cycle in zip(self.request.arms, minted, strict=True)
             ),
         )
+        # Each arm's session is the source's, which `launched` closes past every hand-off.
         return [
-            HeldArm(arm.arm_key, HeldRun.of(start, cycle, held))
+            HeldArm(arm.arm_key, HeldRun.of(start, cycle, held, AsyncExitStack()))
             for arm, start, (_, held), cycle in zip(
                 self.request.arms, self.starts, self.admitted, minted, strict=True
             )
@@ -197,8 +207,9 @@ class AdmittedHeadToHead(LaunchOutcome):
 
     async def launched(self) -> HeadToHeadLaunched:
         """Each arm in its own process, as every server launch."""
-        arms = await self.minted()
-        exits = await run_each(arms, lambda arm: arm.held.detach(mode=RunMode()))
+        async with self.source.closing:
+            arms = await self.minted()
+            exits = await run_each(arms, lambda arm: arm.held.detach(mode=RunMode()))
         launches = [
             LaunchedJob.of(job, arm.held.session.hop)
             for (job, _), arm in zip(self.admitted, arms, strict=True)

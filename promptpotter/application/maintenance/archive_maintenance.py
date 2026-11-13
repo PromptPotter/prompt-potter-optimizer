@@ -14,8 +14,8 @@ from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.l4.proxies import inner_facts_of
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.holders import holder_of
 from promptpotter.infrastructure.identity.default_claim import is_host
-from promptpotter.infrastructure.runtime_flags import producer_attached
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.infrastructure.store.measurement_archive import (
     ArchiveFile,
@@ -27,7 +27,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
     rejoined,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import NotFoundError, PayloadInvalidError, graceful
+from promptpotter.shared.errors import ConflictError, NotFoundError, PayloadInvalidError, graceful
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
@@ -52,13 +52,17 @@ def iter_cycle_ledgers(root: pathlib.Path) -> list[pathlib.Path]:
     ]
 
 
-def archive_writers(root: pathlib.Path) -> int:
-    n = 0
+def archive_writers(root: pathlib.Path) -> list[str]:
+    """Each cycle whose holder can still append to the shared archive (`holders.py::holder_of`),
+    named with its holder."""
     jobs = jobs_dir(root)
+    named: list[str] = []
     for ledger_path in iter_cycle_ledgers(root):
-        if producer_attached(ledger_path.parent.parent, jobs):
-            n += 1
-    return n
+        cycle_dir = ledger_path.parent.parent
+        if (holder := holder_of(jobs, cycle_dir)) is not None:
+            who = "its run" if holder.job is None else f"{holder.job.what} ({holder.job.job_id})"
+            named.append(f"{cycle_dir.name}, held by {who}")
+    return named
 
 
 _ELIGIBLE_ROLE = MeasurementRole.PANEL
@@ -153,13 +157,15 @@ def _notes(*, conflicts: int = 0, unrestorable: int = 0) -> tuple[str, ...]:
     return tuple(notes)
 
 
-def _blocked(writers: int) -> ArchiveReport:
-    return ArchiveReport(
-        archive_writers=writers,
-        notes=(
-            f"{writers} cycle(s) can still append to the shared archive, so nothing was read or "
-            "written — a rewrite could lose a row one is landing. Pause and try again.",
-        ),
+def _blocked(writers: list[str]) -> ArchiveReport:
+    return ArchiveReport(archive_writers=len(writers), notes=(_writing(writers),))
+
+
+def _writing(writers: list[str]) -> str:
+    return (
+        f"{len(writers)} cycle(s) can still append to the shared archive ({'; '.join(writers)}), so "
+        "nothing was read or written — a rewrite could lose a row one is landing. Pause and try "
+        "again."
     )
 
 
@@ -293,7 +299,7 @@ def inventory_measurement_archive(
         by_age=_in_band_order(by_age),
         total=total.row(dataset or "all"),
         orphan_index_rows=orphans,
-        archive_writers=archive_writers(stores.shared_root),
+        archive_writers=len(archive_writers(stores.shared_root)),
     )
 
 
@@ -530,4 +536,7 @@ def purge_cold_store(
 
 
 def reindex_measurement_archive(stores: Stores) -> dict[str, int]:
+    """Refused, naming them, while a cycle can still append: its row would land in no index."""
+    if writers := archive_writers(stores.shared_root):
+        raise ConflictError(_writing(writers), code="archive_writers")
     return stores.archive.reindex()

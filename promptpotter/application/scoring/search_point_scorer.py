@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from promptpotter.application.scoring.query_loop import QueryLoopResult
     from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store.measurement_archive import CellClaim
+    from promptpotter.infrastructure.store.io import HeldLock
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ async def _claim_cell(
     session: Session,
     dataset: list[Sample],
     cached: dict[int, MeasuredCell],
-) -> tuple[MeasuredCell | None, CellClaim | None]:
+) -> tuple[MeasuredCell | None, HeldLock | None]:
     waiting: asyncio.Task[None] | None = None
     try:
         while True:
@@ -146,14 +146,12 @@ async def _claim_cell(
                     held = replayable_on(dataset, feed.advance())
                     cached.update({sid: f for sid, f in held.items() if not is_deprecated(f)})
                 except BaseException:
-                    claim.release()
+                    claim.retire()
                     raise
                 if (row := cached.get(sample.id)) is None:
                     return None, claim
-                claim.release()
+                claim.retire()
                 return row, None
-            if (measured := feed.claimed_cell(sample.key)) is not None:
-                return measured, None
             if waiting is None:
                 waiting = asyncio.create_task(
                     heartbeat(
@@ -205,10 +203,8 @@ class _ArchiveRecorder:
         )
 
     def take(self, cell: GradedCell) -> GradedCell:
-        # A replay with no address is a row a concurrent walk measured and may never take.
-        if not cell.facts.cached or cell.facts.answer is None:
-            cell = self._file([cell])[0]
-        return cell
+        """Files a cell with no address yet; a claimed one was filed as its claim retired."""
+        return cell if cell.facts.answer is not None else self._file([cell])[0]
 
     def bank(self, cells: Sequence[GradedCell]) -> None:
         self._file(cells)

@@ -56,7 +56,7 @@ def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
 
 
 def _write_emails(path: Path, emails: list[str]) -> None:
-    write_json(path, Blocklist(emails=emails).model_dump(mode="json"))
+    write_json(path, Blocklist(emails=emails).model_dump(mode="json"), durable=True)
 
 
 def _append_audit(
@@ -72,6 +72,7 @@ def _append_audit(
             "before_count": before,
             "after_count": after,
         },
+        durable=True,
     )
 
 

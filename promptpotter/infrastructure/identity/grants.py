@@ -77,11 +77,12 @@ def _append_audit(
             "actor": actor,
             "detail": detail,
         },
+        durable=True,
     )
 
 
 def _write(path: Path, grants: dict[str, PrincipalGrant]) -> None:
-    write_json(path, GrantsFile(grants=grants).model_dump(mode="json"))
+    write_json(path, GrantsFile(grants=grants).model_dump(mode="json"), durable=True)
 
 
 def grant_principal(

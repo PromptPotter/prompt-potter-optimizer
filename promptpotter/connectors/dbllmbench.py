@@ -23,10 +23,10 @@ from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.domain.spend import StepUsage
 from promptpotter.infrastructure.docker_host import (
-    PRODUCER_SCRATCH,
     docker,
     docker_daemon_fault,
     machine_step,
+    producer_scratch,
     run_cell_container,
 )
 from promptpotter.infrastructure.llm.openai_compat import cell_gateway_body, sent_effort
@@ -399,7 +399,7 @@ async def _in_process_run(
         await _check_image(str(image))
 
     name = f"pp-dbllmbench-{uuid4().hex[:12]}"
-    work = PRODUCER_SCRATCH / name
+    work = producer_scratch() / name
     work.mkdir()
     try:
         (work / "config.yml").write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")

@@ -40,7 +40,7 @@ from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
 from promptpotter.domain.prompt_block import BlockPack
 from promptpotter.domain.ruler import RulerFold
-from promptpotter.domain.run_records import RECORD_ADAPTER, ChargeLine
+from promptpotter.domain.run_records import RECORD_ADAPTER
 from promptpotter.domain.sample import ArchiveConfig
 from promptpotter.infrastructure.identity.blocklist import Blocklist
 from promptpotter.infrastructure.identity.grants import GrantsFile
@@ -86,10 +86,10 @@ from promptpotter.infrastructure.store.layout import (
 from promptpotter.infrastructure.store.measurement_archive import (
     ArchiveFile,
     answer_of,
-    claimed_row,
     decode_cold,
     index_row,
 )
+from promptpotter.infrastructure.store.read_model import charge_book_fold
 from promptpotter.infrastructure.store.ruler_store import RULER_FILE
 from promptpotter.infrastructure.store.source_scan import SOURCE_FACTS_FILE, TREATMENT_DIGESTS_FILE
 from promptpotter.infrastructure.store.tenant_dataset_store import (
@@ -130,7 +130,8 @@ class Fate(Enum):
     # Kept while it loads, and dropped by a landing once it does not, which says so: what is
     # content-keyed and paid for, or a sign-in its person makes again.
     CACHE = "CACHE"
-    # Dropped by a reset; one that does not load refuses a landing not asked to reset.
+    # Dropped by a reset. One a landing cannot prove (it does not load, or its fold refuses) goes
+    # with its run unit (`run_unit`), which the landing says; one a live run reaches refuses it.
     RUN = "RUN"
     # A lock or marker the box's processes hold: kept, never parsed.
     MACHINE = "MACHINE"
@@ -154,7 +155,14 @@ class Opaque(NamedTuple):
     why: str
 
 
-type Shape = TypeAdapter[Any] | Callable[[bytes], object] | Opaque
+class Folded(NamedTuple):
+    """A row a landing proves by its reader's fold over the whole file, never each line's parse:
+    lines that each parse can still fold wrong."""
+
+    fold: Callable[[bytes], object]
+
+
+type Shape = TypeAdapter[Any] | Callable[[bytes], object] | Opaque | Folded
 
 _HELD = Opaque("a lock or marker its process holds, never parsed")
 _AUDIT = Opaque("an audit trail its writer appends and no reader parses")
@@ -192,8 +200,15 @@ class Kind(NamedTuple):
         )
 
     @property
+    def durable(self) -> bool:
+        """Its writer fsyncs file and directory (`io.py::write_bytes`'s *durable*): who an account is
+        and what the install is set with, which a power loss must not empty, and the bill, whose
+        lost line under-charges; run data stays fast."""
+        return self.fate is Fate.SURVIVOR or self.glob == CHARGES_FILE
+
+    @property
     def per_line(self) -> bool:
-        return self.glob.endswith(".jsonl")
+        return self.glob.endswith(".jsonl") and not isinstance(self.shape, Folded)
 
     @property
     def authored(self) -> bool:
@@ -300,10 +315,11 @@ _RUN = Fate.RUN
 
 ACCOUNT_KINDS: tuple[Kind, ...] = (
     Kind("user", Scope.ACCOUNT, USER_FILE, _SURVIVOR, TypeAdapter(User)),
-    Kind("consent trail", Scope.ACCOUNT, CONSENT_FILE, _RUN, TypeAdapter(ConsentLine)),
+    # A terms acceptance is its line alone (`UserStore.accepted_terms`).
+    Kind("consent trail", Scope.ACCOUNT, CONSENT_FILE, _SURVIVOR, TypeAdapter(ConsentLine)),
     Kind("grant", Scope.ACCOUNT, GRANT_FILE, _RUN, TypeAdapter(CouponGrant)),
     Kind("api keys", Scope.ACCOUNT, API_KEYS_FILE, _SURVIVOR, HELD_KEYS),
-    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _RUN, TypeAdapter(ChargeLine)),
+    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _RUN, Folded(charge_book_fold)),
     Kind("bank", Scope.ACCOUNT, f"{BANKS_DIR}/*.json", Fate.CACHE, read_bank),
     # An upload definition's `source:` reads it.
     Kind("upload", Scope.ACCOUNT, f"{UPLOADS_DIR}/**", _RUN, Opaque("an uploaded file's bytes")),
@@ -517,10 +533,17 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
     Kind("model capabilities", _WS, CAPABILITIES_CACHE, Fate.RUN, _WALKED),
 )
 
-# What `delete` guards a cycle by: a live producer holds it.
-PRODUCER_LOCKS = frozenset(
-    kind for kind in (*_CAMPAIGN_KINDS, *_DRAFT_KINDS) if kind.name.endswith(" producer lock")
+# `io.py` names every atomic write's temporary `.<random>.tmp`, beside the file it replaces, and
+# holds an OS lock on it until the write lands: first in `KINDS`, so a crashed write under a
+# survivor's tree is never read as the survivor.
+ATOMIC_WRITE = Kind(
+    "atomic write", _INSTALL, "**/.*.tmp", Fate.RUN, Opaque("a write a crash cut short")
 )
+
+# What a wipe guards a file by: a live writer holds an OS lock on it (a producer, a write in flight).
+LIVE_LOCKS = frozenset(
+    kind for kind in (*_CAMPAIGN_KINDS, *_DRAFT_KINDS) if kind.name.endswith(" producer lock")
+) | {ATOMIC_WRITE}
 
 _ARCHIVE_SHAPES: dict[ArchiveFile, Shape] = {
     ArchiveFile.INDEX: index_row,
@@ -528,7 +551,6 @@ _ARCHIVE_SHAPES: dict[ArchiveFile, Shape] = {
     ArchiveFile.CELLS: answer_of,
     ArchiveFile.COLD: decode_cold,
     ArchiveFile.CLAIM_LOCK: _HELD,
-    ArchiveFile.CLAIM_ROW: claimed_row,
     ArchiveFile.SAMPLE_FOLD: SampleFoldRow.model_validate_json,
 }
 assert set(_ARCHIVE_SHAPES) == set(ArchiveFile), "an archive file no row names"
@@ -568,9 +590,7 @@ def _retired(_raw: bytes) -> object:
 
 
 KINDS: tuple[Kind, ...] = (
-    # `io.py` names every atomic write's temporary `.<random>.tmp`, beside the file it replaces:
-    # first, so a crashed write under a survivor's tree is never read as the survivor.
-    Kind("atomic write", _INSTALL, "**/.*.tmp", Fate.RUN, Opaque("a write a crash cut short")),
+    ATOMIC_WRITE,
     *INSTALL_KINDS,
     *ACCOUNT_KINDS,
     *WORKSPACE_KINDS,
@@ -582,6 +602,14 @@ KINDS: tuple[Kind, ...] = (
 RETIRED_KINDS: tuple[Kind, ...] = (
     Kind("retired run file", _WS, "campaigns/*/**", Fate.RUN, _retired),
     Kind("retired draft file", _WS, f"{_DRAFT}/**", Fate.RUN, _retired),
+    # A cell claim's row: its holder files the cell's answer instead (`ReplayFeed.claim`).
+    Kind(
+        "retired cell claim row",
+        Scope.ARCHIVE_HOME,
+        f"{MEASUREMENTS_DIR}/{ArchiveFile.CLAIM_LOCK.folder}/*.json",
+        Fate.RUN,
+        _retired,
+    ),
     # Its claim moved onto the host's account (`migrations/host_account.py`).
     Kind(
         "retired host claim", _INSTALL, f"{IDENTITY_DIR}/default_claimed.json", Fate.RUN, _retired
@@ -658,6 +686,9 @@ def load(path: Path, found: Found, staged: bytes | None) -> None:
     # Gone since the listing.
     if raw is None:
         return
+    if isinstance(shape, Folded):
+        shape.fold(raw)
+        return
     if not kind.per_line:
         _check(shape, kind, raw)
         return
@@ -686,6 +717,8 @@ def _schema(shape: Shape) -> object:
         return shape.json_schema()
     if isinstance(shape, Opaque):
         return None
+    if isinstance(shape, Folded):
+        shape = shape.fold
     return {"reader": f"{shape.__module__}::{shape.__qualname__}"}
 
 

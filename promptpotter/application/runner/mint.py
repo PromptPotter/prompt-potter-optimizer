@@ -18,8 +18,8 @@ from promptpotter.application.initialization.scoring_scope import cycle_partitio
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.jobs.launcher.admission import claim_cycle, open_spend_book
-from promptpotter.application.jobs.quota import cycle_share, land_job, move_campaign_money
+from promptpotter.application.jobs.launcher.admission import land_job, open_spend_book
+from promptpotter.application.jobs.quota import cycle_share, move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import measured_address
 from promptpotter.application.optimizer_manifest import bound_optimizer
@@ -213,7 +213,6 @@ def _rebase_held(session: Session, parent: CycleHop) -> None:
             tokens=None if live.tokens is None else max(0, live.tokens - spent.token_amount),
         )
         land_job(session.store, job_registry, job.job_id, session.hop, allotment)
-        claim_cycle(session.store, session.hop, job.job_id)
     stand_held_budget(session.store, session.hop, held)
 
 

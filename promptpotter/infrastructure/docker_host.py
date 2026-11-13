@@ -7,8 +7,8 @@ import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
+from promptpotter.config.paths import PRODUCERS_DIR
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.store.io import rmtree_robust, validate_path_component
 from promptpotter.shared.errors import CellInfrastructureError
@@ -19,14 +19,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# The token's lock is how the next run tells what a hard kill left from a live sibling.
-CONTAINER_PRODUCER = f"{os.getpid():x}{uuid4().hex[:4]}"
 _PRODUCER_LABEL = "com.promptpotter.producer"
 _COMPOSE_FILES_LABEL = "com.docker.compose.project.config_files"
 # Scratch only, in the temp dir for MAX_PATH: a private /tmp is per process, so no liveness lives here.
 _SCRATCH_HOME = Path(tempfile.gettempdir()) / "promptpotter-cells"
-PRODUCER_SCRATCH = _SCRATCH_HOME / CONTAINER_PRODUCER
 _SWEPT: set[tuple[Path, Path | None]] = set()
+# The producer token this process's containers carry (`producer_lock.py::this_producer`), set by
+# its first claim: its lock is how the next run tells what a hard kill left from a live sibling.
+_claimed: str | None = None
+
+
+def machine_producer() -> str:
+    """The token a container started here is labelled with; only a claimed machine starts one."""
+    if _claimed is None:
+        raise RuntimeError("no machine claimed: `claim_machine` runs before any container starts")
+    return _claimed
+
+
+def producer_scratch() -> Path:
+    return _SCRATCH_HOME / machine_producer()
+
 
 PACKAGE_CACHE = "promptpotter-package-cache"
 _PACKAGE_CACHE_PORT = 3142
@@ -85,7 +97,7 @@ def machine_step() -> Iterator[None]:
 async def run_cell_container(
     name: str, *args: str, env: Mapping[str, str], timeout: float
 ) -> tuple[int, str]:
-    label = f"{_PRODUCER_LABEL}={CONTAINER_PRODUCER}"
+    label = f"{_PRODUCER_LABEL}={machine_producer()}"
     try:
         return await docker(
             "run", "--rm", "--name", name, "--label", label, *args, env=env, timeout=timeout
@@ -137,12 +149,8 @@ def forget_package_cache() -> None:
 def _dead_producers(home: Path) -> set[str]:
     # Only a token this home minted is judged: another home's lock is not here to read.
     locks = home.glob("*.lock") if home.is_dir() else ()
-    # The lock, never an mtime: a cell runs for minutes writing nothing.
-    return {
-        lock.stem
-        for lock in locks
-        if lock.stem != CONTAINER_PRODUCER and not producer_lock.held(lock)
-    }
+    # The lock, never an mtime: a cell runs for minutes writing nothing; this process's own reads held.
+    return {lock.stem for lock in locks if not producer_lock.held(lock)}
 
 
 def _forget_producers(home: Path, dead: set[str]) -> None:
@@ -151,8 +159,7 @@ def _forget_producers(home: Path, dead: set[str]) -> None:
         with contextlib.suppress(OSError):
             rmtree_robust(left)
     for token in dead:
-        with contextlib.suppress(OSError):
-            (home / f"{token}.lock").unlink()
+        producer_lock.reclaim_producer(home / f"{token}.lock")
 
 
 async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> None:
@@ -186,11 +193,15 @@ async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> No
     await asyncio.to_thread(_forget_producers, home, dead)
 
 
-async def claim_machine(home: Path, *, compose_overlay: Path | None) -> None:
+async def claim_machine(jobs_dir: Path, *, compose_overlay: Path | None) -> None:
+    """This process's producer token labels its containers; the first claim per home and overlay
+    reaps what a dead producer left."""
+    global _claimed
+    home = jobs_dir / PRODUCERS_DIR
     if (home, compose_overlay) in _SWEPT:
         return
-    producer_lock.take(home / f"{CONTAINER_PRODUCER}.lock")
-    PRODUCER_SCRATCH.mkdir(parents=True, exist_ok=True)
+    _claimed = producer_lock.this_producer(jobs_dir)
+    producer_scratch().mkdir(parents=True, exist_ok=True)
     _SWEPT.add((home, compose_overlay))
     try:
         await reap_dead_producers(home, compose_overlay=compose_overlay)

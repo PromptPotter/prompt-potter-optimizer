@@ -29,7 +29,7 @@ def silence_detail(client: OpenAICompatibleClient, model: str | None, *, role: s
 
 
 HEARTBEAT_INTERVAL_S = 10.0
-"""How often an open call beats. `runtime_flags.py::RECENT_STEP_S` and `WEDGED_AFTER_S` are
+"""How often an open call beats. `run_state.py::RECENT_STEP_S` and `WEDGED_AFTER_S` are
 counted in beats; `webapp/lib/format.ts::fmtGap` reads the served `RECENT_STEP_S`, never this."""
 assert SUSPEND_GRACE_S > HEARTBEAT_INTERVAL_S, "a late tick would read as a suspend"
 

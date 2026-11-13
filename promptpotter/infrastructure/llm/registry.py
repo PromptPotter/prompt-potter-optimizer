@@ -135,7 +135,7 @@ def send_pacing(provider: str, _account: str, paid_by: KeySource) -> SendPacing:
 def get_llm_client(provider: str, key: ProviderKey) -> OpenAICompatibleClient:
     """A client for one resolution, sharing its ACCOUNT's pacing across clients and cycles.
 
-    The key is the caller's resolution (`application/jobs/coupon.py::paying_key`), never
+    The key is the caller's resolution (`wallet.py::paying_key`), never
     read here: which wallet a send draws is an account's question, not a provider's."""
     spec = _OPENAI_COMPAT_SPECS.get(provider)
     if spec is None:

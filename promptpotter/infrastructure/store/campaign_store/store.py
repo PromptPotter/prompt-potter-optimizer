@@ -64,7 +64,7 @@ from promptpotter.infrastructure.projections.live_dashboard.projection import (
     DashboardCheckout,
     run_limits_at,
 )
-from promptpotter.infrastructure.runtime_flags import run_state_stamps
+from promptpotter.infrastructure.run_state import run_state_stamps
 from promptpotter.infrastructure.store.account_spend import (
     sandbox_cycle_dirs,
     workspace_bank,
@@ -90,6 +90,7 @@ from promptpotter.infrastructure.store.io import (
     take_lock,
     unlink_robust,
     write_json,
+    write_lock,
     write_lock_name,
     write_text,
 )
@@ -349,12 +350,14 @@ class CampaignStore:
         )
 
     def update_campaign(self, campaign_id: str, **changes: Unpack[CampaignEdit]) -> None:
-        manifest = self.load_campaign(campaign_id)
-        if manifest is None:
-            raise NotFoundError(f"campaign not found: {campaign_id}")
-        write_json(
-            self._manifest_path(campaign_id), manifest.edited(**changes).model_dump(mode="json")
-        )
+        """Read and replaced under the manifest's write lock: a label rename racing an archive
+        loses neither."""
+        path = self._manifest_path(campaign_id)
+        with write_lock(path):
+            manifest = self.load_campaign(campaign_id)
+            if manifest is None:
+                raise NotFoundError(f"campaign not found: {campaign_id}")
+            write_json(path, manifest.edited(**changes).model_dump(mode="json"))
 
     def list_campaign_ids(self) -> list[str]:
         return sorted(p.name for p in self.iter_campaign_dirs())

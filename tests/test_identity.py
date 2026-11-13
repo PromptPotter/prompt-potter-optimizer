@@ -4081,10 +4081,14 @@ def test_the_check_in_model_reads_no_held_out_row_and_inits_on_the_pipeline_chec
         "a bench row reached the resolver"
     )
     monkeypatch.setattr(checkin_launch, "assert_origin_ready", lambda _draft, _pipeline: None)
-    opened = asyncio.run(
-        checkin_launch.open_checkin(built_stores, draft.draft_id, served, overlays=[])
-    )
-    assert opened.session.pipeline_schema == draft_pipeline(built_stores, draft, served).declared, (
+
+    async def opened_schema() -> object:
+        async with checkin_launch.open_checkin(
+            built_stores, draft.draft_id, served, overlays=[]
+        ) as opened:
+            return opened.session.pipeline_schema
+
+    assert asyncio.run(opened_schema()) == draft_pipeline(built_stores, draft, served).declared, (
         "the run inits on another pipeline than the one its Start was checked against"
     )
 

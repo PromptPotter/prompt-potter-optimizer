@@ -186,7 +186,7 @@ class Settings(BaseSettings):
     # A ceiling on the remainder once the USD total is understated, never a bonus added to it.
     UNPRICED_GRACE_USD: float = 0.10
 
-    # Per-user token bucket; process state, reset by a restart.
+    # Per-user token bucket per server process, reset by a restart: two servers grant twice it.
     USER_RATE_BURST: int = 5
     # Positive: a refused ask's `Retry-After` is when its bucket refills.
     USER_RATE_PER_MIN: PositiveFloat = 1.0
