@@ -69,8 +69,8 @@ BASELINE = {
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
     "p_reads": 311,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
-    "test_files": 6,
-    # Test functions over 150 lines across them: falls to 0 as each file splits one function per fact.
+    "test_files": 7,
+    # Test functions over 150 lines across them: each holds one fact (`tests/CLAUDE.md`).
     "test_functions_over_150": 0,
 }
 

@@ -20,7 +20,6 @@ measured the machine is never a cell: ``_infrastructure_failure`` retries, then 
 from __future__ import annotations
 
 import asyncio
-import functools
 import json
 import logging
 import os
@@ -260,7 +259,6 @@ def _roster_path(dataset: str, version: str) -> Path:
     return _ROSTER_DIR / f"harbor-roster.{dataset}@{version}.json"
 
 
-@functools.cache
 def _pinned_roster(dataset: str, version: str) -> list[dict[str, Any]]:
     # A read never dials out: the roster is what `pin_roster` wrote, or nothing.
     path = _roster_path(dataset, version)
@@ -1180,7 +1178,11 @@ class _AgentModel:
     admitted, paced and billed there, on the box's key (``CONNECTOR.cell_payer``)."""
 
     def __init__(self, model: str | None, provider: str | None, send: Mapping[str, Any]) -> None:
-        assert model and provider, "refused at resolve (`_refuse_send_faults`)"
+        if not model or not provider:
+            raise RuntimeError(
+                f"harbor connector: a trial reached its agent naming model {model!r} on provider "
+                f"{provider!r}, which `_refuse_send_faults` refuses before a cell is bought."
+            )
         payer = CONNECTOR.cell_payer
         if payer != "host":
             raise RuntimeError(

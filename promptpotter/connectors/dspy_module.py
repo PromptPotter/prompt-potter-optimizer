@@ -143,23 +143,27 @@ class _CellSends:
             ).wire()
         }
 
+    async def _count_call(self) -> None:
+        # Once per call, never per resend: a resend is admitted at its own bound.
+        if self.calls_left is None:
+            return
+        if self.calls_left <= 0:
+            raise self.end(
+                CellHaltedError(
+                    f"{self.what} was stopped: its program made more LM calls than the "
+                    f"`max_calls` nodes.{PROGRAM_NODE}.config declares, which is what its "
+                    "spend bound was sized on.",
+                    spent=self.step_tokens(),
+                )
+            )
+        self.calls_left -= 1
+
     async def _admit(
         self, lm: _Metered, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[contextlib.ExitStack, Admission]:
         model, provider = self.model, self.provider
         if self.ended is not None:
             raise self.ended
-        if self.calls_left is not None:
-            if self.calls_left <= 0:
-                raise self.end(
-                    CellHaltedError(
-                        f"{self.what} was stopped: its program made more LM calls than the "
-                        f"`max_calls` nodes.{PROGRAM_NODE}.config declares, which is what its "
-                        "spend bound was sized on.",
-                        spent=self.step_tokens(),
-                    )
-                )
-            self.calls_left -= 1
         sent = kwargs.get("messages") or (args[0] if args else kwargs.get("prompt"))
         max_tokens = kwargs.get("max_tokens", lm.kwargs.get("max_tokens"))
         hold = contextlib.ExitStack()
@@ -234,6 +238,7 @@ class _CellSends:
     ) -> Any:
         from dspy.utils.usage_tracker import track_usage
 
+        await self._count_call()
         while True:
             hold, admission = await self._admit(lm, args, kwargs)
             try:
@@ -264,6 +269,7 @@ class _CellSends:
                     "`aforward`."
                 )
             )
+        self._on_loop(self._count_call())
         while True:
             hold, admission = self._on_loop(self._admit(lm, args, kwargs))
             try:
@@ -374,6 +380,8 @@ async def _in_process_run(
     try:
         with dspy.context(lm=None if default is None else _metered(default, sends, lm_kwargs)):
             prediction = await _acall(student, example)
+            # Off the loop, and metered: an LLM-judge metric's sends are the cell's.
+            score = float(await dspy.asyncify(program.metric)(example, prediction))
     except Exception as exc:
         if sends.ended is not None and sends.ended is not exc:
             raise sends.ended from exc
@@ -388,7 +396,7 @@ async def _in_process_run(
     return {
         "data": {
             RESULT_KEY: [str(prediction)],
-            SCORE_KEY: float(program.metric(example, prediction)),
+            SCORE_KEY: score,
             "terminal_node": PROGRAM_NODE,
             "step_tokens": sends.step_tokens(),
         }

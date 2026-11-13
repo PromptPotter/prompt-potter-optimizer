@@ -4,7 +4,8 @@ import { BRAND } from "@/lib/brand";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData } from "@/lib/hooks/useRead";
 import { useViewedDashboard } from "@/lib/poll";
-import { CAMPAIGN_LAYER, useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
+import { CAMPAIGN_LAYER } from "@/lib/api";
+import { useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { PipelineFlow, type PipelineLayer } from "./PipelineFlow";
 

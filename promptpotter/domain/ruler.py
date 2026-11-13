@@ -267,14 +267,6 @@ class DeltaRuler(FrozenModel):
     def unlinked(self, cells: Iterable[str]) -> int:
         return sum(1 for key in set(cells) if key not in self.delta)
 
-    def entries_covering(self, cells: Iterable[str]) -> dict[str, RulerEntry]:
-        """PoBB only, where the paired comparison absorbs it: an uncarried cell reads the prior centre, never 0.0."""
-        out = self.entries()
-        for key in cells:
-            if key not in out:
-                out[key] = self.mu_delta
-        return out
-
 
 class DeltaState(StrEnum):
     LINKED = "linked"

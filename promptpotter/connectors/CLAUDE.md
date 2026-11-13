@@ -12,7 +12,7 @@ A bug whose cause sits in TermNorm's code is fixed in TermNorm, the one exceptio
 
 - **`in_process_run` is handed the `Sample`, and core clocks it**: no connector stamps `total_time` / `step_timings`. <!-- probe: git grep -cE "total_time|step_timings" -- promptpotter/connectors/*.py == 0 -->
 - A remote backend off the `/matches` wire declares how it differs (`cell_path`, `read_reply`, `round_trip_is_latency`, `pipeline_declaration`), never a branch in `BackendClient`.
-- Per-run state is the `workload` argument, never a ContextVar or a module cache. <!-- probe: git grep -cE "ContextVar\(" -- promptpotter/connectors/*.py == 0 -->
+- Per-run state is the `workload` argument, never a ContextVar or a module cache. <!-- probe: git grep -cE "ContextVar\(|functools\.(lru_)?cache|^_[A-Z_]+: set\[" -- promptpotter/connectors/*.py == 0 -->
 
 ## The answer shape — declared, never inferred
 

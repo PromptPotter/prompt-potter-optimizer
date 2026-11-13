@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -53,10 +54,12 @@ def _error_envelope(reply: httpx.Response) -> dict[str, Any]:
 
 
 class TermNormSession:
-    __slots__ = ("_terms",)
+    __slots__ = ("_reposting", "_terms")
 
     def __init__(self) -> None:
-        self._terms: list[str] | None = None
+        self._terms: list[str] = []
+        # A cell meeting `no_session` while it is out awaits it: a reload re-sends the terms once.
+        self._reposting: asyncio.Task[None] | None = None
 
     async def open(
         self,
@@ -67,32 +70,30 @@ class TermNormSession:
     ) -> None:
         # The term index: every label a row answers with, and the candidate library.
         truths = {s.ground_truth for s in samples if s.ground_truth}
-        await self._post_terms(http, base_url, sorted(truths | set(library)))
-
-    async def _post_terms(self, http: httpx.AsyncClient, base_url: str, terms: list[str]) -> None:
-        if not terms:
+        self._terms = sorted(truths | set(library))
+        if not self._terms:
             logger.warning("no terms to index — the session won't support /matches")
             return
-        if self._terms == terms:
-            return
-        resp = await http.post(f"{base_url}/sessions", json={"terms": terms})
+        await self._post_terms(http, base_url)
+
+    async def _post_terms(self, http: httpx.AsyncClient, base_url: str) -> None:
+        resp = await http.post(f"{base_url}/sessions", json={"terms": self._terms})
         resp.raise_for_status()
-        self._terms = terms
+
+    async def _repost(self, http: httpx.AsyncClient, base_url: str) -> None:
+        try:
+            await self._post_terms(http, base_url)
+        finally:
+            self._reposting = None
 
     async def recover(self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response) -> bool:
         # A backend reload drops its in-memory sessions.
-        if _error_envelope(reply).get("code") != "no_session":
+        if _error_envelope(reply).get("code") != "no_session" or not self._terms:
             return False
-        if not self._terms:
-            logger.error(
-                "Backend requires session but no terms available. "
-                "Call init_session() with terms before running matches."
-            )
-            return False
-        logger.warning("Got 400 (no session) — re-initializing")
-        terms = self._terms
-        self._terms = None  # clear so idempotency guard re-sends
-        await self._post_terms(http, base_url, terms)
+        if self._reposting is None:
+            logger.warning("Got 400 (no session) — re-initializing")
+            self._reposting = asyncio.create_task(self._repost(http, base_url))
+        await asyncio.shield(self._reposting)
         return True
 
     def resend_refused(self, reply: httpx.Response) -> str | None:
@@ -107,17 +108,8 @@ async def _termnorm_preflight(backend_url: str) -> str | None:
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(5.0, connect=3.0), verify=tls_context()
     ) as http:
-        try:
-            # Reachability, not health: a 5xx past the connect surfaces later on the ledger.
-            await http.get(f"{backend_url}/status")
-        except httpx.ConnectError as exc:
-            return (
-                f"{str(exc).strip() or 'connection refused'} at {backend_url}.\n\n"
-                "The TermNorm backend ships in a sibling repo. Clone it beside "
-                "this checkout, then start it:\n"
-                "  TermNorm-excel\\start-server-py-LLMs.bat\n\n"
-                "Install guide: docs/manual/02-install.md"
-            )
+        # Reachability, not health: a 5xx past the connect surfaces later on the ledger.
+        await http.get(f"{backend_url}/status")
     return None
 
 

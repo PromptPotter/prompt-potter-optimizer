@@ -91,7 +91,7 @@ def _pipeline_declaration(_stores: Stores, _experiment: Mapping[str, Any] | None
 def _identity_config(
     _stores: Stores, _experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
-    return {HARNESS_NODE: {INSTRUMENT_KEY: stable_hash(settings.N8N_HARNESS_URL)}}
+    return {HARNESS_NODE: {INSTRUMENT_KEY: stable_hash(CONNECTOR.base_url())}}
 
 
 async def _preflight(backend_url: str) -> str | None:
