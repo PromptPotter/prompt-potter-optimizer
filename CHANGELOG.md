@@ -41,7 +41,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Robustness**: a pause stands only for the run it was filed against, a queued launch an interrupt ends reads `withdrawn`, a dead filer's command reads `cancelled`, account files survive a power loss and concurrent edits, a cell is bought once, TermNorm survives a reload under load, resends and judges bill correctly, and an all-error CAPO arm no longer flattens the ranking.
 - **An upload starts on any backend**: a model is priced on the provider its node runs on, and a node no walk reaches (TermNorm's `direct_prompt`) is never priced or tuned; a node the graph fires off every walk declares `fired_on`.
 - **A tap is the control's it lands on**: a phone's ⋯ fold shuts in the tap that picks from it, and a tap on a sidebar row's menu no longer opens the row's card. (a107b81ec)
-- **soupsieve 4.1** closes two advisories (reached only through `nbconvert`).
+- **soupsieve 4.1** closes two advisories (reached only through `nbconvert`), and **opentelemetry-api 1.45.2** closes CVE-2026-126360 (reached only through `mcp`).
 
 ## [0.8.19] — 2026-11-06
 

@@ -176,7 +176,7 @@ promptpotter = "promptpotter.presentation.cli.campaign_runner:main"
 [tool.uv]
 required-version = "==0.11.21"
 # Security floors for packages only other dependencies pull in (GHSA advisories, Dependabot).
-constraint-dependencies = ["filelock>=4.2.1", "litellm>=1.100.4"]
+constraint-dependencies = ["filelock>=4.2.1", "litellm>=1.100.4", "opentelemetry-api>=1.45.2"]
 
 [tool.setuptools.packages.find]
 include = ["promptpotter*"]
