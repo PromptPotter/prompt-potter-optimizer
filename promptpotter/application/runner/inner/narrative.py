@@ -16,7 +16,7 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts
 
 if TYPE_CHECKING:
-    from promptpotter.application.runner.inner.tasks import InnerTaskSpec
+    from promptpotter.domain.l4.cells import InnerTaskSpec
     from promptpotter.domain.l4.inner_facts import InnerCellFacts
     from promptpotter.domain.l4.proxies import OuterSampleProxies
     from promptpotter.domain.results import CycleResult

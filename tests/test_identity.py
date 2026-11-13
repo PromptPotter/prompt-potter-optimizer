@@ -14,6 +14,7 @@ import contextlib
 import copy
 import io
 import json
+import math
 import random
 import re
 import sys
@@ -23,6 +24,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from statistics import NormalDist
 from types import ModuleType
 from typing import Any, ClassVar, NamedTuple, cast
 from unittest.mock import Mock
@@ -39,6 +41,7 @@ from factories import (
     inner_sandbox,
     jumping_clock,
     loop_session,
+    measurement,
     minted_campaign,
     pipeline_schema,
     prompted,
@@ -47,6 +50,7 @@ from factories import (
     samples,
     seat,
     set_cycle,
+    sheet,
     spend_book,
     stored_campaign,
     workspace,
@@ -56,6 +60,7 @@ from pydantic import ValidationError
 
 from promptpotter.application import optimizer_manifest, optimizers
 from promptpotter.application.bench import llm_call as call_mod
+from promptpotter.application.bench import node_context
 from promptpotter.application.bench.children import (
     admission_failures,
     carried_writes,
@@ -67,6 +72,7 @@ from promptpotter.application.bench.task_context import (
     CheckinOutput,
     OriginFinding,
     campaign_framing,
+    checkin_output,
     checkin_template,
     committed_task_context,
 )
@@ -132,6 +138,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
+    base_optimizer_template,
     checkin_manifest,
     running_prompt,
     select_optimizer,
@@ -146,21 +153,14 @@ from promptpotter.application.optimizers.nodes import (
     RoundContext,
     admits,
 )
-from promptpotter.application.optimizers.potter.dispatch.bundle import (
-    CycleSlice,
-    InjectionBundle,
-    RoundDigest,
-)
-from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub
+from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
+from promptpotter.application.optimizers.potter.dispatch.injections.panels import detectable_rows
 from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
     build_l1_response_schema,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
-from promptpotter.application.optimizers.potter.dispatch.prompts import (
-    base_optimizer_template,
-)
 from promptpotter.application.optimizers.potter.l1 import parse_population
-from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
+from promptpotter.application.optimizers.potter.records import Ladder
 from promptpotter.application.optimizers.potter.validators import l1_shots_in_demo_pool
 from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
@@ -202,10 +202,9 @@ from promptpotter.application.runner.inner.tasks import (
     InnerBenchmarkConfig,
     InnerSpawnContext,
     InnerTasks,
-    InnerTaskSpec,
     inner_instrument_config,
 )
-from promptpotter.application.runner.round import author_arm
+from promptpotter.application.runner.round import author_arm, run_init
 from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.config import paths
@@ -255,6 +254,7 @@ from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBloc
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
+from promptpotter.domain.l4.cells import InnerCells, InnerTaskSpec
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey
@@ -291,7 +291,6 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptPart, Snippet
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
@@ -310,6 +309,8 @@ from promptpotter.infrastructure.identity import blocklist, grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.registry import default_routes
+from promptpotter.infrastructure.llm.request import ChatRequest
+from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import cycle_held
 from promptpotter.infrastructure.projections.base import Projection
@@ -335,7 +336,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import rmtree_robust, write_json, write_yaml
 from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout
-from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
+from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores
@@ -982,6 +983,48 @@ def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_bank(
     banked = tmp_path / "reuse" / "optimizer_reuse"
     assert len(list(banked.glob("*.json"))) == 4, (
         "the second route replayed the first route's banked answer"
+    )
+
+
+def test_a_reply_is_keyed_by_the_schema_sent_and_a_miss_is_bought_once(tmp_path: Path) -> None:
+    # Two check-ins over one description whose chains differ in prompt fields send two schemas
+    # under one class name; keyed by the name, the second replayed the first's hidden slots.
+    def checkin(fields: list[str]) -> ChatRequest:
+        return ChatRequest(
+            messages=[{"role": "user", "content": "one description"}],
+            model="m",
+            temperature=0.0,
+            response_model=checkin_output(fields),
+        )
+
+    one, two = checkin(["problem_description"]), checkin(["problem_description", "persona"])
+    assert one.wire_schema != two.wire_schema
+    assert hash_call(one, provider="p") != hash_call(two, provider="p"), (
+        "two chain shapes keyed one reply: a check-in replays another chain's slots"
+    )
+    sends: list[int] = []
+
+    async def send() -> LLMResponse:
+        sends.append(1)
+        await asyncio.sleep(0)
+        return LLMResponse(content="banked", model="m")
+
+    async def twice() -> list[bool]:
+        cache = LLMReuseCache(tmp_path, "optimizer_reuse")
+        key = hash_call(one, provider="p")
+        with scoped(ledger=CycleEventLog(tmp_path / "asked.jsonl")):
+            answered = await asyncio.gather(
+                *(
+                    cache.answer(
+                        key, send, node="checkin", kind="optimizer", provider="p", model="m"
+                    )
+                    for _ in range(2)
+                )
+            )
+        return [a.replayed for a in answered]
+
+    assert asyncio.run(twice()) == [False, True] and len(sends) == 1, (
+        "two concurrent askers of one missed key each paid the provider"
     )
 
 
@@ -4217,33 +4260,20 @@ def test_an_uploads_start_asks_the_mints_refusals_before_its_dataset_lands(
     )
 
 
-def _bundle(
-    parent: OptSearchPoint, framing: TaskDecomposition, schema: PipelineSchema
-) -> InjectionBundle:
-    return InjectionBundle(
-        parent=parent,
-        l2=L2Memory(),
-        l3=L3Memory(),
-        framing=framing,
-        pipeline_schema=schema,
-        cycle_slice=CycleSlice(
-            round_num=1,
-            l1_stall_depth=0,
-            ladder=Ladder(),
-            exploration_budget="tight",
-            admission=0.85,
-        ),
-        digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
-        axes=None,
-        block_access="open",
-        rebase_capability=True,
-        reelect_capability=True,
-        terminate_capability=True,
-        schema_field_rename=False,
-        shot_k_max=0,
-        slot_of={},
-        pool_window=8,
-    )
+def _view(
+    stores: Stores,
+    monkeypatch: pytest.MonkeyPatch,
+    parent: OptSearchPoint,
+    framing: TaskDecomposition,
+    schema: PipelineSchema,
+    cells: InnerCells | None = None,
+) -> PotterView:
+    """What L1's prompt renders from, read off a node context over a cycle started from *parent*;
+    an L4 outer's under *cells*, which run each inner campaign's manifest."""
+    monkeypatch.setattr(node_context, "inner_cells", lambda: cells)
+    seated = seat(stores, schema=schema, framing=framing, origin=(parent, lambda _s: sheet([])))
+    run_init(seated.cycle, seated.ledger)
+    return PotterView(NodeContext(seated, optimizers.NODE_MEMBERS.get("l1_generate")), Ladder())
 
 
 def _outer_schema(nodes: tuple[str, ...]) -> PipelineSchema:
@@ -4262,15 +4292,36 @@ def _outer_schema(nodes: tuple[str, ...]) -> PipelineSchema:
     )
 
 
-def _inner_bundle() -> InjectionBundle:
-    # The L4 generator's: the INNER campaign's manifest's optimizer prompts, never the outer's own.
-    outer = _outer_schema(tuple(NODE_LAYOUTS))
-    return replace(
-        _bundle(OptSearchPoint(), TaskDecomposition(), outer), inner_cells=inner_cells("potter")
+def test_l1_is_told_the_rows_to_win_on_the_round_it_reads_not_the_frontier_pool(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The parent hits half of 80 origin rows; the latest round reads 20 of them.
+    hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(80)]
+    monkeypatch.setattr(node_context, "inner_cells", lambda: None)
+    seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
+    run_init(seated.cycle, seated.ledger)
+    parent = ArmKey(prompted(instruction="parent").id)
+    latest = round_result(
+        1,
+        improved=False,
+        arms={parent: arm_state("parent")},
+        cells={parent: sheet(hits[:20])},
+        voted={"ended_on": parent},
+    )
+    set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
+    view = PotterView(NodeContext(seated, optimizers.NODE_MEMBERS.get("l1_generate")), Ladder())
+    assert view.admission is not None and len(view.latest_sample_keys) == 20
+    # Two arms of 20 coin-flip rows each: the two-proportion count at 80% power.
+    z = NormalDist().inv_cdf(view.admission) + NormalDist().inv_cdf(0.8)
+    told = detectable_rows(view)
+    assert told is not None and abs(told - z * math.sqrt(20 / 2)) <= 1.0, (
+        f"L1 is told to win {told} rows, a precision the 20-row round cannot carry"
     )
 
 
-def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> None:
+def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
     upstream = "Raw invoice text is provided directly as the input column."
     framing = TaskDecomposition(
         upstream_context=upstream,
@@ -4285,8 +4336,8 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
         [PipelineNode(name="classify", kind=NodeKind.LLM, prompt_info=PROMPT_INFO, tunes_llm=True)]
     )
     classify = booking.prompt_nodes()[0]
-    bundle = _bundle(opt_sp, framing, booking)
-    rendered = "\n\n".join(i.text for i in DispatchHub.render_items("rendered_prompt", bundle))
+    view = _view(built_stores, monkeypatch, opt_sp, framing, booking)
+    rendered = "\n\n".join(i.text for i in DispatchHub.render_items("rendered_prompt", view))
     shown = {
         label.removeprefix("[").removesuffix("]"): body
         for label, _, body in (s.partition("\n") for s in rendered.split("\n\n"))
@@ -4304,14 +4355,23 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
     assert upstream in opt_sp.render_target(classify, framing, demo=()), (
         "dropping the framing from the target render trades this bug for a blinder one"
     )
-    assert upstream in DispatchHub.render("task_context", bundle), (
+    assert upstream in DispatchHub.render("task_context", view), (
         "dropping the framing from the task context trades this bug for a blinder one"
     )
 
 
-def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites() -> None:
+def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # The INNER campaign's manifest's, never the outer's own, and no mandatory panel is refused.
-    inner = _inner_bundle()
+    inner = _view(
+        built_stores,
+        monkeypatch,
+        OptSearchPoint(),
+        TaskDecomposition(),
+        _outer_schema(tuple(NODE_LAYOUTS)),
+        inner_cells("potter"),
+    )
     subject_chars = sum(len(i.text) for i in DispatchHub.render_items("rendered_prompt", inner))
     allowance = NODE_LAYOUTS["l1_generate"].discretionary_chars
     assert subject_chars > allowance, (
@@ -4320,7 +4380,8 @@ def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites() -> 
     )
     potter = select_optimizer(OptimizerChoice(optimizer="potter"))
     generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
-    filled = DispatchHub.fill(generator, inner, node="l1_generate")
+    with scoped(book=spend_book()):
+        filled = DispatchHub.fill(generator, inner, node="l1_generate")
     assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
         "the generator was handed no subject — it is rewriting text it cannot see"
     )
@@ -4329,7 +4390,7 @@ def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites() -> 
 
 
 def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifests(
-    tmp_path: Path, built_stores: Stores, offline: Router
+    tmp_path: Path, built_stores: Stores, offline: Router, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A panel mixing two manifests; the edit it admits reaches the inner cell's request.
     fields = list(OptimizerPromptTemplate.model_fields)
@@ -4337,8 +4398,10 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
     capo = select_optimizer(OptimizerChoice(optimizer="capo"))
     mixed = inner_cells("potter", "capo")
     mixed_schema = _outer_schema((*NODE_LAYOUTS, *capo.llm_nodes))
-    mixed_bundle = replace(_inner_bundle(), pipeline_schema=mixed_schema, inner_cells=mixed)
-    mixed_shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", mixed_bundle))
+    mixed_view = _view(
+        built_stores, monkeypatch, OptSearchPoint(), TaskDecomposition(), mixed_schema, mixed
+    )
+    mixed_shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", mixed_view))
     base_text = base_optimizer_template(capo, "capo_mutate").instruction
     assert f"[capo_mutate.instruction]\n{base_text}" in mixed_shown, (
         "a CAPO inner's prompt was never shown"

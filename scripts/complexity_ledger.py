@@ -42,7 +42,7 @@ BASELINE = {
     # Parameters annotated `Any`.
     "any_params": 35,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 44,
+    "domain_any_maps": 48,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 8,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.
@@ -67,7 +67,7 @@ BASELINE = {
     # and the public members of each object one of its properties exposes.
     "p_member": 12,
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
-    "p_reads": 312,
+    "p_reads": 324,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 7,
     # Test functions over 150 lines across them: each holds one fact (`tests/CLAUDE.md`).

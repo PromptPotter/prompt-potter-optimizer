@@ -76,7 +76,12 @@ from promptpotter import connectors
 from promptpotter.application import optimizers
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.bench.difficulty import ruler_clock, session_ruler_scope
+from promptpotter.application.bench.difficulty import (
+    judging_ruler,
+    regraded_ruler,
+    ruler_clock,
+    session_ruler_scope,
+)
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.caller import Caller
@@ -120,7 +125,7 @@ from promptpotter.application.optimizers.gepa.members import (
     MinibatchGate,
 )
 from promptpotter.application.optimizers.nodes import Panel, ReadArm, RoundContext
-from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, build_bundle
+from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     coerce_l1_layout,
@@ -188,7 +193,6 @@ from promptpotter.application.scoring import passes as held_out
 from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.scoring.evaluators import (
-    DEFAULT_CELL_FORMULA,
     SampleEvaluator,
     compute_degraded_rate,
     compute_error_rate,
@@ -345,6 +349,7 @@ from promptpotter.domain.run_standing import (
 )
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import (
+    CRITERION_BASE,
     NO_CELLS,
     NO_RESULT,
     ROW_GRADES,
@@ -1134,7 +1139,7 @@ def test_the_scorer_id_names_the_grading_function(
     defaulted = scorer_of(per_sample, None).grade(solve(2, "b", 692))
     assert defaulted.grade.objective == 0.0, "only a DECLARED cell formula charges a miss"
     assert auto_scorer_id(per_sample, None, judge_instrument=None) != auto_scorer_id(
-        per_sample, DEFAULT_CELL_FORMULA, judge_instrument=None
+        per_sample, CRITERION_BASE, judge_instrument=None
     ), "the id, never the text, names the grader"
     before = auto_scorer_id(per_sample, per_cell, judge_instrument=None)
     assert auto_scorer_id(per_sample, per_cell, judge_instrument="a judge") != before, (
@@ -1600,6 +1605,50 @@ def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
         )
         assert cycle.output(L1Readout, 2).l1_proposed == 1, "a re-read counted as L1's yield"
         assert [m.id for m in cycle.population] == [parent_id], "a leader was re-read twice"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_ab_replay_refits_the_whole_ruler_under_the_edited_formula(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    # The election's scale re-read off the archive: unchanged under its own formula, moved under
+    # an edited one, since every row the ruler holds is re-graded, not only the record's own cells.
+    def every_other(prompt: str, sample: Sample) -> bool:
+        return _PEER_READ_ORDER[sample.id] % 2 == 0 or "Check" in prompt
+
+    with _peer_cycle(
+        workspace(tmp_path / "ab"),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {"l1_generate": {"config": {"n_variants": 2}}},
+        every_other,
+    ) as (cycle, ledger):
+        offline.llm.says = _potter_says("Check each premise.", "Guess.")
+        first = asyncio.run(execute_round(cycle, 1, ledger)).result
+    assert first.election is not None
+    stamp, stores = first.election.ruler, cycle.session.store
+    opt = cycle.config.optimization
+    n_min, two_pl = opt.elimination_n_min, opt.enable_2pl_graduation
+    read = judging_ruler(
+        stores.ruler,
+        stamp.scope,
+        stamp.reach,
+        stamp.excluded,
+        objective_id=stamp.scope.scorer,
+        n_min=n_min,
+        enable_2pl=two_pl,
+    ).ruler
+    own = cycle.session.state.scoring.require_scorer()
+    same = regraded_ruler(stores, stamp, own, n_min=n_min, enable_2pl=two_pl)
+    assert read is not None and same is not None and same.delta == read.delta, (
+        "ab re-fit the election's scale differently under the formula the election read it with"
+    )
+    edited = scorer_of("label_match(predicted, ground_truth)", "1.0 - fitness")
+    moved = regraded_ruler(stores, stamp, edited, n_min=n_min, enable_2pl=two_pl)
+    assert moved is not None and moved.delta != read.delta, (
+        "ab replayed an edited formula on the scale the old formula fit"
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -2883,7 +2932,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
         ) as (cycle, ledger):
             offline.llm.says = lambda _body: "ok"
             at_origin = RoundContext(cycle=cycle, round_num=0, ledger=ledger)
-            origin_read = build_bundle(
+            origin_read = PotterView(
                 NodeContext(at_origin, optimizers.NODE_MEMBERS.get("l1_critique")), Ladder()
             )
             assert [b.text for b in origin_read.block_window().get("persona", ())[:1]] == [
@@ -2945,7 +2994,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             banked = closed.model_copy(update={"optimizer_state": cycle.close_state(1)})
             set_cycle(cycle, slices=[BlockPool(entries=())])
             cycle.replay_priors([banked])
-            resumed = build_bundle(
+            resumed = PotterView(
                 NodeContext(
                     dataclasses.replace(at_origin, round_num=2),
                     optimizers.NODE_MEMBERS.get("l1_generate"),
@@ -4130,7 +4179,7 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
             optimizers.NODE_MEMBERS.get("l2_context"),
         )
         set_cycle(cycle, line=line)
-        assert build_bundle(forking, Ladder()).reelect_offer == {}, (
+        assert PotterView(forking, Ladder()).reelect_offer == {}, (
             "an improving line, which builds on its parent, was offered a fork"
         )
         # A round file the disk refuses is its ledger's one warning: the close lands, and so
@@ -4161,7 +4210,7 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
             RoundContext(cycle=cycle, round_num=3, ledger=ledger),
             optimizers.NODE_MEMBERS.get("l2_context"),
         )
-        stalled = build_bundle(forking, Ladder())
+        stalled = PotterView(forking, Ladder())
         offer = stalled.reelect_offer
         # c0 sits on both rounds' panels: one entry, its first listing.
         assert offer == {

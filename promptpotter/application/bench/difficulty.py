@@ -36,7 +36,7 @@ from promptpotter.shared.measurement_context import RoleScope
 if TYPE_CHECKING:
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.scoring import CellSheet, GradedCell
+    from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer
     from promptpotter.infrastructure.store.ruler_store import RulerStore
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -176,6 +176,30 @@ def ruler_rows(
             ):
                 out.append((address, cell.key, graded_response(cell)))
     return out
+
+
+def regraded_ruler(
+    stores: Stores, stamp: RulerStamp, scorer: Scorer, *, n_min: int, enable_2pl: bool
+) -> DeltaRuler | None:
+    """The whole scale *stamp* names, other campaigns' rows included, every row re-graded under
+    *scorer* off the archive answer it stands for (its address's latest grade-A one)."""
+    entries = {entry.prompt_fields_id: entry for entry in stores.archive.list_all()}
+    asked: dict[str, set[str]] = {}
+    for address, key, _ in stores.ruler.rows(stamp.scope, stamp.reach):
+        if address not in stamp.excluded:
+            asked.setdefault(address, set()).add(key)
+    held: list[Observation] = []
+    for address, keys in asked.items():
+        if (entry := entries.get(address)) is None:
+            continue
+        latest = {
+            filed.cell.sample_key: filed
+            for filed in stores.archive.measured(entry, frozenset(keys))
+            if meets_grade(filed.provenance, _RULER_GRADE)
+        }
+        sheet = scorer.sheet(stores.archive.whole(filed).cell for filed in latest.values())
+        held += [Observation(address, cell.key, graded_response(cell)) for cell in sheet.scoreable]
+    return calibrate_delta_ruler(held, n_min, enable_2pl=enable_2pl)
 
 
 def parent_line(rounds: Sequence[RoundResult]) -> set[str]:

@@ -6,7 +6,7 @@ import functools
 import logging
 import re
 from collections.abc import Callable, Mapping
-from typing import Annotated, Any, Literal, Self, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, cast
 
 from pydantic import (
     AfterValidator,
@@ -337,7 +337,7 @@ class ForkProposal(OptimizerResponseModel):
 
 class StandingForkProposal(ForkProposal):
     """A ``fork_proposal`` that may name the arm it stands on; only ``fork_proposal_model`` builds
-    one, its ``stand_on`` closed on what ``InjectionBundle.reelect_offer`` lists."""
+    one, its ``stand_on`` closed on what ``PotterView.reelect_offer`` lists."""
 
     stand_on: str = ""
 
@@ -409,7 +409,7 @@ class L2RecombiningOutput(L2ContextOutput):
     recombinations: list[L1Recombination] = Field(default_factory=list)
 
 
-# The reply carries `terminate_proposal` only where `InjectionBundle.terminate_offer` names a
+# The reply carries `terminate_proposal` only where `PotterView.terminate_offer` names a
 # starved node: a model volunteers any field its schema carries, and an honored stop aborts.
 class L2TerminatingOutput(L2ContextOutput):
     terminate_proposal: TerminateProposal | None = None
@@ -524,6 +524,9 @@ _leaky = sorted(
     for block in (_schema, *(_schema.get("$defs") or {}).values())
     if block.get("description") and (title := str(block.get("title", _model.__name__)))
 )
+
+if TYPE_CHECKING:
+    pass
 if _leaky:
     raise RuntimeError(
         "Optimizer response schemas carry a class-level `description` — a class docstring "

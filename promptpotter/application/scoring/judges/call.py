@@ -59,14 +59,7 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
         else:
             response = (
                 await cache.answer(
-                    hash_call(
-                        messages=[{"role": "user", "content": prompt}],
-                        model=stage.model,
-                        provider=stage.provider,
-                        temperature=stage.temperature,
-                        json_schema=None,
-                        max_tokens=stage.max_tokens,
-                    ),
+                    hash_call(_request(stage, prompt), provider=stage.provider),
                     send,
                     node=f"{judge}:{stage.role}",
                     kind="judge",
@@ -125,6 +118,15 @@ async def graded(
     )
 
 
+def _request(stage: JudgeStage, prompt: str) -> ChatRequest:
+    return ChatRequest(
+        messages=[{"role": "user", "content": prompt}],
+        model=stage.model,
+        temperature=stage.temperature,
+        max_tokens=stage.max_tokens,
+    )
+
+
 async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float) -> LLMResponse:
     client = keyed_client(stage.provider)
     label = f"{judge}:{stage.role}"
@@ -141,15 +143,7 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
     )
     try:
         with scoped(send_budget=SendBudget(None, attempts=SEND_ATTEMPTS)):
-            return await client.chat(
-                ChatRequest(
-                    messages=[{"role": "user", "content": prompt}],
-                    model=stage.model,
-                    temperature=stage.temperature,
-                    max_tokens=stage.max_tokens,
-                ),
-                label=CallLabel(label, "judge"),
-            )
+            return await client.chat(_request(stage, prompt), label=CallLabel(label, "judge"))
     finally:
         # An in-flight task survives the function exit and appends progress against a closed call.
         beat.cancel()

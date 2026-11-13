@@ -31,7 +31,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
-    build_bundle,
+    PotterView,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.layer_state import (
     format_l1_critique_for_prompt,
@@ -100,7 +100,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.runner.inner.tasks import InnerCells
+    from promptpotter.domain.l4.cells import InnerCells
     from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.wounds import ValidationFailure
 
@@ -139,35 +139,35 @@ async def l1_generate(
     calls, knobs = ctx.read(Calls), ctx.knobs(L1GenerateKnobs)
     opt_sp = ctx.read(Lineage).parent
 
-    bundle = build_bundle(ctx, ctx.slice(Ladder))
-    pipeline_schema = bundle.pipeline_schema
-    filled = DispatchHub.fill(calls.prompt(), bundle, node=ctx.node)
-    budget = bundle.cycle_slice.exploration_budget
+    view = PotterView(ctx, ctx.slice(Ladder))
+    pipeline_schema = view.pipeline_schema
+    filled = DispatchHub.fill(calls.prompt(), view, node=ctx.node)
+    budget = view.exploration_budget
     citable = citable_fields(
-        node_layout("l1_generate", bundle.l2),
+        node_layout("l1_generate", view.l2),
         exploration_budget=budget,
         rendered=filled.rendered,
     )
     schema_field_rename = knobs.schema_field_rename
     # Under `closed` the wire takes an active entry's id where a pooled field's text would go.
     pooled = (
-        {name: {b.id: b.text for b in blocks} for name, blocks in bundle.block_window().items()}
-        if bundle.block_access == "closed"
+        {name: {b.id: b.text for b in blocks} for name, blocks in view.block_window().items()}
+        if view.block_access == "closed"
         else None
     )
     output_schema = build_l1_response_schema(
         pipeline_schema,
         citable_fields=citable,
-        inner_cells=bundle.inner_cells,
-        silent_panels=bundle.silent_l1_panels,
+        inner_cells=view.inner_cells,
+        silent_panels=view.silent_l1_panels,
         schema_field_rename=schema_field_rename,
         n_variants=n_variants,
         pooled_fields=None if pooled is None else {f: list(ids) for f, ids in pooled.items()},
-        recombination=bundle.recombination_offer("l1_generate"),
+        recombination=view.recombination_offer("l1_generate"),
     )
     # The wire speaks the DEMO POOL panel's ids; an individual holds sample keys.
-    key_of = {s.id: s.key for s in bundle.demo_pool}
-    hosted = bundle.l2.recombinations if bundle.l2.for_round == bundle.cycle_slice.round_num else []
+    key_of = {s.id: s.key for s in view.demo_pool}
+    hosted = view.l2.recombinations if view.l2.for_round == view.round_num else []
     try:
         generated = await calls.answer(
             build_l1_response_model(effective_l1_field_names()),
@@ -233,10 +233,10 @@ async def l1_generate(
             )
         )
     lineage = ctx.read(Lineage)
-    if bundle.recombines("l1_generate"):
+    if view.recombines("l1_generate"):
         own = [
             Recombination.model_validate(spec.model_dump())
-            for spec in generated.recombinations[: bundle.recombine]
+            for spec in generated.recombinations[: view.recombine]
         ]
         population.extend(_recombined(children, own, lineage, pipeline_schema, host=None))
     # What L2's last fire named for this round, L1 the node that adds it.
@@ -283,13 +283,13 @@ def _recombined(
 
 async def distil_critique(ctx: NodeContext) -> Critique:
     """Of the round *ctx* stands on, whether the round adapts or a later walk re-runs it; the readout a dict so persistence does not drag Pydantic into the domain serialization path."""
-    bundle = build_bundle(ctx, ctx.slice(Ladder))
+    view = PotterView(ctx, ctx.slice(Ladder))
     calls = ctx.read(Calls)
-    filled = DispatchHub.fill(calls.prompt(), bundle, node=ctx.node)
+    filled = DispatchHub.fill(calls.prompt(), view, node=ctx.node)
     # A cluster an edit could fix whole and still not separate from its parent is noise to target.
-    least = max(CLUSTER_ROWS_MIN, detectable_rows(bundle) or 0)
+    least = max(CLUSTER_ROWS_MIN, detectable_rows(view) or 0)
     result = await calls.answer(
-        critique_response_model(frozenset(clustered_sample_ids(bundle)), least), filled
+        critique_response_model(frozenset(clustered_sample_ids(view)), least), filled
     )
     return Critique(readout=cast(CritiqueReadout, result.model_dump()))
 

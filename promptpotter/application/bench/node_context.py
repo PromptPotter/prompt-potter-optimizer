@@ -31,7 +31,6 @@ from promptpotter.application.optimizer_manifest import running_prompt
 from promptpotter.application.optimizers.nodes import CycleRead, ReadArm, admits
 from promptpotter.application.runner.inner.tasks import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
-from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
@@ -83,9 +82,9 @@ if TYPE_CHECKING:
         RaceSnapshot,
         RoundContext,
     )
-    from promptpotter.application.runner.inner.tasks import InnerCells
     from promptpotter.domain.campaign_config import LivesConfig
     from promptpotter.domain.connector import MeasuredUnit
+    from promptpotter.domain.l4.cells import InnerCells
     from promptpotter.domain.opt_search_point import EvidenceGrounding
     from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
     from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -98,7 +97,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.run_standing import LineOutlay
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
-    from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
     from promptpotter.domain.value_tree import Delivery
     from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
@@ -461,7 +460,7 @@ class Target(CycleRead):
         return node
 
     @property
-    def framing(self) -> Any:
+    def framing(self) -> TaskDecomposition:
         return self._cycle.framing
 
     @property
@@ -479,12 +478,8 @@ class Target(CycleRead):
         return session.backend_client.connector.prompt_delivery(session.pipeline_params)
 
     @property
-    def cell_formula(self) -> str | None:
-        session = self._cycle.session
-        formula, _ = resolve_cell_formula(
-            session.state.scoring.scorer.per_cell, session.pipeline_schema
-        )
-        return formula
+    def cell_formula(self) -> str:
+        return self._cycle.session.state.scoring.scorer.cell_formula
 
     @property
     def matcher(self) -> str | None:

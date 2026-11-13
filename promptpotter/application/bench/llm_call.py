@@ -197,9 +197,7 @@ def _ledger_response_payload(response: LLMResponse) -> Any:
 class _Call:
     label: str
     merged: NodeConfig
-    messages: list[ChatMessage]
-    response_model: type[BaseModel] | None
-    response_schema: dict[str, Any] | None
+    request: ChatRequest
     context: LLMCallContext
     injections: InjectionBreakdown
     started: float
@@ -240,30 +238,9 @@ def _sampled_at(merged: NodeConfig) -> float:
     return _DEFAULT_TEMPERATURE if merged.temperature is None else merged.temperature
 
 
-def _reuse_key(
-    merged: NodeConfig,
-    messages: list[ChatMessage],
-    response_model: type[BaseModel] | None,
-    response_schema: dict[str, Any] | None,
-) -> str:
-    return hash_call(
-        messages=messages,
-        model=merged.model,
-        provider=merged.provider,
-        temperature=_sampled_at(merged),
-        json_schema=response_schema,
-        response_model=response_model.__name__ if response_model else None,
-        seed=merged.seed,
-        max_tokens=merged.max_tokens,
-        reasoning_effort=merged.reasoning_effort,
-        top_p=merged.top_p,
-        route_order=merged.route_order,
-    )
-
-
 def _announce(call: _Call) -> None:
     context, label, injections = call.context, call.label, call.injections
-    prompt_chars = sum(len(m.get("content") or "") for m in call.messages)
+    prompt_chars = sum(len(m.get("content") or "") for m in call.request.messages)
     start_record = LLMCallStartRecord(
         call_id=call.call_id,
         node=label,
@@ -321,23 +298,7 @@ async def _provider_reply(call: _Call) -> LLMResponse:
         )
     )
     try:
-        return await _chat_under_deadline(
-            call.client,
-            ChatRequest(
-                messages=call.messages,
-                model=merged.model,
-                temperature=_sampled_at(merged),
-                max_tokens=merged.max_tokens,
-                response_model=call.response_model,
-                response_schema=call.response_schema,
-                reasoning_effort=merged.reasoning_effort,
-                top_p=merged.top_p,
-                seed=merged.seed,
-                # An empty route pins nothing, so it is no request for one.
-                route_order=merged.route_order or None,
-            ),
-            node_label=label,
-        )
+        return await _chat_under_deadline(call.client, call.request, node_label=label)
     except OptimizerPromptParseError as parse_err:
         logger.error(
             "%s: optimizer call failed to parse — %s",
@@ -380,7 +341,7 @@ def _call_record(
     if trace_meta:
         payload.update(trace_meta)
     else:
-        payload["messages"] = call.messages
+        payload["messages"] = call.request.messages
     return LLMCallRecord(
         node=call.label,
         round=call.context.round_num,
@@ -406,9 +367,19 @@ async def llm_call(
     call = _Call(
         label=node,
         merged=merged,
-        messages=messages,
-        response_model=response_model,
-        response_schema=response_schema,
+        request=ChatRequest(
+            messages=messages,
+            model=merged.model,
+            temperature=_sampled_at(merged),
+            max_tokens=merged.max_tokens,
+            response_model=response_model,
+            response_schema=response_schema,
+            reasoning_effort=merged.reasoning_effort,
+            top_p=merged.top_p,
+            seed=merged.seed,
+            # An empty route pins nothing, so it is no request for one.
+            route_order=merged.route_order or None,
+        ),
         context=context,
         injections=injections,
         started=time.monotonic(),
@@ -420,7 +391,7 @@ async def llm_call(
         return await _provider_reply(call)
 
     answered = await context.cache.answer(
-        _reuse_key(merged, messages, response_model, response_schema),
+        hash_call(call.request, provider=merged.provider),
         send,
         node=node,
         kind="optimizer",

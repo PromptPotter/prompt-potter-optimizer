@@ -61,10 +61,10 @@ from promptpotter.shared.run_scope import run_scope
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
+    from promptpotter.application.scoring.catch_up import CatchUpPool, CaughtUp
     from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.domain.validators import CatchUps, CaughtUp
     from promptpotter.infrastructure.store.io import HeldLock
     from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -529,7 +529,7 @@ async def run_walks[K: Hashable](
     session: Session,
     *,
     keep_cut: bool,
-    backfills: CatchUps | None = None,
+    backfills: CatchUpPool | None = None,
     blocks: BlockRace[K] | None = None,
     on_turn: Callable[[K, int | None], None] | None = None,
     on_decided: Callable[[K], None] | None = None,
@@ -598,7 +598,7 @@ class _ScoringPhase[K: Hashable]:
     keys: list[K]
     walks: list[Walk | None]
     session: Session
-    backfills: CatchUps | None
+    backfills: CatchUpPool | None
     blocks: BlockRace[K] | None
     on_turn: Callable[[K, int | None], None] | None
     on_decided: Callable[[K], None] | None

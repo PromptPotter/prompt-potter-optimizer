@@ -624,15 +624,16 @@ class RaceSnapshot:
 
 
 class Race(Protocol):
-    """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``rule`` stops one walk, ``blocks`` every live one."""
+    """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``rule`` stops one walk, ``blocks`` every live one.
+    A race whose arms all walk one panel keeps no prior, so it inherits ``priors``, ``admit`` and ``catch_up``."""
 
     @property
     def n_priors(self) -> int: ...
 
     @property
     def priors(self) -> Mapping[ArmKey, CellSheet]:
-        """Each prior a later arm is paired with, in prior order: the bench catches it up on a cell it lacks. Empty where every arm walks one panel."""
-        ...
+        """Each prior a later arm is paired with, in prior order: the bench catches it up on a cell it lacks."""
+        return {}
 
     @property
     def blocks(self) -> BlockRace[ArmKey] | None: ...
@@ -645,9 +646,13 @@ class Race(Protocol):
         self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
     ) -> Elimination | None: ...
 
-    def admit(self, key: ArmKey, results: Sequence[GradedCell]) -> None:
-        """A decided arm's rows, or a prior's caught-up cells, folded onto what it holds."""
-        ...
+    def admit(self, _key: ArmKey, _results: Sequence[GradedCell]) -> None:
+        """A decided arm's rows: it joins the priors."""
+        return None
+
+    def catch_up(self, _key: ArmKey, _cells: Sequence[GradedCell]) -> None:
+        """A prior's caught-up cells, folded onto the rows it holds."""
+        return None
 
 
 class Eliminator(NodeMember, Protocol):

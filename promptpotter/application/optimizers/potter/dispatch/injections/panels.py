@@ -7,9 +7,12 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise, zip_longest
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.intelligence.rasch import expected_score_gain
+from promptpotter.application.intelligence.rasch import (
+    expected_information,
+    expected_score_gain,
+)
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ANSWER_LABEL_STEM,
     ANSWER_TALLY_ROWS,
@@ -34,13 +37,12 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     TRANSCRIPT_QUERY_CAP,
     TRANSCRIPT_REASONING_CAP,
     TRANSCRIPT_RENDER_CAP,
-    InjectionBundle,
     InjectionKind,
     Item,
     signal,
 )
 from promptpotter.application.optimizers.potter.records import ExplorationBudget
-from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_fitness
+from promptpotter.application.scoring.evaluators import compute_fitness
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
 from promptpotter.domain.arm_reading import level_text, lift_interval_text
@@ -65,6 +67,7 @@ from promptpotter.domain.results_health import evidence_starved_node, ran_to_out
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading, ThetaCaveat, ThetaLift
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import (
+    CRITERION_BASE,
     CellSheet,
     GradedCell,
     all_verifier_graded,
@@ -78,6 +81,9 @@ from promptpotter.domain.spend import TokenAccount
 from promptpotter.shared.answer_text import tail
 from promptpotter.shared.composite import render_composite_fitness_block
 
+if TYPE_CHECKING:
+    from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
+
 
 @signal(
     "escalation_panel",
@@ -85,9 +91,8 @@ from promptpotter.shared.composite import render_composite_fitness_block
     char_cap=None,
     citable=True,
 )
-def _r_escalation_panel(b: InjectionBundle) -> list[Item]:
-    cs = b.cycle_slice
-    budget = cs.exploration_budget
+def _r_escalation_panel(b: PotterView) -> list[Item]:
+    budget = b.exploration_budget
     guidance = {
         ExplorationBudget.TIGHT: "build on the parent, its method open to rewrite — "
         "stall_exploration citations are rejected",
@@ -98,7 +103,7 @@ def _r_escalation_panel(b: InjectionBundle) -> list[Item]:
     return [
         Item(
             f"ESCALATION: exploration_budget={budget} "
-            f"(L1 stall: {cs.l1_stall_depth} rounds) — {guidance}"
+            f"(L1 stall: {b.l1_stall_depth} rounds) — {guidance}"
         )
     ]
 
@@ -109,8 +114,8 @@ def _r_escalation_panel(b: InjectionBundle) -> list[Item]:
     char_cap=None,
     citable=True,
 )
-def _r_evidence_health(b: InjectionBundle) -> list[Item]:
-    rates = b.digest.node_failure_rates
+def _r_evidence_health(b: PotterView) -> list[Item]:
+    rates = b.node_failure_rates
     if not rates:
         return []
     ranked = sorted(rates.items(), key=lambda kv: kv[1], reverse=True)
@@ -137,18 +142,17 @@ def _r_evidence_health(b: InjectionBundle) -> list[Item]:
     char_cap=None,
     citable=True,
 )
-def _r_diagnostics(b: InjectionBundle) -> list[Item]:
+def _r_diagnostics(b: PotterView) -> list[Item]:
     sections: list[Item] = []
-    cs = b.cycle_slice
     # The round number is `budget_state`'s, the L1 stall EVOLUTION's: each said once.
     if fires := [
         f"{tag} fired {layer.fires}x (stall {layer.stall_count})"
-        for tag, layer in (("L2", cs.ladder.l2), ("L3", cs.ladder.l3))
+        for tag, layer in (("L2", b.ladder.l2), ("L3", b.ladder.l3))
         if layer.fires > 0
     ]:
         sections.append(Item("STATUS: " + " · ".join(fires)))
 
-    d = b.digest.diagnostics
+    d = b.diagnostics
     if d is None:
         return [*sections, *_evolution(b)]
     parts: list[str] = []
@@ -216,7 +220,7 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
             )
         )
 
-    if (yielded := b.digest.l1_yield) is not None and yielded != 1.0:
+    if (yielded := b.l1_yield) is not None and yielded != 1.0:
         sections.append(Item(f"POPULATION: yield={yielded:.2f}"))
 
     return [*sections, *_evolution(b)]
@@ -229,7 +233,7 @@ _SIDE_VERDICT: dict[LiftSide, str] = {
 }
 
 
-def _evolution(b: InjectionBundle) -> list[Item]:
+def _evolution(b: PotterView) -> list[Item]:
     """On the origin panel's fixed rows, never a round's own fitness: its cells move every round."""
     rounds = [rr for rr in b.measured_rounds if rr.round > 0]
     if not rounds:
@@ -238,7 +242,7 @@ def _evolution(b: InjectionBundle) -> list[Item]:
         f"r{rr.round} {ROUND_ADVANCE_INFO[rr.overlap.advance].label}" for rr in rounds[-5:]
     )
     lines = [
-        f"EVOLUTION — L1 stall: {b.cycle_slice.l1_stall_depth} rounds since the best-so-far line "
+        f"EVOLUTION — L1 stall: {b.l1_stall_depth} rounds since the best-so-far line "
         f"last advanced on the origin panel.\n  {labels}"
     ]
     line, overlap = next(
@@ -290,8 +294,8 @@ def _vs_parent(reading: PairedReading | None) -> str | None:
     return f"  {pick.label} vs its parent {parent.label}: {moved}, {_SIDE_VERDICT[est.side]}"
 
 
-def _critique_is_all_prompt_field(b: InjectionBundle) -> bool:
-    critique = b.digest.critique
+def _critique_is_all_prompt_field(b: PotterView) -> bool:
+    critique = b.critique
     sa = (critique.get("suggested_axes") if critique else None) or []
     if not sa:
         return False
@@ -305,7 +309,7 @@ def _critique_is_all_prompt_field(b: InjectionBundle) -> bool:
     char_cap=None,
     citable=True,
 )
-def _r_axis_memory(b: InjectionBundle) -> list[Item]:
+def _r_axis_memory(b: PotterView) -> list[Item]:
     if b.axes is None:
         return []
     semantic = _critique_is_all_prompt_field(b)
@@ -383,7 +387,7 @@ class _TranscriptPlan(NamedTuple):
     lost: int
 
 
-def _transcript_plan(b: InjectionBundle) -> _TranscriptPlan | None:
+def _transcript_plan(b: PotterView) -> _TranscriptPlan | None:
     if _inner_narrated(b):
         return None
     lost = _repeatedly_lost(_edits(b))
@@ -392,11 +396,11 @@ def _transcript_plan(b: InjectionBundle) -> _TranscriptPlan | None:
     if not rows and not lost:
         return None
     # Rotated by round: the pool's order froze at round 0, so freshness alone serves one head forever.
-    latest = b.digest.latest_sample_keys
+    latest = b.latest_sample_keys
     fresh = [r for r in rows if r.key in latest]
     stale = [r for r in rows if r.key not in latest]
     if fresh:
-        off = (b.cycle_slice.round_num * TRANSCRIPT_RENDER_CAP) % len(fresh)
+        off = (b.round_num * TRANSCRIPT_RENDER_CAP) % len(fresh)
         fresh = fresh[off:] + fresh[:off]
     losing = [loss.run for _, loss in lost if loss.run is not None]
     pool = [r for pair in zip_longest(fresh + stale, losing) for r in pair if r is not None]
@@ -423,7 +427,7 @@ def _trace_excerpt(trace: str) -> str:
     char_cap=None,
     citable=True,
 )
-def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
+def _r_sample_transcripts(b: PotterView) -> list[Item]:
     if (plan := _transcript_plan(b)) is None:
         return []
     unit = unit_plural(b.measured_unit)
@@ -488,7 +492,7 @@ def _judge_verdict(cell: GradedCell) -> str:
 _CELL_SEPARATION_SIGMAS = 2.0
 
 
-def _inner_narrated(b: InjectionBundle) -> list[tuple[GradedCell, InnerCellFacts]]:
+def _inner_narrated(b: PotterView) -> list[tuple[GradedCell, InnerCellFacts]]:
     """A series caveat withholds a seed's θ, never its narrative."""
     return [
         (r, inner)
@@ -529,7 +533,7 @@ class _NarratedCell(NamedTuple):
     cell: GradedCell
 
 
-def _narrated_cells(b: InjectionBundle) -> list[_NarratedCell]:
+def _narrated_cells(b: PotterView) -> list[_NarratedCell]:
     """Ranked on the upper bound, since a point-estimate rank leads with noise; a seed with no θ follows."""
     origin = {r.key: r for r in b.origin_per_sample}
     cells = []
@@ -552,7 +556,7 @@ def _narrated_cells(b: InjectionBundle) -> list[_NarratedCell]:
     return cells
 
 
-def clustered_sample_ids(b: InjectionBundle) -> list[int]:
+def clustered_sample_ids(b: PotterView) -> list[int]:
     """The rows a critique cluster may span, and the only ones a panel marks ``[#id]``: the misses shown and the cells edits keep losing, or one level up the narrated cells."""
     if narrated := _narrated_cells(b):
         return [b.slot_of[c.cell.key] for c in narrated]
@@ -571,7 +575,7 @@ def clustered_sample_ids(b: InjectionBundle) -> list[int]:
     char_cap=None,
     citable=True,
 )
-def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
+def _r_inner_narratives(b: PotterView) -> list[Item]:
     cells = _narrated_cells(b)
     if not cells:
         return []
@@ -616,16 +620,16 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
     return sections
 
 
-def _misses(b: InjectionBundle) -> list[GradedCell]:
+def _misses(b: PotterView) -> list[GradedCell]:
     """An errored sample is not a miss: the measurement never happened, so no mutation wins it back."""
     return [r for r in b.trajectory_results if not r.hit and not r.facts.errored]
 
 
-def _no_labels(b: InjectionBundle) -> bool:
+def _no_labels(b: PotterView) -> bool:
     return all_verifier_graded(r.facts.ground_truth for r in b.trajectory_results)
 
 
-def _errored(b: InjectionBundle) -> list[GradedCell]:
+def _errored(b: PotterView) -> list[GradedCell]:
     return [r for r in b.trajectory_results if r.facts.errored]
 
 
@@ -652,7 +656,7 @@ def _labelled(cells: Iterable[GradedCell]) -> list[GradedCell]:
     char_cap=None,
     citable=True,
 )
-def _r_answer_distribution(b: InjectionBundle) -> list[Item]:
+def _r_answer_distribution(b: PotterView) -> list[Item]:
     rows = _labelled(b.trajectory_results)
     # `None`: no repeated label to be constant about (free text, or identity-keyed answers).
     truth = enumerable_truth_labels(rows)
@@ -683,7 +687,7 @@ def _r_answer_distribution(b: InjectionBundle) -> list[Item]:
     ]
 
 
-def _miss_difficulty(b: InjectionBundle, cell: GradedCell) -> float | None:
+def _miss_difficulty(b: PotterView, cell: GradedCell) -> float | None:
     ruler = b.ruler
     if ruler is None:
         return None
@@ -703,15 +707,15 @@ def _verifier_outcome(cell: GradedCell) -> str:
     return "".join(f" | {p}" for p in parts)
 
 
-def _ordered_misses(b: InjectionBundle) -> list[tuple[float | None, GradedCell]]:
+def _ordered_misses(b: PotterView) -> list[tuple[float | None, GradedCell]]:
     """Easiest first on the cycle's ruler; a miss the ruler does not carry trails, unordered."""
     scored = [(_miss_difficulty(b, r), r) for r in _misses(b)]
     graded = sorted(((d, r) for d, r in scored if d is not None), key=lambda dr: dr[0])
     return [*graded, *((None, r) for d, r in scored if d is None)]
 
 
-def _cluster_rows(b: InjectionBundle) -> frozenset[int]:
-    critique = b.digest.critique or {}
+def _cluster_rows(b: PotterView) -> frozenset[int]:
+    critique = b.critique or {}
     return frozenset(i for c in critique.get("failure_highlights") or [] for i in c["sample_ids"])
 
 
@@ -724,7 +728,7 @@ def _contains(outer: tuple[str, ...], inner: tuple[str, ...]) -> bool:
     return any(outer[i : i + n] == inner for i in range(len(outer) - n + 1))
 
 
-def _extent_can_miss(b: InjectionBundle) -> bool:
+def _extent_can_miss(b: PotterView) -> bool:
     """A label answer has no extent to overlap."""
     return not _no_labels(b) and not enumerable_truth_labels(b.trajectory_results)
 
@@ -742,7 +746,7 @@ def _tied_deltas(ordered: Sequence[tuple[float | None, GradedCell]]) -> frozense
     return frozenset(d for d, n in Counter(d for d, _ in ordered if d is not None).items() if n > 1)
 
 
-def _shown_misses(b: InjectionBundle) -> list[tuple[float | None, GradedCell]]:
+def _shown_misses(b: PotterView) -> list[tuple[float | None, GradedCell]]:
     """Tied and uncarried rows are capped: with no order among them, more repeat the claim."""
     ordered = _ordered_misses(b)
     if clustered := _cluster_rows(b):
@@ -770,7 +774,7 @@ def _miss_outcome(r: GradedCell) -> str:
 
 
 def _miss_row(
-    b: InjectionBundle,
+    b: PotterView,
     r: GradedCell,
     delta: float | None,
     tied: frozenset[float],
@@ -797,7 +801,7 @@ def _miss_row(
     char_cap=None,
     citable=True,
 )
-def _r_failing_samples(b: InjectionBundle) -> list[Item]:
+def _r_failing_samples(b: PotterView) -> list[Item]:
     if _inner_narrated(b):
         return []
     verifier = _no_labels(b)
@@ -920,7 +924,7 @@ class _Edit:
         return self.round.rows(self.key)
 
 
-def _edits(b: InjectionBundle) -> list[_Edit]:
+def _edits(b: PotterView) -> list[_Edit]:
     """Windowed on rounds that EDITED: C0 and a no-op variant carry a candidate that changed nothing."""
     by_round: list[list[_Edit]] = []
     for parent_round, rr in pairwise(b.measured_rounds):
@@ -978,9 +982,8 @@ def _repeatedly_lost(edits: list[_Edit]) -> list[tuple[str, _Loss]]:
     )
 
 
-def _theta_fit_on_formula(b: InjectionBundle) -> bool:
-    formula = b.cycle_slice.composite_formula
-    return formula is not None and formula != DEFAULT_CELL_FORMULA
+def _theta_fit_on_formula(b: PotterView) -> bool:
+    return b.composite_formula != CRITERION_BASE
 
 
 @signal(
@@ -989,7 +992,7 @@ def _theta_fit_on_formula(b: InjectionBundle) -> bool:
     char_cap=None,
     citable=True,
 )
-def _r_mutation_memory(b: InjectionBundle) -> list[Item]:
+def _r_mutation_memory(b: PotterView) -> list[Item]:
     # This cycle alone under either purpose; an arm's own search is what is compared.
     edits = _edits(b)
     # First match wins: ↺ names the EARLIEST round, true whatever rows the composition affords.
@@ -1052,12 +1055,12 @@ def _edit_row(edit: _Edit, slot_of: Mapping[str, int], *, charged: bool) -> str:
 
 
 @signal("measurand", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
-def _r_measurand(b: InjectionBundle) -> list[Item]:
-    fitness = b.digest.composite_fitness
+def _r_measurand(b: PotterView) -> list[Item]:
+    fitness = b.composite_fitness
     if fitness is None:
         return []
     theta = ""
-    if (a := b.digest.ability) is not None:
+    if (a := b.ability) is not None:
         theta = (
             f"; frontier θ {a.theta:+.3f} ±{a.se:.3f} ({a.scale(named=False)} — each "
             f"{b.measured_unit}'s latest cell, whoever measured it)"
@@ -1070,9 +1073,7 @@ def _r_measurand(b: InjectionBundle) -> list[Item]:
                 f"shared cells than it loses{theta}. Round fitness {fitness:.3f}."
             )
         ]
-    body = render_composite_fitness_block(
-        fitness, b.digest.evaluators, b.cycle_slice.composite_formula
-    )
+    body = render_composite_fitness_block(fitness, b.evaluators, b.composite_formula)
     lines = [
         f"ELECTION — a round is won on θ lift over the parent by an arm winning more shared cells "
         f"than it loses, θ fit on each cell's composite under the formula below, not on "
@@ -1083,30 +1084,31 @@ def _r_measurand(b: InjectionBundle) -> list[Item]:
     return [Item("\n".join(lines))]
 
 
-def detectable_rows(b: InjectionBundle) -> int | None:
+def detectable_rows(b: PotterView) -> int | None:
     """How many more of the round's rows than the parent an edit must win to clear the election's
-    bar at 80% power; ``None`` with no θ, a zero se or no bar."""
-    a = b.digest.ability
-    keys = b.digest.latest_sample_keys
-    admission = b.cycle_slice.admission
-    if a is None or a.se <= 0.0 or not keys or admission is None:
-        return None
-    # A parent read as precisely as the frontier: the contrast carries both arms' error.
-    move = ThetaLift(0.0, math.hypot(a.se, a.se)).detectable(admission)
+    bar at 80% power; ``None`` with no parent θ, no informative row or no bar."""
+    a = b.parent_ability
+    keys = b.latest_sample_keys
+    admission = b.admission
     ruler = None if b.ruler is None else b.ruler.entries()
+    info = 0.0 if a is None else expected_information(a.theta, keys, ruler)
+    if a is None or info <= 0.0 or admission is None:
+        return None
+    # Each side answers the round's rows once: the contrast carries both arms' error.
+    move = ThetaLift(0.0, math.sqrt(2.0 / info)).detectable(admission)
     return max(1, round(expected_score_gain(a.theta, move, keys, ruler)))
 
 
 @signal("detectable_move", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
-def _r_detectable_move(b: InjectionBundle) -> list[Item]:
+def _r_detectable_move(b: PotterView) -> list[Item]:
     if (rows := detectable_rows(b)) is None:
         return []
-    n = len(b.digest.latest_sample_keys)
+    n = len(b.latest_sample_keys)
     return [
         Item(
             f"DETECTABLE MOVE — an edit must win ≈{rows} more of this round's {n} "
             f"{unit_plural(b.measured_unit)} than the parent to clear the election's bar "
-            f"(P > {b.cycle_slice.admission:.0%}, 80% power); "
+            f"(P > {b.admission:.0%}, 80% power); "
             "smaller is noise, so prefer one large-effect edit to several small ones."
         )
     ]
@@ -1131,14 +1133,13 @@ def _caveat_measure(a: AbilityReading, units: str) -> str:
 
 
 @signal("confounds", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
-def _r_confounds(b: InjectionBundle) -> list[Item]:
-    d = b.digest
+def _r_confounds(b: PotterView) -> list[Item]:
     rows: list[str] = []
-    if (a := d.ability) is not None and a.caveat is not None:
+    if (a := b.ability) is not None and a.caveat is not None:
         info = THETA_CAVEAT_INFO[a.caveat]
         measure = _caveat_measure(a, unit_plural(b.measured_unit))
         rows.append(f"{info.label} — {info.detail}{measure}")
-    if d.prev_sample_keys and not (d.latest_sample_keys & d.prev_sample_keys):
+    if b.prev_sample_keys and not (b.latest_sample_keys & b.prev_sample_keys):
         rows.append(
             f"SUBSET MOVED WHOLE — this round shares no {b.measured_unit} with the one before it, "
             "so the two rounds' raw rates are two different exams."
@@ -1154,10 +1155,9 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
 
 
 @signal("budget_state", kind=InjectionKind.DERIVED, char_cap=None, citable=False)
-def _r_budget_state(b: InjectionBundle) -> list[Item]:
-    cs = b.cycle_slice
-    parts = [f"ROUND {cs.round_num}" + (f" of {cs.budget_rounds}" if cs.budget_rounds else "")]
-    if cs.spend_budget_usd:
-        used = f"${cs.spend_used_usd:.2f}" if cs.spend_used_usd is not None else "?"
-        parts.append(f"spend {used} of ${cs.spend_budget_usd:.2f}")
+def _r_budget_state(b: PotterView) -> list[Item]:
+    parts = [f"ROUND {b.round_num}" + (f" of {b.budget_rounds}" if b.budget_rounds else "")]
+    if b.spend_budget_usd:
+        used = f"${b.spend_used_usd:.2f}" if b.spend_used_usd is not None else "?"
+        parts.append(f"spend {used} of ${b.spend_budget_usd:.2f}")
     return [Item(" · ".join(parts))]

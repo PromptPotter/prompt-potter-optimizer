@@ -164,10 +164,10 @@ class PoBBRace:
         return self._check.priors
 
     def admit(self, key: ArmKey, results: Sequence[GradedCell]) -> None:
-        if key in self._check.priors:
-            self._check.extend_prior(key, results)
-        else:
-            self._check.register_completed(results, key=key)
+        self._check.register_completed(results, key=key)
+
+    def catch_up(self, key: ArmKey, cells: Sequence[GradedCell]) -> None:
+        self._check.extend_prior(key, cells)
 
     @property
     def blocks(self) -> None:

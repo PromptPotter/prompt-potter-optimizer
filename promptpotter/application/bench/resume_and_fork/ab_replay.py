@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.difficulty import judging_ruler, session_ruler_scope
+from promptpotter.application.bench.difficulty import regraded_ruler
 from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_all_mismatches,
@@ -100,9 +100,9 @@ def _make_replay_verdict(
     campaign_config: CampaignConfig,
     sink: list[ReplayMismatch],
 ) -> Verdict:
-    """Rescored HERE, each round on the scale its election read: the fold asks only of carried-over rounds."""
+    """Rescored HERE, each round on the scale its election read, its every row re-graded under
+    the current scorer: the fold asks only of carried-over rounds."""
     scorer = session.state.scoring.scorer
-    scope = session_ruler_scope(session)
     opt = campaign_config.optimization
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
@@ -111,16 +111,13 @@ def _make_replay_verdict(
         rd = _regraded(rnd.round_data, scorer)
         if rd.election is None:
             return VerdictOutcome(diverged=False)
-        read = rd.election.ruler
-        ruler = judging_ruler(
-            session.store.ruler,
-            scope,
-            read.reach,
-            read.excluded,
-            objective_id=scorer.id,
+        ruler = regraded_ruler(
+            session.store,
+            rd.election.ruler,
+            scorer,
             n_min=opt.elimination_n_min,
             enable_2pl=opt.enable_2pl_graduation,
-        ).ruler
+        )
         found = replay_all_mismatches(rd, rnd.decisions, ruler=ruler)
         if not found:
             return VerdictOutcome(diverged=False)

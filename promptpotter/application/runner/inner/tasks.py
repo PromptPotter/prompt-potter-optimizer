@@ -8,7 +8,6 @@ import itertools
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +20,7 @@ from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.intelligence import rasch
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
+    base_optimizer_template,
     fired_on,
     select_optimizer,
 )
@@ -33,17 +33,14 @@ from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
 )
-from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
+from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
 from promptpotter.domain.l4 import proxies
-from promptpotter.domain.l4.proxies import INNER_RESULT_KEY
-from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
+from promptpotter.domain.l4.cells import CellOptimizer, InnerCell, InnerCells, InnerTaskSpec
 from promptpotter.domain.pipeline_params import NodeCall, lay_nodes
 from promptpotter.domain.pipeline_schema import (
-    DEFAULT_PIPELINE,
     ManifestNodeOverlay,
     NodeKind,
-    NodeRole,
     NodeSearchNarrowing,
     PipelineNode,
 )
@@ -193,12 +190,14 @@ class InnerTasks(FrozenModel):
             by_dataset[name] = InnerCell(
                 campaign_config=campaign,
                 pipeline=read_dataset_pipeline(dataset),
-                optimizer=select_optimizer(
-                    _inner_optimization(
-                        opt,
-                        cfg.inner_nodes,
-                        cfg.inner_depth_nodes,
-                        n_samples=cfg.n_samples_per_inner_round,
+                optimizer=cell_optimizer(
+                    select_optimizer(
+                        _inner_optimization(
+                            opt,
+                            cfg.inner_nodes,
+                            cfg.inner_depth_nodes,
+                            n_samples=cfg.n_samples_per_inner_round,
+                        )
                     )
                 ),
                 # Keyed before the cell's chain resolves: every admission, so no drawable edit hides.
@@ -305,30 +304,6 @@ def parse_resolved(raw: object) -> ResolvedPanel:
     return ResolvedPanel.model_validate(raw)
 
 
-class InnerTaskSpec(FrozenModel):
-    inner_dataset: str
-    optimizer_treatment: str
-    run_seed: int
-    n_samples: int
-    n_samples_origin: int | None = None
-    n_samples_bench: int
-    n_rounds: int
-    nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
-    depth_nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
-    inner_model: str | None = None
-    inner_provider: str | None = None
-    inner_route_order: list[str] | None = None
-    inner_optimizer_temperature: float | None = None
-
-    def treatment(self) -> dict[str, Any]:
-        """SUBTRACTED, so a new spec field defaults to identity: a needless fork wastes a run, a
-        wrong continue corrupts one."""
-        return {k: v for k, v in self.model_dump(mode="json").items() if k not in DEPTH_FIELDS}
-
-
-assert set(InnerTaskSpec.model_fields) >= DEPTH_FIELDS
-
-
 def measurement_modules() -> tuple[ModuleType, ...]:
     """Never ``APP_VERSION``: it voids every banked cell on each release, measurement changed or not."""
     # The δ scale (how it is fit, what each cell reads it on) and what the outer model reads.
@@ -365,146 +340,26 @@ def _with_nodes(opt: OptimizationConfig, laid: Mapping[str, dict[str, Any]]) -> 
     return opt.model_copy(update={"nodes": nodes})
 
 
-# `problem_description` and `answer_format` are absent: they carry the injection slots and the output contract.
-OUTER_PROMPT_FIELDS: tuple[str, ...] = ("persona", "task_intent", "instruction", "thinking_style")
-assert set(OUTER_PROMPT_FIELDS) <= set(OptimizerPromptTemplate.RENDER_ORDER)
-
-_OUTER_KINDS = frozenset({NodeKind.LLM, NodeKind.GATEWAY})
-
-
-@dataclass(frozen=True)
-class InnerCell:
-    campaign_config: Mapping[str, Any]
-    pipeline: Mapping[str, Any] | None
-    optimizer: SelectedOptimizer
-    # The digest without the panel's depth, so a deepened cell continues its campaign.
-    treatment: str
-
-
-def _chain(inner: SelectedOptimizer) -> list[str]:
-    return [
-        n for n in inner.schema.pipelines[DEFAULT_PIPELINE] if inner.node(n).kind in _OUTER_KINDS
-    ]
+def cell_optimizer(inner: SelectedOptimizer) -> CellOptimizer:
+    """A cell's optimizer in the outer's terms, read once at resolve."""
+    llm = [node.name for node in inner.schema.declared_nodes if node.kind is NodeKind.LLM]
+    return CellOptimizer(
+        name=inner.name,
+        declared=tuple(inner.schema.declared_nodes),
+        pipelines={name: list(steps) for name, steps in inner.schema.pipelines.items()},
+        levers={node.name: _lever(inner, node.name) for node in inner.schema.declared_nodes},
+        outer_levers={name: inner.outer_levers(name) for name in llm},
+        fired_on=fired_on(inner.schema),
+        measurement=inner.plan.measurement,
+        templates={name: base_optimizer_template(inner, name) for name in llm},
+    )
 
 
 def _lever(inner: SelectedOptimizer, node: str) -> dict[str, Any]:
-    """What an arm's edit to *node* lands on; the knobs are left out, being how much a cell buys."""
     declared = inner.manifest.nodes[node].model_dump(
         mode="json", exclude_unset=True, exclude={"config"}
     )
     return {**declared, "config": inner.call_settings(node)}
-
-
-def _terminal(inner: SelectedOptimizer) -> str:
-    """The chain's last llm node; only config-less measurement nodes follow, so only a FULL match replays a row."""
-    return [n for n in _chain(inner) if inner.node(n).kind is NodeKind.LLM][-1]
-
-
-@dataclass(frozen=True)
-class InnerCells:
-    """Each cell runs its own optimizer; the outer graph is the union of their nodes, in panel order,
-    so a cell added to the panel appends nodes and moves no banked cell's chain."""
-
-    # As declared, in panel order.
-    cells: tuple[Seat, ...]
-    by_dataset: Mapping[str, InnerCell]
-    # Each seat's spec, by id: a pinned seat carries no depth, so it is read here, never off the pin.
-    specs: Mapping[str, InnerTaskSpec]
-    # Read once per resolve: the outer identity and every cell's campaign id key on this one value.
-    estimator: str
-
-    def held(self, cell: Seat) -> InnerCell:
-        return self.by_dataset[self.spec(cell).inner_dataset]
-
-    def spec(self, cell: Seat) -> InnerTaskSpec:
-        return self.specs[cell.id]
-
-    @property
-    def optimizers(self) -> list[SelectedOptimizer]:
-        """One per manifest, in panel order: a manifest's graph is its name's."""
-        seen: dict[str, SelectedOptimizer] = {}
-        for cell in self.cells:
-            inner = self.held(cell).optimizer
-            seen.setdefault(inner.name, inner)
-        return list(seen.values())
-
-    @cached_property
-    def owners(self) -> Mapping[str, SelectedOptimizer]:
-        """The manifest each outer node is a lever of, over EVERY cell. RAISES where two cells run one
-        node differently, overlay included: an arm's edit to it would mean a different prompt in each."""
-        held: dict[str, SelectedOptimizer] = {}
-        for cell in self.cells:
-            inner = self.held(cell).optimizer
-            for node in inner.schema.declared_nodes:
-                first = held.setdefault(node.name, inner)
-                if _lever(inner, node.name) != _lever(first, node.name):
-                    raise ValueError(
-                        f"cell {cell.id!r} runs node {node.name!r} of {inner.name!r} unlike an "
-                        f"earlier cell's {first.name!r}: one outer node is one lever, so align "
-                        "their campaign overlays or split the panel"
-                    )
-        return held
-
-    @property
-    def chain(self) -> list[str]:
-        return list(dict.fromkeys(n for inner in self.optimizers for n in _chain(inner)))
-
-    def terminal(self, cell: Seat) -> str:
-        return _terminal(self.held(cell).optimizer)
-
-    def own(self, cell: Seat, arm: Mapping[str, Any]) -> dict[str, Any]:
-        """The arm's edit on the nodes this cell's optimizer runs: another manifest's node is not its lever."""
-        nodes = {node.name for node in self.held(cell).optimizer.schema.declared_nodes}
-        return {node: config for node, config in arm.items() if node in nodes}
-
-    def pipeline(self) -> dict[str, Any]:
-        """RAISES where two manifests declare one node differently (``owners``)."""
-        observed = [{"pipeline_key": INNER_RESULT_KEY}]
-        terminals = {_terminal(inner) for inner in self.optimizers}
-        owners = self.owners
-        nests: dict[str, list[str]] = {}
-        for name, cell in sorted(self.by_dataset.items()):
-            nests.setdefault(cell.optimizer.plan.measurement, []).append(name)
-        nodes: dict[str, dict[str, Any]] = {}
-        walks: dict[str, list[str]] = {}
-        fired: dict[str, list[str]] = {}
-        for inner in self.optimizers:
-            fired |= {n: on for n, on in fired_on(inner.schema).items() if owners[n] is inner}
-            for node in inner.schema.declared_nodes:
-                if owners[node.name] is not inner:
-                    continue
-                if node.kind is NodeKind.GATEWAY:
-                    declared: dict[str, Any] = {
-                        "type": node.kind.value,
-                        "config": {},
-                        "nested_datasets": nests.get(node.name, []),
-                    }
-                elif node.kind is NodeKind.LLM:
-                    levers = inner.outer_levers(node.name)
-                    terminal = node.name in terminals
-                    declared = {
-                        "type": node.kind.value,
-                        "node_role": NodeRole.RANKER.value if terminal else "",
-                        "config": {},
-                        "optimizer": {
-                            "param_keys": [*OUTER_PROMPT_FIELDS, *levers],
-                            "param_types": levers,
-                            "observation_name": node.name,
-                            "observation_mappings": observed if terminal else [],
-                        },
-                    }
-                else:
-                    continue
-                nodes[node.name] = declared
-            for name, steps in inner.schema.pipelines.items():
-                walk = walks.setdefault(name, [])
-                walk += [n for n in steps if n in nodes and n not in walk]
-        kept = {k: v for k, v in walks.items() if v}
-        # An escalation no walk lists runs only as its controller fires it: the outer runs it so.
-        for name, on in fired.items():
-            if name in nodes and (on := [w for w in on if w in kept]):
-                nodes[name]["fired_on"] = on
-        return {"nodes": nodes, "pipelines": kept}
 
 
 def inner_instrument_config(

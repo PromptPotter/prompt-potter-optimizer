@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula.compiler import (
@@ -25,7 +25,6 @@ from promptpotter.domain.scoring import (
     all_verifier_graded,
     extract_item_label,
 )
-from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
 
@@ -405,19 +404,3 @@ async def materialize_sample_values(
         if value is not None:
             terms.values[ev.name] = float(value)
     return terms
-
-
-DEFAULT_CELL_FORMULA: Annotated[str, shapes_optimizer_prompt] = "fitness"
-
-
-@shapes_optimizer_prompt
-def resolve_cell_formula(
-    explicit: str | None,
-    schema: PipelineSchema | None,
-) -> tuple[str | None, str | None]:
-    """``(full, short)``; a short form exists only for the default, never for an override."""
-    if explicit:
-        return explicit, None
-    if schema is None:
-        return None, None
-    return DEFAULT_CELL_FORMULA, to_short_formula(DEFAULT_CELL_FORMULA)

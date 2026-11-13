@@ -61,7 +61,6 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 from promptpotter.application import free_tier
 from promptpotter.application.account import account_of, local_stores
 from promptpotter.application.bench import llm_call as call_mod
-from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.task_context import checkin_template
 from promptpotter.application.commands.dispatcher import (
     Applier,
@@ -111,14 +110,13 @@ from promptpotter.application.optimizer_manifest import checkin_manifest, select
 from promptpotter.application.optimizers.nodes import Race
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config
 from promptpotter.application.run_phase_control import RunControl, budget_stop
-from promptpotter.application.runner import round as round_module
 from promptpotter.application.runner.bench import cycle_bench, line_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import InnerSpawnContext
 from promptpotter.application.runner.loop import round_bounds
-from promptpotter.application.runner.round import CatchUpPool
 from promptpotter.application.runner.termination import run_stop_reason
-from promptpotter.application.scoring import query_loop
+from promptpotter.application.scoring import catch_up, query_loop
+from promptpotter.application.scoring.catch_up import CatchUpPool
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.judges import call as judge_call
@@ -832,7 +830,7 @@ async def _walk(
             bill.settle(Billed(TokenAccount(), 1.0))
         return row
 
-    def _backfill(_cycle: Any, _caught: Any, _sp: Any, sample: Sample, _prior: ArmKey) -> Any:
+    def _backfill(_session: Any, _index: Any, _sp: Any, sample: Sample, _prior: ArmKey) -> Any:
         call = asyncio.ensure_future(backend.hold(sample, backfill_pace))
 
         def _commit() -> list[Any]:
@@ -847,12 +845,12 @@ async def _walk(
         def __init__(self) -> None:
             self.priors = {ArmKey("parent"): CellSheet("", ())}
 
-        def admit(self, key: ArmKey, results: Sequence[GradedCell]) -> None:
-            self.priors[key] = self.priors[key].merged(CellSheet("", tuple(results)))
+        def catch_up(self, key: ArmKey, cells: Sequence[GradedCell]) -> None:
+            self.priors[key] = self.priors[key].merged(CellSheet("", tuple(cells)))
 
     parent = ArmKey("parent")
     priors = CatchUpPool(
-        cast("Race", _ParentPrior()), cast("Cycle", None), "elimination", {parent: sp}
+        cast("Race", _ParentPrior()), cast("Session", None), None, "elimination", {parent: sp}
     )
 
     # The walk's own ledger: what each launch recorded of the look-ahead it was sent under.
@@ -860,7 +858,7 @@ async def _walk(
     with (
         scoped(ledger=started),
         mock.patch.object(query_loop, "measure_sample", _measure),
-        mock.patch.object(round_module, "_catch_up", _backfill),
+        mock.patch.object(catch_up, "_catch_up", _backfill),
         scoped(book=book),
     ):
         session = loop_session(

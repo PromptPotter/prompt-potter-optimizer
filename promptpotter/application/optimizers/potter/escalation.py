@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import enum
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, Protocol, Self
 
@@ -19,7 +18,7 @@ from promptpotter.application.bench.node_context import (
 from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
-    build_bundle,
+    PotterView,
 )
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     ForkProposal,
@@ -57,7 +56,6 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
     from promptpotter.domain.paired_reading import RoundArm
     from promptpotter.domain.phase_views import OptimizerStepEnterView
@@ -111,109 +109,49 @@ class LadderInputs:
     l1_layout_refused: bool = False
 
 
-@dataclass(frozen=True)
-class EscalationRule[S]:
-    name: str
-    when: Callable[[S], bool]
-    fire: NextAction
-    priority: int = 0
-
-
-# Every rule above `l1_continue` preempts patience; `l1_only_ladder` preempts every FIRE_L2 below it.
-DEFAULT_ESCALATION_RULES: list[EscalationRule[EscalationInputs]] = [
-    EscalationRule(
-        name="l1_only_ladder",
-        when=lambda s: not s.escalation_ladder.fires_l2,
-        fire=NextAction.CONTINUE,
-        priority=90,
-    ),
-    EscalationRule(
-        name="l1_generate_unusable",
-        when=lambda s: s.l1_mandatory_breach or s.l1_zero_candidates,
-        fire=NextAction.FIRE_L2,
-        priority=70,
-    ),
-    EscalationRule(
-        name="l1_evidence_starved",
-        when=lambda s: s.evidence_starved,
-        fire=NextAction.FIRE_L2,
-        priority=65,
-    ),
-    EscalationRule(
-        name="l1_continue",
-        when=lambda s: s.l1_stall_count < s.l1_patience,
-        fire=NextAction.CONTINUE,
-        priority=50,
-    ),
-    EscalationRule(
-        name="l1_to_l2",
-        when=lambda _s: True,
-        fire=NextAction.FIRE_L2,
-        priority=10,
-    ),
-]
-
-
 L2_PATIENCE_SPENT = "l2_patience_spent"
 L1_LAYOUT_REFUSED = "l1_layout_refused"
 
-CLIMB_RULES: list[EscalationRule[LadderInputs]] = [
-    EscalationRule(
-        name="l2_within_patience",
-        when=lambda s: not s.escalation_ladder.fires_l3 or s.l2_stall_count < s.l2_patience,
-        fire=NextAction.FIRE_L2,
-        priority=30,
-    ),
-    EscalationRule(
-        name=L2_PATIENCE_SPENT,
-        when=lambda s: s.l3_patience is None or s.l3_stall_count < s.l3_patience,
-        fire=NextAction.FIRE_L3,
-        priority=20,
-    ),
-    EscalationRule(
-        name="l3_patience_spent",
-        when=lambda _s: True,
-        fire=NextAction.STOP_L3_PATIENCE,
-        priority=10,
-    ),
-]
-
-HEAL_RULES: list[EscalationRule[LadderInputs]] = [
-    EscalationRule(
-        name=L1_LAYOUT_REFUSED,
-        when=lambda s: s.escalation_ladder.fires_l3 and s.l1_layout_refused,
-        fire=NextAction.FIRE_L3,
-        priority=20,
-    ),
-    EscalationRule(
-        name="l2_landed",
-        when=lambda _s: True,
-        fire=NextAction.CONTINUE,
-        priority=10,
-    ),
-]
+# Every name a decision below stamps on its `EscalationEvent`, ten in all.
+ESCALATION_RULES: tuple[str, ...] = (
+    "l1_only_ladder",
+    "l1_generate_unusable",
+    "l1_evidence_starved",
+    "l1_continue",
+    "l1_to_l2",
+    "l2_within_patience",
+    L2_PATIENCE_SPENT,
+    "l3_patience_spent",
+    L1_LAYOUT_REFUSED,
+    "l2_landed",
+)
 
 
-def _first_match[S](rules: list[EscalationRule[S]], inputs: S) -> EscalationEvent:
-    for rule in sorted(rules, key=lambda r: -r.priority):
-        if rule.when(inputs):
-            return EscalationEvent(next_action=rule.fire, rule=rule.name)
-    raise RuntimeError(
-        f"No escalation rule matched (rules={[r.name for r in rules]}); "
-        "the rule set must include a fall-through with priority < all conditional rules."
-    )
+def decide_escalation(s: EscalationInputs) -> EscalationEvent:
+    """Every rule above `l1_continue` preempts patience; `l1_only_ladder` preempts every FIRE_L2 below it."""
+    if not s.escalation_ladder.fires_l2:
+        return EscalationEvent(NextAction.CONTINUE, "l1_only_ladder")
+    if s.l1_mandatory_breach or s.l1_zero_candidates:
+        return EscalationEvent(NextAction.FIRE_L2, "l1_generate_unusable")
+    if s.evidence_starved:
+        return EscalationEvent(NextAction.FIRE_L2, "l1_evidence_starved")
+    if s.l1_stall_count < s.l1_patience:
+        return EscalationEvent(NextAction.CONTINUE, "l1_continue")
+    return EscalationEvent(NextAction.FIRE_L2, "l1_to_l2")
 
 
-def decide_escalation(inputs: EscalationInputs) -> EscalationEvent:
-    return _first_match(DEFAULT_ESCALATION_RULES, inputs)
+def decide_climb(s: LadderInputs) -> EscalationEvent:
+    if not s.escalation_ladder.fires_l3 or s.l2_stall_count < s.l2_patience:
+        return EscalationEvent(NextAction.FIRE_L2, "l2_within_patience")
+    if s.l3_patience is None or s.l3_stall_count < s.l3_patience:
+        return EscalationEvent(NextAction.FIRE_L3, L2_PATIENCE_SPENT)
+    return EscalationEvent(NextAction.STOP_L3_PATIENCE, "l3_patience_spent")
 
 
-def decide_climb(inputs: LadderInputs) -> EscalationEvent:
-    return _first_match(CLIMB_RULES, inputs)
-
-
-def decide_heal(inputs: LadderInputs) -> EscalationEvent:
-    return _first_match(HEAL_RULES, inputs)
+def decide_heal(s: LadderInputs) -> EscalationEvent:
+    if s.escalation_ladder.fires_l3 and s.l1_layout_refused:
+        return EscalationEvent(NextAction.FIRE_L3, L1_LAYOUT_REFUSED)
+    return EscalationEvent(NextAction.CONTINUE, "l2_landed")
 
 
 class PotterPhase(enum.StrEnum):
@@ -432,7 +370,7 @@ class Layer(Protocol):
     layer_id: ClassVar[Literal["L2", "L3"]]
     phase: ClassVar[OptimizerPhase]
 
-    def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]: ...
+    def reply_model(self, view: PotterView) -> type[BaseModel]: ...
 
     def parse(self, ctx: NodeContext, raw: Any) -> TransitionResult: ...
 
@@ -455,17 +393,17 @@ class LayerCall(NamedTuple):
 
 async def _run_transition(
     fired: LayerCall, fire: Fire
-) -> tuple[TransitionResult, InjectionBundle] | None:
-    """With the bundle it was composed from; ``None`` when the layer's output never parsed."""
+) -> tuple[TransitionResult, PotterView] | None:
+    """With the view it was composed from; ``None`` when the layer's output never parsed."""
     layer, ctx = fired
     ctx.read(Progress).phase(layer.phase.phase, "enter", layer.enter_view(ctx, fire))
     ladder = ctx.slice(Ladder)
     # The prompt reports the verdict that asked for it, which lands only if this fire does.
-    bundle = build_bundle(ctx, ladder if fire.ask is None else as_read_by(ladder, fire.ask))
+    view = PotterView(ctx, ladder if fire.ask is None else as_read_by(ladder, fire.ask))
     calls = ctx.read(Calls)
-    filled = DispatchHub.fill(calls.prompt(), bundle, node=ctx.node)
+    filled = DispatchHub.fill(calls.prompt(), view, node=ctx.node)
     try:
-        result = layer.parse(ctx, await calls.answer(layer.reply_model(bundle), filled))
+        result = layer.parse(ctx, await calls.answer(layer.reply_model(view), filled))
     except OptimizerPromptParseError as parse_err:
         # Unhandled it kills the cycle, and under L4 that voids a whole outer sample.
         logger.error(
@@ -494,15 +432,15 @@ async def _run_transition(
 
     layer.land(ctx, result)
     ctx.read(Progress).phase(layer.phase.phase, "exit", layer.exit_view(ctx, result))
-    return result, bundle
+    return result, view
 
 
-def _layer_control(fired: LayerCall, result: TransitionResult, bundle: InjectionBundle) -> None:
+def _layer_control(fired: LayerCall, result: TransitionResult, view: PotterView) -> None:
     """The layer-control channel, read after the ladder banked the fire: terminate outranks rebase."""
     layer, ctx = fired
     capability = ctx.knobs(EscalationKnobs)
     if result.terminate_proposal is not None:
-        # Present only where the reply schema offered it (`InjectionBundle.terminate_offer`).
+        # Present only where the reply schema offered it (`PotterView.terminate_offer`).
         reason = result.terminate_proposal.reason.strip()
         if not reason:
             # Never substitute a stand-in reason: a blank stop is not a decision.
@@ -524,9 +462,7 @@ def _layer_control(fired: LayerCall, result: TransitionResult, bundle: Injection
                 "%s emitted fork_proposal while rebase_capability is off — ignored",
                 layer.layer_id,
             )
-        elif fork := _rebase_request(
-            ctx, layer.layer_id, result.fork_proposal, bundle.reelect_offer
-        ):
+        elif fork := _rebase_request(ctx, layer.layer_id, result.fork_proposal, view.reelect_offer):
             raise StopLoop(StopReason.REBASED, fork=fork)
 
 
@@ -606,10 +542,10 @@ async def _fire_layer(ctx: NodeContext, fired: LayerCall, fire: Fire) -> Transit
     landed = await _run_transition(fired, fire)
     if landed is None:
         return None
-    result, bundle = landed
+    result, view = landed
     ctx.put(fired.layer.record(ctx.slice(Ladder), fire))
     ctx.restate(Ladder)
-    _layer_control(fired, result, bundle)
+    _layer_control(fired, result, view)
     return result
 
 
