@@ -23,16 +23,16 @@ else:
             with contextlib.suppress(ImportError):
                 getattr(_parked, "__file__", None)
 
+from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import enter, run_campaign
-from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.connectors.dspy_module import (
     PROGRAM_NODE,
     SCORE_KEY,
     DspyProgram,
     dataset_pipeline,
 )
-from promptpotter.domain.campaign_config import OptimizationConfig
+from promptpotter.domain.draft_edit import CampaignLayer, OptimizationLayer
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.search_point import TaskDecomposition
@@ -46,17 +46,11 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 
-_COMPILE_DEFAULTS: dict[str, Any] = {
-    "budget": {"rounds": 5},
-    "degradation_threshold": 0.4,
-    "elimination_n_min": 4,
-}
-
-
-def compile_loop(**knobs: Any) -> OptimizationConfig:
-    optimization = OptimizationConfig.model_validate({**_COMPILE_DEFAULTS, **knobs})
-    select_optimizer(optimization)
-    return optimization
+def compile_loop(**knobs: Any) -> OptimizationLayer:
+    """The knobs a compile sets, laid over `defaults.yaml` as its definition will be: refused here."""
+    loop: OptimizationLayer = OptimizationLayer.model_validate(knobs)
+    ConfigLayers.stating(CampaignLayer(optimization=loop)).config()
+    return loop
 
 
 @dataclass(frozen=True)
@@ -77,7 +71,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         *,
         metric: Callable[[Any, Any], Any],
         dataset_name: str,
-        loop: OptimizationConfig | None = None,
+        loop: OptimizationLayer | None = None,
         node: Node | None = None,
         task_description: str = "",
         scoring: str = SCORE_KEY,

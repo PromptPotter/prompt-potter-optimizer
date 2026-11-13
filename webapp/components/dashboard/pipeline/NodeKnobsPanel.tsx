@@ -45,9 +45,10 @@ export function NodeKnobsPanel({ onApply }: { onApply?: (patch: DraftPatch) => v
   const onChange: OnChange = onApply
     ? (patch) => onApply({ config: { optimization: { nodes: patch } } })
     : undefined;
-  // The draft's own value dropped, so the layer below shows through.
+  // `null`, the wire's clear: the draft's own value dropped, so the layer below shows through.
   const onReset: OnReset = onApply
-    ? (node, key) => onApply({ reset: [`config.optimization.nodes.${node}.config.${key}`] })
+    ? (node, key) =>
+        onApply({ config: { optimization: { nodes: { [node]: { config: { [key]: null } } } } } })
     : undefined;
   const read = useConnector();
   const served = shownData(read);

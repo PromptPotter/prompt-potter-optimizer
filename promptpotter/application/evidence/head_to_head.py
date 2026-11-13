@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, NamedTuple, Self
 
 from pydantic import Field, model_validator
 
-from promptpotter.application.datasets.authored import scorer_of
+from promptpotter.application.datasets.authored import defaults_config, scorer_of
 from promptpotter.application.evidence.subjects import SubjectReading
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -46,7 +46,6 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
     worked_seconds,
 )
-from promptpotter.domain.campaign_config import over_the_default
 from promptpotter.domain.cycle_index import RunStatus
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -228,8 +227,9 @@ def pair_guard(
     bench_sets = [m.bench_set for m in members if m.bench_set is not None]
     budgets = [(m.budget, m.stopping, m.determinism) for m in members]
     # The mint refused an arm off its record's stopping or clamp; only its budget moves after it.
+    standing = defaults_config().optimization.budget
     off_record = record is not None and any(
-        m.budget != over_the_default(record.shared.budget) for m in members
+        m.budget != standing.over(record.shared.budget) for m in members
     )
     differs_on = [
         GuardDifference(field)

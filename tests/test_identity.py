@@ -34,6 +34,7 @@ from factories import (
     PROMPT_INFO,
     arm_state,
     backend_client,
+    defaulted_config,
     inner_cells,
     inner_sandbox,
     jumping_clock,
@@ -83,6 +84,8 @@ from promptpotter.application.datasets.authored import (
     ConfigLayers,
     campaign_file_block,
     dataset_campaign_block,
+    declare_run,
+    effective_config,
     validated_campaign_config,
 )
 from promptpotter.application.datasets.draft_campaign import (
@@ -233,10 +236,7 @@ from promptpotter.domain.campaign_config import (
     CampaignConfig,
     CycleConfig,
     LaidSpan,
-    OptimizationConfig,
     OptimizerChoice,
-    declare_run,
-    effective_config,
 )
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
@@ -384,7 +384,7 @@ def _l4_arm(optimizer: str, overrides: dict[str, dict[str, Any]]) -> dict[str, A
 
 
 def _l4_laid(optimizer: str, overrides: dict[str, dict[str, Any]]) -> OptimizerChoice:
-    bare = CampaignConfig.model_validate(
+    bare = defaulted_config(
         {"optimization": {"optimizer": optimizer, "degradation_threshold": 0.0}}
     )
     return bare.overlaid(spawn.arm_layer(overrides)).optimization
@@ -398,7 +398,7 @@ def _connector_config(**fields: Any) -> CampaignConfig:
     threshold = campaign_defaults()["optimization"]["degradation_threshold"]
     defaults = {"degradation_threshold": threshold}
     optimization = {**defaults, **fields.pop("optimization", {})}
-    return CampaignConfig.model_validate({"optimization": optimization, **fields})
+    return defaulted_config({"optimization": optimization, **fields})
 
 
 # 1. Hashes — what a measurement is filed under
@@ -698,7 +698,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
             )
         )
     both = select_optimizer(
-        CampaignConfig.model_validate(
+        defaulted_config(
             {
                 "optimization": {
                     "optimizer": "capo",
@@ -935,7 +935,7 @@ def ask(tmp_path: Path, offline: Router) -> Callable[..., Any]:
             with (
                 scoped(
                     ledger=CycleEventLog(tmp_path / "asked.jsonl"),
-                    optimizer=select_optimizer(OptimizerChoice()),
+                    optimizer=select_optimizer(OptimizerChoice(optimizer="potter")),
                     determinism=clamp,
                 ),
                 scoped(book=spend_book()),
@@ -963,13 +963,14 @@ def ask(tmp_path: Path, offline: Router) -> Callable[..., Any]:
 def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_bank(
     tmp_path: Path, ask: Callable[..., Any]
 ) -> None:
-    pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
-    for clamp, (temperature, seed, route) in (
-        (pinned, (0.0, 7, ["Alibaba"])),
-        (pinned.model_copy(update={"route_order": ["Baidu"]}), (0.0, 7, ["Baidu"])),
-        (None, (0.7, None, None)),
+    pinned = DeterminismClamp(temperature=0.0, seed=7, route_order={"m": ["Alibaba"]})
+    for clamp, model, (temperature, seed, route) in (
+        (pinned, "m", (0.0, 7, ["Alibaba"])),
+        (pinned.model_copy(update={"route_order": {"m": ["Baidu"]}}), "m", (0.0, 7, ["Baidu"])),
+        (pinned, "other", (0.0, 7, None)),
+        (None, "m", (0.7, None, None)),
     ):
-        sent = ask("q", clamp, provider="openrouter", model="m", temperature=0.7)
+        sent = ask("q", clamp, provider="openrouter", model=model, temperature=0.7)
         assert (sent["temperature"], sent.get("seed"), sent["provider"].get("order")) == (
             temperature,
             seed,
@@ -979,7 +980,7 @@ def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_bank(
             "campaign reports itself pinned and runs unpinned"
         )
     banked = tmp_path / "reuse" / "optimizer_reuse"
-    assert len(list(banked.glob("*.json"))) == 3, (
+    assert len(list(banked.glob("*.json"))) == 4, (
         "the second route replayed the first route's banked answer"
     )
 
@@ -987,7 +988,7 @@ def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_bank(
 def test_a_head_to_head_pins_one_seed_on_every_arm(ask: Callable[..., Any]) -> None:
     # An arm's replicate (numbered at the mint, § 2) enters the seed, and arms of one replicate
     # share it, so a pair differs by its treatment alone (common random numbers).
-    pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
+    pinned = DeterminismClamp(temperature=0.0, seed=7, route_order={"m": ["Alibaba"]})
 
     def armed(key: str, replicate: int) -> Compare:
         return Compare(arm=Arm(head_to_head_id="h", arm_key=key, replicate=replicate))
@@ -1115,7 +1116,7 @@ def test_the_unframed_ablation_renders_no_framing_resumed_or_not(built_stores: S
         "gsm8k", TaskDecomposition(domain="grade-school arithmetic")
     )
     gsm8k = resolve_dataset(built_stores, "gsm8k")
-    framed = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
+    framed = defaulted_config({"optimization": {"degradation_threshold": 0.05}})
     unframed = framed.model_copy(update={"task_framing": "off"})
     assert campaign_framing(built_stores, framed, gsm8k).domain == "grade-school arithmetic", (
         "the framed arm lost the framing committed for it"
@@ -1144,6 +1145,7 @@ def test_a_cell_is_keyed_by_its_own_instrument_and_no_other_cells(built_stores: 
         "inner_benchmark": "innerbench",
         "inner_benchmark_config": {
             "n_samples_per_inner_round": 4,
+            "n_samples_origin": 40,
             "n_samples_bench": 2,
             "max_inner_rounds": 2,
         },
@@ -2532,13 +2534,13 @@ def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
     stores = built_stores
     _fk_dataset(stores)
     restated = {"optimization": {"nodes": {"l1_generate": {"config": {"n_variants": 3}}}}}
-    on_dataset = {"optimization": {**restated["optimization"], "degradation_threshold": 0.4}}
+    on_dataset = defaulted_config(restated).model_dump(mode="json")
     assert laid_config(
         stores, ConfigLayers(on_dataset, restated), connector="termnorm", schema=None
     ).knob_layers == {"l1_generate": {"n_variants": "campaign"}}, (
         "an edit restating the dataset's value read as the dataset's"
     )
-    knob_config = CampaignConfig.model_validate(
+    knob_config = defaulted_config(
         {
             "optimization": {
                 "degradation_threshold": 0.05,
@@ -2793,7 +2795,7 @@ def test_a_replicate_is_numbered_at_the_mint_by_its_treatment_across_every_act(
     assert seeds["p1"] == seeds["c1"], "two arms of one replicate drew apart"
     # A knob set to its default is no other treatment, so the evidence pools the two arms.
     stated = OptimizationOverrides(
-        optimizer="potter", arm_gate=OptimizationConfig.model_fields["arm_gate"].default
+        optimizer="potter", arm_gate=campaign_defaults()["optimization"]["arm_gate"]
     )
     knob = act("knob", ("k1", on_potter), ("k2", stated))
     assert [knob[key].arm.replicate for key in ("k1", "k2")] == [1, 2], (
@@ -2818,7 +2820,10 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     panel = InnerTasks(
         inner_benchmark="decl",
         inner_benchmark_config=InnerBenchmarkConfig(
-            n_samples_per_inner_round=4, n_samples_bench=6, max_inner_rounds=2
+            n_samples_per_inner_round=4,
+            n_samples_origin=40,
+            n_samples_bench=6,
+            max_inner_rounds=2,
         ),
         tasks=[Seat(kind="seat", id="decl/seed-3", run_seed=3)],
     )
@@ -3214,13 +3219,13 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     drained = Mock()
     monkeypatch.setattr(DashboardCheckout, "drain", drained)
     offline.rates = {}
-    # The declaration names no scoring formula, so the launch refuses inside the run, past its
-    # observers' build.
+    # A formula naming no scoring helper refuses inside the run, past its observers' build.
+    unscored = launched.model_copy(update={"scoring": "no_such_helper(predicted)"})
     with pytest.raises(ScoringFormulaError):
         asyncio.run(
             run_optimization(
                 [],
-                CycleConfig.laid(launched, []),
+                CycleConfig.laid(unscored, []),
                 session=opened,
                 observers=observers,
                 mode=RunMode(),
@@ -3960,6 +3965,7 @@ def test_an_l4_pool_seats_a_held_out_environment_out_of_the_pin() -> None:
         "inner_benchmark": "gsm_hard",
         "inner_benchmark_config": {
             "n_samples_per_inner_round": 1,
+            "n_samples_origin": 40,
             "n_samples_bench": 1,
             "max_inner_rounds": 2,
         },

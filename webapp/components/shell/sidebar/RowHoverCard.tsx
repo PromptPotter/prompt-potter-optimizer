@@ -14,7 +14,7 @@ import { entryAlone } from "@/lib/derivations";
 import { fmtAgo, fmtBytes, fmtDateTime, fmtValue, PLACEHOLDER } from "@/lib/format";
 
 // What no layer set: a default, a required floor, or a manifest's own value.
-const UNSET_SOURCES: ReadonlySet<ConfigKnob["source"]> = new Set(["default", "required", "manifest"]);
+const UNSET_SOURCES: ReadonlySet<ConfigKnob["source"]> = new Set(["default", "manifest"]);
 
 // A knob moving several estimands is listed under each, so the path dedupes it.
 function declaredKnobs(map: ConfigMapResponse): ConfigKnob[] {

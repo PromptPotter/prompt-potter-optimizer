@@ -94,14 +94,15 @@ class DeterminismClamp(StrictModel):
             "each call's seed off the campaign id."
         ),
     )
-    route_order: list[str] | None = Field(
+    route_order: dict[str, list[str]] | None = Field(
         None,
         description=(
-            "The upstream HOSTS behind the gateway, in order, every optimizer call is routed "
-            "to (the gateway's own `provider_name`s — read them off `served_by` in the ledger, "
-            "never from a catalogue). Hosts of one model disagree systematically, so an "
-            "unpinned route makes a measurement whose producer nothing can name. `None` "
-            "(default) lets the gateway re-rank per call."
+            "Per model, the upstream HOSTS behind the gateway, in order, every optimizer call "
+            "to that model is routed to (the gateway's own `provider_name`s — read them off "
+            "`served_by` in the ledger, never from a catalogue). A route names one model's "
+            "hosts, so a call to a model it does not key keeps its own. Hosts of one model "
+            "disagree systematically, so an unpinned route makes a measurement whose producer "
+            "nothing can name. `None` (default) lets the gateway re-rank per call."
         ),
     )
 

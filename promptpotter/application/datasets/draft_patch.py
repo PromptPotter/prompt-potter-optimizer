@@ -34,7 +34,7 @@ from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CAMPAIGN_RULE
 from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit
-from promptpotter.domain.layer_fold import Layer, clears, fold_layers, rules_of
+from promptpotter.domain.layer_fold import CLEAR, Layer, fold_layers, wire_patch
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
     ANSWER_FIELDS_KEY,
@@ -100,22 +100,24 @@ async def plan_draft_patch(
         else held
     )
 
-    config, prompts = _reset(draft, patch.reset or [])
+    config = draft.config
     if patch.origin_prompts is not None:
         changes["origin_prompts"] = patch.origin_prompts
-    elif prompts != draft.origin_prompts:
-        changes["origin_prompts"] = prompts
     if (library := await _candidate_library(stores, draft, patch)) is not None:
         changes["candidate_library"] = library
 
     was = draft_pipeline(stores, draft, held)
-    sent = {} if patch.config is None else patch.config.model_dump(mode="json", exclude_unset=True)
+    sent = (
+        {}
+        if patch.config is None
+        else wire_patch(CAMPAIGN_RULE, patch.config.model_dump(mode="json", exclude_unset=True))
+    )
     if patch.config is not None:
         layers = [Layer("draft", config), Layer("edit", sent)]
         config = _stamp_optimizer(
             fold_layers(CAMPAIGN_RULE, layers).document, was.config.optimization.optimizer
         )
-        if "scoring" in sent:
+        if "scoring" in sent and sent["scoring"] is not CLEAR:
             config["scoring"] = _folded_scoring(
                 was.config.scoring, sent["scoring"], campaign_terms(served.connector)
             )
@@ -168,24 +170,6 @@ async def plan_draft_patch(
         column_ground_truth=patch.column_ground_truth,
         served=served,
     )
-
-
-_EDIT_RULE = rules_of(EditDraftPatch)
-_DRAFT_RESETS = (
-    ("config", "optimization", "nodes", "*", "config", "*"),
-    ("origin_prompts", "*", "*"),
-)
-
-
-def _reset(draft: DraftFile, paths: list[str]) -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
-    """*draft*'s config and origin prompts less each of its own values a reset path names."""
-    try:
-        reset = clears(paths, _DRAFT_RESETS)
-    except ValueError as exc:
-        raise PayloadInvalidError(f"patch.reset: {exc}") from exc
-    held = {"config": draft.config, "origin_prompts": draft.origin_prompts}
-    laid = fold_layers(_EDIT_RULE, [Layer("draft", held), Layer("reset", reset)]).document
-    return laid.get("config", {}), laid.get("origin_prompts", {})
 
 
 def _description_keys(pipeline: DraftPipeline) -> dict[str, list[str]]:

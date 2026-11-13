@@ -18,7 +18,7 @@ optimizer = PromptPotterOpt(metric=my_metric, dataset_name="my-task",
 compiled = optimizer.compile(my_program, trainset=trainset)
 ```
 
-`compile(student, *, trainset, teacher=None, valset=None, **kwargs) -> Module` is DSPy's own; every field defaults, so that is a complete run. `compile_loop(**knobs)` returns the campaign's own `OptimizationConfig`, so any field of it is a keyword: `optimizer=` names any manifest `optimizer_roster()` lists, `nodes=` that manifest's node knobs (`pipeline_responses.py::OptimizerSetup.knobs`; one the manifest does not take is refused when the loop is built), `budget=` per axis (a named null lifts it); a compile starts from `teleprompter.py::_COMPILE_DEFAULTS`. The layers: [`../concepts/the-loop.md`](../concepts/the-loop.md).
+`compile(student, *, trainset, teacher=None, valset=None, **kwargs) -> Module` is DSPy's own; every field defaults, so that is a complete run. `compile_loop(**knobs)` returns the knobs a compile sets, a layer of the campaign's own `OptimizationConfig`, so any field of it is a keyword: `optimizer=` names any manifest `optimizer_roster()` lists, `nodes=` that manifest's node knobs (`pipeline_responses.py::OptimizerSetup.knobs`; one the manifest does not take is refused when the loop is built), `budget=` per axis (a named null lifts it); a compile lays them over `promptpotter/assets/datasets/defaults.yaml`, as every definition does. The layers: [`../concepts/the-loop.md`](../concepts/the-loop.md).
 
 What the signatures do not say:
 

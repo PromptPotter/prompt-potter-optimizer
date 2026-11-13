@@ -29,6 +29,7 @@ from promptpotter.application.scoring.sample_measurement import (
     priced_pairs,
 )
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
+from promptpotter.domain.draft_edit import CampaignLayer
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.run_mode import RunMode
@@ -107,7 +108,7 @@ async def run_bbeh_campaign(
     )
     session, cycle_result = await run_campaign(
         "bbeh",
-        campaign_config,
+        CampaignLayer.model_validate(campaign_config.model_dump(mode="json", exclude_unset=True)),
         stores=stores,
         rows=train_norm,
         readout_sink=print,

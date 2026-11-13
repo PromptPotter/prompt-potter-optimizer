@@ -173,23 +173,6 @@ class FewShot(nodes.Proposer):
     draws: ClassVar[Mapping[type[Pool], Draw]] = {
         DemoPool: nodes.CountKnob(nodes.ShotKnobs, "k_max")
     }
-    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = (
-        nodes.MemberCoupling(
-            name="shots_without_demo_pool",
-            knobs=("k_max",),
-            bench_knobs=("dataset_split",),
-            estimand=Estimand.SEARCH,
-            relation="An individual's shots are drawn from the demo pool `dataset_split.demo` holds out.",
-            consequence=(
-                "The campaign declares no demo pool, so every individual carries no shot and "
-                "k_max is inert: CAPO runs as an instruction-only search."
-            ),
-            severity="inert",
-            predicate=lambda c, k, _d: (
-                k.k_max > 0 and (c.dataset_split is None or c.dataset_split.demo == 0)
-            ),
-        ),
-    )
 
     async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         k_max = ctx.knobs(nodes.ShotKnobs).k_max

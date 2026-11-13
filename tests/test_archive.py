@@ -31,6 +31,7 @@ from factories import (
     arm_state,
     arm_walk,
     close_round,
+    defaulted_config,
     degradation_health,
     election,
     filed,
@@ -55,7 +56,6 @@ from factories import (
     workspace,
 )
 from offline_world import Router
-from pydantic import ValidationError
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
@@ -119,8 +119,6 @@ from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.arms import ArmSlot, PointContext
 from promptpotter.domain.bench import DatasetSplit, PartitionRecord, partition_bank
 from promptpotter.domain.campaign_config import (
-    CampaignConfig,
-    OptimizationConfig,
     seed_layer,
 )
 from promptpotter.domain.command_kinds import DeleteCampaignPayload, ForkCyclePayload, ForkSeed
@@ -1292,7 +1290,7 @@ def scenario_line(built_stores: Stores) -> _Scenario:
     closing = seat(stores).cycle
     store = stores.campaigns
     scenario, scenario_log = _minted(stores, "cycle_applyscenario")
-    permits_m = CampaignConfig.model_validate(
+    permits_m = defaulted_config(
         {
             "optimization": {"degradation_threshold": 0.4},
             "optimizer_narrowing": {"a": {"param_allowed_values": {"model": ["m"]}}},
@@ -1390,9 +1388,9 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
     ), "a rewind's record names another arm than the pick its parent's line stood on"
     seed = store.read_laid_spans(applied)[-1].seed
     assert seed is not None, "a rewind's seed rode no record of its own"
-    base = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
+    base = defaulted_config({"optimization": {"degradation_threshold": 0.05}})
     assert base.overlaid(seed_layer(seed.config_overrides)).scoring == criterion
-    assert base.scoring is None, "applying a scenario wrote through to its base config"
+    assert base.scoring != criterion, "applying a scenario wrote through to its base config"
     # A steer outside what the campaign permits is the babysit act, and a fork of that fork lays
     # its seed over its parent's: a steer back inside the menu still runs babysat, and its mint
     # stamps the intervention every answer it files is graded by.
@@ -1480,7 +1478,7 @@ def test_a_field_cleared_in_the_panel_drops_the_candidates_value_and_the_layer_b
     candidate_key = _emit_round(
         closing, scenario_log, scenario_rounds, "s2", resolved_params=candidate_record
     )
-    cleared = ForkSeed(reset=["pipeline_overlay.a.route_order"])
+    cleared = ForkSeed(pipeline_overlay={"a": {"route_order": None}})
     reset_fork = scenario.model_copy(
         update={
             "cycle_id": cut_operator_fork(
@@ -1496,8 +1494,6 @@ def test_a_field_cleared_in_the_panel_drops_the_candidates_value_and_the_layer_b
     assert cycle_config(stores, campaign, reset_fork).seed_overlay == {
         "a": {"model": "m", "provider": "p"}
     }, "a cleared field forked with the candidate's value"
-    with pytest.raises(ValidationError):
-        ForkSeed(reset=["a.route_order"])
 
 
 # It goes ahead on its own authority over the parent (bl1.B5).
@@ -1855,10 +1851,7 @@ def _family(stores: Stores) -> _Family:
         stores,
         minted_campaign(
             family,
-            config=CampaignConfig(
-                optimization=OptimizationConfig(degradation_threshold=0.4),
-                scoring="label_match(predicted, ground_truth)",
-            ),
+            config=defaulted_config({"optimization": {"degradation_threshold": 0.4}}),
         ),
     )
     stores.campaigns.mint_cycle(family)

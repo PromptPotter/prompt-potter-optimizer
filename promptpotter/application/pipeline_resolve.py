@@ -13,6 +13,7 @@ from promptpotter import connectors
 from promptpotter.application.datasets.authored import (
     ConfigLayers,
     dataset_campaign_block,
+    effective_config,
     load_dataset_campaign_config,
     selected_config,
 )
@@ -64,7 +65,6 @@ from promptpotter.domain.campaign_config import (
     CampaignConfig,
     CycleConfig,
     LaidSpan,
-    effective_config,
 )
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.cycle_paths import CycleHop, Subject

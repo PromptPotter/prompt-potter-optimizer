@@ -38,6 +38,7 @@ from factories import (
     billed_call,
     close_round,
     cycle_result,
+    defaulted_config,
     inner_sandbox,
     loop_session,
     minted_campaign,
@@ -118,7 +119,7 @@ from promptpotter.config.paths import PROJECTS_DIR, block_packs_root, default_pr
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.campaign import CampaignRefusal, CampaignRefusedError, Optimize
-from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
+from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_events import (
     WORKSPACE_SUBJECT,
@@ -3388,7 +3389,7 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
     starting = loop_session(
         stores, pipeline_schema([solve]), rows, dataset=resolve_dataset(stores, "acts")
     )
-    declared = declare(starting, CampaignConfig.model_validate(unframed), purpose=Optimize())
+    declared = declare(starting, defaulted_config(unframed), purpose=Optimize())
     plan = resolve_cycle_plan(starting, declared, rows)
     moved, edit = await drafted("moved")
 
@@ -3772,20 +3773,17 @@ async def test_a_host_over_stdio_acts_in_the_terminals_account_as_the_in_process
         patched = {"draft_id": draft["draft_id"], "patch": {"slug": "sums-host"}}
         edited = await host("edit-draft-campaign", keyed(patched))
         assert not edited.get("isError"), edited["content"]
-        # A reset drops the draft's own override, so the layer below runs again: Start would
+        # A null drops the draft's own override, so the layer below runs again: Start would
         # otherwise launch a value the operator took back.
-        knob = "config.optimization.nodes.adaptive_queue.config.sp_budget_round"
         laid = [edited["structuredContent"]["config"]]
-        for edit in (
-            {
+        for value in (7, None):
+            edit = {
                 "config": {
                     "optimization": {
-                        "nodes": {"adaptive_queue": {"config": {"sp_budget_round": 7}}}
+                        "nodes": {"adaptive_queue": {"config": {"sp_budget_round": value}}}
                     }
                 }
-            },
-            {"reset": [knob]},
-        ):
+            }
             sent_edit = await host(
                 "edit-draft-campaign", keyed({"draft_id": draft["draft_id"], "patch": edit})
             )

@@ -17,7 +17,11 @@ from offline_world import FakeBackend, Router
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.bench.node_context import stated_line
-from promptpotter.application.datasets.authored import ConfigLayers, dataset_campaign_block
+from promptpotter.application.datasets.authored import (
+    ConfigLayers,
+    dataset_campaign_block,
+    declare_run,
+)
 from promptpotter.application.datasets.loaders import definition_source
 from promptpotter.application.embedded_run import enter
 from promptpotter.application.initialization.scoring_scope import session_scope
@@ -94,9 +98,7 @@ from promptpotter.domain.bench import (
 from promptpotter.domain.campaign import Campaign, Optimize, Purpose, run_clamp
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
-    OptimizationConfig,
     OptimizerChoice,
-    declare_run,
 )
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import Seat
@@ -176,6 +178,7 @@ from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     ResolvedDataset,
+    campaign_defaults,
     install_dataset,
     resolve_dataset,
 )
@@ -590,7 +593,7 @@ def seat(
     schema = schema or pipeline_schema(
         [PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)]
     )
-    config = CampaignConfig.model_validate(
+    config = defaulted_config(
         {
             "optimization": {"degradation_threshold": 0.0, **(optimization or {})},
             "dataset_split": {"bench": bench, "demo": demo},
@@ -670,12 +673,11 @@ async def run_init_round(
         "dataset_split": split or {"bench": 0, "demo": 0},
         "task_framing": "off",
     }
-    # The definition's chain, root-down: the defaults, the family, the leaf.
+    # The definition's chain, root-down: the wheel's defaults, the family, the leaf.
     family = LAUNCHED_DATASET.split("/")[0]
     shutil.copytree(
         install_datasets_root() / family, stores.install_datasets_root / family, dirs_exist_ok=True
     )
-    shutil.copy(install_datasets_root() / "defaults.yaml", stores.install_datasets_root)
     # The bank as the cut of the definition's own `source:`: no fetch reaches the hub.
     source = definition_source(resolve_dataset(stores, LAUNCHED_DATASET))
     assert source is not None, f"{LAUNCHED_DATASET} names a source"
@@ -683,7 +685,7 @@ async def run_init_round(
     async with init_services(
         dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=enter(stores)
     ) as session:
-        session, config = laid_session(session, ConfigLayers({}, raw))
+        session, config = laid_session(session, ConfigLayers(campaign_defaults(), raw))
         declaration = declare(session, config, purpose=Optimize())
         opened: list[RoundContext] = []
 
@@ -769,6 +771,13 @@ def set_cycle(
         cycle.slices.put(held)
 
 
+def defaulted_config(layer: Mapping[str, Any] | None = None) -> CampaignConfig:
+    """A config as every door builds one: *layer* laid over `defaults.yaml`."""
+    return CampaignConfig.model_validate(
+        ConfigLayers(campaign_defaults(), dict(layer or {})).folded().document
+    )
+
+
 def minted_campaign(
     hop: CycleHop,
     *,
@@ -778,7 +787,7 @@ def minted_campaign(
     **fields: Any,
 ) -> Campaign:
     """A manifest minted as the mint seam does: *config* declared, whole, under *purpose*."""
-    config = config or CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.4))
+    config = config or defaulted_config({"optimization": {"degradation_threshold": 0.4}})
     return Campaign(
         campaign_id=hop.campaign_id,
         dataset_name=dataset_name,

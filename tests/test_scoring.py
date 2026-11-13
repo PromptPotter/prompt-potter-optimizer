@@ -38,6 +38,7 @@ from factories import (
     bench_passes,
     billed_call,
     close_round,
+    defaulted_config,
     delta_ruler,
     election_knobs,
     fake_connector,
@@ -253,7 +254,7 @@ from promptpotter.domain.campaign import (
     Optimize,
     Purpose,
 )
-from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig, OptimizerChoice
+from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import (
     ScoreSummary,
     is_floor_pinned,
@@ -1005,10 +1006,8 @@ def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_o
             client=BackendClient(reporting, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir),
         )
         spec = JudgeSpec(name="sealqa", stages=[JudgeStage(model="m", provider="openai")])
-        config = CampaignConfig(
-            scoring="label_match(predicted, ground_truth)",
-            optimization=OptimizationConfig(degradation_threshold=0.4),
-            judges={name: spec},
+        config = defaulted_config(
+            {"optimization": {"degradation_threshold": 0.4}, "judges": {name: spec.model_dump()}}
         )
         try:
             scorer_setup(
@@ -4373,7 +4372,7 @@ def _h2h_config(
     # The shipped optimizers default to different models, so every arm pins one on each llm node.
     manifest = yaml.safe_load((optimizers_root() / optimizer / "pipeline.yaml").read_text("utf-8"))
     model = proposer_model or "qwen/qwen3.7-flash"
-    return CampaignConfig.model_validate(
+    return defaulted_config(
         {
             "optimization": {
                 "optimizer": optimizer,

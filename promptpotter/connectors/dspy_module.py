@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
-from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
 from promptpotter.domain.search_point import split_rendered_prompt
@@ -404,6 +403,17 @@ async def _in_process_run(
     }
 
 
+# The program node's own prompt fields, in the order it declares them.
+_PROGRAM_FIELDS = (
+    "persona",
+    "task_intent",
+    "problem_description",
+    "instruction",
+    "thinking_style",
+    "answer_format",
+)
+
+
 def dataset_pipeline(
     *,
     model: str,
@@ -419,7 +429,7 @@ def dataset_pipeline(
         "description": "The caller's dspy.Module, scored by the caller's metric.",
         "prompt_info": {
             "template_variables": [],
-            "fields": list(PROMPT_FIELDS),
+            "fields": list(_PROGRAM_FIELDS),
             "rewrite_slot": "instruction",
         },
         "config": {"model": model, "temperature": temperature, **extra},

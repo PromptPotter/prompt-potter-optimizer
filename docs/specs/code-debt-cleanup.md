@@ -117,11 +117,6 @@ row it closes.
   whose Owns gain `presentation/teleprompter.py::acompile` and `landing.py::plan_landing`.
   **Re-test:** `git grep -c "enter()" -- promptpotter/presentation/teleprompter.py` is 0, and
   `git grep -c "complete_registries(" -- promptpotter/application/maintenance/landing.py` is 1.
-- **A retired knob refuses at the launch, not at the landing**: `store/dataset_access.py::definition_layer`
-  checks only that each section is a mapping, so a definition still naming `halt_at_accuracy` lands
-  and refuses at its next launch. Action: the landing validates each layer's `campaign` section against
-  `CampaignConfig`'s keys. **Rides with:** admit-2, whose Owns gain `store/dataset_access.py`.
-  **Re-test:** a definition naming `accuracy_ceiling` past `fitness knobs` refuses `land-data`.
 - **Four launch faults from a code review (reported; verify each at its line first)**: `jobs/head_to_head.py:178`
   leaves a partial mint's arms unstamped, so a retry refuses `arm_taken`; `mint_and_start.py:108` and
   `checkin.py:93` leak the `BackendClient` they open when the mint is refused; `jobs/launch.py:144`
@@ -459,12 +454,9 @@ row it closes.
 - **An operator's authored arm is refused a field they held**: `bench/children.py::carried_writes`
   refuses every child a `prompt_fields_held` field. Decided (2026-11-10): the operator's arm writes it;
   `carried_writes` refuses children only. **Rides with:** rk-run 5.
-- **A field cleared in the steer panel cannot drop a candidate's value**: a fork's seed only adds over
-  the candidate it forks. Action: the steer sends `EditDraftPatch.reset`'s delete. **Rides with:**
-  rk-run 7. **Re-test:** clear a field in `SteerForkPanel`; the fork launches without the candidate's value.
 - **The knob Reset writes the declared value, so the draft stays "edited"**: `OptimizerSetupSection.tsx`
-  lays `NodeKnobsPanel`'s patch as `optimization.nodes` alone, where `EditDraftPatch.reset` is the
-  delete. **Rides with:** rk-run 7. **Re-test:** `git grep -n "set(k.declared)" -- webapp`.
+  lays `NodeKnobsPanel`'s patch as `optimization.nodes` alone, where a `null` is the clear
+  (`layer_fold.py::wire_patch`). **Rides with:** rk-run 7. **Re-test:** `git grep -n "set(k.declared)" -- webapp`.
 - **The call-key rosters are read through a private name**: `domain/search_point.py:10` imports
   `pipeline_params._Roster` to derive `WHO_ANSWERS_KEYS`, `PARAM_FORBIDDEN_KEYS`, `PARAM_SCOPE_KEYS`
   and `CALL_CONFIG_KEYS`. Action: the four live beside `NodeCall`, their nine importers re-pointed.
@@ -679,58 +671,30 @@ plan/apply pair and a temporary locked through its replace. Left:
 
 ### cfg-2 (what cfg left at landing 50; the re-key window)
 
-cfg landed the one layered-document fold (`domain/layer_fold.py`) and every door laying through it. Left:
-the defaults' one home (about 40 config constructions and the `exclude_defaults` identity re-key), the
-patch check spelled once, the browser's "" handling and the `steered*` memory as a fold layer.
+cfg landed the one layered-document fold (`domain/layer_fold.py`) and every door laying through it;
+cfg-2 laid every door's patch through one wire rule and every campaign default into `defaults.yaml`,
+and derived the knob couplings from each member's draws and the escalation ladder.
 
-- **A proposal carries the overlay before it is stripped**: `node_context.py:629` builds
-  `Proposal(overlay=asked)` from the unstripped overlay, so a hallucinated node reaches
-  `l1.py::parse_population` and `PipelineParams.overlaid`'s heal is load-bearing. Action: `Proposal`
-  carries `carried_writes`' stripped config. This moves L1's conviction checks, and then the patch check
-  is spelled once and raises. **Rides with:** cfg-2.
-- **The merge rule is chosen by the door, not declared by the document**: "" means unchanged,
-  emptied, no write, reset or inherit by site; the patch check is spelled about five times, healing in
-  some and raising in others. Action: the `steered*` memory and the browser's "" handling go. About 58
-  of the engine's 611 `dict[str, Any]` sites are node-config bags, the same overlay typed two ways
-  (`dict[str, NodeCall]` on `CycleSeed`, `dict[str, dict[str, Any]]` on `ForkSeed`): each becomes the
-  one typed document. It closes rk-run's cleared-steer-field and relabel rows, admit-2's untyped steer
-  and retired-knob rows, ren 8's node-config census and the pipeline-switch row by explicit layer
-  names. **Rides with:** cfg.
-- **Target-prompt field order is a shared constant**: `domain/CLAUDE.md` rules that field order is
-  the node's (`NodePromptInfo.fields`), never a shared constant, yet `optimizer_template.py::PROMPT_FIELDS`
-  orders a target's parts (`pipeline_responses.py:341`, the library's `suits`) and seeds a connector's
-  fields (`connectors/dspy_module.py:413`). Action: each reader takes the node's own field list off the
-  one document. **Rides with:** cfg. **Re-test:** `git grep -c PROMPT_FIELDS -- promptpotter/connectors
-  promptpotter/application/pipeline_responses.py` is 0.
-- **Knob couplings are hand-written, and `CampaignConfig` has no cross-validator** (a feature-interaction
-  pass; reported unless ✓): `shots_without_demo_pool` is declared on capo `few_shot` only, not `capo_init`
-  or potter `l1_generate`; `couplings.py` has no escalation row (ladder `l1` with rebase, reelect or
-  patiences set is inert); `recombine` is priced into `_walk_ceiling` whatever its host, refusing an arm
-  over children that cannot exist (`potter/members.py:273`, `preflight.py:312`); the degradation
-  coupling tests `== 0` where the code branches on `> 0` and the field is unbounded (`knobs.py:214`,
-  `classification.py:109`, `campaign_config.py:212`); `exclude_nodes` silently drops a narrowing or
-  overlay on the excluded node; `DeterminismClamp.route_order` is laid on every optimizer call
-  (`llm_call.py:167`), skipping the rule that a route names one model's hosts (`pipeline_params.py:215`).
-  Action: couplings derived from each member's `draws` and the ladder enum; `degradation_threshold`
-  bounded 0..1; one `CampaignConfig` validator refusing a narrowing or overlay on an excluded node; the
-  clamp's route keyed by model. **Rides with:** cfg.
-- **A `--config` budget means three things, and a value is typed two ways** (✓): `new.py:277-279` pops
-  the declaration's budget to bound only this launch, REST answers 422 (`draft_edit.py:31-43`), and
-  embedded makes it the standing budget (`embedded_run.py:149`) (root: `ConfigLayers.of` alone decides,
-  the CLI's pop goes); reported, `--set` types values as YAML (`new.py:93-96`) and `--steer` as JSON
-  (`launching.py:128-135`), so `--set k=yes` stays the string "yes" while `--steer` refuses it.
-  **Rides with:** cfg.
-- **The campaign default layer has two homes** (✓): `assets/datasets/defaults.yaml` holds three keys
-  (`scoring`, `degradation_threshold`, `budget.rounds`), and `degradation_threshold` is `Field(...)`,
-  required, at `campaign_config.py:212`; about twenty knobs default in `CampaignConfig` field defaults:
-  `sp_budget_origin=40` (`:308`), `elimination_n_min=6` (`:223`), lives 2/4, judges' temperature 0.0,
-  `hard_sample_order`, `panel_gate` / `origin_gate` strict, `lift_reference`, `arm_gate` off,
-  `enable_2pl_graduation`, `bench_trigger`, `task_framing`, `display_metric`, `dataset_split`. No rule
-  says which goes where, against `architecture.md` §0.5 ("never code", the contract the code is fixed to)
-  and `assets/datasets/CLAUDE.md:7` (the definition chain shows every default). Action: every campaign
-  default lives in `assets/datasets/defaults.yaml`, and each `CampaignConfig` field it covers becomes
-  required, as `degradation_threshold` is. **Rides with:** cfg (a re-key when a cell hashes the merged
-  document). **Re-test:** no `CampaignConfig` field outside the per-run inputs carries a default.
+- **The node document is typed two ways and the L2 steer is a side memory**: every door now parses a
+  patch through `layer_fold.py::wire_patch`, but L2's steer is read through `L2Memory.steered` /
+  `steered_layout` beside the fold, not as a named layer of `l1_generate`'s config, and about 58 of
+  the engine's `dict[str, Any]` sites are node-config bags (`dict[str, NodeCall]` on `CycleSeed`,
+  `dict[str, dict[str, Any]]` on `ForkSeed`, which carries a null clear and text a `NodeCall` refuses
+  before the schema types it). Action: one typed node document with knobs a view on it; the steer a
+  named layer. It closes ren 8's node-config census and the pipeline-switch row. **Rides with:** cfg.
+- **A sub-model's knobs still default in code**: every `CampaignConfig` / `OptimizationConfig` knob's
+  default lives in `assets/datasets/defaults.yaml` (`authored.py::defaults_config`), but a knob inside
+  a nested model keeps a code default the file never shows: `LivesConfig` start 2 / cap 4,
+  `JudgeSpec.temperature` 0.0, and `campaign_config.py::over_the_default`'s budget (usd 0.025, rounds
+  50) laid under every budget a layer names. Action: each into `defaults.yaml`, its field required.
+  **Rides with:** cfg. **Re-test:** no field of a model `CampaignConfig` nests carries a valued default.
+- **Potter's demo axis is dead wherever a dataset holds out no demo pool**: the derived coupling
+  `l1_generate.shots_without_demo_pool` (`application/knobs.py::_draw_couplings`) now badges every default potter
+  campaign, because `defaults.yaml` holds out no `dataset_split.demo` and only justlogic declares one
+  (`demo: 50`), while `l1_generate.k_max` is 5. The badge is true; the default is the fork. Action
+  (operator's call): hold out a demo split by default (every split re-keys, search loses rows) or drop
+  the axis from the default (`k_max: 0`, re-keys potter). **Re-test:** a default potter campaign on a
+  shipped dataset raises no `inert` coupling.
 
 ### batch/26 · rk-dec
 
