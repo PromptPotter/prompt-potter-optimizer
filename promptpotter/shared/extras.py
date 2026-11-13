@@ -19,7 +19,6 @@ class Extra(StrEnum):
     EXCEL = "excel"
     HARBOR = "harbor"
     MCP = "mcp"
-    OBSERVABILITY = "observability"
 
 
 _MARKER = re.compile(r'extra\s*==\s*"([^"]+)"')

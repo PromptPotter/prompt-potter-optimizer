@@ -788,13 +788,14 @@ async def paid_pass(
         ):
             yield book
     except BaseException as exc:
-        start.release(exc)
         if holding is None:
+            start.release(exc)
             raise
         try:
-            # Taken only on the stop it made on it; the release voids any other.
+            # Taken only on the stop it made on it, while its job still holds; the release voids any other.
             taken = holding.control.take_pause() if launch_interrupted(exc) else None
         finally:
+            start.release(exc)
             holding.release()
         if taken is not None:
             raise PassStoppedError(

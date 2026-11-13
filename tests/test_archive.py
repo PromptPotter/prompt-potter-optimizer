@@ -192,6 +192,7 @@ from promptpotter.infrastructure.store.io import (
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, campaigns_root_dir_for
 from promptpotter.infrastructure.store.measurement_archive import (
+    ArchiveFile,
     MeasurementArchive,
     ReplayFeed,
     config_key,
@@ -391,7 +392,11 @@ def test_the_archive_on_disk_keeps_every_paid_answer(built_stores: Stores) -> No
     )
     described = {e.config_key for e in archive.list_all(dataset_hash="kept")}
     assert described == {config_key(LLM_ONLY), config_key(other)}
-    assert archive.reindex() == {"indexed": 2, "undescribed": 0}
+    index = archive.path(ArchiveFile.INDEX)
+    index.write_bytes(b"")
+    assert archive.reindex(apply=False) == {"indexed": 2, "undescribed": 0}
+    assert index.read_bytes() == b"", "a reindex that was not asked to apply wrote the index"
+    assert archive.reindex(apply=True) == {"indexed": 2, "undescribed": 0}
     assert {e.config_key for e in archive.list_all(dataset_hash="kept")} == described
     assert archive.population(entry) == held, "reindex destroyed an answer"
     assert all(archive.answer(ref) is not None for ref in refs), "reindex lost an address"
@@ -431,7 +436,7 @@ def test_a_reindex_beside_a_run_in_another_process_refuses_naming_its_cycle(
     finally:
         run.stdin.close()
         run.wait()
-    assert reindex_measurement_archive(built_stores) == {"indexed": 0, "undescribed": 0}
+    assert reindex_measurement_archive(built_stores, apply=True) == {"indexed": 0, "undescribed": 0}
 
 
 # Each step reads on from where the feed's last advance left it.
@@ -466,7 +471,7 @@ def test_a_reader_tailing_a_cell_file_rewritten_under_it_skips_no_answer(
     assert cells.stat().st_size < read_to
     assert set(feed.advance()) == {"k4"}, "an answer filed after the rewrite was skipped"
     assert reader.entry(file_key, "reidx") is not None
-    archive.reindex()
+    archive.reindex(apply=True)
     _bank(5, dataset_hash="reidx-wide")
     assert reader.entry(file_key, "reidx-wide") is not None, "an index entry was skipped"
     # The other process files between this writer's look at the file and its own append.

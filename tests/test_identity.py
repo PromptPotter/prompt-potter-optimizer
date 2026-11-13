@@ -70,7 +70,7 @@ from promptpotter.application.bench.task_context import (
     committed_task_context,
 )
 from promptpotter.application.commands import launching, origin_resolving
-from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher, Opened
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.datasets import (
     ingest,
@@ -3146,9 +3146,9 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     folding: list[str] = []
     voids = Stores.void_inbox
 
-    def void_after_a_pause(held: Stores, hop: CycleHop, *, before: float | None = None) -> None:
+    def void_after_a_pause(held: Stores, hop: CycleHop, *, sparing: str | None = None) -> None:
         folding.append(pause("fold"))
-        voids(held, hop, before=before)
+        voids(held, hop, sparing=sparing)
 
     with monkeypatch.context() as filing:
         filing.setattr(Stores, "void_inbox", void_after_a_pause)
@@ -3156,10 +3156,10 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     assert read_active_pointer(stores.base_dir) == opened.hop, (
         "a run held its cycle, and the latest launch names another"
     )
-    queue.cancel_queued(claiming.job_id)
     assert [acked(claimed), acked(folding[0])] == ["accepted"] * 2, (
         "the launch voided a pause filed under its own claim or hold"
     )
+    queue.cancel_queued(claiming.job_id)
     with LedgerIndex.of(wired_ledger.path).projecting() as joiner:
         assert joiner.add(DashboardCheckout(root_dir)) is observers.dashboard, (
             "a second holder folded a dashboard beside the run's, each writing its own file"
@@ -3225,6 +3225,49 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
         "a run whose exit unwound kept its ledger's projections or its cycle"
     )
     assert not drained.called, "a run that raised drained its dashboard on the way out"
+
+
+def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(
+    built_stores: Stores, decl: _Declared, held: _Held
+) -> None:
+    # One journey: the pause run R0 admitted lands its accept after R1 took the cycle, and only
+    # R0's job releasing ends it for its filer.
+    stores = built_stores
+    opened, held_campaign = held
+    launched = effective_config(decl.declared)
+    wired = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
+    selected = select_optimizer(launched.optimization)
+    declare_run_wiring(opened, launched, wired, campaign=held_campaign, selected=selected)
+    queue = JobRegistry(stores.jobs_dir, capacity=lambda _live: 0)
+    address = {"campaign_id": opened.hop.campaign_id, "cycle_id": opened.hop.cycle_id}
+
+    def launch() -> tuple[str, RunObservers]:
+        (job,) = request_jobs(
+            stores=stores, job_registry=queue, holder=CampaignLaunch("ds1"), hop=opened.hop
+        )
+        return job.job_id, build_run_observers(session=opened, campaign_config=launched)
+
+    def pause(key: str) -> Opened[object, Any]:
+        call = CommandCall(PauseCyclePayload(**address), key)
+        return asyncio.run(CommandDispatcher(stores).open(call))
+
+    first, r0 = launch()
+    late = pause("late")
+    declare_run_stop(opened, r0, StopReason.ROUNDS_BUDGET, interrupted_by=PauseCause.INTERRUPT)
+    r0.drain_all()
+    r0.release()
+    _, r1 = launch()
+    asyncio.run(late.act)
+    command = late.accepted.command_id
+    assert not r1.hold.control.pause_requested(), "a run took a pause admitted against another hold"
+    queue.cancel_queued(first)
+    assert stores.commands.book().status(command) == "voided", (
+        "a pause whose hold released untaken reads as standing for a run forever"
+    )
+    own = pause("own")
+    asyncio.run(own.act)
+    assert r1.hold.control.pause_requested(), "a run missed a pause admitted against its own hold"
+    r1.release()
 
 
 def test_a_projection_that_cannot_write_is_one_stale_file_warning(tmp_path: Path) -> None:

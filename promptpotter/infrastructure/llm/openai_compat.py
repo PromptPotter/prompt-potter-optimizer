@@ -95,26 +95,23 @@ class _Choice(BaseModel):
     finish_reason: str | None = None
 
 
-class ChatReply(BaseModel):
-    model: str
-    choices: list[_Choice] = Field(default_factory=list)
+class ReportedUsage(BaseModel):
+    """An OpenAI-shaped ``usage`` block: the one reader of it for every connector's bill."""
+
     # Every `usage` names its prompt count, so its absence is the reply's: a bill that never came.
-    prompt_tokens: int | None = Field(None, validation_alias=AliasPath("usage", "prompt_tokens"))
-    completion_tokens: int | None = Field(
-        None, validation_alias=AliasPath("usage", "completion_tokens")
-    )
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
     reasoning_tokens: int | None = Field(
-        None, validation_alias=AliasPath("usage", "completion_tokens_details", "reasoning_tokens")
+        None, validation_alias=AliasPath("completion_tokens_details", "reasoning_tokens")
     )
     cached_tokens: int | None = Field(
-        None, validation_alias=AliasPath("usage", "prompt_tokens_details", "cached_tokens")
+        None, validation_alias=AliasPath("prompt_tokens_details", "cached_tokens")
     )
     cache_write_tokens: int | None = Field(
-        None, validation_alias=AliasPath("usage", "prompt_tokens_details", "cache_write_tokens")
+        None, validation_alias=AliasPath("prompt_tokens_details", "cache_write_tokens")
     )
     # ``None`` where the provider reports none (Groq, OpenAI) — never a zero nobody measured.
-    cost: float | None = Field(None, validation_alias=AliasPath("usage", "cost"))
-    served_by: str | None = Field(None, validation_alias="provider")
+    cost: float | None = None
 
     @property
     def tokens(self) -> TokenAccount:
@@ -126,8 +123,23 @@ class ChatReply(BaseModel):
             cache_write=self.cache_write_tokens or 0,
         )
 
+
+class ChatReply(BaseModel):
+    model: str
+    choices: list[_Choice] = Field(default_factory=list)
+    usage: ReportedUsage | None = None
+    served_by: str | None = Field(None, validation_alias="provider")
+
+    @property
+    def tokens(self) -> TokenAccount:
+        return TokenAccount() if self.usage is None else self.usage.tokens
+
+    @property
+    def cost(self) -> float | None:
+        return None if self.usage is None else self.usage.cost
+
     def bill(self) -> Billed | None:
-        if self.prompt_tokens is None:
+        if self.usage is None or self.usage.prompt_tokens is None:
             return None
         return Billed(self.tokens, self.cost, self.served_by, self.model)
 

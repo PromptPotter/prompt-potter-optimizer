@@ -33,11 +33,11 @@ from promptpotter.domain.command_kinds import (
     SubmitArmsPayload,
 )
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
-from promptpotter.infrastructure.holders import producer_alive
+from promptpotter.domain.run_records import StandingEffect
+from promptpotter.infrastructure.holders import hold_released, producer_alive
 from promptpotter.infrastructure.store.io import append_line, appending
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
 from promptpotter.infrastructure.store.read_model import LineIndex
-from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import ConflictError, IdempotencyKeyReusedError
 from promptpotter.shared.identity import Principal
 
@@ -52,6 +52,8 @@ class PauseAsk(NamedTuple):
     command_id: str
     issued_by: Principal
     at: str
+    # The hold a pause stands for (`StandingEffect`); ``None`` on a `cancel`, which stands on its command.
+    hold: str | None
 
 
 class LookaheadAsk(NamedTuple):
@@ -64,10 +66,18 @@ class LookaheadAsk(NamedTuple):
 class Controls(NamedTuple):
     """A running loop's inbox: the loop commands on its cycle accepted and not yet taken."""
 
-    pause: PauseAsk | None = None
+    # The first pause standing for each hold, in log order.
+    pauses: tuple[PauseAsk, ...] = ()
     skips: tuple[str, ...] = ()
     lookahead: LookaheadAsk | None = None
     submissions: tuple[tuple[str, SubmitArmsPayload], ...] = ()
+
+    @property
+    def pause(self) -> PauseAsk | None:
+        return self.pauses[0] if self.pauses else None
+
+    def for_hold(self, hold: str | None) -> Controls:
+        return self._replace(pauses=tuple(p for p in self.pauses if p.hold == hold))
 
 
 def requested_lookahead(controls: Controls) -> int:
@@ -102,15 +112,16 @@ class _Inbox:
             case CommandRecord():
                 if event.kind in LOOP_KINDS:
                     self._asked[event.command_id] = event
-            case CommandAckRecord(command_id=command_id, status="accepted"):
+            case CommandAckRecord(command_id=command_id, status="accepted", effect=effect):
                 if asked := self._asked.pop(command_id, None):
-                    self._arm(asked)
+                    assert isinstance(effect, StandingEffect), "a loop command is accepted standing"
+                    self._arm(asked, effect.hold)
             case CommandAckRecord(command_id=command_id, status="rejected"):
                 self._asked.pop(command_id, None)
             case CommandAckRecord(command_id=command_id, status="applied"):
                 if asked := self._asked.pop(command_id, None):
                     # Applied with no accept before it: a look-ahead DISARM, nothing to take.
-                    self._arm(asked)
+                    self._arm(asked, None)
                 elif kind := self._kinds.pop(command_id, None):
                     self._take(command_id, kind, dropped=False)
             case CommandAckRecord(command_id=command_id):
@@ -118,15 +129,16 @@ class _Inbox:
                 if kind := self._kinds.pop(command_id, None):
                     self._take(command_id, kind, dropped=True)
 
-    def _arm(self, asked: CommandRecord) -> None:
+    def _arm(self, asked: CommandRecord, hold: str | None) -> None:
         command_id, held = asked.command_id, self._held
         kind = PAYLOAD_MODEL_FOR_KIND[asked.kind]
         assert issubclass(kind, LoopPayload), "only a kind in `LOOP_KINDS` is asked"
         match kind.model_validate(asked.payload):
             case PauseCyclePayload():
-                if held.pause is not None:
+                if any(p.hold == hold for p in held.pauses):
                     return
-                held = held._replace(pause=PauseAsk(command_id, asked.issued_by, asked.timestamp))
+                ask = PauseAsk(command_id, asked.issued_by, asked.timestamp, hold)
+                held = held._replace(pauses=(*held.pauses, ask))
             case SkipSearchpointPayload():
                 held = held._replace(skips=(*held.skips, command_id))
             case SubmitArmsPayload() as submitted:
@@ -147,7 +159,7 @@ class _Inbox:
     def _take(self, command_id: str, kind: type[LoopPayload], *, dropped: bool) -> None:
         held = self._held
         if kind is PauseCyclePayload:
-            held = held._replace(pause=None)
+            held = held._replace(pauses=tuple(p for p in held.pauses if p.command_id != command_id))
         elif kind is SkipSearchpointPayload:
             held = held._replace(skips=tuple(s for s in held.skips if s != command_id))
         elif kind is SubmitArmsPayload:
@@ -235,7 +247,7 @@ class _State:
                 target = str(asked.payload["command_id"])
                 standing = self.moved.get(target)
                 if standing is not None and (now := standing.at(line)) and now.status == "filed":
-                    ask = PauseAsk(row.command_id, asked.issued_by, asked.timestamp)
+                    ask = PauseAsk(row.command_id, asked.issued_by, asked.timestamp, None)
                     self.stopping.setdefault(target, _Versions()).set(line, ask)
             self._add(line, asked.subject, row)
 
@@ -281,12 +293,17 @@ class CommandBook:
         return None if moved is None else moved.at(self._line)
 
     def status(self, command_id: str) -> CommandStatus | None:
-        """A filing with no end reads ``cancelled`` once its filer is gone: its act died with it."""
+        """A filing with no end reads ``cancelled`` once its filer is gone: its act died with it.
+        A pause standing for a hold released untaken reads ``voided``: no run will take it."""
         if (moved := self._moved(command_id)) is None:
             return None
-        filer = self._state.filed[command_id][1].filer
-        if moved.status == "filed" and not producer_alive(self._jobs_dir, filer):
+        filed = self._state.filed[command_id][1]
+        if moved.status == "filed" and not producer_alive(self._jobs_dir, filed.filer):
             return "cancelled"
+        if moved.status == "accepted" and filed.kind == CommandKind.PAUSE:
+            assert moved.end is not None and isinstance(moved.end.effect, StandingEffect)
+            if hold_released(self._jobs_dir, moved.end.effect.hold):
+                return "voided"
         return moved.status
 
     def end(self, command_id: str) -> CommandAckRecord | None:
@@ -308,12 +325,16 @@ class CommandBook:
         return tuple(events if held is None else [*events, *held.upto(self._line)])
 
     def controls(self, subject: Subject) -> Controls:
+        """Less each pause whose hold is released: it stands for that hold alone."""
         held = self._state.inboxes.get(self._spelled(subject))
-        return (None if held is None else held[1].at(self._line)) or Controls()
+        controls = (None if held is None else held[1].at(self._line)) or Controls()
+        live = tuple(p for p in controls.pauses if not hold_released(self._jobs_dir, p.hold))
+        return controls if live == controls.pauses else controls._replace(pauses=live)
 
-    def untaken(self, subject: Subject, *, before: float | None = None) -> list[str]:
+    def untaken(self, subject: Subject, *, sparing: str | None = None) -> list[str]:
         """The loop commands on *subject* accepted and never taken, less an ``auto`` look-ahead,
-        which is a mode, filed before epoch *before* where given: what a run boundary voids."""
+        which is a mode, and less those standing for the hold *sparing* names: what a run
+        boundary voids."""
         kept = self.controls(subject).lookahead
         keep = kept.command_id if kept is not None and kept.auto else None
         return [
@@ -323,8 +344,13 @@ class CommandBook:
             and record.kind in LOOP_KINDS
             and record.command_id != keep
             and self.status(record.command_id) == "accepted"
-            and (before is None or (epoch_seconds(record.timestamp) or 0.0) < before)
+            and (sparing is None or self._standing_for(record.command_id) != sparing)
         ]
+
+    def _standing_for(self, command_id: str) -> str | None:
+        end = self.end(command_id)
+        assert end is not None and isinstance(end.effect, StandingEffect), "accepted standing"
+        return end.effect.hold
 
     def keyed(
         self, subject: str, kind: str, act_digest: str, idempotency_key: str
@@ -425,10 +451,10 @@ class CommandLog:
     def ack(self, command_id: str, status: CommandAckStatus, detail: str = "") -> None:
         self.append(CommandAckRecord(command_id=command_id, status=status, detail=detail))
 
-    def void(self, subject: Subject, detail: str, *, before: float | None = None) -> None:
-        """A run boundary: every loop command *subject* accepted, filed before epoch *before* where
-        given, and the run never took."""
-        untaken = self.book().untaken(subject, before=before)
+    def void(self, subject: Subject, detail: str, *, sparing: str | None = None) -> None:
+        """A run boundary: every loop command *subject* accepted and the run never took, less those
+        standing for the hold *sparing* names."""
+        untaken = self.book().untaken(subject, sparing=sparing)
         if untaken:
             self.append(
                 *(CommandAckRecord(command_id=c, status="voided", detail=detail) for c in untaken)

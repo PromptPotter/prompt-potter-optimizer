@@ -756,6 +756,14 @@ class NoEffect(FrozenModel):
     kind: Literal["none"] = "none"
 
 
+class StandingEffect(FrozenModel):
+    """A loop command accepted for the hold it was admitted against: the job holding its cycle,
+    ``None`` where the cycle lock alone holds it."""
+
+    kind: Literal["standing"] = "standing"
+    hold: str | None
+
+
 class DraftOpenedEffect(FrozenModel):
     """A check-in draft opened by upload, dataset or origin: the draft a retry under its key answers."""
 

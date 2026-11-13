@@ -49,6 +49,11 @@ if sys.platform == "win32":
     def _sync_dir(path: Path) -> None:
         """Windows opens no directory to sync; NTFS journals the rename itself."""
 
+    def _land(f: IO[bytes], tmp: str, path: Path) -> None:
+        # Windows replaces only a closed file, so the lock lapses before the replace.
+        f.close()
+        _atomic_replace(tmp, path)
+
 else:
     import fcntl
 
@@ -84,6 +89,10 @@ else:
             os.fsync(fd)
         finally:
             os.close(fd)
+
+    def _land(_f: IO[bytes], tmp: str, path: Path) -> None:
+        # The file stays open, so its lock holds through the replace.
+        _atomic_replace(tmp, path)
 
 
 def validate_path_component(name: str) -> str:
@@ -235,16 +244,17 @@ def _synced(f: IO[Any]) -> None:
 
 def write_bytes(path: Path, data: bytes, *, durable: bool = False) -> None:
     """*durable* (a `data_root.py::Kind.durable` row's writer) fsyncs the file before the replace and
-    its directory after, so a power loss never brings it back empty; run data stays fast."""
+    its directory after, so a power loss never brings it back empty; run data stays fast. The
+    temporary's lock holds from its creation to the replace on POSIX, so a wipe reads it as a write in
+    flight; on Windows it lapses at the close, and a reset in that gap unlinks the temporary."""
     fd, tmp = _tmp_beside(path)
-    # Held until the file closes, so a wipe reads the temporary as a write in flight.
     _try_lock(fd)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             if durable:
                 _synced(f)
-        _atomic_replace(tmp, path)
+            _land(f, tmp, path)
     except Exception:
         with contextlib.suppress(OSError):
             os.unlink(tmp)

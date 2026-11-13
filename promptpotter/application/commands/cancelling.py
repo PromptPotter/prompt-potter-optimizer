@@ -37,7 +37,7 @@ async def cancel(dispatched: Dispatched[CancelPayload]) -> Applier[object]:
                 await dispatcher.dispatch(act)
         elif owned.status == "filed" and kind not in _PASS_KINDS:
             raise TaskUncancellableError(f"{kind} acts to its end; ask again once it ends")
-        elif owned.end is not None and owned.end.status == "accepted":
+        elif owned.status == "accepted":
             raise TaskUncancellableError(f"{kind} stands for its loop, which takes it")
 
     return Applier.silent(_ask)

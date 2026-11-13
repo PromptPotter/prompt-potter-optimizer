@@ -59,7 +59,7 @@ def _render_inventory(inv: ArchiveInventory, *, dataset: str | None) -> str:
     if inv.orphan_index_rows:
         lines.append(
             f"\n{inv.orphan_index_rows} index row(s) have no answer behind them — a claim rather "
-            "than a measurement. `reindex` clears them."
+            "than a measurement. `reindex --apply` clears them."
         )
     if inv.archive_writers:
         lines.append(

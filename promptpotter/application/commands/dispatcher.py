@@ -34,7 +34,7 @@ from promptpotter.domain.command_kinds import (
     LinePayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject, decode_cycle_path
-from promptpotter.domain.run_records import LaunchAnswer, NoEffect
+from promptpotter.domain.run_records import LaunchAnswer, NoEffect, StandingEffect
 from promptpotter.infrastructure.producer_lock import this_producer
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import (
@@ -156,12 +156,17 @@ class Applier[R]:
         return Applier(run)
 
     @staticmethod
-    def for_loop(refusal: str) -> Applier[object]:
+    def for_loop(dispatched: DispatchedToCycle[Any], refusal: str) -> Applier[object]:
+        """Stamped with the hold read beside *refusal*: a run takes only a pause of its own."""
+        held = dispatched.dispatcher.stores.campaigns.holder(dispatched.hop)
+        job = None if held is None else held.job
+        standing = StandingEffect(hold=None if job is None else job.job_id)
+
         async def _guard() -> None:
             if refusal:
                 raise RejectedError(refusal)
 
-        return Applier(_guard, ack="accepted")
+        return Applier(_guard, effect_fn=lambda _: standing, ack="accepted")
 
     @staticmethod
     def refusing(reason: str) -> Applier[object]:

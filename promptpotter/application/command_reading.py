@@ -145,6 +145,8 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
         status, said = "working", f"{filed.kind}: running"
     else:
         match end.status:
+            case "accepted" if owned.status == "voided":
+                status, said = "cancelled", f"{filed.kind}: its run released the cycle untaken"
             case "accepted":
                 status, said = "working", f"{filed.kind}: accepted, standing for its loop"
             case "applied":

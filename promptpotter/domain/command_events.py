@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Self, get_args
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, model_validator
 
 from promptpotter.domain.cycle_paths import Subject
 from promptpotter.domain.refusal import Refusal
@@ -14,6 +14,7 @@ from promptpotter.domain.run_records import (
     DraftOpenedEffect,
     LaunchedEffect,
     NoEffect,
+    StandingEffect,
 )
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import utcnow_iso
@@ -68,7 +69,7 @@ class CommandRecord(FrozenModel):
 
 
 CommandEffect = Annotated[
-    NoEffect | DraftOpenedEffect | LaunchedEffect, Field(discriminator="kind")
+    NoEffect | StandingEffect | DraftOpenedEffect | LaunchedEffect, Field(discriminator="kind")
 ]
 
 
@@ -92,8 +93,8 @@ class KeptRefusal(FrozenModel):
 
 
 class CommandAckRecord(FrozenModel):
-    """``applied`` = it HAPPENED; a loop command is ``accepted`` first, and stays so if untaken
-    until the run boundary ``voided`` it. ``cancelled``: its act was interrupted. A ``rejected``
+    """``applied`` = it HAPPENED; a loop command is ``accepted`` first, for the hold its
+    `StandingEffect` names, and stays so if untaken until the run boundary ``voided`` it. ``cancelled``: its act was interrupted. A ``rejected``
     act keeps the refusal its door served, and a task kind's applied act its modelled answer
     (`dispatcher.py::keeps_answer`): what its task's result and its retry answer."""
 
@@ -105,6 +106,12 @@ class CommandAckRecord(FrozenModel):
     answer: dict[str, Any] | None = None
     refusal: KeptRefusal | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
+
+    @model_validator(mode="after")
+    def _accepted_names_what_stands(self) -> Self:
+        if self.status == "accepted" and isinstance(self.effect, NoEffect):
+            raise ValueError("an accept names the hold it stands for or the launch it admitted")
+        return self
 
 
 class CommandLanded(FrozenModel):

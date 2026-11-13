@@ -368,8 +368,10 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "reindex:cmd_reindex",
         terminal_only="disk repair of the data root this process opens",
         help="Rebuild the measurement index (measurements/index.jsonl) from the detail "
-        "files and GC orphaned runs. The index is derived, so this loses nothing — use "
-        "after a crash mid-append or to reclaim orphaned bytes. Pure disk work, zero spend.",
+        "files, dropping index rows no detail file stands behind. The index is derived, so this "
+        "loses nothing — use after a crash mid-append. Refuses while any cycle can still append. "
+        "Dry-run by default: names what it would index, writes nothing. Pure disk work, zero spend.",
+        args=(Arg("--apply", action="store_true", help="Write (default: report only)."),),
         needs_registries=False,
     ),
     Verb(

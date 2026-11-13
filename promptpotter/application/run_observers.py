@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -38,7 +37,6 @@ from promptpotter.infrastructure.projections.live_dashboard.projection import Da
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import instrument_depth
 from promptpotter.shared.run_scope import rescope, run_scope
 
@@ -158,14 +156,6 @@ def build_run_observers(
     forked_from: RunObservers | None = None,
 ) -> RunObservers:
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
-    # A launch holds its cycle from its job's first live claim, else from here: a pause filed since
-    # is its to take, a QUEUED one included.
-    holder = session.store.campaigns.holder(session.hop)
-    held_since = (
-        epoch_seconds(holder.since)
-        if holder is not None and not holder.declared and holder.since is not None
-        else None
-    ) or time.time()
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
     hold = CycleHold(session.store, session.hop, scoring_pass=False)
     ledger = CycleEventLog.open(cycle_dir)
@@ -184,9 +174,10 @@ def build_run_observers(
         )
         # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
         observers.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
-        # A launch is a run boundary; the run a gate held resumes, what it was asked standing.
+        # A launch is a run boundary, sparing what was asked of its own hold, a QUEUED claim's
+        # included; the run a gate held resumes, what it was asked standing.
         if prior is None or prior.run_phase is not RunPhase.GATE:
-            session.store.void_inbox(session.hop, before=held_since)
+            session.store.void_inbox(session.hop, sparing=hold.control.hold)
         # The latest launch is the latest run held: a mint, a fork or a resume, from every door.
         save_active_pointer(session.store.base_dir, session.hop)
     except BaseException:

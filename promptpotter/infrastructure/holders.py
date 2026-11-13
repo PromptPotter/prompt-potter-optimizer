@@ -68,11 +68,18 @@ def in_flight(jobs_dir: Path, job: Job) -> bool:
     return not job.released and producer_alive(jobs_dir, job.producer_id)
 
 
+def hold_released(jobs_dir: Path, hold: str | None) -> bool:
+    """The job *hold* names is no longer in flight. A hold no job names (the cycle lock alone)
+    ends only at its run boundary's void."""
+    if hold is None:
+        return False
+    job = read_job(job_path(jobs_dir, hold))
+    return job is None or not in_flight(jobs_dir, job)
+
+
 class CycleHolder(NamedTuple):
     # ``None``: the cycle lock is held, and no live job's hold names the cycle.
     job: Job | None
-    # Since its job's hold of the cycle: a pause filed since is its run's to take.
-    since: str | None
     # Its run declared itself since: the cycle lock is its hold from then on.
     declared: bool
 
@@ -98,7 +105,6 @@ def holder_of(jobs_dir: Path, cycle_dir: Path) -> CycleHolder | None:
     held = scan_cycle_hold(CycleLayout(cycle_dir).ledger)
     job = None if held is None else read_job(job_path(jobs_dir, held.hold.hold_id))
     job = job if job is not None and in_flight(jobs_dir, job) else None
-    since = None if held is None else held.hold.timestamp
     if job is not None and held is not None and not held.declared:
-        return CycleHolder(job, since, declared=False)
-    return CycleHolder(job, since, declared=True) if producer_lock.cycle_held(cycle_dir) else None
+        return CycleHolder(job, declared=False)
+    return CycleHolder(job, declared=True) if producer_lock.cycle_held(cycle_dir) else None

@@ -15,6 +15,7 @@ from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
 from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
+from promptpotter.infrastructure.llm.openai_compat import ReportedUsage
 from promptpotter.infrastructure.llm.pricing import priced_pair
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import drawn_budget, held_wait
@@ -191,13 +192,8 @@ class _CellSends:
         """``True`` where the send goes again."""
         bill = None
         if totals:
-            usage = TokenAccount(
-                input=sum(int(u.get("prompt_tokens") or 0) for u in totals.values()),
-                output=sum(int(u.get("completion_tokens") or 0) for u in totals.values()),
-                reasoning=sum(
-                    int((u.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0)
-                    for u in totals.values()
-                ),
+            usage = sum(
+                (ReportedUsage.model_validate(u).tokens for u in totals.values()), TokenAccount()
             )
             self.used += usage
             bill = Billed(usage, None)

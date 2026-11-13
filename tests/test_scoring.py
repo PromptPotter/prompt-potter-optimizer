@@ -173,6 +173,7 @@ from promptpotter.application.runner.bench import (
 )
 from promptpotter.application.runner.entry import build_cycle_result
 from promptpotter.application.runner.inner.tasks import inner_spawn_of
+from promptpotter.application.runner.loop import open_origin_round
 from promptpotter.application.runner.round import (
     ReferencePairs,
     announce_opening,
@@ -359,7 +360,7 @@ from promptpotter.domain.scoring import (
     turn_scalars,
 )
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.domain.spend import Budget, TokenUsageKind
+from promptpotter.domain.spend import Budget, SpendRollup, TokenUsageKind
 from promptpotter.domain.verification import (
     BenchPasses,
     NoiseBand,
@@ -1286,6 +1287,7 @@ def _peer_cycle(
     bench: int = 0,
     control: RunControl | None = None,
     book: SpendBook | None = None,
+    origin_replicates: int | None = None,
     **optimization: Any,
 ) -> Iterator[tuple[Cycle, CycleEventLog]]:
     """Bound as a run seam binds it; the backend answers right where ``solves`` says, errs on None."""
@@ -1354,6 +1356,7 @@ def _peer_cycle(
             hop=hop,
             origin=(origin, measured_origin),
             framing=TaskDecomposition(pipeline_purpose="Answer each query with its letter."),
+            origin_replicates=origin_replicates,
         )
         cycle, ledger = seated.cycle, seated.ledger
         with scoped(
@@ -2526,6 +2529,67 @@ def test_a_noise_band_stands_beside_the_recorded_level_of_exactly_the_rows_it_re
         assert band in [
             record.view for _, record in ledger.iter() if isinstance(record, PhaseRecord)
         ], "the band was not filed on its cycle's ledger"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorded_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    offline.llm.says = _bench_says
+    with _peer_cycle(
+        workspace(tmp_path / "replicated"),
+        _PEER_HOP,
+        monkeypatch,
+        "capo",
+        {"capo_init": {"config": {"size": 2, "k_max": 0}}},
+        lambda prompt, s: "OK" in prompt or s.id % 2 == 0,
+        origin_replicates=2,
+    ) as (cycle, ledger):
+        stores, peer = cycle.session.store, minted_campaign(_PEER_HOP)
+        stores.campaigns.create_campaign(peer)
+        minted_dataset(stores, peer)
+        session = cycle.session
+        session.state.clock = LaunchClock.now()
+        # The origin's walk as INIT banks it, which the round file's cells name.
+        origin = cycle.origin_round.origin.individual
+        c0_arm = cycle.origin_round.panel[ArmKey(origin.id)]
+        ledger.append(RoundEnteredRecord(round=0))
+        ledger.append(
+            ArmRecord(
+                round=0,
+                arm=ArmKey(origin.id),
+                state=Proposed(role=c0_arm.role, slot=c0_arm.slot, individual=c0_arm.individual),
+            )
+        )
+        walked = list(session.state.scoring.partition.search)[:4]
+        with at_round(0):
+            c0 = asyncio.run(
+                score_search_point(
+                    cycle.points.measured(cycle.measured(origin.id)),
+                    walked,
+                    session,
+                    kind=MeasurementRole.ORIGIN,
+                    measured=origin.id,
+                )
+            )
+        cells = {ArmKey(origin.id): c0.sheet}
+        set_cycle(cycle, line=[cycle.origin_round.model_copy(update={"cells": cells})])
+        asyncio.run(open_origin_round(cycle, [], ledger, spend=SpendRollup()))
+        bands = [
+            record.view
+            for _, record in ledger.iter()
+            if isinstance(record, PhaseRecord)
+            and isinstance(record.view, VerificationGradedView)
+            and record.view.verification.kind is MeasurementRole.NOISE_FLOOR
+        ]
+    assert len(bands) == 1, "round 0 filed no band, or one per replicate"
+    (band,) = bands
+    assert isinstance(band.reading, NoiseBand) and len(band.reading.raw) == 2
+    rows = band.verification.sample_keys
+    assert sorted(rows) == sorted(s.key for s in walked), (
+        "the band re-scored rows round 0 never recorded"
+    )
+    assert len(band.verification.cells) == 2 * len(rows), "a replicate re-scored a partial set"
 
 
 @pytest.mark.usefixtures("optimizing_memory")

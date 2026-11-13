@@ -1282,6 +1282,8 @@ def _offline_run(_: Selection) -> Outcome:
 
 
 _EXTRA_ARG = re.compile(r"--extra[ =]([\w-]+)")
+# The extras code asks for by name (`require_extra`): each must be one pyproject.toml declares.
+_EXTRA_ENUM = REPO / "promptpotter" / "shared" / "extras.py"
 
 
 def _extras(_: Selection) -> Outcome:
@@ -1297,7 +1299,14 @@ def _extras(_: Selection) -> Outcome:
         for name in _EXTRA_ARG.findall(path.read_text(encoding="utf-8"))
     }
     asked |= {("gate.py", name) for name in _PINNED_EXTRAS}
-    gone = sorted(f"  {caller}: --extra {name}" for caller, name in asked if name not in known)
+    asked |= {
+        ("extras.py::Extra", member.value.value)
+        for cls in ast.parse(_EXTRA_ENUM.read_text(encoding="utf-8")).body
+        if isinstance(cls, ast.ClassDef) and cls.name == "Extra"
+        for member in cls.body
+        if isinstance(member, ast.Assign) and isinstance(member.value, ast.Constant)
+    }
+    gone = sorted(f"  {caller}: {name}" for caller, name in asked if name not in known)
     if gone:
         return 1, "not an extra in pyproject.toml:\n" + "\n".join(gone)
     return 0, ""
@@ -1321,7 +1330,13 @@ CHECKS: tuple[Check, ...] = (
         _extras,
         on_commit=True,
         light=True,
-        reads=("pyproject.toml", ".github/workflows/", "deploy-linux/", *_GATE),
+        reads=(
+            "pyproject.toml",
+            ".github/workflows/",
+            "deploy-linux/",
+            "promptpotter/shared/extras.py",
+            *_GATE,
+        ),
     ),
     Check(
         "layering",

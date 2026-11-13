@@ -85,7 +85,7 @@ Each file's contract is its model; this says only what the type cannot.
 
 **Ledger tail → `cycles` → process table by command line → only then mtimes.**
 
-1. **Ledger tail** (`.runtime/ledger.jsonl`) — the chronology; what the loop was asked is the account's `.workspace/commands.jsonl`, each `command`'s `command_ack`: `accepted` (armed), `applied` (taken), `rejected` (no loop will), `voided` (its run ended untaken), `cancelled` (its act was interrupted).
+1. **Ledger tail** (`.runtime/ledger.jsonl`) — the chronology; what the loop was asked is the account's `.workspace/commands.jsonl`, each `command`'s `command_ack`: `accepted` (armed, for the hold its `StandingEffect` names), `applied` (taken), `rejected` (no loop will), `voided` (its run ended untaken), `cancelled` (its act was interrupted).
 2. **`python -m promptpotter cycles`** — derived `run_phase`, the producer reading, the pause cause.
 3. **Process table, by command line** — which process holds the cycle.
 4. **Mtimes** — only to date what the above explained.

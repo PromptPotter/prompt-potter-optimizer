@@ -111,6 +111,8 @@ class RunControl:
     # The commands whose passes this control acts for, outermost first: a `cancel` of one is its
     # pause while that command acts, and of no other act on its cycle.
     acting: tuple[str, ...] = ()
+    # The job its run holds *cycle* under: a pause standing for another hold is never this run's.
+    hold: str | None = None
 
     def __post_init__(self) -> None:
         if self.commands is None and (self.cycle is not None or self.enclosing or self.acting):
@@ -121,7 +123,9 @@ class RunControl:
         return self.commands
 
     def _inbox(self) -> Controls:
-        return Controls() if self.cycle is None else self._log().book().controls(self.cycle)
+        if self.cycle is None:
+            return Controls()
+        return self._log().book().controls(self.cycle).for_hold(self.hold)
 
     def _outer_paused(self) -> Subject | None:
         """The innermost enclosing run a pause stands on."""
@@ -203,10 +207,14 @@ class CycleHold:
     ) -> None:
         self._stores, self._hop, self._pass = stores, hop, scoring_pass
         self._dir = stores.campaigns.cycle_dir(hop)
-        self.control = RunControl(
-            commands=stores.commands, cycle=stores.subject(hop), acting=acting
-        )
         (hold_pass if scoring_pass else hold_cycle)(self._dir)
+        held = stores.campaigns.holder(hop)
+        self.control = RunControl(
+            commands=stores.commands,
+            cycle=stores.subject(hop),
+            acting=acting,
+            hold=None if held is None or held.job is None else held.job.job_id,
+        )
 
     def release(self) -> None:
         try:

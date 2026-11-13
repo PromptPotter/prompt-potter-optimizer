@@ -188,6 +188,7 @@ from promptpotter.domain.run_records import (
     LaunchedJob,
     RunPhaseRecord,
     RunWiringRecord,
+    StandingEffect,
 )
 from promptpotter.domain.said import Said, pins
 from promptpotter.domain.search_point import TaskDecomposition
@@ -235,6 +236,7 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.run_state import derive_run_state, producer_attached
+from promptpotter.infrastructure.store import io as store_io
 from promptpotter.infrastructure.store.account_spend import campaign_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
 from promptpotter.infrastructure.store.data_root import Fate, classify
@@ -242,6 +244,7 @@ from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, re
 from promptpotter.infrastructure.store.io import (
     append_jsonl,
     take_lock,
+    write_bytes,
     write_json,
     write_jsonl,
     write_yaml,
@@ -2062,7 +2065,8 @@ def held_cycle(built_stores: Stores) -> _HeldCycle:
 
     def attached_alike() -> None:
         # Attachment reads no command: a standing pause moves it for no cycle, held, claimed or free.
-        asked = Controls(pause=PauseAsk("pause", acting_principal(built_stores.identity), "now"))
+        asker = acting_principal(built_stores.identity)
+        asked = Controls(pauses=(PauseAsk("pause", asker, "now", "job"),))
         held = built_stores.run_state(hop).producer.attached
         jobs = built_stores.jobs_dir
         assert (
@@ -2531,6 +2535,26 @@ def test_a_resets_plan_carries_its_refusal_of_a_held_draft_or_cycle_so_a_dry_run
     assert campaigns.iter_campaign_dirs(), "a refused reset dropped a campaign"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows replaces only a closed file")
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_reset_racing_a_write_before_its_replace_is_refused_and_the_write_lands_whole(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = built_stores.projects_root.parent / "racer.json"
+    replace = store_io._atomic_replace
+    raced: list[str] = []
+
+    def racing(tmp: str, path: Path) -> None:
+        with pytest.raises(ConflictError):
+            apply_reset(plan_reset(built_stores.projects_root, tenant_id=None, staged={}))
+        raced.append(tmp)
+        replace(tmp, path)
+
+    monkeypatch.setattr(store_io, "_atomic_replace", racing)
+    write_bytes(target, b"whole")
+    assert raced and target.read_bytes() == b"whole", "a reset in a write's gap cut the write"
+
+
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_reset_asks_again_at_its_act_and_never_refills_the_daily_launch_quota(
     built_stores: Stores, tmp_path: Path, held_cycle: _HeldCycle
@@ -2989,7 +3013,10 @@ def _read_as_owed(
         ended = folded(key)
         command_id = first(key)
         assert command_id is not None
-        stores.commands.append(CommandAckRecord(command_id=command_id, status="accepted"))
+        stray = CommandAckRecord(
+            command_id=command_id, status="accepted", effect=StandingEffect(hold=None)
+        )
+        stores.commands.append(stray)
         stores.commands.ack(command_id, "applied")
         if stores.commands.book().status(command_id) != ended[0]:
             wrong.append(f"{key}: ended {ended[0]}, moved by a stray ack")

@@ -534,7 +534,9 @@ class MeasurementArchive:
     def read_cold(self, file_key: str) -> list[MovedFields]:
         return read_file(self.cold_path(file_key), decode_cold) or []
 
-    def reindex(self) -> dict[str, int]:
+    def reindex(self, *, apply: bool) -> dict[str, int]:
+        if not apply:
+            return self._built_index()[1]
         counts = replace_lines(self._index_path(), self._built_index)
         self._invalidate()
         return counts

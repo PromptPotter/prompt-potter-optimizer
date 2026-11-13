@@ -182,7 +182,10 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
     observers.arm_spend_book(book)
     store = session.store
     session.state.control = replace(
-        session.state.control, commands=store.commands, cycle=store.subject(session.hop)
+        session.state.control,
+        commands=store.commands,
+        cycle=store.subject(session.hop),
+        hold=observers.hold.control.hold,
     )
     # The rate-limit countdown polls it too — the one blocking seam that otherwise ignores a pause.
     rescope(abort_check=session.state.control.pause_requested)

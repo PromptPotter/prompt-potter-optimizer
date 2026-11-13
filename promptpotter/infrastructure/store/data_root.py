@@ -532,8 +532,8 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
 )
 
 # `io.py` names every atomic write's temporary `.<random>.tmp`, beside the file it replaces, and
-# holds an OS lock on it until the write lands: first in `KINDS`, so a crashed write under a
-# survivor's tree is never read as the survivor.
+# holds an OS lock on it until the write lands (Windows: until its close): first in `KINDS`, so a
+# crashed write under a survivor's tree is never read as the survivor.
 ATOMIC_WRITE = Kind(
     "atomic write", _INSTALL, "**/.*.tmp", Fate.RUN, Opaque("a write a crash cut short")
 )

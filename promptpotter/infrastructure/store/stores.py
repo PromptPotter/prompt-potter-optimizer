@@ -104,11 +104,11 @@ class Stores:
         state = derive_run_state(self.campaigns.cycle_dir(hop), self.inbox(hop), self.jobs_dir)
         return state._replace(inner=self.inner)
 
-    def void_inbox(self, hop: CycleHop, *, before: float | None = None) -> None:
-        """A run boundary: what the cycle's loop was asked and never took stands no more, filed
-        before epoch *before* where given (a launch's cut-off is its live claim's)."""
-        detail = "run boundary" if before is None else "the launch"
-        self.commands.void(self.subject(hop), f"{detail} of {hop.cycle_id}", before=before)
+    def void_inbox(self, hop: CycleHop, *, sparing: str | None = None) -> None:
+        """A run boundary: what the cycle's loop was asked and never took stands no more, less
+        what stands for the hold *sparing* names (a launch's own)."""
+        detail = "run boundary" if sparing is None else "the launch"
+        self.commands.void(self.subject(hop), f"{detail} of {hop.cycle_id}", sparing=sparing)
 
     def declare_stop(
         self, hop: CycleHop, stop: RunPhaseRecord, *, error: ErrorRecord | None = None

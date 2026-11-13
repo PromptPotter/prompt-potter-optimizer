@@ -44,7 +44,7 @@ BASELINE = {
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 44,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
-    "models_lax": 7,
+    "models_lax": 8,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.
     "injections": 32,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a

@@ -112,13 +112,16 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   2026-11-13), the masthead id and setup line placed by it, and the phone walk's back step. **mob-3**
   queues behind the webapp-free chains: a one-row toolbar's hit area held to its row, and the walk
   server's world named by the gate, not a hand-set hash.
+- **landed 54:** passes-5 and holders-3: a pause stands for the hold it was filed against, one reader
+  of a reply's usage, `origin_replicates` tested in a run; `reindex` plans unless `--apply`, and an
+  atomic write's temporary stays locked through its replace. Every `Extra` names a declared extra.
+- **v0.8.20** is cut here (operator, 2026-11-13).
 - **cfg-2**: the defaults' one home, the patch check spelled once after a proposal carries the
   stripped overlay, the browser's "" handling.
-- **life-2**, **holders-3** and **passes-5** after it (passes-5: a pause stamped with its hold, the
-  noise floor's band at temperature 0, one send category, one usage reader). life-2: no blocking lock on the event loop, the server
-  composing what the CLI prints, a writer-kept live-jobs index, a served read naming a job file that
-  does not load, and no client left open by a withdrawn head-to-head or the tests. holders-3: `reindex`
-  planned before it is applied, and an atomic write's temporary locked through its replace.
+- **life-2** after it: no blocking lock on the event loop, the server composing what the CLI prints, a
+  writer-kept live-jobs index, a served read naming a job file that does not load, and no client left
+  open by a withdrawn head-to-head or the tests. **passes-6** (one send category, the usage the
+  connectors drop) rides with the chain that owns the LLM client's raise contract.
 - **rk-opt 10+:** the reply cache keyed on the schema sent, potter's renderers reading the node's own
   reads (`InjectionBundle` goes), one admit door per arm role for the catch-up pool, L1 told the rows to
   win from the parent's own information, a cell's optimizer in `domain/l4` terms with its cells resolved

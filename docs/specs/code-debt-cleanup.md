@@ -606,23 +606,6 @@ row it closes.
   `format.ts::shortId`, `compare/EvidenceCharts.tsx` and `evidence/read.py`. **Re-test:**
   `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
 
-### holders-3 (what holders-2 left at landing 51)
-
-holders-2 landed one death rule (`infrastructure/holders.py::in_flight`), durable SURVIVOR writes, a
-cell claim filed at publish, locked edits and maintenance verbs that ask the holders they race. Left:
-
-- **`reindex` has no dry run**: `archive_maintenance.py::reindex_measurement_archive` refuses beside a
-  live writer (`code=archive_writers`) but rebuilds the index the moment it is asked, while
-  `archive_maintenance.py::compact_measurement_archive` plans unless `apply`. Root: one plan/apply
-  pair, like compact. **Rides with:** holders-3. **Re-test:** a `reindex` without `--apply` writes
-  nothing and names what it would rebuild.
-- **An atomic write's temporary is unlocked between its close and its replace**:
-  `store/io.py::write_bytes` holds its `_try_lock` on the temporary only until `os.fdopen` closes it,
-  so `_atomic_replace` runs on an unlocked temporary; a reset in that gap unlinks it and the replace
-  raises, and on Windows a probe of an empty locked temporary may read it as unheld. Root: on POSIX
-  the lock is held through the replace. **Rides with:** holders-3. **Re-test:** a reset racing a write
-  between its close and its replace leaves the write whole.
-
 ### life-2 (what life left at landing 51)
 
 life landed the launch lifecycle as data (`domain/job.py`'s `LAUNCH_MOVES`, one `JobRegistry.move`),
@@ -670,28 +653,29 @@ client. Left:
   opener that owns its lifetime. **Rides with:** life-2. **Re-test:** after those three suites, a probe
   on `BackendClient` reads no open client.
 
-### passes-5 (what passes 3-4 left at landing 52)
+### passes-6 (what passes-5 and holders-3 left at landing 54)
 
-passes 3-4 landed one list campaign for the diagnostics, the origin's constant floor, a refused
-parameter's `Cut(Refused)`, and a retry acting once on holders' death rule. Left:
+passes-5 landed a pause standing for its hold and one reader of a reply's usage; holders-3 `reindex`'s
+plan/apply pair and a temporary locked through its replace. Left:
 
-- **A pause filed as a run releases reaches the next run** (✓, model-checked): a pause filed while run
-  R0 releases is applied by the NEXT run, though it predates that run's `held_since`, or reads "working:
-  accepted" forever. Action (verified in the model): each loop filing stamped with the hold it was
-  admitted against. **Rides with:** passes-5.
-- **The noise floor's band reads ±0 at temperature 0**: `scoring/passes.py`'s noise floor takes
-  `mean_ci` over `k` replicate composites, which a temperature-0 solver answers identically, so the
-  band serves ±0 and measures nothing about the noise. Root: the replicates differ by what the floor is
-  meant to measure (the panel's draw), or the pass refuses at temperature 0. **Rides with:** passes-5.
-- **`origin_replicates` has no in-run test**: the knob is priced and served, but no test runs a round 0
-  with replicates and reads its cells. **Rides with:** passes-5.
 - **A send's error category is decided twice**: `spend_book.py::_status_failure` classifies at the
-  send's close, and `failed_send` classifies again where a cell is built
-  (`sample_measurement.py:575,703`, `dspy_module.py:208`, `harbor.py:1224`). Root: the cell reads the
-  send's own outcome. **Rides with:** passes-5.
-- **Harbor's bill reads no reasoning tokens**: DSPy's bill reads
-  `completion_tokens_details.reasoning_tokens` (landing 52), and Harbor's does not. Root: one usage reader for
-  every connector's bill. **Rides with:** passes-5.
+  send's close, and the cell classifies the raised exception again (`sample_measurement.py::_known_failure`,
+  `measure_sample`'s except, `harbor.py::_AgentModel.call`). Root: the send raises a typed failure
+  carrying its `SendOutcome`, which changes what `openai_compat`'s client raises for every caller
+  (`judges/call.py` catches `httpx.HTTPError`; `infrastructure/backend.py::run_query`'s `raise_for_status` builds a
+  fresh exception after the send closed). **Rides with:** the chain owning the client's raise contract.
+- **A cell's step usage drops reasoning**: `connectors/dspy_module.py::step_tokens` and
+  `connectors/harbor.py::_step_tokens` build `StepUsage` without `reasoning`, though the field exists;
+  and `openai_compat.py::ReportedUsage.tokens` writes `cache_read=… or 0` where `TokenAccount` reads
+  `None` as no breakdown reported. Root: `StepUsage` is built from `ReportedUsage` alone.
+  **Rides with:** passes-6.
+- **A stale pause can read PAUSED between a run's lock release and its job's end**:
+  `infrastructure/run_state.py`'s `asked=inbox.pause` filters only on the hold being alive.
+  **Rides with:** life-2.
+- **Two tests fail under load, not under their claim**: `test_concurrent_account_edits_and_an_acceptance_all_survive`
+  raises `PermissionError` on `user.json` on Windows beside a second gate, and
+  `tests/test_security.py` is not collectable in a venv lacking the `mcp` extra; `tests/test_scoring.py::_peer_cycle`
+  files no round-0 cells, so a noise floor through it reads nothing. **Rides with:** passes-6.
 
 ### cfg-2 (what cfg left at landing 50; the re-key window)
 
@@ -1612,10 +1596,6 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 
 ### batch/31 · small
 
-- **An extra the package no longer declares**: `shared/extras.py::Extra.OBSERVABILITY` outlived the
-  Langfuse and MLflow sinks; nothing reads it and `missing()` would raise on it. Action: it goes, and a
-  check holds `Extra` equal to `pyproject.toml`'s extras less `api`, `jupyter`, `all` and `dev`.
-  **Rides with:** small. **Re-test:** `git grep -c OBSERVABILITY -- promptpotter` is 0.
 - **Two selectors override one pair identically**: `levi/members.py` and potter's `ThetaElection`
   (`potter/members.py`) each define `parent_cells` and `parent_read` as the panel's cells. Action: the
   `Selector` default. **Rides with:** small.
@@ -1632,9 +1612,8 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 - **Archive hygiene before the next bulk delete**: (1) reclaim, a dataset-scoped destructive `delete`,
   dry-run by default, refusing while a producer can append; (2) attribution, an L4 outer cell stamps the
   runs its inner campaign produced; (3) the entry-to-run lookup (which runs an archive entry serves,
-  so a delete names what it breaks; not `pipeline_schema.py::reach_map`, a node's reach); (4) `reindex`'s
-  help promises "GC orphaned runs" that `archive_maintenance.py::reindex_measurement_archive` does not
-  do, and says what it does (its dry run rides holders-3). **Rides with:** small 3. **Re-test:**
+  so a delete names what it breaks; not `pipeline_schema.py::reach_map`, a node's reach).
+  **Rides with:** small 3. **Re-test:**
   `compact-archive inventory`.
 - **An immutable record is written four ways**: `FrozenModel`, `StrictModel`, `NamedTuple` and frozen
   `dataclass`. Action: `docs/developer/conventions.md` names one per role (a record crossing a seam, a

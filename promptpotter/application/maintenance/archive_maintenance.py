@@ -234,7 +234,7 @@ class ArchiveInventory(StrictModel):
     """Index rows no answer stands behind.
 
     Such a row can be neither replayed nor read, so it is a claim rather than a measurement.
-    `reindex` is what clears them."""
+    `reindex --apply` is what clears them."""
     archive_writers: int = 0
     """Cycles that can still append. REPORTED, never a refusal: this pass writes nothing, and the
     numbers are wanted most while a campaign is still filling the store."""
@@ -535,8 +535,8 @@ def purge_cold_store(
     return _each_file(stores, cold, "purge", transform, apply=apply)
 
 
-def reindex_measurement_archive(stores: Stores) -> dict[str, int]:
-    """Refused, naming them, while a cycle can still append: its row would land in no index."""
+def reindex_measurement_archive(stores: Stores, *, apply: bool = False) -> dict[str, int]:
+    """Plans unless *apply*; refused, naming them, while a cycle can still append: its row would land in no index."""
     if writers := archive_writers(stores.shared_root):
         raise ConflictError(_writing(writers), code="archive_writers")
-    return stores.archive.reindex()
+    return stores.archive.reindex(apply=apply)
