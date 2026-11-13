@@ -9,7 +9,12 @@ from pathlib import Path
 
 from promptpotter.config.paths import ADMISSION_LOCK, LANDING_FILE
 from promptpotter.config.settings import CODE_REVISION, LOCK_TIMEOUT
-from promptpotter.infrastructure.store.io import read_text_optional, take_lock, write_text
+from promptpotter.infrastructure.store.io import (
+    read_text_optional,
+    refuse_on_event_loop,
+    take_lock,
+    write_text,
+)
 from promptpotter.shared.errors import ServiceUnavailableError
 
 
@@ -33,6 +38,7 @@ class AdmissionGate:
 
     @contextlib.contextmanager
     def held(self) -> Iterator[None]:
+        refuse_on_event_loop("the admission gate")
         with self._nest:
             lock = None
             if self._depth == 0 and (lock := take_lock(self._path, wait_s=LOCK_TIMEOUT)) is None:

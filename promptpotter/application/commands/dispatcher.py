@@ -13,6 +13,7 @@ from promptpotter.application.cycle_addressing import resolve_course, resolve_su
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.jobs.launcher.launch import LaunchOutcome
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.views.render.phase import stop_next_lines
 from promptpotter.domain.command_events import (
     WORKSPACE_SUBJECT,
     CommandAckRecord,
@@ -30,10 +31,12 @@ from promptpotter.domain.command_kinds import (
     CommandKind,
     CommandPayload,
     CyclePayload,
+    Door,
     DraftPayload,
     LinePayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject, decode_cycle_path
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.run_records import LaunchAnswer, NoEffect, StandingEffect
 from promptpotter.infrastructure.producer_lock import this_producer
 from promptpotter.infrastructure.store.draft_store import DraftClaim
@@ -74,11 +77,13 @@ MAX_IDEMPOTENCY_KEY_CHARS = 256
 class CommandCall[P: CommandPayload]:
     """A remote door passes the key its caller retries under, and a retry under it answers the
     first act; an in-process sender sends once, under a fresh one. Its command id is minted here,
-    so a door names what it filed (its `cancel`) before the act answers."""
+    so a door names what it filed (its `cancel`) before the act answers. *door* is where it was
+    pressed, named by every caller."""
 
     payload: P
     idempotency_key: str = field(default_factory=lambda: uuid.uuid4().hex)
     command_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    door: Door = field(kw_only=True)
 
     def __post_init__(self) -> None:
         if not 0 < len(self.command_id) <= COMMAND_ID_CHARS:
@@ -149,11 +154,20 @@ class Applier[R]:
     # its slot, and the draft's claim, to its mint): how that answer is given back where the act
     # raises after `run` answered it. A draft command's claim is otherwise the dispatcher's until
     # the act ends, and released on every raise.
-    rides: Callable[[R, BaseException], None] | None = None
+    rides: Callable[[R, BaseException], Awaitable[None]] | None = None
 
     @staticmethod
     def silent(run: Callable[[], Awaitable[object]]) -> Applier[object]:
         return Applier(run)
+
+    @staticmethod
+    def blocking[T](act: Callable[[], T]) -> Applier[T]:
+        """A sync act, which may wait on a gate or a store's lock: off the loop, its one offload."""
+
+        async def _off_loop() -> T:
+            return await asyncio.to_thread(act)
+
+        return Applier(_off_loop)
 
     @staticmethod
     def for_loop(dispatched: DispatchedToCycle[Any], refusal: str) -> Applier[object]:
@@ -182,6 +196,8 @@ class Dispatched[P: CommandPayload]:
     payload: P
     # What it is filed as: a pass reads its `cancel` by it (`RunControl.acting`).
     command_id: str
+    # Where it was pressed, which an act it files in turn names (a cancel's pause, a fork's parent's).
+    door: Door = field(kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,6 +285,15 @@ def _rejected(command_id: str, detail: str, refused: Exception) -> CommandAckRec
 
 def handler_of(kind: CommandKind) -> Handler[Any]:
     return cast(Handler[Any], imported(_HANDLER_PACKAGE, kind.handler))
+
+
+def interrupted_lines(verb: str) -> list[str]:
+    """Past a second Ctrl+C, which quit before *verb*'s act said its stop: a run's is its paused
+    stop (`stop_next_lines`), and a pass is pressed again, replaying every cell it banked."""
+    kinds = [kind for kind in CommandKind if kind.cli_verb == verb]
+    if any(command_answer(kind) is LaunchAnswer for kind in kinds):
+        return stop_next_lines(StopReason.PAUSED)
+    return ["next: every cell it measured is banked, and a rerun replays them", f"cli:  `{verb}`"]
 
 
 def command_answer(kind: CommandKind) -> object | None:
@@ -367,6 +392,11 @@ class CommandDispatcher:
             require_capability(
                 self.stores.identity, kind.capability, subject=f"command {kind.value!r}"
             )
+        if not kind.pressed_at(call.door):
+            raise BadRequestError(
+                f"command {kind.value!r} is not pressed at the {call.door} door.",
+                code="command_door_refused",
+            )
         if (inner_refusal := _inner_refusal(call.payload)) is not None:
             raise PayloadInvalidError(inner_refusal, code="inner_cycle_unaddressed")
         filed_as, subject = await asyncio.to_thread(self._filed_on, call.payload)
@@ -389,8 +419,10 @@ class CommandDispatcher:
             case DraftPayload():
                 return await self._on_draft(call, recorded)
             case _:
-                applier = await self._applier(Dispatched(self, call.payload, call.command_id))
-                return self._filed(WORKSPACE_SUBJECT, call, applier, recorded)
+                applier = await self._applier(
+                    Dispatched(self, call.payload, call.command_id, door=call.door)
+                )
+                return await self._filed(WORKSPACE_SUBJECT, call, applier, recorded)
 
     async def _settled(
         self, subject: str, kind: CommandKind, act_digest: str, idempotency_key: str
@@ -440,9 +472,11 @@ class CommandDispatcher:
         self, call: CommandCall[CampaignPayload], recorded: _Recorded
     ) -> Opened[object, CampaignPayload]:
         owned_campaign(self.stores, call.payload.campaign_id)
-        applier = await self._applier(Dispatched(self, call.payload, call.command_id))
+        applier = await self._applier(
+            Dispatched(self, call.payload, call.command_id, door=call.door)
+        )
         subject = subject_key(Subject(call.payload.campaign_id))
-        return self._filed(subject, call, applier, recorded)
+        return await self._filed(subject, call, applier, recorded)
 
     async def _on_line(
         self, call: CommandCall[LinePayload], recorded: _Recorded
@@ -450,10 +484,10 @@ class CommandDispatcher:
         campaign = owned_campaign(self.stores, call.payload.campaign_id)
         hop = self.stores.campaigns.line_holder(campaign.root_hop)
         applier = await self._applier(
-            DispatchedToCycle(self, call.payload, call.command_id, campaign, hop)
+            DispatchedToCycle(self, call.payload, call.command_id, campaign, hop, door=call.door)
         )
         subject = subject_key(self.stores.subject(hop))
-        return self._filed(subject, call, applier, recorded)
+        return await self._filed(subject, call, applier, recorded)
 
     async def _on_cycle(
         self, call: CommandCall[CyclePayload], recorded: _Recorded
@@ -473,10 +507,10 @@ class CommandDispatcher:
                 f"cycle not found: {campaign_id}/{cycle_id}", code="command_target_not_found"
             )
         applier = await self._applier(
-            DispatchedToCycle(self, payload, call.command_id, campaign, hop)
+            DispatchedToCycle(self, payload, call.command_id, campaign, hop, door=call.door)
         )
         subject = subject_key(self.stores.subject(hop))
-        return self._filed(subject, call, applier, recorded)
+        return await self._filed(subject, call, applier, recorded)
 
     async def _on_draft(
         self, call: CommandCall[DraftPayload], recorded: _Recorded
@@ -487,9 +521,11 @@ class CommandDispatcher:
         claim = self.stores.drafts.claim(call.payload.draft_id)
         try:
             applier = await self._applier(
-                DispatchedToDraft(self, call.payload, call.command_id, claim)
+                DispatchedToDraft(self, call.payload, call.command_id, claim, door=call.door)
             )
-            opened = self._filed(draft_subject(call.payload.draft_id), call, applier, recorded)
+            opened = await self._filed(
+                draft_subject(call.payload.draft_id), call, applier, recorded
+            )
         except BaseException:
             claim.release()
             raise
@@ -506,11 +542,13 @@ class CommandDispatcher:
 
         return Opened(opened.accepted, _released())
 
-    def _filed[P: CommandPayload, R](
+    async def _filed[P: CommandPayload, R](
         self, subject: str, call: CommandCall[P], applier: Applier[R], recorded: _Recorded
     ) -> Opened[R, P]:
-        """*subject* is the log's spelling of what the command is filed on (`command_events.py`)."""
+        """*subject* is the log's spelling of what the command is filed on (`command_events.py`);
+        its filer is the producer token, which a first filing takes off the loop."""
         payload, act_digest = recorded
+        filer = await asyncio.to_thread(this_producer, self.stores.jobs_dir)
         self.stores.commands.file(
             CommandRecord(
                 command_id=call.command_id,
@@ -520,7 +558,7 @@ class CommandDispatcher:
                 act_digest=act_digest,
                 issued_by=acting_principal(self.stores.identity),
                 subject=subject,
-                filer=this_producer(self.stores.jobs_dir),
+                filer=filer,
             )
         )
         accepted = CommandAcceptedBody(command_id=call.command_id, subject=subject)
@@ -542,11 +580,11 @@ class CommandDispatcher:
                     f"command {kind} rejected: {exc.reason}",
                     details={"command_id": command_id, "reason": exc.reason},
                 )
-                log.append(_rejected(command_id, exc.reason, refused))
+                await asyncio.to_thread(log.append, _rejected(command_id, exc.reason, refused))
                 raise refused from None
             except Exception as exc:
                 ended = True
-                log.append(_rejected(command_id, str(exc), exc))
+                await asyncio.to_thread(log.append, _rejected(command_id, str(exc), exc))
                 raise
             effect = NoEffect() if applier.effect_fn is None else applier.effect_fn(applied[0])
             kept = (
@@ -555,17 +593,17 @@ class CommandDispatcher:
                 else None
             )
             ended = True
-            log.append(
-                CommandAckRecord(
-                    command_id=command_id, status=applier.ack, effect=effect, answer=kept
-                )
+            ack = CommandAckRecord(
+                command_id=command_id, status=applier.ack, effect=effect, answer=kept
             )
+            await asyncio.to_thread(log.append, ack)
         except BaseException as exc:
             # Admitted and never handed on: what the answer holds is given back in this scope.
             if applied and applier.rides is not None:
-                applier.rides(applied[0], exc)
+                await applier.rides(applied[0], exc)
             if not ended:
-                log.ack(command_id, "cancelled", f"interrupted: {type(exc).__name__}")
+                interrupted = f"interrupted: {type(exc).__name__}"
+                await asyncio.to_thread(log.ack, command_id, "cancelled", interrupted)
             raise
 
         return CommandOutcome(

@@ -8,7 +8,7 @@ from promptpotter.application.views.render.primitives import fmt_ci
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.arm_reading import lift_band_text
 from promptpotter.domain.bench import BandedValue
-from promptpotter.domain.command_kinds import VerifyCandidatePayload
+from promptpotter.domain.command_kinds import Door, VerifyCandidatePayload
 from promptpotter.domain.cycle_paths import Subject
 from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.run_records import VERIFY_WORDS, VerifySaturated
@@ -42,7 +42,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         "seed": args.seed,
     }
     payload = PayloadInvalidError.validating(VerifyCandidatePayload, fields)
-    call = CommandCall(payload)
+    call = CommandCall(payload, door=Door.TERMINAL)
     with ctrl_c_stops_pass(stores, call):
         dispatched = await CommandDispatcher(stores).answer(measuring.verify_candidate, call)
 

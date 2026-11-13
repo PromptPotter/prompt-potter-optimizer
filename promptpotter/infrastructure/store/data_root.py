@@ -22,6 +22,7 @@ from promptpotter.config.paths import (
     JOBS_DIR,
     JUDGE_REUSE_DIR,
     LANDING_FILE,
+    LIVE_JOBS_INDEX,
     MACHINE_DIR,
     MEASUREMENTS_DIR,
     OPTIMIZER_REUSE_DIR,
@@ -36,7 +37,7 @@ from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import parse_prompt_export
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER
-from promptpotter.domain.job import JOB_ADAPTER
+from promptpotter.domain.job import JOB_ADAPTER, LIVE_JOB_IDS
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
 from promptpotter.domain.prompt_block import BlockPack
 from promptpotter.domain.ruler import RulerFold
@@ -285,6 +286,7 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("dataset fetch cache", _INSTALL, f"{INSTALL_CACHE_DIR}/huggingface/**", Fate.CACHE, _TREE),
     # Today's launches are what the daily quota counts, so a reset keeps them.
     Kind("job", _INSTALL, f"{JOBS_DIR}/*.json", _SURVIVOR, JOB_ADAPTER),
+    Kind("live-jobs index", _INSTALL, f"{JOBS_DIR}/{LIVE_JOBS_INDEX}", _SURVIVOR, LIVE_JOB_IDS),
     Kind("ended job", _INSTALL, f"{JOBS_DIR}/{ENDED_JOBS_DIR}/*.json", Fate.RUN, JOB_ADAPTER),
     Kind("landing", _INSTALL, f"{JOBS_DIR}/{LANDING_FILE}", Fate.MACHINE, _HELD),
     Kind(

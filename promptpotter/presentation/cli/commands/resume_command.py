@@ -12,6 +12,7 @@ from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.pipeline_resolve import fork_preview
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import (
+    Door,
     ForkCyclePayload,
     ForkSeed,
     MintCampaignPayload,
@@ -73,7 +74,7 @@ async def _dispatch_held(
 ) -> HeldRun:
     """*ctx* follows the cycle the command answers (a fork) and stays put when the hold is refused."""
     outcome = await CommandDispatcher(ctx.store, inline=inline_launch(args)).dispatch(
-        CommandCall(payload)
+        CommandCall(payload, door=Door.TERMINAL)
     )
     held = held_run(outcome.result)
     ctx.cycle_id = held.session.hop.cycle_id
@@ -174,22 +175,17 @@ async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> Hel
 async def _pivot_to_fresh(
     args: argparse.Namespace, ctx: SessionCtx, drift: ConfigDriftError
 ) -> CommandResult:
+    act = drift.next_act
     answer = confirm_tty(
-        f"Start a fresh campaign on `{drift.dataset_name}` instead?",
-        default_no=True,
-        context=str(drift),
+        f"Start a fresh campaign on `{act.value}` instead?", default_no=True, context=str(drift)
     )
     if answer is None:
         raise drift
     if not answer:
         raise SystemExit("Cancelled. Revert the config edits and retry `resume`.")
+    fresh = {act.field: act.value, "budget": budget_from_args(args)}
     return await mint_and_run(
-        ctx.store,
-        MintCampaignPayload(
-            dataset_name=drift.dataset_name,
-            budget=budget_from_args(args),
-        ),
-        inline_launch(args),
+        ctx.store, MintCampaignPayload.model_validate(fresh), inline_launch(args)
     )
 
 

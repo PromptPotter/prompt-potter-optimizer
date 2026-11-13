@@ -259,3 +259,5 @@ class Job:
 
 
 JOB_ADAPTER = TypeAdapter(Job)
+# The live-jobs index: each unreleased job's id, kept by `JobRegistry`'s writer.
+LIVE_JOB_IDS = TypeAdapter(tuple[str, ...])

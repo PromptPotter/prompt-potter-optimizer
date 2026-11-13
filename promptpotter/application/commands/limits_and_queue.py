@@ -76,7 +76,7 @@ async def cancel_queued_run(dispatched: Dispatched[CancelQueuedRunPayload]) -> A
     """A queued FORK's stub stays for ``cleanup-empty-cycles``: deleting a cycle is that verb's."""
     dispatcher, job_id = dispatched.dispatcher, dispatched.payload.job_id
 
-    async def _apply() -> None:
+    def _apply() -> None:
         stores, registry = dispatcher.stores, dispatcher.job_registry
         # Its own launch only: a job's principal never changes, so it is asked outside the gate.
         job = registry.get(job_id)
@@ -87,4 +87,4 @@ async def cancel_queued_run(dispatched: Dispatched[CancelQueuedRunPayload]) -> A
         ):
             raise NotFoundError("Not found", code="not_found")
 
-    return Applier.silent(_apply)
+    return Applier.blocking(_apply)

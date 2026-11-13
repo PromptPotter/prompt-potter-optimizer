@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import ipaddress
 import logging
@@ -142,6 +143,15 @@ async def login(
     return response
 
 
+def _exchange_refused(provider: str, exc: Exception) -> account.SignInRefusal:
+    # Nobody signed in yet, so the refusal is the box's own to keep.
+    box = build_stores_from_identity(account.registered_or_default_identity())
+    account.record_refusal(box, subject=f"sign-in through {provider}: {exc}")
+    # No retry of the user's mends a provider the health check found refusing this server.
+    broken = health.is_broken(default_projects_root(), health.signin_probe(provider))
+    return "signin_unavailable" if broken else "code_exchange_failed"
+
+
 @auth_flow_router.get("/callback/{provider}")
 async def callback(
     request: Request,
@@ -170,15 +180,12 @@ async def callback(
     try:
         identity = await client.exchange_code(code=code, nonce=nonce)
     except (CodeExchangeError, IDTokenInvalidError) as exc:
-        # Nobody signed in yet, so the refusal is the box's own to keep.
-        box = build_stores_from_identity(account.registered_or_default_identity())
-        account.record_refusal(box, subject=f"sign-in through {provider}: {exc}")
-        # No retry of the user's mends a provider the health check found refusing this server.
-        broken = health.is_broken(default_projects_root(), health.signin_probe(provider))
-        return _redirect_with_error("signin_unavailable" if broken else "code_exchange_failed")
+        refusal = await asyncio.to_thread(_exchange_refused, provider, exc)
+        return _redirect_with_error(refusal)
 
     device = device_of(request.headers.get("sec-ch-ua-mobile"), request.headers.get("user-agent"))
-    signed = account.sign_in_oidc(bundle, identity, device=device)
+    # Off the loop: an arrival and the default's claim wait on the accounts lock.
+    signed = await asyncio.to_thread(account.sign_in_oidc, bundle, identity, device=device)
     for ring in signed.rings:
         background.add_task(notify_operator, ring, ring=True)
     if isinstance(signed, account.SignInRefused):

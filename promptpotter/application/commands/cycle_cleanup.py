@@ -20,13 +20,13 @@ async def delete_cycle(dispatched: DispatchedToCycle[DeleteCyclePayload]) -> App
     dispatcher, hop = dispatched.dispatcher, dispatched.hop
     stores = dispatcher.stores
 
-    async def _apply() -> None:
+    def _apply() -> None:
         with destroying(stores, dispatcher.job_registry, hop.campaign_id, cycle_id=hop.cycle_id):
             deleted, reason = cleanup_stub_fork_if_empty(campaign_store=stores.campaigns, hop=hop)
         if not deleted:
             raise RejectedError(reason)
 
-    return Applier.silent(_apply)
+    return Applier.blocking(_apply)
 
 
 async def cleanup_empty_cycles(
@@ -35,7 +35,7 @@ async def cleanup_empty_cycles(
     dispatcher, hop = dispatched.dispatcher, dispatched.hop
     stores = dispatcher.stores
 
-    async def _apply() -> None:
+    def _apply() -> None:
         for _pass in range(2):
             deleted = False
             for stub in deletable_stubs(stores, hop):
@@ -52,4 +52,4 @@ async def cleanup_empty_cycles(
             if not deleted:
                 break
 
-    return Applier.silent(_apply)
+    return Applier.blocking(_apply)

@@ -121,7 +121,12 @@ from promptpotter.domain.bench import DatasetSplit, PartitionRecord, partition_b
 from promptpotter.domain.campaign_config import (
     seed_layer,
 )
-from promptpotter.domain.command_kinds import DeleteCampaignPayload, ForkCyclePayload, ForkSeed
+from promptpotter.domain.command_kinds import (
+    DeleteCampaignPayload,
+    Door,
+    ForkCyclePayload,
+    ForkSeed,
+)
 from promptpotter.domain.cycle_paths import (
     CycleDir,
     CycleHop,
@@ -1198,7 +1203,7 @@ def test_an_unreadable_close_refuses_its_cycle_to_every_reader_and_the_remedy_ke
         )
     asyncio.run(
         CommandDispatcher(stores).dispatch(
-            CommandCall(DeleteCampaignPayload(campaign_id=stranded.campaign_id))
+            CommandCall(DeleteCampaignPayload(campaign_id=stranded.campaign_id), door=Door.HOST)
         )
     )
     assert not stores.campaigns.campaign_root_dir(stranded.campaign_id).exists(), (
@@ -1352,7 +1357,8 @@ def test_a_rewind_its_launch_refuses_has_written_nothing_on_its_parent(
                             cycle_id=scenario.cycle_id,
                             round=refused_round,
                             keep_rounds=True,
-                        )
+                        ),
+                        door=Door.HOST,
                     )
                 )
             )
@@ -1540,7 +1546,8 @@ def test_a_fork_by_another_issuer_withdraws_the_launch_queued_on_its_parent(
                     cycle_id=scenario.cycle_id,
                     round=2,
                     keep_rounds=True,
-                )
+                ),
+                door=Door.HOST,
             )
         )
     )

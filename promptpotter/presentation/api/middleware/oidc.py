@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import FastAPI, Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -35,7 +37,9 @@ class OIDCMiddleware:
         if bundle is not None:
             session_id = request.cookies.get(SESSION_COOKIE_NAME)
             if session_id:
-                identity_ctx = _identity_context_from_session(session_id, bundle)
+                identity_ctx = await asyncio.to_thread(
+                    _identity_context_from_session, session_id, bundle
+                )
         # request.state IS scope["state"] — set it here so the endpoint's Request reads it.
         scope.setdefault("state", {})["identity_ctx"] = identity_ctx
         await self.app(scope, receive, send)

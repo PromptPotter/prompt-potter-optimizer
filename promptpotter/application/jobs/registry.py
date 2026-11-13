@@ -7,7 +7,7 @@ import secrets
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -17,7 +17,7 @@ from typing import Any
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import AdmissionGate
 from promptpotter.application.runner.termination import run_stop_reason
-from promptpotter.config.paths import ENDED_JOBS_DIR
+from promptpotter.config.paths import ENDED_JOBS_DIR, LIVE_JOBS_INDEX
 from promptpotter.config.settings import CODE_REVISION, settings
 from promptpotter.domain.campaign import CampaignRefusedError
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
@@ -25,6 +25,7 @@ from promptpotter.domain.job import (
     JOB_ADAPTER,
     LAUNCH_EXITS,
     LAUNCH_MOVES,
+    LIVE_JOB_IDS,
     UNRESOLVED_HOP,
     CampaignLaunch,
     Job,
@@ -39,7 +40,7 @@ from promptpotter.domain.refusal import Refusal
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.holders import in_flight, job_path, read_job
 from promptpotter.infrastructure.producer_lock import this_producer
-from promptpotter.infrastructure.store.io import unlink_robust, write_json
+from promptpotter.infrastructure.store.io import read_text_optional, unlink_robust, write_json
 from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
@@ -54,8 +55,6 @@ logger = logging.getLogger(__name__)
 _QUEUE_POLL_S = 2.0
 # How long a reaped job's ending stays readable by its id.
 _ENDED_KEPT = timedelta(days=7)
-# Each job file a listing could not load, named once per process: every poll lists the jobs.
-_named: set[str] = set()
 
 
 def launch_interrupted(exc: BaseException) -> bool:
@@ -331,22 +330,28 @@ class JobRegistry:
         return read_job(path, self._staged.get(path))
 
     def list_all(self, *, user_id: str | None = None) -> list[Job]:
-        """Released jobs included, until `reap_orphans` ends one launched before today. A file that
-        does not load is named in the log and left out, never raised out of every listing; a
-        landing refuses on it (a job file is a survivor)."""
-        out: list[Job] = []
-        for path in self._dir.glob("*.json"):
-            try:
-                job = self._read(path)
-            except FileUnreadableError as exc:
-                if str(path) not in _named:
-                    _named.add(str(path))
-                    logger.error("job listing leaves out %s: %s", path, exc)
-                continue
-            if job is not None and user_id in (None, job.user_id):
-                out.append(job)
+        """Released jobs included, until `reap_orphans` ends one launched before today."""
+        out = [j for j in self._loaded(self._dir.glob("*.json")) if user_id in (None, j.user_id)]
         out.sort(key=lambda j: j.created_at, reverse=True)
         return out
+
+    def _loaded(self, paths: Iterable[Path]) -> Iterator[Job]:
+        """Each job of *paths* that loads: one that does not is left out of every listing, never
+        raised out of it, and named by `unloadable` (`machine-status`); a landing refuses on it."""
+        for path in paths:
+            with contextlib.suppress(FileUnreadableError):
+                if (job := self._read(path)) is not None:
+                    yield job
+
+    def unloadable(self) -> list[str]:
+        """Each job file no listing counts, with why it does not load."""
+        named: list[str] = []
+        for path in sorted(self._dir.glob("*.json")):
+            try:
+                self._read(path)
+            except FileUnreadableError as exc:
+                named.append(f"{path.name}: {exc}")
+        return named
 
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
         """Oldest first, and a plain read: a job whose producer is gone is left out, never released."""
@@ -370,7 +375,22 @@ class JobRegistry:
         return in_flight(self._dir, job)
 
     def _live(self, wanted: Callable[[Job], bool], *, user_id: str | None) -> list[Job]:
-        return [j for j in self.list_all(user_id=user_id) if wanted(j) and self.in_flight(j)]
+        """Read off the live-jobs index, never a glob of every job file."""
+        return [
+            j
+            for j in self._loaded(self._path(job_id) for job_id in self._indexed())
+            if user_id in (None, j.user_id) and wanted(j) and self.in_flight(j)
+        ]
+
+    def _indexed(self) -> tuple[str, ...]:
+        path = self._dir / LIVE_JOBS_INDEX
+        raw = self._staged.get(path) or read_text_optional(path)
+        return LIVE_JOB_IDS.validate_json(raw) if raw.strip() else ()
+
+    def _index(self, ids: Iterable[str]) -> None:
+        """Written under the gate by the writer of the job files it names, after them: a reader
+        between the two reads a released job, which no live listing counts."""
+        write_json(self._dir / LIVE_JOBS_INDEX, sorted(set(ids)), durable=True)
 
     def list_launches(self, *, user_id: str | None = None) -> list[Job]:
         """Campaign launches in flight, queued included: what an account's concurrency limit holds."""
@@ -440,6 +460,9 @@ class JobRegistry:
             JOB_ADAPTER.dump_python(job, mode="json"),
             durable=at is None,
         )
+        indexed = set(self._indexed())
+        if at is None and (job.job_id in indexed) == job.released:
+            self._index(indexed ^ {job.job_id})
 
     def _path(self, job_id: str) -> Path:
         return job_path(self._dir, job_id)

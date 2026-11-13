@@ -183,14 +183,17 @@ async def run_held_job(
     readout_sink: Callable[[str], None] | None = None,
 ) -> tuple[Session, CycleResult]:
     """THE run of a held launch at every door: START, the run, its END. Answers the session the
-    run ENDED on (`run_optimization`)."""
-    start.job_registry.move(start.job_id, LaunchMove.START)
+    run ENDED on (`run_optimization`). Its START, its hold and its END wait on gates, off the loop."""
+    await asyncio.to_thread(start.job_registry.move, start.job_id, LaunchMove.START)
     # Unstamped until its observers stand: nothing of this launch reached the cycle before, whose
     # own producer may still be running it.
     stamps: CycleHop | None = None
     try:
-        observers = build_run_observers(
-            session=session, campaign_config=cycle.config, readout_sink=readout_sink
+        observers = await asyncio.to_thread(
+            build_run_observers,
+            session=session,
+            campaign_config=cycle.config,
+            readout_sink=readout_sink,
         )
         stamps = session.hop
         ended, result = await run_optimization(
@@ -205,9 +208,11 @@ async def run_held_job(
     except BaseException as exc:
         # An interrupt is the pause flag's SYNTHETIC one, its pause already declared; anything else
         # fired OUTSIDE the runner's try, so this stamps it.
-        start.release(exc, stamps=None if launch_interrupted(exc) else stamps)
+        await asyncio.to_thread(
+            start.release, exc, stamps=None if launch_interrupted(exc) else stamps
+        )
         raise
-    start.release(result)
+    await asyncio.to_thread(start.release, result)
     return ended, result
 
 

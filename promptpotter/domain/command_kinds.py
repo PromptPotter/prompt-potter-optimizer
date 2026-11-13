@@ -77,6 +77,17 @@ def person(verb: str) -> Press:
 # The browser alone: no terminal verb and no host tool.
 BROWSER = None
 
+
+class Door(StrEnum):
+    """Where a call is filed, which its kind's `Press` admits or refuses (`CommandKind.pressed_at`)."""
+
+    # The REST API: every kind it mounts, the browser's among them.
+    API = "api"
+    TERMINAL = "terminal"
+    # A host assistant: its tools, and an embedding host's `host_dispatcher`.
+    HOST = "host"
+
+
 _MINTS_THROUGH_CHECKIN = "the browser mints through a check-in"
 
 # How a door answers a kind: inline with its applied answer, or as a task its door tracks.
@@ -130,6 +141,15 @@ class CommandKind(StrEnum):
     def browser_only(self) -> bool:
         """Reached through the webapp alone: no terminal verb and no host tool."""
         return self.press is None
+
+    def pressed_at(self, door: Door) -> bool:
+        match door:
+            case Door.API:
+                return True
+            case Door.TERMINAL:
+                return self.cli_verb is not None
+            case Door.HOST:
+                return self.host
 
     PAUSE = (
         "pause",

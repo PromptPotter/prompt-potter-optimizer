@@ -312,9 +312,8 @@ def read_account_wallet(
     excluding_job_id: str | None = None,
     excluding_campaign: str | None = None,
 ) -> AccountWallet:
-    """What the coupon has left past every bill, less what each live run may still draw. Each
-    dead producer's job closes first, so the bill and the holds read one book."""
-    reap_dead_runs(stores.projects_root, job_registry)
+    """What the coupon has left past every bill, less what each live run may still draw. A dead
+    producer's hold closes at the sweep (`reaper.py::sweep`), never at a read."""
     coupon = read_coupon(stores)
     if coupon.unmetered:
         return AccountWallet(coupon, coupon.face)

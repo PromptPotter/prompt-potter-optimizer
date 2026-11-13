@@ -8,7 +8,6 @@ scored on text it was never meant to carry.
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import contextlib
 import copy
@@ -241,6 +240,7 @@ from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.command_kinds import (
     ArmRequest,
+    Door,
     ForkSeed,
     HeadToHeadRequest,
     PauseCyclePayload,
@@ -2257,18 +2257,25 @@ def test_an_empty_answer_buys_a_turn_only_where_one_is_owed(
     with pytest.raises(ConflictError) as unowed:
         asyncio.run(
             CommandDispatcher(built_stores).dispatch(
-                CommandCall(ResolveOriginPayload(draft_id=authored.draft_id))
+                CommandCall(ResolveOriginPayload(draft_id=authored.draft_id), door=Door.HOST)
             )
         )
     assert unowed.value.code == origin_resolving.RESOLVER_NOT_OWED
     with pytest.raises(OriginIncompleteError):
         asyncio.run(
-            cli_new._hold_checkin(argparse.Namespace(), built_stores, authored.draft_id, None)
+            cli_new._hold_checkin(
+                campaign_runner._PARSER.parse_args(["new", "x"]),
+                built_stores,
+                authored.draft_id,
+                None,
+            )
         )
     assert not turns, "an empty answer bought a turn the draft does not owe"
     asyncio.run(
         CommandDispatcher(built_stores).dispatch(
-            CommandCall(ResolveOriginPayload(draft_id=authored.draft_id, rerun=True))
+            CommandCall(
+                ResolveOriginPayload(draft_id=authored.draft_id, rerun=True), door=Door.HOST
+            )
         )
     )
     assert len(turns) == 1, "the operator's re-run bought no turn"
@@ -3191,7 +3198,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     address = {"campaign_id": opened.hop.campaign_id, "cycle_id": opened.hop.cycle_id}
 
     def pause(key: str) -> str:
-        call = CommandCall(PauseCyclePayload(**address), key)
+        call = CommandCall(PauseCyclePayload(**address), key, door=Door.HOST)
         return asyncio.run(CommandDispatcher(stores).dispatch(call)).accepted.command_id
 
     def acked(command_id: str) -> str | None:
@@ -3309,7 +3316,7 @@ def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(
         return job.job_id, build_run_observers(session=opened, campaign_config=launched)
 
     def pause(key: str) -> Opened[object, Any]:
-        call = CommandCall(PauseCyclePayload(**address), key)
+        call = CommandCall(PauseCyclePayload(**address), key, door=Door.HOST)
         return asyncio.run(CommandDispatcher(stores).open(call))
 
     first, r0 = launch()
@@ -4167,7 +4174,7 @@ def test_no_held_out_row_reaches_the_index_the_optimizers_panels_read() -> None:
 
 
 def test_the_check_in_model_reads_no_held_out_row_and_inits_on_the_pipeline_checked(
-    monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+    built_stores: Stores,
 ) -> None:
     checkin_bank = samples(40, "TRUE", query="claim ")
     built_stores.tenant_datasets.put_bank(heldout := Bank.of(checkin_bank))
@@ -4190,7 +4197,6 @@ def test_the_check_in_model_reads_no_held_out_row_and_inits_on_the_pipeline_chec
     assert not [s.id for s in bench_rows if f'"{s.query}"' in content], (
         "a bench row reached the resolver"
     )
-    monkeypatch.setattr(checkin_launch, "assert_origin_ready", lambda _draft, _pipeline: None)
 
     async def opened_schema() -> object:
         async with checkin_launch.open_checkin(
@@ -4220,13 +4226,15 @@ def test_an_uploads_start_asks_the_mints_refusals_before_its_dataset_lands(
             config={"optimization": {"optimizer": "potter", "nodes": starved}},
         ),
     )
-    monkeypatch.setattr(checkin_launch, "assert_origin_ready", lambda _draft, _pipeline: None)
+    monkeypatch.setattr(launching, "assert_origin_ready", lambda _draft, _pipeline: None)
     for attempt in ("first", "retry"):
         with pytest.raises(PayloadInvalidError):
             asyncio.run(
                 dispatch_start_checkin(
                     built_stores,
-                    CommandCall(StartCheckinPayload(draft_id=uploaded.draft_id), attempt),
+                    CommandCall(
+                        StartCheckinPayload(draft_id=uploaded.draft_id), attempt, door=Door.HOST
+                    ),
                     inline=Inline(),
                 )
             )
@@ -4242,13 +4250,14 @@ def test_an_uploads_start_asks_the_mints_refusals_before_its_dataset_lands(
     built_stores.drafts.write_draft(
         owned_draft(built_stores, uploaded.draft_id).patch(slug="email-tagging")
     )
-    monkeypatch.setattr(launching, "assert_origin_ready", lambda _draft, _pipeline: None)
     held_before = built_stores.tenant_datasets.held_version("email-tagging")
     with pytest.raises(SlugTakenError):
         asyncio.run(
             dispatch_start_checkin(
                 built_stores,
-                CommandCall(StartCheckinPayload(draft_id=uploaded.draft_id), "onto-install"),
+                CommandCall(
+                    StartCheckinPayload(draft_id=uploaded.draft_id), "onto-install", door=Door.HOST
+                ),
                 inline=Inline(),
             )
         )

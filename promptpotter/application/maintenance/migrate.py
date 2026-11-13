@@ -11,6 +11,7 @@ from pathlib import Path
 from promptpotter.application.maintenance.migrations import (
     grant_ceiling,
     host_account,
+    live_jobs_index,
     terms_consent,
 )
 from promptpotter.infrastructure.store.data_root import Staged
@@ -18,5 +19,6 @@ from promptpotter.infrastructure.store.data_root import Staged
 MIGRATIONS: dict[str, Callable[[Path, Mapping[Path, bytes]], list[Staged]]] = {
     "grant ceiling": grant_ceiling.staged,
     "host account": host_account.staged,
+    "live-jobs index": live_jobs_index.staged,
     "terms consent": terms_consent.staged,
 }

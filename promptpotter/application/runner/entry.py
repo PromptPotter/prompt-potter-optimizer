@@ -160,7 +160,7 @@ def close_cycle(
             cycle_error=cycle_error,
             finished_at=finished_at,
             # In-memory, never the debounced ``dashboard.json``.
-            spend=observers.dashboard.live.state.spend,
+            spend=observers.dashboard.spend,
             bench=bench,
         )
         _finalize_run(
@@ -283,7 +283,7 @@ async def _run_single_cycle(
             declare_run_stop(session, observers, StopReason.REBASED, interrupted_by=pause_cause)
             observers.drain_all()
             parent = observers
-            observers = onto_fork(cycle.session, forked_from, parent, prep=prep)
+            observers = await onto_fork(cycle.session, forked_from, parent, prep=prep)
             # Held through the fork's mint, which moves the campaign's holds off it.
             parent.release()
         session = cycle.session
@@ -291,7 +291,7 @@ async def _run_single_cycle(
         declare_round_allowance(session, step_rounds)
         book = require_spend_book("the bench's set-aside")
         ended = await open_origin_round(
-            cycle, dataset, observers.ledger, spend=observers.dashboard.live.state.spend
+            cycle, dataset, observers.ledger, spend=observers.dashboard.spend
         ) or await run_round_loop(cycle, campaign_config, session, observers.ledger)
         stop_reason, cycle_error, fork, open_round, cancel_exc, stepped = ended
         if stepped:
@@ -345,7 +345,7 @@ async def _run_single_cycle(
     )
 
 
-def _mint_and_rebase_fork(
+async def _mint_and_rebase_fork(
     prep: PreparedRun,
     *,
     session: Session,
@@ -355,7 +355,26 @@ def _mint_and_rebase_fork(
     """``config_overrides`` re-snapshot BEFORE the mint, so seed and in-process config agree. The
     fork's cap is what its line has left; its working state is the parent's latest, since the cut
     rewinds the line, never what the optimizer learned on it. A re-election is the round it hangs
-    from, so the line continues from the arm a layer named."""
+    from, so the line continues from the arm a layer named. Cut off the loop: its take waits on
+    the parent's line."""
+    parent = session.hop
+    prep, session, rounds = await asyncio.to_thread(_cut_rebase_fork, prep, session, rebase_req)
+    observers = await onto_fork(session, parent, observers, prep=prep)
+    logger.info(
+        "Auto-rebase: %s → %s at round %d, %s rounds in its cap [trigger=%s, reason=%s]",
+        parent.cycle_id,
+        session.hop.cycle_id,
+        rebase_req.fork_from_round,
+        rounds,
+        rebase_req.trigger.value,
+        rebase_req.reason,
+    )
+    return prep, session, observers
+
+
+def _cut_rebase_fork(
+    prep: PreparedRun, session: Session, rebase_req: RebaseRequest
+) -> tuple[PreparedRun, Session, int | None]:
     parent = session.hop
     store = session.store.campaigns
     cut = rebase_req.fork_from_round
@@ -384,18 +403,7 @@ def _mint_and_rebase_fork(
     store.rebank_round(
         child, branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices}))
     )
-    session = session.bound(child, purpose=session.purpose)
-    observers = onto_fork(session, parent, observers, prep=prep)
-    logger.info(
-        "Auto-rebase: %s → %s at round %d, %s rounds in its cap [trigger=%s, reason=%s]",
-        parent.cycle_id,
-        new_cycle_id,
-        cut,
-        overrides.budget.rounds,
-        rebase_req.trigger.value,
-        rebase_req.reason,
-    )
-    return prep, session, observers
+    return prep, session.bound(child, purpose=session.purpose), overrides.budget.rounds
 
 
 async def _run_line(
@@ -418,7 +426,7 @@ async def _run_line(
             return outcome
         # The operator's `--from` rewound the line's first cycle; a fork stands on its rebase's cut.
         mode = mode.model_copy(update={"from_round": None})
-        prep, session, observers = _mint_and_rebase_fork(
+        prep, session, observers = await _mint_and_rebase_fork(
             prep,
             session=outcome.session,
             observers=outcome.observers,

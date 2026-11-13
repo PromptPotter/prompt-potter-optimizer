@@ -9,7 +9,7 @@ import re
 import shlex
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn, get_args, get_origin
+from typing import TYPE_CHECKING, Any, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -24,14 +24,13 @@ from promptpotter.application.commands.launching import dispatch_start_checkin
 from promptpotter.application.datasets.authored import (
     campaign_file_block,
 )
-from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.loaders import no_dataset_hint
-from promptpotter.application.datasets.origin_readiness import checklist_field, origin_readiness
+from promptpotter.application.datasets.origin_readiness import checklist_field
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
-from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import (
     ArmRequest,
+    Door,
     EditDraftCampaignPayload,
     HeadToHeadRequest,
     IngestUploadPayload,
@@ -70,7 +69,6 @@ from promptpotter.shared.errors import (
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Sequence
 
-    from promptpotter.application.datasets.origin_readiness import FieldGap
     from promptpotter.application.jobs.launcher.launch import Inline
     from promptpotter.application.jobs.launcher.run_job import HeldRun
     from promptpotter.domain.checkin_draft import OriginResolution
@@ -169,9 +167,11 @@ def _draft_kept(draft_id: str) -> str:
     )
 
 
-def _raise_incomplete(
-    gaps: Sequence[FieldGap], turn: OriginResolution | None, draft_id: str
-) -> NoReturn:
+def _said_incomplete(
+    refused: OriginIncompleteError, turn: OriginResolution | None, draft_id: str
+) -> OriginIncompleteError:
+    """The Start's own refusal, with what this terminal can do about it."""
+    gaps = refused.gaps
     lines = ["Open fields:", *(f"  - {g.field}: {g.hint}" for g in gaps)]
     if turn is not None and turn.degraded_cause:
         lines += ["", f"The resolver turn came back thin: {turn.degraded_cause}."]
@@ -185,10 +185,9 @@ def _raise_incomplete(
         "  promptpotter new <file> "
         + " ".join(f"--set {'.'.join(_gap_path(g.field))}=<value>" for g in gaps),
     ]
-    refused = OriginIncompleteError(tuple(gaps))
     refused.add_note("\n".join(lines))
     refused.add_note(_draft_kept(draft_id))
-    raise refused
+    return refused
 
 
 async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
@@ -209,7 +208,9 @@ async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
     )
     # A refusal is `campaign_runner.main`'s to say, in its own words, as every verb's.
     draft = (
-        await CommandDispatcher(stores).answer(workspace_edits.ingest_upload, CommandCall(payload))
+        await CommandDispatcher(stores).answer(
+            workspace_edits.ingest_upload, CommandCall(payload, door=Door.TERMINAL)
+        )
     ).result
     _checkin_line("ingest", f"{draft.n_samples} rows → check-in '{draft.slug}' ({draft.draft_id})")
     return draft.draft_id
@@ -222,7 +223,9 @@ async def _hold_checkin(
     if patch is not None:
         await CommandDispatcher(stores).answer(
             draft_editing.edit_draft_campaign,
-            CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch)),
+            CommandCall(
+                EditDraftCampaignPayload(draft_id=draft_id, patch=patch), door=Door.TERMINAL
+            ),
         )
     last_turn: OriginResolution | None = None
     # A `new <file>` sends the one command an empty Send does: the server buys the turn only where
@@ -230,7 +233,8 @@ async def _hold_checkin(
     _checkin_line("origin resolver", "asking for the AI check-in")
     try:
         turn = await CommandDispatcher(stores).answer(
-            origin_resolving.resolve_origin, CommandCall(ResolveOriginPayload(draft_id=draft_id))
+            origin_resolving.resolve_origin,
+            CommandCall(ResolveOriginPayload(draft_id=draft_id), door=Door.TERMINAL),
         )
     except ConflictError as refused:
         if refused.code != origin_resolving.RESOLVER_NOT_OWED:
@@ -240,20 +244,19 @@ async def _hold_checkin(
         )
     else:
         last_turn = turn.result.resolution
-    draft = owned_draft(stores, draft_id)
-
-    readiness = origin_readiness(
-        draft, draft_pipeline(stores, draft, await draft_served(stores, draft))
-    )
-    if not readiness.complete:
-        _raise_incomplete(readiness.gaps, last_turn, draft_id)
-
-    _checkin_line("origin", f"complete — check-in '{draft.slug}' ready")
-    launched = await dispatch_start_checkin(
-        stores,
-        CommandCall(StartCheckinPayload(draft_id=draft_id, budget=budget_from_args(args))),
-        inline=inline_launch(args),
-    )
+    # The Start checks the origin's readiness, once, on its one backend read.
+    try:
+        launched = await dispatch_start_checkin(
+            stores,
+            CommandCall(
+                StartCheckinPayload(draft_id=draft_id, budget=budget_from_args(args)),
+                door=Door.TERMINAL,
+            ),
+            inline=inline_launch(args),
+        )
+    except OriginIncompleteError as refused:
+        raise _said_incomplete(refused, last_turn, draft_id) from None
+    _checkin_line("origin", f"complete — check-in {draft_id} started")
     held = held_run(launched)
     _checkin_line("campaign", f"minted {held.session.campaign_id} from check-in {draft_id}")
     return held
@@ -325,7 +328,7 @@ def _named_dataset(stores: Stores) -> Iterator[None]:
 async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
     dispatcher = CommandDispatcher(stores, inline=inline)
     with _named_dataset(stores):
-        launched = (await dispatcher.dispatch(CommandCall(mint))).result
+        launched = (await dispatcher.dispatch(CommandCall(mint, door=Door.TERMINAL))).result
     held = held_run(launched)
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
     return await _run_origin(held)
@@ -416,7 +419,9 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     payload = _head_to_head_payload(args)
     dispatcher = CommandDispatcher(stores)
     with _named_dataset(stores):
-        outcome = await dispatcher.answer(launching.mint_head_to_head, CommandCall(payload))
+        outcome = await dispatcher.answer(
+            launching.mint_head_to_head, CommandCall(payload, door=Door.TERMINAL)
+        )
     answer = outcome.answer
     assert isinstance(answer, LaunchAnswer), "a launch kind answers its LaunchAnswer"
     arms = [

@@ -4,7 +4,6 @@ Kept out of ``shared_config.py`` because the CAPO/DSPy notebooks live on
 Colab and must stay import-safe there (no ``promptpotter.*`` imports).
 """
 
-import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -99,7 +98,7 @@ async def run_bbeh_campaign(
     print(f"GLOBAL OPTIMIZATION ({len(train_norm)} train samples)")
     print("=" * 60)
 
-    stores = enter()
+    stores = await enter()
     campaign_config = build_campaign_config(
         resolve_dataset(stores, "bbeh"),
         budget_rounds=budget_rounds,
@@ -115,125 +114,110 @@ async def run_bbeh_campaign(
         budget=Budget(),
         mode=RunMode(),
     )
-    try:
-        # Read only: the session the run answers, configured under the campaign as the mint did.
-        configured = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
-        pipeline_params = configured.pipeline_params
-        # The model this run actually reaches, resolved from `bbeh/dataset.yaml::pipeline` — never
-        # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
-        # than default: a results file naming the wrong model is worse than no results file.
-        models = {
-            pipeline_params.node(node.name).model
-            for node in configured.pipeline_schema.prompt_nodes()
-        }
-        if len(models) != 1 or None in models:
-            raise RuntimeError(
-                f"the prompt nodes resolve the models {models} — `bbeh/dataset.yaml::pipeline` "
-                "must pin one."
-            )
-        target_model = models.pop()
-
-        report_completion(cycle_result, session=session)
-        origin = cycle_result.origin
-        origin_train_acc = (
-            None if origin is None or origin.fitness is None else origin.fitness.value
+    # Read only: the session the run answers, configured under the campaign as the mint did.
+    configured = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
+    pipeline_params = configured.pipeline_params
+    # The model this run actually reaches, resolved from `bbeh/dataset.yaml::pipeline` — never
+    # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
+    # than default: a results file naming the wrong model is worse than no results file.
+    models = {
+        pipeline_params.node(node.name).model for node in configured.pipeline_schema.prompt_nodes()
+    }
+    if len(models) != 1 or None in models:
+        raise RuntimeError(
+            f"the prompt nodes resolve the models {models} — `bbeh/dataset.yaml::pipeline` "
+            "must pin one."
         )
-        # Ask the outcome table, never a hand-authored string: the export below is only
-        # meaningful for a run that finished, and every halted/failed/paused reason must skip it.
-        if stop_reason_outcome(cycle_result.stop_reason) is not StopOutcome.SUCCESS:
-            return None
+    target_model = models.pop()
 
-        export = session.store.campaigns.read_export(session.hop)
-        result_pipeline_params = cycle_result.result_pipeline_params or PipelineParams()
-        train_acc = cycle_result.result_fitness
+    report_completion(cycle_result, session=session)
+    origin = cycle_result.origin
+    origin_train_acc = None if origin is None or origin.fitness is None else origin.fitness.value
+    # Ask the outcome table, never a hand-authored string: the export below is only
+    # meaningful for a run that finished, and every halted/failed/paused reason must skip it.
+    if stop_reason_outcome(cycle_result.stop_reason) is not StopOutcome.SUCCESS:
+        return None
 
-        print(f"\n{'=' * 60}")
-        print("PER-TASK TEST EVALUATION")
-        print("=" * 60)
+    export = session.store.campaigns.read_export(session.hop)
+    result_pipeline_params = cycle_result.result_pipeline_params or PipelineParams()
+    train_acc = cycle_result.result_fitness
 
-        per_task_results: dict[str, Record] = {}
-        # Outside the run, so a verify pass of its own: a job whose hold every cell draws on.
-        bound = await cell_bound(session, result_pipeline_params)
-        calls = result_pipeline_params.nodes
-        billed = cell_billing(
-            session.pipeline_schema,
-            priced_pairs(session, calls),
-            await attempt_bounds(session, calls),
-        )
-        client = session.backend_client
-        sends = sends_on(session.store, campaign_config, client.connector.name)
-        async with paid_pass(
-            stores=session.store,
-            pass_kind=MeasurementRole.VERIFY,
-            hop=None,
-            declared=Budget(),
-            sends=sends,
-        ):
-            for i, task in enumerate(tasks, start=1):
-                test_items = test_norm_by_task[task]
-                hits = 0
-                for ex in test_items:
-                    # Each cell is a unit of work of its own: its envelope opens its send budget.
-                    async with CellEnvelope(
-                        client.connector.cell_envelope_s(ex, result_pipeline_params),
-                        attempts=client.connector.cell_attempts,
-                        label=f"{task}:{ex.id}",
-                    ):
-                        data, _spent = await client.run_query(
-                            ex, pipeline_params=result_pipeline_params, bound=bound, billed=billed
-                        )
-                    ranking = data.get("final_ranking") or []
-                    predicted = ranking[0].get("candidate", "") if ranking else ""
-                    hits += int(label_match(predicted, ex.ground_truth))
-                acc = hits / len(test_items) if test_items else 0.0
-                per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
-                print(
-                    f"  [{i:2d}/{len(tasks)}] {task:<40s} {acc:>6.1%}  ({hits}/{len(test_items)})"
-                )
+    print(f"\n{'=' * 60}")
+    print("PER-TASK TEST EVALUATION")
+    print("=" * 60)
 
-        macro_avg = sum(r["accuracy"] for r in per_task_results.values()) / len(per_task_results)
-        total_test = sum(r["n_test"] for r in per_task_results.values())
-        print(
-            f"\nMacro-avg test accuracy: {macro_avg:.1%}  "
-            f"(global winner, {total_test} held-out mini examples across {len(tasks)} tasks)"
-        )
+    per_task_results: dict[str, Record] = {}
+    # Outside the run, so a verify pass of its own: a job whose hold every cell draws on.
+    bound = await cell_bound(session, result_pipeline_params)
+    calls = result_pipeline_params.nodes
+    billed = cell_billing(
+        session.pipeline_schema,
+        priced_pairs(session, calls),
+        await attempt_bounds(session, calls),
+    )
+    client = session.backend_client
+    sends = sends_on(session.store, campaign_config, client.connector.name)
+    async with paid_pass(
+        stores=session.store,
+        pass_kind=MeasurementRole.VERIFY,
+        hop=None,
+        declared=Budget(),
+        sends=sends,
+    ):
+        for i, task in enumerate(tasks, start=1):
+            test_items = test_norm_by_task[task]
+            hits = 0
+            for ex in test_items:
+                # Each cell is a unit of work of its own: its envelope opens its send budget.
+                async with CellEnvelope(
+                    client.connector.cell_envelope_s(ex, result_pipeline_params),
+                    attempts=client.connector.cell_attempts,
+                    label=f"{task}:{ex.id}",
+                ):
+                    data, _spent = await client.run_query(
+                        ex, pipeline_params=result_pipeline_params, bound=bound, billed=billed
+                    )
+                ranking = data.get("final_ranking") or []
+                predicted = ranking[0].get("candidate", "") if ranking else ""
+                hits += int(label_match(predicted, ex.ground_truth))
+            acc = hits / len(test_items) if test_items else 0.0
+            per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
+            print(f"  [{i:2d}/{len(tasks)}] {task:<40s} {acc:>6.1%}  ({hits}/{len(test_items)})")
 
-        winner_prompt_str = (
-            "\n\n".join(export.render(node) for node in export.prompts)
-            if export is not None
-            else ""
-        )
-        opt_cfg = campaign_config.optimization
-        return export_results(
-            method="promptpotter",
-            per_task=per_task_results,
-            config={
-                "optimizer": "promptpotter",
-                "budget_rounds": opt_cfg.budget.rounds,
-                "n_variants": select_optimizer(opt_cfg).arms_per_round,
-                "sp_budget_round": select_optimizer(opt_cfg).round_cells_asked(len(train_pool)),
-                "model_id": target_model,
-                "n_train": len(train_pool),
-                "train_accuracy": round(train_acc, 4) if train_acc is not None else None,
-                "origin_train_accuracy": (
-                    round(origin_train_acc, 4) if origin_train_acc is not None else None
-                ),
-                "rounds": cycle_result.n_rounds_after_origin,
-                "methodology": (
-                    "Single global prompt optimized on the pooled per-task train halves of "
-                    "BBEH mini; evaluated on the held-out test halves, the same rows every "
-                    "peer optimizer is scored on. Train/test disjoint by construction."
-                ),
-                "note": "unmeasured starting hyperparameters - pre-sweep",
-            },
-            optimized_prompts={"__global__": winner_prompt_str},
-            output_path=str(output_path),
-            model=target_model,
-        )
-    finally:
-        # Always close the httpx pool — leaked async clients are the most
-        # common cause of "kernel stuck connecting" after a notebook Ctrl+C.
-        # ``Exception`` excludes BaseException subclasses (KeyboardInterrupt,
-        # SystemExit), so a second Ctrl+C still force-quits.
-        with contextlib.suppress(Exception):
-            await session.backend_client.aclose()
+    macro_avg = sum(r["accuracy"] for r in per_task_results.values()) / len(per_task_results)
+    total_test = sum(r["n_test"] for r in per_task_results.values())
+    print(
+        f"\nMacro-avg test accuracy: {macro_avg:.1%}  "
+        f"(global winner, {total_test} held-out mini examples across {len(tasks)} tasks)"
+    )
+
+    winner_prompt_str = (
+        "\n\n".join(export.render(node) for node in export.prompts) if export is not None else ""
+    )
+    opt_cfg = campaign_config.optimization
+    return export_results(
+        method="promptpotter",
+        per_task=per_task_results,
+        config={
+            "optimizer": "promptpotter",
+            "budget_rounds": opt_cfg.budget.rounds,
+            "n_variants": select_optimizer(opt_cfg).arms_per_round,
+            "sp_budget_round": select_optimizer(opt_cfg).round_cells_asked(len(train_pool)),
+            "model_id": target_model,
+            "n_train": len(train_pool),
+            "train_accuracy": round(train_acc, 4) if train_acc is not None else None,
+            "origin_train_accuracy": (
+                round(origin_train_acc, 4) if origin_train_acc is not None else None
+            ),
+            "rounds": cycle_result.n_rounds_after_origin,
+            "methodology": (
+                "Single global prompt optimized on the pooled per-task train halves of "
+                "BBEH mini; evaluated on the held-out test halves, the same rows every "
+                "peer optimizer is scored on. Train/test disjoint by construction."
+            ),
+            "note": "unmeasured starting hyperparameters - pre-sweep",
+        },
+        optimized_prompts={"__global__": winner_prompt_str},
+        output_path=str(output_path),
+        model=target_model,
+    )

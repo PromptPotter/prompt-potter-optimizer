@@ -58,6 +58,7 @@ from promptpotter.domain.command_kinds import (
     CommandAcceptedBody,
     CommandKind,
     CommandPayload,
+    Door,
     ReadKind,
 )
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
@@ -171,7 +172,7 @@ class HostTool:
             raise PayloadInvalidError.refusing(exc.errors()) from exc
         if isinstance(validated, ReadParams):
             return validated
-        return CommandCall(validated, key)
+        return CommandCall(validated, key, door=Door.HOST)
 
 
 @functools.cache
@@ -424,7 +425,9 @@ class HostSession:
 
     async def _cancel(self, command_id: str) -> CommandReading:
         """Its one `cancel`, keyed by it so a retried cancel acts once."""
-        cancel = CommandCall(CancelPayload(command_id=command_id), f"cancel:{command_id}")
+        cancel = CommandCall(
+            CancelPayload(command_id=command_id), f"cancel:{command_id}", door=Door.HOST
+        )
         await self._dispatcher().dispatch(cancel)
         return await self._read(command_id)
 

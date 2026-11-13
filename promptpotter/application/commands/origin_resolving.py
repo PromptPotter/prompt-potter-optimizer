@@ -4,9 +4,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import Applier
-from promptpotter.application.datasets.draft_build import DraftCampaignWire, draft_wire
+from promptpotter.application.datasets.draft_build import DraftCampaignWire, kept_draft_wire
 from promptpotter.application.datasets.draft_campaign import owned_draft
-from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
 from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
 from promptpotter.domain.checkin_draft import OriginResolution
@@ -60,8 +59,7 @@ async def resolve_origin(
                 f"origin resolver turn failed: {exc}", code="resolver_failed"
             ) from exc
         # A turn writes no field the pipeline reads, so the declaration read before it holds.
-        wire = draft_wire(stores, result.draft, served)
-        save_checkin_draft(stores, result.draft, resolution=result.resolution)
+        wire = await kept_draft_wire(stores, result.draft, served, resolution=result.resolution)
         return ResolveOriginResponse(resolution=result.resolution, draft=wire)
 
     # Its end keeps the turn's answer: a deduped retry re-spends no LLM call, after a mint too.

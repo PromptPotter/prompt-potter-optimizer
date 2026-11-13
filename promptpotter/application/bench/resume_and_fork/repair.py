@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -338,7 +339,7 @@ async def apply_correction(
     rederived = await _rederived(
         cycle, corrected, [rn for rn in drifted if rn < cut.resume_at], ledger
     )
-    repair_target = cut_fork(
+    fork_cut = cut_fork(
         session.store,
         hop,
         cut.resume_at,
@@ -346,7 +347,8 @@ async def apply_correction(
         reason=f"repair:round_{cut.rounds[0]}",
         issued_by=SYSTEM_PRINCIPAL,
         named=cut.edge,
-    ).take(session.store)
+    )
+    repair_target = await asyncio.to_thread(fork_cut.take, session.store)
     logger.warning(
         "Round(s) %s do not re-derive from their own rows; branched → %s from %s, and this cycle "
         "keeps them exactly as they ran. Everything after that candidate retires with it; its "

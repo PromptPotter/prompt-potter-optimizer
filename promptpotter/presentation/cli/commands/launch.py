@@ -18,6 +18,7 @@ from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import (
     CancelPayload,
     CyclePayload,
+    Door,
     PauseCyclePayload,
 )
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
@@ -92,7 +93,7 @@ def ctrl_c_pauses(
     async def _pause_each() -> None:
         for pause in pauses:
             with contextlib.suppress(PotterError):
-                await CommandDispatcher(stores).dispatch(CommandCall(pause))
+                await CommandDispatcher(stores).dispatch(CommandCall(pause, door=Door.TERMINAL))
 
     return _ctrl_c(stores, _pause_each)
 
@@ -106,7 +107,7 @@ def ctrl_c_stops_pass(
     async def _stop() -> None:
         with contextlib.suppress(PotterError):
             cancel = CancelPayload(command_id=call.command_id)
-            await CommandDispatcher(stores).dispatch(CommandCall(cancel))
+            await CommandDispatcher(stores).dispatch(CommandCall(cancel, door=Door.TERMINAL))
 
     return _ctrl_c(stores, _stop)
 
@@ -120,7 +121,7 @@ def _ctrl_c(
 
     async def send(payload: CyclePayload) -> None:
         try:
-            await CommandDispatcher(stores).dispatch(CommandCall(payload))
+            await CommandDispatcher(stores).dispatch(CommandCall(payload, door=Door.TERMINAL))
         except PotterError as exc:
             print(f"  {refusal_words(exc)}", flush=True)
 

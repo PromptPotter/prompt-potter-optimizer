@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
 from promptpotter.application.datasets.authored import ConfigLayers, effective_config
-from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import RunStart, admit_arms, probe_backend
 from promptpotter.application.jobs.launcher.checkin import OpenedCheckin, open_checkin
@@ -27,7 +26,6 @@ from promptpotter.application.jobs.mint import (
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.pipeline_resolve import draft_served
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import LaunchedJob
@@ -35,8 +33,10 @@ from promptpotter.infrastructure.store.dataset_access import runnable_definition
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.pipeline_resolve import ServedPipeline
     from promptpotter.domain.command_kinds import HeadToHeadRequest
-    from promptpotter.domain.spend import HeldBudget
+    from promptpotter.domain.spend import Budget, HeldBudget
+    from promptpotter.infrastructure.llm.wallet import Send
     from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
     from promptpotter.infrastructure.store.draft_store import DraftClaim
     from promptpotter.infrastructure.store.stores import Stores
@@ -95,9 +95,8 @@ async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
 
 
 async def checkin_arms(
-    stores: Stores, claim: DraftClaim, request: HeadToHeadRequest
+    stores: Stores, claim: DraftClaim, request: HeadToHeadRequest, served: ServedPipeline
 ) -> CheckinArms:
-    served = await draft_served(stores, owned_draft(stores, claim.draft_id))
     await _probe(served.connector)
     overlays = [request.declared_optimization(arm) for arm in request.arms]
     closing = AsyncExitStack()
@@ -144,10 +143,14 @@ async def run_each[T](arms: list[HeldArm], act: Callable[[HeldArm], Awaitable[T]
         try:
             done.append(await act(arm))
         except BaseException as exc:
-            for rest in arms[i + 1 :]:
-                rest.held.start.release(exc, stamps=rest.held.session.hop)
+            await asyncio.to_thread(_release_rest, arms[i + 1 :], exc)
             raise
     return done
+
+
+def _release_rest(rest: list[HeldArm], exc: BaseException) -> None:
+    for arm in rest:
+        arm.held.start.release(exc, stamps=arm.held.session.hop)
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,22 +171,22 @@ class AdmittedHeadToHead(LaunchOutcome):
         stores = self.plans[0].session.store
         return [RunStart(stores, self.job_registry, job) for job, _ in self.admitted]
 
-    def withdraw(self, exc: BaseException) -> None:
-        """Every arm's slot given back, where the act that admitted them raised before any minted."""
-        for start in self.starts:
-            logger.warning("admitted arm %s withdrawn unrun: %s", start.job_id, exc)
-            start.release(exc)
+    async def withdraw(self, exc: BaseException) -> None:
+        """Every arm's slot given back and the source closed, where the act that admitted them
+        raised before any minted."""
+        async with self.source.closing:
+            for start in self.starts:
+                logger.warning("admitted arm %s withdrawn unrun: %s", start.job_id, exc)
+                await asyncio.to_thread(start.release, exc)
 
     async def minted(self) -> list[HeldArm]:
         """All arms minted, each job landed on its cycle; a failure stamps every minted cycle."""
         minted: list[OpenedCycle] = []
         try:
             minted = await _mint(self.source, self.plans)
-            for start, (_, held), cycle in zip(self.starts, self.admitted, minted, strict=True):
-                start.land(cycle.hop, held)
+            await asyncio.to_thread(self._land, minted)
         except BaseException as exc:
-            for i, start in enumerate(self.starts):
-                start.release(exc, stamps=minted[i].hop if minted else None)
+            await asyncio.to_thread(self._unmint, minted, exc)
             raise
         finally:
             if isinstance(self.source, CheckinArms):
@@ -203,6 +206,14 @@ class AdmittedHeadToHead(LaunchOutcome):
                 self.request.arms, self.starts, self.admitted, minted, strict=True
             )
         ]
+
+    def _land(self, minted: list[OpenedCycle]) -> None:
+        for start, (_, held), cycle in zip(self.starts, self.admitted, minted, strict=True):
+            start.land(cycle.hop, held)
+
+    def _unmint(self, minted: list[OpenedCycle], exc: BaseException) -> None:
+        for i, start in enumerate(self.starts):
+            start.release(exc, stamps=minted[i].hop if minted else None)
 
     async def launched(self) -> HeadToHeadLaunched:
         """Each arm in its own process, as every server launch."""
@@ -236,19 +247,23 @@ async def admit_head_to_head(
         (effective_config(plan.declaration), plan.declaration.environment.connector)
         for plan in plans
     ]
-    # Offloaded: the sweep and the wallet read scan every cycle ledger, off the event loop.
-    await asyncio.to_thread(sweep, session.store.projects_root)
-    admitted = await asyncio.to_thread(
-        admit_arms,
-        [
-            (config.optimization.budget, sends_on(session.store, config, connector))
-            for config, connector in configs
-        ],
-        stores=session.store,
-        job_registry=job_registry,
-        holder=holder,
-    )
+    asks = [
+        (config.optimization.budget, sends_on(session.store, config, connector))
+        for config, connector in configs
+    ]
+    # Off the loop, once: the sweep and the admission wait on the gate and scan every ledger.
+    admitted = await asyncio.to_thread(_admit, asks, session.store, job_registry, holder)
     return AdmittedHeadToHead(source, request, plans, admitted, job_registry)
+
+
+def _admit(
+    asks: list[tuple[Budget, tuple[Send, ...]]],
+    stores: Stores,
+    job_registry: JobRegistry,
+    holder: CampaignLaunch | EmbeddedRun,
+) -> list[tuple[Job, HeldBudget]]:
+    sweep(stores.projects_root)
+    return admit_arms(asks, stores=stores, job_registry=job_registry, holder=holder)
 
 
 def head_to_head_answer(

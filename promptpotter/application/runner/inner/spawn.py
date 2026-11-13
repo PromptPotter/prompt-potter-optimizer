@@ -349,7 +349,9 @@ async def _run_inner_campaign(
                 session.hop, SpawnedBy.model_validate(spawned_by)
             )
             minted.append(session.hop)
-            observers = build_run_observers(session=session, campaign_config=config)
+            observers = await asyncio.to_thread(
+                build_run_observers, session=session, campaign_config=config
+            )
             # Each send is admitted by its own book AND the ROOT's; its share bounds every checkpoint.
             _, result = await slotless_share(
                 config,

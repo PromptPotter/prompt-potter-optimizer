@@ -244,6 +244,14 @@ export interface MachineStatusResponse {
   /** The CALLER's own launches refused today, newest first. A launch that queued
    * was answered before it was refused, so this is where its refusal is read. */
   refused: MachineRefusal[];
+  /** The caller's own limit on concurrent campaigns, which `account_bound` words. */
+  max_concurrent_cycles: number;
+  /** `machine` where the caller's own limit is above `ceiling`, so the machine is
+   * what binds them; null where their own limit does. */
+  account_bound: 'throttle' | 'machine' | null;
+  /** Each job file no count above includes, with why it does not load: a run it
+   * names may hold a slot the machine cannot see. Served where every slot is. */
+  unloadable: string[];
   /** A landing in progress, `busy` and the caller's place in `queue` — a fact about
    * the NEXT launch, never about a run in view; null where a slot is free and
    * nothing of theirs waits. */

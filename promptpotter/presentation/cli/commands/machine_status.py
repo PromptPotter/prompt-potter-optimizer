@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 from promptpotter.application import health, notices
 from promptpotter.application.jobs.capacity import SLOT_BOUND_WORDS
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.read_params import QuotaStatusParams
 from promptpotter.presentation.cli.commands.result import CommandResult, said_text
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
@@ -22,16 +21,14 @@ def machine_status_human(
     _params: MachineStatusParams,
     status: MachineStatusResponse,
     _args: argparse.Namespace,
-    caller: Caller,
+    _caller: Caller,
 ) -> CommandResult:
-    # The caller's own bound beside the machine's: the `quota-status` row, read on the same caller.
-    account = QuotaStatusParams().answer(caller)
     lines = [
         f"running {status.occupied} of {status.capacity} (ceiling {status.ceiling}), "
         f"{status.queued} queued"
     ]
-    bounds = [(status.bound, status.model_dump()), (account.bound, account.model_dump())]
-    lines += [SLOT_BOUND_WORDS[bound].format(**said) for bound, said in bounds if bound]
+    said = status.model_dump()
+    lines += [SLOT_BOUND_WORDS[b].format(**said) for b in (status.bound, status.account_bound) if b]
     notice = status.notice
     lines.append("a slot is free" if notice is None else said_text(notice))
     lines += [
@@ -47,7 +44,7 @@ def machine_status_human(
         for refusal in status.refused
     ]
     return CommandResult(
-        data={**status.model_dump(mode="json"), "account_bound": account.bound},
+        data=status.model_dump(mode="json"),
         human="\n".join(lines),
     )
 

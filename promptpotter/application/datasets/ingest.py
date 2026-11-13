@@ -5,13 +5,12 @@ from typing import Any
 
 from promptpotter.application.account import record_upload
 from promptpotter.application.datasets.authored import read_authored_dataset
-from promptpotter.application.datasets.draft_build import DraftCampaignWire, draft_wire
+from promptpotter.application.datasets.draft_build import DraftCampaignWire, kept_draft_wire
 from promptpotter.application.datasets.draft_campaign import (
     PREVIEW_ROWS,
     default_slug_from_filename,
     new_draft,
 )
-from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.datasets.prompts import origin_prompts
 from promptpotter.application.datasets.startability import (
     checkin_bank,
@@ -26,7 +25,6 @@ from promptpotter.application.datasets.tabular_ingest import (
 )
 from promptpotter.application.origin_listing import canonical_origin_campaign
 from promptpotter.application.pipeline_resolve import (
-    ServedPipeline,
     cycle_config,
     draft_pipeline,
     draft_served,
@@ -34,7 +32,7 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.connectors import upload_connector
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
+from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
@@ -74,12 +72,6 @@ def _first_blank_rows(headers: list[str], rows: list[dict[str, str]]) -> dict[st
     return blank
 
 
-def _kept(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftCampaignWire:
-    wire = draft_wire(stores, draft, served)
-    save_checkin_draft(stores, draft)
-    return wire
-
-
 async def ingest_draft(
     *,
     stores: Stores,
@@ -110,7 +102,7 @@ async def ingest_draft(
         column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
         first_blank_row=_first_blank_rows(list(table.headers), list(table.rows)),
     )
-    return _kept(stores, draft, await draft_served(stores, draft))
+    return await kept_draft_wire(stores, draft, await draft_served(stores, draft))
 
 
 async def draft_from_dataset(
@@ -170,7 +162,7 @@ async def draft_from_dataset(
     )
     if overrides:
         draft = draft.patch(**overrides)
-    return _kept(stores, draft, served)
+    return await kept_draft_wire(stores, draft, served)
 
 
 async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaignWire:

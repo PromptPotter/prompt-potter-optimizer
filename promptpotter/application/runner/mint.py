@@ -8,6 +8,7 @@ ids: ``measurements/`` pools their origin scores."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -134,8 +135,10 @@ async def open_launch(
     declare_run_wiring(
         session, campaign_config, observers.ledger, campaign=campaign, selected=bound_optimizer()
     )
-    # A fresh mint was admitted before its campaign existed: its ceiling is stored here.
-    move_campaign_money(
+    # A fresh mint was admitted before its campaign existed: its ceiling is stored here, off the
+    # loop, under the gate.
+    await asyncio.to_thread(
+        move_campaign_money,
         budget.standing,
         stores=session.store,
         job_registry=JobRegistry.attach(session.store.jobs_dir),
@@ -199,6 +202,15 @@ def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
         stores.campaigns.append(hop, StandingBudgetRecord(budget=cycle, overshoot=prior.overshoot))
 
 
+def _rebased_observers(
+    session: Session, parent: CycleHop, observers: RunObservers, prep: PreparedRun
+) -> RunObservers:
+    _rebase_held(session, parent)
+    return build_run_observers(
+        session=session, campaign_config=prep.campaign_config, forked_from=observers
+    )
+
+
 def _rebase_held(session: Session, parent: CycleHop) -> None:
     """The job follows the fork, and its share stops counting *parent*'s metered spend, which the campaign's holds."""
     held = session.state.held
@@ -219,19 +231,15 @@ def _rebase_held(session: Session, parent: CycleHop) -> None:
     stand_held_budget(session.store, session.hop, held)
 
 
-def onto_fork(
+async def onto_fork(
     session: Session,
     parent: CycleHop,
     observers: RunObservers,
     *,
     prep: PreparedRun,
 ) -> RunObservers:
-    _rebase_held(session, parent)
-    observers = build_run_observers(
-        session=session,
-        campaign_config=prep.campaign_config,
-        forked_from=observers,
-    )
+    """Rebased and held off the loop: both wait on a gate."""
+    observers = await asyncio.to_thread(_rebased_observers, session, parent, observers, prep)
     # A fork's config is already admitted, so it is wired as its observers open.
     declare_run_wiring(
         session,

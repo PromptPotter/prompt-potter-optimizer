@@ -114,7 +114,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         program = DspyProgram(student=student, metric=self.metric, examples=list(trainset))
 
         # Landed first: the definition is written under the root as this code reads it.
-        stores = enter()
+        stores = await enter()
         self._write_definition(stores, items)
         # No config: the file this compile just wrote IS the projection of `loop` and `node`.
         session, result = await run_campaign(

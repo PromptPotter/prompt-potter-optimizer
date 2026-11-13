@@ -86,7 +86,7 @@ def sweep_dead_cycles(projects_root: Path) -> int:
 
 def sweep(projects_root: Path) -> None:
     """Every reclaim of what a dead producer left: no read stamps or deletes any of it, and only
-    the wallet's releases its runs (`reap_dead_runs`)."""
+    this releases its runs (`reap_dead_runs`)."""
     sweep_dead_cycles(projects_root)
     reclaim_orphan_sandboxes(projects_root)
     reap_dead_runs(projects_root, JobRegistry.attach(jobs_dir(projects_root)))

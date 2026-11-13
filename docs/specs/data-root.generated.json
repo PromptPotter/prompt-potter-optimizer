@@ -1536,6 +1536,18 @@
         "type": "object"
       }
     },
+    "live-jobs index": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "jobs/.live-jobs"
+      ],
+      "shape": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
     "model rates": {
       "fate": "CACHE",
       "patterns": [

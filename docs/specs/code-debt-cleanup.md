@@ -101,28 +101,21 @@ row it closes.
   by an embedding host reaps no dead job. Action: the sweep is the dispatcher's, for every kind.
   **Rides with:** admit-2. **Re-test:** `git grep -n "sweep(" -- promptpotter/application/embedded_run.py`
   names the dispatcher.
-- **A host may file any kind its identity's capability allows**: `commands/dispatcher.py::CommandDispatcher.open` checks
-  `kind.capability` and never `kind.press`, and `CommandCall` carries no door. `embedded_run.py` hands a
-  host `CommandCall` and `host_dispatcher` under `default_identity`, which holds the owner's capabilities
-  (`account.keys` among them), so a host can file `set-sample-lookahead`, `set-api-key` and
-  `remove-api-key`, though `Press.host` is false on each. "The absence is the boundary" holds only at the
-  doors that enumerate their kinds (`host_surface.py`). Action: a call names its door, and `open` refuses
-  a kind whose `press` excludes that door. **Rides with:** life-2 (every door moves through one
-  transition). **Re-test:** a `set-api-key` call filed through `host_dispatcher` refuses.
+
 - **`acompile` lands twice per compile**: `presentation/teleprompter.py::acompile` calls `enter()` for its
   stores, then `run_campaign(…, stores=stores)` enters again (`embedded_run.py:130`); every
   `embedded_run.py::enter` re-runs `land_at_entry`, and a landing that applies completes the registries
   twice (`landing.py::land_at_entry`, then `plan_landing`). Action: one landing per process, its
   registries completed once by the entry; `plan_landing` takes them complete. **Rides with:** admit-2,
   whose Owns gain `presentation/teleprompter.py::acompile` and `landing.py::plan_landing`.
-  **Re-test:** `git grep -c "enter()" -- promptpotter/presentation/teleprompter.py` is 0, and
+  **Re-test:** `git grep -cE "\benter\(" -- promptpotter/presentation/teleprompter.py` is 0 (any spelling:
+  `to_thread(enter)` read 0 while the double landing stood), and
   `git grep -c "complete_registries(" -- promptpotter/application/maintenance/landing.py` is 1.
-- **Four launch faults from a code review (reported; verify each at its line first)**: `jobs/head_to_head.py:178`
+- **Three launch faults from a code review (reported; verify each at its line first)**: `jobs/head_to_head.py:178`
   leaves a partial mint's arms unstamped, so a retry refuses `arm_taken`; `mint_and_start.py:108` and
-  `checkin.py:93` leak the `BackendClient` they open when the mint is refused; `jobs/launch.py:144`
-  runs `admit()`'s every-ledger sweep on the event loop where `head_to_head.py` offloads it; ties between
+  `checkin.py:93` leak the `BackendClient` they open when the mint is refused; ties between
   launches broken on a random `job_id` can refuse two head-to-head arms with one stamp each other
-  `launch_contended`. Action: one mint door owns the client and the stamp, and offloads the sweep.
+  `launch_contended`. Action: one mint door owns the client and the stamp.
   **Rides with:** admit-2.
 - **Framing precedence is decided twice** (✓): `--task-text` beats `task_framing: off`
   (`jobs/mint.py:670`) while `campaign_framing` lets off beat everything (`task_context.py:197`), so a
@@ -550,52 +543,18 @@ row it closes.
   `format.ts::shortId`, `compare/EvidenceCharts.tsx` and `evidence/read.py`. **Re-test:**
   `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
 
-### life-2 (what life left at landing 51)
+### life-2b (what life-2b left)
 
-life landed the launch lifecycle as data (`domain/job.py`'s `LAUNCH_MOVES`, one `JobRegistry.move`),
-the reconciler's rename to `run_state.py`, the contracts as imports, and the opener owning the backend
-client. Left:
-
-- **A blocking lock runs on the event loop** (✓): the admission gate's RLock is taken on worker threads
-  that scan every ledger and on the loop (`admit()` at `launch.py:134-162`, from async launch `:173` and
-  `launching.py:348`; the registry's `move`, `release`, `cancel_queued`), and the file gate
-  `io.py::take_lock` polls with `time.sleep` up to `LOCK_TIMEOUT` = 5 s (`interlock.py:50-58`); also on
-  the loop: the dispatcher's `_applied` ack (a locked command-log append), a grants read in the OIDC
-  middleware per request, `headers.py:56-61,98` reading `build-id.txt` per response, the auth callback's
-  `claim_default` lock. One admission scan or file-gate holder stalls every request for up to 5 s. Root:
-  a blocking lock (`take_lock` with wait > 0, the admission gate) refuses on the event-loop thread, and
-  each async door offloads once. Beside it (filed by paths, whose landing moved the upload parse off the
-  loop): `loaders.py:433` and `startability.py:195` re-read a kept upload on the loop at every bank read
-  (`read_kept_table`). **Rides with:** life-2 (every door moves through one transition).
-- **The CLI composes answers the server should own** (reported unless ✓): `machine-status` joins
-  `account_bound`; a pass's second Ctrl+C hard-codes "resume" (`campaign_runner.py:91-98`); the drift
-  pivot (`resume_command.py:175-194`) should be `ConfigDriftError` carrying `NextAct("mint-campaign")`;
-  readiness is checked twice (`new.py:248-254` vs `launching.py:444-446`) with two `draft_served`
-  fetches. **Rides with:** life-2.
-- **The job registry globs every job file per question** (✓): `jobs/registry.py::JobRegistry.list_all`
-  globs and validates every `jobs/*.json`, and `list_running`, `list_queued`, `pass_on` each call it
-  again, some under the admission gate (`reap_orphans`, `share_campaign_ceiling`); every L4 inner cell
-  mints a job, and wallet reads on each store frame run `reap_orphans` under the gate. Root: a
-  writer-maintained live-jobs index; reaping moves to the sweep. **Rides with:** life-2.
-- **A job file that does not load is logged, not reported**: `jobs/registry.py::JobRegistry.list_all`
-  skips it after one `logger.error` per process, and only a landing names it, so an operator reading
-  `machine-status` or the queue never learns a job is missing from the count. Root: a served read
-  reports it. **Rides with:** life-2. **Re-test:** a job file that does not load is named in a served
-  read.
-- **A withdrawn head-to-head leaks its source's client**: `launcher/head_to_head.py`'s `DatasetArms` and
-  `CheckinArms` close their `closing` stack only in `launched()`; `withdraw` is sync and never acloses
-  it, so a head-to-head withdrawn before its launch leaves its source's backend client open. Action: an
-  async withdraw closes the source stack. **Rides with:** life-2. **Re-test:** withdraw a head-to-head
-  and read its client closed.
-- **The runner reads the live dashboard's state through**: `runner/entry.py:167,305` walks
-  `observers.dashboard.live.state.spend` for the spend it hands the run's end and the origin round,
-  instead of asking the projection. Root: the projection answers its spend itself, and the walks go.
-  **Rides with:** life-2. **Re-test:** `git grep -n "dashboard.live.state" -- promptpotter/application/runner` is empty.
-- **The test session builds backend clients nobody closes**: `tests/factories.py:422`'s `backend_client`
-  builds a `BackendClient` beside the opener, so after `test_spend`, `test_identity` and `test_security`
-  two clients are still open (life's probe), both test-built. Root: a test opens its client through the
-  opener that owns its lifetime. **Rides with:** life-2. **Re-test:** after those three suites, a probe
-  on `BackendClient` reads no open client.
+- **The inner layers carry life-2's +285 net**: the async doors offload through hand-written thread
+  shims (`_open_pass`, `_close_pass`, `_land`, `_unmint`), each a sync body wrapped once. Action: one
+  offload-once helper at the async doors replaces the shims. **Rides with:** a lean chain. **Re-test:**
+  `git diff --shortstat 805feffd6 HEAD -- promptpotter/domain promptpotter/application promptpotter/infrastructure`
+  is ≤ 0 net.
+- **The bbeh runner queries through a client its run closed**: `paper/bbeh-comparison/bbeh_potter_runner.py`'s
+  test-eval loop calls `session.backend_client.run_query` after `run_campaign` returned, and
+  `run_campaign` closes that client on every exit. Action: the verify pass opens and closes its own
+  client, as every opener does. **Rides with:** the next chain touching `paper/bbeh-comparison/`.
+  **Re-test:** `git grep -c "session.backend_client" -- paper/bbeh-comparison/bbeh_potter_runner.py` is 0.
 
 ### passes-6 (what passes-5 and holders-3 left at landing 54)
 
@@ -613,9 +572,6 @@ plan/apply pair and a temporary locked through its replace. Left:
   and `openai_compat.py::ReportedUsage.tokens` writes `cache_read=… or 0` where `TokenAccount` reads
   `None` as no breakdown reported. Root: `StepUsage` is built from `ReportedUsage` alone.
   **Rides with:** passes-6.
-- **A stale pause can read PAUSED between a run's lock release and its job's end**:
-  `infrastructure/run_state.py`'s `asked=inbox.pause` filters only on the hold being alive.
-  **Rides with:** life-2.
 - **Two tests fail under load, not under their claim**: `test_concurrent_account_edits_and_an_acceptance_all_survive`
   raises `PermissionError` on `user.json` on Windows beside a second gate, and
   `tests/test_security.py` is not collectable in a venv lacking the `mcp` extra; `tests/test_scoring.py::_peer_cycle`

@@ -72,7 +72,7 @@ async def hold(request: LaunchRequest, start: RunStart) -> HeldRun:
         opened = await closing.enter_async_context(request.open(start.stores))
         if request.hop == UNRESOLVED_HOP:
             stamps = opened.hop
-            start.land(opened.hop, held)
+            await asyncio.to_thread(start.land, opened.hop, held)
             logger.info(
                 "%s: minted %s/%s (job %s)",
                 request.verb,
@@ -82,7 +82,7 @@ async def hold(request: LaunchRequest, start: RunStart) -> HeldRun:
             )
         return HeldRun.of(start, opened, held, closing)
     except BaseException as exc:
-        start.release(exc, stamps=stamps)
+        await asyncio.to_thread(start.release, exc, stamps=stamps)
         await closing.aclose()
         raise
     finally:
@@ -102,10 +102,10 @@ class Admitted(LaunchOutcome):
     def as_launches(self) -> list[LaunchedJob]:
         return [LaunchedJob.of(self.start.job)]
 
-    def withdraw(self, exc: BaseException) -> None:
+    async def withdraw(self, exc: BaseException) -> None:
         """Its slot given back, where the act that admitted it raised before any run held it."""
         logger.warning("admitted launch %s withdrawn unrun: %s", self.start.job_id, exc)
-        self.start.release(exc)
+        await asyncio.to_thread(self.start.release, exc)
 
     async def held(self) -> HeldRun:
         """Its run held: past the queue, the money admission and the cycle's session."""
@@ -143,7 +143,8 @@ def admit(
     inline: Inline | None,
 ) -> Admitted:
     """Call AFTER everything a person types: a slot held across an interactive check-in is lost.
-    Every door's launch first reclaims what a dead producer left, so the machine it counts is live."""
+    Every door's launch first reclaims what a dead producer left, so the machine it counts is live;
+    its sweep and its admission wait on the gate, so every async door offloads it once."""
     sweep(stores.projects_root)
     (job,) = request_jobs(
         stores=stores,
@@ -173,7 +174,9 @@ async def launch(
     job_registry: JobRegistry,
     inline: Inline | None,
 ) -> Launched:
-    admitted = admit(request, mode, stores=stores, job_registry=job_registry, inline=inline)
+    admitted = await asyncio.to_thread(
+        admit, request, mode, stores=stores, job_registry=job_registry, inline=inline
+    )
     return await admitted.launched()
 
 

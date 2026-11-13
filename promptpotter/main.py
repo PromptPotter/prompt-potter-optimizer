@@ -42,7 +42,7 @@ from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, setting
 from promptpotter.domain.command_kinds import CommandAcceptedBody, CommandKind, ReadKind
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody, StrictModel
-from promptpotter.infrastructure.identity.bundle import build_identity_bundle
+from promptpotter.infrastructure.identity.bundle import IdentityBundle, build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.outbound import notify_operator
 from promptpotter.infrastructure.producer_lock import minted_producer, this_producer
@@ -89,18 +89,16 @@ def _telegram_shutdown_notice(registry: JobRegistry) -> None:
         )
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    silence_proactor_disconnect_noise()
+def _open_server(version: str) -> tuple[IdentityBundle, JobRegistry]:
+    """The server's sync preamble, run off the loop once: every step here may wait on a lock."""
     land_at_entry(every_treatment=True)
     bundle = build_identity_bundle(default_identity_paths())
-    app.state.identity_bundle = bundle
     # Before any user can find out: what is broken is told now, not at its first use.
-    checked = await asyncio.to_thread(notices.check_and_tell)
+    checked = notices.check_and_tell()
     print(
         render_server_banner(
             brand_name=settings.BRAND_SERVICE_NAME,
-            version=app.version,
+            version=version,
             data_root=user_data_root(),
             auth_open=auth_is_open(),
             providers=bundle.config.configured,
@@ -113,12 +111,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     # The registry ends cycles whose JOB is proven dead; the sweep clears dead cycles it never saw.
-    projects_root = default_projects_root()
-    registry = JobRegistry.attach(jobs_dir(projects_root))
+    registry = JobRegistry.attach(jobs_dir(default_projects_root()))
     # Held for the server's life, so a reset elsewhere reads it live with no job in flight.
     this_producer(registry.jobs_dir)
+    return bundle, registry
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    silence_proactor_disconnect_noise()
+    bundle, registry = await asyncio.to_thread(_open_server, app.version)
+    app.state.identity_bundle = bundle
     app.state.job_registry = registry
-    sweep_task = asyncio.create_task(periodic_sweep(projects_root))
+    sweep_task = asyncio.create_task(periodic_sweep(default_projects_root()))
     yield
     sweep_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):

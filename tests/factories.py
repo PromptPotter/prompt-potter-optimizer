@@ -679,8 +679,9 @@ async def run_init_round(
     source = definition_source(resolve_dataset(stores, LAUNCHED_DATASET))
     assert source is not None, f"{LAUNCHED_DATASET} names a source"
     stores.tenant_datasets.record_cut(source.identity, Bank.of(bank))
+    entered = await enter(stores)
     async with init_services(
-        dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=enter(stores)
+        dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=entered
     ) as session:
         session, config = laid_session(session, ConfigLayers(campaign_defaults(), raw))
         declaration = declare(session, config, purpose=Optimize())
@@ -694,10 +695,17 @@ async def run_init_round(
                 task_text=None,
             )
             running, cycle_config = minted.session, minted.cycle
-            land_job(
-                stores, JobRegistry.attach(stores.jobs_dir), held.job_id, running.hop, held.share
+            await asyncio.to_thread(
+                land_job,
+                stores,
+                JobRegistry.attach(stores.jobs_dir),
+                held.job_id,
+                running.hop,
+                held.share,
             )
-            observers = build_run_observers(session=running, campaign_config=cycle_config.config)
+            observers = await asyncio.to_thread(
+                build_run_observers, session=running, campaign_config=cycle_config.config
+            )
             start_launch(running)
             determinism = cycle_config.config.optimization.determinism
             try:
@@ -727,7 +735,8 @@ async def run_init_round(
             opened.append(RoundContext(cycle, round_num, ledger=cycle_ledger(cycle)))
             return None, cycle_result([], None, [], cost=0.0)
 
-        start, held = await admit_slotless(
+        start, held = await asyncio.to_thread(
+            admit_slotless,
             config,
             stores=stores,
             holder=EmbeddedRun(session.measured_dataset),
@@ -739,9 +748,9 @@ async def run_init_round(
         try:
             _, ended = await run(held)
         except BaseException as exc:
-            start.release(exc)
+            await asyncio.to_thread(start.release, exc)
             raise
-        start.release(ended)
+        await asyncio.to_thread(start.release, ended)
         (ctx,) = opened
         return ctx
 

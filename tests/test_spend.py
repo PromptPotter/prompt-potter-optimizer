@@ -102,7 +102,7 @@ from promptpotter.application.jobs.quota import (
     hold_moved,
     hold_run,
 )
-from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
+from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
@@ -151,6 +151,7 @@ from promptpotter.domain.command_kinds import (
     ArmRequest,
     ChangeRunLimitsPayload,
     DiscardDraftPayload,
+    Door,
     EditDraftCampaignPayload,
     HeadToHeadRequest,
     MintHeadToHeadPayload,
@@ -417,7 +418,9 @@ def _change_run_limits(
     payload = ChangeRunLimitsPayload(
         campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget, overshoot=overshoot
     )
-    dispatched = DispatchedToCycle(dispatcher, payload, "limits", minted_campaign(hop), hop)
+    dispatched = DispatchedToCycle(
+        dispatcher, payload, "limits", minted_campaign(hop), hop, door=Door.HOST
+    )
 
     async def apply() -> Applier[object]:
         applier = await change_run_limits(dispatched)
@@ -1953,7 +1956,8 @@ def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
         return None, cycle_result([], None, [])
 
     async def embedded() -> None:
-        start, held = await admit_slotless(
+        start, held = await asyncio.to_thread(
+            admit_slotless,
             _budgeted(Budget(usd=1.0)),
             stores=built_stores,
             holder=EmbeddedRun("ds1"),
@@ -1963,7 +1967,7 @@ def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
             sends=_CELLS,
         )
         _, ended = await held_embedded(held)
-        start.release(ended)
+        await asyncio.to_thread(start.release, ended)
 
     with pytest.raises(QuotaExceededError):
         asyncio.run(embedded())
@@ -2307,10 +2311,11 @@ def test_a_remote_cell_open_at_the_runs_wall_clock_is_cut_on_it(
     async def cut_cell() -> tuple[MeasuredCell, float]:
         loop = asyncio.get_running_loop()
         began = loop.time()
-        with scoped(book=clock):
-            row = await measure_sample(
-                Sample(id=0, query="q", ground_truth="a"), cut_session, PipelineParams()
-            )
+        async with contextlib.aclosing(remote):
+            with scoped(book=clock):
+                row = await measure_sample(
+                    Sample(id=0, query="q", ground_truth="a"), cut_session, PipelineParams()
+                )
         return row, loop.time() - began
 
     row, waited = jumping_clock(cut_cell())
@@ -2894,7 +2899,10 @@ def test_a_backend_cell_is_never_sent_again_while_it_may_still_bill(
     wallet = spend_book()
 
     async def remote_cell() -> Any:
-        async with CellEnvelope(600.0, attempts=remote.connector.cell_attempts, label="q"):
+        async with (
+            contextlib.aclosing(remote),
+            CellEnvelope(600.0, attempts=remote.connector.cell_attempts, label="q"),
+        ):
             return await remote.run_query(
                 Sample(id=0, query="q", ground_truth=None),
                 PipelineParams(),
@@ -4007,14 +4015,14 @@ def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside
                 "a pass declared nothing and did not hold the coupon's headroom"
             )
             assert pass_book.allotment.usd is None, "a pass that declared nothing took a ceiling"
-            assert len(machine_status(slots, identity=passing.identity).running) == 1, (
-                "a paid pass ran beside the machine's slot count"
-            )
+            assert (
+                len(machine_status(slots, identity=passing.identity, account_limit=1).running) == 1
+            ), "a paid pass ran beside the machine's slot count"
             with pytest.raises(HostAllowanceExhaustedError):
-                launch_beside()
+                await asyncio.to_thread(launch_beside)
 
     asyncio.run(pass_beside())
-    assert not machine_status(slots, identity=passing.identity).running, (
+    assert not machine_status(slots, identity=passing.identity, account_limit=1).running, (
         "a pass kept its slot past its exit"
     )
     assert launch_beside().usd == pytest.approx(1.0), "the pass kept its reservation past its exit"
@@ -4319,7 +4327,7 @@ def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
     assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.11), (
         "a call on no run held nothing of the coupon"
     )
-    # A dead producer's hold closes at the next wallet read, on a box no sweep runs on.
+    # A dead producer's hold closes at the sweep, never at a read; every admission sweeps first.
     crashed = billing.request_slot(
         user_id="sub-6",
         principal_id="sub-6",
@@ -4332,8 +4340,9 @@ def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
     unreported = money_on(biller.charges.path).unreported.host.unreported_usd
     with monkeypatch.context() as dead:
         dead.setattr(holders, "producer_alive", lambda *_: False)
+        sweep(biller.projects_root)
         assert quota.account_wallet(biller).headroom.usd == pytest.approx(0.11), (
-            "a crashed run held the coupon until a sweep"
+            "a crashed run held the coupon past the sweep"
         )
     money = money_on(biller.charges.path)
     assert chat.job_id not in money.open and money.unreported.host.unreported_usd == (
@@ -4370,7 +4379,7 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
         """The arm's own process, run and exited: its slot handed back, nothing spent."""
         spec = held.job_spec(mode)
         detached.append(spec)
-        held.start.job_registry.release(spec.job_id, StopReason.CONVERGED)
+        await asyncio.to_thread(held.start.job_registry.release, spec.job_id, StopReason.CONVERGED)
         return asyncio.create_task(asyncio.sleep(0))
 
     monkeypatch.setattr(run_job_mod, "spawn_job", ran_elsewhere)
@@ -4396,7 +4405,7 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
     pair = {"a": "capo", "b": "potter"}
     with pytest.raises(PayloadInvalidError) as short:
         cheap = asked("duel-2", pair, Budget(usd=0.0001, rounds=1))
-        asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(cheap)))
+        asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(cheap, door=Door.HOST)))
     assert short.value.code == "spend_cap_below_round", "guard: refused for its round"
     assert not campaigns(), "an arm whose round outspends its cap took a key"
 
@@ -4447,7 +4456,7 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
     minted = campaigns()
     trio = asked("duel-3", {"a": "capo", "b": "capo", "c": "capo"}, Budget(usd=50.0, rounds=1))
     with pytest.raises(QuotaExceededError):
-        asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(trio)))
+        asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(trio, door=Door.HOST)))
     assert campaigns() == minted, "an arm past the account's ceiling minted a campaign"
     assert not JobRegistry.attach(stores.jobs_dir).list_running(), "a refused arm kept its slot"
 
@@ -4879,7 +4888,7 @@ def test_a_drafts_sends_are_charged_and_a_starts_claim_holds_off_a_discard(
     def command(
         payload: DiscardDraftPayload | StartCheckinPayload | EditDraftCampaignPayload,
     ) -> object:
-        return asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(payload)))
+        return asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(payload, door=Door.HOST)))
 
     # An edit racing a Start's mint is refused while the claim holds, and finds nothing once the
     # draft closed: it never lands inside the mint nor writes the closed draft's dir back.

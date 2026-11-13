@@ -5,6 +5,7 @@ from typing import NamedTuple
 
 from pydantic import Field
 
+from promptpotter.application.account import account_or_opening
 from promptpotter.application.jobs.capacity import SlotBound, resolve_run_capacity
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
@@ -21,6 +22,7 @@ from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
 from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import IdentityContext, acting_principal
 
 _WHAT_DOC = (
@@ -206,6 +208,18 @@ class MachineStatusResponse(StrictModel):
         description="The CALLER's own launches refused today, newest first. A launch that queued "
         "was answered before it was refused, so this is where its refusal is read.",
     )
+    max_concurrent_cycles: int = Field(
+        description="The caller's own limit on concurrent campaigns, which `account_bound` words."
+    )
+    account_bound: SlotBound | None = Field(
+        description="`machine` where the caller's own limit is above `ceiling`, so the machine is "
+        "what binds them; null where their own limit does."
+    )
+    unloadable: list[str] = Field(
+        default_factory=list,
+        description="Each job file no count above includes, with why it does not load: a run it "
+        "names may hold a slot the machine cannot see. Served where every slot is.",
+    )
     notice: Said | None = Field(
         description="A landing in progress, `busy` and the caller's place in `queue` — a fact about "
         "the NEXT launch, never about a run in view; null where a slot is free and nothing of "
@@ -213,8 +227,17 @@ class MachineStatusResponse(StrictModel):
     )
 
 
-def machine_status(jobs: JobRegistry, *, identity: IdentityContext) -> MachineStatusResponse:
-    """Occupancy is not relative to who asks; which slots are NAMED is. Blocking: threadpool it."""
+def served_machine_status(stores: Stores, jobs: JobRegistry) -> MachineStatusResponse:
+    """As its caller is served it: their own limit read beside the machine's."""
+    limit = account_or_opening(stores).max_concurrent_cycles
+    return machine_status(jobs, identity=stores.identity, account_limit=limit)
+
+
+def machine_status(
+    jobs: JobRegistry, *, identity: IdentityContext, account_limit: int
+) -> MachineStatusResponse:
+    """Occupancy is not relative to who asks; which slots are NAMED is, and whose limit binds them
+    (*account_limit*, the caller's own). Blocking: threadpool it."""
     principal_id = acting_principal(identity).id
     account = str(identity.user_id)
     held = [MachineSlot.of(job, account=account) for job in jobs.list_running()]
@@ -239,11 +262,14 @@ def machine_status(jobs: JobRegistry, *, identity: IdentityContext) -> MachineSt
         capacity=capacity,
         ceiling=ceiling,
         bound=SlotBound.THROTTLE if capacity < ceiling else None,
+        max_concurrent_cycles=account_limit,
+        account_bound=SlotBound.MACHINE if account_limit > ceiling else None,
         occupied=len(held),
         running=running,
         queued=len(order),
         busy=busy,
         queue=queue,
+        unloadable=jobs.unloadable() if sees_all else [],
         # Named only where the caller may see the machine's oldest slot.
         notice=machine_notice(
             landing=jobs.landing(),

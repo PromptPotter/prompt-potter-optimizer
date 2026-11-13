@@ -589,7 +589,7 @@ def open_spend_book(
     return book
 
 
-async def admit_slotless(
+def admit_slotless(
     config: CampaignConfig,
     *,
     stores: Stores,
@@ -601,7 +601,7 @@ async def admit_slotless(
 ) -> tuple[RunStart, HeldBudget]:
     """THE admission with no slot, taken BEFORE anything paid: the job ASKED, then ADMITTED under
     its hold (HELD on *hop*); a refusal releases it. An inner run's share is of what the
-    enclosing run's book has left at its spawn."""
+    enclosing run's book has left at its spawn. It waits on the gate: an async door offloads it."""
     enclosing = run_scope().book if isinstance(holder, InnerRun) else None
     if isinstance(holder, InnerRun) and enclosing is None:
         raise RuntimeError("an inner run spawns only under its enclosing run's book")
@@ -623,8 +623,7 @@ async def admit_slotless(
         declared, asked = declare_run_budget(
             config.optimization.budget, stores=stores, hop=hop, requested=requested
         )
-        held = await asyncio.to_thread(
-            admit_and_share,
+        held = admit_and_share(
             declared,
             asked,
             stores=stores,
@@ -652,7 +651,8 @@ async def slotless_share[S](
 ) -> tuple[S, CycleResult]:
     """An inner run on the cycle its spawn minted: admitted (`admit_slotless`), then *run* under
     its hold, whose result the job's release records."""
-    start, held = await admit_slotless(
+    start, held = await asyncio.to_thread(
+        admit_slotless,
         config,
         stores=stores,
         holder=holder,
@@ -662,12 +662,12 @@ async def slotless_share[S](
         sends=sends,
     )
     try:
-        start.job_registry.move(start.job_id, LaunchMove.START)
+        await asyncio.to_thread(start.job_registry.move, start.job_id, LaunchMove.START)
         ran = await run(held)
     except BaseException as exc:
-        start.release(exc)
+        await asyncio.to_thread(start.release, exc)
         raise
-    start.release(ran[1])
+    await asyncio.to_thread(start.release, ran[1])
     return ran
 
 
@@ -708,9 +708,9 @@ async def paid_call(
         with scoped(account=stores, book=book):
             yield book
     except BaseException as exc:
-        start.release(exc)
+        await asyncio.to_thread(start.release, exc)
         raise
-    start.release()
+    await asyncio.to_thread(start.release)
 
 
 class PassStoppedError(ConflictError):
@@ -730,10 +730,49 @@ async def paid_pass(
     acting: str | None = None,
 ) -> AsyncIterator[SpendBook]:
     """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops
-    it; *acting* is the command it acts for, whose `cancel` stops it too."""
+    it; *acting* is the command it acts for, whose `cancel` stops it too. Opened and closed off
+    the loop: both wait on the gate."""
+    start, holding, book = await asyncio.to_thread(
+        _open_pass,
+        stores=stores,
+        pass_kind=pass_kind,
+        hop=hop,
+        declared=declared,
+        sends=sends,
+        acting=acting,
+    )
+    try:
+        with scoped(
+            account=stores,
+            book=book,
+            # The rate-limit and slot waits poll the cycle's pause too, as a loop's do.
+            abort_check=run_scope().abort_check
+            if holding is None
+            else holding.control.pause_requested,
+        ):
+            yield book
+    except BaseException as exc:
+        taken = await asyncio.to_thread(_close_pass, start, holding, exc)
+        if taken is not None:
+            raise PassStoppedError(
+                f"The {pass_kind} pass stopped: {taken}. Every cell it measured is banked, and a "
+                "rerun replays them."
+            ) from None
+        raise
+    await asyncio.to_thread(_close_pass, start, holding, None)
+
+
+def _open_pass(
+    *,
+    stores: Stores,
+    pass_kind: MeasurementRole,
+    hop: CycleHop | None,
+    declared: Budget,
+    sends: tuple[Send, ...],
+    acting: str | None,
+) -> tuple[RunStart, CycleHold | None, SpendBook]:
     job_registry = JobRegistry.attach(stores.jobs_dir)
-    (job,) = await asyncio.to_thread(
-        request_jobs,
+    (job,) = request_jobs(
         stores=stores,
         job_registry=job_registry,
         holder=ScoringPass(pass_kind),
@@ -756,10 +795,8 @@ async def paid_pass(
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
             cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
             close_dead_bench(CycleEventLog.open(cycle_dir))
-            ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)
-            declared = ceiling.over(declared)
-        held = await asyncio.to_thread(
-            admit_and_share,
+            declared = _campaign_ceiling(stores, hop).over(declared)
+        held = admit_and_share(
             declared,
             Budget(),
             stores=stores,
@@ -778,34 +815,28 @@ async def paid_pass(
             live=False,
         )
         job_registry.move(job.job_id, LaunchMove.START)
-        with scoped(
-            account=stores,
-            book=book,
-            # The rate-limit and slot waits poll the cycle's pause too, as a loop's do.
-            abort_check=run_scope().abort_check
-            if holding is None
-            else holding.control.pause_requested,
-        ):
-            yield book
     except BaseException as exc:
-        if holding is None:
-            start.release(exc)
-            raise
-        try:
-            # Taken only on the stop it made on it, while its job still holds; the release voids any other.
-            taken = holding.control.take_pause() if launch_interrupted(exc) else None
-        finally:
-            start.release(exc)
-            holding.release()
-        if taken is not None:
-            raise PassStoppedError(
-                f"The {pass_kind} pass stopped: {taken[1]}. Every cell it measured is banked, and a "
-                "rerun replays them."
-            ) from None
+        _close_pass(start, holding, exc)
         raise
-    start.release()
-    if holding is not None:
+    return start, holding, book
+
+
+def _close_pass(
+    start: RunStart, holding: CycleHold | None, exc: BaseException | None
+) -> str | None:
+    """The pass's job released and its cycle let go; the pause it stopped on, if it was one."""
+    if holding is None:
+        start.release(exc)
+        return None
+    try:
+        # Taken only on the stop it made on it, while its job still holds; the release voids any other.
+        taken = (
+            holding.control.take_pause() if exc is not None and launch_interrupted(exc) else None
+        )
+    finally:
+        start.release(exc)
         holding.release()
+    return None if taken is None else taken[1]
 
 
 def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:

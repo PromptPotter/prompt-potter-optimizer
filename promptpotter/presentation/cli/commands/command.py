@@ -13,6 +13,7 @@ from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CommandKind,
     CyclePayload,
+    Door,
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands.result import CommandResult
@@ -44,7 +45,7 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
         )
         fields["campaign_id"], fields["cycle_id"] = hop.campaign_id, hop.cycle_id
     payload = PayloadInvalidError.validating(model, fields)
-    sent = await CommandDispatcher(stores).dispatch(CommandCall(payload))
+    sent = await CommandDispatcher(stores).dispatch(CommandCall(payload, door=Door.TERMINAL))
     # The address acted on, else the one field a workspace command names its subject by.
     acted = sent.payload.model_dump(mode="json")
     named = [name for name in _ADDRESS if name in model.model_fields] or [next(iter(fields))]

@@ -93,8 +93,12 @@ def main() -> None:
         with contextlib.suppress(RuntimeError, KeyboardInterrupt):
             runner.close()
         reason = f" — {exc}" if str(exc) else ""
-        print(f"\nPaused{reason}. Completed work is saved; continue with:", file=sys.stderr)
-        print("  python -m promptpotter resume", file=sys.stderr)
+        print(f"\nPaused{reason}. Completed work is saved.", file=sys.stderr)
+        lines = cast(
+            "Callable[[str], list[str]]",
+            imported("promptpotter.application.commands", "dispatcher:interrupted_lines"),
+        )
+        print("\n".join(lines(args.command)), file=sys.stderr)
         sys.exit(StopOutcome.PAUSED.exit_code)
     runner.close()
     if args.json_output or result.human is None:

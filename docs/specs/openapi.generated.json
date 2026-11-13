@@ -9891,6 +9891,17 @@
       "MachineStatusResponse": {
         "additionalProperties": false,
         "properties": {
+          "account_bound": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlotBound"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`machine` where the caller's own limit is above `ceiling`, so the machine is what binds them; null where their own limit does."
+          },
           "bound": {
             "anyOf": [
               {
@@ -9915,6 +9926,11 @@
           "ceiling": {
             "description": "The operator's `MACHINE_RUN_CAPACITY` — set in the server environment and writable nowhere else. `capacity` never exceeds it, and neither may an account's limit.",
             "title": "Ceiling",
+            "type": "integer"
+          },
+          "max_concurrent_cycles": {
+            "description": "The caller's own limit on concurrent campaigns, which `account_bound` words.",
+            "title": "Max Concurrent Cycles",
             "type": "integer"
           },
           "notice": {
@@ -9961,6 +9977,14 @@
             },
             "title": "Running",
             "type": "array"
+          },
+          "unloadable": {
+            "description": "Each job file no count above includes, with why it does not load: a run it names may hold a slot the machine cannot see. Served where every slot is.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unloadable",
+            "type": "array"
           }
         },
         "required": [
@@ -9971,6 +9995,8 @@
           "running",
           "queued",
           "busy",
+          "max_concurrent_cycles",
+          "account_bound",
           "notice"
         ],
         "title": "MachineStatusResponse",

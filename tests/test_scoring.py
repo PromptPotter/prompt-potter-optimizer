@@ -271,6 +271,7 @@ from promptpotter.domain.command_kinds import (
     CancelPayload,
     CommandKind,
     CommandPayload,
+    Door,
     GradeBenchPayload,
     PauseCyclePayload,
     SkipSearchpointPayload,
@@ -2209,7 +2210,13 @@ def _pause_mid_pass(
         walked.append(sample.id)
         if len(walked) == 2:
             phases.append(stores.run_state(_PEER_HOP).run_phase)
-            acks.append((await CommandDispatcher(stores).dispatch(CommandCall(_PEER_PAUSE))).ack)
+            acks.append(
+                (
+                    await CommandDispatcher(stores).dispatch(
+                        CommandCall(_PEER_PAUSE, door=Door.HOST)
+                    )
+                ).ack
+            )
             phases.append(stores.run_state(_PEER_HOP).run_phase)
         cell: MeasuredCell = await measure(sample, at, pipeline_params)
         return cell
@@ -2392,7 +2399,8 @@ def test_a_host_cancel_and_a_ctrl_c_each_stop_a_pass_by_its_commands_cancel(
                     campaign_id=_PEER_HOP.campaign_id,
                     cycle_id=_PEER_HOP.cycle_id,
                     candidate_id=candidate_id,
-                )
+                ),
+                door=Door.HOST,
             )
 
         opened_task: dict[str, str] = {}
@@ -2460,7 +2468,7 @@ def test_a_host_cancel_and_a_ctrl_c_each_stop_a_pass_by_its_commands_cancel(
         assert not cycle_held(cycle_dir), "the pass kept its cycle"
 
         async def _cancel(command_id: str) -> str:
-            sent = CommandCall(CancelPayload(command_id=command_id))
+            sent = CommandCall(CancelPayload(command_id=command_id), door=Door.HOST)
             return (await CommandDispatcher(stores).dispatch(sent)).ack
 
         assert asyncio.run(_cancel(opened_task["held"])) == "applied", (
@@ -2502,7 +2510,7 @@ def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
         with monkeypatch.context() as patched:
             patched.setattr(measuring, "verify_candidate", _verify_reached)
             with pytest.raises(ConflictError):
-                asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(verify)))
+                asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(verify, door=Door.HOST)))
         assert reached == [leaf], "a command resolved its leaf by another rule than a read's"
 
 
@@ -2522,7 +2530,9 @@ def test_a_campaigns_command_by_a_prefix_acts_on_its_full_id_as_a_cycles_does(
         with monkeypatch.context() as patched:
             patched.setattr(measuring, "grade_bench", _bench_reached)
             with pytest.raises(ConflictError):
-                asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(bench_by_prefix)))
+                asyncio.run(
+                    CommandDispatcher(stores).dispatch(CommandCall(bench_by_prefix, door=Door.HOST))
+                )
         assert benched == [_PEER_HOP.campaign_id], "a campaign's command acted on the typed prefix"
 
 
@@ -2913,7 +2923,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                 )
             ],
         )
-        return CommandDispatcher(authored).dispatch(CommandCall(payload, key))
+        return CommandDispatcher(authored).dispatch(CommandCall(payload, key, door=Door.HOST))
 
     # What earlier runs earned on this answer space reaches the origin's critique, not round 1 alone.
     monkeypatch.setattr(
@@ -4323,7 +4333,9 @@ def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_drop
     address = {"campaign_id": command_hop.campaign_id, "cycle_id": command_hop.cycle_id}
 
     def press(payload: CommandPayload, key: str) -> str:
-        outcome = asyncio.run(CommandDispatcher(commanded).dispatch(CommandCall(payload, key)))
+        outcome = asyncio.run(
+            CommandDispatcher(commanded).dispatch(CommandCall(payload, key, door=Door.HOST))
+        )
         return outcome.accepted.command_id
 
     def acks(command_id: str) -> list[str]:

@@ -15,6 +15,7 @@ import asyncio
 import base64
 import contextlib
 import dataclasses
+import functools
 import json
 import logging
 import os
@@ -77,6 +78,7 @@ from promptpotter.application.cycle_files import FileScope, read_cycle_file
 from promptpotter.application.datasets.draft_campaign import new_draft, owned_draft
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.datasets.tabular_ingest import IngestError
+from promptpotter.application.embedded_run import host_dispatcher
 from promptpotter.application.hierarchy_subtree import hierarchy_subtree, subtree_version
 from promptpotter.application.host_surface import (
     CallTool,
@@ -97,6 +99,7 @@ from promptpotter.application.jobs.launcher.admission import (
     request_jobs,
 )
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
+from promptpotter.application.jobs.launcher.head_to_head import AdmittedHeadToHead, CheckinArms
 from promptpotter.application.jobs.launcher.launch import Launched
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
@@ -104,6 +107,7 @@ from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import LibraryAuthored, library
 from promptpotter.application.maintenance.landing import apply_landing, last_landing, plan_landing
+from promptpotter.application.maintenance.migrate import MIGRATIONS
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import running_prompt, select_optimizer
 from promptpotter.application.optimizers.nodes import RoundContext
@@ -118,7 +122,13 @@ from promptpotter.application.runner.round import run_init
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
-from promptpotter.config.paths import PROJECTS_DIR, block_packs_root, default_projects_root
+from promptpotter.config.paths import (
+    LIVE_JOBS_INDEX,
+    PROJECTS_DIR,
+    block_packs_root,
+    default_projects_root,
+    jobs_dir,
+)
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot, Broken, Cut
 from promptpotter.domain.campaign import CampaignRefusal, CampaignRefusedError, Optimize
@@ -132,6 +142,7 @@ from promptpotter.domain.command_events import (
 )
 from promptpotter.domain.command_kinds import (
     AcceptTermsPayload,
+    ArmRequest,
     BankSnippetPayload,
     CancelPayload,
     CancelQueuedRunPayload,
@@ -141,7 +152,9 @@ from promptpotter.domain.command_kinds import (
     DeleteCampaignPayload,
     DeleteCyclePayload,
     DiscardDraftPayload,
+    Door,
     EditDraftCampaignPayload,
+    HeadToHeadRequest,
     IngestUploadPayload,
     MintCampaignPayload,
     PauseCyclePayload,
@@ -156,7 +169,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.dataset_name import validate_dataset_name
-from promptpotter.domain.draft_edit import EditDraftPatch
+from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.hierarchy import SubtreeCampaign
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job, LaunchMove, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -237,7 +250,7 @@ from promptpotter.infrastructure.identity.provider_config import (
 from promptpotter.infrastructure.identity.session import OIDCSessionStore, SessionData
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
-from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
+from promptpotter.infrastructure.producer_lock import hold_cycle, minted_producer, release_cycle
 from promptpotter.infrastructure.run_state import derive_run_state, producer_attached
 from promptpotter.infrastructure.store import io as store_io
 from promptpotter.infrastructure.store.account_spend import campaign_spend, sandbox_cycle_dirs
@@ -296,6 +309,7 @@ from promptpotter.presentation.cli.commands.read import cmd_read
 from promptpotter.presentation.cli.commands.result import said_text
 from promptpotter.presentation.mcp.server import _refused
 from promptpotter.shared.errors import (
+    BadRequestError,
     ConflictError,
     CycleBusyError,
     FileUnreadableError,
@@ -421,6 +435,26 @@ async def test_a_sweep_leaves_the_containers_of_a_producer_another_process_holds
         held.release()
     assert removed == ["c-dead"], "a sweep reaped a live producer's containers or kept a dead one's"
     assert not (home / "dead.lock").exists(), "a reaped producer's lock outlived it"
+
+
+async def test_a_blocking_lock_refuses_on_the_event_loop_and_takes_nothing(tmp_path: Path) -> None:
+    # A waiter on the loop stalls every request it serves for as long as another holder keeps it.
+    gate = tmp_path / "gate.lock"
+    with pytest.raises(RuntimeError):
+        take_lock(gate, wait_s=1.0)
+    with pytest.raises(RuntimeError), JobRegistry.attach(tmp_path / "jobs").admission_gate():
+        pytest.fail("the admission gate was taken on the event loop")
+    taken = await asyncio.to_thread(take_lock, gate, wait_s=1.0)
+    assert taken is not None, "a refused wait on the loop left the lock taken"
+    taken.release()
+
+
+@pytest.mark.usefixtures("offline")
+def test_the_api_starts_under_the_loop_guard_with_its_held_producer_lock() -> None:
+    # The real lifespan, on a loop: a lock its preamble waits on there refuses the server's start.
+    with TestClient(app) as client:
+        assert client.get("/api/v1/health").status_code == 200
+        assert minted_producer(app.state.job_registry.jobs_dir) is not None
 
 
 def _uploader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, user_id: str) -> Stores:
@@ -759,7 +793,7 @@ def test_machine_occupancy_reaches_a_stranger_as_a_count_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registry, ada_hop, held = _held_slot(tmp_path)
-    seen_by_eve = machine_status(registry, identity=_who("eve-id"))
+    seen_by_eve = machine_status(registry, identity=_who("eve-id"), account_limit=1)
     assert seen_by_eve.occupied == 1, "occupancy depended on who asked"
     served = seen_by_eve.model_dump_json()
     for named in ("ada-id", ada_hop.campaign_id, ada_hop.cycle_id, held.job_id):
@@ -769,11 +803,13 @@ def test_machine_occupancy_reaches_a_stranger_as_a_count_alone(
         (_who("ada-id"), "an account lost its own slot"),
         (host, "the host lost it"),
     ):
-        assert [s.job_id for s in machine_status(registry, identity=reader).running] == [
-            held.job_id
-        ], why
+        assert [
+            s.job_id for s in machine_status(registry, identity=reader, account_limit=1).running
+        ] == [held.job_id], why
     monkeypatch.setattr(settings_mod.settings, "MACHINE_STATUS_SCOPE", "all")
-    assert machine_status(registry, identity=_who("eve-id")).running, "`all` still hid the slot"
+    assert machine_status(registry, identity=_who("eve-id"), account_limit=1).running, (
+        "`all` still hid the slot"
+    )
 
 
 @pytest.mark.usefixtures("offline")
@@ -839,7 +875,7 @@ def test_an_edit_banked_in_one_accounts_block_pack_is_no_snippet_of_anothers(
     banked = BankSnippetPayload(
         supersedes=snippet_id(seed.text), text=edit, experiment=ada_hop.campaign_id
     )
-    asyncio.run(CommandDispatcher(ada).dispatch(CommandCall(banked)))
+    asyncio.run(CommandDispatcher(ada).dispatch(CommandCall(banked, door=Door.HOST)))
     by_ada = {s.text: s for s in library(ada.block_packs).snippets}
     authored = by_ada[edit].provenance
     assert isinstance(authored, LibraryAuthored), "a banked edit reads as cited"
@@ -1598,16 +1634,18 @@ async def test_a_delegate_withdraws_only_its_own_queued_launch_never_its_owners(
     delegate = _delegate_of(owner)
     # A full box: every launch takes a place in line.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
-    (owners,) = request_jobs(stores=owner, job_registry=registry, holder=CampaignLaunch("ds1"))
-    (delegates,) = request_jobs(
-        stores=delegate, job_registry=registry, holder=CampaignLaunch("ds1")
+    (owners,) = await asyncio.to_thread(
+        request_jobs, stores=owner, job_registry=registry, holder=CampaignLaunch("ds1")
+    )
+    (delegates,) = await asyncio.to_thread(
+        request_jobs, stores=delegate, job_registry=registry, holder=CampaignLaunch("ds1")
     )
     assert owners.queued and delegates.queued
     assert owners.user_id == delegates.user_id, "one account: the quota key cannot tell them apart"
 
     async def withdraw(stores: Stores, job_id: str) -> None:
         await CommandDispatcher(stores, job_registry=registry).dispatch(
-            CommandCall(CancelQueuedRunPayload(job_id=job_id), f"cancel-{job_id}")
+            CommandCall(CancelQueuedRunPayload(job_id=job_id), f"cancel-{job_id}", door=Door.HOST)
         )
 
     with pytest.raises(NotFoundError):
@@ -1936,7 +1974,7 @@ async def test_an_accounts_trail_holds_its_sign_in_consent_and_commands_in_time_
 
 
 @pytest.mark.usefixtures("offline")
-async def test_a_delegate_acts_for_its_owner_under_its_own_id_in_the_owners_workspace(
+def test_a_delegate_acts_for_its_owner_under_its_own_id_in_the_owners_workspace(
     tmp_path: Path, ada_signed_in: _SignedIn
 ) -> None:
     # Bob's own account opens on whichever request comes first.
@@ -1962,7 +2000,7 @@ async def test_a_delegate_acts_for_its_owner_under_its_own_id_in_the_owners_work
 
 
 @pytest.mark.usefixtures("offline", "ada_signed_in")
-async def test_a_consent_file_this_build_cannot_read_costs_the_survey_its_one_account(
+def test_a_consent_file_this_build_cannot_read_costs_the_survey_its_one_account(
     tmp_path: Path, oidc: _Oidc
 ) -> None:
     projects = oidc.projects
@@ -2196,20 +2234,23 @@ async def test_a_launch_holds_its_cycle_from_the_moment_it_is_accepted_and_a_ful
 ) -> None:
     hop, _, attached_alike, delete_refused = held_cycle
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
-    (job,) = request_jobs(
-        stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
+    launching = functools.partial(
+        request_jobs,
+        stores=built_stores,
+        job_registry=registry,
+        holder=CampaignLaunch("ds1"),
+        hop=hop,
     )
+    (job,) = await asyncio.to_thread(launching)
     assert job.queued
     claimed = built_stores.run_state(hop)
     attached_alike()
     assert (claimed.run_phase, claimed.producer.state) == (RunPhase.QUEUED, ProducerState.CLAIMED)
     assert claimed.producer.attached and not claimed.resumable
     assert not claimed.pause_refusal, "a claimed launch refused the pause its run will take"
-    delete_refused(registry)
+    await asyncio.to_thread(delete_refused, registry)
     with pytest.raises(CycleBusyError):
-        request_jobs(
-            stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
-        )
+        await asyncio.to_thread(launching)
     with pytest.raises(CycleBusyError):
         async with paid_pass(
             stores=built_stores,
@@ -2219,7 +2260,9 @@ async def test_a_launch_holds_its_cycle_from_the_moment_it_is_accepted_and_a_ful
             sends=(),
         ):
             pass
-    assert registry.cancel_queued(job.job_id), "a queued launch stayed queued"
+    assert await asyncio.to_thread(registry.cancel_queued, job.job_id), (
+        "a queued launch stayed queued"
+    )
     assert not built_stores.run_state(hop).producer.attached, "a withdrawn launch held its cycle"
     attached_alike()
     refuse_taken_cycle(built_stores, hop)
@@ -2243,7 +2286,7 @@ async def test_a_silent_producer_holding_its_cycle_reads_wedged_and_only_the_das
     built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
 ) -> None:
     hop, cycle_dir, attached_alike, _ = held_cycle
-    ledger = _running(cycle_dir)
+    ledger = await asyncio.to_thread(_running, cycle_dir)
     os.utime(ledger, (0, 0))
     quiet = built_stores.run_state(hop).producer
     attached_alike()
@@ -2324,17 +2367,20 @@ async def test_a_pass_registered_on_a_stub_not_yet_holding_it_refuses_the_stubs_
     stub = CycleHop(campaign_id=hop.campaign_id, cycle_id=f"{hop.cycle_id}_fork_1")
     campaigns.mint_cycle(stub)
     stub_delete = DeleteCyclePayload(campaign_id=hop.campaign_id, cycle_id=stub.cycle_id)
-    (stub_pass,) = request_jobs(
+    (stub_pass,) = await asyncio.to_thread(
+        request_jobs,
         stores=built_stores,
         job_registry=passes,
         holder=ScoringPass(MeasurementRole.BENCH),
         hop=stub,
     )
     with pytest.raises(CycleBusyError):
-        await CommandDispatcher(built_stores, passes).dispatch(CommandCall(stub_delete))
+        await CommandDispatcher(built_stores, passes).dispatch(
+            CommandCall(stub_delete, door=Door.HOST)
+        )
     assert campaigns.cycle_dir(stub).is_dir(), "a stub a pass registered on was deleted"
-    passes.release(stub_pass.job_id)
-    await CommandDispatcher(built_stores, passes).dispatch(CommandCall(stub_delete))
+    await asyncio.to_thread(passes.release, stub_pass.job_id)
+    await CommandDispatcher(built_stores, passes).dispatch(CommandCall(stub_delete, door=Door.HOST))
     assert not campaigns.cycle_dir(stub).is_dir(), "a stub no one holds survived its delete"
 
 
@@ -2344,7 +2390,7 @@ async def test_a_fork_stub_a_pass_holds_is_neither_counted_nor_swept(
 ) -> None:
     # The served count is the sweep's list.
     campaigns, (hop, cycle_dir, _, _) = built_stores.campaigns, held_cycle
-    _running(cycle_dir)
+    await asyncio.to_thread(_running, cycle_dir)
     passes = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
     fork = CycleHop(campaign_id=hop.campaign_id, cycle_id=f"{hop.cycle_id}_fork_r1")
     campaigns.mint_fork_cycle(
@@ -2368,7 +2414,8 @@ async def test_a_fork_stub_a_pass_holds_is_neither_counted_nor_swept(
         return tree.facts.deletable_stubs
 
     assert counted() == 1
-    (fork_pass,) = request_jobs(
+    (fork_pass,) = await asyncio.to_thread(
+        request_jobs,
         stores=built_stores,
         job_registry=passes,
         holder=ScoringPass(MeasurementRole.BENCH),
@@ -2376,18 +2423,19 @@ async def test_a_fork_stub_a_pass_holds_is_neither_counted_nor_swept(
     )
     held_at = subtree_version(built_stores, family)
     assert counted() == 0, "the tree counted a stub a pass holds as deletable"
-    await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep))
+    await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep, door=Door.HOST))
     # Each act asks again: a sweep whose list predates the pass, and a refused fork's withdraw.
     with monkeypatch.context() as patched:
         patched.setattr(cycle_cleanup, "deletable_stubs", lambda *_: [fork])
-        await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep))
-    ForkCut(parent=hop, child=fork, direction=ForkDirection.OFFSHOOT).withdraw(built_stores, passes)
+        await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep, door=Door.HOST))
+    cut = ForkCut(parent=hop, child=fork, direction=ForkDirection.OFFSHOOT)
+    await asyncio.to_thread(cut.withdraw, built_stores, passes)
     assert campaigns.cycle_dir(fork).is_dir(), "a destroyer's act deleted a stub a pass holds"
-    passes.release(fork_pass.job_id)
+    await asyncio.to_thread(passes.release, fork_pass.job_id)
     assert subtree_version(built_stores, family) != held_at, (
         "a pass's release left the count it moves answered unread"
     )
-    await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep))
+    await CommandDispatcher(built_stores, passes).dispatch(CommandCall(sweep, door=Door.HOST))
     assert not campaigns.cycle_dir(fork).is_dir(), "the sweep kept a stub no one holds"
 
 
@@ -2419,20 +2467,21 @@ async def test_the_reaper_takes_a_producer_only_once_it_no_longer_holds_its_cycl
     built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
 ) -> None:
     campaigns, (hop, cycle_dir, _, delete_refused) = built_stores.campaigns, held_cycle
-    ledger = _running(cycle_dir)
+    ledger = await asyncio.to_thread(_running, cycle_dir)
     os.utime(ledger, (0, 0))
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
-    assert sweep_dead_cycles(built_stores.projects_root) == 0, "a quiet held producer was reaped"
+    reaped = await asyncio.to_thread(sweep_dead_cycles, built_stores.projects_root)
+    assert reaped == 0, "a quiet held producer was reaped"
     assert built_stores.mark_producer_vanished(hop) is False
     with pytest.raises(ConflictError):
-        hold_cycle(cycle_dir)
-    delete_refused(registry)
+        await asyncio.to_thread(hold_cycle, cycle_dir)
+    await asyncio.to_thread(delete_refused, registry)
     standing = campaigns.load(hop, moment=None)
     assert standing is not None and standing.finished_at is None
     # A fresh heartbeat with no lock held is still dead, and a pause it accepted before it died
     # stands for no producer: the crash reads vanished, never a clean pause (bl1.B12).
     pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
-    await CommandDispatcher(built_stores).dispatch(CommandCall(pause))
+    await CommandDispatcher(built_stores).dispatch(CommandCall(pause, door=Door.HOST))
     assert built_stores.inbox(hop).pause is not None
     release_cycle(cycle_dir)
     os.utime(ledger)
@@ -2452,16 +2501,18 @@ async def test_the_reaper_takes_a_producer_only_once_it_no_longer_holds_its_cycl
         "a pause landed after the reaper's read was ended vanished"
     )
     campaigns.append(hop, RunPhaseRecord(run_phase=RunPhase.RUNNING))
-    assert sweep_dead_cycles(built_stores.projects_root) == 1
+    assert await asyncio.to_thread(sweep_dead_cycles, built_stores.projects_root) == 1
     swept = campaigns.load(hop, moment=None)
     assert swept is not None and swept.stop_reason is StopReason.PRODUCER_VANISHED
     assert built_stores.inbox(hop).pause is None, "a reaped cycle's pause still stood"
-    assert sweep_dead_cycles(built_stores.projects_root) == 0, "one dead producer was swept twice"
+    assert await asyncio.to_thread(sweep_dead_cycles, built_stores.projects_root) == 0, (
+        "one dead producer was swept twice"
+    )
     # A finished run still writing its last files holds the cycle against a delete.
-    hold_cycle(cycle_dir)
+    await asyncio.to_thread(hold_cycle, cycle_dir)
     finishing = built_stores.run_state(hop)
     assert (finishing.run_phase, finishing.producer.attached) == (RunPhase.TERMINAL, True)
-    delete_refused(registry)
+    await asyncio.to_thread(delete_refused, registry)
     release_cycle(cycle_dir)
     ended = built_stores.run_state(hop)
     assert (ended.run_phase, ended.producer.state) == (RunPhase.TERMINAL, ProducerState.ABSENT)
@@ -2679,8 +2730,8 @@ def test_a_landing_carries_an_acceptance_off_the_account_file_onto_its_consent_t
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_a_job_listing_names_a_job_file_it_cannot_load_and_lists_the_rest(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+def test_a_job_file_that_does_not_load_is_named_in_machine_status_and_the_rest_listed(
+    tmp_path: Path,
 ) -> None:
     registry = JobRegistry.attach(tmp_path / "jobs")
     kept = registry.create(
@@ -2690,7 +2741,27 @@ def test_a_job_listing_names_a_job_file_it_cannot_load_and_lists_the_rest(
     torn = tmp_path / "jobs" / "torn.json"
     torn.write_text("{", encoding="utf-8")
     assert [job.job_id for job in registry.list_running()] == [kept.job_id], "a torn file hid a job"
-    assert str(torn) in caplog.text, "a job file the listing left out went unnamed"
+    served = machine_status(registry, identity=default_identity(), account_limit=1)
+    assert [named.split(":")[0] for named in served.unloadable] == ["torn.json"], (
+        "a job file the listing left out went unnamed"
+    )
+
+
+def test_a_job_in_flight_before_the_live_jobs_index_holds_its_slot_past_the_landing(
+    tmp_path: Path,
+) -> None:
+    projects_root = tmp_path / "projects"
+    registry = JobRegistry.attach(jobs_dir(projects_root))
+    job = registry.create(
+        user_id="u", principal_id="u", workspace=WorkspaceDir(tmp_path / "w"),
+        hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
+    )  # fmt: skip
+    (jobs_dir(projects_root) / LIVE_JOBS_INDEX).unlink()
+    staged = {one.path: one.data for one in MIGRATIONS["live-jobs index"](projects_root, {})}
+    landed = JobRegistry.as_staged(jobs_dir(projects_root), staged)
+    assert [j.job_id for j in landed.list_running()] == [job.job_id], (
+        "a run in flight across the landing lost its slot"
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
@@ -2702,7 +2773,7 @@ def test_a_write_a_crash_cut_short_under_an_authored_tree_is_run_data_never_a_su
 
 # One tree: refused by a stray, landed while a run started since its plan holds, landed again.
 @pytest.mark.usefixtures("optimizing_memory", "offline")
-async def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_file_refuses(
+def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_file_refuses(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # It proves the tree as it would stand: the old code never runs on a migrated survivor.
@@ -2766,10 +2837,9 @@ async def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_
     )
     since_jobs, since = _pass_started(built_stores, kept_hop)
     held_runs = apply_landing(built_stores.projects_root, landed)
-    on_disk = await asyncio.to_thread(lambda: events.exists() and retired.exists())
-    assert on_disk and [one.path for one in held_runs.runs] == [marker], (
-        "a landing dropped the files of a run started since its plan"
-    )
+    assert (
+        events.exists() and retired.exists() and [one.path for one in held_runs.runs] == [marker]
+    ), "a landing dropped the files of a run started since its plan"
     unlanded = last_landing(built_stores.projects_root)
     assert sum(line.startswith("kept ") for line in held_runs.said) == 2, held_runs.said
     assert unlanded is not None and unlanded.key is None, "a landing that kept a run read landed"
@@ -2925,7 +2995,7 @@ def command_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _CommandLog:
         payload = VerifyCandidatePayload(
             campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, candidate_id=key
         )
-        return CommandCall(payload, key)
+        return CommandCall(payload, key, door=Door.HOST)
 
     def first(key: str) -> str | None:
         book = stores.commands.book()
@@ -2965,7 +3035,7 @@ def command_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _CommandLog:
 
         before = read()
         try:
-            await sender.dispatch(CommandCall(CancelPayload(command_id=command_id)))
+            await sender.dispatch(CommandCall(CancelPayload(command_id=command_id), door=Door.HOST))
         except PotterError as refused:
             return before, type(refused).__name__
         return before, read()
@@ -2982,7 +3052,9 @@ def command_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _CommandLog:
     ) -> Callable[[], Awaitable[None]]:
         async def _walked() -> None:
             if cancel:
-                await sender.dispatch(CommandCall(CancelPayload(command_id=call.command_id)))
+                await sender.dispatch(
+                    CommandCall(CancelPayload(command_id=call.command_id), door=Door.HOST)
+                )
             walk = RunControl(
                 commands=stores.commands, enclosing=(subject,), acting=(call.command_id,)
             )
@@ -3159,7 +3231,9 @@ async def test_a_command_whose_filer_died_reads_cancelled_and_its_id_stays_the_l
     )
     await sender.dispatch(after_dead)
     # An id is the log's own: a call under one already filed is refused inside the filing.
-    reused = CommandCall(verify("reused").payload, "reused", command_id=dead.command_id)
+    reused = CommandCall(
+        verify("reused").payload, "reused", command_id=dead.command_id, door=Door.HOST
+    )
     await seen(("unfiled", "a call under a filed command's id"), "reused", reused)
     owed = {
         ("filed", "its filer gone, cancelled"): ("cancelled", "cancelled", "cancelled", "-", 0),
@@ -3275,7 +3349,9 @@ async def test_deleting_its_campaign_or_its_cycle_moves_nothing_of_a_command(
         await sender.dispatch(verify(campaign_id, owner))
         before = standing(campaign_id)
         await sender.dispatch(
-            CommandCall(DeleteCampaignPayload(campaign_id=campaign_id, keep_results=keep))
+            CommandCall(
+                DeleteCampaignPayload(campaign_id=campaign_id, keep_results=keep), door=Door.HOST
+            )
         )
         assert standing(campaign_id) == before, f"deleting {campaign_id} moved its command"
         await seen(
@@ -3290,7 +3366,9 @@ async def test_deleting_its_campaign_or_its_cycle_moves_nothing_of_a_command(
     await sender.dispatch(verify("stub", stub))
     before = standing("stub")
     await sender.dispatch(
-        CommandCall(DeleteCyclePayload(campaign_id=stub.campaign_id, cycle_id=stub.cycle_id))
+        CommandCall(
+            DeleteCyclePayload(campaign_id=stub.campaign_id, cycle_id=stub.cycle_id), door=Door.HOST
+        )
     )
     assert standing("stub") == before, "deleting its cycle moved its command"
     await seen(("applied", "its cycle deleted"), "stub", verify("stub", stub))
@@ -3337,7 +3415,9 @@ def drafted(
         )
         stores.drafts.write_draft(draft)
         edit = CommandCall(
-            EditDraftCampaignPayload(draft_id=draft.draft_id, patch=EditDraftPatch()), key
+            EditDraftCampaignPayload(draft_id=draft.draft_id, patch=EditDraftPatch()),
+            key,
+            door=Door.HOST,
         )
         await sender.dispatch(edit)
         return draft.draft_id, edit
@@ -3353,7 +3433,7 @@ async def test_discarding_its_draft_moves_nothing_of_an_edit_command(
     gone, done = "NotFoundError", "completed"
     discarded, edit = await drafted("discarded")
     before = standing("discarded")
-    await sender.dispatch(CommandCall(DiscardDraftPayload(draft_id=discarded)))
+    await sender.dispatch(CommandCall(DiscardDraftPayload(draft_id=discarded), door=Door.HOST))
     assert standing("discarded") == before, "discarding its draft moved its command"
     await seen(("applied", "its draft discarded"), "discarded", edit)
     # An edit's retry answers its draft as it reads now, and there is none.
@@ -3393,7 +3473,7 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
         )
 
     monkeypatch.setattr(launching, "start_checkin", _started)
-    start = CommandCall(StartCheckinPayload(draft_id=moved), "start")
+    start = CommandCall(StartCheckinPayload(draft_id=moved), "start", door=Door.HOST)
     await sender.dispatch(start)
     before = standing("moved")
     mint(plan, campaign_id="adopted", adopting=moved)
@@ -3447,9 +3527,9 @@ async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addres
     leaf_dir = inner.campaigns.cycle_dir(leaf)
     into_leaf = Subject.of((acts_hop, leaf)).command_fields
     CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
-    hold_cycle(leaf_dir)
+    await asyncio.to_thread(hold_cycle, leaf_dir)
     controls["inner, its own loop running"] = inner.run_state(leaf).admission.refusal
-    paused = CommandCall(PauseCyclePayload(**into_leaf, reason="stop"), "inner-run")
+    paused = CommandCall(PauseCyclePayload(**into_leaf, reason="stop"), "inner-run", door=Door.HOST)
     with pytest.raises(PayloadInvalidError):
         await sender.dispatch(paused)
     await seen(("unfiled", "a pause into an inner cycle its own loop runs"), "inner-run", paused)
@@ -3457,7 +3537,9 @@ async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addres
 
     def into(key: str) -> CommandCall[Any]:
         return CommandCall(
-            VerifyCandidatePayload.model_validate({**into_leaf, "candidate_id": key}), key
+            VerifyCandidatePayload.model_validate({**into_leaf, "candidate_id": key}),
+            key,
+            door=Door.HOST,
         )
 
     inner_stopped = into("inner-stopped")
@@ -3466,7 +3548,7 @@ async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addres
     await seen(
         ("applied", "an inner pass stopped by a cancel"), "inner-stopped", into("inner-stopped")
     )
-    unaddressed = CommandCall(DeleteCyclePayload(**into_leaf), "inner-422")
+    unaddressed = CommandCall(DeleteCyclePayload(**into_leaf), "inner-422", door=Door.HOST)
     with pytest.raises(PayloadInvalidError) as static:
         await sender.dispatch(unaddressed)
     assert static.value.code == "inner_cycle_unaddressed"
@@ -3508,7 +3590,7 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Com
             stores=stores, pass_kind=MeasurementRole.BENCH, hop=held, declared=Budget(), sends=()
         ):
             pause = PauseCyclePayload(campaign_id="held", cycle_id="cycle_held", reason="stop")
-            await sender.dispatch(CommandCall(pause))
+            await sender.dispatch(CommandCall(pause, door=Door.HOST))
             controls["outer, paused under a pass"] = stores.run_state(held).admission.refusal
             raise asyncio.CancelledError("aborted")
     parked = f"{RUN_PHASE_INFO[RunPhase.PAUSED].parked.capitalize()}."
@@ -3527,17 +3609,18 @@ async def test_a_loop_command_accepted_by_its_act_is_taken_by_its_loop_or_voided
     stores.campaigns.mint_cycle(ended_hop)
     ended_dir = stores.campaigns.cycle_dir(ended_hop)
     CycleEventLog.open(CycleDir(ended_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
-    hold_cycle(ended_dir)
+    await asyncio.to_thread(hold_cycle, ended_dir)
     release_cycle(ended_dir)
     looped = CycleHop(campaign_id="looped", cycle_id="cycle_looped")
     stores.campaigns.create_campaign(minted_campaign(looped))
     stores.campaigns.mint_cycle(looped)
     looped_dir = stores.campaigns.cycle_dir(looped)
     CycleEventLog.open(CycleDir(looped_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
-    hold_cycle(looped_dir)
+    await asyncio.to_thread(hold_cycle, looped_dir)
     asked = CommandCall(
         PauseCyclePayload(campaign_id="looped", cycle_id="cycle_looped", reason="stop"),
         "loop-pause",
+        door=Door.HOST,
     )
     await sender.dispatch(asked)
     await seen(("accepted", "standing for its loop"), "loop-pause", asked)
@@ -3545,11 +3628,15 @@ async def test_a_loop_command_accepted_by_its_act_is_taken_by_its_loop_or_voided
     assert loop.take_pause() is not None, "its loop never took a standing pause"
     await seen(("applied", "taken by its loop"), "loop-pause", asked)
     skipped = CommandCall(
-        SkipSearchpointPayload(campaign_id="looped", cycle_id="cycle_looped"), "loop-left"
+        SkipSearchpointPayload(campaign_id="looped", cycle_id="cycle_looped"),
+        "loop-left",
+        door=Door.HOST,
     )
     await sender.dispatch(skipped)
     release_cycle(looped_dir)
-    assert sweep_dead_cycles(stores.projects_root) == 2, "a dead loop's cycle was not reaped"
+    assert await asyncio.to_thread(sweep_dead_cycles, stores.projects_root) == 2, (
+        "a dead loop's cycle was not reaped"
+    )
     await seen(("voided", "its loop ended without taking it"), "loop-left", None)
     owed = {
         ("accepted", "standing for its loop"): ("accepted", "working", refused, "replayed", 1),
@@ -3576,10 +3663,11 @@ async def test_every_kind_replays_off_the_log_but_a_payload_holding_a_secret(
         return len(UserStore(stores.campaigns.workspace).consent_trail())
 
     def twice(payload: CommandPayload, key: str) -> list[CommandCall[Any]]:
-        return [CommandCall(payload, key), CommandCall(payload, key)]
+        return [CommandCall(payload, key, door=Door.API), CommandCall(payload, key, door=Door.API)]
 
     def keyed_secret(secret: str) -> CommandCall[Any]:
-        return CommandCall(SetApiKeyPayload(provider="openrouter", secret=SecretStr(secret)), "key")
+        keyed = SetApiKeyPayload(provider="openrouter", secret=SecretStr(secret))
+        return CommandCall(keyed, "key", door=Door.API)
 
     replayed: dict[str, tuple[int, object, list[int]]] = {}
     for kind, calls in (
@@ -3604,6 +3692,15 @@ async def test_every_kind_replays_off_the_log_but_a_payload_holding_a_secret(
 
 
 # 5. The host surface
+
+
+async def test_a_host_files_no_kind_its_press_keeps_from_hosts(tmp_path: Path) -> None:
+    stores = workspace(tmp_path)
+    keyed = SetApiKeyPayload(provider="openrouter", secret=SecretStr("sk-host-aaaa"))
+    with pytest.raises(BadRequestError):
+        await (await host_dispatcher(stores)).dispatch(CommandCall(keyed, door=Door.HOST))
+    assert not stores.api_keys.load(), "a host set the account's own key"
+
 
 # The stdio server as a host spawns it, in the `offline` fixture's world.
 _SERVE_MCP_OFFLINE = """
@@ -3795,7 +3892,9 @@ async def test_a_reopen_of_a_draft_its_queued_start_holds_serves_that_starts_sta
     full = JobRegistry(caller.stores.jobs_dir, capacity=lambda _live: 0)
 
     async def started() -> tuple[CommandCall[Any], object]:
-        call = CommandCall(StartCheckinPayload(draft_id=draft["draft_id"]), uuid.uuid4().hex)
+        call = CommandCall(
+            StartCheckinPayload(draft_id=draft["draft_id"]), uuid.uuid4().hex, door=Door.HOST
+        )
         sent = await CommandDispatcher(caller.stores, job_registry=full).dispatch(call)
         return call, sent.result
 
@@ -3808,11 +3907,47 @@ async def test_a_reopen_of_a_draft_its_queued_start_holds_serves_that_starts_sta
     assert reopened["start"] == {"stage": "queued", "command_id": start.command_id}, (
         "a reopen served another Start than the one holding its draft"
     )
-    queued_start.withdraw(RuntimeError("left the queue"))
+    await queued_start.withdraw(RuntimeError("left the queue"))
     assert isinstance(queued_start.request, CheckinStart), "guard"
     queued_start.request.claim.release()
     assert (await answered("draft", {"draft_id": draft["draft_id"]}))["start"] is None, (
         "a withdrawn Start still held its reopened draft"
+    )
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_head_to_head_start_withdrawn_unrun_closes_the_client_its_arms_opened(
+    monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
+) -> None:
+    _, caller, _, answered, keyed, upload = host_tenant
+    draft = await answered("ingest-upload", keyed(upload))
+    resolved = EditDraftPatch(
+        raw_task_description="Answer it.", column_query="question", column_ground_truth="answer"
+    )
+    dispatcher = CommandDispatcher(caller.stores)
+    edit = EditDraftCampaignPayload(draft_id=draft["draft_id"], patch=resolved)
+    await dispatcher.dispatch(CommandCall(edit, "edit", door=Door.HOST))
+    monkeypatch.setattr(launching, "assert_origin_ready", lambda _draft, _pipeline: None)
+    arms = HeadToHeadRequest(
+        head_to_head_id="duel",
+        arms=[
+            ArmRequest(arm_key=key, optimization=OptimizationOverrides(optimizer=opt))
+            for key, opt in (("a", "potter"), ("b", "potter"))
+        ],
+        budget=Budget(usd=50.0, rounds=1),
+    )
+    call = CommandCall(
+        StartCheckinPayload(draft_id=draft["draft_id"], head_to_head=arms), "k", door=Door.HOST
+    )
+    admitted = (await dispatcher.dispatch(call)).result
+    assert isinstance(admitted, AdmittedHeadToHead), "guard: the arms were not admitted"
+    assert isinstance(admitted.source, CheckinArms), "guard"
+    client = admitted.source.opened.session.backend_client
+    _ = client.http
+    await admitted.withdraw(RuntimeError("the act raised past its answer"))
+    admitted.source.claim.release()
+    assert client._http is None or client._http.is_closed, (
+        "a head-to-head withdrawn before its launch left its arms' backend client open"
     )
 
 
@@ -3826,10 +3961,14 @@ async def test_a_knob_sent_at_its_default_is_another_act_than_the_knob_unsent(
     pair = [halting, {**halting, "optimization": {"halt_at_fitness": 0.9, "optimizer": "potter"}}]
     dispatcher = CommandDispatcher(caller.stores)
     with pytest.raises(PotterError) as first_refusal:
-        await dispatcher.dispatch(CommandCall(MintCampaignPayload.model_validate(pair[0]), "k"))
+        await dispatcher.dispatch(
+            CommandCall(MintCampaignPayload.model_validate(pair[0]), "k", door=Door.HOST)
+        )
     assert first_refusal.value.code != "idempotency_key_reused"
     with pytest.raises(IdempotencyKeyReusedError):
-        await dispatcher.dispatch(CommandCall(MintCampaignPayload.model_validate(pair[1]), "k"))
+        await dispatcher.dispatch(
+            CommandCall(MintCampaignPayload.model_validate(pair[1]), "k", door=Door.HOST)
+        )
 
 
 @pytest.mark.usefixtures("offline")
@@ -3911,10 +4050,10 @@ def test_every_jobs_cancel_is_resolved_before_any_is_dispatched(
     run_dir = cycle_dir_for(workspace, run_hop)
     run_dir.mkdir(parents=True)
     with pytest.raises(TaskUncancellableError):
-        launch_cancels([queued, running], caller.stores)
+        launch_cancels([queued, running], caller.stores, Door.HOST)
     CycleEventLog.open(CycleDir(run_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
     hold_cycle(run_dir)
-    acts = launch_cancels([queued, running], caller.stores)
+    acts = launch_cancels([queued, running], caller.stores, Door.HOST)
     release_cycle(run_dir)
     assert [(a.payload.kind, a.idempotency_key) for a in acts] == [
         (CommandKind.CANCEL_QUEUED, f"cancel:{queued.job_id}"),
@@ -3923,7 +4062,7 @@ def test_every_jobs_cancel_is_resolved_before_any_is_dispatched(
     hold_cycle(run_dir)
     elsewhere = dataclasses.replace(running, workspace=str(tmp_path / "sandbox"))
     with pytest.raises(TaskUncancellableError):
-        launch_cancels([queued, elsewhere], caller.stores)
+        launch_cancels([queued, elsewhere], caller.stores, Door.HOST)
     release_cycle(run_dir)
     assert registry.cancel_queued(queued.job_id) is not None
     assert read(queued) == "cancelled", "a withdrawn launch reads as run"
@@ -3931,7 +4070,7 @@ def test_every_jobs_cancel_is_resolved_before_any_is_dispatched(
 
 # The quota reads the launch whose run died beside the launches after it.
 @pytest.mark.usefixtures("offline")
-async def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_what_spent(
+def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_what_spent(
     host_tenant: _HostTenant, launches: _Launches
 ) -> None:
     # Its run's process died without a release: no lock holds its producer, so it never will end.
@@ -3983,7 +4122,7 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         key = uuid.uuid4().hex
         idle = set(launcher_launch._DETACHED)
         ran = await CommandDispatcher(caller.stores, job_registry=queuing).dispatch(
-            CommandCall(step, key)
+            CommandCall(step, key, door=Door.HOST)
         )
         waiter = set(launcher_launch._DETACHED) - idle
         assert waiter, "guard: the queued step left no waiter to wake"
@@ -3991,14 +4130,14 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         launched = ran.result.launch
         assert launched.hop == step_hop, "a queued step recorded no cycle its job knew"
         if ending is None:
-            assert queuing.cancel_queued(launched.job_id)
+            assert await asyncio.to_thread(queuing.cancel_queued, launched.job_id)
         else:
-            queuing.release(launched.job_id, ending)
+            await asyncio.to_thread(queuing.release, launched.job_id, ending)
         # Its queue waiter wakes on the ended job and raises into a release of its own.
         await asyncio.gather(*waiter, return_exceptions=True)
         with pytest.MonkeyPatch.context() as later:
             later.setattr(registry_module, "utcnow_iso", lambda: "2999-01-01T00:00:00Z")
-            queuing.reap_orphans()
+            await asyncio.to_thread(queuing.reap_orphans)
         assert queuing.get(launched.job_id) is None, "guard: the job was not reaped"
         retried = {**step.model_dump(mode="json"), "idempotency_key": key}
         task = (await stepping.answer(CallTool("start-run", retried))).task

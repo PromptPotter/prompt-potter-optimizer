@@ -570,6 +570,11 @@ class DashboardCheckout:
             LiveDashboardProjection, seed=_seed(LiveDashboardProjection, self._prefix)
         )
 
+    @property
+    def spend(self) -> SpendRollup:
+        """What the run has spent so far, as its fold banks it."""
+        return self.live.state.spend
+
     def feed(self, record: CycleRecord) -> None:
         with self._lock:
             if type(record) in _AT_ONCE:

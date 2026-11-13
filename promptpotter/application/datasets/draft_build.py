@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -11,6 +12,7 @@ from promptpotter.application.datasets.origin_readiness import (
     OriginReadiness,
     load_resolution,
     origin_readiness,
+    save_checkin_draft,
 )
 from promptpotter.application.hierarchy import draft_starts
 from promptpotter.application.jobs.quota import account_wallet, launch_bound, launch_refusal
@@ -189,7 +191,24 @@ def _recap(draft: DraftFile, connector: str, criterion: DraftCriterion) -> str:
 
 
 async def read_draft_wire(stores: Stores, draft: DraftFile) -> DraftCampaignWire:
-    return draft_wire(stores, draft, await draft_served(stores, draft))
+    return await off_loop(draft_wire, stores, draft, await draft_served(stores, draft))
+
+
+async def kept_draft_wire(
+    stores: Stores,
+    draft: DraftFile,
+    served: ServedPipeline,
+    *,
+    resolution: OriginResolution | None = None,
+) -> DraftCampaignWire:
+    """*draft* kept once its response is built, off the loop: the wire reads the account's wallet."""
+
+    def _kept() -> DraftCampaignWire:
+        wire = draft_wire(stores, draft, served)
+        save_checkin_draft(stores, draft, resolution=resolution)
+        return wire
+
+    return await asyncio.to_thread(_kept)
 
 
 class HeldStart(FrozenModel):

@@ -33,7 +33,7 @@ async def cancel(dispatched: Dispatched[CancelPayload]) -> Applier[object]:
         kind = owned.filed.kind
         jobs = await asyncio.to_thread(launched_jobs, dispatcher.job_registry, owned)
         if jobs is not None:
-            for act in await asyncio.to_thread(launch_cancels, jobs, stores):
+            for act in await asyncio.to_thread(launch_cancels, jobs, stores, dispatched.door):
                 await dispatcher.dispatch(act)
         elif owned.status == "filed" and kind not in _PASS_KINDS:
             raise TaskUncancellableError(f"{kind} acts to its end; ask again once it ends")

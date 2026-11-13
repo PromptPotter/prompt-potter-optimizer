@@ -41,6 +41,7 @@ from promptpotter.application.pipeline_resolve import cycle_config, laid_session
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.command_kinds import Door
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.results import CycleResult
@@ -63,6 +64,7 @@ if TYPE_CHECKING:
 # Every verb but the run is a command the host files through `host_dispatcher`, as every door does.
 __all__ = [
     "CommandCall",
+    "Door",
     "enter",
     "host_dispatcher",
     "reindex_measurement_archive",
@@ -71,17 +73,17 @@ __all__ = [
 ]
 
 
-def enter(stores: Stores | None = None) -> Stores:
-    """The embedded door, first wherever a host enters it: the data root landed, then *stores*
-    (the local account's where none). A launch's admission reclaims what a dead producer left."""
+async def enter(stores: Stores | None = None) -> Stores:
+    """The embedded door, first wherever a host enters it: the data root landed off the loop, then
+    *stores* (the local account's where none). A sync host awaits it through `asyncio.run`."""
     setup_logging()
-    land_at_entry(every_treatment=False)
+    await asyncio.to_thread(land_at_entry, every_treatment=False)
     return local_stores(tenant=None) if stores is None else stores
 
 
-def host_dispatcher(stores: Stores | None = None) -> CommandDispatcher:
+async def host_dispatcher(stores: Stores | None = None) -> CommandDispatcher:
     """What a host files every command through, past `enter`."""
-    return CommandDispatcher(enter(stores))
+    return CommandDispatcher(await enter(stores))
 
 
 @asynccontextmanager
@@ -127,7 +129,7 @@ async def run_campaign(
     session bound to the cycle the run ended on, whose backend client it closes on every exit.
     Under ``origin_gate: strict`` an unhealthy origin halts it, and a resume proceeds; under an
     ``arm_gate`` it blocks until ``submit-arms`` answers."""
-    stores = enter(stores)
+    stores = await enter(stores)
     resuming: ExistingCycle | None = None
     declaration: RunDeclaration | None = None
     async with AsyncExitStack() as clients:
@@ -155,7 +157,8 @@ async def run_campaign(
         # Admitted BEFORE the mint, whose framing call is paid, and before a resume binds its
         # cycle: a refusal leaves nothing written. Offloaded: the sweep scans every cycle ledger.
         await asyncio.to_thread(sweep, stores.projects_root)
-        start, held = await admit_slotless(
+        start, held = await asyncio.to_thread(
+            admit_slotless,
             config,
             stores=stores,
             holder=EmbeddedRun(measured),
@@ -175,9 +178,9 @@ async def run_campaign(
                     session, declaration, session.bank.samples, task_text=None
                 )
                 stamps = running.hop
-                start.land(running.hop, held)
+                await asyncio.to_thread(start.land, running.hop, held)
         except BaseException as exc:
-            start.release(exc, stamps=stamps)
+            await asyncio.to_thread(start.release, exc, stamps=stamps)
             raise
         return await run_held_job(
             start,
@@ -205,7 +208,7 @@ async def run_head_to_head(
 
     Raises what ``head-to-head`` refuses the browser's and the terminal's act on.
     """
-    stores = enter(stores)
+    stores = await enter(stores)
 
     async def _run(arm: HeldArm) -> tuple[str, Session, CycleResult]:
         held = arm.held

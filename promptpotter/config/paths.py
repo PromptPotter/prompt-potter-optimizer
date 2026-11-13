@@ -73,6 +73,7 @@ JOBS_DIR = "jobs"
 # Under the jobs dir, which is globbed for `*.json` only, so none of these reads as a job.
 ADMISSION_LOCK = ".admission.lock"
 LANDING_FILE = ".landing"
+LIVE_JOBS_INDEX = ".live-jobs"
 PRODUCERS_DIR = "producers"
 MACHINE_DIR = "machine"
 # A reaped job's record as its release stamped it, read by job id alone (`JobRegistry.launched_by`).

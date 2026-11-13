@@ -62,6 +62,7 @@ from promptpotter.domain.command_events import CommandEffect
 from promptpotter.domain.command_kinds import (
     CancelQueuedRunPayload,
     CommandKind,
+    Door,
     MintHeadToHeadPayload,
     PauseCyclePayload,
     StartCheckinPayload,
@@ -91,7 +92,9 @@ from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, acting_principal
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.application.pipeline_resolve import ServedPipeline
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.checkin_draft import DraftFile
     from promptpotter.domain.command_kinds import (
         CommandPayload,
         ForkCyclePayload,
@@ -238,7 +241,9 @@ async def relaunched(replaying: Replaying[Any]) -> StartAnswer:
 _CANCELLED = "command cancelled"
 
 
-def launch_cancels(jobs: list[Job], stores: Stores) -> list[CommandCall[CommandPayload]]:
+def launch_cancels(
+    jobs: list[Job], stores: Stores, door: Door
+) -> list[CommandCall[CommandPayload]]:
     """A launch's `cancel`: each live job's own act, resolved for every job before any is
     dispatched: a queued one withdrawn, a running run paused on its own cycle in *stores*, each
     keyed by the job so a retried cancel acts once. A job no command of *stores* cancels now — its
@@ -249,7 +254,7 @@ def launch_cancels(jobs: list[Job], stores: Stores) -> list[CommandCall[CommandP
         if job.released:
             continue
         if job.queued:
-            acts.append(CommandCall(CancelQueuedRunPayload(job_id=job.job_id), key))
+            acts.append(CommandCall(CancelQueuedRunPayload(job_id=job.job_id), key, door=door))
             continue
         if isinstance(job.holder, InnerRun):
             raise TaskUncancellableError(f"{job.what}: {INNER_PAUSE_REFUSAL}")
@@ -264,7 +269,7 @@ def launch_cancels(jobs: list[Job], stores: Stores) -> list[CommandCall[CommandP
         pause = PauseCyclePayload(
             campaign_id=job.campaign_id, cycle_id=job.cycle_id, reason=_CANCELLED
         )
-        acts.append(CommandCall(pause, key))
+        acts.append(CommandCall(pause, key, door=door))
     return acts
 
 
@@ -288,7 +293,8 @@ async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[L
         # Refused before a slot is taken: a rewind past the last close is the operator's to fix.
         if (after := payload.mode.from_round) is not None:
             stores.campaigns.rewind_enters(hop, after)
-        return await admit(
+        admitted = await asyncio.to_thread(
+            admit,
             ExistingCycle(
                 hop, dispatched.campaign, payload.budget, step_rounds=payload.step_rounds
             ),
@@ -296,7 +302,8 @@ async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[L
             stores=stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
-        ).launched()
+        )
+        return await admitted.launched()
 
     return _launch_applier(dispatcher, _apply_start, refused_on=hop)
 
@@ -324,26 +331,27 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
         )
         # Bounded as a start-run is: the payload's own budget, admitted from what the parent leaves.
         return await _launch_fork(
-            dispatcher, cut, ExistingCycle(cut.child, campaign, payload.budget), payload.mode
+            dispatched, cut, ExistingCycle(cut.child, campaign, payload.budget), payload.mode
         )
 
     return _launch_applier(dispatcher, _apply_fork)
 
 
 async def _launch_fork(
-    dispatcher: CommandDispatcher, cut: ForkCut, request: ExistingCycle, mode: RunMode
+    dispatched: Dispatched[ForkCyclePayload], cut: ForkCut, request: ExistingCycle, mode: RunMode
 ) -> Launched:
     """Its parent untouched until the fork's run is held: a refused fork deletes its cut and
     leaves its parent's line, inbox, pointer and comparison as they stood. A held fork then leaves
     its parent and the comparison, BEFORE the cut is taken, so a fork that fails names no parent
     superseded."""
+    dispatcher = dispatched.dispatcher
     stores, job_registry = dispatcher.stores, dispatcher.job_registry
     try:
-        admitted = admit(
-            request, mode, stores=stores, job_registry=job_registry, inline=dispatcher.inline
+        admitted = await asyncio.to_thread(
+            admit, request, mode, stores=stores, job_registry=job_registry, inline=dispatcher.inline
         )
     except BaseException:
-        cut.withdraw(stores, job_registry)
+        await asyncio.to_thread(cut.withdraw, stores, job_registry)
         raise
 
     async def _held_fork() -> HeldRun:
@@ -352,26 +360,37 @@ async def _launch_fork(
             held = await admitted.held()
             # It spends the arm's ceiling and moves its parent, so the campaign leaves.
             stores.campaigns.leave_comparison(cut.child, ComparisonExit.FORK)
-            await _leave_parent(dispatcher, cut)
-            cut.take(stores)
+            await _leave_parent(dispatcher, cut, dispatched.door)
+            await asyncio.to_thread(cut.take, stores)
         except BaseException as exc:
-            if held is not None:
-                held.start.release(exc)
-            cut.withdraw(stores, job_registry)
+            await asyncio.to_thread(_unfork, held, cut, stores, job_registry, exc)
             raise
         return held
 
     return await admitted.hand_over(_held_fork())
 
 
-async def _leave_parent(dispatcher: CommandDispatcher, cut: ForkCut) -> None:
+def _unfork(
+    held: HeldRun | None,
+    cut: ForkCut,
+    stores: Stores,
+    job_registry: JobRegistry,
+    exc: BaseException,
+) -> None:
+    if held is not None:
+        held.start.release(exc)
+    cut.withdraw(stores, job_registry)
+
+
+async def _leave_parent(dispatcher: CommandDispatcher, cut: ForkCut, door: Door) -> None:
     """On the fork's own authority over its parent: the parent's launch still queued is withdrawn,
     otherwise its run paused; a parent no pause reaches is left as it stands, its refusal the
     pause's own outcome, filed on the parent's log."""
     stores, parent = dispatcher.stores, cut.parent
     holder = stores.campaigns.holder(parent)
     job = None if holder is None else holder.job
-    if job is not None and dispatcher.job_registry.cancel_queued(job.job_id):
+    cancel = dispatcher.job_registry.cancel_queued
+    if job is not None and await asyncio.to_thread(cancel, job.job_id) is not None:
         return
     pause = PauseCyclePayload(
         campaign_id=parent.campaign_id,
@@ -379,7 +398,7 @@ async def _leave_parent(dispatcher: CommandDispatcher, cut: ForkCut) -> None:
         reason=f"superseded by fork {cut.child.cycle_id}",
     )
     with contextlib.suppress(ConflictError):
-        await dispatcher.dispatch(CommandCall(pause))
+        await dispatcher.dispatch(CommandCall(pause, door=door))
 
 
 async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[Launched]:
@@ -436,13 +455,18 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
     dispatcher, start, claim = dispatched.dispatcher, dispatched.payload, dispatched.claim
     stores = dispatcher.stores
 
-    async def _admit() -> Admitted:
-        # Refused before the ack; the Start's own read waits for its slot (`CheckinStart.open`).
+    async def _ready() -> tuple[DraftFile, ServedPipeline]:
+        # Refused before the ack, on the Start's one backend read, which its open lands on.
         draft = owned_draft(stores, claim.draft_id)
         served = await draft_served(stores, draft)
         assert_origin_ready(draft, draft_pipeline(stores, draft, served))
-        return admit(
-            CheckinStart(claim=claim, dataset_name=draft.dataset_name, budget=start.budget),
+        return draft, served
+
+    async def _admit() -> Admitted:
+        draft, served = await _ready()
+        return await asyncio.to_thread(
+            admit,
+            CheckinStart(claim, draft.dataset_name, start.budget, served),
             RunMode(),
             stores=stores,
             job_registry=dispatcher.job_registry,
@@ -451,7 +475,7 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
 
     async def _admit_arms(request: HeadToHeadRequest) -> AdmittedHeadToHead:
         # Its draft lands once every arm passed its refusals.
-        source = await checkin_arms(stores, claim, request)
+        source = await checkin_arms(stores, claim, request, (await _ready())[1])
         return await admit_head_to_head(
             source,
             request,
@@ -459,9 +483,9 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
             holder=CampaignLaunch(source.opened.draft.dataset_name, draft_id=claim.draft_id),
         )
 
-    def _withdraw(answer: StartAnswer, exc: BaseException) -> None:
+    async def _withdraw(answer: StartAnswer, exc: BaseException) -> None:
         if isinstance(answer, Admitted | AdmittedHeadToHead):
-            answer.withdraw(exc)
+            await answer.withdraw(exc)
 
     # The claim and the slot ride the admitted launch to its mint; a second Start refuses while it
     # holds the claim, and is not found once it minted. A retry under its key answers the first

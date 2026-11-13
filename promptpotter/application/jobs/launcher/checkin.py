@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -13,7 +14,6 @@ from promptpotter.application.datasets.loaders import Source, cut_bank, definiti
 from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.mint_and_start import (
-    assert_origin_ready,
     commit_upload_definition,
     persist_origin_candidate_library,
 )
@@ -33,7 +33,6 @@ from promptpotter.application.pipeline_resolve import (
     draft_budget,
     draft_pipeline,
     draft_sends,
-    draft_served,
     laid_config,
     laid_session,
 )
@@ -65,6 +64,8 @@ class CheckinStart:
     # The queue's label alone (`DraftFile.dataset_name`); every decision reads the draft.
     dataset_name: str
     budget: Budget
+    # The Start's one backend read, taken where its origin's readiness was checked.
+    served: ServedPipeline
 
     @property
     def hop(self) -> CycleHop:
@@ -91,8 +92,7 @@ class CheckinStart:
     async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
         """Nothing before the slot is HELD touches the draft: it lands, mints and closes here."""
         draft_id = self.claim.draft_id
-        served = await draft_served(stores, owned_draft(stores, draft_id))
-        async with open_checkin(stores, draft_id, served, overlays=[{}]) as opened:
+        async with open_checkin(stores, draft_id, self.served, overlays=[{}]) as opened:
             session, config = laid_session(opened.session, opened.layers)
             plan = resolve_cycle_plan(
                 session,
@@ -175,11 +175,11 @@ async def open_checkin(
     overlays: Sequence[Mapping[str, JsonValue]],
 ) -> AsyncIterator[OpenedCheckin]:
     """*overlays* are what each campaign the Start mints lays over the draft's `optimization`;
-    *served* is the Start's one backend read, taken once its slot is held."""
+    *served* is the Start's one backend read, its readiness checked at the admission."""
     draft = owned_draft(stores, draft_id)
     pipeline = draft_pipeline(stores, draft, served)
-    assert_origin_ready(draft, pipeline)
-    origin_override = _land_draft(stores, draft, pipeline, overlays)
+    # Off the loop: the landing re-reads the kept upload and writes the draft's definition.
+    origin_override = await asyncio.to_thread(_land_draft, stores, draft, pipeline, overlays)
     async with init_services(
         dataset_name=draft.dataset_name, identity=stores.identity, stores=stores, served=served
     ) as session:

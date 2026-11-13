@@ -118,7 +118,7 @@ async def read_tabular(blob: bytes, filename: str) -> Table:
 
 
 def read_kept_table(path: Path) -> Table:
-    # Kept only once it parsed within the caps; still read on the caller's thread.
+    # Kept only once it parsed within the caps; its async door offloads the read.
     return _parse_table(path.read_bytes(), path.name)
 
 

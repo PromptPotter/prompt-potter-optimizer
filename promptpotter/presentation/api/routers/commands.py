@@ -21,6 +21,7 @@ from promptpotter.domain.command_kinds import (
     CommandAcceptedBody,
     CommandKind,
     CommandPayload,
+    Door,
     IngestUploadPayload,
 )
 from promptpotter.domain.run_records import LaunchAnswer
@@ -60,7 +61,7 @@ async def ingest_upload(
     }
     payload = PayloadInvalidError.validating(IngestUploadPayload, fields)
     outcome = await CommandDispatcher(stores).answer(
-        workspace_edits.ingest_upload, CommandCall(payload, key)
+        workspace_edits.ingest_upload, CommandCall(payload, key, door=Door.API)
     )
     return outcome.result
 
@@ -100,7 +101,7 @@ class _Dispatching:
         command_id: CommandIdHeader = None,
     ) -> object:
         dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-        call = CommandCall(payload, key)
+        call = CommandCall(payload, key, door=Door.API)
         if command_id is not None:
             call = replace(call, command_id=command_id)
         outcome = await dispatcher.dispatch(call)

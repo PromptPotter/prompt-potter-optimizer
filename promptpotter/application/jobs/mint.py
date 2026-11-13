@@ -67,6 +67,7 @@ from promptpotter.domain.campaign_config import (
 from promptpotter.domain.command_events import CommandLanded, draft_subject, subject_key
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
+from promptpotter.domain.phases import NextAct
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
@@ -293,7 +294,8 @@ class ConfigDriftError(ConflictError):
         capabilities_moved: list[str],
         revision_moved: str | None,
     ) -> None:
-        self.dataset_name = campaign.dataset_name
+        # The act past it, which every door words: a fresh campaign on the same dataset.
+        self.next_act = NextAct("mint-campaign", "dataset_name", campaign.dataset_name)
         causes: list[str] = []
         if drift is not None:
             moved = ", ".join(drift.moved())
@@ -321,6 +323,7 @@ class ConfigDriftError(ConflictError):
                 "defaults_pin_moved": drift is not None,
                 "capabilities_moved": capabilities_moved,
                 "backend_revision_moved": revision_moved is not None,
+                "next_act": self.next_act._asdict(),
             },
         )
 

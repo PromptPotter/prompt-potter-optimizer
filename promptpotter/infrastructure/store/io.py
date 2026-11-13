@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import itertools
 import json
@@ -8,7 +9,6 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterable, Iterator
-from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import IO, Any, NamedTuple
 
@@ -434,8 +434,26 @@ def _open_lock(name: str) -> int:
         return os.open(name, os.O_RDWR | os.O_CREAT)
 
 
+def refuse_on_event_loop(what: str) -> None:
+    """A blocking wait stalls every request the loop serves: its async door offloads it once."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError(
+        f"{what} blocks the event loop; the async door offloads it (asyncio.to_thread)"
+    )
+
+
 def take_lock(path: Path, *, wait_s: float) -> HeldLock | None:
-    """Polls for up to *wait_s*, so ``0`` is one try; ``None`` is another holder's."""
+    """Polls for up to *wait_s*, so ``0`` is one try; ``None`` is another holder's. A wait refuses
+    on the event loop: a gate is held across a scan, so its waiter stalls every request."""
+    if wait_s > 0:
+        refuse_on_event_loop(f"waiting on {path.name}")
+    return _poll_lock(path, wait_s)
+
+
+def _poll_lock(path: Path, wait_s: float) -> HeldLock | None:
     name = _long_path(path)
     deadline = time.monotonic() + wait_s
     while True:
@@ -453,7 +471,12 @@ def take_lock(path: Path, *, wait_s: float) -> HeldLock | None:
 
 @contextlib.contextmanager
 def held_lock(path: Path, *, wait_s: float) -> Iterator[None]:
-    lock = take_lock(path, wait_s=wait_s)
+    with _holding(path, take_lock(path, wait_s=wait_s), wait_s):
+        yield
+
+
+@contextlib.contextmanager
+def _holding(path: Path, lock: HeldLock | None, wait_s: float) -> Iterator[None]:
     if lock is None:
         raise TimeoutError(f"{path} stayed locked past {wait_s} s")
     try:
@@ -481,11 +504,15 @@ def write_lock_name(name: str) -> str:
     return f".{name}.lock"
 
 
-def write_lock(path: Path) -> AbstractContextManager[None]:
+@contextlib.contextmanager
+def write_lock(path: Path) -> Iterator[None]:
     """The file's one write lock. Windows runs `O_APPEND` as seek-then-write, so two unlocked
     appends overwrite one record; a read-and-rewrite holds it too, so two edits never both read
-    the file the other is about to replace."""
-    return held_lock(path.with_name(write_lock_name(path.name)), wait_s=LOCK_TIMEOUT)
+    the file the other is about to replace. Held for that one write, so its wait is that write's,
+    never a gate's: the loop may take it."""
+    lock_path = path.with_name(write_lock_name(path.name))
+    with _holding(lock_path, _poll_lock(lock_path, LOCK_TIMEOUT), LOCK_TIMEOUT):
+        yield
 
 
 # Name → (inode, end, mtime) after this process's last append there, which landed whole: an inode

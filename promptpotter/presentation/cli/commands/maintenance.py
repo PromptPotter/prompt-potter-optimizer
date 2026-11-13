@@ -9,7 +9,7 @@ from promptpotter.application.maintenance.archive_maintenance import (
     ArchiveReport,
     inventory_measurement_archive,
 )
-from promptpotter.domain.command_kinds import CompactArchivePayload
+from promptpotter.domain.command_kinds import CompactArchivePayload, Door
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import PayloadInvalidError
@@ -85,7 +85,7 @@ async def cmd_compact_archive(args: argparse.Namespace) -> CommandResult:
         CompactArchivePayload, {"mode": mode, "dataset": dataset, "apply": apply}
     )
     sent = await CommandDispatcher(stores).answer(
-        archive_compaction.compact_archive, CommandCall(payload)
+        archive_compaction.compact_archive, CommandCall(payload, door=Door.TERMINAL)
     )
     report = sent.result
     return CommandResult(

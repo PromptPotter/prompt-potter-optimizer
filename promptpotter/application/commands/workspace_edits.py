@@ -48,7 +48,7 @@ async def campaign_lifecycle(dispatched: Dispatched[LifecyclePayload]) -> Applie
     dispatcher, payload = dispatched.dispatcher, dispatched.payload
     stores = dispatcher.stores
 
-    async def _apply() -> None:
+    def _apply() -> None:
         if isinstance(payload, UnarchiveCampaignPayload):
             # It destroys nothing, so it takes no destroyer's guard.
             _lifecycle(stores, payload)
@@ -56,7 +56,7 @@ async def campaign_lifecycle(dispatched: Dispatched[LifecyclePayload]) -> Applie
         with destroying(stores, dispatcher.job_registry, payload.campaign_id):
             _lifecycle(stores, payload)
 
-    return Applier.silent(_apply)
+    return Applier.blocking(_apply)
 
 
 def _lifecycle(stores: Stores, payload: LifecyclePayload) -> None:
@@ -84,10 +84,7 @@ async def set_campaign_label(dispatched: Dispatched[SetCampaignLabelPayload]) ->
     campaigns = dispatched.dispatcher.stores.campaigns
     campaign_id, label = dispatched.payload.campaign_id, dispatched.payload.label
 
-    async def _apply() -> None:
-        campaigns.update_campaign(campaign_id, label=label)
-
-    return Applier.silent(_apply)
+    return Applier.blocking(lambda: campaigns.update_campaign(campaign_id, label=label))
 
 
 def _opening(run: Callable[[], Awaitable[DraftCampaignWire]]) -> Applier[DraftCampaignWire]:
@@ -151,10 +148,7 @@ async def set_user_settings(
     stores = dispatched.dispatcher.stores
     sent = account.UserSettings(demo_mode_enabled=dispatched.payload.demo_mode_enabled)
 
-    async def _apply() -> account.UserSettings:
-        return account.set_user_settings(stores, sent)
-
-    return Applier(_apply)
+    return Applier.blocking(lambda: account.set_user_settings(stores, sent))
 
 
 @replays(CommandKind.SET_USER_SETTINGS)
@@ -168,10 +162,7 @@ async def accept_terms(
 ) -> Applier[account.TermsConsent]:
     stores, version = dispatched.dispatcher.stores, dispatched.payload.version
 
-    async def _apply() -> account.TermsConsent:
-        return account.accept_terms(stores, version)
-
-    return Applier(_apply)
+    return Applier.blocking(lambda: account.accept_terms(stores, version))
 
 
 @replays(CommandKind.ACCEPT_TERMS)
@@ -185,30 +176,23 @@ async def set_api_key(dispatched: Dispatched[SetApiKeyPayload]) -> Applier[Accou
     """Its payload is `unmatched`: no retry is answered as it, so it replays nothing."""
     stores, payload = dispatched.dispatcher.stores, dispatched.payload
 
-    async def _apply() -> AccountKey:
-        return put_account_key(stores, payload.provider, payload.secret)
-
-    return Applier(_apply)
+    return Applier.blocking(lambda: put_account_key(stores, payload.provider, payload.secret))
 
 
 async def remove_api_key(dispatched: Dispatched[RemoveApiKeyPayload]) -> Applier[object]:
     stores, provider = dispatched.dispatcher.stores, dispatched.payload.provider
 
-    async def _apply() -> None:
-        remove_account_key(stores, provider)
-
-    return Applier.silent(_apply)
+    return Applier.blocking(lambda: remove_account_key(stores, provider))
 
 
 async def bank_snippet(dispatched: Dispatched[BankSnippetPayload]) -> Applier[object]:
     stores, payload = dispatched.dispatcher.stores, dispatched.payload
 
-    async def _apply() -> None:
-        library.bank_snippet(
+    return Applier.blocking(
+        lambda: library.bank_snippet(
             stores,
             supersedes=payload.supersedes,
             text=payload.text,
             experiment=payload.experiment,
         )
-
-    return Applier.silent(_apply)
+    )

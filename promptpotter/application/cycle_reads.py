@@ -10,7 +10,7 @@ from pydantic import Field
 
 from promptpotter.application.hierarchy import entries_version
 from promptpotter.application.hierarchy_subtree import subtree_course
-from promptpotter.application.jobs.machine_status import machine_status
+from promptpotter.application.jobs.machine_status import served_machine_status
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.scoring.closed_rounds import campaign_scorer, closed_round
 from promptpotter.application.served_dashboard import WarmingDashboard, served_dashboard
@@ -217,7 +217,7 @@ def feed_versions(stores: Stores, jobs: JobRegistry, named: str = "") -> dict[st
         # What the account filed: an edit, a setting, a draft turn. A run's appends do not move it.
         held["account"] = (file_sig(stores.commands.path), stores.drafts.version())
     if "machine".startswith(named):
-        held["machine"] = (machine_status(jobs, identity=stores.identity).model_dump_json(),)
+        held["machine"] = (served_machine_status(stores, jobs).model_dump_json(),)
     return {
         subject: hashlib.sha256(repr(version).encode()).hexdigest()[:16]
         for subject, version in held.items()

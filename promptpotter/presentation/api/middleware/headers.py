@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -95,7 +96,7 @@ class ResponseHeadersMiddleware:
                     elapsed_ms = (time.perf_counter() - began) * 1000
                     headers["server-timing"] = f"app;dur={elapsed_ms:.1f}"
                     # The webapp compares it with the id it was built with (`lib/api/client.ts::send`).
-                    build = served_build(self._webapp_dir)
+                    build = await asyncio.to_thread(served_build, self._webapp_dir)
                     if build:
                         headers["x-webapp-build"] = build
             await send(message)

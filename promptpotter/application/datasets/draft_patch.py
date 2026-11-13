@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter import connectors
@@ -325,7 +326,8 @@ async def _candidate_library(
             f"patch.candidate_library_column {column!r} is not one of the dataset's columns "
             f"{list(draft.headers)}."
         )
-    terms = candidate_library_from_rows(checkin_rows(stores, draft), column)
+    rows = await asyncio.to_thread(checkin_rows, stores, draft)
+    terms = candidate_library_from_rows(rows, column)
     if not terms:
         raise PayloadInvalidError(
             f"column {column!r} has no usable values.",

@@ -38,7 +38,7 @@ L4's law is `domain/l4/`; this package runs it, and the `promptpotter` connector
 - **A paid verb outside a run is admitted inside the application function**: a scoring pass through `paid_pass` (a slot, refused `machine_busy`, never queued), one LLM call through `jobs/launcher/admission.py::paid_call` (a slotless job, so its hold closes with it or its dead producer); both refuse a taken cycle.
 - **A server-launched run executes in its own process** (`jobs/launcher/run_job.py`); a queued job's intent never leaves the process that authenticated it, so a restart drops the queue.
 - **A launch moves only by a `domain/job.py::LAUNCH_MOVES` row, through `JobRegistry.move`** (asked → admitted → held → running → ended; each exit a `LaunchExit`), at every door: no other code writes a job's stage, admission, hop or release. <!-- probe: git grep -cE "(admitted_at|started_at|released_at).: utcnow_iso" -- promptpotter/*.py == 3 -->
-- **A job file is written by `JobRegistry._stamp` under the admission gate**; a second writer overwrites a release or a retarget. <!-- probe: git grep -cE "_persist\(" -- promptpotter/application/jobs/registry.py == 4 -->
+- **A job file is written by `JobRegistry._stamp` under the admission gate**; a second writer overwrites a release or a retarget. Its persist keeps the live-jobs index beside it, which every live listing reads instead of a glob; a dead producer's job is released by the sweep (`reaper.py::sweep`), never a read. <!-- probe: git grep -cE "_persist\(" -- promptpotter/application/jobs/registry.py == 4 -->
 
 ## Backend overlay
 

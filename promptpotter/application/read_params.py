@@ -52,7 +52,10 @@ from promptpotter.application.jobs.account_activity import (
     ActivityWindow,
     account_activity,
 )
-from promptpotter.application.jobs.machine_status import MachineStatusResponse, machine_status
+from promptpotter.application.jobs.machine_status import (
+    MachineStatusResponse,
+    served_machine_status,
+)
 from promptpotter.application.jobs.quota import (
     CouponStatus,
     QuotaStatus,
@@ -255,7 +258,7 @@ class MachineStatusParams(ReadParams, read=ReadKind.MACHINE_STATUS, route="/mach
     caller may see."""
 
     def answer(self, caller: Caller) -> MachineStatusResponse:
-        return machine_status(caller.jobs, identity=caller.stores.identity)
+        return served_machine_status(caller.stores, caller.jobs)
 
 
 class CommandParams(ReadParams, read=ReadKind.COMMAND, route="/commands/{command_id}"):

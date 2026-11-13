@@ -135,10 +135,14 @@ def _claimed(cycle_dir: Path, jobs_dir: Path) -> LaunchStage | None:
 
 def derive_run_state(cycle_dir: Path, inbox: Controls, jobs_dir: Path) -> RunState:
     held = cycle_held(cycle_dir)
+    # The pause asked of the hold now on the cycle, as its loop takes it (`for_hold`): one asked of
+    # a run whose lock is released and whose job has not ended yet stands for that run alone.
+    holder = holder_of(jobs_dir, cycle_dir) if held else None
+    hold = None if holder is None or holder.job is None else holder.job.job_id
     return read_run_state(
         last=scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], RunPhaseRecord),
         claimed=None if held else _claimed(cycle_dir, jobs_dir),
-        asked=inbox.pause,
+        asked=inbox.for_hold(hold).pause,
         cycle_held=held,
         pass_held=held and pass_held(cycle_dir),
         graded=_graded(cycle_dir) if held else None,

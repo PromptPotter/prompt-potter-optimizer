@@ -14,7 +14,7 @@
 
 ## Sample look-ahead — the one entry point that is deliberately NOT at parity
 
-**`/commands/set-sample-lookahead` is browser-only, and the ABSENCE is the boundary** (its `BROWSER` press), so a missing CLI verb, host tool, config key or dataset knob is never an oversight. `set-api-key` and `remove-api-key` are browser-only too, each for the reason beside its row. Who may press it: [`access-model.md`](../../docs/operations/access-model.md) § host-admin ↔ user.
+**`/commands/set-sample-lookahead` is browser-only, and the ABSENCE is the boundary** (its `BROWSER` press, which `CommandDispatcher.open` holds at the door a `CommandCall` names: `CommandKind.pressed_at`), so a missing CLI verb, host tool, config key or dataset knob is never an oversight. `set-api-key` and `remove-api-key` are browser-only too, each for the reason beside its row. Who may press it: [`access-model.md`](../../docs/operations/access-model.md) § host-admin ↔ user.
 
 ## Everything on stdout is also on disk
 
