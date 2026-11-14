@@ -2,7 +2,7 @@
 
 Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chain id `lw`, arc `arc/lw`.
 
-- **Base:** `origin/main` at `23d0e5c0c` (narr-1, small-1, webb-4 and bkeys landed). Your `<base sha>` in common.md is this commit.
+- **Base:** `origin/main` at `f589cbe9a` (narr-1, small-1, webb-4, bkeys and faults-w landed). Your `<base sha>` in common.md is this commit.
 - **The code shrinks:** over `webapp/` (excluding `lib/api/types.generated.ts`), net ≤ −50. A move pays for itself in deleted re-exports, barrel hops and duplicated imports. Run `git diff --shortstat <base> HEAD -- webapp ':!webapp/lib/api/types.generated.ts'` after each link. `promptpotter/` is untouched.
 - **Spec:**
   - `### batch/27 · lw`, every row. webb-4 has landed its `NodeSchemaReading` row, so the barrel row is unblocked.
@@ -34,7 +34,7 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
 
 ## Beside you
 
-- **faults-w** (local) is engine-only. `webapp/lib/api/types.generated.ts` is never hand-edited; regenerate it through its script after a rebase, if one is needed.
+- **rec** and **rn-conn** (cloud, same base) are engine-only and may regenerate `webapp/lib/api/types.generated.ts`. Never hand-edit it; regenerate it through its script after a rebase, if one is needed.
 - Touch no `promptpotter/` file and no `scripts/` file. A row that needs one is cut into "rows to file".
 
 ## Proof (beyond common.md)
