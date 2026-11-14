@@ -48,6 +48,7 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     Overshoot,
     PaidSpend,
+    Remainder,
     SpendRollup,
     UserSpend,
     draws_coupon,
@@ -971,12 +972,12 @@ class Money(NamedTuple):
             tokens if bound.tokens is None else max(tokens, bound.tokens - spent.at_most_tokens),
         )
 
-    def left(self, hold: Hold) -> tuple[float | None, int | None]:
+    def left(self, hold: Hold) -> Remainder:
         """What *hold* still admits: its bound less what was drawn under it and what its open
-        children hold; ``None`` on an axis it leaves unbounded."""
+        children hold."""
         usd, tokens = self._below(hold.hold_id, False)
         bound, spent = hold.bound, self._spent(hold.hold_id, False)
-        return (
+        return Remainder(
             None if bound.usd is None else bound.usd - spent.at_most_usd - usd,
             None if bound.tokens is None else bound.tokens - spent.at_most_tokens - tokens,
         )

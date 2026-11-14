@@ -397,17 +397,6 @@ class MapElites(nodes.Selector):
             OptimizerFact(key="proxy", label="Proxy K", text=str(k), value=k, kind="stat"),
         ]
 
-    def parent_cells(
-        self,
-        _ctx: NodeContext,
-        panel: Panel,
-        _rows: Mapping[ArmKey, CellSheet],
-    ) -> list[Sample]:
-        return panel.cells
-
-    def parent_read(self, panel: nodes.PanelSize) -> int:
-        return panel.cells
-
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         knobs = ctx.knobs(MapElitesKnobs)
         offered = [

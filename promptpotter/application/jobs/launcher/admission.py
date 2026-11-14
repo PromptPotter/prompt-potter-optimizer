@@ -464,11 +464,7 @@ def admit_and_share(
                 if hop is None
                 else stores.campaigns.metered_spend(hop.campaign_id, meter)
             )
-            left = enclosing.money_left()
-            room = Budget(
-                usd=None if left.usd is None else left.usd + spent.usd_amount,
-                tokens=None if left.tokens is None else left.tokens + spent.token_amount,
-            )
+            room = enclosing.money_left().bound_over(spent)
             admitted, reserve = declared.over(_within(declared, room)), Budget()
             ceiling = admitted
         allotment = share_campaign_ceiling(

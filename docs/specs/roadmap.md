@@ -165,8 +165,9 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landed 75, narr-2:** the ledger keeps facts and phase acts are typed, so the stored dashboard
   views go and every renderer reads the records; one way to the ledger, the open run scope; the
   dashboard read reaches every door. Run data wiped (cycles).
-- **then:** faults-1 (a refusal names its next acts) beside small-2 (one `Selector` default, the
-  spend book's typed remainder), then narr 3 (the acts bank facts, not text; one door to a run's
+- **landed 76, small-2:** the `Selector` reads the parent on the panel's cells by default; one typed
+  remainder carries an overdraft.
+- **then:** faults-1 (a refusal names its next acts), then narr 3 (the acts bank facts, not text; one door to a run's
   ledger), then ren (classes defined twice, a gate refusing another).
 
 The re-keys end at the behaviour-key switch.

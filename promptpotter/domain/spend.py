@@ -293,24 +293,13 @@ class Budget(FrozenModel):
             raise ValueError(f"{self!r} carries no token amount")
         return self.tokens
 
-    @property
-    def run_out(self) -> bool:
-        """Read on what is LEFT: nothing on some axis it bounds."""
-        return (self.usd is not None and self.usd <= 0) or (
-            self.tokens is not None and self.tokens <= 0
-        )
-
-    def less(self, *taken: Budget) -> Budget:
-        """What is LEFT per money axis this bound names once *taken* (amounts) is out, never below
-        nothing: a provider bills after the send is admitted, so spend can pass a bound."""
+    def less(self, *taken: Budget) -> Remainder:
+        """What is LEFT per money axis this bound names once *taken* (amounts) is out."""
         usd, tokens = self.usd, self.tokens
         for amount in taken:
             usd = None if usd is None else usd - amount.usd_amount
             tokens = None if tokens is None else tokens - amount.token_amount
-        return Budget(
-            usd=None if usd is None else max(0.0, usd),
-            tokens=None if tokens is None else max(0, tokens),
-        )
+        return Remainder(usd, tokens)
 
     @classmethod
     def amount(cls, usd: float, tokens: int) -> Budget:
@@ -319,6 +308,37 @@ class Budget(FrozenModel):
     def plus(self, other: Budget) -> Budget:
         return Budget.amount(
             self.usd_amount + other.usd_amount, self.token_amount + other.token_amount
+        )
+
+
+class Remainder(NamedTuple):
+    """What a bound still admits per money axis, below nothing once overdrawn: a provider bills
+    after the send is admitted, so spend can pass a bound. ``None`` on an axis it leaves unbounded."""
+
+    usd: float | None = None
+    tokens: int | None = None
+
+    @property
+    def run_out(self) -> bool:
+        """Nothing left on some axis it bounds."""
+        return (self.usd is not None and self.usd <= 0) or (
+            self.tokens is not None and self.tokens <= 0
+        )
+
+    @property
+    def budget(self) -> Budget:
+        """What is left as a bound: an overdraft bounds at nothing."""
+        return Budget(
+            usd=None if self.usd is None else max(0.0, self.usd),
+            tokens=None if self.tokens is None else max(0, self.tokens),
+        )
+
+    def bound_over(self, spent: Budget) -> Budget:
+        """The bound that leaves this past *spent* (an amount)."""
+        room = self.budget
+        return Budget(
+            usd=None if room.usd is None else room.usd + spent.usd_amount,
+            tokens=None if room.tokens is None else room.tokens + spent.token_amount,
         )
 
 

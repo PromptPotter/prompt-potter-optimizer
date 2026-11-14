@@ -32,6 +32,7 @@ from promptpotter.domain.spend import (
     Budget,
     CeilingMeter,
     KeySource,
+    Remainder,
     TokenAccount,
     TokenUsageKind,
     UserSpend,
@@ -176,12 +177,12 @@ def _times(left: float, each: float | None) -> int:
 type Asks = tuple[SendBound, SendBound]
 
 
-def _past(bound: SendBound, left: tuple[float | None, int | None]) -> SendBound:
-    usd, tokens = bound.usd, bound.tokens
-    if usd is not None and left[0] is not None:
-        usd = max(0.0, usd - max(0.0, left[0]))
-    if tokens is not None and left[1] is not None:
-        tokens = max(0, tokens - max(0, left[1]))
+def _past(bound: SendBound, left: Remainder) -> SendBound:
+    usd, tokens, room = bound.usd, bound.tokens, left.budget
+    if usd is not None and room.usd is not None:
+        usd = max(0.0, usd - room.usd)
+    if tokens is not None and room.tokens is not None:
+        tokens = max(0, tokens - room.tokens)
     return SendBound(input_tokens=0, output_tokens=tokens, usd=usd, unpriced=bound.unpriced)
 
 
@@ -347,17 +348,14 @@ class SpendBook:
                 usd, tokens = usd + held_usd, tokens + held_tokens
         return usd, tokens
 
-    def _left(
-        self, money: Money, *, host: bool, beside: TokenUsageKind | None
-    ) -> tuple[float | None, int | None]:
-        """What the share (*host*: the reserve) still admits, below nothing once overdrawn;
-        ``None`` on an axis it leaves unbounded."""
+    def _left(self, money: Money, *, host: bool, beside: TokenUsageKind | None) -> Remainder:
+        """What the share (*host*: the reserve) still admits."""
         limit = self.reserve if host else self.allotment
         if limit.usd is None and limit.tokens is None:
-            return None, None
+            return Remainder()
         spent = self._spent(money, host=host)
         out_usd, out_tokens = self._out(money, host=host, beside=beside)
-        return (
+        return Remainder(
             None
             if limit.usd is None
             else limit.usd - spent.at_most_usd - self.set_aside_usd - out_usd,
@@ -391,15 +389,13 @@ class SpendBook:
         """The campaign's share binds every send it meters; the coupon's reserve every one on the
         box's key; each holds what the send asks of it."""
         money = self._money()
-        share_usd, share_tokens = self._left(money, host=False, beside=beside)
-        held_usd, held_tokens = (
-            self._left(money, host=True, beside=beside) if draws_coupon(paid_by) else (None, None)
-        )
-        for reserve, left in ((False, share_usd), (True, held_usd)):
+        share = self._left(money, host=False, beside=beside)
+        held = self._left(money, host=True, beside=beside) if draws_coupon(paid_by) else Remainder()
+        for reserve, left in ((False, share.usd), (True, held.usd)):
             if left is not None:
                 n = _admits(left, asks[reserve].usd, reserve)
                 yield ErrorCategory.SPEND_CEILING, reserve, n
-        for reserve, left_t in ((False, share_tokens), (True, held_tokens)):
+        for reserve, left_t in ((False, share.tokens), (True, held.tokens)):
             if left_t is not None:
                 n = _admits(left_t, asks[reserve].tokens, reserve)
                 yield ErrorCategory.TOKEN_CEILING, reserve, n
@@ -589,20 +585,13 @@ class SpendBook:
         """Whether ANY send is held in dollars here: a price list is then needed whoever pays."""
         return self.allotment.usd is not None or self.reserve.usd is not None
 
-    def coupon_left(self) -> Budget:
+    def coupon_left(self) -> Remainder:
         """What the reserve still admits on the box's key, past what it counted and has out."""
-        return _at_least_nothing(*self._left(self._money(), host=True, beside=None))
+        return self._left(self._money(), host=True, beside=None)
 
-    def money_left(self) -> Budget:
+    def money_left(self) -> Remainder:
         """What the allotment still admits past spend and holds: an enclosed run's whole ceiling."""
-        return _at_least_nothing(*self._left(self._money(), host=False, beside=None))
-
-
-def _at_least_nothing(usd: float | None, tokens: int | None) -> Budget:
-    return Budget(
-        usd=None if usd is None else max(0.0, usd),
-        tokens=None if tokens is None else max(0, tokens),
-    )
+        return self._left(self._money(), host=False, beside=None)
 
 
 def draws_on(book: SpendBook) -> str:
@@ -637,11 +626,11 @@ def reservation_left() -> SendBound:
     if (cell := run_scope().reservation) is None:
         raise RuntimeError("no cell reservation is open to bound this send")
     money = money_on(require_spend_book("a cell's reservation").charges.path)
-    usd, tokens = money.left(money.holds[cell])
+    room = money.left(money.holds[cell]).budget
     return SendBound(
         input_tokens=0,
-        output_tokens=0 if tokens is None else max(0, tokens),
-        usd=0.0 if usd is None else max(0.0, usd),
+        output_tokens=0 if room.tokens is None else room.tokens,
+        usd=0.0 if room.usd is None else room.usd,
     )
 
 

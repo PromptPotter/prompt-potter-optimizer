@@ -2449,6 +2449,19 @@ def test_a_sends_room_is_the_ceiling_less_bills_unpriced_sends_and_the_set_aside
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
+def test_a_free_send_fits_at_exactly_nothing_left_and_never_once_overdrawn() -> None:
+    free = SendBound(input_tokens=0, output_tokens=0, usd=0.0)
+    book = spend_book(0.25)
+    _drawn(book, 0.25, lapsed=False)
+    assert book.fits(free, paid_by="host") > 0, "a send costing nothing was refused at nothing left"
+    _drawn(book, 0.125, lapsed=False)
+    assert (book.money_left().usd, book.coupon_left().usd) == pytest.approx((-0.125, -0.125)), (
+        "the remainder lost the overdraft a bill past its bound drew"
+    )
+    assert book.fits(free, paid_by="host") == 0, "an overdrawn book admitted a free send"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
 def test_a_price_list_that_could_not_be_fetched_is_an_outage_never_an_unpriced_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

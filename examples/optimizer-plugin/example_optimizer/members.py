@@ -3,7 +3,6 @@ through its entry points alone: a random panel, a rephrasing llm node, a keep-th
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, ClassVar
 
@@ -33,7 +32,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet
 
 MANIFEST = ManifestDir("example", Path(__file__).parent)
 
@@ -98,17 +96,6 @@ class Keep(nodes.Selector):
     sees = frozenset({Lineage, Replay})
     elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
-
-    def parent_cells(
-        self,
-        _ctx: NodeContext,
-        panel: Panel,
-        _rows: Mapping[ArmKey, CellSheet],
-    ) -> list[Sample]:
-        return panel.cells
-
-    def parent_read(self, panel: nodes.PanelSize) -> int:
-        return panel.cells
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         folds = measured.folds

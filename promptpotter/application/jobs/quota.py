@@ -639,14 +639,7 @@ def share_campaign_ceiling(
                 "with `set-limits`."
             ),
         )
-    return _allotment(left, own=stores.campaigns.cycle_metered(hop, meter))
-
-
-def _allotment(left: Budget, *, own: Budget) -> Budget:
-    return Budget(
-        usd=None if left.usd is None else own.usd_amount + left.usd,
-        tokens=None if left.tokens is None else own.token_amount + left.tokens,
-    )
+    return left.bound_over(stores.campaigns.cycle_metered(hop, meter))
 
 
 def cycle_share(stores: Stores, job: Job) -> Budget:
@@ -741,7 +734,7 @@ def _reshare_campaign_ceiling(
         for other in jobs:
             if other.job_id != job.job_id:
                 beside = beside.plus(_held(held[other.job_id], own[other.job_id]))
-        share = _allotment(moved.less(spent, beside), own=own[job.job_id])
+        share = moved.less(spent, beside).bound_over(own[job.job_id])
         hold_moved(stores, job.hop, held[job.job_id].over(share.only(moved.named)))
 
 

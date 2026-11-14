@@ -115,7 +115,6 @@ from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import VariationMode
 from promptpotter.domain.optimizer_state import Critique, StatePart
-from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_acts import StepClosed, StepOpened
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool
@@ -125,7 +124,6 @@ from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.answer_text import truncate
@@ -331,17 +329,6 @@ class ThetaElection(nodes.Selector):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Bounds, Lineage, Ruler, Replay})
     elects_on: ClassVar[DisplayMetric] = "ability"
     elects_partial: ClassVar[bool] = True
-
-    def parent_cells(
-        self,
-        _ctx: NodeContext,
-        panel: Panel,
-        _rows: Mapping[ArmKey, CellSheet],
-    ) -> list[Sample]:
-        return panel.cells
-
-    def parent_read(self, panel: nodes.PanelSize) -> int:
-        return panel.cells
 
     def admission(self, selected: SelectedOptimizer) -> float:
         return selected.knobs_of(self.name, ElectionKnobs).admission

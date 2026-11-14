@@ -21,6 +21,7 @@ from promptpotter.domain.spend import (
     Budget,
     KeySource,
     PaidSpend,
+    Remainder,
     UserSpend,
     bill_is_floor,
     draws_coupon,
@@ -70,7 +71,7 @@ class Coupon(NamedTuple):
         return Budget.amount(self.spent.at_most_usd, self.spent.at_most_tokens)
 
     @property
-    def left(self) -> Budget:
+    def left(self) -> Remainder:
         return self.face.less(self.drawn)
 
     @property
@@ -264,7 +265,7 @@ def keyed_client(provider: str) -> OpenAICompatibleClient:
         draws_coupon(key.paid_by)
         and (left := require_spend_book(what).root().coupon_left()).run_out
     ):
-        raise AccountWallet(read_coupon(stores), left).refused(
+        raise AccountWallet(read_coupon(stores), left.budget).refused(
             ProviderSend(provider, key.paid_by), what="this account"
         )
     return get_llm_client(provider, key)

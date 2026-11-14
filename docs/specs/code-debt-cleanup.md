@@ -1088,28 +1088,22 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 
 ### batch/31 · small
 
-- **Two selectors override one pair identically**: `levi/members.py` and potter's `ThetaElection`
-  (`potter/members.py`) each define `parent_cells` and `parent_read` as the panel's cells. Action: the
-  `Selector` default. **Rides with:** small.
 - **No verb sets an account's coupon or starts it afresh**: `grant.json` is hand-written, and a reset is
   moving `charges.jsonl` aside; `wallet_store.py::CouponGrant.granted_at` is written and never read.
   **Rides with:** small 1.
-- **Swapping a model means hand-editing eleven `model:` lines** (4+3+3+1: potter, levi, capo, gepa;
-  recounted on the current tree by `grep -c "model:" promptpotter/assets/optimizers/*/pipeline.yaml`,
-  the same lines as rk-run 5's re-test). Action: a swap verb. **Rides with:** small 2. **Re-test:** one
-  in `presentation/cli/commands/`.
+- **The bench's one optimizer model is spelled eleven times** (4+3+3+1: potter, levi, capo, gepa,
+  each `minimax/minimax-m3.1-flash`, each yaml saying "the bench runs every optimizer on one model").
+  Root: one bench fact every llm node reads unless it authors its own; the lines go (a swap verb
+  would patch the copies). Re-key census (small-2's landing): a node's `model` reaches
+  `optimizer_manifest.py::treatment`'s manifest hash, so all four treatment digests move, and the
+  bench pin if the fact lands in the bench defaults; no measurement key reads it. **Rides with:** its
+  own small chain after narr 3. **Re-test:** `git grep -c "model:" -- 'promptpotter/assets/optimizers/*/pipeline.yaml'` is 0.
 - **Archive hygiene before the next bulk delete**: (1) reclaim, a dataset-scoped destructive `delete`,
   dry-run by default, refusing while a producer can append; (2) attribution, an L4 outer cell stamps the
   runs its inner campaign produced; (3) the entry-to-run lookup (which runs an archive entry serves,
   so a delete names what it breaks; not `pipeline_schema.py::reach_map`, a node's reach).
   **Rides with:** small 3. **Re-test:**
   `compact-archive inventory`.
-- **An overdrawn remainder has no type** (small-1's landing): `infrastructure/llm/spend_book.py::_left`
-  (`:351`) is a signed `(usd, tokens)` tuple beside `domain/spend.py::Budget.less`, which clamps at
-  zero, and `_at_least_nothing` (`:602`) clamps it again; `_times` admits a free send at exactly zero
-  left but nothing once overdrawn, so it cannot fold into `less` unchanged. Action: one typed remainder
-  that carries the overdraft, read by both. **Rides with:** small 2. **Re-test:**
-  `git grep -c "_at_least_nothing" -- promptpotter` is 0.
 - **The paper harness tracks no named tree** (small-1's landing): `paper/bbeh-comparison/bbeh_potter_runner.py:1`
   pins `promptpotter==0.8.20` while the ledger fixes it against the current API. Action: the
   harness names the release it runs against, and a fix to it targets that release. **Rides with:** the

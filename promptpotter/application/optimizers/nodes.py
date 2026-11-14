@@ -578,14 +578,14 @@ class Selector(NodeMember, Protocol):
         ...
 
     def parent_cells(
-        self, ctx: NodeContext, panel: Panel, rows: Mapping[ArmKey, CellSheet]
+        self, _ctx: NodeContext, panel: Panel, _rows: Mapping[ArmKey, CellSheet]
     ) -> list[Sample]:
         """The cells the bench re-scores the parent on: all an arm's lift against it can pair on."""
-        ...
+        return panel.cells
 
     def parent_read(self, panel: PanelSize) -> int:
         """The most of *panel*'s cells ``parent_cells`` names that no arm's walk buys."""
-        ...
+        return panel.cells
 
     def admission(self, _selected: SelectedOptimizer) -> float | None:
         """The ``P(θ_arm > θ_parent)`` ``select`` promotes at, which a race's leader lock-in stops at; ``None`` locks none in."""
