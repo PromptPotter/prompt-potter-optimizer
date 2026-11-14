@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from promptpotter.application.initialization.scoring_scope import declare_on_cycle
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
@@ -80,7 +81,8 @@ def declare_run_wiring(
 ) -> None:
     """The one writer of ``RunWiringRecord``, on the cycle *session* is bound to: a mint's, a
     launch's or a fork's."""
-    session.store.campaigns.append(
+    declare_on_cycle(
+        session.store,
         session.hop,
         RunWiringRecord(
             round_cells_ceiling=selected.round_cells_ceiling(len(session.bank.samples)),
@@ -171,7 +173,7 @@ def build_run_observers(
             readout_sink=readout_sink,
         )
         # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
-        session.store.campaigns.append(session.hop, RunPhaseRecord(state=Running()))
+        declare_on_cycle(session.store, session.hop, RunPhaseRecord(state=Running()))
         # A launch is a run boundary, sparing what was asked of its own hold, a QUEUED claim's
         # included; the run a gate held resumes, what it was asked standing.
         if prior is None or not isinstance(prior.state, ArmsGate):

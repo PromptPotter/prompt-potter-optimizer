@@ -1671,9 +1671,10 @@ export interface ServedDashboard {
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** The cycle's producer, derived with the phase. */
   producer: ProducerReading;
-  /** Which run verbs the cycle admits now (`RunState.admission`): the verb the run
-   * control offers or the sentence where it offers none, and each verb's
-   * refusal — the same answer the dispatcher refuses on. */
+  /** Which run verbs the cycle admits now, its campaign's refusal joined
+   * (`admission.py::admitted`): the verb the run control offers or the
+   * sentence where it offers none, and each verb's refusal — the same answer
+   * the dispatcher refuses on. */
   admission: RunAdmission;
   /** Why the cycle reads `paused` or `terminal` — what caused it, the stop it was
    * left on and what said so (`RunState.stop`); null in every other phase. */

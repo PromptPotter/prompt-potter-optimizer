@@ -274,9 +274,9 @@ class ServedDashboard(DashboardFacts):
     )
     producer: ProducerReading = Field(description="The cycle's producer, derived with the phase.")
     admission: RunAdmission = Field(
-        description="Which run verbs the cycle admits now (`RunState.admission`): the verb the "
-        "run control offers or the sentence where it offers none, and each verb's refusal — the "
-        "same answer the dispatcher refuses on."
+        description="Which run verbs the cycle admits now, its campaign's refusal joined "
+        "(`admission.py::admitted`): the verb the run control offers or the sentence where it "
+        "offers none, and each verb's refusal — the same answer the dispatcher refuses on."
     )
     stop: StopReading | None = Field(
         description="Why the cycle reads `paused` or `terminal` — what caused it, the stop it was "
@@ -467,6 +467,7 @@ def _lookahead(
     state: LiveDashboardState,
     *,
     run: RunState,
+    admission: RunAdmission,
     standing: _Standing | None,
     in_flight: int,
     allowed: int,
@@ -484,7 +485,7 @@ def _lookahead(
     )
     pick_max = max(1, min(ceiling, most)) if most > 0 else ceiling
     auto = standing is not None and standing.lookahead_auto
-    pressable = ceiling > 1 and run.admission.lookahead_refusal == ""
+    pressable = ceiling > 1 and admission.lookahead_refusal == ""
     return SampleLookahead(
         depth=depth,
         auto=auto,
@@ -567,7 +568,12 @@ def _serve(
         if dials is None
         else {name: d.anchor for name, d in dials.items() if d.anchor is not None},
         lookahead=_lookahead(
-            state, run=run, standing=standing, in_flight=in_flight, allowed=allowed
+            state,
+            run=run,
+            admission=admission,
+            standing=standing,
+            in_flight=in_flight,
+            allowed=allowed,
         ),
         spend_metered=None if meter is None else MeteredSpend.of(state.spend, meter),
         spend_metered_by_round=None

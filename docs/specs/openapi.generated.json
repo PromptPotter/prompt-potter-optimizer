@@ -15450,7 +15450,7 @@
         "properties": {
           "admission": {
             "$ref": "#/components/schemas/RunAdmission",
-            "description": "Which run verbs the cycle admits now (`RunState.admission`): the verb the run control offers or the sentence where it offers none, and each verb's refusal — the same answer the dispatcher refuses on."
+            "description": "Which run verbs the cycle admits now, its campaign's refusal joined (`admission.py::admitted`): the verb the run control offers or the sentence where it offers none, and each verb's refusal — the same answer the dispatcher refuses on."
           },
           "allotment": {
             "anyOf": [

@@ -189,15 +189,22 @@ class CampaignStore:
         return self.layout(hop).ledger
 
     def append(self, hop: CycleHop, *records: CycleRecord) -> int:
-        """The one append door: each record lands under a one-shot hold of the cycle's `index.json`
-        (and, for a run phase, its `dashboard.json`), joining a run's in this process."""
+        """The append door outside a run; a run's own declarations go through
+        `scoring_scope.py::declare_on_cycle`."""
+        with self.appending(hop, records) as ledger:
+            return ledger.append(*records)
+
+    @contextmanager
+    def appending(self, hop: CycleHop, records: Sequence[CycleRecord]) -> Iterator[CycleEventLog]:
+        """*hop*'s ledger under a one-shot hold of its `index.json` (and, for a run phase, its
+        `dashboard.json`), joining a run's in this process: the last holder drains them."""
         cycle_dir = CycleDir(self.cycle_dir(hop))
         ledger = CycleEventLog.open(cycle_dir)
         with LedgerIndex.of(ledger.path).projecting() as projecting:
             projecting.add(CycleIndexProjection(cycle_dir))
             if any(isinstance(record, RunPhaseRecord) for record in records):
                 projecting.add(DashboardCheckout(cycle_dir))
-            return ledger.append(*records)
+            yield ledger
 
     def _read_declared[M: (Campaign, HeadToHeadRecord)](
         self, path: Path, model: type[M]

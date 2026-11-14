@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.application.commands.dispatcher import Applier, DispatchedToCycle
+from promptpotter.application.jobs.launcher.admission import admitted
 from promptpotter.domain.command_kinds import (
     PauseCyclePayload,
     SetSampleLookaheadPayload,
     SkipSearchpointPayload,
     SubmitArmsPayload,
 )
+from promptpotter.domain.phases import RunAdmission
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -38,9 +40,7 @@ async def submit_arms(dispatched: DispatchedToCycle[SubmitArmsPayload]) -> Appli
 async def skip_searchpoint(
     dispatched: DispatchedToCycle[SkipSearchpointPayload],
 ) -> Applier[object]:
-    return Applier.for_loop(
-        dispatched, dispatched.dispatcher.stores.run_state(dispatched.hop).admission.skip_refusal
-    )
+    return Applier.for_loop(dispatched, _admission(dispatched).skip_refusal)
 
 
 async def set_sample_lookahead(
@@ -55,8 +55,10 @@ async def set_sample_lookahead(
         return Applier.silent(_disarm)
     # `auto` is a mode and stands across launches; one press is spent by its round, so it needs a run.
     return Applier.for_loop(
-        dispatched,
-        ""
-        if payload.auto
-        else dispatched.dispatcher.stores.run_state(dispatched.hop).admission.lookahead_refusal,
+        dispatched, "" if payload.auto else _admission(dispatched).lookahead_refusal
     )
+
+
+def _admission(dispatched: DispatchedToCycle[Any]) -> RunAdmission:
+    stores, hop = dispatched.dispatcher.stores, dispatched.hop
+    return admitted(stores, stores.campaigns.load_campaign(hop.campaign_id), stores.run_state(hop))

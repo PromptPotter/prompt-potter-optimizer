@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.resume import resume_with_divergence_check
-from promptpotter.application.initialization.scoring_scope import cycle_partition, scorer_setup
+from promptpotter.application.initialization.scoring_scope import (
+    cycle_partition,
+    declare_on_cycle,
+    scorer_setup,
+)
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
@@ -196,7 +200,7 @@ def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
     cycle = held.standing.only(CYCLE_AXES)
     prior = stores.campaigns.read_standing_budget(hop)
     if prior.budget != cycle:
-        stores.campaigns.append(hop, StandingBudgetRecord(budget=cycle, overshoot=prior.overshoot))
+        declare_on_cycle(stores, hop, StandingBudgetRecord(budget=cycle, overshoot=prior.overshoot))
 
 
 def _rebased_observers(
@@ -252,13 +256,13 @@ async def onto_fork(
 
 def declare_round_allowance(session: Session, step_rounds: int | None) -> None:
     """A launch with no allowance clears the last launch's."""
-    campaigns = session.store.campaigns
-    standing = campaigns.read_standing_budget(session.hop)
+    standing = session.store.campaigns.read_standing_budget(session.hop)
     pause_at_round = (
         None if step_rounds is None else max(session.state.resumed_from_round - 1, 0) + step_rounds
     )
     if standing.pause_at_round != pause_at_round:
-        campaigns.append(
+        declare_on_cycle(
+            session.store,
             session.hop,
             StandingBudgetRecord(
                 budget=standing.budget,
