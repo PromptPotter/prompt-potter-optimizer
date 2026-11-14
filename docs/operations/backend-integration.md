@@ -4,13 +4,13 @@ PromptPotter optimizes any backend registered as a `Connector`; every axis is de
 
 ## The HTTP default — TermNorm's endpoints
 
-A `remote_http` connector that keeps `Connector`'s defaults speaks two of the endpoints [TermNorm](https://github.com/runfish5/TermNorm-excel) serves: `/matches` and `GET /pipeline`. `/status` is TermNorm's own declared probe; a connector that declares none probes nothing. The request body is each connector's `wire_adapter`; TermNorm's opens a session first (`POST /sessions {terms}`, re-sent on `no_session`).
+A `remote_http` connector that keeps `Connector`'s defaults speaks two of the endpoints [TermNorm](https://github.com/runfish5/TermNorm-excel) serves: `/matches` and `GET /pipeline`. TermNorm's probe is `GET /version`, refused on any `contract` but the connector's `wire_contract`; a connector that declares neither a preflight nor a contract probes nothing. The request body is each connector's `wire_adapter`; TermNorm's opens a session first (`POST /sessions {terms}`, re-sent on `no_session`).
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/matches` | POST | Run one query: TermNorm's body is `{query, steps?, node_config?}` (`termnorm.py::termnorm_wire_adapter`); returns prediction, ranked candidates, and `diagnostics.warnings[]` (`{step, code, message}` — the self-healing signal). |
 | `/pipeline` | GET | Full schema: nodes, types, parameters, allowed value sets, LLM-node prompt templates, named sequences. Read live at run init and on every draft read. A node no sequence lists runs only where it names the sequence that fires it (`fired_on`). A node serving `accepts` bounds what is sent to it: its wire keys (`PipelineNode.wire_keys`, `config` ∪ `optimizer.param_keys` ∪ `accepts`) gate the `response_format` axis, and the mint refuses any other key (`preflight.py::refuse_off_contract`); one serving none bounds nothing. |
-| `/status` | GET | TermNorm's liveness and version probe; 200 when up. |
+| `/version` | GET | `{revision, contract}` at the top level: the probe refuses a `contract` other than `Connector.wire_contract`, and `revision` keys every answer (`pipeline_resolve.py::identity_layer`), so a moved TermNorm banks no cell beside a stale one. |
 
 Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md). PromptPotter's own API roster is `/docs` (`openapi.generated.json`).
 
@@ -89,6 +89,6 @@ Three mechanisms, none changing measurement identity:
 
 ## Debugging the highway
 
-- A backend whose `/status` times out almost always has a blocking call in an `async def` request path: offload the sync I/O via `asyncio.to_thread`.
+- A backend whose `/version` times out almost always has a blocking call in an `async def` request path: offload the sync I/O via `asyncio.to_thread`.
 - **The highway is a cross-repo contract — change one side, fix both.** TermNorm's error envelope is `{status, message, code}`, not FastAPI's `{detail}`; session self-heal keys on `code: "no_session"` and resend policy on `detail.retryable` — codes, never substrings — both read by TermNorm's connector, never by the agnostic client. `--reload` wipes TermNorm's in-memory sessions; PP self-heals (re-`POST /sessions` + retry).
 - Keep request timeouts under `Connector.cell_envelope_s`; an unbounded optimizer node blows `OPTIMIZER_CALL_DEADLINE_S` before round 1.

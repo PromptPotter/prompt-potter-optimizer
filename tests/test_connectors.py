@@ -23,7 +23,7 @@ from offline_world import Router
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.sample_measurement import cell_billing
 from promptpotter.config.settings import settings
-from promptpotter.connectors import dbllmbench, dspy_module, harbor, n8n
+from promptpotter.connectors import dbllmbench, dspy_module, harbor, n8n, termnorm
 from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
@@ -269,3 +269,17 @@ def test_a_second_n8n_endpoint_rekeys_no_cell_of_the_first(
     assert refused is not None and "['classify', 'route']" in refused, (
         "a dataset naming no endpoint ran on one of two"
     )
+
+
+# A backend one wire contract away answers every key it reads differently: the launch never opens.
+def test_a_backend_on_another_wire_contract_refuses_at_the_probe(offline: Router) -> None:
+    connector = termnorm.CONNECTOR
+    assert connector.wire_contract == 1
+    offline.backend.CONTRACT = 2
+    behind = asyncio.run(connector.unreachable(None))
+    assert behind is not None and "contract 2" in behind and "speaks 1" in behind, behind
+    offline.backend.faults = {"/version": [httpx.Response(404, json={"detail": "Not Found"})]}
+    absent = asyncio.run(connector.unreachable(None))
+    assert absent is not None and "`GET /version`" in absent, absent
+    offline.backend.CONTRACT = 1
+    assert asyncio.run(connector.unreachable(None)) is None

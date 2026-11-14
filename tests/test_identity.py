@@ -419,7 +419,9 @@ def test_the_judge_a_cell_is_graded_by_moves_its_searchpoint_hash() -> None:
     )
 
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
-        identity = identity_layer(None, None, None, judges, schema.active_steps, base_url="")
+        identity = identity_layer(
+            None, None, None, judges, schema.active_steps, base_url="", revision=None
+        )
         return schema.sp_hash(
             ParamLayers(schema=schema, workspace=None, identity=identity).fold().params
         )

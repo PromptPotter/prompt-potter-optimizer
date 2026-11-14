@@ -230,6 +230,9 @@ class FakeBackend:
 
     AT = "127.0.0.1:8000"
     URL = f"http://{AT}"
+    # What `GET /version` answers: the revision every answer is keyed on, the wire it speaks.
+    REVISION = "offline"
+    CONTRACT = 1
     # P(correct) = k/10 by marker. Potter's script: a round-1 win, then the stalls that fire L2.
     SKILL: ClassVar[dict[str | None, int]] = {
         None: 3,
@@ -278,13 +281,13 @@ class FakeBackend:
                     "nodes": {"llm_only": LLM_ONLY_NODE},
                     "pipelines": {"llm_only": ["llm_only"]},
                 }
-                answer = {
+                answer: dict[str, Any] = {
                     "status": "success",
                     "message": "Pipeline configuration",
                     "data": pipeline,
                 }
-            case "/status":
-                answer = {"status": "ok"}
+            case "/version":
+                answer = {"revision": self.REVISION, "contract": self.CONTRACT}
             case "/sessions":
                 answer = {"status": "success", "data": {"terms_count": 0}}
             case "/matches":

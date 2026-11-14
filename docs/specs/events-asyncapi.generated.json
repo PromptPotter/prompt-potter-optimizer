@@ -880,8 +880,15 @@
         "description": "What a launch read of the backend's revision, beside the one its connector was written against.",
         "properties": {
           "expected": {
-            "title": "Expected",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected"
           },
           "reported": {
             "anyOf": [

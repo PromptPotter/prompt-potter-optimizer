@@ -16,7 +16,6 @@ from promptpotter.connectors.protocol import (
 )
 from promptpotter.domain.pipeline_params import STEPS_KEY, PipelineParams
 from promptpotter.domain.sample import Sample
-from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
 
@@ -100,31 +99,13 @@ class TermNormSession:
         return f"{detail.get('error_code')}: {detail.get('message')}"
 
 
-async def _termnorm_preflight(backend_url: str) -> str | None:
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(5.0, connect=3.0), verify=tls_context()
-    ) as http:
-        # Reachability, not health: a 5xx past the connect surfaces later on the ledger.
-        await http.get(f"{backend_url}/status")
-    return None
-
-
-async def _termnorm_version_check(
-    http: httpx.AsyncClient,
-    base_url: str,
-) -> str | None:
-    resp = await http.get(f"{base_url}/status")
+async def _termnorm_version_check(http: httpx.AsyncClient, base_url: str) -> str | None:
+    """``GET /version``'s ``revision``: the code, config, prompts and requirements an answer is
+    keyed on, fixed at TermNorm's boot."""
+    resp = await http.get(f"{base_url}/version")
     resp.raise_for_status()
-    data: dict[str, Any] = resp.json()
-    for key in ("version", "revision", "git_sha"):
-        val = data.get(key)
-        if val:
-            return str(val)
-    return None
-
-
-# `None` opts out of the drift WARN until TermNorm's `GET /status` reports a stable revision.
-_EXPECTED_REVISION: str | None = None
+    revision = resp.json().get("revision")
+    return str(revision) if revision else None
 
 
 def _termnorm_auth_token() -> str | None:
@@ -140,9 +121,9 @@ CONNECTOR = Connector(
     sent_spend_bound=None,
     cells_priced=True,
     session_factory=TermNormSession,
-    expected_revision=_EXPECTED_REVISION,
     version_check=_termnorm_version_check,
-    preflight=_termnorm_preflight,
+    # TermNorm's `WIRE_CONTRACT`: `GET /version` is the probe, so no preflight beside it.
+    wire_contract=1,
     endpoint=Endpoint("TERMNORM_ENDPOINTS", lambda: settings.TERMNORM_ENDPOINTS),
     auth_token=_termnorm_auth_token,
     # The knee on `llm_only`: past it the wall clock stops falling and the call tail grows.

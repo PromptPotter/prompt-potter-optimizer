@@ -36,9 +36,9 @@ from processes import REPO, clone_cache, git, replace_changed, run
 BASELINE = {
     # Lines of the package's own Python: a change removes more than it adds (operator, 2026-11-13),
     # judged, not counted (2026-11-14): a raise names the substance its lines carry.
-    # xconn (+110): a node's wire keys and their refusal; named endpoints threaded from the
-    # dataset to every client, probe and identity.
-    "package_lines": 110449,
+    # xconn (+129): a node's wire keys and their refusal; named endpoints threaded from the
+    # dataset to every client, probe and identity; the wire-contract probe.
+    "package_lines": 110468,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -64,7 +64,8 @@ BASELINE = {
     # `TYPE_CHECKING` imports on a file-level import cycle: a knot hidden, not cut (`_type_cycles`).
     "type_cycles": 81,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
-    "p_record": 20,
+    # xconn: `pipeline_resolve.py` keys a campaign read by the revision its launch recorded.
+    "p_record": 21,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 33,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.

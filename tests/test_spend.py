@@ -2891,7 +2891,7 @@ def test_a_backend_cell_is_never_sent_again_while_it_may_still_bill(
         "data": {"step_tokens": None},
     }
     offline.backend.faults = {
-        "/status": [httpx.ConnectError("still restarting")],
+        "/version": [httpx.ConnectError("still restarting")],
         "/matches": [
             httpx.ConnectError("refused"),
             httpx.Response(500, json={"detail": "upstream", "data": billed_step}),

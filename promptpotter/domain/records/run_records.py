@@ -1095,15 +1095,16 @@ class DefaultsDrift(FrozenModel):
 class BackendRevision(FrozenModel):
     """What a launch read of the backend's revision, beside the one its connector was written against."""
 
-    expected: str
+    # `None`: the connector was written against no revision (`Connector.expected_revision`).
+    expected: str | None
     # `None`: the backend answered with none, or could not be asked (`unread`).
     reported: str | None
     # Why it could not be asked: the failure's class alone, since its message names the backend's address.
     unread: str | None
 
     def drift(self) -> str | None:
-        """``None`` where the backend runs the revision expected; else what differs, in a sentence."""
-        if self.reported == self.expected:
+        """``None`` where the backend runs the revision expected, or none is; else what differs."""
+        if self.expected is None or self.reported == self.expected:
             return None
         if self.unread is not None:
             said = f"its revision could not be read ({self.unread})"

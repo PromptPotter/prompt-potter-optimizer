@@ -110,9 +110,11 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
+    BackendRevision,
     DefaultsDrift,
     DefaultsPin,
     PipelineRead,
+    RunWiringRecord,
     ScoringLockedRecord,
 )
 from promptpotter.domain.sample import Sample
@@ -157,6 +159,7 @@ from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
 logger = logging.getLogger(__name__)
 
 JUDGE_INSTRUMENT_KEY = "judge_instrument"
+BACKEND_REVISION_KEY = "backend_revision"
 """The node-config key the judges' fingerprint rides into measurement identity — ONE key over the
 whole term → judge mapping. Twin of `connectors/harbor.py::INSTRUMENT_KEY`, named apart because
 that one says which task bytes ran and this one which grader read the answer. Both are identity,
@@ -437,14 +440,19 @@ def identity_layer(
     chain: Sequence[str],
     *,
     base_url: str,
+    revision: BackendRevision | None,
 ) -> dict[str, dict[str, Any]]:
     """The connector's and the judges' ONE channel into the archive key; *base_url* is the
-    address its cells were sent to."""
+    address its cells were sent to, *revision* what that backend reported running."""
     out: dict[str, dict[str, Any]] = {}
     if connector is not None and connector.identity_config is not None:
         if stores is None:
             raise ValueError(f"{connector.name}: its identity needs the stores")
         out.update(connector.identity_config(stores, experiment, base_url))
+    reported = None if revision is None else revision.reported
+    if connector is not None and connector.wire_contract is not None and reported and chain:
+        # What the backend's answers are keyed on, so a moved backend banks no cell beside a stale one.
+        out.setdefault(chain[-1], {})[BACKEND_REVISION_KEY] = reported
     if judges and chain:
         # The TERMINAL step: a judge grades the answer that node emits.
         out.setdefault(chain[-1], {})[JUDGE_INSTRUMENT_KEY] = judge_instrument(judges)
@@ -712,6 +720,8 @@ class _CampaignMerge(_Merge):
     experiment: dict[str, Any] | None
     # The connector endpoint its run init read (`PipelineRead.endpoint`).
     endpoint: str | None
+    # What that backend reported running at the launch (`RunWiringRecord.backend_revision`).
+    revision: BackendRevision | None
 
 
 @dataclass(frozen=True)
@@ -751,7 +761,7 @@ def merge_outside_run(
             campaign=cfg.pipeline_overlay,
             free_tier=free_tier_overlay(cfg, declared, fence),
             identity=identity_layer(
-                None, None, None, cfg.judges, filtered.active_steps, base_url=""
+                None, None, None, cfg.judges, filtered.active_steps, base_url="", revision=None
             ),
         ),
         free=_task_fenced(fence),
@@ -796,6 +806,9 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
         hop=hop,
         experiment=resolved.experiment,
         endpoint=read.endpoint,
+        revision=None
+        if (wired := stores.campaigns.last(hop, RunWiringRecord)) is None
+        else wired.backend_revision,
     )
 
 
@@ -990,6 +1003,7 @@ def resolve_pipeline_for_campaign(
             m.cfg.judges,
             m.filtered.active_steps,
             base_url=connector.base_url(m.endpoint),
+            revision=m.revision,
         ),
         evolved=evolved,
         recorded=measured,
@@ -1253,6 +1267,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
             campaign_config.judges,
             filtered.active_steps,
             base_url=session.backend_client.base_url,
+            revision=session.backend_revision,
         ),
     ).fold()
     pipeline_params = folded.params

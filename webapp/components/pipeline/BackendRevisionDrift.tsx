@@ -4,7 +4,9 @@ import { useViewedDashboard } from "@/lib/state/poll";
 export function BackendRevisionDrift() {
   const { dash } = useViewedDashboard();
   const revision = dash?.backend_revision;
-  if (!revision || revision.reported === revision.expected) return null;
+  if (!revision || revision.expected === null || revision.reported === revision.expected) {
+    return null;
+  }
   const { expected, reported, unread } = revision;
   const read = unread === null ? `reports ${reported ?? "none"}` : `unread (${unread})`;
   return (

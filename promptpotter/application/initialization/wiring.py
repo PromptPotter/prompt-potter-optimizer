@@ -71,10 +71,10 @@ async def _read_backend_revision(
     refused: every contract a wrong number rides is checked on its own and raises — the schema,
     the observation keys, the package cache, harbor's trial layout (`harbor.py::_layout_fault`) —
     so a revision gate would only stop a backend
-    upgrade that moved none of them."""
+    upgrade that moved none of them. Read on every launch, expected or not."""
     expected = connector.expected_revision
     check = connector.version_check
-    if not expected or check is None:
+    if check is None:
         return None
     try:
         reported = await check(client.http, client.base_url)

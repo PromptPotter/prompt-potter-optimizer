@@ -27,6 +27,7 @@ from promptpotter.domain.spend import KeySource
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.shared.extras import Extra
+from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -234,6 +235,10 @@ class Connector:
 
     version_check: VersionCheck | None = None
 
+    wire_contract: int | None = None
+    """The ``GET /version`` ``contract`` this connector speaks; the probe refuses any other, and
+    the revision that route reports keys every answer (``pipeline_resolve.py::identity_layer``)."""
+
     extra: Extra | None = None
     """What a cell imports beyond core; absent, launch refuses and the listing blocks before a read."""
 
@@ -320,12 +325,29 @@ class Connector:
         nothing. A failed probe's transport error is the reason, so no ``preflight`` catches its own."""
         if (unset := self.unconfigured(endpoint)) is not None:
             return unset
-        if self.preflight is None:
-            return None
-        import httpx
-
         base_url = self.base_url(endpoint)
         try:
-            return await self.preflight(base_url)
+            if self.preflight is not None and (said := await self.preflight(base_url)):
+                return said
+            return await self._off_contract(base_url)
         except httpx.TransportError as exc:
             return f"{type(exc).__name__} at {base_url}: {str(exc).strip() or 'no answer'}"
+
+    async def _off_contract(self, base_url: str) -> str | None:
+        """Why the backend at *base_url* speaks another wire contract than this connector's."""
+        if self.wire_contract is None:
+            return None
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(5.0, connect=3.0),
+            verify=tls_context(),
+            headers=self.credential_header(),
+        ) as http:
+            reply = await http.get(f"{base_url}/version")
+        try:
+            served = reply.json().get("contract") if reply.is_success else None
+        except (ValueError, AttributeError):
+            served = None
+        if served == self.wire_contract:
+            return None
+        said = "serves no `GET /version`" if served is None else f"speaks wire contract {served}"
+        return f"{self.name} at {base_url} {said}; its connector speaks {self.wire_contract}."

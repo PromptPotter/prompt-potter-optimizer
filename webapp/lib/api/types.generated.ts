@@ -1957,7 +1957,7 @@ export interface Treatment {
 /** What a launch read of the backend's revision, beside the one its connector was
  * written against. */
 export interface BackendRevision {
-  expected: string;
+  expected: string | null;
   reported: string | null;
   unread: string | null;
 }
