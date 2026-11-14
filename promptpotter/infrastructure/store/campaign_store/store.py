@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import secrets
-import shutil
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
@@ -32,10 +31,8 @@ from promptpotter.domain.run_records import (
     CycleFinalRecord,
     CycleMintedRecord,
     CycleRecord,
-    CycleSeedRecord,
     ForkDirection,
     ForkGradedRecord,
-    ForkSpec,
     InterventionRecord,
     LeftComparisonRecord,
     PipelineRead,
@@ -48,7 +45,6 @@ from promptpotter.domain.run_records import (
     SpawnedBy,
     SpawnedRecord,
     StandingBudgetRecord,
-    parent_address,
 )
 from promptpotter.domain.spend import NOTHING_METERED, Budget, CeilingMeter
 from promptpotter.domain.strict_model import StrictModel
@@ -230,7 +226,7 @@ class CampaignStore:
             or not workspace_bank(self._base_dir).deleted(campaign_id)
         ):
             return campaign
-        return campaign.edited(lifecycle_status="deleted")
+        return campaign.model_copy(update={"lifecycle_status": "deleted"})
 
     def _campaigns_root(self) -> Path:
         return campaigns_root_dir_for(self._base_dir)
@@ -357,7 +353,7 @@ class CampaignStore:
             manifest = self.load_campaign(campaign_id)
             if manifest is None:
                 raise NotFoundError(f"campaign not found: {campaign_id}")
-            write_json(path, manifest.edited(**changes).model_dump(mode="json"))
+            write_json(path, manifest.model_copy(update=changes).model_dump(mode="json"))
 
     def list_campaign_ids(self) -> list[str]:
         return sorted(p.name for p in self.iter_campaign_dirs())
@@ -515,32 +511,18 @@ class CampaignStore:
         """What the standing launch took up: its own declaration retired that ending."""
         return scan_cycle_facts(self.ledger(hop)).resumed_ending
 
-    def adopt_ledger(self, hop: CycleHop, ledger: Path) -> None:
-        """A MOVE, never a copy: what a draft billed is the cycle's first lines."""
-        target = self.ledger(hop)
-        if target.exists():
-            raise ConflictError(f"cycle {hop.cycle_id} already holds a ledger")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(ledger, target)
-
-    def mint_cycle(self, hop: CycleHop) -> None:
-        if scan_cycle_facts(self.ledger(hop)).minted is None:
-            self.append(hop, CycleMintedRecord())
-
-    def mint_fork_cycle(
-        self, child: CycleHop, parent_dir: Path, spec: ForkSpec, *, cut: int, cut_round: int
-    ) -> None:
-        """*parent_dir* may lie in another tree: the record names it by path, never by id."""
-        self.append(
-            child,
-            CycleMintedRecord(
-                parent=parent_address(self.cycle_dir(child), parent_dir),
-                forked_at_offset=cut,
-                cut_round=cut_round,
-                fork=spec,
-            ),
-        )
-        self.append(child, RoundEnteredRecord(round=cut_round, rewound=True))
+    def mint_cycle(self, hop: CycleHop, minted: CycleMintedRecord | None = None) -> None:
+        """THE mint, idempotent by content: a re-mint of what stands is a no-op, another refuses.
+        *minted* defaults to a root's, with no seed."""
+        minted = minted or CycleMintedRecord()
+        held = scan_cycle_facts(self.ledger(hop)).minted
+        if held is None:
+            self.append(hop, minted)
+        elif held != minted.model_copy(update={"timestamp": held.timestamp}):
+            raise ConflictError(
+                f"cycle {hop.cycle_id} is minted already, on another seed or cut",
+                code="cycle_minted_otherwise",
+            )
 
     def grade_fork(self, hop: CycleHop, direction: ForkDirection) -> None:
         self.append(hop, ForkGradedRecord(direction=direction))
@@ -718,7 +700,7 @@ class CampaignStore:
         return [
             LaidSpan(seed=None if record is None else record.seed, scoring_lock=lock)
             for record, lock in zip(
-                scan_each_last(chain, CycleSeedRecord),
+                scan_each_last(chain, CycleMintedRecord),
                 scan_each_last(chain, ScoringLockedRecord),
                 strict=True,
             )

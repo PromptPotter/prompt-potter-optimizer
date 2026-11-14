@@ -8794,16 +8794,8 @@
       },
       "KeepDraftsAction": {
         "additionalProperties": false,
-        "description": "One button: a press sends `keep` as `kind` to the cycle holding for its round's arms.",
+        "description": "One button: a press sends `payload` as `kind` to the cycle holding for its round's arms.",
         "properties": {
-          "keep": {
-            "description": "The drafts measured as proposed, by index at the hold.",
-            "items": {
-              "type": "integer"
-            },
-            "title": "Keep",
-            "type": "array"
-          },
           "kind": {
             "const": "submit-arms",
             "title": "Kind",
@@ -8812,6 +8804,17 @@
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "description": "What the press sends beside the cycle's address, as served: the drafts it keeps, by index at the hold.",
+            "title": "Payload",
+            "type": "object"
           },
           "variant": {
             "enum": [
@@ -8827,7 +8830,7 @@
           "label",
           "variant",
           "kind",
-          "keep"
+          "payload"
         ],
         "title": "KeepDraftsAction",
         "type": "object"
@@ -12519,7 +12522,7 @@
       },
       "OriginResolution": {
         "additionalProperties": false,
-        "description": "`resolution.json`: the last resolver turn; the mint gate is the draft's `readiness`,\nrecomputed on every read.",
+        "description": "The last resolver turn, kept on its draft; the mint gate is the draft's `readiness`,\nrecomputed on every read.",
         "properties": {
           "degraded_cause": {
             "anyOf": [
@@ -13604,7 +13607,6 @@
               "decision",
               "cycle_final",
               "cycle_minted",
-              "cycle_seed",
               "cycle_share",
               "cycle_superseded",
               "election",
@@ -14531,6 +14533,17 @@
             "description": "The verb the one run control offers; null where it offers none.",
             "title": "Offers"
           },
+          "payload": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "description": "What the offered start or resume sends beside the cycle's address: the `start-run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent as served.",
+            "title": "Payload",
+            "type": "object"
+          },
           "refusal": {
             "description": "Why the control offers none; empty where it offers one.",
             "title": "Refusal",
@@ -14546,7 +14559,8 @@
           "offers",
           "refusal",
           "skip_refusal",
-          "lookahead_refusal"
+          "lookahead_refusal",
+          "payload"
         ],
         "title": "RunAdmission",
         "type": "object"

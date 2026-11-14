@@ -82,7 +82,7 @@ class JobSpec(StrictModel):
         return self
 
 
-async def spawn_job(held: HeldRun, mode: RunMode) -> asyncio.Task[None]:
+async def spawn_job(held: HeldRun) -> asyncio.Task[None]:
     """Returns only once the run's process holds the job (`run_job`): a spawner
     gone before that, its producer lock with it, would leave a job a reconciling read releases
     under its child. Answers the task that ends when the run's process exits."""
@@ -90,7 +90,7 @@ async def spawn_job(held: HeldRun, mode: RunMode) -> asyncio.Task[None]:
     log_path = CycleLayout(stores.campaigns.cycle_dir(hop)).job_log
     loop = asyncio.get_running_loop()
     try:
-        spec = held.job_spec(mode)
+        spec = held.job_spec()
         child = _start(spec, log_path)
         if not await _adoption(loop, child, spec.job_id):
             raise RuntimeError(
@@ -230,10 +230,16 @@ class HeldRun:
     budget: HeldBudget
     optimizer: SelectedOptimizer
     closing: AsyncExitStack
+    mode: RunMode  # `launch.py::Admitted.mode`'s: no door re-derives it
 
     @classmethod
     def of(
-        cls, start: RunStart, opened: OpenedCycle, budget: HeldBudget, closing: AsyncExitStack
+        cls,
+        start: RunStart,
+        opened: OpenedCycle,
+        budget: HeldBudget,
+        closing: AsyncExitStack,
+        mode: RunMode,
     ) -> HeldRun:
         """The config the cycle reads back as, which a detached run rebuilds, never the one a mint
         was made from."""
@@ -248,14 +254,15 @@ class HeldRun:
             budget=budget,
             optimizer=opened.optimizer,
             closing=closing,
+            mode=mode,
         )
 
-    def job_spec(self, mode: RunMode) -> JobSpec:
+    def job_spec(self) -> JobSpec:
         stores = self.session.store
         return JobSpec(
             job_id=self.start.job_id,
             hop=self.session.hop,
-            mode=mode,
+            mode=self.mode,
             identity=stores.identity,
             budget=self.budget,
             jobs_dir=self.start.job_registry.jobs_dir,
@@ -265,12 +272,12 @@ class HeldRun:
             research_datasets_root=stores.research_datasets_root,
         )
 
-    async def detach(self, *, mode: RunMode) -> asyncio.Task[None]:
+    async def detach(self) -> asyncio.Task[None]:
         async with self.closing:
-            return await spawn_job(self, mode)
+            return await spawn_job(self)
 
     async def run_inline(
-        self, *, mode: RunMode, readout_sink: Callable[[str], None] | None
+        self, *, readout_sink: Callable[[str], None] | None
     ) -> tuple[Session, CycleResult]:
         session = self.session
         readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
@@ -282,7 +289,7 @@ class HeldRun:
                 self.start,
                 self.session,
                 self.cycle,
-                mode=mode,
+                mode=self.mode,
                 budget=self.budget,
                 optimizer=self.optimizer,
                 readout_sink=readout_sink,

@@ -42,7 +42,6 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.layer_fold import wire_value
-from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import LaunchAnswer
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES
 from promptpotter.presentation.cli.commands.launch import (
@@ -470,5 +469,5 @@ async def _run_origin(held: HeldRun) -> CommandResult:
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(session.campaign_id))
 
     _checkin_line("origin", "launching origin scoring")
-    result = await run_inline(held, mode=RunMode())
+    result = await run_inline(held)
     return cycle_result_command(session, result)

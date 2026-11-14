@@ -121,10 +121,7 @@ async def _mint(source: ArmSource, plans: list[CyclePlan]) -> list[OpenedCycle]:
         case DatasetArms(session=session):
             return await mint_framed_arms(session, plans)
         case CheckinArms(opened=opened):
-            drafts = opened.session.store.drafts
-            minted = mint_arms(plans, adopting=opened.draft.draft_id)
-            drafts.close(opened.draft.draft_id)
-            return minted
+            return mint_arms(plans, adopting=opened.draft.draft_id)
         case _:
             assert_never(source)
 
@@ -201,7 +198,7 @@ class AdmittedHeadToHead(LaunchOutcome):
         )
         # Each arm's session is the source's, which `launched` closes past every hand-off.
         return [
-            HeldArm(arm.arm_key, HeldRun.of(start, cycle, held, AsyncExitStack()))
+            HeldArm(arm.arm_key, HeldRun.of(start, cycle, held, AsyncExitStack(), RunMode()))
             for arm, start, (_, held), cycle in zip(
                 self.request.arms, self.starts, self.admitted, minted, strict=True
             )
@@ -219,7 +216,7 @@ class AdmittedHeadToHead(LaunchOutcome):
         """Each arm in its own process, as every server launch."""
         async with self.source.closing:
             arms = await self.minted()
-            exits = await run_each(arms, lambda arm: arm.held.detach(mode=RunMode()))
+            exits = await run_each(arms, lambda arm: arm.held.detach())
         launches = [
             LaunchedJob.of(job, arm.held.session.hop)
             for (job, _), arm in zip(self.admitted, arms, strict=True)

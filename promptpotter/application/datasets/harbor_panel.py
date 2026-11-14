@@ -95,8 +95,7 @@ def write_task_panel(
     template = _template(layers)
     tasks_root = out_dir / "tasks"
     # Rebuilt whole rather than merged into: a stale directory is a task Harbor still runs.
-    if tasks_root.exists():
-        rmtree_robust(tasks_root)
+    rmtree_robust(tasks_root)
     tasks: list[dict[str, str]] = []
     for i, row in enumerate(rows):
         haystack = list(row.get(columns["documents"]) or [])

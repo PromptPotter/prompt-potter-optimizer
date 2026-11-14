@@ -10,9 +10,7 @@ from promptpotter.application.datasets.draft_campaign import DraftCriterion, own
 from promptpotter.application.datasets.origin_readiness import (
     SETUP_STEP_TITLES,
     OriginReadiness,
-    load_resolution,
     origin_readiness,
-    save_checkin_draft,
 )
 from promptpotter.application.hierarchy import draft_starts
 from promptpotter.application.jobs.quota import account_wallet, launch_bound, launch_refusal
@@ -195,17 +193,13 @@ async def read_draft_wire(stores: Stores, draft: DraftFile) -> DraftCampaignWire
 
 
 async def kept_draft_wire(
-    stores: Stores,
-    draft: DraftFile,
-    served: ServedPipeline,
-    *,
-    resolution: OriginResolution | None = None,
+    stores: Stores, draft: DraftFile, served: ServedPipeline
 ) -> DraftCampaignWire:
     """*draft* kept once its response is built, off the loop: the wire reads the account's wallet."""
 
     def _kept() -> DraftCampaignWire:
         wire = draft_wire(stores, draft, served)
-        save_checkin_draft(stores, draft, resolution=resolution)
+        stores.drafts.write_draft(draft)
         return wire
 
     return await asyncio.to_thread(_kept)
@@ -263,7 +257,7 @@ def _reopened(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draft
     stage = draft_starts(stores).get(draft.draft_id)
     return DraftReopenResponse(
         draft=draft_wire(stores, draft, served),
-        resolution=load_resolution(stores, draft),
+        resolution=draft.resolution,
         resolution_pending=draft.resolution_pending(),
         start=None if stage is None else HeldStart.of(stores, draft.draft_id, stage),
     )

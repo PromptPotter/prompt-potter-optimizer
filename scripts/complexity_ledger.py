@@ -35,6 +35,8 @@ from processes import REPO, clone_cache, git, replace_changed, run
 BASELINE = {
     # Lines of the package's own Python: a change removes more than it adds (operator, 2026-11-13).
     "package_lines": 112081,
+    # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
+    "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
@@ -58,7 +60,7 @@ BASELINE = {
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 23,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
-    "p_record_drift": 12,
+    "p_record_drift": 33,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
     "p_served": 197,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
@@ -194,12 +196,16 @@ def _class_node(cls: type) -> ast.ClassDef:
 
 
 def _public_surface(cls: type) -> set[str]:
-    """The public names *cls* answers to: its own and every package class's it inherits."""
+    """The public names *cls* answers to: its own and every package class's it inherits, less
+    pydantic's own API, which a package override (`StrictModel.model_copy`) only re-types."""
+    from pydantic import BaseModel
+
     return {
         member
         for klass in cls.__mro__
         if klass.__module__.startswith("promptpotter")
         for member in _members_bound(_class_node(klass))
+        if member not in vars(BaseModel)
     }
 
 
@@ -414,15 +420,21 @@ def _imports_own_package(node: ast.AST) -> typing.TypeGuard[ast.stmt | ast.expr]
     )
 
 
+def _is_copy_update(call: ast.Call) -> bool:
+    func = call.func
+    named = isinstance(func, ast.Attribute) and func.attr == "model_copy"
+    return named and any(kw.arg == "update" for kw in call.keywords)
+
+
 def _source_counts(py_files: list[Path]) -> dict[str, int]:
-    """The five counts read off source, in ONE parse and one walk per module.
+    """The six counts read off source, in ONE parse and one walk per module.
 
     A deferred import counts once per function enclosing it, so a closure's import is charged to
     the closure and to the function that holds it. ``domain_any_maps`` is scoped to ``domain/``
     because package-wide the shape is mostly the backend's own runtime-keyed overlay, and a count
     that flags what nobody may fix gets muted."""
     domain_root = _PACKAGE_ROOT / "domain"
-    package_lines = any_params = any_maps = deferred = 0
+    package_lines = any_params = any_maps = deferred = copies = 0
     bases: dict[str, list[str]] = {}
     declared: dict[str, str | None] = {}
     for path in py_files:
@@ -440,6 +452,8 @@ def _source_counts(py_files: list[Path]) -> dict[str, int]:
                         ann is not None and any(s in ast.unparse(ann) for s in _ANY_MAPS)
                         for ann in (*annotations, node.returns)
                     )
+            elif isinstance(node, ast.Call):
+                copies += _is_copy_update(node)
             elif isinstance(node, ast.ClassDef):
                 if names := [b.id for b in node.bases if isinstance(b, ast.Name)]:
                     bases[node.name] = names
@@ -449,6 +463,7 @@ def _source_counts(py_files: list[Path]) -> dict[str, int]:
                 deferred += depth * (not any(_EXTRAS_MARKER in line for line in context))
     return {
         "package_lines": package_lines,
+        "model_copy_updates": copies,
         "any_params": any_params,
         "domain_any_maps": any_maps,
         "models_lax": _count_lax_models(bases, declared),
@@ -505,6 +520,7 @@ def compute_ledger() -> dict[str, int]:
 
     return {
         "package_lines": source["package_lines"],
+        "model_copy_updates": source["model_copy_updates"],
         "reexport_shims": sum(_is_reexport_shim(p) for p in py_files if p.name == "__init__.py"),
         # The overlay leaf stands for the node knobs each member declares, counted instead.
         "config_leaf_fields": len(KNOBS) - 1 + member_knob_count(),

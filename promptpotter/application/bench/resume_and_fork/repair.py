@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.node_context import restated_round
 from promptpotter.application.bench.resume_and_fork.ab_replay import line_divergence
-from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_fork
 from promptpotter.application.bench.round_analysis import mended_round
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import ArmState, Concluded, is_leader_eligible
@@ -179,8 +178,9 @@ def origin_only(rounds: Sequence[RoundResult], standing: StandingRounds) -> bool
 
 async def apply_correction(
     cycle: Cycle, prior: list[RoundResult], dataset: list[Any]
-) -> str | None:
-    """*cycle* is seated on *prior*, and is seated on what the branch carries where one is cut."""
+) -> ForkCut | None:
+    """*cycle* is seated on *prior*, and is seated on what the branch carries where one is cut:
+    graded and re-banked before its take (`runner/mint.py::onto_fork`)."""
     session = cycle.session
     campaign_store, hop = session.store.campaigns, session.hop
     # One read of the line before the branch exists to displace it.
@@ -217,7 +217,8 @@ async def apply_correction(
         issued_by=SYSTEM_PRINCIPAL,
         named=cut.edge,
     )
-    repair_target = await asyncio.to_thread(fork_cut.take, session.store)
+    branch = fork_cut.child
+    repair_target = branch.cycle_id
     logger.warning(
         "Round(s) %s do not re-derive from their own rows; branched → %s from %s, and this cycle "
         "keeps them exactly as they ran. Everything after that candidate retires with it; its "
@@ -232,7 +233,6 @@ async def apply_correction(
         "before deciding where it belongs.",
         ", ".join(str(r) for r in repaired),
     )
-    branch = CycleHop(campaign_id=hop.campaign_id, cycle_id=repair_target)
     corrected = _rebank_on_branch(cycle, standing.rounds, branch, corrected, cut.retirements)
     if cut.retirements:
         logger.warning(
@@ -252,4 +252,4 @@ async def apply_correction(
             repair_target,
         )
     cycle.replay_priors(corrected[: cut.resume_at])
-    return repair_target
+    return fork_cut

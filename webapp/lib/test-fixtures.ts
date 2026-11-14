@@ -379,7 +379,7 @@ export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchySta
     status: { run_phase: "terminal", stop_reason: null, mark: "unknown" },
     attached: false,
     pause: null,
-    admission: { offers: null, refusal: "", skip_refusal: "", lookahead_refusal: "" },
+    admission: { offers: null, refusal: "", skip_refusal: "", lookahead_refusal: "", payload: {} },
     intervened: false,
     ...over,
   };
@@ -554,6 +554,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
       refusal: "",
       skip_refusal: "",
       lookahead_refusal: "",
+      payload: {},
     },
     backpressure: null,
     measured_unit: "sample",

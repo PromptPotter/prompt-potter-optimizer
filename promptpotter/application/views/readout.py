@@ -394,7 +394,7 @@ class ReadoutProjection(Projection):
         self._write(f"  {DIM}⇉ sample look-ahead depth {depth}{tail}{RESET}")
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
-        self._arms.enter(record)
+        self._arms.enter(record.round)
 
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
         self._arms.take(record)

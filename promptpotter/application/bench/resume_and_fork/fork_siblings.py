@@ -6,12 +6,12 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
 from promptpotter.application.served_dashboard import fork_remainder
-from promptpotter.domain.arms import Proposed
+from promptpotter.domain.arms import ArmState, Proposed
 from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -20,12 +20,13 @@ from promptpotter.domain.pipeline_params import PipelineParams, lay_nodes
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
-    CycleSeedRecord,
+    CycleMintedRecord,
     ForkCutFrom,
     ForkDirection,
     ForkSpec,
     ForkTrigger,
     ResumeCheckpointRecord,
+    parent_address,
 )
 from promptpotter.domain.run_standing import line_reference
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -39,6 +40,7 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.domain.command_kinds import ForkCyclePayload
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
     from promptpotter.infrastructure.store.stores import Stores
@@ -87,13 +89,18 @@ def _fork_sibling_setup(
         from_round,
         payload.trigger.value,
     )
-    campaign_store.mint_fork_cycle(child, parent_dir, payload, cut=cut + 1, cut_round=from_round)
-    if seed is not None:
-        # Without its own record a rebase's config unlock silently re-locks on the fork's first `resume`.
-        campaign_store.append(child, CycleSeedRecord(seed=seed))
-    # decisions.md § 0005: stamped once, at the mint every fork takes, its own steer or its line's.
-    if babysat:
-        campaign_store.record_intervention(child, kind="disallowed_model_override")
+    # ONE record: the cut, the seed and the babysat stamp (decisions.md § 0005) land as one fact.
+    campaign_store.mint_cycle(
+        child,
+        CycleMintedRecord(
+            parent=parent_address(new_dir, parent_dir),
+            forked_at_offset=cut + 1,
+            cut_round=from_round,
+            fork=payload,
+            seed=seed,
+            babysat=babysat,
+        ),
+    )
 
 
 def _fork_suffix(*parts: str) -> str:
@@ -247,49 +254,57 @@ def declare_steered_values(
     return seed.model_copy(update={"optimizer_narrowing": declared})
 
 
-def cut_operator_fork(
-    *,
-    stores: Stores,
-    hop: CycleHop,
-    from_round: int,
-    seed: CycleSeed,
-    from_candidate_id: str = "",
-    cleared: Mapping[str, Mapping[str, Any]],
-    keep_rounds: bool = False,
-    reason: str = "",
-) -> ForkCut:
-    """*cleared*: the reset the candidate's record runs under (`ForkSeed.cleared`)."""
-    campaign = owned_campaign(stores, hop.campaign_id)
-    named = RoundArm(round=from_round, arm=ArmKey(from_candidate_id)) if from_candidate_id else None
-    if named is not None and (params := _candidate_params(stores, hop, named)) is not None:
-        seed = seed.model_copy(update={"origin_params": lay_nodes(params, cleared)})
+def operator_seed(stores: Stores, payload: ForkCyclePayload, seed: CycleSeed) -> CycleSeed:
+    """*seed* as `parse_cycle_seed` froze it, laid for the fork's cut: a named candidate's fork
+    runs its prompts and its params, the operator's edit over both."""
+    hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
+    if (named := _named(payload)) is not None and (arm := _candidate(stores, hop, named)):
+        seed = seed.model_copy(
+            update={"origin_prompts": {**arm.individual.prompts, **seed.origin_prompts}}
+        )
+        # A proposal never walked resolved no params.
+        if not isinstance(arm, Proposed):
+            params = PipelineParams.model_validate(arm.resolved_params).laid_nodes
+            seed = seed.model_copy(
+                update={"origin_params": lay_nodes(params, payload.seed.cleared)}
+            )
     # Against what the parent's nodes permit, so the child lays over what its parent ran.
+    campaign = owned_campaign(stores, hop.campaign_id)
     seed = declare_steered_values(seed, permitted_narrowing(stores, campaign, hop))
-    if not keep_rounds:
-        # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
-        caps = fork_remainder(stores, hop).under(seed.config_overrides)
-        seed = seed.model_copy(update={"config_overrides": caps})
+    if payload.keep_rounds:
+        return seed
+    # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
+    caps = fork_remainder(stores, hop).under(seed.config_overrides)
+    return seed.model_copy(update={"config_overrides": caps})
+
+
+def cut_operator_fork(stores: Stores, payload: ForkCyclePayload, seed: CycleSeed) -> ForkCut:
+    """*seed* as `parse_cycle_seed` froze it; `operator_seed` lays it for the cut."""
+    hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
+    keep, at = payload.keep_rounds, payload.round
     return cut_fork(
         stores,
         hop,
-        from_round if keep_rounds else 0,
-        trigger=ForkTrigger.OPERATOR_REWIND if keep_rounds else ForkTrigger.OPERATOR_STEERED,
-        reason=reason
+        at if keep else 0,
+        trigger=ForkTrigger.OPERATOR_REWIND if keep else ForkTrigger.OPERATOR_STEERED,
+        reason=payload.reason
         or (
-            f"operator-applied from round {from_round} of {hop.cycle_id}"
-            if keep_rounds
+            f"operator-applied from round {at} of {hop.cycle_id}"
+            if keep
             else f"operator-steered fork from {hop.cycle_id}"
         ),
         issued_by=acting_principal(stores.identity),
-        named=named,
-        seed=seed,
+        named=_named(payload),
+        seed=operator_seed(stores, payload, seed),
     )
 
 
-def _candidate_params(stores: Stores, hop: CycleHop, named: RoundArm) -> dict[str, Any] | None:
-    """Each node's config as the named candidate's record resolved it; ``None`` where it was
-    proposed and never walked, so it resolved none."""
-    arm = stores.campaigns.standing_rounds(hop, moment=None).arms.get((named.round, named.arm))
-    if arm is None or isinstance(arm.state, Proposed):
+def _named(payload: ForkCyclePayload) -> RoundArm | None:
+    if not payload.candidate_id:
         return None
-    return PipelineParams.model_validate(arm.state.resolved_params).laid_nodes
+    return RoundArm(round=payload.round, arm=ArmKey(payload.candidate_id))
+
+
+def _candidate(stores: Stores, hop: CycleHop, named: RoundArm) -> ArmState | None:
+    arm = stores.campaigns.standing_rounds(hop, moment=None).arms.get((named.round, named.arm))
+    return None if arm is None else arm.state

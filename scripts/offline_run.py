@@ -735,14 +735,10 @@ async def forked_twice(stores: Stores, fork: CycleHop, rounds: int) -> None:
     """An operator fork off the divergence fork, then one off that: one campaign, four courses."""
     # Each cut leaves the fork a round of its own to close under the campaign's rounds cap.
     for from_round in (rounds - 2, rounds - 1):
-        cycle_id = cut_operator_fork(
-            stores=stores,
-            hop=fork,
-            from_round=from_round,
-            cleared={},
-            seed=CycleSeed(),
-            keep_rounds=True,
-        ).take(stores)
+        asked = ForkCyclePayload(
+            campaign_id=fork.campaign_id, cycle_id=fork.cycle_id, round=from_round, keep_rounds=True
+        )
+        cycle_id = cut_operator_fork(stores, asked, CycleSeed()).take(stores)
         fork = CycleHop(campaign_id=fork.campaign_id, cycle_id=cycle_id)
         session, result = await run_campaign(
             fork,
@@ -1342,7 +1338,7 @@ async def run_controlled(
     )
     launched = forked.result
     assert isinstance(launched, Launched) and launched.held is not None
-    await launched.held.run_inline(mode=RunMode(), readout_sink=print)
+    await launched.held.run_inline(readout_sink=print)
     after = subject_evidence(stores, [Subject(c) for c in subjects]).head_to_head
     assert after is not None
     row = next(r for r in after.rows if r.campaign_id == cid)

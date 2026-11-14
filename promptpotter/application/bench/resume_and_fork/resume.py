@@ -6,11 +6,10 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.resume_and_fork.ab_replay import line_divergence
-from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_fork
 from promptpotter.application.bench.resume_and_fork.repair import apply_correction
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.scoring.closed_rounds import closed_rounds
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.run_mode import OnDivergence
 from promptpotter.domain.run_records import ComparisonExit, ForkTrigger
@@ -65,8 +64,9 @@ def _stale_generation(
 
 async def resume_with_divergence_check(
     cycle: Cycle, dataset: list[Any], mode: RunMode
-) -> str | None:
-    """The cycle opens on the standing the last close of the line it continues stated, a fork's included."""
+) -> ForkCut | None:
+    """The cycle opens on the standing the last close of the line it continues stated, a fork's
+    included; a fork is answered cut and untaken (`runner/mint.py::onto_fork` takes it)."""
     session = cycle.session
     campaign_store, hop = session.store.campaigns, session.hop
     resumed_from_round = session.state.resumed_from_round
@@ -98,30 +98,27 @@ async def resume_with_divergence_check(
     fork = await apply_correction(cycle, prior, dataset)
     if fork is None and found is not None:
         fork = _branch(cycle, prior, *found)
-    line = hop if fork is None else CycleHop(campaign_id=hop.campaign_id, cycle_id=fork)
+    line = hop if fork is None else fork.child
     cycle.standing = campaign_store.standing_rounds(line, moment=None).standing
     return fork
 
 
 def _branch(
     cycle: Cycle, prior: list[RoundResult], div: ReplayMismatch, self_inflicted: bool
-) -> str:
+) -> ForkCut:
     session = cycle.session
     hop = session.hop
-    new_cycle_id = cut_fork(
+    fork = cut_fork(
         session.store,
         hop,
         div.round_num,
         trigger=ForkTrigger.SCORING_DIVERGENCE,
         reason=f"resume_divergence:{div.kind}",
         issued_by=SYSTEM_PRINCIPAL,
-    ).take(session.store)
+    )
     if not self_inflicted:
         # The operator's flag ran the line past a divergence it halts on.
-        session.store.campaigns.leave_comparison(
-            CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
-            ComparisonExit.FORK_ON_DIVERGENCE,
-        )
+        session.store.campaigns.leave_comparison(fork.child, ComparisonExit.FORK_ON_DIVERGENCE)
     if div.round_num == 0:
         cycle.reopen_origin()
     else:
@@ -131,9 +128,9 @@ def _branch(
         "continuation; this one keeps what the superseded package produced.",
         div.round_num,
         div.kind,
-        new_cycle_id,
+        fork.child.cycle_id,
     )
-    return new_cycle_id
+    return fork
 
 
 def _divergence(

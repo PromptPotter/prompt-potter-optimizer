@@ -49,7 +49,8 @@ row it closes.
   new campaign. Action: the daily count reads the request's campaign; the fork is admitted on the
   parent's hop, unresolved, and lands on the child. **Rides with:** admit-2. **Re-test:**
   `git grep -n "cut_operator_fork(\|admit(" -- promptpotter/application/commands/launching.py` lists the
-  admission before the cut.
+  admission before the cut. Measured at +60 in `promptpotter` as its own door (`wip/valid-2` d75eb7e is
+  the reference build), so it rides admit-2's one admission door.
 - **An arm is planned on a replicate it does not have yet**: `command_kinds.py::HeadToHeadRequest.purpose`
   declares replicate 1 and `jobs/mint.py::_numbered` overwrites it under the record hold; the placeholder
   reaches the root id, so admission prices plans whose ids are not final. Action: a purpose-free run spec
@@ -60,7 +61,7 @@ row it closes.
   embedded mints hold no claim at all, so the landing tells a live mint from a torn one by the job
   registry alone (`maintenance/landing.py::plan_landing` asks `maintenance/reset.py::holder_in_reach` of
   the mint's whole workspace: any live job there keeps every torn mint in it). Action: the mint claims
-  its cycle before `adopt_ledger`, and the landing reads the claim, its act too: `apply_landing` keeps
+  its cycle before `DraftStore.become`, and the landing reads the claim, its act too: `apply_landing` keeps
   a claimed mint (today it asks a torn mint only its manifest; once a mint claims first, that is the
   read `destroying` would otherwise raise `CycleBusyError` on). **Rides with:** admit-2. **Re-test:**
   `git grep -n "unit.parent.parent" -- promptpotter/application/maintenance/landing.py` is empty.
@@ -76,11 +77,6 @@ row it closes.
   re-checks admission and spawns it when the slot frees; `jobs/CLAUDE.md`'s rule ("a queued job's intent
   never leaves the process that authenticated it") is restated in the same link. **Rides with:**
   admit-2. **Re-test:** `resume --step-rounds 1` behind a running cycle; it starts when the slot frees.
-- **A steer is typed, then sent untyped**: `commands/launching.py::_typed_steer` (`:108`) validates each
-  node as `NodeCall` and keeps the dict it validated, because `domain/run_records.py::CycleSeed.pipeline_overlay`
-  (`:326`) is `dict[str, Any]`. Action: type it `dict[str, NodeCall]` and keep the typed carrier.
-  **Rides with:** admit-2, which holds `commands/launching.py`; its Owns gain `CycleSeed.pipeline_overlay`.
-  **Re-test:** read `_typed_steer`'s return and `CycleSeed.pipeline_overlay`'s type.
 - **The inner door mints its seat before its admission**: `runner/inner/spawn.py::_run_inner_campaign`
   calls `_open_seat` (`mint(` at `:335`) and only then `slotless_share` (`:367`) admits, so a refusal
   leaves a minted seat. Action: admit, then mint; the reorder moves the enclosing book's room and the L4
@@ -618,44 +614,17 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### valid (after rk-dec, before the behaviour keys)
 
-- **A cycle's mint is written before it is minted**: the root mint writes its partition, seed and
-  resolved run before `CycleMintedRecord`, against `run_records.py`'s own docstring. Action: one
-  `mint_cycle` writer. **Rides with:** valid 2.
-- **Three ways onto a fork**: the mid-INIT rebind, `_run_line`'s rebase and an operator relaunch.
-  Action: one. **Rides with:** valid 2.
-- **A copy skips validation**: `model_copy(update=…)` stands at 114 sites in 60 files, and pydantic
-  validates nothing in `update`; `domain/strict_model.py::StrictModel` does not override it. So a copy
-  bypasses the 49 classes' `model_validator`s (`OptimizerState`'s slices in `runner/entry.py`,
-  `CycleSeed` in `fork_siblings.py`, the command payloads `commands/dispatcher.py` rewrites); about
-  100 update keys are string literals no rename or mypy sees, so a stale key lands unrefused while the
-  renamed field keeps its old value. No live
-  breach found in the sites sampled. Action: `StrictModel.model_copy` revalidates whenever `update` is
-  given, and a probe keeps the count from rising. **Rides with:** valid 3. **Re-test:** a copy with a
-  stale key or a state its validator refuses raises.
-- **A mint or a fork lands as several appends** (reported): `CycleMintedRecord`, the rewound
-  `RoundEnteredRecord`, `CycleSeedRecord` and `InterventionRecord` are separate appends (`store.py:215`
-  loops single appends; `:535`, `:544`, `fork_siblings.py:93,96`), so a resumed torn fork stands on all
-  its parent's rounds, loses the steer, or grades steered rows reusable; a crash after the manifest
-  (`mint.py:592`) and before `drafts.close` (`checkin.py:102`) leaves the draft listed for a duplicate
-  mint, and one after `adopt_ledger` and before the manifest leaves a torn mint whose draft lost its
-  check-in ledger; `draft.json` is written before `resolution.json` (`origin_readiness.py:263-264`) and
-  `write_own_definition` is torn across framing, origin and definition (`stores.py:167-172`). Action:
-  one append per fact; the manifest names the adopted draft and `draft_ids` skips it; a companion file
-  carries the digest it was computed against. **Rides with:** valid 2 (one mint writer).
-- **Each door forks its own way** (an entry-point parity pass; ✓ unless reported): a REST fork-cycle
-  with `candidate_id` seeds only the candidate's params (`fork_siblings.py:263-267`), so it runs X's
-  params under C0's prompts, while the webapp sends X's prompts itself (`SteerForkPanel.tsx:77`) (root:
-  `cut_operator_fork` seeds the origin prompts from the named candidate beside `_candidate_params`); the
-  CLI refuses rewind + steer (`resume_command.py:209-210`), which the payload accepts, sets its own
-  default reason (`:115` vs `fork_siblings.py:279-284`), and its `--steer` seed covers only the overlay
-  (`verbs.py:192`; `_unsaid` checks top-level fields only, `:893-903`) (root: both CLI rules go, one
-  `ForkCyclePayload` laid); reported, the CLI re-derives `RunMode` for an inline run (`new.py:481`,
-  `resume_command.py:242-244`) where `HeldRun` should carry the admitted mode; the browser's "Resume run"
-  sends start-run with no mode (`useRunControl.ts:54,59`) while `phases.py:793` serves
-  `NextAct("start-run", "mode.on_divergence", "fork")`, so a diverged cycle diverges again; the
-  `arm_gate: author` hold offers keep-only buttons (`LiveSegment.tsx:32`, `activity.py:134-157`) though
-  `command_kinds.py:140-145` says the browser presses submit-arms. Root for the browser: a served act
-  carries the payload it fills. **Rides with:** valid 2 (one way onto a fork) with the `RunMode` row.
+- **One fact, two append loops**: `infrastructure/store/io.py::append_jsonl` lands a batch in one
+  locked write, while `infrastructure/ledger.py::CycleEventLog.append` takes one record, so
+  `CampaignStore.append` loops it and a multi-record fact can tear. Action: the event log lands its
+  batch through `append_jsonl`. **Rides with:** valid 4.
+- **`HeldRun.of`'s second config read**: `jobs/launcher/run_job.py::HeldRun.of` reloads the campaign
+  and `cycle_config` after `open` and the admission already read them. Action: the opened cycle carries
+  the config it read. **Rides with:** valid 4.
+- **A fork's share lands at its landing**: a running cycle's job moves onto its fork through
+  `jobs/launcher/admission.py::land_job`, which writes the fork's `CycleShareRecord` there, so a
+  `set-limits` filed between the cut and the landing re-shares the campaign without the fork. Action:
+  the share is taken against the campaign with the cut. **Rides with:** admit-2.
 
 ### hubs (after valid, before layers)
 
@@ -700,6 +669,11 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### bkeys (the last re-key; L4's cell identity rides it)
 
+- **A node's call settings carry its prompt fields** (✓, valid-3's symptom): `search_point.py::NodeConfig.call_settings`
+  dumps with `include=CALL_CONFIG_KEYS`, which `pipeline_params.py::NodeCall._dump`'s plain serializer
+  ignores, so `optimizer_manifest.py::_node_digest` hashes the prompt fields twice (once as the running
+  prompt, once as "call settings"). Root: the call keys are read by attribute, as `prompt_edits` is since
+  valid-3. Moves every treatment digest. **Rides with:** bkeys 1, whose switch moves them all anyway.
 - **An L4 cell's depth defines its measurand but enters no key** (✓, an L4 pass): the panel says
   "`max_inner_rounds` IS the estimand's budget" (`research/…/panel/dataset.yaml:29-32`), yet
   `DEPTH_FIELDS` stay out of every key (`cells.py:24-28`, `Seat.pin` `:48-52`, the treatment

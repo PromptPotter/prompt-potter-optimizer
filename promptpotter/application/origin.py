@@ -25,6 +25,7 @@ from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import ScoredWalk
 from promptpotter.domain.arms import ArmSlot, Concluded, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
@@ -99,18 +100,22 @@ def try_inherit_fork_origin(
         return None
     store = session.store.campaigns
     index = store.load(session.hop, moment=None)
-    if index is None or index.fork is None or index.parent_cycle_id is None:
+    if (
+        index is None
+        or index.fork is None
+        or (parent := index.parent_cycle_id) is None
+        or index.forked_at_offset is None
+    ):
         return None
-    parent = index.parent_cycle_id
     named = index.fork.from_candidate
-
+    parent_hop = CycleHop(campaign_id=session.campaign_id, cycle_id=parent)
     parent_round = closed_round(
         session.store,
-        session.hop,
+        parent_hop,
         named.round,
         session.state.scoring.scorer,
-        # The fork's chain at its mint, its first record: the parent as cut, before any own close.
-        moment=Moment(store.ledger(session.hop), 0),
+        # The parent as the fork cut it: its line through the FORK_CUT, which the mint names.
+        moment=Moment(store.ledger(parent_hop), index.forked_at_offset - 1),
     )
     if parent_round is None:
         return None

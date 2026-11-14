@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from promptpotter.domain.checkin_draft import DraftFile, OriginResolution
+from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.io import HeldLock, rmtree_robust, take_lock, write_bytes
 from promptpotter.infrastructure.store.layout import (
@@ -16,7 +16,6 @@ from promptpotter.infrastructure.store.read_model import file_sig, read_file
 from promptpotter.shared.errors import ConflictError, NotFoundError
 
 DRAFT_FILE = "draft.json"
-RESOLUTION_FILE = "resolution.json"
 
 
 class DraftClaim:
@@ -89,17 +88,14 @@ class DraftStore:
             lambda raw: DraftFile.model_validate_json(raw).at(draft_id),
         )
 
-    def write_resolution(self, draft_id: str, resolution: OriginResolution) -> None:
-        path = self.draft_dir(draft_id) / RESOLUTION_FILE
-        write_bytes(path, resolution.model_dump_json(indent=2).encode("utf-8"))
-
-    def load_resolution(self, draft_id: str) -> OriginResolution | None:
-        path = self.draft_dir(draft_id) / RESOLUTION_FILE
-        return read_file(path, OriginResolution.model_validate_json)
-
-    def close(self, draft_id: str) -> None:
-        """After a mint moved its ledger out, by whoever holds the draft: a working copy nothing reads."""
-        rmtree_robust(self.draft_dir(draft_id))
+    def become(self, draft_id: str, cycle_dir: Path) -> None:
+        """A draft dir is laid out as a cycle's, so the mint renames it: what it billed is the
+        cycle's first lines. Unlisted first, so a crash before the rename leaves no second Start."""
+        source = self.draft_dir(draft_id)
+        (source / DRAFT_FILE).unlink(missing_ok=True)
+        if source.is_dir():
+            cycle_dir.parent.mkdir(parents=True, exist_ok=True)
+            source.rename(cycle_dir)
 
     def discard(self, claim: DraftClaim) -> None:
         """A destroyer, under the claim it releases: what was commanded on it is the account log's."""

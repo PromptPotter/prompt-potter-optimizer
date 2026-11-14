@@ -113,12 +113,15 @@ class ActivityState(FrozenModel):
 
 
 class KeepDraftsAction(FrozenModel):
-    """One button: a press sends `keep` as `kind` to the cycle holding for its round's arms."""
+    """One button: a press sends `payload` as `kind` to the cycle holding for its round's arms."""
 
     label: str
     variant: Literal["primary", "ghost", "danger"]
     kind: Literal[CommandKind.SUBMIT_ARMS]
-    keep: list[int] = Field(description="The drafts measured as proposed, by index at the hold.")
+    payload: dict[str, list[int]] = Field(
+        description="What the press sends beside the cycle's address, as served: the drafts it "
+        "keeps, by index at the hold."
+    )
 
 
 class ActivityDecision(FrozenModel):
@@ -149,7 +152,7 @@ def _arms_gate(round_num: int | None, drafts: list[Said]) -> ActivityDecision:
                 label="Measure the drafts",
                 variant="primary",
                 kind=CommandKind.SUBMIT_ARMS,
-                keep=list(range(len(drafts))),
+                payload={"keep": list(range(len(drafts)))},
             )
         ]
         if drafts
@@ -239,7 +242,7 @@ class ActivityFeed:
                 self._notices = [n for n in self._notices if n.id not in self._held.values()]
                 self._held.clear()
             case RoundEnteredRecord():
-                self._arms.enter(record)
+                self._arms.enter(record.round)
                 if self._round is not None and record.round != self._round:
                     self._notices = [n for n in self._notices if LIFETIME[n.kind] == "run"]
                 self._round = record.round

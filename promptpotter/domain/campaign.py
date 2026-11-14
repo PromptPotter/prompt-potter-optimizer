@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from typing import Annotated, Any, Literal, TypedDict, Unpack, assert_never
+from typing import Annotated, Any, Literal, TypedDict, assert_never
 
 from pydantic import Field
 
@@ -362,9 +362,6 @@ class Campaign(FrozenModel):
     def active(self) -> bool:
         """An archived or deleted campaign (a torn delete among them) runs and scores nothing more."""
         return self.lifecycle_status == "active"
-
-    def edited(self, **changes: Unpack[CampaignEdit]) -> Campaign:
-        return Campaign.model_validate({**self.model_dump(mode="json"), **changes})
 
     @property
     def origin_id(self) -> str:

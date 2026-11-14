@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.run_job import HeldRun
     from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.results import CycleResult
-    from promptpotter.domain.run_mode import RunMode
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger("promptpotter.presentation.cli")
@@ -149,13 +148,11 @@ def _ctrl_c(
         signal.signal(signal.SIGINT, previous)
 
 
-async def run_inline(held: HeldRun, *, mode: RunMode) -> CycleResult:
+async def run_inline(held: HeldRun) -> CycleResult:
     hop = held.session.hop
     pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
     with ctrl_c_pauses(held.session.store, [pause]):
-        _, result = await held.run_inline(
-            mode=mode, readout_sink=functools.partial(print, flush=True)
-        )
+        _, result = await held.run_inline(readout_sink=functools.partial(print, flush=True))
     return result
 
 

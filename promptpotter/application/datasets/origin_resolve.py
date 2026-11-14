@@ -62,12 +62,6 @@ class OriginProposal:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class OriginResolutionResult:
-    resolution: OriginResolution
-    draft: DraftFile
-
-
 class OriginConsultation(NamedTuple):
     user_content: str
     instruction: str
@@ -139,8 +133,8 @@ async def resolve_origin_turn(
     stores: Stores,
     draft: DraftFile,
     pipeline: DraftPipeline,
-) -> OriginResolutionResult:
-    """Keeps no draft: its caller keeps the turn's once the answer is built."""
+) -> DraftFile:
+    """Keeps no draft: its caller keeps the turn's, carrying its resolution, once the answer is built."""
     consultation = build_origin_consultation(draft, pipeline)
 
     # No launch admitted this call and no run's book watches it; a check-in has no producer.
@@ -159,9 +153,7 @@ async def resolve_origin_turn(
     degraded_cause = _degraded_cause(
         output=raw, applied=updated is not draft, repair_attempts=repair_attempts
     )
-    updated = updated.patch(resolver_ran=True)
-
-    block = OriginResolution(
+    resolution = OriginResolution(
         last_resolution=OriginLastResolution(
             assessment=raw.assessment,
             questions=checkin_questions(updated, raw.next_action.questions),
@@ -174,7 +166,7 @@ async def resolve_origin_turn(
         ],
         degraded_cause=degraded_cause,
     )
-    return OriginResolutionResult(resolution=block, draft=updated)
+    return updated.patch(resolver_ran=True, resolution=resolution)
 
 
 def _degraded_cause(*, output: CheckinOutput, applied: bool, repair_attempts: int) -> str | None:

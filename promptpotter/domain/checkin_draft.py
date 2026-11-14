@@ -1,5 +1,4 @@
-"""A check-in draft's two files, `draft.json` and `resolution.json`, as their reader and their
-`store/data_root.py::KINDS` rows take them."""
+"""A check-in draft's `draft.json`, as its reader and its `store/data_root.py::KINDS` row take it."""
 
 from __future__ import annotations
 
@@ -40,6 +39,61 @@ def closed_answer_format(labels: tuple[str, ...]) -> str:
     return "Choose exactly one of these labels: " + " | ".join(labels)
 
 
+class SetupStep(StrEnum):
+    """The check-in's steps, in the order a check-in shows them: each a fold that sets one part of
+    the campaign, keyed as `setup_schema` keys the steps it serves."""
+
+    OPTIMIZER = "optimizer"
+    DATA = "data"
+    SCORING = "scoring"
+    PIPELINE = "pipeline"
+    HEAD_TO_HEAD = "head_to_head"
+    RUN = "run"
+
+
+class CheckinQuestion(StrictModel):
+    """A resolver question one answer closes, projected through `CHECKLIST_FIELDS`."""
+
+    field: str
+    path: list[str] = Field(description="The `EditDraftPatch` path the answer is written at.")
+    step: SetupStep | None
+    prompt: str
+    options: list[str] = Field(description="The answers it takes; empty is free text.")
+
+
+class OriginLastResolution(StrictModel):
+    """One resolver turn's own output. Its findings ride ``OriginResolution.raised`` as commands."""
+
+    assessment: str
+    questions: list[CheckinQuestion]
+    recap: str = Field(description="Set only on a `ready` turn.")
+
+
+class RaisedCommand(StrictModel):
+    """One proposal, already the command a click fires. The assistant offers it and never fires it."""
+
+    kind: Literal["edit-draft-campaign"] = "edit-draft-campaign"
+    payload: EditDraftCampaignPayload
+    label: str = Field(description="What the proposal does, in `CHECKLIST_FIELDS`' words.")
+    evidence: str = Field(description="The citation backing the proposal.")
+
+
+class OriginResolution(StrictModel):
+    """The last resolver turn, kept on its draft; the mint gate is the draft's `readiness`,
+    recomputed on every read."""
+
+    last_resolution: OriginLastResolution | None = Field(
+        default=None, description="Null until a resolver turn ran, and again after a later edit."
+    )
+    raised: list[RaisedCommand] = Field(
+        default_factory=list, description="Proposals the last turn left unclicked."
+    )
+    degraded_cause: str | None = Field(
+        default=None,
+        description="Why the last turn came back thin or empty; null where it did not.",
+    )
+
+
 class DraftFile(FrozenModel):
     """`draft.json`, the check-in's draft. ``config`` is a partial `CampaignConfig`: the keys the
     draft sets, its edit layer over its basis (`pipeline_resolve.py::draft_layers`)."""
@@ -67,6 +121,8 @@ class DraftFile(FrozenModel):
     candidate_library: tuple[str, ...]
     # A resolver turn has run on it: an edit keeps it, so a reopen reviews, never re-resolves.
     resolver_ran: bool
+    # What the last turn left; an edit (`patch`) clears it, the turn's own patch sets it.
+    resolution: OriginResolution = Field(default_factory=OriginResolution)
 
     def at(self, draft_id: str) -> DraftFile:
         addressed = self.model_copy()
@@ -134,7 +190,9 @@ class DraftFile(FrozenModel):
         return fields
 
     def patch(self, **changes: object) -> DraftFile:
-        return self.model_copy(update={"updated_at": utcnow_iso(), **changes})
+        return self.model_copy(
+            update={"updated_at": utcnow_iso(), "resolution": OriginResolution(), **changes}
+        )
 
     def confirm_columns(
         self, *, query_col: str | None = None, ground_truth_col: str | None = None
@@ -159,58 +217,3 @@ class DraftFile(FrozenModel):
         if provenance:
             merged.update(provenance)
         return self.patch(field_provenance=merged, **(values or {}))
-
-
-class SetupStep(StrEnum):
-    """The check-in's steps, in the order a check-in shows them: each a fold that sets one part of
-    the campaign, keyed as `setup_schema` keys the steps it serves."""
-
-    OPTIMIZER = "optimizer"
-    DATA = "data"
-    SCORING = "scoring"
-    PIPELINE = "pipeline"
-    HEAD_TO_HEAD = "head_to_head"
-    RUN = "run"
-
-
-class CheckinQuestion(StrictModel):
-    """A resolver question one answer closes, projected through `CHECKLIST_FIELDS`."""
-
-    field: str
-    path: list[str] = Field(description="The `EditDraftPatch` path the answer is written at.")
-    step: SetupStep | None
-    prompt: str
-    options: list[str] = Field(description="The answers it takes; empty is free text.")
-
-
-class OriginLastResolution(StrictModel):
-    """One resolver turn's own output. Its findings ride ``OriginResolution.raised`` as commands."""
-
-    assessment: str
-    questions: list[CheckinQuestion]
-    recap: str = Field(description="Set only on a `ready` turn.")
-
-
-class RaisedCommand(StrictModel):
-    """One proposal, already the command a click fires. The assistant offers it and never fires it."""
-
-    kind: Literal["edit-draft-campaign"] = "edit-draft-campaign"
-    payload: EditDraftCampaignPayload
-    label: str = Field(description="What the proposal does, in `CHECKLIST_FIELDS`' words.")
-    evidence: str = Field(description="The citation backing the proposal.")
-
-
-class OriginResolution(StrictModel):
-    """`resolution.json`: the last resolver turn; the mint gate is the draft's `readiness`,
-    recomputed on every read."""
-
-    last_resolution: OriginLastResolution | None = Field(
-        default=None, description="Null until a resolver turn ran, and again after a later edit."
-    )
-    raised: list[RaisedCommand] = Field(
-        default_factory=list, description="Proposals the last turn left unclicked."
-    )
-    degraded_cause: str | None = Field(
-        default=None,
-        description="Why the last turn came back thin or empty; null where it did not.",
-    )

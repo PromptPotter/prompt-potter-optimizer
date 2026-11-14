@@ -141,6 +141,9 @@ def open_text_robust(path: Path) -> IO[str]:
 
 def rmtree_robust(path: Path) -> None:
     def _onexc(func: Callable[[str], object], target: str, exc: BaseException) -> None:
+        # Gone already, as `unlink_robust` takes it: a move or a racing delete got there first.
+        if isinstance(exc, FileNotFoundError):
+            return
         if isinstance(exc, PermissionError):
             try:
                 os.chmod(target, stat.S_IWRITE)

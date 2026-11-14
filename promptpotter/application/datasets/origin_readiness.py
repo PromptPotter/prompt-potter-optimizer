@@ -9,7 +9,6 @@ from pydantic import Field, computed_field
 from promptpotter.domain.checkin_draft import (
     CheckinQuestion,
     DraftFile,
-    OriginResolution,
     SetupStep,
 )
 from promptpotter.domain.origin_provenance import Provenance
@@ -19,7 +18,6 @@ from promptpotter.shared.worded import Worded
 if TYPE_CHECKING:
     from promptpotter.application.bench.task_context import OriginQuestion
     from promptpotter.application.pipeline_resolve import DraftPipeline
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 SETUP_STEP_TITLES: Worded[SetupStep, str] = Worded(
@@ -255,15 +253,3 @@ def field_values(draft: DraftFile) -> dict[str, Any]:
         "answer_space": lambda d: list(d.answer_space() or ()),
     }
     return {key: getter(draft) for key, getter in getters.items()}
-
-
-def save_checkin_draft(
-    stores: Stores, draft: DraftFile, *, resolution: OriginResolution | None = None
-) -> DraftFile:
-    stores.drafts.write_draft(draft)
-    stores.drafts.write_resolution(draft.draft_id, resolution or OriginResolution())
-    return draft
-
-
-def load_resolution(stores: Stores, draft: DraftFile) -> OriginResolution:
-    return stores.drafts.load_resolution(draft.draft_id) or OriginResolution()

@@ -150,7 +150,9 @@ from promptpotter.domain.run_records import (
     ArmRecord,
     Bill,
     CallPrice,
+    CycleMintedRecord,
     ElectionRecord,
+    ForkSpec,
     Hold,
     PipelineRead,
     RoundClosedRecord,
@@ -159,6 +161,7 @@ from promptpotter.domain.run_records import (
     RunWiringRecord,
     SampleScoredRecord,
     TokenUsageRecord,
+    parent_address,
 )
 from promptpotter.domain.run_standing import LineOutlay, RunStanding
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
@@ -1490,4 +1493,25 @@ def cycle_result(
             by_kind={"optimizer": SpendBucket(incurred_unpriced_tokens=unpriced_tokens)},
         ),
         **overrides,
+    )
+
+
+def mint_fork(
+    campaigns: CampaignStore,
+    child: CycleHop,
+    parent_dir: Path,
+    spec: ForkSpec,
+    *,
+    cut: int,
+    cut_round: int,
+) -> None:
+    """A fork's one mint record, as `fork_siblings.py::cut_fork` lays it, with no seed."""
+    campaigns.mint_cycle(
+        child,
+        CycleMintedRecord(
+            parent=parent_address(campaigns.cycle_dir(child), parent_dir),
+            forked_at_offset=cut,
+            cut_round=cut_round,
+            fork=spec,
+        ),
     )

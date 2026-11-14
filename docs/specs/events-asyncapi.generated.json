@@ -2339,8 +2339,13 @@
       },
       "CycleMintedRecord": {
         "additionalProperties": false,
-        "description": "One per cycle's own ledger, after only the lines it adopted; a chain is walked off it alone.",
+        "description": "One per cycle's own ledger, after only the lines it adopted, and its first own fact: a chain\nis walked off it alone. A cycle runs every seed its chain's mints hold, root first.",
         "properties": {
+          "babysat": {
+            "default": false,
+            "title": "Babysat",
+            "type": "boolean"
+          },
           "cut_round": {
             "anyOf": [
               {
@@ -2394,6 +2399,17 @@
             "title": "Record Type",
             "type": "string"
           },
+          "seed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CycleSeed"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
@@ -2412,7 +2428,6 @@
             "campaign_ceiling": "#/components/schemas/CampaignCeilingRecord",
             "cycle_final": "#/components/schemas/CycleFinalRecord",
             "cycle_minted": "#/components/schemas/CycleMintedRecord",
-            "cycle_seed": "#/components/schemas/CycleSeedRecord",
             "cycle_share": "#/components/schemas/CycleShareRecord",
             "cycle_superseded": "#/components/schemas/CycleSupersededRecord",
             "decision": "#/components/schemas/ResumeCheckpointRecord",
@@ -2480,9 +2495,6 @@
           },
           {
             "$ref": "#/components/schemas/CycleMintedRecord"
-          },
-          {
-            "$ref": "#/components/schemas/CycleSeedRecord"
           },
           {
             "$ref": "#/components/schemas/CycleShareRecord"
@@ -2645,30 +2657,6 @@
           }
         },
         "title": "CycleSeed",
-        "type": "object"
-      },
-      "CycleSeedRecord": {
-        "additionalProperties": false,
-        "description": "Each cycle's own, LAST wins on its ledger; a cycle runs every one its chain holds, in order.",
-        "properties": {
-          "record_type": {
-            "const": "cycle_seed",
-            "default": "cycle_seed",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "seed": {
-            "$ref": "#/components/schemas/CycleSeed"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "seed"
-        ],
-        "title": "CycleSeedRecord",
         "type": "object"
       },
       "CycleShareRecord": {
@@ -3928,16 +3916,8 @@
       },
       "KeepDraftsAction": {
         "additionalProperties": false,
-        "description": "One button: a press sends `keep` as `kind` to the cycle holding for its round's arms.",
+        "description": "One button: a press sends `payload` as `kind` to the cycle holding for its round's arms.",
         "properties": {
-          "keep": {
-            "description": "The drafts measured as proposed, by index at the hold.",
-            "items": {
-              "type": "integer"
-            },
-            "title": "Keep",
-            "type": "array"
-          },
           "kind": {
             "const": "submit-arms",
             "title": "Kind",
@@ -3946,6 +3926,17 @@
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "description": "What the press sends beside the cycle's address, as served: the drafts it keeps, by index at the hold.",
+            "title": "Payload",
+            "type": "object"
           },
           "variant": {
             "enum": [
@@ -3961,7 +3952,7 @@
           "label",
           "variant",
           "kind",
-          "keep"
+          "payload"
         ],
         "title": "KeepDraftsAction",
         "type": "object"
@@ -6038,7 +6029,6 @@
               "decision",
               "cycle_final",
               "cycle_minted",
-              "cycle_seed",
               "cycle_share",
               "cycle_superseded",
               "election",

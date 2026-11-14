@@ -319,16 +319,7 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
     seed = parse_cycle_seed(payload.seed, stores, campaign, hop)
 
     async def _apply_fork() -> Launched:
-        cut = cut_operator_fork(
-            stores=stores,
-            hop=hop,
-            from_round=payload.round,
-            from_candidate_id=payload.candidate_id,
-            cleared=payload.seed.cleared,
-            seed=seed,
-            keep_rounds=payload.keep_rounds,
-            reason=payload.reason,
-        )
+        cut = cut_operator_fork(stores, payload, seed)
         # Bounded as a start-run is: the payload's own budget, admitted from what the parent leaves.
         return await _launch_fork(
             dispatched, cut, ExistingCycle(cut.child, campaign, payload.budget), payload.mode

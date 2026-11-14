@@ -29,7 +29,7 @@ export function LiveSegment({
 
   // The activity is the viewed leaf's, so its decision is addressed there like any command.
   const decide = (path: CyclePath, a: DecisionAction) =>
-    void cmd.run(a.label, () => commands[a.kind]({ ...cycleAddress(path), keep: a.keep }));
+    void cmd.run(a.label, () => commands[a.kind]({ ...cycleAddress(path), ...a.payload }));
   const busy = cmd.pending !== null || viewedPath === null;
 
   return (

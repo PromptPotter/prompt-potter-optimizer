@@ -53,6 +53,7 @@ from promptpotter.shared.run_scope import rescope, run_scope
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.arms import PointContext
     from promptpotter.domain.campaign import Campaign, RunDeclaration
@@ -204,9 +205,11 @@ def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
 
 
 def _rebased_observers(
-    session: Session, parent: CycleHop, observers: RunObservers, prep: PreparedRun
+    session: Session, cut: ForkCut, observers: RunObservers, prep: PreparedRun
 ) -> RunObservers:
-    _rebase_held(session, parent)
+    # The cut's last step: everything the fork stands on landed before it supersedes its parent.
+    cut.take(session.store)
+    _rebase_held(session, cut.parent)
     return build_run_observers(
         session=session, campaign_config=prep.campaign_config, forked_from=observers
     )
@@ -233,14 +236,12 @@ def _rebase_held(session: Session, parent: CycleHop) -> None:
 
 
 async def onto_fork(
-    session: Session,
-    parent: CycleHop,
-    observers: RunObservers,
-    *,
-    prep: PreparedRun,
-) -> RunObservers:
-    """Rebased and held off the loop: both wait on a gate."""
-    observers = await asyncio.to_thread(_rebased_observers, session, parent, observers, prep)
+    session: Session, cut: ForkCut, observers: RunObservers, *, prep: PreparedRun
+) -> tuple[Session, RunObservers]:
+    """THE in-process move onto a fork, a rebase's and a divergence's: the take, the bind, the
+    held share and the wiring. Taken and rebased off the loop: both wait on a gate."""
+    session = session.bound(cut.child, purpose=session.purpose)
+    observers = await asyncio.to_thread(_rebased_observers, session, cut, observers, prep)
     # A fork's config is already admitted, so it is wired as its observers open.
     declare_run_wiring(
         session,
@@ -252,7 +253,7 @@ async def onto_fork(
     # The line's every emit lands on the cycle it moved onto, under the launch's one scope.
     rescope(ledger=observers.ledger)
     arm_run_controls(session, observers)
-    return observers
+    return session, observers
 
 
 def declare_round_allowance(session: Session, step_rounds: int | None) -> None:
@@ -279,7 +280,7 @@ def _init_cycle(session: Session, *, resume_from_round_override: int | None) -> 
     hop = session.hop
     # Before anything that can raise: a fork's state is its parent's until this line.
     session.state.resumed_from_round = (
-        _next_round(session)
+        _next_round(session.store, hop)
         if resume_from_round_override is None
         else store.rewind_enters(hop, resume_from_round_override)
     )
@@ -298,9 +299,9 @@ def _init_cycle(session: Session, *, resume_from_round_override: int | None) -> 
         session.state.human_intervened = existing.human_intervened
 
 
-def _next_round(session: Session) -> int:
+def _next_round(stores: Stores, hop: CycleHop) -> int:
     """The round NUMBER after the highest one closed, never a count: the origin is round 0."""
-    last = session.store.campaigns.standing_rounds(session.hop, moment=None).last_closed
+    last = stores.campaigns.standing_rounds(hop, moment=None).last_closed
     return 1 if last is None else last + 1
 
 
@@ -383,8 +384,8 @@ async def open_cycle(
     session: Session,
     ledger: CycleEventLog,
     mode: RunMode,
-) -> tuple[Cycle, CycleHop | None]:
-    """The cycle holds the session it runs on, and beside it the cycle a divergence forked it from.
+) -> tuple[Cycle, ForkCut | None]:
+    """The cycle holds the session it runs on, and beside it the fork a divergence cut, untaken.
 
     INIT stays open: its caller moves onto a fork first (`onto_fork`), then closes it (`close_init`).
     """
@@ -407,17 +408,11 @@ async def open_cycle(
         optimizer=selected,
         survey=survey,
     )
-    forked_from: CycleHop | None = None
-    if replays:
-        fork = await resume_with_divergence_check(cycle, dataset, mode)
-        if fork is not None:
-            forked_from = session.hop
-            cycle.session = session.bound(
-                CycleHop(campaign_id=session.campaign_id, cycle_id=fork), purpose=session.purpose
-            )
-            # Off the fork's own chain: one cut at round 0 closes the origin again, then runs round 1.
-            cycle.session.state.resumed_from_round = _next_round(cycle.session)
-    return cycle, forked_from
+    cut = await resume_with_divergence_check(cycle, dataset, mode) if replays else None
+    if cut is not None:
+        # Off the fork's own chain: one cut at round 0 closes the origin again, then runs round 1.
+        session.state.resumed_from_round = _next_round(session.store, cut.child)
+    return cycle, cut
 
 
 def close_init(cycle: Cycle, ledger: CycleEventLog) -> None:

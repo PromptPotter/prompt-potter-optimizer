@@ -39,6 +39,7 @@ from factories import (
     loop_session,
     measurement,
     measurements,
+    mint_fork,
     minted_campaign,
     minted_dataset,
     optimizer_state,
@@ -742,7 +743,8 @@ def _mint_sibling(
     """The mint record alone, cut at the parent's head: what `cut_fork` writes for a sibling."""
     child = parent.model_copy(update={"cycle_id": cycle_id})
     parent_dir = store.cycle_dir(parent)
-    store.mint_fork_cycle(
+    mint_fork(
+        store,
         child,
         parent_dir,
         spec,
@@ -1097,7 +1099,7 @@ def test_a_reentered_rounds_arm_folds_only_its_new_walk(
     folds.announce(walk)
     folds.take(cell)
     assert folds.fold(1, walk.arm) is not None, "guard"
-    folds.enter(rewind)
+    folds.enter(rewind.round)
     with pytest.raises(LookupError):
         folds.take(cell)
     folds.announce(walk)
@@ -1367,6 +1369,12 @@ def test_a_rewind_its_launch_refuses_has_written_nothing_on_its_parent(
         )
 
 
+def _operator_fork(stores: Stores, hop: CycleHop, parsed: CycleSeed, **asked: Any) -> str:
+    """An operator's fork of *hop* cut and taken, its seed *parsed*."""
+    payload = ForkCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, **asked)
+    return cut_operator_fork(stores, payload, parsed).take(stores)
+
+
 # The steered forks cut from the applied scenario's fork, and from each other.
 @pytest.mark.usefixtures("offline", "optimizing_memory")
 def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_its_criterion(
@@ -1375,15 +1383,13 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
     stores, store = built_stores, built_stores.campaigns
     scenario, _, _, scenario_pick, drawn, unheld, _ = scenario_line
     criterion = "0.9 * accuracy + 0.1 * (1 - mean_latency_s)"
-    fork_id = cut_operator_fork(
-        stores=stores,
-        hop=scenario,
-        from_round=2,
-        from_candidate_id="",
-        cleared={},
-        seed=CycleSeed(config_overrides=ConfigOverrides(scoring=criterion)),
+    fork_id = _operator_fork(
+        stores,
+        scenario,
+        CycleSeed(config_overrides=ConfigOverrides(scoring=criterion)),
+        round=2,
         keep_rounds=True,
-    ).take(stores)
+    )
     applied = scenario.model_copy(update={"cycle_id": fork_id})
     index = store.load(applied, moment=None)
     assert index is not None and index.fork is not None
@@ -1415,9 +1421,7 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
         seed = parse_cycle_seed(
             ForkSeed(pipeline_overlay={"a": {"model": model}}), stores, campaign, hop
         )
-        cycle_id = cut_operator_fork(
-            stores=stores, hop=hop, from_round=2, cleared={}, seed=seed, keep_rounds=True
-        ).take(stores)
+        cycle_id = _operator_fork(stores, hop, seed, round=2, keep_rounds=True)
         return hop.model_copy(update={"cycle_id": cycle_id})
 
     permitted = permitted_narrowing(stores, campaign)
@@ -1459,14 +1463,13 @@ def test_a_panel_fork_off_a_candidate_runs_its_record_and_sends_only_the_operato
     assert steer_verdict(stores, permitted, no_edit.pipeline_overlay) == "clean"
     panel_fork = scenario.model_copy(
         update={
-            "cycle_id": cut_operator_fork(
-                stores=stores,
-                hop=scenario,
-                from_round=2,
-                from_candidate_id=candidate_key,
-                cleared={},
-                seed=parse_cycle_seed(no_edit, stores, campaign, scenario),
-            ).take(stores)
+            "cycle_id": _operator_fork(
+                stores,
+                scenario,
+                parse_cycle_seed(no_edit, stores, campaign, scenario),
+                round=2,
+                candidate_id=candidate_key,
+            )
         }
     )
     panel_laid = cycle_config(stores, campaign, panel_fork)
@@ -1496,14 +1499,14 @@ def test_a_field_cleared_in_the_panel_drops_the_candidates_value_and_the_layer_b
     cleared = ForkSeed(pipeline_overlay={"a": {"route_order": None}})
     reset_fork = scenario.model_copy(
         update={
-            "cycle_id": cut_operator_fork(
-                stores=stores,
-                hop=scenario,
-                from_round=2,
-                from_candidate_id=candidate_key,
-                cleared=cleared.cleared,
-                seed=parse_cycle_seed(cleared, stores, campaign, scenario),
-            ).take(stores)
+            "cycle_id": _operator_fork(
+                stores,
+                scenario,
+                parse_cycle_seed(cleared, stores, campaign, scenario),
+                round=2,
+                candidate_id=candidate_key,
+                seed=cleared,
+            )
         }
     )
     assert cycle_config(stores, campaign, reset_fork).seed_overlay == {
@@ -2371,9 +2374,9 @@ def repair(built_stores: Stores) -> _Repair:
             mock.patch.object(query_loop, "measure_sample", _answered),
             scoped(book=spend_book()),
         ):
-            branch_id = asyncio.run(apply_correction(cycle, line, repair_bank))
-        assert branch_id is not None, "a holed round was carried as it ran"
-        return hop, hop.model_copy(update={"cycle_id": branch_id})
+            branch = asyncio.run(apply_correction(cycle, line, repair_bank))
+        assert branch is not None, "a holed round was carried as it ran"
+        return hop, branch.child
 
     def fork_direction(hop: CycleHop) -> ForkDirection:
         index = stores.campaigns.load(hop, moment=None)

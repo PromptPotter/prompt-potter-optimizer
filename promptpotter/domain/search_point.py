@@ -38,11 +38,8 @@ class NodeConfig(NodeCall, OptimizerPromptEdits):
         return self.model_dump(include=set(CALL_CONFIG_KEYS), exclude_unset=True)
 
     def prompt_edits(self) -> dict[str, str]:
-        return self.model_dump(include=set(PROMPT_FIELDS), exclude_none=True)
-
-    def laid(self, update: Mapping[str, object]) -> NodeConfig:
-        """*update* laid over it, typed as a config is: a value of the wrong type refuses."""
-        return NodeConfig.model_validate({**self.model_dump(exclude_unset=True), **update})
+        # Read by attribute: `NodeCall`'s plain serializer ignores `include`.
+        return {f: v for f in PROMPT_FIELDS if (v := getattr(self, f)) is not None}
 
 
 def missing_template_vars(

@@ -381,8 +381,8 @@ class AnnouncedArms:
         for key in keys:
             self._arms[record.round, key] = _Announced(record.arms[key], record.folds.get(key))
 
-    def enter(self, record: RoundEnteredRecord) -> None:
-        self._arms = {at: held for at, held in self._arms.items() if at[0] < record.round}
+    def enter(self, round_num: int) -> None:
+        self._arms = {at: held for at, held in self._arms.items() if at[0] < round_num}
 
     def state(self, round_num: int, key: ArmKey) -> ArmState:
         return self._arms[round_num, key].state
@@ -1152,14 +1152,6 @@ class ScoringLockedRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class CycleSeedRecord(FrozenModel):
-    """Each cycle's own, LAST wins on its ledger; a cycle runs every one its chain holds, in order."""
-
-    record_type: Literal["cycle_seed"] = "cycle_seed"
-    seed: CycleSeed
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
 class PipelineRead(FrozenModel):
     """What run init read: the served pipeline with the dataset's definition laid on."""
 
@@ -1247,7 +1239,8 @@ class SpawnedBy(StrictModel):
 
 
 class CycleMintedRecord(FrozenModel):
-    """One per cycle's own ledger, after only the lines it adopted; a chain is walked off it alone."""
+    """One per cycle's own ledger, after only the lines it adopted, and its first own fact: a chain
+    is walked off it alone. A cycle runs every seed its chain's mints hold, root first."""
 
     record_type: Literal["cycle_minted"] = "cycle_minted"
     # The parent's cycle dir relative to this one's, POSIX-separated: `../<id>` for a sibling.
@@ -1256,6 +1249,9 @@ class CycleMintedRecord(FrozenModel):
     # The first round the fork runs itself: every round below it is its parent's line's.
     cut_round: int | None = None
     fork: ForkSpec | None = None
+    seed: CycleSeed | None = None
+    # decisions.md § 0005: its seed steers outside the permitted narrowing, read as a `BABYSAT` act.
+    babysat: bool = False
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @model_validator(mode="after")
@@ -1330,6 +1326,10 @@ class InterventionRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+# The act a babysat mint (`CycleMintedRecord.babysat`) reads as.
+BABYSAT = "disallowed_model_override"
+
+
 class ComparisonExit(enum.StrEnum):
     """An act that runs an arm off the comparison its head-to-head declared: admitted like on any
     campaign, its event is the arm's exit (decisions.md § 0009)."""
@@ -1369,7 +1369,6 @@ CycleRecord = Annotated[
     | PricedKeyRecord
     | CycleFinalRecord
     | CycleMintedRecord
-    | CycleSeedRecord
     | CycleShareRecord
     | CycleSupersededRecord
     | ElectionRecord

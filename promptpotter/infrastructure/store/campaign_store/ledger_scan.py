@@ -22,6 +22,7 @@ from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.results import RoundCells
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import (
+    BABYSAT,
     AnnouncedArms,
     ArmRecord,
     CampaignCeilingRecord,
@@ -29,7 +30,6 @@ from promptpotter.domain.run_records import (
     CycleFinalRecord,
     CycleMintedRecord,
     CycleRecord,
-    CycleSeedRecord,
     CycleShareRecord,
     CycleSupersededRecord,
     ElectionRecord,
@@ -225,7 +225,12 @@ class _CycleFacts:
         held = self._held
         match record:
             case CycleMintedRecord():
-                held = held._replace(minted=record)
+                # The babysat stamp is the mint's own: an intervention, never a second append.
+                stamped = (InterventionRecord(kind=BABYSAT, timestamp=record.timestamp),)
+                held = held._replace(
+                    minted=record,
+                    interventions=(*held.interventions, *(stamped if record.babysat else ())),
+                )
             case RunPhaseRecord(run_phase=RunPhase.TERMINAL):
                 held = held._replace(ended=record, paused=None, resumed_ending=None)
             case RunPhaseRecord():
@@ -444,7 +449,8 @@ def _take(taken: dict[str, WalkedCell], cell: WalkedCell) -> None:
 
 
 _RoundStep = (
-    RoundEnteredRecord
+    CycleMintedRecord
+    | RoundEnteredRecord
     | ElectionRecord
     | ResumeCheckpointRecord
     | RoundClosedRecord
@@ -465,6 +471,10 @@ class _Standing:
         self._cells: dict[tuple[int, ArmKey], dict[str, WalkedCell]] = {}
 
     def feed(self, record: _RoundStep) -> None:
+        if isinstance(record, CycleMintedRecord):
+            # A fork's mint is its rewound entry at its cut: the rounds below are its parent line's.
+            self._held = self._held._replace(entered=record.cut_round, rewound=record.cut_round)
+            return
         rnd = record.round
         if rnd is None:
             return
@@ -476,7 +486,7 @@ class _Standing:
                     entered=_earliest(held.entered, rnd),
                     rewound=_earliest(held.rewound, rewound),
                 )
-                self._arms.enter(record)
+                self._arms.enter(rnd)
                 self._cells = _before(self._cells, rnd)
             case ElectionRecord():
                 held.elections[rnd] = record
@@ -736,7 +746,7 @@ LedgerIndex.readers(
         _last,
         (
             CampaignCeilingRecord,
-            CycleSeedRecord,
+            CycleMintedRecord,
             CycleShareRecord,
             PartitionRecord,
             StandingBudgetRecord,

@@ -60,7 +60,7 @@ class Launched(LaunchOutcome):
         return [self.launch]
 
 
-async def hold(request: LaunchRequest, start: RunStart) -> HeldRun:
+async def hold(request: LaunchRequest, start: RunStart, mode: RunMode) -> HeldRun:
     """THE way into a held run: past the queue and the money admission, then the request's cycle
     opened. One with no hop yet mints it, so a refusal before then leaves nothing written and one
     after stamps the minted cycle; an existing cycle's is never stamped, so it stays as resumable
@@ -80,7 +80,7 @@ async def hold(request: LaunchRequest, start: RunStart) -> HeldRun:
                 opened.hop.cycle_id,
                 start.job_id,
             )
-        return HeldRun.of(start, opened, held, closing)
+        return HeldRun.of(start, opened, held, closing, mode)
     except BaseException as exc:
         await asyncio.to_thread(start.release, exc, stamps=stamps)
         await closing.aclose()
@@ -109,7 +109,7 @@ class Admitted(LaunchOutcome):
 
     async def held(self) -> HeldRun:
         """Its run held: past the queue, the money admission and the cycle's session."""
-        return await hold(self.request, self.start)
+        return await hold(self.request, self.start, self.mode)
 
     async def launched(self) -> Launched:
         return await self.hand_over(self.held())
@@ -124,7 +124,7 @@ class Admitted(LaunchOutcome):
 
         async def hold_and_detach() -> CycleHop:
             held = await holding
-            await held.detach(mode=self.mode)
+            await held.detach()
             return held.session.hop
 
         if job.queued:

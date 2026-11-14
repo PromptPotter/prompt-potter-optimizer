@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass, replace
 
 from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_fork
 from promptpotter.application.initialization.scoring_scope import session_scope
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
@@ -39,7 +39,6 @@ from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import run_clamp
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, seed_layer
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import (
     SELF_PAUSE_CAUSE,
     STOP_REASON_INFO,
@@ -268,22 +267,19 @@ async def _run_single_cycle(
     dataset, campaign_config = prep.dataset, prep.campaign_config
 
     cycle: Cycle | None = None
-    forked_from: CycleHop | None = None
     cancel_exc: asyncio.CancelledError | None = None
     book: SpendBook | None = None
     fork: RebaseRequest | None = None
     open_round: int | None = None
     pause_cause = PauseCause.INTERRUPT
     try:
-        cycle, forked_from = await open_cycle(
-            prep, session=session, ledger=observers.ledger, mode=mode
-        )
-        if forked_from is not None:
+        cycle, cut = await open_cycle(prep, session=session, ledger=observers.ledger, mode=mode)
+        if cut is not None:
             # On the parent's own ledger, as a rebase's close ends it, before its readout names the fork.
             declare_run_stop(session, observers, StopReason.REBASED, interrupted_by=pause_cause)
             observers.drain_all()
             parent = observers
-            observers = await onto_fork(cycle.session, forked_from, parent, prep=prep)
+            cycle.session, observers = await onto_fork(session, cut, parent, prep=prep)
             # Held through the fork's mint, which moves the campaign's holds off it.
             parent.release()
         session = cycle.session
@@ -349,36 +345,13 @@ async def _run_single_cycle(
     )
 
 
-async def _mint_and_rebase_fork(
-    prep: PreparedRun,
-    *,
-    session: Session,
-    observers: RunObservers,
-    rebase_req: RebaseRequest,
-) -> tuple[PreparedRun, Session, RunObservers]:
+def _cut_rebase_fork(
+    prep: PreparedRun, session: Session, rebase_req: RebaseRequest
+) -> tuple[PreparedRun, ForkCut]:
     """``config_overrides`` re-snapshot BEFORE the mint, so seed and in-process config agree. The
     fork's cap is what its line has left; its working state is the parent's latest, since the cut
     rewinds the line, never what the optimizer learned on it. A re-election is the round it hangs
-    from, so the line continues from the arm a layer named. Cut off the loop: its take waits on
-    the parent's line."""
-    parent = session.hop
-    prep, session, rounds = await asyncio.to_thread(_cut_rebase_fork, prep, session, rebase_req)
-    observers = await onto_fork(session, parent, observers, prep=prep)
-    logger.info(
-        "Auto-rebase: %s → %s at round %d, %s rounds in its cap [trigger=%s, reason=%s]",
-        parent.cycle_id,
-        session.hop.cycle_id,
-        rebase_req.fork_from_round,
-        rounds,
-        rebase_req.trigger.value,
-        rebase_req.reason,
-    )
-    return prep, session, observers
-
-
-def _cut_rebase_fork(
-    prep: PreparedRun, session: Session, rebase_req: RebaseRequest
-) -> tuple[PreparedRun, Session, int | None]:
+    from, so the line continues from the arm a layer named. Untaken: `onto_fork` takes it."""
     parent = session.hop
     store = session.store.campaigns
     cut = rebase_req.fork_from_round
@@ -390,7 +363,7 @@ def _cut_rebase_fork(
     prep = replace(prep, campaign_config=prep.campaign_config.overlaid(seed_layer(overrides)))
     held = store.standing_rounds(parent, moment=None).rounds
     learned = held[max(held)].close.optimizer_state
-    new_cycle_id = cut_fork(
+    fork = cut_fork(
         session.store,
         parent=parent,
         fork_from_round=cut,
@@ -399,15 +372,25 @@ def _cut_rebase_fork(
         issued_by=rebase_req.issued_by,
         # No `origin_prompts`: a rebase replays its origin from the parent's round.
         seed=CycleSeed(config_overrides=overrides),
-    ).take(session.store)
-    child = CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id)
+    )
     branch = (
-        rebase_req.hangs_from or store.standing_rounds(child, moment=None).rounds[cut - 1].close
+        rebase_req.hangs_from
+        or store.standing_rounds(fork.child, moment=None).rounds[cut - 1].close
     )
     store.rebank_round(
-        child, branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices}))
+        fork.child,
+        branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices})),
     )
-    return prep, session.bound(child, purpose=session.purpose), overrides.budget.rounds
+    logger.info(
+        "Auto-rebase: %s → %s at round %d, %s rounds in its cap [trigger=%s, reason=%s]",
+        parent.cycle_id,
+        fork.child.cycle_id,
+        cut,
+        overrides.budget.rounds,
+        rebase_req.trigger.value,
+        rebase_req.reason,
+    )
+    return prep, fork
 
 
 async def _run_line(
@@ -430,12 +413,9 @@ async def _run_line(
             return outcome
         # The operator's `--from` rewound the line's first cycle; a fork stands on its rebase's cut.
         mode = mode.model_copy(update={"from_round": None})
-        prep, session, observers = await _mint_and_rebase_fork(
-            prep,
-            session=outcome.session,
-            observers=outcome.observers,
-            rebase_req=outcome.fork,
-        )
+        # Cut off the loop: its reads wait on the parent's line.
+        prep, cut = await asyncio.to_thread(_cut_rebase_fork, prep, outcome.session, outcome.fork)
+        session, observers = await onto_fork(outcome.session, cut, outcome.observers, prep=prep)
 
 
 async def run_optimization(

@@ -72,8 +72,9 @@ export function SteerForkPanel({
 
   const confirm = () => {
     const { budget, nodes } = limits.current;
+    // The server seeds the candidate's own prompts; only an edit rides the seed.
     const forkSeed: ForkSeed = {
-      origin_prompts: editedPrompts.current ?? seedPrompts,
+      ...(editedPrompts.current ? { origin_prompts: editedPrompts.current } : {}),
       pipeline_overlay: editedOverlay.current ?? {},
       config_overrides: nodes ? { nodes } : {},
       ...(Object.keys(editedNarrowing.current).length > 0

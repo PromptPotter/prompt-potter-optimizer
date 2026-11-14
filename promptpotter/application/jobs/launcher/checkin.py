@@ -100,9 +100,7 @@ class CheckinStart:
                 session.bank.samples,
                 origin_override=opened.origin_override,
             )
-            minted = mint(plan, campaign_id=fresh_campaign_id(session), adopting=draft_id)
-            stores.drafts.close(draft_id)
-            yield minted
+            yield mint(plan, campaign_id=fresh_campaign_id(session), adopting=draft_id)
 
 
 def _land_draft(

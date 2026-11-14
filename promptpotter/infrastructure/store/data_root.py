@@ -32,7 +32,7 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.prompt_blocks import PACK_FILE
 from promptpotter.domain.campaign import Campaign, HeadToHeadRecord
-from promptpotter.domain.checkin_draft import DraftFile, OriginResolution
+from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import parse_prompt_export
@@ -63,7 +63,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     definition_layer,
     origin_layer,
 )
-from promptpotter.infrastructure.store.draft_store import DRAFT_FILE, RESOLUTION_FILE
+from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import (
     complete_lines,
     parse_yaml,
@@ -488,13 +488,6 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
     *_CAMPAIGN_KINDS,
     *_DRAFT_KINDS,
     Kind("draft", _WS, f"{_DRAFT}/{DRAFT_FILE}", Fate.RUN, _DRAFT_SHAPE),
-    Kind(
-        "draft resolution",
-        _WS,
-        f"{_DRAFT}/{RESOLUTION_FILE}",
-        Fate.RUN,
-        TypeAdapter(OriginResolution),
-    ),
     # Retired by the hold `reset` takes on it, with the draft it claims.
     Kind("draft claim", _WS, f"{DRAFTS_DIR}/.*.claim", Fate.RUN, _HELD),
     Kind(

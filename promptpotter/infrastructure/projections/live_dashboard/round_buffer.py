@@ -10,7 +10,6 @@ from promptpotter.domain.results import Election
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
-    RoundEnteredRecord,
     SampleScoredRecord,
 )
 from promptpotter.domain.scoring import Grade, MeasuredCell
@@ -45,9 +44,9 @@ class RoundBuffer:
         self.race_current_id = ""
         self.race_n_samples = 0
 
-    def enter(self, record: RoundEnteredRecord) -> None:
-        self.announced.enter(record)
-        self.reset(record.round)
+    def enter(self, round_num: int) -> None:
+        self.announced.enter(round_num)
+        self.reset(round_num)
 
     def announce(self, record: ArmRecord) -> None:
         self.announced.announce(record)

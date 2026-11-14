@@ -52,13 +52,32 @@ def _run_mode(args: argparse.Namespace) -> RunMode:
     )
 
 
-def _start_run(args: argparse.Namespace, hop: CycleHop) -> StartRunPayload:
-    return StartRunPayload(
-        campaign_id=hop.campaign_id,
-        cycle_id=hop.cycle_id,
-        budget=budget_from_args(args),
-        step_rounds=args.step_rounds,
-        mode=_run_mode(args),
+def _payload(args: argparse.Namespace, hop: CycleHop) -> StartRunPayload | ForkCyclePayload:
+    """The whole payload the flags spell: a `--rewind` or a `--steer` cuts a fork, refused as
+    every door refuses one."""
+    budget, mode = budget_from_args(args), _run_mode(args)
+    if args.rewind_to_round is None and not args.steer:
+        return StartRunPayload(
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
+            budget=budget,
+            step_rounds=args.step_rounds,
+            mode=mode,
+        )
+    if args.step_rounds is not None:
+        raise PayloadInvalidError("--step-rounds steps a cycle's own run; a fork's run takes none.")
+    return PayloadInvalidError.validating(
+        ForkCyclePayload,
+        {
+            "campaign_id": hop.campaign_id,
+            "cycle_id": hop.cycle_id,
+            "round": args.rewind_to_round or 0,
+            "keep_rounds": args.rewind_to_round is not None,
+            "reason": args.rewind_reason.strip(),
+            "seed": ForkSeed(pipeline_overlay=_steer_overlay(args.steer or [])),
+            "budget": budget,
+            "mode": mode,
+        },
     )
 
 
@@ -74,52 +93,6 @@ async def _dispatch_held(
     return held
 
 
-async def _dispatch_fork(
-    args: argparse.Namespace,
-    ctx: SessionCtx,
-    *,
-    from_round: int,
-    seed: ForkSeed,
-    keep_rounds: bool = False,
-    reason: str = "",
-) -> HeldRun:
-    """A refused hold leaves no fork: the applier removes the stub it minted."""
-    return await _dispatch_held(
-        args,
-        ctx,
-        PayloadInvalidError.validating(
-            ForkCyclePayload,
-            {
-                "campaign_id": ctx.campaign_id,
-                "cycle_id": ctx.cycle_id,
-                "round": from_round,
-                "seed": seed,
-                "budget": budget_from_args(args),
-                "keep_rounds": keep_rounds,
-                "reason": reason,
-                "mode": _run_mode(args),
-            },
-        ),
-    )
-
-
-async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
-    rewind_to: int = args.rewind_to_round
-    reason = args.rewind_reason.strip() or f"operator rewind to round {rewind_to}"
-    parent_cycle_id = ctx.cycle_id
-    held = await _dispatch_fork(
-        args, ctx, from_round=rewind_to, seed=ForkSeed(), keep_rounds=True, reason=reason
-    )
-    logger.info(
-        "Operator rewind: %s → %s at round %d [reason=%s]",
-        parent_cycle_id,
-        ctx.cycle_id,
-        rewind_to,
-        reason,
-    )
-    return held
-
-
 def _steer_overlay(specs: list[str]) -> dict[str, dict[str, str]]:
     """Split only: the server reads each value in its param's declared type (`launching.py::_typed_steer`)."""
     overlay: dict[str, dict[str, str]] = {}
@@ -132,37 +105,24 @@ def _steer_overlay(specs: list[str]) -> dict[str, dict[str, str]]:
     return overlay
 
 
-async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
+def _confirm_steer(ctx: SessionCtx, overlay: dict[str, dict[str, object]]) -> None:
     """C0 is INHERITED; a steer to a non-PERMITTED model needs ``campaign.babysit``, the dispatcher's gate: this only warns."""
-    overlay = _steer_overlay(args.steer)
     preview = fork_preview(ctx.store, ctx.campaign_id, overlay)
-    disallowed = preview.steer != "clean"
-    if disallowed:
-        permitted = preview.permitted
-        steered = ", ".join(
-            f"{node}.{param}={value!r}"
-            for node, cfg in sorted(overlay.items())
-            for param, value in sorted(cfg.items())
-        )
-        print()
-        print(f"⚠  Steering {steered} — NOT permitted by")
-        print(f"   the origin: {permitted or '{} (nothing sanctioned)'}.")
-        print("   This branch will be marked babysat (grade C); the origin's C0 is inherited.")
-        print()
-        # The cap is the authorization; the prompt is a courtesy, and a non-TTY run (None) proceeds on the cap.
-        if confirm_tty("Proceed with the babysit steer?", default_no=True) is False:
-            raise SystemExit("Cancelled. The active campaign is unchanged.")
-
-    parent_cycle_id = ctx.cycle_id
-    held = await _dispatch_fork(args, ctx, from_round=0, seed=ForkSeed(pipeline_overlay=overlay))
-    logger.info(
-        "Operator steer-fork (%s): %s → %s [overlay=%s]",
-        "babysit, grade C" if disallowed else "clean, sanctioned values",
-        parent_cycle_id,
-        ctx.cycle_id,
-        overlay,
+    if preview.steer == "clean":
+        return
+    steered = ", ".join(
+        f"{node}.{param}={value!r}"
+        for node, cfg in sorted(overlay.items())
+        for param, value in sorted(cfg.items())
     )
-    return held
+    print()
+    print(f"⚠  Steering {steered} — NOT permitted by")
+    print(f"   the origin: {preview.permitted or '{} (nothing sanctioned)'}.")
+    print("   This branch will be marked babysat (grade C); the origin's C0 is inherited.")
+    print()
+    # The cap is the authorization; the prompt is a courtesy, and a non-TTY run (None) proceeds on the cap.
+    if confirm_tty("Proceed with the babysit steer?", default_no=True) is False:
+        raise SystemExit("Cancelled. The active campaign is unchanged.")
 
 
 async def _pivot_to_fresh(
@@ -192,20 +152,11 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
     ctx = load_session(stores, cycle_target(stores, args.campaign, args.cycle))
 
-    rewinding = args.rewind_to_round is not None
-    steering = bool(args.steer)
-    if rewinding and steering:
-        raise PayloadInvalidError("--rewind and --steer each cut a fork — pass one per `resume`.")
-    if (rewinding or steering) and args.step_rounds is not None:
-        raise PayloadInvalidError("--step-rounds steps a cycle's own run; a fork's run takes none.")
-
+    payload = _payload(args, ctx.hop)
+    if isinstance(payload, ForkCyclePayload) and payload.seed.pipeline_overlay:
+        _confirm_steer(ctx, payload.seed.pipeline_overlay)
     try:
-        if rewinding:
-            held = await _fork_operator_rewind(args, ctx)
-        elif steering:
-            held = await _fork_operator_steer(args, ctx)
-        else:
-            held = await _dispatch_held(args, ctx, _start_run(args, ctx.hop))
+        held = await _dispatch_held(args, ctx, payload)
     except ConfigDriftError as drift:
         return await _pivot_to_fresh(args, ctx, drift)
 
@@ -225,5 +176,5 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
 
     # A halt on divergence is the run's DIVERGED stop: its `next_acts` name the fork.
-    cycle_result = await run_inline(held, mode=_run_mode(args))
+    cycle_result = await run_inline(held)
     return cycle_result_command(session, cycle_result)

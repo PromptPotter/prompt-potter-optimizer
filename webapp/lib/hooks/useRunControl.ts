@@ -51,12 +51,19 @@ export function useRunControl(): RunControl | null {
       return;
     }
     // A paused cycle's worker has exited, so resume is a relaunch: the same branch as start.
-    void cmd.run("start-run", () => commands["start-run"](cycleAddress(viewedPath)));
+    // Sent as served: a diverged cycle's relaunch forks (`RunAdmission.payload`).
+    void cmd.run("start-run", () =>
+      commands["start-run"]({ ...cycleAddress(viewedPath), ...admission?.payload }),
+    );
   };
 
   const step = (rounds: number) =>
     void cmd.run("start-run", () =>
-      commands["start-run"]({ ...cycleAddress(viewedPath), step_rounds: rounds }),
+      commands["start-run"]({
+        ...cycleAddress(viewedPath),
+        ...admission?.payload,
+        step_rounds: rounds,
+      }),
     );
 
   return {

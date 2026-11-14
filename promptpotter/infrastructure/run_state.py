@@ -78,7 +78,9 @@ def read_run_state(
     if scoring:
         run = RunState(RunPhase.PAUSED if asked is not None else RunPhase.SCORING, producer)
     elif terminal:
-        return RunState(RunPhase.TERMINAL, producer)
+        return RunState(
+            RunPhase.TERMINAL, producer, ended=None if last is None else last.stop_reason
+        )
     elif asked is not None or declared is RunPhase.PAUSED:
         run = RunState(RunPhase.PAUSED, producer)
     elif producer.state is ProducerState.HELD:

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+import copy
+from collections.abc import Mapping
+from typing import Annotated, Self
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
@@ -10,6 +12,22 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 class StrictModel(BaseModel):
     # A validator builds on first use, so an import pays for no model the process never reads.
     model_config = ConfigDict(extra="forbid", defer_build=True)
+
+    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
+        """A copy with *update* is VALIDATED, as a read is: an unknown key or a state a validator
+        refuses raises. Only the update's keys join what was set."""
+        if not update:
+            return super().model_copy(deep=deep)
+        if self.model_config.get("extra") != "allow" and (
+            unknown := update.keys() - type(self).model_fields.keys()
+        ):
+            raise ValueError(f"{type(self).__name__} has no field {sorted(unknown)}")
+        held = copy.deepcopy(dict(self)) if deep else dict(self)
+        copied = self.model_validate({**held, **update}, by_name=True)
+        object.__setattr__(copied, "__pydantic_fields_set__", self.model_fields_set | update.keys())
+        if self.__pydantic_private__ is not None:
+            object.__setattr__(copied, "__pydantic_private__", dict(self.__pydantic_private__))
+        return copied
 
 
 class FrozenModel(StrictModel):

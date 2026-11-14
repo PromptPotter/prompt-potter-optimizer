@@ -51,6 +51,7 @@ from factories import (
     measurement,
     measurements,
     member_rows,
+    mint_fork,
     minted_campaign,
     minted_dataset,
     optimizer_state,
@@ -5246,7 +5247,8 @@ def test_the_arms_of_one_declared_head_to_head_are_controlled_only_on_their_reco
             line = h2h_stores.campaigns.line_holder(forked.root_hop)
             parent = h2h_stores.campaigns.cycle_dir(line)
             fork = CycleHop(campaign_id=line.campaign_id, cycle_id=f"{line.cycle_id}_fork_r1")
-            h2h_stores.campaigns.mint_fork_cycle(
+            mint_fork(
+                h2h_stores.campaigns,
                 fork,
                 parent,
                 ForkSpec(

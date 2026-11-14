@@ -43,6 +43,7 @@ from factories import (
     inner_sandbox,
     jumping_clock,
     loop_session,
+    mint_fork,
     minted_campaign,
     minted_dataset,
     on_jumping_clock,
@@ -200,8 +201,8 @@ from promptpotter.domain.run_records import (
     Bill,
     CallPrice,
     ConfigOverrides,
+    CycleMintedRecord,
     CycleSeed,
-    CycleSeedRecord,
     CycleShareRecord,
     ForkRemainder,
     ForkSpec,
@@ -1042,8 +1043,9 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
         budget=held,
         optimizer=select_optimizer(launched_config.optimization),
         closing=contextlib.AsyncExitStack(),
+        mode=mode,
     )
-    spec = launched.job_spec(mode)
+    spec = launched.job_spec()
     book = _armed(stores, None, spec.budget)
     assert (book.budget, book.allotment, book.reserve) == (
         held.admitted.only(CYCLE_AXES),
@@ -1506,11 +1508,11 @@ def test_a_ledger_index_serves_the_file_as_it_stands_grown_compacted_raced_and_s
 
     def seed(model: str) -> None:
         overlay = {"llm_only": NodeCall(model=model)}
-        index.append(CycleSeedRecord(seed=CycleSeed(pipeline_overlay=overlay)))
+        index.append(CycleMintedRecord(seed=CycleSeed(pipeline_overlay=overlay)))
 
     def tailed() -> tuple[float, int, CycleSeed | None]:
         spend, calls, _worked_s = scan_ledger_spend([LedgerSpan(index.path)])
-        seeded = scan_last([LedgerSpan(index.path)], CycleSeedRecord)
+        seeded = scan_last([LedgerSpan(index.path)], CycleMintedRecord)
         return spend.total_used_usd, calls, None if seeded is None else seeded.seed
 
     def cold() -> tuple[float, int, CycleSeed | None]:
@@ -1518,7 +1520,7 @@ def test_a_ledger_index_serves_the_file_as_it_stands_grown_compacted_raced_and_s
         bills = [
             row["money"]["price"]["cost_usd"] for row in rows if row["record_type"] == "token_usage"
         ]
-        seeds = [row["seed"] for row in rows if row["record_type"] == "cycle_seed"]
+        seeds = [row["seed"] for row in rows if row["record_type"] == "cycle_minted"]
         seeded = CycleSeed.model_validate(seeds[-1]) if seeds else None
         return sum(bills), len(bills), seeded
 
@@ -1902,7 +1904,8 @@ def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
     root_dir = built_stores.campaigns.cycle_dir(root)
     bill(root, 0.25)
     for fork in forks:
-        built_stores.campaigns.mint_fork_cycle(
+        mint_fork(
+            built_stores.campaigns,
             fork,
             root_dir,
             ForkSpec(
@@ -2615,7 +2618,7 @@ def test_a_bill_naming_no_price_closes_its_hold_in_tokens_and_keeps_its_money_he
     )
     priceless = billed_call(node="bare", input_tokens=40, output_tokens=9, hold_id="bare").bill
     assert priceless is not None
-    charges.append(priceless.model_copy(update={"ledger": on_bare}))
+    charges.append(priceless)
     assert unreported_under(charges, bare.path).host.unreported_usd == pytest.approx(hold_usd), (
         "a priceless bill freed its hold"
     )
@@ -4102,7 +4105,8 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
 
     bill(root, 0.1)
     root_dir = forker.campaigns.cycle_dir(root)
-    forker.campaigns.mint_fork_cycle(
+    mint_fork(
+        forker.campaigns,
         fork,
         root_dir,
         ForkSpec(
@@ -4375,9 +4379,9 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
     stores.tenant_datasets.relabel("duel", bank.dataset_hash)
     detached: list[JobSpec] = []
 
-    async def ran_elsewhere(held: HeldRun, mode: RunMode) -> asyncio.Task[None]:
+    async def ran_elsewhere(held: HeldRun) -> asyncio.Task[None]:
         """The arm's own process, run and exited: its slot handed back, nothing spent."""
-        spec = held.job_spec(mode)
+        spec = held.job_spec()
         detached.append(spec)
         await asyncio.to_thread(held.start.job_registry.release, spec.job_id, StopReason.TARGET_HIT)
         return asyncio.create_task(asyncio.sleep(0))

@@ -227,10 +227,10 @@ def _merged_config(
     # Except the call's own draw, drawn FROM the clamp's seed: it keys the call on every provider.
     if seed is not None:
         laid["seed"] = seed
-    merged = config.laid(laid)
+    merged = config.model_copy(update=laid)
     # Keyed and sent as the host it gets, as a target node is (`pin_default_routes`).
     if route := pinned_route(merged.model, merged.route_order, merged.provider, default_routes()):
-        merged = merged.laid({"route_order": route})
+        merged = merged.model_copy(update={"route_order": route})
     return merged
 
 

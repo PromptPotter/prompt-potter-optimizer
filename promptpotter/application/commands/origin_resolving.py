@@ -49,7 +49,7 @@ async def resolve_origin(
 
     async def _apply() -> ResolveOriginResponse:
         try:
-            result = await resolve_origin_turn(stores=stores, draft=draft, pipeline=pipeline)
+            turned = await resolve_origin_turn(stores=stores, draft=draft, pipeline=pipeline)
         except PotterError:
             raise
         except Exception as exc:
@@ -59,8 +59,8 @@ async def resolve_origin(
                 f"origin resolver turn failed: {exc}", code="resolver_failed"
             ) from exc
         # A turn writes no field the pipeline reads, so the declaration read before it holds.
-        wire = await kept_draft_wire(stores, result.draft, served, resolution=result.resolution)
-        return ResolveOriginResponse(resolution=result.resolution, draft=wire)
+        wire = await kept_draft_wire(stores, turned, served)
+        return ResolveOriginResponse(resolution=turned.resolution, draft=wire)
 
     # Its end keeps the turn's answer: a deduped retry re-spends no LLM call, after a mint too.
     return Applier(_apply)

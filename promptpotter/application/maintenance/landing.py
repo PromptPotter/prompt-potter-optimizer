@@ -57,7 +57,11 @@ from promptpotter.infrastructure.store.io import (
     write_text,
 )
 from promptpotter.infrastructure.store.layout import INNER_SANDBOXES_DIR, CampaignLayout
-from promptpotter.infrastructure.store.stores import tenant_stores
+from promptpotter.infrastructure.store.stores import (
+    DEFINITION_SWAP_DIR,
+    complete_definition_swap,
+    tenant_stores,
+)
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, PotterError
 from promptpotter.shared.hashing import stable_hash
@@ -106,6 +110,8 @@ class Landing(NamedTuple):
     # its manifest since, so it kept (`apply_landing`): the stamp then names no key, and the next
     # entry lands the root again.
     kept: tuple[Unloadable, ...]
+    # A definition swap committed and not yet laid (`stores.py::complete_definition_swap`).
+    swaps: tuple[Path, ...]
 
     @property
     def refused(self) -> Refused | None:
@@ -155,6 +161,7 @@ class Landing(NamedTuple):
         landing's, and the stamp keeps them."""
         return (
             *(f"migrate {one.said}" for one in self.staged),
+            *(f"complete the definition swap {swap}" for swap in self.swaps),
             *(f"drop {one.said}" for one in (*self.caches, *self.runs)),
             *(f"delete {one.why}, its spend banked" for one in self.torn),
             *(f"kept {one.why}" for one in self.kept),
@@ -297,6 +304,7 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
         tuple(unknown),
         tuple(unloadable),
         kept=(),
+        swaps=tuple(sorted({p.parent for p in found_at if p.parent.name == DEFINITION_SWAP_DIR})),
     )
 
 
@@ -370,6 +378,8 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
         for one in landing.staged:
             # A staged file is a survivor's (`data_root.py::Kind.durable`).
             write_bytes(one.path, one.data, durable=True)
+        for swap in landing.swaps:
+            complete_definition_swap(swap)
         for cache in landing.caches:
             unlink_robust(cache.path)
         jobs = live_jobs(registry)

@@ -31,6 +31,7 @@ from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import (
     ArmRecord,
     BackendWarningRecord,
+    CycleMintedRecord,
     CycleRecord,
     ElectionRecord,
     FlightRecord,
@@ -215,12 +216,20 @@ class LiveDashboardProjection(Projection):
         self._holds.pop(record.sender, None)
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
+        self._enter(record.round)
+
+    def _handle_cycle_minted(self, record: CycleMintedRecord) -> None:
+        # A fork's mint enters its cut: the rounds from it on are its own, never its parent line's.
+        if record.cut_round is not None:
+            self._enter(record.cut_round)
+
+    def _enter(self, round_num: int) -> None:
         s = self.state
-        s.round = record.round
-        s.rounds = [r for r in s.rounds if r.round < record.round]
-        self._standings = {n: held for n, held in self._standings.items() if n < record.round}
+        s.round = round_num
+        s.rounds = [r for r in s.rounds if r.round < round_num]
+        self._standings = {n: held for n, held in self._standings.items() if n < round_num}
         self._stand()
-        self._buffer.enter(record)
+        self._buffer.enter(round_num)
 
     def _stand(self) -> None:
         """The run stands where its LATEST round's last statement says, whichever round was stated last."""

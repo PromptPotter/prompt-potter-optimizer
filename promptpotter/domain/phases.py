@@ -262,6 +262,8 @@ class RunState(NamedTuple):
     inner: bool = False
     gate: GateKind | None = None
     drafts: int = 0
+    # A terminal cycle's declared stop, whose next acts its relaunch fills.
+    ended: StopReason | None = None
 
     @property
     def resumable(self) -> bool:
@@ -406,6 +408,10 @@ class RunAdmission(FrozenModel):
         description="`set-sample-lookahead` for ONE round. `auto` is a mode and a disarm removes "
         "an arming, so neither needs a walk and neither is refused here."
     )
+    payload: dict[str, dict[str, str]] = Field(
+        description="What the offered start or resume sends beside the cycle's address: the "
+        "`start-run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent as served."
+    )
 
     @classmethod
     def of(cls, run: RunState) -> RunAdmission:
@@ -428,11 +434,14 @@ class RunAdmission(FrozenModel):
             offers, refusal = None, declined if pausing else f"{info.parked.capitalize()}."
         else:
             offers, refusal = info.action, ""
+        stop = run.ended or (None if run.pause is None else run.pause.stop_reason)
+        acts = () if stop is None or pausing else STOP_REASON_INFO[stop].next_acts
         return cls(
             offers=offers,
             refusal=refusal,
             skip_refusal=skip,
             lookahead_refusal=lookahead,
+            payload={k: v for act in acts for k, v in act.payload.items()},
         )
 
 
@@ -501,6 +510,13 @@ class NextAct(NamedTuple):
     field: str = ""
     value: str = ""
     reads: str = ""
+
+    @property
+    def payload(self) -> dict[str, dict[str, str]]:
+        """What a press sends beside the cycle's address: a `start-run`'s *value* is the literal
+        its dotted *field* takes; any other act's *value* describes, so it sends none."""
+        head, _, leaf = self.field.partition(".")
+        return {head: {leaf: self.value}} if self.kind == "start-run" and leaf else {}
 
 
 class StopReasonInfo(NamedTuple):

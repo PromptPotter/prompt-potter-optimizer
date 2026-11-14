@@ -43,6 +43,7 @@ from factories import (
     defaulted_config,
     inner_sandbox,
     loop_session,
+    mint_fork,
     minted_campaign,
     minted_dataset,
     optimizer_state,
@@ -2394,7 +2395,8 @@ async def test_a_fork_stub_a_pass_holds_is_neither_counted_nor_swept(
     await asyncio.to_thread(_running, cycle_dir)
     passes = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
     fork = CycleHop(campaign_id=hop.campaign_id, cycle_id=f"{hop.cycle_id}_fork_r1")
-    campaigns.mint_fork_cycle(
+    mint_fork(
+        campaigns,
         fork,
         cycle_dir,
         ForkSpec(
@@ -3478,7 +3480,6 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
     await sender.dispatch(start)
     before = standing("moved")
     mint(plan, campaign_id="adopted", adopting=moved)
-    stores.drafts.close(moved)
     # A Start's answer lost after its mint: its retry answers that launch, its draft gone.
     start_status, acked = folded("start")
     table[("accepted", "a Start retried, its draft minted and closed")] = (

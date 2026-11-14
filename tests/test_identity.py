@@ -296,8 +296,8 @@ from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     ConfigOverrides,
+    CycleMintedRecord,
     CycleSeed,
-    CycleSeedRecord,
     PipelineRead,
     RoundWarningRecord,
     ScoringLockedRecord,
@@ -2158,7 +2158,7 @@ def test_a_resolvers_model_proposal_is_one_edit_its_turn_raises_and_never_applie
     turn = asyncio.run(
         origin_resolve.resolve_origin_turn(stores=built_stores, draft=knobbed, pipeline=upload_laid)
     )
-    assert turn.draft.config == knobbed.config, "a resolver turn applied a node's model unpriced"
+    assert turn.config == knobbed.config, "a resolver turn applied a node's model unpriced"
     assert [c.payload.patch for c in turn.resolution.raised] == [proposal.patch], (
         "a resolver turn dropped the model edit it may not apply"
     )
@@ -2377,8 +2377,9 @@ def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_late
         optimizer_narrowing={"a": NodeSearchNarrowing(param_keys=[])},
         config_overrides=ConfigOverrides(budget=Budget(rounds=4)),
     )
-    stores.campaigns.append(campaign.root_hop, CycleSeedRecord(seed=seed))
-    forked = cycle_config(stores, campaign, campaign.root_hop).config
+    seeded = campaign.root_hop.model_copy(update={"cycle_id": "cycle_seeded"})
+    stores.campaigns.mint_cycle(seeded, CycleMintedRecord(seed=seed))
+    forked = cycle_config(stores, campaign, seeded).config
     assert forked.optimization.budget.rounds == 4, "a seed's override did not reach its cycle"
     assert [forked.optimizer_narrowing[n].param_keys for n in "ab"] == [[], ["k"]], (
         "a seed's narrowing replaced the nodes it did not name"
@@ -3142,14 +3143,13 @@ def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
     rows_30 = decl.rows_30
     opened, held_campaign = held
     steered_hop = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_steered")
-    stores.campaigns.mint_cycle(steered_hop)
+    stores.campaigns.mint_cycle(
+        steered_hop,
+        CycleMintedRecord(seed=CycleSeed(pipeline_overlay={"solve": NodeCall(temperature=0.3)})),
+    )
     partition = stores.campaigns.last(held_campaign.root_hop, PartitionRecord)
     assert partition is not None, "the held campaign banked no partition"
     stores.campaigns.append(steered_hop, partition)
-    stores.campaigns.append(
-        steered_hop,
-        CycleSeedRecord(seed=CycleSeed(pipeline_overlay={"solve": NodeCall(temperature=0.3)})),
-    )
     steered_fork = opened.bound(steered_hop, purpose=Optimize())
     steered_fork.record_resolved_run()
     resolve_resume(steered_fork, held_campaign, rows_30)

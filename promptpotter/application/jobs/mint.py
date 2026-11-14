@@ -72,8 +72,8 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     BackendRevision,
+    CycleMintedRecord,
     CycleSeed,
-    CycleSeedRecord,
     DefaultsDrift,
     OriginSource,
     RunWiringRecord,
@@ -543,15 +543,6 @@ def fresh_campaign_id(session: Session) -> str:
     )
 
 
-def _write_plan(
-    stores: Stores, hop: CycleHop, drawn: PartitionRecord, seed: CycleSeed | None
-) -> None:
-    """At the mint, so a cycle's draw is on disk before any launch, fork or read of it."""
-    stores.campaigns.append(hop, drawn)
-    if seed is not None:
-        stores.campaigns.append(hop, CycleSeedRecord(seed=seed))
-
-
 def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> Session:
     """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran."""
     validate_path_component(hop.cycle_id)
@@ -561,20 +552,18 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     session = plan.session
     campaigns = session.store.campaigns
     if adopting is not None:
-        billed = session.store.drafts.ledger(adopting)
-        if billed.is_file():
-            campaigns.adopt_ledger(hop, billed)
+        session.store.drafts.become(adopting, campaigns.cycle_dir(hop))
         # What was filed on the draft reads as this cycle's, ahead of its own.
         drafted = draft_subject(adopting)
         log = session.store.commands
         if log.book().subject_events(drafted):
             log.append(CommandLanded(subject=drafted, onto=subject_key(session.store.subject(hop))))
-    _write_plan(session.store, hop, plan.drawn, plan.cycle.own_seed)
+    # The mint first, its seed on it; then the draw, so it is on disk before any launch, fork or
+    # read of the cycle, and what the origin hash was taken under, before the campaign is visible.
+    campaigns.mint_cycle(hop, CycleMintedRecord(seed=plan.cycle.own_seed))
+    campaigns.append(hop, plan.drawn)
     session = session.bound(hop, purpose=declaration.purpose)
-    # What the origin hash was taken under, appended before the campaign is visible, so every
-    # reader of it finds what its run init read.
     session.record_resolved_run()
-    campaigns.mint_cycle(hop)
     campaign = Campaign(
         campaign_id=hop.campaign_id,
         dataset_name=session.measured_dataset,
@@ -729,5 +718,4 @@ async def _mint_after_framing(
     except BaseException:
         drafts.discard(drafts.hold(draft_id))
         raise
-    drafts.close(draft_id)
     return minted

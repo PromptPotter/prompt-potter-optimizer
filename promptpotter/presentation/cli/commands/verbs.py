@@ -175,11 +175,15 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "resume",
         "resume_command:cmd_resume",
         unspelled={
-            "mode": "`--from ROUND` and `--on-divergence`",
+            "mode.from_round": "`--from ROUND`",
+            "mode.on_divergence": "`--on-divergence`",
             "round": "`--rewind ROUND`",
             "reason": "`--rewind-reason`",
-            "keep_rounds": "`--rewind` keeps them, `--steer` does not",
-            "seed": "`--steer NODE.PARAM=VALUE`, folded into the seed's overlay",
+            "keep_rounds": "`--rewind` keeps them, a bare `--steer` does not",
+            "seed.pipeline_overlay": "`--steer NODE.PARAM=VALUE`, folded per node",
+            "seed.origin_prompts": "a terminal fork edits no prompt; the browser's steer-fork does",
+            "seed.config_overrides": "a fork's caps are its parent's remainder; `--max-*` bound it",
+            "seed.node_narrowing": "a terminal fork narrows no node; the browser's steer-fork does",
             "candidate_id": "a terminal fork starts from a round's line, never a named candidate",
         },
         help="Continue the active campaign. Bare `resume` picks up where it "
@@ -740,8 +744,20 @@ def command_verb(kind: CommandKind) -> Verb:
     )
 
 
+def _paths(model: type[BaseModel], prefix: str = "") -> dict[str, FieldInfo]:
+    """Each field by its dotted path, a nested model's own fields beside it."""
+    paths: dict[str, FieldInfo] = {}
+    for name, field in model.model_fields.items():
+        paths[path := prefix + name] = field
+        nested = field.annotation
+        if isinstance(nested, type) and issubclass(nested, BaseModel) and nested is not Budget:
+            paths |= _paths(nested, f"{path}.")
+    return paths
+
+
 def _unsaid(verb: Verb) -> list[str]:
-    """What *verb* leaves unsaid: a payload field with no `Arg` or `unspelled` reason, or the reverse."""
+    """What *verb* leaves unsaid: a payload field, nested ones too, with no `Arg` or `unspelled`
+    reason on it or a model holding it, or the reverse."""
     if verb.read is not None:
         return []
     kinds = [kind for kind in CommandKind if kind.cli_verb == verb.name]
@@ -751,13 +767,15 @@ def _unsaid(verb: Verb) -> list[str]:
     fields = {
         name: field
         for kind in kinds
-        for name, field in PAYLOAD_MODEL_FOR_KIND[kind].model_fields.items()
-        if name not in CyclePayload.model_fields
+        for name, field in _paths(PAYLOAD_MODEL_FOR_KIND[kind]).items()
+        if name.split(".")[0] not in CyclePayload.model_fields
     }
     budgets = {name for name, field in fields.items() if field.annotation is Budget}
+    said, holders = dests | verb.unspelled.keys(), {name.rpartition(".")[0] for name in fields}
     unsaid = [
         f"`{verb.name}` spells no `{name}`"
-        for name in sorted(fields.keys() - budgets - dests - verb.unspelled.keys())
+        for name in sorted(fields.keys() - budgets - holders)
+        if not any(".".join(name.split(".")[:n]) in said for n in range(1, name.count(".") + 2))
     ]
     if budgets and not set(BUDGET_AXES) <= set(verb.args):
         unsaid.append(f"`{verb.name}` takes a budget without `BUDGET_AXES`")

@@ -25,7 +25,14 @@ from promptpotter.infrastructure.store.dataset_access import (
     render_framing_file,
 )
 from promptpotter.infrastructure.store.draft_store import DraftStore
-from promptpotter.infrastructure.store.io import validate_path_component, write_text, write_yaml
+from promptpotter.infrastructure.store.io import (
+    rmtree_robust,
+    unlink_robust,
+    validate_path_component,
+    write_bytes,
+    write_text,
+    write_yaml,
+)
 from promptpotter.infrastructure.store.layout import (
     ArchiveHome,
     archive_home,
@@ -172,13 +179,33 @@ class Stores:
         name is claimed over. WHOLE files: the tenant tier lays no defaults or family under it."""
         claim_own_definition(self, slug, new=False)
         dst = self.tenant_datasets.dataset_dir(slug)
-        write_text(dst / FRAMING_FILE, render_framing_file(description, framing))
+        staged = dst / _STAGED_DIR
+        rmtree_robust(staged)
+        write_text(staged / FRAMING_FILE, render_framing_file(description, framing))
         if origin:
-            write_yaml(dst / ORIGIN_FILE, origin)
-        # Last: the definition file is what makes the directory a dataset.
+            write_yaml(staged / ORIGIN_FILE, origin)
         definition = {"source": source, "pipeline": pipeline, "campaign": campaign}
-        write_yaml(dst / DEFINITION_FILE, definition)
+        write_yaml(staged / DEFINITION_FILE, definition)
+        # The commit: from here the swap is laid whole, by this call or by the landing.
+        staged.rename(dst / DEFINITION_SWAP_DIR)
+        complete_definition_swap(dst / DEFINITION_SWAP_DIR)
         return dst
+
+
+_STAGED_DIR = ".staged"
+DEFINITION_SWAP_DIR = ".swap"
+# Definition last: its file is what makes the directory a dataset.
+_DEFINITION_SET = (FRAMING_FILE, ORIGIN_FILE, DEFINITION_FILE)
+
+
+def complete_definition_swap(swap: Path) -> None:
+    """Re-lays a committed swap whole, so a torn one completes on any re-run: a file it lacks goes."""
+    for name in _DEFINITION_SET:
+        if (swap / name).is_file():
+            write_bytes(swap.parent / name, (swap / name).read_bytes())
+        else:
+            unlink_robust(swap.parent / name)
+    rmtree_robust(swap)
 
 
 def owned_campaign(stores: Stores, campaign_id: str) -> Campaign:
