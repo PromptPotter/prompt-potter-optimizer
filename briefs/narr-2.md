@@ -2,8 +2,8 @@
 
 Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chain id `narr-2`, arc `arc/narr-2`.
 
-- **Base:** `origin/arc/readings-r` at `2b4c645da`. That is main (`fda4c2bd6`, with la landed) plus readings re-based and proved: `live_dashboard` is one module, the CLI is five modules, one `Estimate`. It reaches main as one squash with the same tree. Your `<base sha>` in common.md is this commit. Branch off it, not off `origin/main`.
-- **xconn** (links 1–2: wire keys and named endpoints) lands on main beside you, and the orchestrator re-bases you over it by hunk. It adds `PipelineRead.endpoint` to `domain/records/run_records.py`. Leave that field as it is.
+- **Base:** `origin/land/wave-6` at `f22c87a41`: main (`fda4c2bd6`) plus the readings and xconn 1–2 landing commits, which push to main as they are. `live_dashboard` is one module, the CLI is five modules, one `Estimate`. Your `<base sha>` in common.md is this commit. Branch off it, not off `origin/main`.
+- **A first run was cut off by a usage limit in link 2, with nothing pushed.** Start fresh, and push `wip/narr-2` after every commit (common.md). One finding of that run, to verify: the run's ledger already rides the scope, and `CycleEventLog` is a stateless path handle, so link 2 is mostly a sweep of signatures and call arguments. `bench/resume_and_fork/decisions.py::record_decision` threads a sink only for that reason; the run proposed a `ResumeCheckpointRecord` builder in its place.
 - **The code shrinks**, judged as common.md says. This is the largest excision left in the run path: `domain/phase_views.py` (13 view classes), `views/view_models.py::ViewContext`, the ingress that builds the views, `round_buffer.py` and the threaded `ledger` parameters all go. Expect well over −300 over `promptpotter/`. Run `git diff --shortstat <base> HEAD -- promptpotter` after each link.
 - **Spec:** the ledger section `### batch/26 · narr (links 1-2, on stream-rk's tip)`, every row but the one this brief holds. Re-run each Re-test first: rec typed the run-phase record as a union and la merged `live_dashboard`, so a row may be half closed. Name a closed row and cut it; build only the open half.
 
@@ -38,7 +38,7 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
 
 Name every shared file in its link's commit body.
 
-- **faults-1** (cloud, your base) gives `Refusal` its `next_acts` and spells no verb or flag in a message. You share `domain/phases.py`: it owns `STOP_REASON_INFO`'s `next_acts` and the refusal rows; you own `parked` and the per-cycle acts. Touch only your hunks.
+- **faults-1** runs after you, on your tip. It gives `Refusal` its `next_acts` and spells no verb or flag in a message. In `domain/phases.py` you own `parked` and the per-cycle acts. Leave `STOP_REASON_INFO`'s `next_acts` and the refusal rows as they stand, since they are faults-1's.
 - **ren** (cloud, later) renames classes defined twice. It waits for you.
 
 ## Proof (beyond common.md)
