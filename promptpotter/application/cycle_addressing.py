@@ -116,8 +116,8 @@ def named_campaign(stores: Stores, needle: str) -> Campaign:
     return owned_campaign(stores, resolve_subject(stores, Subject(needle)).campaign_id)
 
 
-def resolve_course(stores: Stores, subject: Subject) -> Subject:
-    """`resolve_subject`, then the course's cycle id prefix in the campaign it resolved, by the
+def resolve_cycle(stores: Stores, subject: Subject) -> Subject:
+    """`resolve_subject`, then the cycle id prefix in the campaign it resolved, by the
     same rule."""
     leaf_stores, resolved = _leaf(stores, subject)
     campaign_id, needle = resolved.campaign_id, resolved.cycle_id

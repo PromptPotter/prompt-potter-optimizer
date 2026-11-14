@@ -289,11 +289,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         <PipelineSetupSection draft={draft} onApply={flow.applyPatch}>
           <PipelineDependencies
             dependencies={draft.dependencies}
-            librarySize={draft.candidate_library_size}
+            answerTermsSize={draft.answer_terms_size}
             headers={draft.headers}
             targetColumn={draft.column_ground_truth}
-            onUpload={flow.uploadCandidateLibrary}
-            onBuildFromColumn={flow.buildCandidateLibraryFromColumn}
+            onUpload={flow.uploadAnswerTerms}
+            onBuildFromColumn={flow.buildAnswerTermsFromColumn}
             busy={flow.busy}
           />
         </PipelineSetupSection>

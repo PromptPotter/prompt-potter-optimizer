@@ -46,7 +46,7 @@ export function ChannelMap({
     const keys = [
       ...new Set(
         points.flatMap((p) =>
-          index.byAddress.get(p.coursePathKey)?.level === "course" ? [p.coursePathKey] : [],
+          index.byAddress.get(p.cyclePathKey)?.entry_kind === "cycle" ? [p.cyclePathKey] : [],
         ),
       ),
     ];

@@ -163,8 +163,8 @@ MEMBER_KINDS: frozenset[NodeKind] = frozenset(
 assert not (MEMBER_KINDS & THINKING_KINDS) and frozenset(NodeKind) >= MEMBER_KINDS
 
 
-CANDIDATE_LIBRARY = "candidate_library"
-CANDIDATE_LIBRARY_FILE = "candidate_library.txt"
+ANSWER_TERMS = "answer_terms"
+ANSWER_TERMS_FILE = "answer_terms.txt"
 
 
 class PipelineDependency(FrozenModel):
@@ -187,9 +187,9 @@ def dependencies_from_node_roles(
         served = ", ".join(candidate_sources)
         deps.append(
             PipelineDependency(
-                kind=CANDIDATE_LIBRARY,
+                kind=ANSWER_TERMS,
                 node=served,
-                title="Candidate library",
+                title="Answer terms",
                 hint=(
                     f"The candidate-source stage ({served}) ranks each query against a target "
                     "library. Drop the full target list (one entry per line, or a single-column "
@@ -361,7 +361,7 @@ class NodePromptInfo(FrozenModel):
     # The node's prompt loci, IN RENDER ORDER: the order sits inside every cell key it renders.
     fields: tuple[str, ...]
     # The field a whole-prompt rewrite lands in; `None` declares none, and such a rewrite is refused.
-    rewrite_slot: str | None = None
+    rewrite_field: str | None = None
 
     @field_validator("fields")
     @classmethod
@@ -374,8 +374,8 @@ class NodePromptInfo(FrozenModel):
 
     @model_validator(mode="after")
     def _slot_is_a_field(self) -> "NodePromptInfo":
-        if self.rewrite_slot is not None and self.rewrite_slot not in self.fields:
-            raise ValueError(f"rewrite_slot {self.rewrite_slot!r} is none of {self.fields}")
+        if self.rewrite_field is not None and self.rewrite_field not in self.fields:
+            raise ValueError(f"rewrite_field {self.rewrite_field!r} is none of {self.fields}")
         return self
 
 
@@ -587,12 +587,12 @@ class PipelineNode(FrozenModel):
 
 # Declared in fold order: a later layer wins (`pipeline_resolve.py::ParamLayers`).
 ParamLayer = Literal[
-    "dataset", "campaign", "free_tier", "seed", "model_floor", "identity", "evolved"
+    "dataset", "campaign", "free_tier", "start", "model_floor", "identity", "evolved"
 ]
 # Stamped BY the fold, never diffed against it; `identity` is unoverridable, so no surface edits one.
 ParamSource = Literal[ParamLayer, "unset"]
 # The layers an optimizer node's knob is set by; the others lay only a target's params.
-KnobLayer = Literal["dataset", "campaign", "free_tier", "seed"]
+KnobLayer = Literal["dataset", "campaign", "free_tier", "start"]
 assert set(get_args(KnobLayer)) <= set(get_args(ParamLayer)), "a knob's layer is a ParamLayer"
 # Per optimizer node, the layer that last set each key of its `optimization.nodes` config.
 type KnobLayers = Mapping[str, Mapping[str, KnobLayer]]

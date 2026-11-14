@@ -503,7 +503,7 @@ export function maskedSubject(
 }
 
 // Subjects are sorted into the id, so one selection is one read whatever order it was picked in.
-// Built whole on each ask, so only a live measured course (`live`) is moved by the feed.
+// Built whole on each ask, so only a live measured cycle (`live`) is moved by the feed.
 export function evidenceRead(
   subjects: readonly string[],
   opts: {
@@ -524,7 +524,7 @@ export function evidenceRead(
   if (opts.grid) qs.set("grid", opts.grid);
   return {
     ...byEtag<Evidence>("evidence", readUrl("evidence", {}, qs)),
-    // Only while a measured course is attached: a settled one's answer stands.
+    // Only while a measured cycle is attached: a settled one's answer stands.
     ...(live ? { subject: STORES } : {}),
     // A refused metric or grid keeps the same subjects' last reading.
     keep: `evidence${SEP}${named.join("&")}`,
@@ -579,17 +579,17 @@ export function subtreeRead(
     load: async (signal, validator, subject) => {
       const res = await entry.load(signal, validator, subject);
       if (res.kind === "not_modified") return res;
-      if (res.data.level !== "campaign") {
+      if (res.data.entry_kind !== "campaign") {
         // The address named a level this read does not serve: a verdict, never a retried outage.
-        throw new InvalidInputError(`not a campaign: ${res.data.level}`);
+        throw new InvalidInputError(`not a campaign: ${res.data.entry_kind}`);
       }
       return { ...res, data: res.data };
     },
   };
 }
 
-// A course's steps, windowed newest-first, delivered oldest-first; `before` is a prior `cursor_prev`.
-// The head window moves with the course's family; a page never moves and reads once.
+// A cycle's steps, windowed newest-first, delivered oldest-first; `before` is a prior `cursor_prev`.
+// The head window moves with the cycle's family; a page never moves and reads once.
 export function stepsRead(path: CyclePath, limit: number, before: string | null): ReadDescriptor<HierarchySteps> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (before) params.set("before", before);

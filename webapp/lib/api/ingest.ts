@@ -1,7 +1,7 @@
 import { commands } from "./commands";
 import type { DraftCampaignWire } from "@/lib/api/types";
 
-// A JSON body carries bytes base64 (`EditDraftPatch.candidate_library_file`).
+// A JSON body carries bytes base64 (`EditDraftPatch.answer_terms_file`).
 async function base64Of(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
@@ -9,23 +9,23 @@ async function base64Of(file: File): Promise<string> {
     binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(binary);
 }
-export async function postUploadCandidateLibrary(
+export async function postUploadAnswerTerms(
   draftId: string,
   file: File,
 ): Promise<DraftCampaignWire> {
   const blob = await base64Of(file);
   return commands["edit-draft-campaign"]({
     draft_id: draftId,
-    patch: { candidate_library_file: { filename: file.name, blob } },
+    patch: { answer_terms_file: { filename: file.name, blob } },
   });
 }
-export function postBuildCandidateLibraryFromColumn(
+export function postBuildAnswerTermsFromColumn(
   draftId: string,
   column: string,
 ): Promise<DraftCampaignWire> {
   return commands["edit-draft-campaign"]({
     draft_id: draftId,
-    patch: { candidate_library_column: column },
+    patch: { answer_terms_column: column },
   });
 }
 // Opens a draft from the dataset's CURRENT config; no campaign exists until `start-checkin`.

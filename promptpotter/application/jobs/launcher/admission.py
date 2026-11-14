@@ -26,7 +26,7 @@ from promptpotter.application.jobs.quota import (
 )
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.pipeline_resolve import cycle_config
-from promptpotter.application.run_phase_control import CycleHold, close_dead_bench
+from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import Campaign, CampaignRefusedError
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -765,7 +765,7 @@ def _open_pass(
     declared: Budget,
     sends: tuple[Send, ...],
     acting: str | None,
-) -> tuple[RunStart, CycleHold | None, SpendBook]:
+) -> tuple[RunStart, ProducerHold | None, SpendBook]:
     job_registry = JobRegistry.attach(stores.jobs_dir)
     (job,) = request_jobs(
         stores=stores,
@@ -776,13 +776,13 @@ def _open_pass(
     if job.queued:
         refuse_as_busy(job_registry, job)
     start = RunStart(stores, job_registry, job)
-    holding: CycleHold | None = None
+    holding: ProducerHold | None = None
     try:
         meters: CeilingMeter = (
             "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
         )
         if hop is not None:
-            holding = CycleHold(
+            holding = ProducerHold(
                 stores, hop, scoring_pass=True, acting=() if acting is None else (acting,)
             )
             # What a producer gone since was asked stands no more, as a launch's RUNNING record voids it.
@@ -816,7 +816,7 @@ def _open_pass(
 
 
 def _close_pass(
-    start: RunStart, holding: CycleHold | None, exc: BaseException | None
+    start: RunStart, holding: ProducerHold | None, exc: BaseException | None
 ) -> str | None:
     """The pass's job released and its cycle let go; the pause it stopped on, if it was one."""
     if holding is None:

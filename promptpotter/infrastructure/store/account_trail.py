@@ -126,7 +126,7 @@ def _cycle_lines(cycle_dir: Path, *, inside: str = "") -> list[TrailLine]:
 
 
 def _command_line(spelled: str, at: str, kind: str, actor: str) -> TrailLine:
-    """A course's command is addressed as its cycle, in the sandbox chain above it; a draft's as
+    """A cycle's command is addressed as its cycle, in the sandbox chain above it; a draft's as
     one; a campaign's and the workspace's as nothing."""
     if (draft_id := draft_of(spelled)) is not None:
         return TrailLine(at, kind, f"{DRAFTS_DIR}/{draft_id}", actor, "")

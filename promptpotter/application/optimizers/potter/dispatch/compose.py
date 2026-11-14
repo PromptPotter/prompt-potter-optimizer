@@ -19,7 +19,7 @@ COUNT_LINE_ALLOWANCE = 56
 
 
 @dataclass(frozen=True)
-class PanelCoverage:
+class PanelPlacement:
     """``produced == 0`` is the panel saying it had nothing, distinct from its absence from the layout."""
 
     produced: int
@@ -72,7 +72,7 @@ def select(
     *,
     exempt: frozenset[str] = frozenset(),
     mandatory: frozenset[str] = frozenset(),
-) -> tuple[dict[str, str], dict[str, PanelCoverage]]:
+) -> tuple[dict[str, str], dict[str, PanelPlacement]]:
     """*budget* bounds the DISCRETIONARY panels alone: *mandatory* ones are admitted whatever they cost, charged SEPARATELY."""
     pools = {name: list(items) for name in order if (items := rendered.get(name))}
     taken: dict[str, list[Item]] = {name: [] for name in pools}
@@ -131,7 +131,7 @@ def select(
         for name in order
     }
     coverage = {
-        name: PanelCoverage(
+        name: PanelPlacement(
             produced=len(pools.get(name, [])),
             placed=len(taken.get(name, [])),
             chars=len(out[name]),

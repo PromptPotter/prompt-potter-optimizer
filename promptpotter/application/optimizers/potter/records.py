@@ -22,11 +22,11 @@ class L1Layout(StrictModel):
     problem_description: list[str] = Field(default_factory=list)
 
     def all_placeholders(self) -> list[str]:
-        return [name for slot in type(self).model_fields for name in self.slot(slot)]
+        return [name for region in type(self).model_fields for name in self.region(region)]
 
-    def slot(self, name: str) -> list[str]:
+    def region(self, name: str) -> list[str]:
         if name not in type(self).model_fields:
-            raise KeyError(f"Unknown L1 layout slot: {name}")
+            raise KeyError(f"Unknown L1 layout region: {name}")
         return cast("list[str]", getattr(self, name))
 
 

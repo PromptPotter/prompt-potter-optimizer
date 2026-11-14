@@ -37,14 +37,14 @@ RECENT_STEP_S = 9 * HEARTBEAT_INTERVAL_S
 WEDGED_AFTER_S = 30 * HEARTBEAT_INTERVAL_S
 
 
-class Progress(NamedTuple):
+class Liveness(NamedTuple):
     progressed_at: float | None = None
     waiting_since: float | None = None
 
 
 class _Progress:
     def __init__(self) -> None:
-        self._held = Progress()
+        self._held = Liveness()
 
     def feed(self, line: dict[str, Any]) -> None:
         kind = line.get("record_type")
@@ -63,7 +63,7 @@ class _Progress:
         at = epoch_seconds(line.get("timestamp"))
         self._held = held if at is None else held._replace(progressed_at=at)
 
-    def value(self) -> Progress:
+    def value(self) -> Liveness:
         return self._held
 
 

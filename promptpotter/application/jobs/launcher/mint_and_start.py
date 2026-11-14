@@ -173,10 +173,10 @@ def commit_upload_definition(
         framing=draft_task_context(draft),
         origin=draft.committed_prompts(pipeline.chain),
     )
-    persist_origin_candidate_library(stores, draft.slug, draft)
+    persist_origin_answer_terms(stores, draft.slug, draft)
 
 
-def persist_origin_candidate_library(stores: Stores, slug: str, draft: DraftFile) -> None:
+def persist_origin_answer_terms(stores: Stores, slug: str, draft: DraftFile) -> None:
     """Tenant datasets only: a reopened repo benchmark is not ours to mutate."""
-    if draft.candidate_library and own_definition(stores, slug) is not None:
-        stores.tenant_datasets.write_candidate_library(slug, draft.candidate_library)
+    if draft.answer_terms and own_definition(stores, slug) is not None:
+        stores.tenant_datasets.write_answer_terms(slug, draft.answer_terms)

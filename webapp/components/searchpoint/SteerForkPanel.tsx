@@ -4,7 +4,7 @@ import {
   cycleAddress,
   forkPreviewRead,
   type RunLimitOverrides,
-  type ForkSeed,
+  type ForkStart,
 } from "@/lib/api";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useCommand } from "@/lib/hooks/useCommand";
@@ -47,12 +47,12 @@ export function SteerForkPanel({
   onCancel: () => void;
 }) {
   const root = pathRoot(path);
-  const rootCourse = useEntry(encodeCyclePath([root]));
-  const isLive = phaseWalks(rootCourse?.level === "course" ? rootCourse.state.status.run_phase : undefined);
+  const rootCycle = useEntry(encodeCyclePath([root]));
+  const isLive = phaseWalks(rootCycle?.entry_kind === "cycle" ? rootCycle.state.status.run_phase : undefined);
   const round = useRound(path, candidate.round);
-  const seed = round.seed(candidate.arm);
-  const seedPrompts = seed?.origin_prompts ?? {};
-  const overlay = seed?.pipeline_overlay ?? {};
+  const start = round.start(candidate.arm);
+  const startPrompts = start?.origin_prompts ?? {};
+  const overlay = start?.pipeline_overlay ?? {};
   const [pickedOverlay, setPickedOverlay] = useState<Record<
     string,
     Record<string, unknown>
@@ -73,8 +73,8 @@ export function SteerForkPanel({
 
   const confirm = () => {
     const { budget, nodes } = limits.current;
-    // The server seeds the candidate's own prompts; only an edit rides the seed.
-    const forkSeed: ForkSeed = {
+    // The server starts from the candidate's own prompts; only an edit rides the start.
+    const forkStart: ForkStart = {
       ...(editedPrompts.current ? { origin_prompts: editedPrompts.current } : {}),
       pipeline_overlay: editedOverlay.current ?? {},
       config_overrides: nodes ? { nodes } : {},
@@ -89,7 +89,7 @@ export function SteerForkPanel({
           ...cycleAddress(path),
           round: candidate.round,
           candidate_id: candidate.arm,
-          seed: forkSeed,
+          start: forkStart,
           ...(budget ? { budget } : {}),
         }),
       onDone,
@@ -103,7 +103,7 @@ export function SteerForkPanel({
         then fork-continue optimizing from it. Edits are optional.
       </p>
 
-      {!seed &&
+      {!start &&
         (round.read.status === "failed" ? (
           <FailureLine failure={round.read.failure} lead="Could not read this searchpoint." />
         ) : (
@@ -133,16 +133,16 @@ export function SteerForkPanel({
 
       <NodeSurface
         node={null}
-        point={searchPoint(seedPrompts, overlay)}
+        point={searchPoint(startPrompts, overlay)}
         overlay={overlay}
         pipelineAt={pipelineAt}
         mode="values"
         onApply={(p) => {
-          // The editor writes fields; each node's shots ride the seed unchanged.
+          // The editor writes fields; each node's shots ride the start unchanged.
           const fields = p.origin_prompts ?? {};
           editedPrompts.current = Object.fromEntries(
             Object.entries(fields).flatMap(([node, f]) => {
-              const seeded = seedPrompts[node];
+              const seeded = startPrompts[node];
               return seeded ? [[node, { fields: f, shots: seeded.shots }]] : [];
             }),
           );

@@ -147,9 +147,9 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import (
         Controller,
         Eliminator,
-        Panel,
         Proposer,
         Race,
+        RoundSamples,
         Selection,
         Selector,
     )
@@ -441,7 +441,7 @@ class _OriginPanelPairs:
         self._scorer = session.state.scoring.scorer
         self._dataset = session.bank.dataset_hash
         self._key_of = {int(s.id): s.key for s in scoring_pool}
-        self._slot_of = session.bank.slot_of
+        self._position_of = session.bank.position_of
 
     @staticmethod
     def cells_of(step: LineStep, held: InRunCells) -> CellSheet:
@@ -450,7 +450,7 @@ class _OriginPanelPairs:
     def walked(self, rows: Iterable[GradedCell]) -> list[int]:
         """By bank slot, in the order the rows were walked: the panel is served as the sample ids the
         operator selects on."""
-        return list(dict.fromkeys(self._slot_of[cell.key] for cell in rows if cell.scored))
+        return list(dict.fromkeys(self._position_of[cell.key] for cell in rows if cell.scored))
 
     def measured(self, rows: Iterable[GradedCell]) -> set[int]:
         return set(self.walked(rows))
@@ -574,7 +574,7 @@ async def _measure_gaps(
 async def measure_population(
     ctx: RoundContext,
     population: Proposals,
-    panel: Panel,
+    panel: RoundSamples,
     pool: list[Sample],
     eliminator: Eliminator | None,
     selector: Selector,
@@ -702,7 +702,7 @@ async def measure_population(
 
 async def _reference_readings(
     ctx: RoundContext,
-    panel: Panel,
+    panel: RoundSamples,
     arms: Mapping[ArmKey, Concluded],
     rows: Mapping[ArmKey, CellSheet],
     scored: Sequence[ArmKey],
@@ -842,7 +842,7 @@ class ReferencePairs:
 async def _walk_population(
     ctx: RoundContext,
     population: Proposals,
-    panel: Panel,
+    panel: RoundSamples,
     eliminator: Eliminator | None,
     *,
     keep_cut: bool,
@@ -1112,13 +1112,13 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
     )
     if reason is None:
         return
-    slot_of = ctx.cycle.session.bank.slot_of
+    position_of = ctx.cycle.session.bank.position_of
     for cid, cell in holed_rows:
         logger.warning(
             "round %d panel HOLE: candidate %s, sample %s — %s",
             round_num,
             cid,
-            slot_of[cell.key],
+            position_of[cell.key],
             cell.facts.error or cell.facts.error_category,
         )
     for cid in holed:
@@ -1188,7 +1188,7 @@ def announce_population(ctx: RoundContext, opening: RoundOpening, population: Pr
     )
 
 
-async def _walk(ctx: RoundContext, proposers: Sequence[Proposer], panel: Panel) -> Proposals:
+async def _walk(ctx: RoundContext, proposers: Sequence[Proposer], panel: RoundSamples) -> Proposals:
     proposals = Proposals([])
     for proposer in proposers:
         proposals = await proposer.propose(NodeContext(ctx, proposer), panel, proposals)
@@ -1227,7 +1227,7 @@ def bank_walk(ctx: RoundContext, proposals: list[Proposal]) -> None:
     bank_proposals(ctx, proposals, submitted=False)
 
 
-async def _walked(ctx: RoundContext, walk: RoundWalk, panel: Panel) -> Proposals:
+async def _walked(ctx: RoundContext, walk: RoundWalk, panel: RoundSamples) -> Proposals:
     cycle = ctx.cycle
     if (banked := cycle.banked_walk(ctx.round_num)) is not None:
         cycle.seat_walk(ctx.round_num, banked.walked)
@@ -1246,7 +1246,7 @@ async def _walked(ctx: RoundContext, walk: RoundWalk, panel: Panel) -> Proposals
     return population
 
 
-async def propose_population(ctx: RoundContext, walk: RoundWalk, panel: Panel) -> Proposals:
+async def propose_population(ctx: RoundContext, walk: RoundWalk, panel: RoundSamples) -> Proposals:
     population = await _walked(ctx, walk, panel)
     arms = _one_arm_each(ctx, population.proposals)
     seated = walk.walked[2]
@@ -1279,7 +1279,7 @@ class RoundWalked(NamedTuple):
     act: ControllerAct | None
 
 
-async def _proposed(ctx: RoundContext, panel: Panel) -> Proposals:
+async def _proposed(ctx: RoundContext, panel: RoundSamples) -> Proposals:
     walk = ctx.cycle.optimizer.plan.walk(stands=bool(ctx.cycle.population))
     opening = announce_opening(ctx, walk)
     population = await propose_population(ctx, walk, panel)
@@ -1288,7 +1288,7 @@ async def _proposed(ctx: RoundContext, panel: Panel) -> Proposals:
 
 
 async def _measured(
-    ctx: RoundContext, population: Proposals, panel: Panel, pool: list[Sample]
+    ctx: RoundContext, population: Proposals, panel: RoundSamples, pool: list[Sample]
 ) -> MeasuredRound:
     plan = ctx.cycle.optimizer.plan
     append_record(
@@ -1364,7 +1364,7 @@ async def _adapt_beside_overlap(
 
 async def walk_round(
     cycle: Cycle, round_num: int
-) -> tuple[RoundContext, list[Sample], Panel, Proposals]:
+) -> tuple[RoundContext, list[Sample], RoundSamples, Proposals]:
     """A round's open through its banked walk: a measured round's prefix."""
     # The search split alone: a bench or demo row a round could draw would elect on held-out rows.
     pool = list(cycle.session.state.scoring.partition.search)

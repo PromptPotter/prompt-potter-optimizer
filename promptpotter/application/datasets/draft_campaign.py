@@ -122,7 +122,7 @@ def new_draft(
         field_provenance=provenance,
         origin_prompts={},
         decomposed_task_context={},
-        candidate_library=(),
+        answer_terms=(),
         resolver_ran=False,
     ).at(mint_draft_id())
 

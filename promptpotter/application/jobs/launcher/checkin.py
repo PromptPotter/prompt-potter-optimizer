@@ -14,7 +14,7 @@ from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.mint_and_start import (
     commit_upload_definition,
-    persist_origin_candidate_library,
+    persist_origin_answer_terms,
 )
 from promptpotter.application.jobs.mint import (
     OpenedCycle,
@@ -115,7 +115,7 @@ def _land_draft(
     params, chain = pipeline.params, pipeline.chain
     basis = draft.basis
     if isinstance(basis, DatasetBasis):
-        persist_origin_candidate_library(stores, basis.dataset, draft)
+        persist_origin_answer_terms(stores, basis.dataset, draft)
         # An origin authored over an existing slug writes no dataset: only the override carries it.
         # `committed_prompts` rather than the raw map, or the label enumeration is lost.
         return (

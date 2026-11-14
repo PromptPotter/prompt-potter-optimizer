@@ -10,6 +10,7 @@ from typing import Any, NamedTuple, assert_never, get_args
 from pydantic import ValidationError
 
 from promptpotter import connectors
+from promptpotter.application.config_map import ConfigMapResponse, bench_defaults_pin, config_map
 from promptpotter.application.datasets.authored import (
     ConfigLayers,
     dataset_campaign_block,
@@ -38,7 +39,6 @@ from promptpotter.application.free_tier import (
 )
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.quota import sends_on
-from promptpotter.application.knobs import ConfigMapResponse, bench_defaults_pin, config_map
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.optimizers.nodes import MintFacts
 from promptpotter.application.pipeline_responses import (
@@ -187,7 +187,7 @@ class ParamLayers:
     dataset: Mapping[str, NodeCall] = field(default_factory=dict)
     campaign: Mapping[str, NodeCall] = field(default_factory=dict)
     free_tier: Mapping[str, Any] = field(default_factory=dict)
-    seed: Mapping[str, Any] = field(default_factory=dict)
+    start: Mapping[str, Any] = field(default_factory=dict)
     identity: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     evolved: Mapping[str, Any] = field(default_factory=dict)
     # A measured point's params: the identity it ran under stands over the one recomputed today.
@@ -219,8 +219,8 @@ class ParamLayers:
                 return laid_calls(self.campaign)
             case "free_tier":
                 return self.free_tier
-            case "seed":
-                return self.seed
+            case "start":
+                return self.start
             case "model_floor":
                 return self._floors(params)
             case "identity":
@@ -662,8 +662,8 @@ def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift |
 
 
 def cycle_config(stores: Stores, campaign: Campaign, hop: CycleHop | None) -> CycleConfig:
-    """The declaration's effective config under every seed of *hop*'s line, the criterion its dials
-    lock on the origin laid on; ``None`` is the declaration alone, which no cycle's seed moved."""
+    """The declaration's effective config under every start of *hop*'s line, the criterion its dials
+    lock on the origin laid on; ``None`` is the declaration alone, which no cycle's start moved."""
     try:
         declared = effective_config(campaign.declaration)
     except ValidationError as exc:
@@ -677,7 +677,7 @@ def cycle_config(stores: Stores, campaign: Campaign, hop: CycleHop | None) -> Cy
     campaigns = stores.campaigns
     if hop is None:
         root_lock = campaigns.last(campaign.root_hop, ScoringLockedRecord)
-        return CycleConfig.laid(declared, [LaidSpan(seed=None, scoring_lock=root_lock)])
+        return CycleConfig.laid(declared, [LaidSpan(start=None, scoring_lock=root_lock)])
     return CycleConfig.laid(declared, campaigns.read_laid_spans(hop))
 
 
@@ -784,7 +784,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
             dataset=read.dataset_overlay,
             campaign=cfg.pipeline_overlay,
             free_tier=read.free_tier_overlay,
-            seed=cycle.seed_overlay,
+            start=cycle.start_overlay,
         ),
         free=_task_fenced(free_fence(stores, campaign.connector)),
         steer_bound=not has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP),
@@ -1160,7 +1160,7 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
     read = scan_resolved_run(stores.campaigns.chain(campaign.root_hop)).read
     return (
         stable_hash(cycle.config.model_dump(mode="json")),
-        stable_hash(cycle.seed_overlay),
+        stable_hash(cycle.start_overlay),
         campaign.root_cycle_id,
         stable_hash(
             None
@@ -1241,7 +1241,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
         dataset=read.dataset_overlay,
         campaign=campaign_config.pipeline_overlay,
         free_tier=read.free_tier_overlay,
-        seed=cycle.seed_overlay,
+        start=cycle.start_overlay,
         identity=identity_layer(
             session.store,
             session.backend_client.connector,

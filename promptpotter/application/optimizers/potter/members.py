@@ -31,10 +31,10 @@ from promptpotter.application.optimizers.nodes import (
     Draw,
     MeasuredRound,
     OptimizerPhase,
-    Panel,
     PromptArity,
     Proposals,
     ReviewReading,
+    RoundSamples,
     Selection,
 )
 from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, LADDER, POBB
@@ -158,11 +158,11 @@ class AdaptiveQueue(nodes.Sampler):
     size_knob: ClassVar[str | None] = "sp_budget_round"
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ADAPTIVE_QUEUE
 
-    def drawn(self, knobs: AdaptiveQueueKnobs, _search: int, _pipeline: str) -> nodes.PanelSize:
+    def drawn(self, knobs: AdaptiveQueueKnobs, _search: int, _pipeline: str) -> nodes.DrawSize:
         # Unclamped: a budget above the search split is the finding preflight reports.
-        return nodes.PanelSize(cells=knobs.sp_budget_round, block_size=1)
+        return nodes.DrawSize(cells=knobs.sp_budget_round, block_size=1)
 
-    def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
+    def draw(self, ctx: NodeContext, pool: list[Sample]) -> RoundSamples:
         view = ctx.read(Ruler).difficulty
         knobs = ctx.knobs(AdaptiveQueueKnobs)
         lineage = ctx.read(Lineage)
@@ -195,7 +195,7 @@ class AdaptiveQueue(nodes.Sampler):
         )
         by_id = {int(s.id): s for s in cells}
         # Every cell closes a block: PoBB decides after each one.
-        return nodes.Panel(cells=cells, order=[by_id[sid] for sid in order], block_size=1)
+        return nodes.RoundSamples(cells=cells, order=[by_id[sid] for sid in order], block_size=1)
 
 
 class L1Generate(LayoutNode, nodes.Proposer):
@@ -295,7 +295,9 @@ class L1Generate(LayoutNode, nodes.Proposer):
     def complete(self) -> None:
         injection_table()
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, _proposals: Proposals
+    ) -> Proposals:
         return await propose_l1_population(ctx)
 
 
@@ -319,7 +321,7 @@ class PoBB(nodes.Eliminator):
             ),
         )
 
-    def race(self, ctx: NodeContext, panel: Panel) -> PoBBRace:
+    def race(self, ctx: NodeContext, panel: RoundSamples) -> PoBBRace:
         return PoBBRace(ctx, panel)
 
 

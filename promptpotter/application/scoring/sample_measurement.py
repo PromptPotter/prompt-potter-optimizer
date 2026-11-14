@@ -50,7 +50,7 @@ from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.spend_book import (
     FRAMING_TOKENS,
     Billed,
-    Reported,
+    ReportedSpend,
     SendBound,
     require_spend_book,
 )
@@ -220,7 +220,7 @@ def cell_billing(
 ) -> CellBilling[PipelineData]:
     """``None`` where the reply reports no usage at all, which is charged the cell's whole bound."""
 
-    def billed(data: dict[str, Any]) -> tuple[Reported | None, PipelineData]:
+    def billed(data: dict[str, Any]) -> tuple[ReportedSpend | None, PipelineData]:
         spent = _reply_spend(data, pairs)
         if not isinstance(data.get("step_tokens"), dict):
             return None, spent
@@ -238,7 +238,7 @@ def cell_billing(
                 "web_search",
             )
             parts.append(Billed(TokenAccount(), float(usd), node=searched))
-        return Reported(tuple(parts), _unreported_attempts(reported, each)), spent
+        return ReportedSpend(tuple(parts), _unreported_attempts(reported, each)), spent
 
     return billed
 

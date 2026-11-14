@@ -30,10 +30,10 @@ from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.nodes import (
     CycleRead,
     MeasuredRound,
-    Panel,
     PromptArity,
     Proposals,
     RewriteKnobs,
+    RoundSamples,
     Selection,
 )
 from promptpotter.application.optimizers.paper_templates import child, shown, task_description
@@ -239,14 +239,14 @@ class ProxyCss(nodes.Sampler):
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration})
     size_knob: ClassVar[str | None] = None
 
-    def drawn(self, knobs: ProxyCssKnobs, search: int, pipeline: str) -> nodes.PanelSize:
+    def drawn(self, knobs: ProxyCssKnobs, search: int, pipeline: str) -> nodes.DrawSize:
         # The proxy is chosen among the discovery set, which the search split must hold whole.
         if knobs.discovery > search:
-            return nodes.PanelSize(cells=0, block_size=0)
+            return nodes.DrawSize(cells=0, block_size=0)
         cells = knobs.discovery if pipeline == INITIAL_POPULATION else knobs.size
-        return nodes.PanelSize(cells=cells, block_size=cells)
+        return nodes.DrawSize(cells=cells, block_size=cells)
 
-    def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
+    def draw(self, ctx: NodeContext, pool: list[Sample]) -> RoundSamples:
         calibration = ctx.slice(DescriptorCalibration).calibration
         if calibration is None:
             knobs = ctx.knobs(ProxyCssKnobs)
@@ -256,12 +256,14 @@ class ProxyCss(nodes.Sampler):
                     f"that large, and this one holds {len(pool)}"
                 )
             discovery = pool[: knobs.discovery]
-            return nodes.Panel(cells=discovery, order=list(discovery), block_size=len(discovery))
+            return nodes.RoundSamples(
+                cells=discovery, order=list(discovery), block_size=len(discovery)
+            )
         by_key = {s.key: s for s in pool}
         if missing := [key for key in calibration.proxy if key not in by_key]:
             raise ValueError(f"proxy_css: {len(missing)} proxy cells left the search split")
         cells = [by_key[key] for key in calibration.proxy]
-        return nodes.Panel(cells=cells, order=list(cells), block_size=len(cells))
+        return nodes.RoundSamples(cells=cells, order=list(cells), block_size=len(cells))
 
 
 def _lloyd(points: np.ndarray, k: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
@@ -492,7 +494,9 @@ class LeviSeed(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, LeviSeedKnobs).n_diverse_seeds
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, _proposals: Proposals
+    ) -> Proposals:
         origin = ctx.read(Lineage).origin
         node, calls = ctx.read(Target).prompt_node, ctx.read(Calls)
         shown: list[tuple[OptSearchPoint, float | None]] = [(origin, None)]
@@ -540,7 +544,9 @@ class LeviParadigmShift(nodes.Proposer):
             )
         ]
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
+    ) -> Proposals:
         n_clusters = ctx.knobs(LeviParadigmShiftKnobs).n_clusters
         shift = await self._shift(ctx, n_clusters, len(proposals.proposals))
         return nodes.Proposals([*proposals.proposals, shift])
@@ -619,7 +625,9 @@ class LeviRefine(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.reached_knobs(self, LeviParadigmShiftKnobs).interval - 1
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, _proposals: Proposals
+    ) -> Proposals:
         calibration = ctx.slice(DescriptorCalibration).calibration
         elites = ctx.slice(EliteArchive).elites
         shift = ctx.knobs(LeviParadigmShiftKnobs)

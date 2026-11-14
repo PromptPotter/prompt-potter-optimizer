@@ -17,6 +17,7 @@ from offline_world import FakeBackend, Router
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext, SliceMap
 from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.bench.node_context import closed_round
+from promptpotter.application.config_map import bench_defaults_pin
 from promptpotter.application.datasets.authored import (
     ConfigLayers,
     dataset_campaign_block,
@@ -36,7 +37,6 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.mint import declare, mint_framed_cycle
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, PoBBKnobs
 from promptpotter.application.optimizers.potter.records import (
@@ -70,8 +70,8 @@ from promptpotter.connectors.protocol import (
 )
 from promptpotter.connectors.termnorm import termnorm_wire_adapter
 from promptpotter.domain.arms import (
+    ArmPosition,
     ArmRole,
-    ArmSlot,
     ArmState,
     Broken,
     Cut,
@@ -90,7 +90,7 @@ from promptpotter.domain.bench import (
     BankPartition,
     BenchScore,
     LiftCost,
-    LineRun,
+    LiveCycleRun,
     OwnLevel,
     bench_status,
     partition_bank,
@@ -325,7 +325,7 @@ def score_summary(
 def arm_state(
     name: str = "c0",
     *,
-    slot: ArmSlot | None = None,
+    position: ArmPosition | None = None,
     total: int = 4,
     cut: CutKind | None = None,
     invalid_reason: ValidationReason | None = None,
@@ -333,8 +333,8 @@ def arm_state(
     elimination: dict[str, Any] | None = None,
     **overrides: Any,
 ) -> Cut | Measured:
-    """A concluded arm whose individual is named by *name*; ``slot=None`` is a reference arm, a
-    round-0 slot the origin."""
+    """A concluded arm whose individual is named by *name*; ``position=None`` is a reference arm, a
+    round-0 position the origin."""
     failures = (
         [ValidationFailure(axis="prompt_fields", value="", allowed=[], reason=invalid_reason)]
         if invalid_reason
@@ -342,14 +342,14 @@ def arm_state(
     )
     role = (
         MeasurementRole.PARENT
-        if slot is None
+        if position is None
         else MeasurementRole.ORIGIN
-        if slot.round == 0
+        if position.round == 0
         else MeasurementRole.PANEL
     )
     fields: dict[str, Any] = {
         "role": role,
-        "slot": slot,
+        "position": position,
         "individual": prompted(instruction=name),
         "validation_failures": failures,
         "sp_hash": name,
@@ -375,7 +375,7 @@ def arm_state(
                 degraded_count=total,
                 total_scored=total,
                 observed_config={},
-                first_seen_round=0 if slot is None else slot.round,
+                first_seen_round=0 if position is None else position.round,
                 changes_description="",
                 owner=NurseOwner.L1,
             )
@@ -581,7 +581,7 @@ def loop_session(
     return session
 
 
-PROMPT_INFO = NodePromptInfo(fields=PROMPT_FIELDS, rewrite_slot="instruction")
+PROMPT_INFO = NodePromptInfo(fields=PROMPT_FIELDS, rewrite_field="instruction")
 
 
 def samples(n: int, truth: str | None = "a", *, query: str = "q") -> list[Sample]:
@@ -653,7 +653,7 @@ def seat(
         sp = session.points(framing).job(individual)
         c0 = arm_state(
             "C0",
-            slot=ArmSlot(round=0, idx=0, total=1),
+            position=ArmPosition(round=0, idx=0, total=1),
             individual=individual,
             resolved_params=sp.config_params.dump(),
             sp_hash=sp.sp_hash(session.pipeline_schema),
@@ -921,7 +921,9 @@ def arm_walk(
     running: ScoreSummary | None = None,
 ) -> list[SampleScoredRecord]:
     """*individual* announced as an arm of round *rnd*, then each filed cell scored at its slot."""
-    announced = Proposed(role=role, slot=ArmSlot(round=rnd, idx=0, total=1), individual=prompted())
+    announced = Proposed(
+        role=role, position=ArmPosition(round=rnd, idx=0, total=1), individual=prompted()
+    )
     ledger.append(ArmRecord(round=rnd, arm=ArmKey(individual), state=announced))
     rows = [
         SampleScoredRecord(
@@ -955,7 +957,7 @@ def close_round(
             ArmRecord(
                 round=n,
                 arm=key,
-                state=Proposed(role=arm.role, slot=arm.slot, individual=arm.individual),
+                state=Proposed(role=arm.role, position=arm.position, individual=arm.individual),
             )
         )
     with scoped(round=n):
@@ -1177,7 +1179,7 @@ def round_result(
         **{
             ArmKey(f"c{i}"): arm_state(
                 f"c{i}",
-                slot=ArmSlot(round=rnd, idx=i, total=panel),
+                position=ArmPosition(round=rnd, idx=i, total=panel),
                 total=2 if i < cut else len(_TRUTH),
             )
             for i in range(candidates_scored)
@@ -1185,7 +1187,7 @@ def round_result(
         **{
             ArmKey(f"x{i}"): arm_state(
                 f"x{i}",
-                slot=ArmSlot(round=rnd, idx=candidates_scored + i, total=panel),
+                position=ArmPosition(round=rnd, idx=candidates_scored + i, total=panel),
                 invalid_reason=reason,
             )
             for i, reason in enumerate(reasons)
@@ -1193,7 +1195,9 @@ def round_result(
     }
     arms = (built | {PARENT: arm_state("parent")}) if arms is None else arms
     if selected is None and improved:
-        measured = (k for k, a in arms.items() if isinstance(a, Measured) and a.slot is not None)
+        measured = (
+            k for k, a in arms.items() if isinstance(a, Measured) and a.position is not None
+        )
         selected = next(measured, None)
     vote = election(selected, **{"electable": candidates_scored} | (voted or {}))
     # Merged rather than splatted after the literals, so ``overrides`` reaches EVERY field.
@@ -1343,7 +1347,7 @@ def bench_line(
     """A line that closed one round on *selection*; *line* bends any other field."""
     fields: dict[str, Any] = {
         "hop": CycleHop(campaign_id="camp", cycle_id="cyc"),
-        "on_line": True,
+        "on_live_cycle": True,
         "inner": False,
         "refused": None,
         "held_by": None,
@@ -1353,7 +1357,7 @@ def bench_line(
         "spend": None,
     } | line
     return BenchLine(
-        run=LineRun(
+        run=LiveCycleRun(
             selecting=selecting,
             pass_open=False,
             ending=ending,
@@ -1444,13 +1448,13 @@ def cycle_result(
         status=bench_status(
             trigger="at_end",
             bench_size=0,
-            on_line=True,
+            on_live_cycle=True,
             inner=False,
             refused=None,
             held_by=None,
             origin=None,
             selected=None,
-            run=LineRun(
+            run=LiveCycleRun(
                 selecting=False,
                 pass_open=False,
                 ending=stop_reason,

@@ -102,7 +102,7 @@ def complete_registries() -> None:
             connector.completion_check()
 
 
-def read_treatment(name: str) -> None:
+def check_treatment(name: str) -> None:
     """An optimizer as every launch reads it, an install shadow included; its source digest raises
     on a prompt-shaping helper nothing hashes."""
     select_optimizer(OptimizerChoice(optimizer=name)).treatment(
@@ -110,11 +110,11 @@ def read_treatment(name: str) -> None:
     )
 
 
-def read_every_treatment() -> None:
+def check_every_treatment() -> None:
     """Every optimizer, and the check-in as every check-in and mint reads it, an install shadow
     included: a process serving any campaign reads them all at entry."""
     for name in optimizers.MANIFESTS.table:
-        read_treatment(name)
+        check_treatment(name)
     checkin_manifest()
 
 
@@ -128,7 +128,7 @@ class Unloadable(NamedTuple):
         return f"{self.found.kind.fate.value} {self.found.kind.name} {self.path}: {self.why}"
 
 
-class Refused(NamedTuple):
+class LandingRefusal(NamedTuple):
     """What refuses a landing, the paths that do and its remedy."""
 
     why: str
@@ -163,34 +163,34 @@ class Landing(NamedTuple):
     swaps: tuple[Path, ...]
 
     @property
-    def refused(self) -> Refused | None:
+    def refused(self) -> LandingRefusal | None:
         survivors = [one for one in self.unloadable if one.found.kind.fate is Fate.SURVIVOR]
         if migrated := tuple(
             one.path for one in survivors if one.found.kind.shape is not JOB_ADAPTER
         ):
-            return Refused(
+            return LandingRefusal(
                 "a survivor does not load, and no migration maps it",
                 migrated,
                 "the landed code owes one (`maintenance/migrate.py::MIGRATIONS`)",
             )
         if survivors:
             # A job file is owed no migration: the code that wrote it is the code its run ends on.
-            return Refused(
+            return LandingRefusal(
                 "a job file does not load",
                 tuple(one.path for one in survivors),
                 "let its run end on the code that wrote it, then move the file out of the jobs dir",
             )
         if self.reset is not None and self.reset.refusal is not None:
-            return Refused(self.reset.refusal, ())
+            return LandingRefusal(self.reset.refusal, ())
         if self.unknown:
-            return Refused(
+            return LandingRefusal(
                 "a file no row names is in the way",
                 self.unknown,
                 "move it out of the data root; one this code writes owes a row in "
                 "`data_root.py::KINDS`",
             )
         if self.unloadable:
-            return Refused(
+            return LandingRefusal(
                 "a live run's file does not load",
                 tuple(one.path for one in self.unloadable),
                 "pause or stop it first",
@@ -366,7 +366,7 @@ def _shadow_why(path: Path, found: Found) -> str | None:
         if found.kind is CHECKIN_SHADOW:
             checkin_manifest()
         else:
-            read_treatment(path.parent.name)
+            check_treatment(path.parent.name)
     except (PotterError, *LOAD_ERRORS) as exc:
         return " ".join(f"{type(exc).__name__}: {exc}".split())
     return None
@@ -383,7 +383,7 @@ def _locks(data_root: Path, unit: Path) -> list[Path]:
     ]
 
 
-def _refusal(data_root: Path, refused: Refused) -> ConflictError:
+def _refusal(data_root: Path, refused: LandingRefusal) -> ConflictError:
     named = [path.relative_to(data_root).as_posix() for path in refused.paths[:_NAMED]]
     more = len(refused.paths) - len(named)
     said = f" ({', '.join(named)}{f', and {more} more' if more else ''})" if named else ""
@@ -499,7 +499,7 @@ def land_at_entry(*, every_treatment: bool) -> None:
     said here, a line each on the process's log and one tally to the operator, for every entry
     alike; the stamp keeps the lines. A landing that refuses raises, having written nothing."""
     if every_treatment:
-        read_every_treatment()
+        check_every_treatment()
     projects_root = default_projects_root()
     if _landed(projects_root):
         return

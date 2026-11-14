@@ -17,7 +17,7 @@ export function useListedLifecycle(): ListedLifecycle {
 
 // The active list leads with the unstarted: a setup waiting for Start is never behind a filter.
 export function listedUnder(lifecycle: ListedLifecycle, campaign: ListedCampaign): boolean {
-  return campaign.level === "unstarted"
+  return campaign.entry_kind === "unstarted"
     ? lifecycle === "active"
     : campaign.facts.lifecycle === lifecycle;
 }

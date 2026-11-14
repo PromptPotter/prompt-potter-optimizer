@@ -8,7 +8,7 @@ from pathlib import Path
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
-from promptpotter.application.run_phase_control import CycleHold, close_dead_bench
+from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
 from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
@@ -113,7 +113,7 @@ class RunObservers:
     dashboard: DashboardCheckout
     readout: ReadoutProjection
     projecting: Projecting
-    hold: CycleHold
+    hold: ProducerHold
 
     def arm_spend_book(self, book: SpendBook) -> None:
         book.ledger = billing_ledger("the run's book")
@@ -157,7 +157,7 @@ def build_run_observers(
 ) -> RunObservers:
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
-    hold = CycleHold(session.store, session.hop, scoring_pass=False)
+    hold = ProducerHold(session.store, session.hop, scoring_pass=False)
     projecting = LedgerIndex.of(session.store.campaigns.ledger(session.hop)).projecting()
     try:
         prior = session.store.campaigns.last(session.hop, RunPhaseRecord)
@@ -190,7 +190,7 @@ def build_run_observers(
 def _bind_observers(
     cycle_dir: CycleDir,
     projecting: Projecting,
-    hold: CycleHold,
+    hold: ProducerHold,
     *,
     session: Session,
     campaign_config: CampaignConfig,

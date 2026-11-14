@@ -166,7 +166,7 @@ def panel_cuts(panels: Sequence[tuple[int | None, int | None]]) -> list[bool]:
 Crown = Literal["elected", "uncontested"]
 
 
-class ArmPanel(FrozenModel):
+class ArmSamples(FrozenModel):
     """The cells one arm's walk holds of the panel its round asked of it."""
 
     scored: int | None = Field(
@@ -191,7 +191,7 @@ class ArmPanel(FrozenModel):
     @classmethod
     def of(
         cls, scored: int | None, expected: int | None, cached: int | None, *, cut: bool
-    ) -> ArmPanel:
+    ) -> ArmSamples:
         share = cached / scored if scored and cached is not None else None
         return cls(scored=scored, expected=expected, cached=cached, cached_share=share, cut=cut)
 
@@ -378,7 +378,7 @@ class ArmReading(FrozenModel):
         description="The round mean of each term the scoring formula reads, `fitness` aside, over "
         "the cells that answered it: an L4 outer arm's `held_out_lift` and `floored` share."
     )
-    panel: ArmPanel
+    panel: ArmSamples
     tokens: TokenAccount | None = Field(
         description="What measuring it consumed, the BACKEND bucket alone, replayed rows "
         "excluded; null until its score report folds an account."
@@ -429,7 +429,7 @@ class ArmReading(FrozenModel):
         """*fold* is its round's, or `narration.py::Narration.fold` in flight; *fit* the election's, ``None`` until held."""
         walked = None if isinstance(arm, Proposed) else arm
         tokens = None if fold is None else fold.tokens
-        panel = ArmPanel.of(
+        panel = ArmSamples.of(
             None if fold is None else fold.walked,
             None if walked is None else walked.expected_samples,
             None if fold is None else fold.cached,

@@ -103,7 +103,7 @@ export function useViewedDashboard(): DashboardPoll {
 
 const RAY_WINDOW = 200;
 
-// How far back the operator paged the viewed course: naming no view, it outlives the ray's mount;
+// How far back the operator paged the viewed cycle: naming no view, it outlives the ray's mount;
 // the pages themselves are `earlierStepsRead`'s, in the cache beside the head window.
 const paging = createModuleStore<{ unit: string | null; anchor: string | null; pages: number }>({
   unit: null,
@@ -119,7 +119,7 @@ interface TimeRay {
   loadOlder: () => void;
 }
 
-// The viewed course's steps: a head window the feed moves, then pages asked one by one.
+// The viewed cycle's steps: a head window the feed moves, then pages asked one by one.
 export function useTimeRay(): TimeRay {
   const { viewed } = useWorkspace();
   const path = viewed?.path ?? null;

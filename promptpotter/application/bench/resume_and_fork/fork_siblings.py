@@ -23,7 +23,7 @@ from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     FORK_DIRECTION,
     CycleMintedRecord,
-    CycleSeed,
+    CycleStart,
     ForkCutFrom,
     ForkDirection,
     ForkSpec,
@@ -58,7 +58,7 @@ def _fork_sibling_setup(
     *,
     from_round: int,
     payload: ForkSpec,
-    seed: CycleSeed | None,
+    start: CycleStart | None,
 ) -> None:
     campaign_store = stores.campaigns
     campaign = campaign_store.load_campaign(child.campaign_id)
@@ -67,7 +67,7 @@ def _fork_sibling_setup(
     # Decided before anything is written: a refusal here leaves no minted, unstamped child.
     babysat = CycleConfig.laid(
         cycle_config(stores, campaign, None).config,
-        [*cycle_config(stores, campaign, parent).spans, LaidSpan(seed=seed, scoring_lock=None)],
+        [*cycle_config(stores, campaign, parent).spans, LaidSpan(start=start, scoring_lock=None)],
     ).steers_outside(permitted_narrowing(stores, campaign))
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(child)
@@ -82,7 +82,7 @@ def _fork_sibling_setup(
     )
     if cut is None:
         raise RuntimeError(f"{child.cycle_id}: a muted scope landed no cut to mint the fork at")
-    # ONE record: the cut, the seed and the babysat stamp (decisions.md § 0005) land as one fact.
+    # ONE record: the cut, the start and the babysat stamp (decisions.md § 0005) land as one fact.
     campaign_store.mint_cycle(
         child,
         CycleMintedRecord(
@@ -90,7 +90,7 @@ def _fork_sibling_setup(
             forked_at_offset=cut + 1,
             cut_round=from_round,
             fork=payload,
-            seed=seed,
+            start=start,
             babysat=babysat,
         ),
     )
@@ -118,16 +118,16 @@ def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) 
         if arm.state.refused:
             raise PayloadInvalidError(
                 f"{arm.state.label} of round {named.round} is a refused proposal, keyed by its "
-                "slot: it measured no individual to fork from"
+                "position: it measured no individual to fork from"
             )
         if arm.state.role is not MeasurementRole.PARENT:
             return named
-        if (slot := arm.state.slot) is None:
+        if (position := arm.state.position) is None:
             raise PayloadInvalidError(
                 f"round {named.round} re-read {named.arm}, which no round of the parent walked: "
                 "name the candidate itself"
             )
-        return RoundArm(round=slot.round, arm=named.arm)
+        return RoundArm(round=position.round, arm=named.arm)
     # Off the announced arms: a line whose origin walk never closed still names its origin.
     origin = next(
         (
@@ -186,7 +186,7 @@ def cut_fork(
     reason: str,
     issued_by: Principal,
     named: RoundArm | None = None,
-    seed: CycleSeed | None = None,
+    start: CycleStart | None = None,
 ) -> ForkCut:
     """``fork_from_round`` is how many parent rounds the cut lifts, recorded as its ``cut_round``."""
     campaign_store = stores.campaigns
@@ -222,18 +222,18 @@ def cut_fork(
         child,
         from_round=fork_from_round,
         payload=payload,
-        seed=seed,
+        start=start,
     )
     return ForkCut(parent=parent, child=child, direction=direction)
 
 
 def declare_steered_values(
-    seed: CycleSeed, narrowing: Mapping[str, NodeSearchNarrowing]
-) -> CycleSeed:
+    start: CycleStart, narrowing: Mapping[str, NodeSearchNarrowing]
+) -> CycleStart:
     """Without it the fork runs ``model=X`` beside a permitted set that excludes X; X is what the
     fork runs, its candidate's own under the operator's edit."""
-    declared = dict(seed.optimizer_narrowing)
-    for node, cfg in seed.runs().items():
+    declared = dict(start.optimizer_narrowing)
+    for node, cfg in start.runs().items():
         origin = narrowing.get(node)
         listed = origin.param_allowed_values if origin else {}
         own = declared.get(node)
@@ -247,35 +247,35 @@ def declare_steered_values(
             declared[node] = (own or NodeSearchNarrowing()).model_copy(
                 update={"param_allowed_values": values}
             )
-    return seed.model_copy(update={"optimizer_narrowing": declared})
+    return start.model_copy(update={"optimizer_narrowing": declared})
 
 
-def operator_seed(stores: Stores, payload: ForkCyclePayload, seed: CycleSeed) -> CycleSeed:
-    """*seed* as `parse_cycle_seed` froze it, laid for the fork's cut: a named candidate's fork
+def operator_start(stores: Stores, payload: ForkCyclePayload, start: CycleStart) -> CycleStart:
+    """*start* as `parse_cycle_start` froze it, laid for the fork's cut: a named candidate's fork
     runs its prompts and its params, the operator's edit over both."""
     hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
     if (named := _named(payload)) is not None and (arm := _candidate(stores, hop, named)):
-        seed = seed.model_copy(
-            update={"origin_prompts": {**arm.individual.prompts, **seed.origin_prompts}}
+        start = start.model_copy(
+            update={"origin_prompts": {**arm.individual.prompts, **start.origin_prompts}}
         )
         # A proposal never walked resolved no params.
         if not isinstance(arm, Proposed):
             params = PipelineParams.model_validate(arm.resolved_params).laid_nodes
-            seed = seed.model_copy(
-                update={"origin_params": lay_nodes(params, payload.seed.cleared)}
+            start = start.model_copy(
+                update={"origin_params": lay_nodes(params, payload.start.cleared)}
             )
     # Against what the parent's nodes permit, so the child lays over what its parent ran.
     campaign = owned_campaign(stores, hop.campaign_id)
-    seed = declare_steered_values(seed, permitted_narrowing(stores, campaign, hop))
+    start = declare_steered_values(start, permitted_narrowing(stores, campaign, hop))
     if payload.keep_rounds:
-        return seed
+        return start
     # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
-    caps = fork_remainder(stores, hop).under(seed.config_overrides)
-    return seed.model_copy(update={"config_overrides": caps})
+    caps = fork_remainder(stores, hop).under(start.config_overrides)
+    return start.model_copy(update={"config_overrides": caps})
 
 
-def cut_operator_fork(stores: Stores, payload: ForkCyclePayload, seed: CycleSeed) -> ForkCut:
-    """*seed* as `parse_cycle_seed` froze it; `operator_seed` lays it for the cut."""
+def cut_operator_fork(stores: Stores, payload: ForkCyclePayload, start: CycleStart) -> ForkCut:
+    """*start* as `parse_cycle_start` froze it; `operator_start` lays it for the cut."""
     hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
     keep, at = payload.keep_rounds, payload.round
     return cut_fork(
@@ -291,7 +291,7 @@ def cut_operator_fork(stores: Stores, payload: ForkCyclePayload, seed: CycleSeed
         ),
         issued_by=acting_principal(stores.identity),
         named=_named(payload),
-        seed=operator_seed(stores, payload, seed),
+        start=operator_start(stores, payload, start),
     )
 
 

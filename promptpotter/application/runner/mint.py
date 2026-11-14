@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.resume import resume_with_divergence_check
+from promptpotter.application.config_map import measured_address
 from promptpotter.application.initialization.scoring_scope import cycle_partition, scorer_setup
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
@@ -22,7 +23,6 @@ from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher.admission import land_job, open_spend_book
 from promptpotter.application.jobs.quota import cycle_share, move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.knobs import measured_address
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.origin import CampaignOrigin, seat_campaign_origin
 from promptpotter.application.preflight import run_preflight_checks
@@ -66,10 +66,10 @@ def origin_content_hash(
     points: PointContext,
     dataset: list[Sample],
     *,
-    candidate_library: Collection[str],
+    answer_terms: Collection[str],
 ) -> str:
     """Config-AWARE, as the measurement key is: a connector-config edit yields a DISTINCT origin."""
-    return points.job(origin).content_hash(dataset, candidate_library=candidate_library)[:12]
+    return points.job(origin).content_hash(dataset, answer_terms=answer_terms)[:12]
 
 
 def root_cycle_id_of(origin_hash: str, declaration: RunDeclaration) -> str:
@@ -155,7 +155,7 @@ async def open_launch(
             cell, filed(CELL).kind, NEXT_CELL, session.backend_client.connector.cell_payer
         )
     # The launch's one session open, before round 0's door sends a cell.
-    await session.backend_client.init_session(session.bank.samples, session.candidate_library)
+    await session.backend_client.init_session(session.bank.samples, session.answer_terms)
     return PreparedRun(
         origin=seat_campaign_origin(session, dataset, campaign_config, cycle=cycle),
         campaign_config=campaign_config,

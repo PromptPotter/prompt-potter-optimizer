@@ -37,7 +37,7 @@ from promptpotter.application.views.trail import trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.cycle_paths import Subject
-from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse, HierarchyResponse
+from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCycle, HierarchyResponse
 from promptpotter.domain.phases import RUN_PHASE_INFO
 from promptpotter.domain.spend import usd_text
 from promptpotter.presentation.cli.commands.launch import head_to_head_command
@@ -104,10 +104,10 @@ async def cmd_read(args: argparse.Namespace) -> CommandResult:
     return render(params, answer, args, caller)
 
 
-def _line(course: HierarchyCourse, *, active: bool) -> str:
-    state = course.state
+def _line(cycle: HierarchyCycle, *, active: bool) -> str:
+    state = cycle.state
     return (
-        course.address
+        cycle.address
         + ("" if state.stop is None else f"  {state.stop.said}")
         + (
             f"  next: {state.admission.offers}"
@@ -131,13 +131,13 @@ def cycles_human(
     for campaign in listing.entries:
         if not isinstance(campaign, HierarchyCampaign):
             continue
-        for course in campaign.children:
-            lines.append(_line(course, active=course.address == active))
-            if (climb := course.climb) is not None:
+        for cycle in campaign.children:
+            lines.append(_line(cycle, active=cycle.address == active))
+            if (climb := cycle.climb) is not None:
                 lines.append(f"    {said_text(climb)}")
-            lines.append("    " + " · ".join(said_text(r) for r in course.figures))
-            lines.extend(f"    {said_text(r)}" for r in course.lines)
-            if (said := course.said) is not None:
+            lines.append("    " + " · ".join(said_text(r) for r in cycle.figures))
+            lines.extend(f"    {said_text(r)}" for r in cycle.lines)
+            if (said := cycle.said) is not None:
                 lines.append(f"    {said.tone}: {said_text(said)}")
     # Each arm campaign's `<h2h>:<key>`: the head-to-head ids already taken.
     arms = [

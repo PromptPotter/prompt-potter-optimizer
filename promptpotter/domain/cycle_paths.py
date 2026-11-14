@@ -44,7 +44,7 @@ CyclePath = tuple[CycleHop, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class Cut:
+class CycleAt:
     """``offset`` indexes the cycle's OWN records, never an inherited prefix; ``None`` is the head."""
 
     cycle: CycleDir
@@ -111,9 +111,9 @@ def parse_sample_ids(text: str | None) -> frozenset[int] | None:
     return ids or None
 
 
-SubjectKind = Literal["campaign", "course", "candidate"]
+SubjectKind = Literal["campaign", "cycle", "candidate"]
 # How many `/`-joined ids each kind's evidence spelling takes.
-SUBJECT_ARITY: dict[SubjectKind, int] = {"campaign": 1, "course": 2, "candidate": 3}
+SUBJECT_ARITY: dict[SubjectKind, int] = {"campaign": 1, "cycle": 2, "candidate": 3}
 
 _POOL_SEGMENTS = frozenset({"in"})
 _SUBJECT_SEGMENTS = _POOL_SEGMENTS | {"lens", "samples"}
@@ -151,7 +151,7 @@ def parse_pool(spec: str) -> tuple[str, CyclePath]:
 
 
 class Subject(NamedTuple):
-    """One address of the record: a campaign, or a course and what in it (a round, a candidate,
+    """One address of the record: a campaign, or a cycle and what in it (a round, a candidate,
     a line of its ledger, ``at``), in the L4 sandbox chain it is read in (``inside``), under the
     mask it is read through (``lens``, ``samples``).
 
@@ -171,7 +171,7 @@ class Subject(NamedTuple):
 
     @classmethod
     def of(cls, path: CyclePath) -> Subject:
-        """The course at the end of *path*, in the chain above it."""
+        """The cycle at the end of *path*, in the chain above it."""
         *inside, hop = path
         return cls(hop.campaign_id, hop.cycle_id, inside=tuple(inside))
 
@@ -185,15 +185,13 @@ class Subject(NamedTuple):
     def kind(self) -> SubjectKind:
         if self.candidate_id:
             return "candidate"
-        return "course" if self.cycle_id else "campaign"
+        return "cycle" if self.cycle_id else "campaign"
 
     @property
     def path(self) -> CyclePath:
-        """The chain down to the course; a campaign subject names no cycle, so it has none."""
+        """The chain down to the cycle; a campaign subject names no cycle, so it has none."""
         if not self.cycle_id:
-            raise BadRequestError(
-                f"Campaign {self.campaign_id!r} names no cycle; address a course."
-            )
+            raise BadRequestError(f"Campaign {self.campaign_id!r} names no cycle; address a cycle.")
         return (*self.inside, CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id))
 
     @property
@@ -229,10 +227,10 @@ class Subject(NamedTuple):
                 f"{kind!r} subject takes exactly {arity}."
             )
         inside, lens, samples = _segments(spec, segments, allowed=_SUBJECT_SEGMENTS)
-        if lens and kind != "course":
+        if lens and kind != "cycle":
             raise BadRequestError(
                 f"A {kind!r} subject takes no lens: an alternative formula re-decides ELECTIONS, "
-                "and only a course has any. Address the branch instead."
+                "and only a cycle has any. Address the branch instead."
             )
         ids = [*parts, "", ""]
         return cls(ids[0], ids[1], ids[2], inside=inside, lens=lens, samples=samples)
@@ -250,7 +248,7 @@ class Subject(NamedTuple):
 
     @classmethod
     def parse_address(cls, address: str) -> Subject:
-        """A hierarchy address: ``[<chain>~]<campaign>``, or a course's cycle path then
+        """A hierarchy address: ``[<chain>~]<campaign>``, or a cycle's path then
         ``/r<round>[/<candidate>]`` or ``/@<offset>``."""
         head, slash, rest = address.partition("/")
         *above, last = head.split(HOP_SEP)
@@ -277,12 +275,12 @@ class Subject(NamedTuple):
         if not self.cycle_id:
             above = (encode_cycle_path(self.inside),) if self.inside else ()
             return HOP_SEP.join((*above, self.campaign_id))
-        course = encode_cycle_path(self.path)
+        cycle = encode_cycle_path(self.path)
         if self.at is not None:
-            return f"{course}/@{self.at}"
+            return f"{cycle}/@{self.at}"
         if self.round is None:
             if self.candidate_id:
                 raise ValueError(f"candidate {self.candidate_id!r} names no round to address")
-            return course
-        stepped = f"{course}/r{self.round}"
+            return cycle
+        stepped = f"{cycle}/r{self.round}"
         return f"{stepped}/{self.candidate_id}" if self.candidate_id else stepped

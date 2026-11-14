@@ -6,7 +6,7 @@ export interface RayStep {
   key: string;
   path: CyclePath;
   pathKey: string;
-  // In `path`'s OWN ledger: below the viewed course it is an address to navigate to, never a moment to fold to.
+  // In `path`'s OWN ledger: below the viewed cycle it is an address to navigate to, never a moment to fold to.
   offset: number;
   ts: string;
   // served: `StepFacts.gap_before_s`, heartbeats included

@@ -34,14 +34,14 @@ export function useCampaignPipeline(
   return useRead(campaignId ? campaignPipelineRead(campaignId, at) : null);
 }
 
-// The viewed leaf as a course subject: the hops ABOVE it are its chain, so an L4 inner run
+// The viewed leaf as a cycle subject: the hops ABOVE it are its chain, so an L4 inner run
 // resolves its OWN pipeline.
 export function useLeafSubject(): string | null {
   const { viewed } = useWorkspace();
   return useMemo(
     () =>
       viewed
-        ? subjectKey("course", [viewed.leaf.campaignId, viewed.leaf.cycleId], viewed.path.slice(0, -1))
+        ? subjectKey("cycle", [viewed.leaf.campaignId, viewed.leaf.cycleId], viewed.path.slice(0, -1))
         : null,
     [viewed],
   );

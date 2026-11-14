@@ -24,9 +24,9 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         MeasuredRound,
-        Panel,
         PromptArity,
         Proposals,
+        RoundSamples,
         Selection,
     )
     from promptpotter.domain.arm_reading import DisplayMetric
@@ -53,13 +53,13 @@ class RandomDraw(nodes.Sampler):
     sees = frozenset({Replay})
     size_knob: ClassVar[str | None] = "size"
 
-    def drawn(self, knobs: DrawKnobs, search: int, _pipeline: str) -> nodes.PanelSize:
+    def drawn(self, knobs: DrawKnobs, search: int, _pipeline: str) -> nodes.DrawSize:
         cells = min(knobs.size, search)
-        return nodes.PanelSize(cells=cells, block_size=cells)
+        return nodes.DrawSize(cells=cells, block_size=cells)
 
-    def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
+    def draw(self, ctx: NodeContext, pool: list[Sample]) -> RoundSamples:
         cells = ctx.read(Replay).rng().sample(pool, min(ctx.knobs(DrawKnobs).size, len(pool)))
-        return nodes.Panel(cells=cells, order=list(cells), block_size=len(cells))
+        return nodes.RoundSamples(cells=cells, order=list(cells), block_size=len(cells))
 
 
 class ProposeKnobs(RewriteKnobs):
@@ -80,7 +80,9 @@ class Propose(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, ProposeKnobs).variants
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, _proposals: Proposals
+    ) -> Proposals:
         parent, node = ctx.read(Lineage).parent, ctx.read(Target).prompt_node
         prompt = prompts.rephrase_prompt(ctx, instruction=shown(ctx, parent, node))
         variants = ctx.knobs(ProposeKnobs).variants

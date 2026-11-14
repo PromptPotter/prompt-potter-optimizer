@@ -53,7 +53,7 @@ from promptpotter.domain.command_kinds import (
     Door,
     EditDraftCampaignPayload,
     ForkCyclePayload,
-    ForkSeed,
+    ForkStart,
     HeadToHeadRequest,
     IngestUploadPayload,
     MintCampaignPayload,
@@ -661,7 +661,7 @@ def _payload(args: argparse.Namespace, hop: CycleHop) -> StartRunPayload | ForkC
             "round": args.rewind_to_round or 0,
             "keep_rounds": args.rewind_to_round is not None,
             "reason": args.rewind_reason.strip(),
-            "seed": ForkSeed(pipeline_overlay=_steer_overlay(args.steer or [])),
+            "start": ForkStart(pipeline_overlay=_steer_overlay(args.steer or [])),
             "budget": budget,
             "mode": mode,
         },
@@ -741,8 +741,8 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     ctx = load_session(stores, cycle_target(stores, args.campaign, args.cycle))
 
     payload = _payload(args, ctx.hop)
-    if isinstance(payload, ForkCyclePayload) and payload.seed.pipeline_overlay:
-        _confirm_steer(ctx, payload.seed.pipeline_overlay)
+    if isinstance(payload, ForkCyclePayload) and payload.start.pipeline_overlay:
+        _confirm_steer(ctx, payload.start.pipeline_overlay)
     try:
         held = await _dispatch_held(args, ctx, payload)
     except ConfigDriftError as drift:

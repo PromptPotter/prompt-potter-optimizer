@@ -22,7 +22,7 @@ export interface CampaignView {
   // `address.ts::formatPick`'s spelling.
   viewedPick: string | null;
   treeFreed: boolean;
-  // Lane keys (course addresses), the same space `lineage-tree.ts::layout` matches.
+  // Lane keys (cycle addresses), the same space `lineage-tree.ts::layout` matches.
   expandedLanes: string[];
   // The viewed lane last opened for its visit: a manual collapse is not undone.
   expandedForLane: string | null;

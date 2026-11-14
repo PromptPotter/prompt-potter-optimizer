@@ -11,7 +11,7 @@ import { HeadToHeadVerdict } from "./HeadToHeadVerdict";
 
 function channelPoints(subjects: readonly SubjectReading[]): CladogramChannel[] {
   return subjects.map((s, i) => ({
-    coursePathKey: encodeCyclePath(readingPath(s)),
+    cyclePathKey: encodeCyclePath(readingPath(s)),
     candidateId: s.candidate_id,
     // Served order: the index the bars, legend and pairwise table read, so one channel is one colour.
     ink: seriesVar(i),

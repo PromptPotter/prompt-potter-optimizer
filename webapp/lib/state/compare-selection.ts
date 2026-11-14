@@ -13,13 +13,13 @@ export interface CompareChannel {
   subject: string;
 }
 
-/** After a supersede the line is a fork's: the served `facts.line` names it. */
+/** After a supersede the line is a fork's: the served `facts.live_cycle` names it. */
 export function defaultChannel(campaign: HierarchyCampaign): CompareChannel {
-  const line = decodeCyclePath(campaign.facts.line)?.at(-1);
-  if (!line) throw new Error(`undecodable line ${campaign.facts.line}`);
+  const line = decodeCyclePath(campaign.facts.live_cycle)?.at(-1);
+  if (!line) throw new Error(`undecodable line ${campaign.facts.live_cycle}`);
   return {
     rootCampaignId: campaign.address,
-    subject: subjectKey("course", [line.campaignId, line.cycleId]),
+    subject: subjectKey("cycle", [line.campaignId, line.cycleId]),
   };
 }
 
@@ -88,7 +88,7 @@ export function useChannelView({ channel, reading, headline }: CompareItem, inde
   const view = stored ?? unviewed(opensDetail);
   const arms = useMemo(() => channelArms(index, reading, headline !== null), [index, reading, headline]);
   const entry = view.picked ? index.byAddress.get(view.picked) : undefined;
-  const selected = view.picked === undefined ? arms.seed : entry?.level === "candidate" ? entry : null;
+  const selected = view.picked === undefined ? arms.seed : entry?.entry_kind === "candidate" ? entry : null;
   return { ...view, arms, selected, ...actions };
 }
 

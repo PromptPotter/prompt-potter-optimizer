@@ -32,7 +32,7 @@ from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.pipeline_schema import (
-    CANDIDATE_LIBRARY,
+    ANSWER_TERMS,
     PipelineDependency,
     PipelineSchema,
     dependencies_from_node_roles,
@@ -104,7 +104,7 @@ class DraftCampaignWire(StrictModel):
         description="Per active step, its starting prompt's fields by name; empty until the "
         "check-in fills it. A step bearing no prompt reads none."
     )
-    candidate_library_size: int = Field(
+    answer_terms_size: int = Field(
         description="A count, not the list: a library runs to tens of thousands of entries."
     )
     created_at: str
@@ -156,8 +156,8 @@ def _modes(served: ServedPipeline, declared: PipelineSchema) -> list[PipelineMod
 
 
 def _dependency_fulfilled(dep: PipelineDependency, draft: DraftFile) -> bool:
-    if dep.kind == CANDIDATE_LIBRARY:
-        return bool(draft.candidate_library)
+    if dep.kind == ANSWER_TERMS:
+        return bool(draft.answer_terms)
     return False
 
 
@@ -284,7 +284,7 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
         column_ground_truth=draft.column_ground_truth,
         field_provenance=dict(draft.field_provenance),
         origin_prompts={node: dict(fields) for node, fields in draft.origin_prompts.items()},
-        candidate_library_size=len(draft.candidate_library),
+        answer_terms_size=len(draft.answer_terms),
         created_at=draft.created_at,
         active_steps=active,
         modes=modes,

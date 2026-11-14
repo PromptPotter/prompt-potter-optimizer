@@ -22,10 +22,10 @@ from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
 from promptpotter.shared.measurement_context import MeasurementRole
 
 # A cost bound, never a caller's dial: sandboxes nest re-entrantly, so an unbounded walk is unbounded on disk.
-MAX_COURSE_DEPTH = 3
+MAX_CYCLE_DEPTH = 3
 
 
-class FamilyCourse(NamedTuple):
+class FamilyCycle(NamedTuple):
     store: Stores
     path: CyclePath
     # Not `index`: a NamedTuple field by that name shadows `tuple.index`.
@@ -58,10 +58,10 @@ class _Reads:
         return self._campaigns[key]
 
 
-def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
+def _child_cycles(stores: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCycle]:
     leaf = path[-1]
     reads.seen.add((stores.base_dir, leaf.campaign_id, leaf.cycle_id))
-    out: list[FamilyCourse] = []
+    out: list[FamilyCycle] = []
     for hop, index in reads.cycles(stores):
         if index.parent_cycle_id != leaf.cycle_id or hop.campaign_id != leaf.campaign_id:
             continue
@@ -69,7 +69,7 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
             continue
         reads.seen.add(key)
         out.append(
-            FamilyCourse(
+            FamilyCycle(
                 store=stores,
                 path=(*path[:-1], hop),
                 manifest=index,
@@ -80,14 +80,14 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
     sandbox = inner_sandbox_store(stores, leaf.campaign_id, leaf.cycle_id)
     if sandbox is not None:
         for hop, index in reads.cycles(sandbox):
-            # A course whose campaign does not load has no entry, so it is no course of the tree.
+            # A cycle whose campaign does not load has no entry, so it is no cycle of the tree.
             if index.parent_cycle_id or reads.campaign(sandbox, hop.campaign_id) is None:
                 continue
             if (key := (sandbox.base_dir, hop.campaign_id, hop.cycle_id)) in reads.seen:
                 continue
             reads.seen.add(key)
             out.append(
-                FamilyCourse(
+                FamilyCycle(
                     store=sandbox,
                     path=(*path, hop),
                     manifest=index,
@@ -97,10 +97,10 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
     return out
 
 
-def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
+def iter_family_cycles(stores: Stores, path: CyclePath) -> list[FamilyCycle]:
     reads = _Reads()
     root_store, _ = resolve_cycle_path(stores, path)
-    root = FamilyCourse(
+    root = FamilyCycle(
         store=root_store,
         path=path,
         manifest=root_store.campaigns.load(path[-1], moment=None),
@@ -109,11 +109,11 @@ def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
     out = [root]
     frontier = [root]
     while frontier:
-        level: list[FamilyCourse] = []
-        for course in frontier:
-            for child in _child_courses(course.store, course.path, reads):
+        level: list[FamilyCycle] = []
+        for cycle in frontier:
+            for child in _child_cycles(cycle.store, cycle.path, reads):
                 depth = len(child.path) - len(path)
-                if depth > MAX_COURSE_DEPTH:
+                if depth > MAX_CYCLE_DEPTH:
                     continue
                 level.append(child._replace(depth=depth))
         # Stable order: the time-ray's ETag must hold across identical requests.
@@ -123,7 +123,7 @@ def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
     return out
 
 
-class CourseArm(NamedTuple):
+class CycleArm(NamedTuple):
     """An arm its round PROPOSED, read: a reference a round re-read is no arm of that round."""
 
     round: int
@@ -132,19 +132,19 @@ class CourseArm(NamedTuple):
     reading: ArmReading
 
 
-class CourseRead(NamedTuple):
-    arms: list[CourseArm]
+class CycleRoundsRead(NamedTuple):
+    arms: list[CycleArm]
     # Every round it holds a record of, by its election: `None` for one that elected nothing.
     rounds: dict[int, Election | None]
     # Each `parent`-role arm by (round, key): the candidate its first record names it re-reading.
     rereads: dict[tuple[int, ArmKey], RoundArm]
 
 
-def _course_spans(
+def _cycle_spans(
     stores: Stores, hop: CycleHop, index: CycleIndex, *, moment: Moment | None
 ) -> list[LedgerSpan]:
     """A sibling fork's lifted rounds are its parent's, so it reads its own ledger; a cycle cut from
-    ANOTHER tree has no parent course here, and its prefix is its own record."""
+    ANOTHER tree has no parent cycle here, and its prefix is its own record."""
     layout = stores.campaigns.layout(hop)
     if index.parent is not None and index.parent_cycle_id is None:
         return ledger_chain(CycleDir(layout.cycle_dir), moment=moment)
@@ -154,11 +154,11 @@ def _course_spans(
 _NO_ELECTION = ArmElection(held=False, selected=False, leading=False, crown=None)
 
 
-def read_course(
+def read_cycle(
     stores: Stores, hop: CycleHop, index: CycleIndex, *, moment: Moment | None
-) -> CourseRead:
-    """One course's own record: its arms in round and slot order, read, and each round's election."""
-    spans = _course_spans(stores, hop, index, moment=moment)
+) -> CycleRoundsRead:
+    """One cycle's own record: its arms in round and position order, read, and each round's election."""
+    spans = _cycle_spans(stores, hop, index, moment=moment)
     standing = scan_standing_rounds(spans)
     closes = [standing.rounds[r].close for r in sorted(standing.rounds, reverse=True)]
     line = line_by_individual(next((c.overlap for c in closes if overlap_line(c.overlap)), None))
@@ -179,15 +179,15 @@ def read_course(
         held = standing.rounds.get(rnd)
         return None if held is None else held.close.election
 
-    arms: list[CourseArm] = []
+    arms: list[CycleArm] = []
     rereads: dict[tuple[int, ArmKey], RoundArm] = {}
     for (rnd, key), held in sorted(
         standing.arms.items(),
-        key=lambda kv: (kv[0][0], 0 if kv[1].state.slot is None else kv[1].state.slot.idx),
+        key=lambda kv: (kv[0][0], 0 if kv[1].state.position is None else kv[1].state.position.idx),
     ):
         if held.state.role == MeasurementRole.PARENT:
-            if (slot := held.state.slot) is not None:
-                rereads[rnd, key] = RoundArm(round=slot.round, arm=key)
+            if (position := held.state.position) is not None:
+                rereads[rnd, key] = RoundArm(round=position.round, arm=key)
             continue
         election = election_of(rnd)
         reading = ArmReading.of(
@@ -207,7 +207,7 @@ def read_course(
             fit=None if election is None else election.fit.get(key),
         )
         arms.append(
-            CourseArm(
+            CycleArm(
                 rnd,
                 key,
                 held.state,
@@ -217,4 +217,4 @@ def read_course(
             )
         )
     numbers = sorted({rnd for rnd, _ in standing.arms} | set(standing.rounds))
-    return CourseRead(arms, {rnd: election_of(rnd) for rnd in numbers}, rereads)
+    return CycleRoundsRead(arms, {rnd: election_of(rnd) for rnd in numbers}, rereads)

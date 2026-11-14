@@ -12,9 +12,9 @@ const at = (sec: number): string => new Date(T0 + sec * 1000).toISOString();
 
 function item(
   over: { ts: string; offset?: number; gap?: number; label?: string } & Partial<StepFacts>,
-  course = ROOT,
+  cycle = ROOT,
 ): HierarchyStep {
-  return hierarchyStep(course, {
+  return hierarchyStep(cycle, {
     offset: over.offset ?? 0,
     ts: over.ts,
     gap_before_s: over.gap ?? 0,

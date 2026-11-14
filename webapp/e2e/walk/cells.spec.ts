@@ -1,23 +1,23 @@
 import type { APIRequestContext } from "@playwright/test";
-import type { HierarchyCourse, SubtreeEntry } from "@/lib/api/types";
+import type { HierarchyCycle, SubtreeEntry } from "@/lib/api/types";
 import { encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
 import { test, expect, open, campaigns, DASHBOARD_VIEWS } from "../harness";
 
 const API = "/api/v1";
 
 // A cell and the name the tree row draws for it (`ForestRows`), so the walk clicks what the operator
-// reads: an inner campaign's one course folds into its campaign's row, which draws the campaign's label.
-type Cell = { course: HierarchyCourse; row: string };
-type Found = { outer: CyclePath; named: HierarchyCourse[]; row: string };
+// reads: an inner campaign's one cycle folds into its campaign's row, which draws the campaign's label.
+type Cell = { cycle: HierarchyCycle; row: string };
+type Found = { outer: CyclePath; named: HierarchyCycle[]; row: string };
 
 const hashOf = (path: CyclePath) => `#/${encodeCyclePath(path)}`;
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 function cellsOf(n: SubtreeEntry, out: Cell[] = []): Cell[] {
   for (const c of n.children) {
-    const cell = c.level === "course" && c.facts.task && pathOfAddress(c.address).length === 2;
-    if (cell && n.level === "campaign") {
-      out.push({ course: c, row: n.label });
+    const cell = c.entry_kind === "cycle" && c.facts.task && pathOfAddress(c.address).length === 2;
+    if (cell && n.entry_kind === "campaign") {
+      out.push({ cycle: c, row: n.label });
     }
     cellsOf(c, out);
   }
@@ -33,7 +33,7 @@ async function outerServing(request: APIRequestContext): Promise<Found | null> {
     // Two arms measure one task, so a name may draw several rows: any of them is a correct landing.
     const first = cells[0];
     if (first) {
-      const named = cells.filter((y) => y.row === first.row).map((y) => y.course);
+      const named = cells.filter((y) => y.row === first.row).map((y) => y.cycle);
       return { outer: [{ campaignId: c.id, cycleId: c.cycleId }], named, row: first.row };
     }
   }

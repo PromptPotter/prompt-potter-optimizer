@@ -164,7 +164,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
     crowned(1, 1, 3, { improved: true }),
     crowned(2, -1, 3, { improved: false, verdict_reason: "no arm cleared the parent" }, 1),
   ];
-  // The course entry's standing: `CourseFacts.standing`.
+  // The cycle entry's standing: `CycleEntryFacts.standing`.
   const stood = standing(1, 1);
   // `observed` is served: `served_dashboard.py::_observed`
   const closed = dash({
@@ -290,7 +290,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
 describe("originPoint — the origin as the served tree names it", () => {
   const snap = dash({ rounds: [crowned(0, 0, 1), crowned(1, 0, 2)] });
 
-  it("addresses the origin by the arm key its own course speaks", () => {
+  it("addresses the origin by the arm key its own cycle speaks", () => {
     const p = originPoint(snap, hierarchyCandidate("camp::cycle_a", { id: "r0c0", label: "C0" }));
     expect(p).toMatchObject({ round: 0, label: "C0", title: "origin · C0" });
     expect(p?.row?.reading.arm.key).toBe("r0c0");

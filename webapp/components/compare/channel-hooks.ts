@@ -156,9 +156,9 @@ export function usePickedPoint(
   // This cycle's ledger only: a pick on a fork's lane was billed to a file this read did not open.
   const spentTo = useMemo(() => {
     if (!reading || !selected || round == null) return null;
-    const onOwnCourse =
+    const onOwnCycle =
       encodeCyclePath(pathOfAddress(selected.address)) === encodeCyclePath(readingPath(reading));
-    return onOwnCourse ? (reading.spend_to_round[String(round)] ?? null) : null;
+    return onOwnCycle ? (reading.spend_to_round[String(round)] ?? null) : null;
   }, [reading, selected, round]);
   const overlay = useMemo(
     () => applyFlatEdits(cfg?.config ?? {}, editsFor(edits, key)),

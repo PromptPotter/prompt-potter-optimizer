@@ -195,7 +195,7 @@ def _init_formula(record: PhaseRecord) -> str | None:
     return None
 
 
-class _CycleFacts:
+class _CycleFactsFold:
     records: ClassVar[RecordClasses] = get_args(_CycleFact)
 
     def __init__(self) -> None:
@@ -415,7 +415,7 @@ _RoundStep = (
 )
 
 
-class _Standing:
+class _StandingFold:
     records: ClassVar[RecordClasses] = get_args(_RoundStep)
 
     def __init__(self) -> None:
@@ -534,14 +534,14 @@ class _Standing:
 
 
 _MOVES_ROUNDS = (RoundEnteredRecord, RoundClosedRecord, RoundRestatedRecord)
-assert set(_MOVES_ROUNDS) <= set(_Standing.records)
+assert set(_MOVES_ROUNDS) <= set(_StandingFold.records)
 
 
 def moves_index(record: CycleRecord) -> bool:
     """Whether *record* moves a cycle's index (`projections/cycle_index.py`): a fact its fold takes, or a round that stands."""
     if isinstance(record, PhaseRecord):
         return _init_formula(record) is not None
-    return isinstance(record, (*_CycleFacts.records, *_MOVES_ROUNDS))
+    return isinstance(record, (*_CycleFactsFold.records, *_MOVES_ROUNDS))
 
 
 _Naming = (
@@ -740,9 +740,9 @@ LedgerIndex.readers(
     _ResolvedRun,
     _ArmActs,
     _LaunchClocks,
-    _CycleFacts,
+    _CycleFactsFold,
     _CycleHold,
-    _Standing,
+    _StandingFold,
     _Answers,
     _Verification,
     _BenchOpen,
@@ -832,13 +832,13 @@ def scan_bench_open(ledger_path: Path) -> bool:
 
 
 def scan_cycle_facts(ledger_path: Path, until: int | None = None) -> CycleFacts:
-    return LedgerIndex.of(ledger_path).view(_CycleFacts, until)
+    return LedgerIndex.of(ledger_path).view(_CycleFactsFold, until)
 
 
 def scan_cell_formula(spans: Iterable[LedgerSpan]) -> str | None:
     formula: str | None = None
     for span in spans:
-        held = LedgerIndex.of(span.path).view(_CycleFacts, span.until)
+        held = LedgerIndex.of(span.path).view(_CycleFactsFold, span.until)
         formula = held.formula or formula
     return formula
 
@@ -846,7 +846,7 @@ def scan_cell_formula(spans: Iterable[LedgerSpan]) -> str | None:
 def scan_standing_rounds(spans: Iterable[LedgerSpan]) -> StandingRounds:
     standing = StandingRounds.none()
     for span in spans:
-        standing = standing.then(LedgerIndex.of(span.path).view(_Standing, span.until))
+        standing = standing.then(LedgerIndex.of(span.path).view(_StandingFold, span.until))
     return standing
 
 

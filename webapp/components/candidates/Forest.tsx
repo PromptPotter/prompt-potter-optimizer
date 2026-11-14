@@ -6,9 +6,9 @@ import { pressable } from "@/components/ui";
 import { pathLeaf, pathOfAddress, shortFamilyTail } from "@/lib/ids";
 import { figureOf, tagValue } from "@/lib/derivations";
 import {
-  type CourseKind,
-  type CourseSpawn,
-  type HierarchyCourse,
+  type CycleMint,
+  type CycleSpawn,
+  type HierarchyCycle,
   type SubtreeCampaign,
   DISPLAY_METRIC_INFO,
   type DisplayMetric,
@@ -44,14 +44,14 @@ export interface CladogramCtx {
   invalidated?: ReadonlySet<string>;
 }
 
-function courseName(course: HierarchyCourse): string {
-  const cycleId = pathLeaf(pathOfAddress(course.address)).cycleId;
-  return course.facts.mint === "root"
-    ? (tagValue(course, "dataset") ?? cycleId)
+function cycleName(cycle: HierarchyCycle): string {
+  const cycleId = pathLeaf(pathOfAddress(cycle.address)).cycleId;
+  return cycle.facts.mint === "root"
+    ? (tagValue(cycle, "dataset") ?? cycleId)
     : shortFamilyTail(cycleId);
 }
 
-function SpawnGlyph({ kind, spawn }: { kind: CourseKind; spawn: CourseSpawn | null }) {
+function SpawnGlyph({ kind, spawn }: { kind: CycleMint; spawn: CycleSpawn | null }) {
   return (
     <>
       {KIND_GLYPH[kind]}
@@ -188,7 +188,7 @@ export function Forest({
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
   expanded: ReadonlySet<string>;
-  onLaneActivate: (courseKey: string) => void;
+  onLaneActivate: (cycleKey: string) => void;
   ctx: CladogramCtx;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -283,10 +283,10 @@ export function Forest({
           ))}
 
           {laneList.map((l) => {
-            if (l.coursePathKey !== viewedKey) return null;
+            if (l.cyclePathKey !== viewedKey) return null;
             return (
               <rect
-                key={`hl-${l.coursePathKey}`}
+                key={`hl-${l.cyclePathKey}`}
                 x={0}
                 y={bandTop(l)}
                 width={width}
@@ -298,28 +298,28 @@ export function Forest({
 
           {/* Painted before the nodes so their clicks win. */}
           {laneList.map((l) => {
-            const course = l.course;
-            const { spawn } = course.facts;
-            const selection = figureOf(course, "selection");
+            const cycle = l.cycle;
+            const { spawn } = cycle.facts;
+            const selection = figureOf(cycle, "selection");
             const isEmpty = l.candidates.length === 0;
             const roundCount = new Set(l.candidates.map((c) => c.facts.reading.arm.round)).size;
             const verb = l.expanded ? "Collapse" : "Expand";
             return (
               <rect
-                key={`lanehit-${l.coursePathKey}`}
+                key={`lanehit-${l.cyclePathKey}`}
                 x={0}
                 y={bandTop(l)}
                 width={width}
                 height={bandH(l)}
                 className="family-cladogram-lane-hit"
-                {...pressable(() => onLaneActivate(course.address))}
-                aria-label={`${verb} ${courseName(course)}`}
+                {...pressable(() => onLaneActivate(cycle.address))}
+                aria-label={`${verb} ${cycleName(cycle)}`}
                 style={{ cursor: "pointer" }}
               >
                 <title>
-                  {pathLeaf(pathOfAddress(course.address)).cycleId}
-                  {`\n${course.facts.mint}`}
-                  {course.facts.task ? ` · ${course.facts.task}` : ""}
+                  {pathLeaf(pathOfAddress(cycle.address)).cycleId}
+                  {`\n${cycle.facts.mint}`}
+                  {cycle.facts.task ? ` · ${cycle.facts.task}` : ""}
                   {spawn?.trigger === "operator_steered"
                     ? ` · steered${spawn.issued_by ? ` by ${spawn.issued_by}` : ""}`
                     : ""}
@@ -329,7 +329,7 @@ export function Forest({
                   {spawn?.direction === "equivalent"
                     ? "\n≡ the cut reached nothing — this branch and its parent continue identically"
                     : ""}
-                  {` · ${figureOf(course, "state")?.value}`}
+                  {` · ${figureOf(cycle, "state")?.value}`}
                   {selection ? ` · ${selection.label}: ${selection.value}` : ""}
                   {isEmpty
                     ? "\nNo post-divergence rounds — use Clean up in the header to prune"
@@ -342,19 +342,19 @@ export function Forest({
           {nodes
             .filter((n) => !n.isExpanded)
             .map((n) => {
-              const cycleSelected = n.coursePathKey === viewedKey;
-              const layoutEntry = laneByKey.get(n.courseKey);
-              const nodeCycleId = pathLeaf(n.coursePath).cycleId;
-              const cycName = layoutEntry ? courseName(layoutEntry.course) : nodeCycleId;
+              const cycleSelected = n.cyclePathKey === viewedKey;
+              const layoutEntry = laneByKey.get(n.cycleKey);
+              const nodeCycleId = pathLeaf(n.cyclePath).cycleId;
+              const cycName = layoutEntry ? cycleName(layoutEntry.cycle) : nodeCycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
               // Inside an <svg>, so `<Hearts>` can't mount; the served figure is the same pips as text.
-              const laneHearts = figureOf(layoutEntry?.course ?? null, "lives")?.value;
+              const laneHearts = figureOf(layoutEntry?.cycle ?? null, "lives")?.value;
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;
               const ink = inkOf(n);
               return (
                 <g
-                  key={`n-${n.courseKey}-${n.round}`}
+                  key={`n-${n.cycleKey}-${n.round}`}
                   className={cx(
                     "family-cladogram-node",
                     cycleSelected && "selected",
@@ -362,7 +362,7 @@ export function Forest({
                     isDivergence && "mask-divergence",
                     ink && "channel",
                   )}
-                  {...pressable(() => onLaneActivate(n.courseKey))}
+                  {...pressable(() => onLaneActivate(n.cycleKey))}
                   aria-label={`Expand ${cycName}${ink ? ", holding a channel of the comparison" : ""}`}
                   style={{ cursor: "pointer" }}
                 >
@@ -370,7 +370,7 @@ export function Forest({
                     cx={n.x}
                     cy={n.y}
                     r={ink ? NODE_R + 1.5 : NODE_R}
-                    className={`family-cladogram-dot kind-${n.courseKind}`}
+                    className={`family-cladogram-dot kind-${n.cycleKind}`}
                     style={ink ? { fill: ink } : undefined}
                   />
                   {isDivergence && (
@@ -394,7 +394,7 @@ export function Forest({
                   {d.labels && rowLabelText && (
                     <text x={n.x + 8} y={n.y + 3} className="family-cladogram-cyclelabel">
                       <tspan className="family-cladogram-glyph">
-                        <SpawnGlyph kind={n.courseKind} spawn={n.spawn} />
+                        <SpawnGlyph kind={n.cycleKind} spawn={n.spawn} />
                       </tspan>
                       <tspan dx="4">{rowLabelText}</tspan>
                       {laneHearts && (
@@ -441,19 +441,19 @@ export function Forest({
           {(d.labels ? nodes : [])
             .filter((n) => n.isExpanded && n.isLastInLane)
             .map((n) => {
-              const course = laneByKey.get(n.courseKey)?.course;
-              if (!course) return null;
+              const cycle = laneByKey.get(n.cycleKey)?.cycle;
+              if (!cycle) return null;
               return (
                 <text
-                  key={`elabel-${n.courseKey}`}
+                  key={`elabel-${n.cycleKey}`}
                   x={n.x + d.candStub + 84}
                   y={n.y + 3}
                   className="family-cladogram-cyclelabel"
                 >
                   <tspan className="family-cladogram-glyph">
-                    <SpawnGlyph kind={course.facts.mint} spawn={course.facts.spawn} />
+                    <SpawnGlyph kind={cycle.facts.mint} spawn={cycle.facts.spawn} />
                   </tspan>
-                  <tspan dx="4">{courseName(course)}</tspan>
+                  <tspan dx="4">{cycleName(cycle)}</tspan>
                 </text>
               );
             })}

@@ -1,12 +1,12 @@
 import type {
   ArmElection,
-  CourseKind,
-  CourseSpawn,
+  CycleMint,
+  CycleSpawn,
   HierarchyCandidate,
   LineageDivergence,
   RoundFacts,
   SubtreeCampaign,
-  SubtreeCourse,
+  SubtreeCycle,
 } from "@/lib/api/types";
 import { candidatesOf, descentOf, tagValue, type Descent } from "@/lib/derivations";
 import { type CyclePath, pathOfAddress } from "@/lib/ids";
@@ -171,7 +171,7 @@ function paired(rows: readonly PairedRow[], centers: readonly number[]): PairedL
   };
 }
 
-// ---- FREED: one lane per course, one column per round, in pixels.
+// ---- FREED: one lane per cycle, one column per round, in pixels.
 
 export interface Density {
   colW: number;
@@ -211,20 +211,20 @@ export const HEADER_H = 18;
 export const TOP_PAD = HEADER_H + 8;
 export const NODE_R = 3.5;
 
-export const KIND_GLYPH: Record<CourseKind, string> = {
+export const KIND_GLYPH: Record<CycleMint, string> = {
   root: "●",
   fork: "⑂",
   inner: "◇",
 };
 
-export const TRIGGER_GLYPH: Record<CourseSpawn["trigger"], string> = {
+export const TRIGGER_GLYPH: Record<CycleSpawn["trigger"], string> = {
   operator_steered: "✎",
   operator_rewind: "",
   optimizer_rebase: "",
   scoring_divergence: "",
 };
 
-export const DIRECTION_GLYPH: Record<CourseSpawn["direction"], string> = {
+export const DIRECTION_GLYPH: Record<CycleSpawn["direction"], string> = {
   offshoot: "",
   supersede: "↳",
   equivalent: "≡",
@@ -248,7 +248,7 @@ function pickWinner(cands: readonly HierarchyCandidate[]): HierarchyCandidate | 
   return cands.find((c) => c.facts.reading.election.selected) ?? null;
 }
 
-const innerCourses = (cand: HierarchyCandidate): SubtreeCourse[] =>
+const innerCycles = (cand: HierarchyCandidate): SubtreeCycle[] =>
   cand.children.flatMap((c) => c.children);
 
 export function expandedLaneSpan(cands: readonly HierarchyCandidate[]): number {
@@ -260,9 +260,9 @@ export function expandedLaneSpan(cands: readonly HierarchyCandidate[]): number {
 }
 
 export interface LaneLayout {
-  course: SubtreeCourse;
-  // The course's address, which is its `CyclePath` on the wire.
-  coursePathKey: string;
+  cycle: SubtreeCycle;
+  // The cycle's address, which is its `CyclePath` on the wire.
+  cyclePathKey: string;
   candidates: HierarchyCandidate[];
   electsOn: ReadonlyMap<number, RoundFacts["elects_on"]>;
   expanded: boolean;
@@ -276,24 +276,24 @@ export interface LaneLayout {
 }
 
 export interface CladogramAnchor {
-  coursePathKey: string;
+  cyclePathKey: string;
   // The individual id.
   candidateId: string;
 }
 
-// The campaigns hung inside a course: off its candidates, and off the course where none claims one.
-const campaignsIn = (course: SubtreeCourse): SubtreeCampaign[] => [
-  ...candidatesOf(course).flatMap((c) => c.children),
-  ...course.children.filter((c) => c.level === "campaign"),
+// The campaigns hung inside a cycle: off its candidates, and off the cycle where none claims one.
+const campaignsIn = (cycle: SubtreeCycle): SubtreeCampaign[] => [
+  ...candidatesOf(cycle).flatMap((c) => c.children),
+  ...cycle.children.filter((c) => c.entry_kind === "campaign"),
 ];
 
 function pointAt(campaign: SubtreeCampaign, anchor: CladogramAnchor): HierarchyCandidate | null {
-  for (const course of campaign.children) {
-    if (course.address === anchor.coursePathKey) {
-      const own = candidatesOf(course).find((c) => c.facts.individual === anchor.candidateId);
+  for (const cycle of campaign.children) {
+    if (cycle.address === anchor.cyclePathKey) {
+      const own = candidatesOf(cycle).find((c) => c.facts.individual === anchor.candidateId);
       if (own) return own;
     }
-    for (const inner of campaignsIn(course)) {
+    for (const inner of campaignsIn(cycle)) {
       const found = pointAt(inner, anchor);
       if (found) return found;
     }
@@ -311,9 +311,9 @@ export function extentKeys(
   if (point === null) return null;
   const keys = new Set([point.address, ...point.facts.main_line.flatMap((s) => s.candidates)]);
   const addMeasurements = (cand: HierarchyCandidate): void => {
-    for (const course of innerCourses(cand)) {
-      if (course.facts.mint !== "inner") continue;
-      for (const c of candidatesOf(course)) {
+    for (const cycle of innerCycles(cand)) {
+      if (cycle.facts.mint !== "inner") continue;
+      for (const c of candidatesOf(cycle)) {
         keys.add(c.address);
         addMeasurements(c);
       }
@@ -324,11 +324,11 @@ export function extentKeys(
 }
 
 // A lane stands while it, or a run hung inside it, holds a kept candidate.
-const holdsKept = (course: SubtreeCourse, keep: ReadonlySet<string>): boolean =>
-  candidatesOf(course).some((c) => keep.has(c.address)) ||
-  campaignsIn(course).some((inner) => inner.children.some((c) => holdsKept(c, keep)));
+const holdsKept = (cycle: SubtreeCycle, keep: ReadonlySet<string>): boolean =>
+  candidatesOf(cycle).some((c) => keep.has(c.address)) ||
+  campaignsIn(cycle).some((inner) => inner.children.some((c) => holdsKept(c, keep)));
 
-// Lanes key on the course address, never a cycle id: inner cycle ids repeat across `.inner/` sandboxes.
+// Lanes key on the cycle address, never a cycle id: inner cycle ids repeat across `.inner/` sandboxes.
 function lanes(
   root: SubtreeCampaign,
   expanded: ReadonlySet<string>,
@@ -341,15 +341,15 @@ function lanes(
   const laneByKey = new Map<string, LaneLayout>();
   let nextRow = 0;
   let maxCol = 0;
-  const visitCourse = (
-    course: SubtreeCourse,
+  const visitCycle = (
+    cycle: SubtreeCycle,
     baseCol: number,
     anchor: string | null,
     parentKey: string | null,
   ): void => {
-    const key = course.address;
-    if (keep !== null && !holdsKept(course, keep)) return;
-    const cands = candidatesOf(course).filter((c) => keep === null || keep.has(c.address));
+    const key = cycle.address;
+    if (keep !== null && !holdsKept(cycle, keep)) return;
+    const cands = candidatesOf(cycle).filter((c) => keep === null || keep.has(c.address));
     const isExpanded = expanded.has(key);
     const laneSpan = isExpanded ? expandedLaneSpan(cands) : 1;
     const laneOffset = nextRow;
@@ -357,12 +357,12 @@ function lanes(
     const rightmost = cands.length > 0 ? baseCol + Math.max(...cands.map(candidateRound)) : baseCol;
     if (rightmost > maxCol) maxCol = rightmost;
     const electsOn = new Map<number, RoundFacts["elects_on"]>();
-    for (const rnd of course.children) {
-      if (rnd.level === "round") electsOn.set(rnd.facts.round, rnd.facts.elects_on);
+    for (const rnd of cycle.children) {
+      if (rnd.entry_kind === "round") electsOn.set(rnd.facts.round, rnd.facts.elects_on);
     }
     laneByKey.set(key, {
-      course,
-      coursePathKey: key,
+      cycle,
+      cyclePathKey: key,
       candidates: cands,
       electsOn,
       expanded: isExpanded,
@@ -377,9 +377,9 @@ function lanes(
         visitCampaign(inner, baseCol + candidateRound(cand) + 1, cand.address, key);
       }
     }
-    // An inner campaign no candidate holds hangs from the course itself, its caveat saying why.
-    for (const inner of course.children) {
-      if (inner.level === "campaign") visitCampaign(inner, baseCol, null, key);
+    // An inner campaign no candidate holds hangs from the cycle itself, its caveat saying why.
+    for (const inner of cycle.children) {
+      if (inner.entry_kind === "campaign") visitCampaign(inner, baseCol, null, key);
     }
   };
   // A fork shares its parent's round axis and hangs at its spawn candidate.
@@ -389,10 +389,10 @@ function lanes(
     anchor: string | null,
     parentKey: string | null,
   ): void => {
-    for (const course of campaign.children) {
-      const spawn = course.facts.spawn;
-      if (spawn) visitCourse(course, baseCol, course.facts.from_candidate, spawn.parent);
-      else visitCourse(course, baseCol, anchor, parentKey);
+    for (const cycle of campaign.children) {
+      const spawn = cycle.facts.spawn;
+      if (spawn) visitCycle(cycle, baseCol, cycle.facts.from_candidate, spawn.parent);
+      else visitCycle(cycle, baseCol, anchor, parentKey);
     }
   };
   visitCampaign(root, 0, null, null);
@@ -400,9 +400,9 @@ function lanes(
 }
 
 export interface RoundNodePos {
-  courseKey: string;
-  coursePath: CyclePath;
-  coursePathKey: string;
+  cycleKey: string;
+  cyclePath: CyclePath;
+  cyclePathKey: string;
   round: number;
   col: number;
   x: number;
@@ -418,8 +418,8 @@ export interface RoundNodePos {
   crown: ArmElection["crown"];
   isExpanded: boolean;
   isLastInLane: boolean;
-  courseKind: CourseKind;
-  spawn: CourseSpawn | null;
+  cycleKind: CycleMint;
+  spawn: CycleSpawn | null;
   divergence: LineageDivergence | null;
   divergent: boolean;
   retiredBy: string | null;
@@ -432,7 +432,7 @@ interface BranchSeg {
   y1: number;
   x2: number;
   y2: number;
-  // `fork`: a lane to the candidate or course it hangs from; else a descent link.
+  // `fork`: a lane to the candidate or cycle it hangs from; else a descent link.
   variant: DescentVariant | "fork";
   note: string | null;
 }
@@ -457,9 +457,9 @@ function placedNode(
   const { round } = cand.facts.reading.arm;
   const { selected, crown } = cand.facts.reading.election;
   return {
-    courseKey: laneKey,
-    coursePath: pathOfAddress(l.course.address),
-    coursePathKey: l.coursePathKey,
+    cycleKey: laneKey,
+    cyclePath: pathOfAddress(l.cycle.address),
+    cyclePathKey: l.cyclePathKey,
     round,
     col: l.baseCol + round,
     x,
@@ -472,8 +472,8 @@ function placedNode(
     crown,
     isExpanded,
     isLastInLane: false,
-    courseKind: l.course.facts.mint,
-    spawn: l.course.facts.spawn,
+    cycleKind: l.cycle.facts.mint,
+    spawn: l.cycle.facts.spawn,
     divergence: cand.facts.divergence,
     divergent: cand.facts.divergent,
     retiredBy: retiredBy(cand),
@@ -579,7 +579,7 @@ function freed(
 
     const childBandY = bandCenterY(l);
     // A fork shares its parent's round axis; an inner run starts a column right of its spawner.
-    const minChildX = l.course.facts.spawn ? anchorX : anchorX + d.colW;
+    const minChildX = l.cycle.facts.spawn ? anchorX : anchorX + d.colW;
     const firstRound = l.candidates.length > 0
       ? Math.min(...l.candidates.map(candidateRound))
       : null;

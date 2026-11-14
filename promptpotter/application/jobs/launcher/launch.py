@@ -27,7 +27,7 @@ from promptpotter.infrastructure.store.stores import Stores
 logger = logging.getLogger(__name__)
 
 # Detached queued launches, held so the event loop cannot collect one mid-wait.
-_DETACHED: set[asyncio.Task[object]] = set()
+_DETACHED_TASKS: set[asyncio.Task[object]] = set()
 
 
 type LaunchRequest = FreshMint | ExistingCycle | CheckinStart
@@ -175,8 +175,8 @@ async def launch(
 
 def _detach(coro: Coroutine[Any, Any, object], *, what: str) -> None:
     task = asyncio.ensure_future(coro)
-    _DETACHED.add(task)
-    task.add_done_callback(_DETACHED.discard)
+    _DETACHED_TASKS.add(task)
+    task.add_done_callback(_DETACHED_TASKS.discard)
     # Nobody awaits it, so the result is read here: an unread exception warns at shutdown.
     task.add_done_callback(lambda t: _report_detached(t, what))
 

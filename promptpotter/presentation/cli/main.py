@@ -354,10 +354,10 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "cli.commands.launch:cmd_resume",
         unspelled={
             "keep_rounds": "`--rewind` keeps them, a bare `--steer` does not",
-            "seed.pipeline_overlay": "`--steer NODE.PARAM=VALUE`, folded per node",
-            "seed.origin_prompts": "a terminal fork edits no prompt; the browser's steer-fork does",
-            "seed.config_overrides": "a fork's caps are its parent's remainder; `--max-*` bound it",
-            "seed.node_narrowing": "a terminal fork narrows no node; the browser's steer-fork does",
+            "start.pipeline_overlay": "`--steer NODE.PARAM=VALUE`, folded per node",
+            "start.origin_prompts": "a terminal fork edits no prompt; the browser's steer-fork does",
+            "start.config_overrides": "a fork's caps are its parent's remainder; `--max-*` bound it",
+            "start.node_narrowing": "a terminal fork narrows no node; the browser's steer-fork does",
             "candidate_id": "a terminal fork starts from a round's line, never a named candidate",
         },
         help="Continue the active campaign. Bare `resume` picks up where it "
@@ -601,14 +601,14 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 action="append",
                 default=[],
                 help="What to pool, repeated for a set: 'campaign:<id>' (its root origin), "
-                "'course:<campaign>/<cycle>' (one branch, at its last elected winner) or "
+                "'cycle:<campaign>/<cycle>' (one branch, at its last elected winner) or "
                 "'candidate:<campaign>/<cycle>/<candidate>' (one searchpoint). The campaign id accepts "
                 "the same short prefix every other verb does. May span datasets, which the comparability "
                 "line then reports on. An L4 inner run names the sandbox "
                 "chain it lives in, same codec as the API's '?descend=': "
                 "';in=<outer_campaign>::<outer_cycle>', one hop per level. A mask rides the same "
                 "address, ';'-separated: ';samples=3,7,11' reads every value over those samples only, and "
-                "';lens=score:<formula>' (courses only) re-decides the branch's elections under another "
+                "';lens=score:<formula>' (cycles only) re-decides the branch's elections under another "
                 "criterion — so the record and the counterfactual pool as two channels of one read.",
             ),
             Arg(
@@ -623,7 +623,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "--winner-chain",
                 dest="winner_chain",
                 action="store_true",
-                help="Also print the branch behind each course / candidate subject — the winner chain "
+                help="Also print the branch behind each cycle / candidate subject — the winner chain "
                 "from its origin to its head, each point read on its own cells. OFF by default: every "
                 "point past the origin opens a round file.",
             ),
@@ -691,7 +691,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "the headline — the pass a `bench_trigger: manual` campaign (the default) sends only "
         "when asked, on the cycle holding its line. Reuses a pass the line already holds; refuses "
         "a line with a run in flight, a split holding nothing out and a selection already graded "
-        "— the served status's own answer (the course's `facts.bench.status`). Spends: two passes "
+        "— the served status's own answer (the cycle's `facts.bench.status`). Spends: two passes "
         "over the bench rows.",
         args=(ACTIVE_CAMPAIGN,),
     ),
@@ -850,7 +850,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "mcp.server:cmd_mcp",
         terminal_only="it is the host door, over this terminal's stdio",
         help="Serve this workspace to a local host assistant over MCP stdio: every command and "
-        "read as a tool, campaigns and courses as resources, the check-in as a prompt — each "
+        "read as a tool, campaigns and cycles as resources, the check-in as a prompt — each "
         "call as this terminal's own principal. Runs until the host closes stdin. Needs the "
         "`mcp` extra.",
     ),

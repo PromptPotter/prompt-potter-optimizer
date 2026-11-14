@@ -37,7 +37,7 @@ from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, parse_prompt_export
-from promptpotter.domain.free_tier import FREE_TIER_ADAPTER
+from promptpotter.domain.free_tier_file import FREE_TIER_ADAPTER
 from promptpotter.domain.job import JOB_ADAPTER, LIVE_JOB_IDS
 from promptpotter.domain.kinds import KindTable
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
@@ -172,7 +172,7 @@ class Parsed(NamedTuple):
     model: object
 
 
-class Folded(NamedTuple):
+class FoldedLines(NamedTuple):
     """A row a landing proves by its reader's fold over the whole file, never each line's parse:
     lines that each parse can still fold wrong."""
 
@@ -180,7 +180,7 @@ class Folded(NamedTuple):
     model: object
 
 
-type Shape = TypeAdapter[Any] | Parsed | Opaque | Folded
+type Shape = TypeAdapter[Any] | Parsed | Opaque | FoldedLines
 
 _HELD = Opaque("a lock or marker its process holds, never parsed")
 _AUDIT = Opaque("an audit trail its writer appends and no reader parses")
@@ -226,7 +226,7 @@ class Kind(NamedTuple):
 
     @property
     def per_line(self) -> bool:
-        return self.glob.endswith(".jsonl") and not isinstance(self.shape, Folded)
+        return self.glob.endswith(".jsonl") and not isinstance(self.shape, FoldedLines)
 
     @property
     def authored(self) -> bool:
@@ -330,7 +330,7 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
     Kind("consent trail", Scope.ACCOUNT, CONSENT_FILE, _SURVIVOR, TypeAdapter(ConsentLine)),
     Kind("grant", Scope.ACCOUNT, GRANT_FILE, _RUN, TypeAdapter(CouponGrant)),
     Kind("api keys", Scope.ACCOUNT, API_KEYS_FILE, _SURVIVOR, HELD_KEYS),
-    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _RUN, Folded(charge_book_fold, Money)),
+    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _RUN, FoldedLines(charge_book_fold, Money)),
     Kind("bank", Scope.ACCOUNT, f"{BANKS_DIR}/*.json", Fate.CACHE, Parsed(read_bank, Bank)),
     # An upload definition's `source:` reads it.
     Kind("upload", Scope.ACCOUNT, f"{UPLOADS_DIR}/**", _RUN, Opaque("an uploaded file's bytes")),
@@ -715,7 +715,7 @@ def load(path: Path, found: Found, staged: bytes | None) -> None:
     # Gone since the listing.
     if raw is None:
         return
-    if isinstance(shape, Folded):
+    if isinstance(shape, FoldedLines):
         shape.fold(raw)
         return
     if not kind.per_line:

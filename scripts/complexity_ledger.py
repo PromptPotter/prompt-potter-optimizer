@@ -50,7 +50,9 @@ BASELINE = {
     # said, the parent's fitness banked on L2's box, each candidate's
     # rendered prompt in the population table, a readout naming the InitClosed it missed, and the
     # browser's skip refusal served off the run, apart from the launch's admission.
-    "package_lines": 110007,
+    # ren (+29): `Panel` named `RoundSamples`, so twelve proposers' `propose` signatures wrap, each
+    # beside a samples parameter only gepa reads (filed); net of two dead definitions deleted.
+    "package_lines": 110036,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -99,6 +101,8 @@ BASELINE = {
     "test_files": 7,
     # Test functions over 150 lines across them: each holds one fact (`tests/CLAUDE.md`).
     "test_functions_over_150": 0,
+    # Top-level class names the package defines twice, private ones included: one name, two things.
+    "class_names_twice": 0,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"
@@ -360,16 +364,16 @@ def _recorded_models() -> list[object]:
     from pydantic import TypeAdapter
 
     from promptpotter.domain.kinds import KindTable
-    from promptpotter.infrastructure.store.data_root import KINDS, Folded, Parsed
+    from promptpotter.infrastructure.store.data_root import KINDS, FoldedLines, Parsed
 
     models: list[object] = []
     for kind in KINDS:
         match kind.shape:
             case TypeAdapter():
                 models.append(kind.shape._type)
-            case Parsed(model=KindTable() as table) | Folded(model=KindTable() as table):
+            case Parsed(model=KindTable() as table) | FoldedLines(model=KindTable() as table):
                 models.extend(table.registered().values())
-            case Parsed(model=model) | Folded(model=model):
+            case Parsed(model=model) | FoldedLines(model=model):
                 models.append(model)
     return models
 
@@ -517,7 +521,7 @@ def _is_copy_update(call: ast.Call) -> bool:
 
 
 def _source_counts(py_files: list[Path]) -> dict[str, int]:
-    """The six counts read off source, in ONE parse and one walk per module.
+    """The seven counts read off source, in ONE parse and one walk per module.
 
     A deferred import counts once per function enclosing it, so a closure's import is charged to
     the closure and to the function that holds it. ``domain_any_maps`` is scoped to ``domain/``
@@ -527,12 +531,15 @@ def _source_counts(py_files: list[Path]) -> dict[str, int]:
     package_lines = any_params = any_maps = deferred = copies = 0
     bases: dict[str, list[str]] = {}
     declared: dict[str, str | None] = {}
+    classes: collections.Counter[str] = collections.Counter()
     for path in py_files:
         source = path.read_text(encoding="utf-8")
         lines = source.splitlines()
         package_lines += len(lines)
         in_domain = domain_root in path.parents
-        for node, depth in _nodes(ast.parse(source)):
+        tree = ast.parse(source)
+        classes.update(s.name for s in tree.body if isinstance(s, ast.ClassDef))
+        for node, depth in _nodes(tree):
             if isinstance(node, _Function):
                 args = node.args
                 annotations = [a.annotation for a in args.posonlyargs + args.args + args.kwonlyargs]
@@ -558,6 +565,7 @@ def _source_counts(py_files: list[Path]) -> dict[str, int]:
         "domain_any_maps": any_maps,
         "models_lax": _count_lax_models(bases, declared),
         "deferred_imports": deferred,
+        "class_names_twice": sum(n > 1 for n in classes.values()),
     }
 
 
@@ -607,7 +615,7 @@ def _is_reexport_shim(init_file: Path) -> bool:
 def compute_ledger() -> dict[str, int]:
     from promptpotter.application import optimizers
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.knobs import KNOBS, member_knob_count
+    from promptpotter.application.config_map import KNOBS, member_knob_count
     from promptpotter.application.optimizers.nodes import CycleRead
     from promptpotter.config.settings import Settings
     from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
@@ -659,6 +667,7 @@ def compute_ledger() -> dict[str, int]:
         "p_reads": sum(map(_count_handed, CycleRead.__subclasses__())),
         "test_files": test_files,
         "test_functions_over_150": test_functions_over_150,
+        "class_names_twice": source["class_names_twice"],
     }
 
 

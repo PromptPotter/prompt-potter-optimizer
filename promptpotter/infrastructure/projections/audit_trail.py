@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar
 
-from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase
+from promptpotter.domain.phases import STOP_REASON_INFO
 from promptpotter.domain.records.run_records import (
     Ended,
     LLMCallRecord,
@@ -26,8 +26,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, RecordClasses
-
-_STOPS = frozenset({RunPhase.TERMINAL, RunPhase.PAUSED})
 
 type _Record = (
     LLMCallRecord | RoundClosedRecord | RoundEnteredRecord | RoundWarningRecord | RunPhaseRecord

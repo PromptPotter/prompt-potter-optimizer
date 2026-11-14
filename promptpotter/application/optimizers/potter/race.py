@@ -13,7 +13,7 @@ from promptpotter.application.bench.node_context import (
     Ruler,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
-from promptpotter.application.optimizers.nodes import Panel
+from promptpotter.application.optimizers.nodes import RoundSamples
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb import (
     EliminationContext,
@@ -78,7 +78,7 @@ class PoBBRace:
     """A block race cut on the family-wise p_best (`PoBBCheck.check`) at each checkpoint the arms share;
     its top-up onto the origin panel is one more stretch of it (`runner/round.py::measure_population`)."""
 
-    def __init__(self, ctx: NodeContext, panel: Panel) -> None:
+    def __init__(self, ctx: NodeContext, panel: RoundSamples) -> None:
         # The one prior no arm of this round labels; a cell it never answered is caught up, never borrowed.
         lineage = ctx.read(Lineage)
         parent = ArmKey(lineage.parent.id)

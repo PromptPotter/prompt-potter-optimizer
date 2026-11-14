@@ -15,13 +15,13 @@ describe("compareItems", () => {
     const evidence = {
       subjects: [
         reading("campaign:potter", "campaign"),
-        reading("course:capo/c1", "course"),
+        reading("cycle:capo/c1", "cycle"),
         reading("candidate:potter/c0/k", "candidate"),
       ],
-      head_to_head: { rows: [row("campaign:potter", "potter"), row("course:capo/c1", "capo")] },
+      head_to_head: { rows: [row("campaign:potter", "potter"), row("cycle:capo/c1", "capo")] },
     } as unknown as Evidence;
     const items = compareItems(evidence, [
-      { rootCampaignId: "capo", subject: "course:capo/c1" },
+      { rootCampaignId: "capo", subject: "cycle:capo/c1" },
       { rootCampaignId: "potter", subject: "candidate:potter/c0/k" },
       { rootCampaignId: "gone", subject: "campaign:gone" },
       { rootCampaignId: "potter", subject: "campaign:potter" },

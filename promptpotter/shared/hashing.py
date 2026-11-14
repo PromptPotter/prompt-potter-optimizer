@@ -92,12 +92,12 @@ def content_hash(
     dataset: Iterable[Any],
     pipeline_params: dict[str, Any] | None,
     *,
-    candidate_library: Iterable[str],
+    answer_terms: Iterable[str],
 ) -> str:
     """Each node's rendered ``prompt`` rides its config, so *pipeline_params* covers every prompt."""
     blob_dict: dict[str, Any] = {"dataset": dataset_hash(dataset)}
     if pipeline_params:
         blob_dict["pipeline_params"] = pipeline_params
-    if library := sorted(set(candidate_library)):
-        blob_dict["candidate_library"] = library
+    if library := sorted(set(answer_terms)):
+        blob_dict["answer_terms"] = library
     return stable_hash(blob_dict, length=ADDRESS_HEX)

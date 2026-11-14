@@ -21,7 +21,7 @@ from typing import IO, Any, Literal
 from xml.etree import ElementTree
 
 from promptpotter.config.settings import settings
-from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
+from promptpotter.domain.pipeline_schema import ANSWER_TERMS_FILE
 from promptpotter.domain.sample import Sample
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.extras import Extra, require_extra
@@ -511,7 +511,7 @@ def _dedup_terms(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(seen)
 
 
-async def parse_candidate_library(blob: bytes, filename: str) -> tuple[str, ...]:
+async def parse_answer_terms(blob: bytes, filename: str) -> tuple[str, ...]:
     return await asyncio.to_thread(_library_terms, blob, filename)
 
 
@@ -524,19 +524,19 @@ def _library_terms(blob: bytes, filename: str) -> tuple[str, ...]:
     if not terms:
         raise IngestError(
             reason="empty",
-            message="The candidate library has no usable entries (every line was blank).",
+            message="The answer terms have no usable entry (every line was blank).",
         )
     return terms
 
 
-def read_candidate_library_file(dataset_dir: Path) -> tuple[str, ...]:
-    path = dataset_dir / CANDIDATE_LIBRARY_FILE
+def read_answer_terms_file(dataset_dir: Path) -> tuple[str, ...]:
+    path = dataset_dir / ANSWER_TERMS_FILE
     if not path.is_file():
         return ()
     return _dedup_terms(path.read_text(encoding="utf-8").splitlines())
 
 
-def candidate_library_from_rows(rows: Iterable[dict[str, Any]], column: str) -> tuple[str, ...]:
+def answer_terms_from_rows(rows: Iterable[dict[str, Any]], column: str) -> tuple[str, ...]:
     return _dedup_terms(str(row.get(column, "")) for row in rows)
 
 

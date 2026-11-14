@@ -3,10 +3,10 @@ import type { SubtreeCampaign } from "@/lib/api/types";
 import { armAt, candidatesAtPath, indexLineage } from "@/lib/derivations";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 import {
-  courseTags,
+  cycleTags,
   subtreeCampaign,
   hierarchyCandidate,
-  subtreeCourse,
+  subtreeCycle,
   roundsOf,
 } from "@/lib/test-fixtures";
 
@@ -20,15 +20,15 @@ const innerRun = (outer: CyclePath, cycleId: string, task: string | null): Subtr
   return subtreeCampaign({
     address: `${encodeCyclePath(outer)}~${campaignId}`,
     children: [
-      subtreeCourse(
-        { address: encodeCyclePath([...outer, { campaignId, cycleId }]), tags: courseTags("inner") },
+      subtreeCycle(
+        { address: encodeCyclePath([...outer, { campaignId, cycleId }]), tags: cycleTags("inner") },
         { mint: "inner", task },
       ),
     ],
   });
 };
 
-// Both courses mint a C1.1: a fork's cells join on its own course's labels.
+// Both cycles mint a C1.1: a fork's cells join on its own cycle's labels.
 function tree(task = "justlogic-d234/seed-0"): SubtreeCampaign {
   const root = [
     hierarchyCandidate(R, { id: "root-c0", label: "C0" }, { children: [innerRun(ROOT, "inner_a", task)] }),
@@ -48,8 +48,8 @@ function tree(task = "justlogic-d234/seed-0"): SubtreeCampaign {
   return subtreeCampaign({
     address: "demo__aaaaaa",
     children: [
-      subtreeCourse({ address: R, children: roundsOf(R, root) }),
-      subtreeCourse({ address: F, children: roundsOf(F, fork) }, { mint: "fork" }),
+      subtreeCycle({ address: R, children: roundsOf(R, root) }),
+      subtreeCycle({ address: F, children: roundsOf(F, fork) }, { mint: "fork" }),
     ],
   });
 }
@@ -61,7 +61,7 @@ describe("candidatesAtPath", () => {
     expect(candidatesAtPath(index(), FORK).map((c) => c.facts.individual)).toEqual(["fork-c1"]);
   });
 
-  it("gives a course its OWN candidates, never a fork's", () => {
+  it("gives a cycle its OWN candidates, never a fork's", () => {
     expect(candidatesAtPath(index(), ROOT).map((c) => c.facts.individual)).toEqual([
       "root-c0",
       "root-c1",

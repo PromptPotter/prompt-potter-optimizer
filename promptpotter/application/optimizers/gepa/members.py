@@ -26,10 +26,10 @@ from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.nodes import (
     CycleRead,
     MeasuredRound,
-    Panel,
     PromptArity,
     Proposals,
     RewriteKnobs,
+    RoundSamples,
     Selection,
 )
 from promptpotter.application.optimizers.paper_templates import child, shown
@@ -156,13 +156,13 @@ class Minibatch(nodes.Sampler):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Replay})
     size_knob: ClassVar[str | None] = None
 
-    def drawn(self, knobs: MinibatchKnobs, search: int, _pipeline: str) -> nodes.PanelSize:
+    def drawn(self, knobs: MinibatchKnobs, search: int, _pipeline: str) -> nodes.DrawSize:
         fits = search - knobs.pareto_size >= knobs.size
-        return nodes.PanelSize(
+        return nodes.DrawSize(
             cells=knobs.size + knobs.pareto_size if fits else 0, block_size=knobs.size
         )
 
-    def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
+    def draw(self, ctx: NodeContext, pool: list[Sample]) -> RoundSamples:
         knobs = ctx.knobs(MinibatchKnobs)
         banked = ctx.slice(ParetoSet).keys
         by_key = {s.key: s for s in pool}
@@ -180,7 +180,7 @@ class Minibatch(nodes.Sampler):
         ctx.put(ParetoSet(keys=[s.key for s in pareto]))
         batch = ctx.read(Replay).rng().sample(feedback, knobs.size)
         cells = [*batch, *pareto]
-        return nodes.Panel(cells=cells, order=list(cells), block_size=knobs.size)
+        return nodes.RoundSamples(cells=cells, order=list(cells), block_size=knobs.size)
 
 
 class GepaReflect(nodes.Proposer):
@@ -201,10 +201,12 @@ class GepaReflect(nodes.Proposer):
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
 
-    def parent_read(self, panel: nodes.PanelSize) -> int:
+    def parent_read(self, panel: nodes.DrawSize) -> int:
         return panel.block_size
 
-    async def propose(self, ctx: NodeContext, panel: Panel, _proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, panel: RoundSamples, _proposals: Proposals
+    ) -> Proposals:
         candidates = ctx.slice(ParetoScores)
         parent_id = candidates.parent_id
         # A lineage no longer scored keeps no pointer.
@@ -359,7 +361,7 @@ class MinibatchGate(nodes.Eliminator):
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
     stop_disqualifies: ClassVar[bool] = True
 
-    def race(self, ctx: NodeContext, panel: Panel) -> _GateRace:
+    def race(self, ctx: NodeContext, panel: RoundSamples) -> _GateRace:
         return _GateRace(
             ctx,
             bars=ctx.recall(MinibatchBars, ctx.round_num),
@@ -447,12 +449,12 @@ class Pareto(nodes.Selector):
     def parent_cells(
         self,
         _ctx: NodeContext,
-        panel: Panel,
+        panel: RoundSamples,
         _rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells[panel.block_size :]
 
-    def parent_read(self, panel: nodes.PanelSize) -> int:
+    def parent_read(self, panel: nodes.DrawSize) -> int:
         return panel.cells - panel.block_size
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:

@@ -3,7 +3,7 @@ import type { DraftDependency } from "@/lib/api/types";
 import { Select } from "@/components/ui";
 
 interface DependencyProps {
-  librarySize: number;
+  answerTermsSize: number;
   headers: string[];
   targetColumn: string | null;
   onUpload: (file: File) => void;
@@ -23,7 +23,7 @@ export function PipelineDependencies({
 
 function DependencyRow({
   dep,
-  librarySize,
+  answerTermsSize,
   headers,
   targetColumn,
   onUpload,
@@ -37,7 +37,7 @@ function DependencyRow({
   return (
     <fieldset>
       <legend>
-        {dep.title} — {dep.fulfilled ? `✓ ${librarySize} targets` : "missing"}
+        {dep.title} — {dep.fulfilled ? `✓ ${answerTermsSize} targets` : "missing"}
       </legend>
       <p>{dep.hint}</p>
       {headers.length > 0 ? (

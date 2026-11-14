@@ -155,7 +155,7 @@ async def draft_from_dataset(
                 node: dict(prompt.fields)
                 for node, prompt in origin_prompts(dataset, running).items()
             },
-            "candidate_library": authored.candidate_library,
+            "answer_terms": authored.answer_terms,
         },
         provenance={} if task is None else {"task_description": Provenance.CONFIRMED},
     )
@@ -169,10 +169,10 @@ async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaignW
     if campaign is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
     overrides: dict[str, Any] = {}
-    seed = cycle_config(stores, campaign, campaign.root_hop).origin
-    if seed is not None:
+    start = cycle_config(stores, campaign, campaign.root_hop).origin
+    if start is not None:
         overrides["origin_prompts"] = {
-            node: dict(prompt.fields) for node, prompt in seed.origin_prompts.items()
+            node: dict(prompt.fields) for node, prompt in start.origin_prompts.items()
         }
     return await draft_from_dataset(
         stores=stores,

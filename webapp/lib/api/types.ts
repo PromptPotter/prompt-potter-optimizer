@@ -7,31 +7,31 @@ import type {
   CampaignPipelineResponse,
   CellsResponse,
   CommandPayloads,
-  CourseFacts,
+  CycleEntryFacts,
   EditDraftPatch,
   HierarchyCampaign,
   HierarchyCandidate,
-  HierarchyCourse,
+  HierarchyCycle,
   HierarchyResponse,
   HierarchyRound,
   ServedDashboard,
   SubtreeCampaign,
-  SubtreeCourse,
+  SubtreeCycle,
 } from "./types.generated";
 
 // served: `domain/hierarchy.py::ListedCampaign` — a started campaign, or an open check-in
-// (`level: "unstarted"`). Narrow on `level` once.
+// (`entry_kind: "unstarted"`). Narrow on `entry_kind` once.
 export type ListedCampaign = HierarchyResponse["entries"][number];
 
-// What the forest and a bar draw: a run, or one candidate of one. Narrow on `level` once.
-export type LineageNode = SubtreeCourse | HierarchyCandidate;
+// What the forest and a bar draw: a run, or one candidate of one. Narrow on `entry_kind` once.
+export type LineageNode = SubtreeCycle | HierarchyCandidate;
 
 // Any entry a row or a card renders, the listing's or a subtree's: each `Subtree*` type extends its
 // listing one. A round is a node of the tree, never a row.
-export type HierarchyEntry = HierarchyCampaign | HierarchyCourse | HierarchyCandidate;
+export type HierarchyEntry = HierarchyCampaign | HierarchyCycle | HierarchyCandidate;
 // served: `domain/hierarchy.py::HierarchyEntry` — what `GET /hierarchy/{address}` answers.
-export type SubtreeEntry = SubtreeCampaign | SubtreeCourse | HierarchyRound | HierarchyCandidate;
-export type CourseKind = CourseFacts["mint"];
+export type SubtreeEntry = SubtreeCampaign | SubtreeCycle | HierarchyRound | HierarchyCandidate;
+export type CycleMint = CycleEntryFacts["mint"];
 
 // A partial config, as sent: every key omittable at any depth.
 export type DraftPatch = Partial<Omit<EditDraftPatch, "config">> &

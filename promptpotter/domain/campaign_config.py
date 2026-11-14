@@ -27,7 +27,7 @@ from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
     NodeSearchNarrowing,
 )
-from promptpotter.domain.records.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
+from promptpotter.domain.records.run_records import ConfigOverrides, CycleStart, ScoringLockedRecord
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -157,7 +157,7 @@ class OptimizationConfig(OptimizerChoice):
             "checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the "
             "origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); "
             "``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. "
-            "A fork seed, a standing ``set-limits`` and a launch flag each lay over it axis by "
+            "A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by "
             "axis, and the account admits the result whole or refuses the launch. A null axis "
             "is unbounded. ``tokens`` is unset by default: a token is worth a different amount "
             "on every route, so set it only where a backend bills but reports no cost "
@@ -326,7 +326,7 @@ class CampaignConfig(StrictModel):
         "no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE "
         "permitted model set: what the optimizer may pick, and what a human fork may steer to "
         "without tainting the branch. A steer outside it is a `campaign.babysit` act — warned "
-        "+ graded C (`steer_verdict`, asked when a fork's seed is parsed). Nothing declared for "
+        "+ graded C (`steer_verdict`, asked when a fork's start is parsed). Nothing declared for "
         "a node = nothing sanctioned there, the restrictive default.",
     )
     scoring: Annotated[_Formula | dict[str, _Formula], Knob(Estimand.GATE)]
@@ -429,12 +429,12 @@ class CampaignConfig(StrictModel):
 CAMPAIGN_RULE = rules_of(CampaignConfig)
 
 
-def seed_layer(overrides: ConfigOverrides) -> Layer[str]:
+def start_layer(overrides: ConfigOverrides) -> Layer[str]:
     """A fork's delta: a ``scoring`` mapping is laid into the criterion's block, as the ``score:F`` lens."""
-    return Layer("seed", functools.partial(_seeded, overrides))
+    return Layer("start", functools.partial(_started, overrides))
 
 
-def _seeded(overrides: ConfigOverrides, held: Mapping[str, object]) -> dict[str, Any]:
+def _started(overrides: ConfigOverrides, held: Mapping[str, object]) -> dict[str, Any]:
     optimization: dict[str, Any] = {}
     if overrides.budget.named:
         optimization["budget"] = overrides.budget.model_dump(mode="json", exclude_unset=True)
@@ -462,18 +462,18 @@ def _locked(lock: ScoringLockedRecord, held: Mapping[str, object]) -> dict[str, 
 
 
 class LaidSpan(FrozenModel):
-    """One ledger of a cycle's chain: its own last seed, then the criterion its origin locked."""
+    """One ledger of a cycle's chain: its own last start, then the criterion its origin locked."""
 
-    seed: CycleSeed | None
+    start: CycleStart | None
     scoring_lock: ScoringLockedRecord | None
 
     def layers(self) -> list[Layer[str]]:
         layers: list[Layer[str]] = []
-        if (seed := self.seed) is not None:
-            narrowing = {n: v.model_dump(mode="json") for n, v in seed.optimizer_narrowing.items()}
+        if (start := self.start) is not None:
+            narrowing = {n: v.model_dump(mode="json") for n, v in start.optimizer_narrowing.items()}
             layers += [
-                seed_layer(seed.config_overrides),
-                Layer("seed", {"optimizer_narrowing": narrowing}),
+                start_layer(start.config_overrides),
+                Layer("start", {"optimizer_narrowing": narrowing}),
             ]
         if (lock := self.scoring_lock) is not None:
             layers.append(Layer("scoring_lock", functools.partial(_locked, lock)))
@@ -487,9 +487,9 @@ class CycleConfig(FrozenModel):
     config: CampaignConfig
     # One per ledger of the cycle's chain, its root's first and its own last.
     spans: tuple[LaidSpan, ...]
-    seed_overlay: dict[str, dict[str, Any]]
-    # Each (node, key) of ``optimization.nodes`` a seed of the line laid.
-    seeded_knobs: frozenset[tuple[str, str]]
+    start_overlay: dict[str, dict[str, Any]]
+    # Each (node, key) of ``optimization.nodes`` a start of the line laid.
+    start_knobs: frozenset[tuple[str, str]]
 
     @classmethod
     def laid(cls, declared: CampaignConfig, spans: Sequence[LaidSpan]) -> CycleConfig:
@@ -500,8 +500,8 @@ class CycleConfig(FrozenModel):
         return cls(
             config=CampaignConfig.model_validate(folded.document),
             spans=tuple(spans),
-            seed_overlay=lay_nodes(*(s.seed.runs() for s in spans if s.seed is not None)),
-            seeded_knobs=frozenset(
+            start_overlay=lay_nodes(*(s.start.runs() for s in spans if s.start is not None)),
+            start_knobs=frozenset(
                 (path[2], path[4])
                 for path in folded.stamps
                 if len(path) == 5 and path[:2] == ("optimization", "nodes")
@@ -509,37 +509,37 @@ class CycleConfig(FrozenModel):
         )
 
     def steers_outside(self, permitted: Mapping[str, NodeSearchNarrowing]) -> bool:
-        """The babysit act (decisions.md § 0005): a seed of the line steers outside what the nodes *permitted*."""
+        """The babysit act (decisions.md § 0005): a start of the line steers outside what the nodes *permitted*."""
         return any(
-            span.seed is not None
-            and steers_disallowed_model(permitted, laid_calls(span.seed.pipeline_overlay))
+            span.start is not None
+            and steers_disallowed_model(permitted, laid_calls(span.start.pipeline_overlay))
             for span in self.spans
         )
 
     def knob_layers(self, recorded: KnobLayers) -> dict[str, dict[str, KnobLayer]]:
-        """The layer that last set each ``optimization.nodes`` key ``config`` holds: a seed of the
+        """The layer that last set each ``optimization.nodes`` key ``config`` holds: a start of the
         line, else the one *recorded* at the mint."""
         return {
             node: {
-                key: "seed" if (node, key) in self.seeded_knobs else recorded[node][key]
+                key: "start" if (node, key) in self.start_knobs else recorded[node][key]
                 for key in overlay.config
             }
             for node, overlay in self.config.optimization.nodes.items()
         }
 
     @property
-    def own_seed(self) -> CycleSeed | None:
-        """The seed the cycle's own ledger holds; ``None`` where it wrote none."""
-        return self.spans[-1].seed if self.spans else None
+    def own_start(self) -> CycleStart | None:
+        """The start the cycle's own ledger holds; ``None`` where it wrote none."""
+        return self.spans[-1].start if self.spans else None
 
     @property
-    def origin(self) -> CycleSeed | None:
-        """The last seed that stated C0's prompts: a child that states none runs its parent's."""
+    def origin(self) -> CycleStart | None:
+        """The last start that stated C0's prompts: a child that states none runs its parent's."""
         return next(
             (
-                span.seed
+                span.start
                 for span in reversed(self.spans)
-                if span.seed is not None and span.seed.origin_prompts
+                if span.start is not None and span.start.origin_prompts
             ),
             None,
         )

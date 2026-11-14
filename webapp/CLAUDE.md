@@ -25,12 +25,12 @@ A data-backed surface is `anon` (public preview, demo content), `auth_empty` (no
 
 ## The served hierarchy
 
-**Every surface that lists, switches, docks or heads a run renders ONE entry family**, the `domain/hierarchy.py::_HierarchyEntry` subclasses (`HierarchyCampaign`, `HierarchyCourse`; the deep read's `HierarchyEntry` union), minted by `application/hierarchy.py` and `application/hierarchy_subtree.py` alone; their `figures`, `lines` and a course's `climb` (the lead line: the selection's lift vs origin and vs parent, then its rates) render as served.
+**Every surface that lists, switches, docks or heads a run renders ONE entry family**, the `domain/hierarchy.py::_HierarchyEntry` subclasses (`HierarchyCampaign`, `HierarchyCycle`; the deep read's `HierarchyEntry` union), minted by `application/hierarchy.py` and `application/hierarchy_subtree.py` alone; their `figures`, `lines` and a cycle's `climb` (the lead line: the selection's lift vs origin and vs parent, then its rates) render as served.
 
 - **One tag exception, `mint`**, served typed as `facts.mint`. <!-- probe: git grep -cE "tagValue\(.*mint" -- webapp == 0 -->
-- **One run-state derivation**: a campaign's `state` IS its line course's. <!-- probe: git grep -cE "HierarchyState\.of\(" -- promptpotter == 2 --> <!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 2 --> The listing serves `attached` and no clock, so it answers 304 between writes.
+- **One run-state derivation**: a campaign's `state` IS its line cycle's. <!-- probe: git grep -cE "HierarchyState\.of\(" -- promptpotter == 2 --> <!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 2 --> The listing serves `attached` and no clock, so it answers 304 between writes.
 - **One listing read** over every lifecycle; the sidebar filter is layout over `facts.lifecycle`. <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/hooks/useRegistry.ts == 1 -->
-- **The genealogy is the same entry, read deep** (`GET /hierarchy/{address}`), no second route and no client fold but `descendantsOf`. <!-- probe: git grep -cE "\}/tree" -- promptpotter/presentation == 0 --> A course's chronology is its STEPS (`GET /hierarchy/{course}/@`), never `children`.
+- **The genealogy is the same entry, read deep** (`GET /hierarchy/{address}`), no second route and no client fold but `descendantsOf`. <!-- probe: git grep -cE "\}/tree" -- promptpotter/presentation == 0 --> A cycle's chronology is its STEPS (`GET /hierarchy/{cycle}/@`), never `children`.
 
 ## The chat thread — rendered, never authored
 

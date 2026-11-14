@@ -3,8 +3,8 @@ import {
   commands,
   postDraftFromDataset,
   postDraftFromOrigin,
-  postBuildCandidateLibraryFromColumn,
-  postUploadCandidateLibrary,
+  postBuildAnswerTermsFromColumn,
+  postUploadAnswerTerms,
   type StartCheckinOptions,
 } from "@/lib/api";
 import type {
@@ -88,8 +88,8 @@ export interface IngestFlow {
   discarded: (draftId: string) => void;
   submitContext: () => void;
   applyPatch: (patch: DraftPatch) => void;
-  uploadCandidateLibrary: (file: File) => void;
-  buildCandidateLibraryFromColumn: (column: string) => void;
+  uploadAnswerTerms: (file: File) => void;
+  buildAnswerTermsFromColumn: (column: string) => void;
   rerunCheckin: () => void;
   startFromReady: (limits: StartCheckinOptions) => void;
   useExistingFromCollision: () => void;
@@ -334,8 +334,8 @@ export function useIngestFlow({
     const turn = resolution.last_resolution;
     const recap = turn?.recap || turn?.assessment;
     if (recap) say(recap);
-    if (draft.candidate_library_size > 0)
-      say(`Candidate library attached — ${draft.candidate_library_size} targets.`);
+    if (draft.answer_terms_size > 0)
+      say(`Answer terms attached — ${draft.answer_terms_size} targets.`);
   };
 
   // Where the served draft stands, landed: `told` is false where the thread already says it.
@@ -429,21 +429,21 @@ export function useIngestFlow({
     void mutateDraft("edit", () => commands["edit-draft-campaign"]({ draft_id: id, patch }));
   };
 
-  const uploadCandidateLibrary = async (file: File) => {
+  const uploadAnswerTerms = async (file: File) => {
     if (phase.stage !== "ready" || busy) return;
     const id = phase.draft.draft_id;
-    const updated = await mutateDraft("library", () => postUploadCandidateLibrary(id, file));
-    if (updated) say(`Candidate library attached — ${updated.candidate_library_size} targets.`);
+    const updated = await mutateDraft("library", () => postUploadAnswerTerms(id, file));
+    if (updated) say(`Answer terms attached — ${updated.answer_terms_size} targets.`);
   };
 
-  const buildCandidateLibraryFromColumn = async (column: string) => {
+  const buildAnswerTermsFromColumn = async (column: string) => {
     if (phase.stage !== "ready" || busy) return;
     const id = phase.draft.draft_id;
     const updated = await mutateDraft("library", () =>
-      postBuildCandidateLibraryFromColumn(id, column),
+      postBuildAnswerTermsFromColumn(id, column),
     );
     if (updated)
-      say(`Candidate library built from “${column}” — ${updated.candidate_library_size} targets.`);
+      say(`Answer terms built from “${column}” — ${updated.answer_terms_size} targets.`);
   };
 
   // Asked by the operator: the one turn bought whether or not the draft owes one.
@@ -554,8 +554,8 @@ export function useIngestFlow({
     discarded,
     submitContext: () => void submitContext(),
     applyPatch,
-    uploadCandidateLibrary: (file) => void uploadCandidateLibrary(file),
-    buildCandidateLibraryFromColumn: (column) => void buildCandidateLibraryFromColumn(column),
+    uploadAnswerTerms: (file) => void uploadAnswerTerms(file),
+    buildAnswerTermsFromColumn: (column) => void buildAnswerTermsFromColumn(column),
     rerunCheckin,
     startFromReady: (limits) => void startFromReady(limits),
     useExistingFromCollision,

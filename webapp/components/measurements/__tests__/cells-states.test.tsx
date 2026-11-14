@@ -6,7 +6,7 @@ import { clearReadCache } from "@/lib/read-cache";
 import { AuthProvider } from "@/lib/state/auth";
 import { ViewMemoryProvider } from "@/lib/state/view-memory";
 import { WorkspaceProvider } from "@/lib/state/workspace";
-import { courseTags, pairedReading, subtreeCampaign, subtreeCourse } from "@/lib/test-fixtures";
+import { cycleTags, pairedReading, subtreeCampaign, subtreeCycle } from "@/lib/test-fixtures";
 import { SubjectFlips } from "@/components/searchpoint/SubjectFlips";
 import { MeasurementsPane } from "../MeasurementsPane";
 import { RosterNote } from "../RosterNote";
@@ -59,8 +59,8 @@ describe("a cells read's answer, as its panes say it", () => {
         return Response.json({ tenant_id: "t", hop: { campaign_id: "c", cycle_id: "y" } });
       }
       if (path.endsWith("/hierarchy")) {
-        const course = subtreeCourse({ address: "c::y", tags: courseTags("root", "ds") });
-        return Response.json({ entries: [subtreeCampaign({ address: "c", children: [course] })] });
+        const cycle = subtreeCycle({ address: "c::y", tags: cycleTags("root", "ds") });
+        return Response.json({ entries: [subtreeCampaign({ address: "c", children: [cycle] })] });
       }
       return new Response(null, { status: path.endsWith("/cells") ? 403 : 404 });
     });

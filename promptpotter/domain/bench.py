@@ -220,7 +220,7 @@ class PassOutcome(NamedTuple):
     reads_before: int | None
 
 
-class LineRun(NamedTuple):
+class LiveCycleRun(NamedTuple):
     selecting: bool
     # A bench pass's bracket stands open on the cycle, and a process still holds it.
     pass_open: bool
@@ -321,13 +321,13 @@ def bench_status(
     *,
     trigger: BenchTrigger,
     bench_size: int,
-    on_line: bool,
+    on_live_cycle: bool,
     inner: bool,
     refused: CampaignRefusal | None,
     held_by: str | None,
     origin: PassOutcome | None,
     selected: PassOutcome | None,
-    run: LineRun,
+    run: LiveCycleRun,
 ) -> BenchStatus:
     """*refused* is the campaign's own refusal, the one admission refuses a pass with."""
     subject: BenchSubject | None = None
@@ -342,7 +342,7 @@ def bench_status(
         if outcome is StopOutcome.FAILED
         else ReadingState.NOT_ASKED
     )
-    if not on_line:
+    if not on_live_cycle:
         state = ReadingState.HELD_ELSEWHERE
     elif not bench_size:
         state = ReadingState.NO_HOLDOUT
@@ -361,7 +361,7 @@ def bench_status(
     refusal: BenchRefusal | None = None
     if inner:
         refusal = BenchRefusal.INNER
-    elif not on_line:
+    elif not on_live_cycle:
         refusal = BenchRefusal.NO_MANIFEST if held_by is None else BenchRefusal.HELD_ELSEWHERE
     elif refused is not None:
         refusal = BenchRefusal(refused.value)

@@ -21,14 +21,14 @@ import { tagValue, type FigureKey } from "@/lib/derivations";
 import { fmtAgo } from "@/lib/format";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf, type CyclePath } from "@/lib/ids";
-import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedCycle } from "@/lib/state/lineage";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import { TERMS } from "@/lib/terms";
 import { useViewedListing, useWorkspace } from "@/lib/state/workspace";
 
 // "Where is this run", over every subject: its title row, and under a run its setup and the viewed
-// course's served figures, each the door to the view that reads it; any other open view gets a door
+// cycle's served figures, each the door to the view that reads it; any other open view gets a door
 // of its own. A phone's title row leads with the way back to the list.
 export function RunMasthead() {
   const { viewed, pinned, checkin, navigate, open } = useWorkspace();
@@ -80,7 +80,7 @@ export function RunMasthead() {
         {viewedPath === null ? (
           <SubjectDoors />
         ) : (
-          <RunFacts path={viewedPath} campaign={listing?.level === "campaign" ? listing : null} />
+          <RunFacts path={viewedPath} campaign={listing?.entry_kind === "campaign" ? listing : null} />
         )}
       </div>
     </header>
@@ -108,11 +108,11 @@ function SubjectDoors() {
 
 function RunFacts({ path, campaign }: { path: CyclePath; campaign: HierarchyCampaign | null }) {
   const { dash } = useViewedDashboard();
-  const course = useViewedCourse();
+  const cycle = useViewedCycle();
   const served = useServedCriterion();
   const innerLeaf = path.length > 1 ? pathLeaf(path) : null;
   const metered = dash?.spend_metered ?? null;
-  const figures = course?.figures.map((row) => ({ row, opens: familyOfGlance(row.key) })) ?? [];
+  const figures = cycle?.figures.map((row) => ({ row, opens: familyOfGlance(row.key) })) ?? [];
   const unnamed = useUnnamedViews(figures.map((f) => f.opens));
   const [whole, setWhole] = useState(false);
   // What the masthead adds to a served figure's Term, by its key.
@@ -152,7 +152,7 @@ function RunFacts({ path, campaign }: { path: CyclePath; campaign: HierarchyCamp
             </>
           )}
           {served.formula ? <CriterionLine mask={served.mask} /> : null}
-          {course?.lines.map((row) => (
+          {cycle?.lines.map((row) => (
             <Said
               key={row.key}
               tone={row.tone}

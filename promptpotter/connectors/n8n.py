@@ -86,7 +86,7 @@ def _pipeline_declaration(_stores: Stores, _experiment: Mapping[str, Any] | None
                 "type": "llm",
                 "runtime": "backend",
                 "description": "The LLM node an n8n eval harness holds, on the n8n node's model.",
-                "prompt_info": {"fields": list(_HARNESS_FIELDS), "rewrite_slot": "instruction"},
+                "prompt_info": {"fields": list(_HARNESS_FIELDS), "rewrite_field": "instruction"},
                 "config": {},
                 "optimizer": {"param_keys": []},
             },

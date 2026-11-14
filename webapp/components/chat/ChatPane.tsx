@@ -1,13 +1,13 @@
 // The disabled controls are INTENTIONAL placeholders (`docs/specs/roadmap.md` § Host assistant): never hide them.
 import { useState } from "react";
 import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
-import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedCycle } from "@/lib/state/lineage";
 import { useWorkspace } from "@/lib/state/workspace";
 import { entryAlone } from "@/lib/derivations";
 import { NEW_CHECKIN } from "@/lib/hooks/useIngestFlow";
 import { useCheckinSubject } from "@/lib/state/ingest-flow";
 import { IngestComposer, useIngestItems } from "@/components/ingest/IngestConversation";
-import type { HierarchyCourse } from "@/lib/api/types";
+import type { HierarchyCycle } from "@/lib/api/types";
 import { PipelineStack } from "@/components/pipeline/PipelineStack";
 import { useCycleEvents } from "@/lib/hooks/useCycleEvents";
 import {
@@ -26,7 +26,7 @@ export function ChatPane() {
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
   const subject = useCheckinSubject();
-  const threads = useThreads<HierarchyCourse>();
+  const threads = useThreads<HierarchyCycle>();
   const runKey = viewed ? runThreadKey(viewed.address) : null;
   const threadKey =
     subject === null && runKey !== null
@@ -34,23 +34,23 @@ export function ChatPane() {
       : checkinThreadKey(subject === null || subject === NEW_CHECKIN ? null : subject);
   const stored = threads.of(threadKey);
 
-  const course = useViewedCourse();
+  const cycle = useViewedCycle();
 
-  // The served `attached`, NOT `isLive`, which is false at the gate. The course entry is frozen
+  // The served `attached`, NOT `isLive`, which is false at the gate. The cycle entry is frozen
   // whole on its own detach, so the ending is one served read.
-  const liveCourse = course?.state.attached ? course.address : null;
-  const [prevLiveCourse, setPrevLiveCourse] = useState(liveCourse);
-  if (liveCourse !== prevLiveCourse) {
-    setPrevLiveCourse(liveCourse);
-    // The identity check stops a course switch filing another course under this one's ending.
-    if (runKey && prevLiveCourse && !liveCourse && course?.address === prevLiveCourse) {
+  const liveCycle = cycle?.state.attached ? cycle.address : null;
+  const [prevLiveCycle, setPrevLiveCycle] = useState(liveCycle);
+  if (liveCycle !== prevLiveCycle) {
+    setPrevLiveCycle(liveCycle);
+    // The identity check stops a cycle switch filing another cycle under this one's ending.
+    if (runKey && prevLiveCycle && !liveCycle && cycle?.address === prevLiveCycle) {
       // Read under a mask or a moment, the served caveat already names which.
-      threads.appendRun(runKey, course.address, entryAlone(course));
+      threads.appendRun(runKey, cycle.address, entryAlone(cycle));
     }
   }
 
   const live = useCycleEvents(viewedPath);
-  const mounted: ThreadItem<HierarchyCourse>[] = [];
+  const mounted: ThreadItem<HierarchyCycle>[] = [];
   if (subject === null && viewed) {
     mounted.push({
       id: "live",
@@ -59,7 +59,7 @@ export function ChatPane() {
         <LiveSegment
           notices={live.notices}
           status={live.status}
-          listening={live.connected && liveCourse !== null}
+          listening={live.connected && liveCycle !== null}
           decision={live.decision}
         />
       ),
@@ -73,7 +73,7 @@ export function ChatPane() {
     });
   }
   const ingestItems = useIngestItems(stored.length === 0);
-  const items: ThreadItem<HierarchyCourse>[] =
+  const items: ThreadItem<HierarchyCycle>[] =
     subject === null
       ? [...stored, ...mounted]
       : [...ingestItems.head, ...stored, ...ingestItems.tail];
@@ -90,7 +90,7 @@ export function ChatPane() {
       <div className="chat-grid">
         <div className="chat-panel">
           <div className="ingest-conversation">
-            <Thread items={items} renderRun={(course) => <RunSummaryItem course={course} />} />
+            <Thread items={items} renderRun={(cycle) => <RunSummaryItem cycle={cycle} />} />
             <IngestComposer />
           </div>
         </div>

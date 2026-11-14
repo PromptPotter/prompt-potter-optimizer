@@ -74,11 +74,9 @@ class JobSearchPoint(FrozenModel):
         """Over the SCHEMA-RESOLVED node configs alone: the same across subsets, as :meth:`content_hash` is not."""
         return pipeline_schema.sp_hash(self.pipeline_params)
 
-    def content_hash(self, dataset: list[Any], *, candidate_library: Collection[str]) -> str:
+    def content_hash(self, dataset: list[Any], *, answer_terms: Collection[str]) -> str:
         """Names a campaign's root (``runner/mint.py::root_cycle_id_of``); no measurement is filed under it."""
-        return content_hash(
-            dataset, self.pipeline_params.dump(), candidate_library=candidate_library
-        )
+        return content_hash(dataset, self.pipeline_params.dump(), answer_terms=answer_terms)
 
 
 # Operator-authored, never measured, frozen for the run: `application/optimizers/potter/CLAUDE.md` § L2 — what.

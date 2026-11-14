@@ -6,7 +6,7 @@ import type { HierarchyCandidate } from "@/lib/api/types";
 
 interface SelectNode {
   isPicked: (node: HierarchyCandidate) => boolean;
-  // A deselect returns to the candidate's own course.
+  // A deselect returns to the candidate's own cycle.
   pick: (node: HierarchyCandidate) => void;
 }
 

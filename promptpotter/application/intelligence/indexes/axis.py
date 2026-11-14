@@ -7,7 +7,7 @@ from itertools import combinations, pairwise
 from typing import Any
 
 from promptpotter.application.intelligence.indexes.sample import (
-    FailureCluster,
+    FailureModeCount,
     SampleIndex,
     SampleRecord,
 )
@@ -49,7 +49,7 @@ def _fmt_axis_rankings(
     return "; ".join(parts)
 
 
-def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:
+def _fmt_clusters(clusters: list[FailureModeCount], *, with_counts: bool) -> str:
     if with_counts:
         return "; ".join(
             f"{c.failure_mode} ({c.fraction:.0%}, {c.sample_count} samples)" for c in clusters

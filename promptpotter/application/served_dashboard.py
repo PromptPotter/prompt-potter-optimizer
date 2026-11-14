@@ -11,7 +11,7 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import (
     RoundHealth,
     RunLimits,
@@ -407,7 +407,7 @@ def run_said(
     return pinned(rows)
 
 
-class _Standing(NamedTuple):
+class _Present(NamedTuple):
     """Only the PRESENT holds these; a replay takes none — a past moment never had them."""
 
     allotment: Budget | None
@@ -469,7 +469,7 @@ def _lookahead(
     state: LiveDashboardState,
     *,
     run: RunState,
-    standing: _Standing | None,
+    standing: _Present | None,
     in_flight: int,
     allowed: int,
 ) -> SampleLookahead:
@@ -523,7 +523,7 @@ def _serve(
     admission: RunAdmission,
     meter: CeilingMeter,
     run_limits: RunLimits,
-    standing: _Standing | None,
+    standing: _Present | None,
 ) -> ServedDashboard:
     """*standing* is ``None`` for a replay: the moment it folded, and nothing armed since."""
     banked: dict[str, Any] = {name: getattr(state, name) for name in DashboardFacts.model_fields}
@@ -612,7 +612,7 @@ def served_dashboard(
     # The read's own join, never the checkout's: the campaign's refusal moves no ledger.
     admission = admitted(stores, campaign, run)
 
-    state = fold_at(Cut(cycle=CycleDir(cycle_path), hop=hop, offset=at))
+    state = fold_at(CycleAt(cycle=CycleDir(cycle_path), hop=hop, offset=at))
     if state is None:
         return WarmingDashboard(
             campaign_id=hop.campaign_id,
@@ -644,7 +644,7 @@ def served_dashboard(
         admission=admission,
         meter=meter,
         run_limits=limits,
-        standing=_Standing(
+        standing=_Present(
             allotment=_allotment(stores, hop, run),
             lookahead=requested_lookahead(armed),
             lookahead_auto=armed.lookahead is not None and armed.lookahead.auto,

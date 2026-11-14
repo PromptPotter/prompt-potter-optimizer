@@ -1594,25 +1594,25 @@
             "title": "Dataset Hash",
             "type": "string"
           },
+          "position_of": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Position Of",
+            "type": "object"
+          },
           "samples": {
             "items": {
               "$ref": "#/$defs/Sample"
             },
             "title": "Samples",
             "type": "array"
-          },
-          "slot_of": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "Slot Of",
-            "type": "object"
           }
         },
         "required": [
           "samples",
           "dataset_hash",
-          "slot_of"
+          "position_of"
         ],
         "title": "Bank",
         "type": "object"

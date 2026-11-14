@@ -24,7 +24,7 @@ class SampleRecord:
 
 
 @dataclass
-class FailureCluster:
+class FailureModeCount:
     failure_mode: str
     sample_count: int
     fraction: float
@@ -59,7 +59,7 @@ class SampleIndex:
 
         for cell in graded:
             facts = cell.facts
-            sid = self._bank.slot_of[facts.sample_key]
+            sid = self._bank.position_of[facts.sample_key]
             if sid not in self._introduced:
                 self._introduced.add(sid)
                 new_samples.append((sid, facts.query, facts.ground_truth))
@@ -137,7 +137,7 @@ class SampleIndex:
         records.sort(key=lambda r: r.hit_rate)
         return records
 
-    def failure_clusters(self, max_clusters: int = 5) -> list[FailureCluster]:
+    def failure_clusters(self, max_clusters: int = 5) -> list[FailureModeCount]:
         mode_samples: dict[str, list[int]] = defaultdict(list)
         for sid, modes in self._failure_modes.items():
             if modes:
@@ -148,7 +148,7 @@ class SampleIndex:
         clusters = []
         for mode, sids in sorted(mode_samples.items(), key=lambda x: -len(x[1])):
             clusters.append(
-                FailureCluster(
+                FailureModeCount(
                     failure_mode=mode,
                     sample_count=len(sids),
                     fraction=len(sids) / total if total else 0.0,

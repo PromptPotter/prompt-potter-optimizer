@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 from pydantic import Field
 
 from promptpotter.application import optimizers
-from promptpotter.application.knobs import ConfigNodeKnobs, node_knobs
+from promptpotter.application.config_map import ConfigNodeKnobs, node_knobs
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     running_prompt,
@@ -182,7 +182,7 @@ class CampaignPipelineResponse(StrictModel):
     cycle_id: str
     dataset_name: str
     connector: str = Field(
-        description="The connector the course runs on, as `dataset.yaml::pipeline.connector` "
+        description="The connector the cycle runs on, as `dataset.yaml::pipeline.connector` "
         "names it: the id `GET /backends` lists"
     )
     self_optimization: bool = Field(
@@ -191,11 +191,11 @@ class CampaignPipelineResponse(StrictModel):
         "data of its own"
     )
     optimizer: str = Field(
-        description="The optimizer manifest the addressed course runs — the one answer a surface "
+        description="The optimizer manifest the addressed cycle runs — the one answer a surface "
         "reads which optimizer's graph, knobs and analytics apply by, a check-in's draft included"
     )
     optimizer_setup: OptimizerSetup = Field(
-        description="That optimizer as the addressed course runs it — the manifest's knobs under "
+        description="That optimizer as the addressed cycle runs it — the manifest's knobs under "
         "the campaign's and the cycle seed's overlays, its arms and its pools"
     )
     params: dict[str, Any] = Field(

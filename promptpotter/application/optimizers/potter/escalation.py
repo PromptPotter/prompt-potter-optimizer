@@ -365,7 +365,7 @@ class Fire:
     best: HighWater
 
 
-class Layer(Protocol):
+class EscalationLayer(Protocol):
     """Fired by the `escalation` controller, under its own node context: it writes its own memory, never the ladder; its patience is the controller's knob."""
 
     name: ClassVar[str]
@@ -389,7 +389,7 @@ class Layer(Protocol):
 class LayerCall(NamedTuple):
     """A layer the controller fires, with the context it runs under (`NodeContext.fire`)."""
 
-    layer: Layer
+    layer: EscalationLayer
     ctx: NodeContext
 
 

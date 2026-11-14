@@ -27,7 +27,7 @@ COMMAND_ACK_STATUSES: tuple[CommandAckStatus, ...] = get_args(CommandAckStatus)
 CommandStatus = Literal["filed", CommandAckStatus]
 
 # The subject a command is filed on, as the log spells it: the workspace, a draft, or a campaign or
-# course in `Subject`'s own encoding (`Subject.key`, its sandbox chain kept).
+# cycle in `Subject`'s own encoding (`Subject.key`, its sandbox chain kept).
 WORKSPACE_SUBJECT = ""
 _DRAFT = "draft:"
 
@@ -45,7 +45,7 @@ def draft_of(spelled: str) -> str | None:
 
 
 def subject_of(spelled: str) -> Subject | None:
-    """The campaign or course *spelled* names; ``None`` for the workspace or a draft."""
+    """The campaign or cycle *spelled* names; ``None`` for the workspace or a draft."""
     if spelled == WORKSPACE_SUBJECT or draft_of(spelled) is not None:
         return None
     return Subject.parse(spelled)

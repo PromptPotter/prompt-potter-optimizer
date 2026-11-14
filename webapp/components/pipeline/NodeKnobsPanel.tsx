@@ -98,7 +98,7 @@ const LAYER_WORDS: Partial<Record<KnobLayer, string>> = {
   dataset: "by the dataset",
   campaign: "by this campaign",
   free_tier: "by the free tier",
-  seed: "by a steer",
+  start: "by a steer",
 };
 
 function knobLayers(map: ConfigMapResponse | null | undefined): Map<string, KnobLayer> {

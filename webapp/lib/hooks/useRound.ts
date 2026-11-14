@@ -26,7 +26,7 @@ interface Round {
   read: ReadResult<RoundView>;
   rows: ArmRow[];
   cfg: (key: string | null, display: string, nodeId?: string | null) => ObserveConfig | null;
-  seed: (key: string) => CandidateSearchPoint | null;
+  start: (key: string) => CandidateSearchPoint | null;
   reading: (key: string | null) => ArmReading | null;
   verdicts: Map<string, CandidateVerdict>;
 }
@@ -50,10 +50,10 @@ export function useRound(path: CyclePath | null, round: number | null): Round {
     return groupByRound(roundCandidates(dash)).get(round) ?? NO_ROWS;
   }, [dash, round]);
 
-  const answers = useMemo<Pick<Round, "cfg" | "seed" | "reading" | "verdicts">>(
+  const answers = useMemo<Pick<Round, "cfg" | "start" | "reading" | "verdicts">>(
     () => ({
       cfg: (key, display, nodeId) => armObserveConfig(servedArm(arms, key), display, nodeId),
-      seed: (key) => armSearchPoint(servedArm(arms, key)),
+      start: (key) => armSearchPoint(servedArm(arms, key)),
       reading: (key) => servedArm(arms, key)?.reading ?? null,
       verdicts: armVerdicts(arms),
     }),

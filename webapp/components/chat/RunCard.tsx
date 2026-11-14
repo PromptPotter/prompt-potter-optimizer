@@ -1,7 +1,7 @@
 import { useViewedDashboard } from "@/lib/state/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData } from "@/lib/hooks/useRead";
-import type { HierarchyCourse } from "@/lib/api/types";
+import type { HierarchyCycle } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { runNextStep } from "@/lib/derivations";
 import { SummaryBlock } from "@/components/chat/SummaryBlock";
@@ -22,13 +22,13 @@ export function RunCard() {
   );
 }
 
-// The course entry as served when its producer detached: frozen, never re-worded here.
-export function RunSummaryItem({ course }: { course: HierarchyCourse }) {
-  const changes = course.facts.standing?.changes;
-  const nextStep = runNextStep(course.state);
+// The cycle entry as served when its producer detached: frozen, never re-worded here.
+export function RunSummaryItem({ cycle }: { cycle: HierarchyCycle }) {
+  const changes = cycle.facts.standing?.changes;
+  const nextStep = runNextStep(cycle.state);
   return (
     <div className="chat-msg ai run-summary-item" role="note">
-      <SummaryBlock dense entry={course} />
+      <SummaryBlock dense entry={cycle} />
       {nextStep ? <p className="run-summary-line">{nextStep}</p> : null}
       {changes ? <p className="run-summary-line">{changes}</p> : null}
     </div>

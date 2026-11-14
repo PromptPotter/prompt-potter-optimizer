@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from promptpotter.application import optimizers
 from promptpotter.application.optimizers.nodes import (
     CountKnob,
+    DrawSize,
     Initializer,
-    PanelSize,
     Reviewer,
     RoundWalk,
     behaviour_key,
@@ -325,7 +325,7 @@ class SelectedOptimizer:
     def sampler(self) -> Sampler:
         return self.plan.sampler
 
-    def _asked_panel(self, search: int, pipeline: str) -> PanelSize:
+    def _asked_panel(self, search: int, pipeline: str) -> DrawSize:
         return self.sampler.drawn(self.knobs(self.sampler.name), search, pipeline)
 
     def round_cells_asked(self, search: int) -> int:
@@ -333,11 +333,11 @@ class SelectedOptimizer:
         split is the finding preflight reports, never cells a round walks."""
         return self._asked_panel(search, DEFAULT_PIPELINE).cells
 
-    def round_panel(self, search: int, pipeline: str = DEFAULT_PIPELINE) -> PanelSize:
+    def round_panel(self, search: int, pipeline: str = DEFAULT_PIPELINE) -> DrawSize:
         """The panel a walk of *pipeline* walks: an ask above the split (an L4 size) still walks no
         more cells than the split holds; no cells where it holds no panel."""
         asked = self._asked_panel(search, pipeline)
-        return PanelSize(min(asked.cells, search), asked.block_size)
+        return DrawSize(min(asked.cells, search), asked.block_size)
 
     def round_cells(self, search: int) -> int:
         """Cells a round after the first walks per arm."""

@@ -3,18 +3,18 @@ import type {
   AccountKey,
   CouponStatus,
   LifetimeSpend,
-  CourseKind,
+  CycleMint,
   ArmElection,
   ArmName,
-  ArmPanel,
+  ArmSamples,
   ArmReading,
   CandidateFacts,
   CurrentRound,
   DashboardCandidate,
   SubtreeCampaign,
   HierarchyCandidate,
-  SubtreeCourse,
-  SubtreeCourseFacts,
+  SubtreeCycle,
+  SubtreeCycleEntryFacts,
   HierarchyRound,
   HierarchyState,
   HierarchyStep,
@@ -127,12 +127,12 @@ export function couponStatus(over: Partial<CouponStatus> = {}): CouponStatus {
   };
 }
 
-// A step as served: its address is the server's, minted from its course and offset.
+// A step as served: its address is the server's, minted from its cycle and offset.
 export function hierarchyStep(parent: string, facts: StepFacts): HierarchyStep {
   return {
     address: `${parent}/@${facts.offset}`,
     parent,
-    level: "step",
+    entry_kind: "step",
     facts,
   };
 }
@@ -287,7 +287,7 @@ export function health(
 export function armReading(
   over: Partial<Omit<ArmReading, "arm" | "panel" | "election">> & {
     arm?: Partial<ArmName>;
-    panel?: Partial<ArmPanel>;
+    panel?: Partial<ArmSamples>;
     election?: Partial<ArmElection>;
   } = {},
 ): ArmReading {
@@ -322,9 +322,9 @@ export function ownLevel(fitness: number, n = 0): NonNullable<ArmReading["own"]>
 
 }
 
-// A candidate as the subtree read serves it, at `{course}/r{round}/{key}`; its label is its arm's.
+// A candidate as the subtree read serves it, at `{cycle}/r{round}/{key}`; its label is its arm's.
 export function hierarchyCandidate(
-  course: string,
+  cycle: string,
   {
     id,
     round = 0,
@@ -339,17 +339,17 @@ export function hierarchyCandidate(
   const { arm } = reading;
   return {
     ...envelope(),
-    address: `${course}/r${arm.round}/${arm.key}`,
-    parent: `${course}/r${arm.round}`,
+    address: `${cycle}/r${arm.round}/${arm.key}`,
+    parent: `${cycle}/r${arm.round}`,
     label: arm.label,
-    level: "candidate",
+    entry_kind: "candidate",
     ...over,
     facts: {
       individual: id,
       parent_ids: [],
       variations: [],
       stands: false,
-      course_latest: false,
+      cycle_latest: false,
       answers_for_id: true,
       main_line: [],
       descends_from: null,
@@ -369,9 +369,9 @@ export function hierarchyCandidate(
   };
 }
 
-// A course's own ledger: its candidates grouped into rounds, rounds ascending, slot order kept.
+// A cycle's own ledger: its candidates grouped into rounds, rounds ascending, slot order kept.
 export function roundsOf(
-  course: string,
+  cycle: string,
   candidates: readonly HierarchyCandidate[],
 ): HierarchyRound[] {
   const byRound = new Map<number, HierarchyCandidate[]>();
@@ -382,10 +382,10 @@ export function roundsOf(
   return [...byRound]
     .sort(([x], [y]) => x - y)
     .map(([round, children]) => ({
-      address: `${course}/r${round}`,
-      parent: course,
+      address: `${cycle}/r${round}`,
+      parent: cycle,
       children,
-      level: "round",
+      entry_kind: "round",
       facts: { round, elects_on: "ability" },
     }));
 }
@@ -406,25 +406,25 @@ export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchySta
   };
 }
 
-export function courseTags(mint: CourseKind, dataset?: string): HierarchyTag[] {
+export function cycleTags(mint: CycleMint, dataset?: string): HierarchyTag[] {
   return [
     ...(dataset === undefined ? [] : [{ kind: "dataset" as const, value: dataset, label: dataset }]),
     { kind: "mint", value: mint, label: mint },
   ];
 }
 
-export function subtreeCourse(
-  over: Partial<SubtreeCourse> & Pick<SubtreeCourse, "address">,
-  facts: Partial<SubtreeCourseFacts> = {},
-): SubtreeCourse {
+export function subtreeCycle(
+  over: Partial<SubtreeCycle> & Pick<SubtreeCycle, "address">,
+  facts: Partial<SubtreeCycleEntryFacts> = {},
+): SubtreeCycle {
   return {
     ...envelope(),
     parent: null,
     label: over.address,
-    tags: courseTags(facts.mint ?? "root"),
+    tags: cycleTags(facts.mint ?? "root"),
     state: hierarchyState(),
     span: { opened_at: "", last_at: "" },
-    level: "course",
+    entry_kind: "cycle",
     children: [],
     facts: {
       mint: "root",
@@ -457,12 +457,12 @@ export function subtreeCampaign(
     label: over.address,
     state: hierarchyState(),
     span: { opened_at: "", last_at: "" },
-    level: "campaign",
+    entry_kind: "campaign",
     children: [],
     facts: {
       label: null,
       root,
-      line: root,
+      live_cycle: root,
       lifecycle: "active",
       runs_with: null,
       deletable_stubs: 0,

@@ -186,7 +186,7 @@ def host_server(session: HostSession) -> Server[Any]:
         template = types.ResourceTemplate(
             uri_template=host_surface.RESOURCE_TEMPLATE,
             name="hierarchy",
-            description="Any entry by its hierarchy address: a campaign, course, round or candidate.",
+            description="Any entry by its hierarchy address: a campaign, cycle, round or candidate.",
             mime_type="application/json",
         )
         return types.ListResourceTemplatesResult(resource_templates=[template])

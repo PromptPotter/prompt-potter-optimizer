@@ -22,7 +22,7 @@ from promptpotter.domain.hierarchy import (
     LineageDivergence,
     RankMove,
     SubtreeCampaign,
-    SubtreeCourse,
+    SubtreeCycle,
     entries_under,
 )
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -48,13 +48,13 @@ def _abort_suppress(variant: str) -> frozenset[str]:
 def _mask_records(
     stores: Stores, root: SubtreeCampaign, samples: frozenset[int] | None, lens: Lens | None
 ) -> dict[CyclePath, MaskRecord]:
-    """One per campaign, keyed by a course's PATH: one inner campaign id sits in several sibling sandboxes."""
+    """One per campaign, keyed by a cycle's PATH: one inner campaign id sits in several sibling sandboxes."""
     out: dict[CyclePath, MaskRecord] = {}
     seen: set[tuple[CyclePath, str]] = set()
-    for course in entries_under(root):
-        if not isinstance(course, SubtreeCourse):
+    for cycle in entries_under(root):
+        if not isinstance(cycle, SubtreeCycle):
             continue
-        path = Subject.parse_address(course.address).path
+        path = Subject.parse_address(cycle.address).path
         if (campaign := (path[:-1], path[-1].campaign_id)) in seen:
             continue
         seen.add(campaign)
@@ -132,18 +132,18 @@ class _Overlay:
                 for cid, rnd in result.divergent
             )
             for cyc in record.cycles:
-                course = (*sandbox, CycleHop(campaign_id=campaign_id, cycle_id=cyc.cycle_id))
-                self.criteria.setdefault(course, record.criterion)
+                cycle = (*sandbox, CycleHop(campaign_id=campaign_id, cycle_id=cyc.cycle_id))
+                self.criteria.setdefault(cycle, record.criterion)
                 for rnd_rec in cyc.rounds:
                     for cand in rnd_rec.candidates:
-                        self.readings[(course, cand.key)] = cand.reading
+                        self.readings[(cycle, cand.key)] = cand.reading
         self.dimmed: frozenset[tuple[CyclePath, int]] = frozenset(dimmed)
 
     def apply(self, entry: HierarchyEntry) -> HierarchyEntry:
-        if not isinstance(entry, SubtreeCourse):
+        if not isinstance(entry, SubtreeCycle):
             return entry.model_copy(update={"children": [self.apply(c) for c in entry.children]})
         path = Subject.parse_address(entry.address).path
-        # The course's own candidates, never an inner campaign's under them.
+        # The cycle's own candidates, never an inner campaign's under them.
         read = {
             c.address: self._candidate(path, c)
             for rnd in entry.children
@@ -172,12 +172,12 @@ class _Overlay:
             }
         )
 
-    def _candidate(self, course: CyclePath, c: HierarchyCandidate) -> HierarchyCandidate:
+    def _candidate(self, cycle: CyclePath, c: HierarchyCandidate) -> HierarchyCandidate:
         arm = c.facts.reading.arm
-        key = (course, arm.round)
-        read = (course, arm.key) in self.readings
-        reading = self.readings.get((course, arm.key))
-        lensed = self.criteria.get(course) is not None
+        key = (cycle, arm.round)
+        read = (cycle, arm.key) in self.readings
+        reading = self.readings.get((cycle, arm.key))
+        lensed = self.criteria.get(cycle) is not None
         subset_n = (reading.n_scored if reading else 0) if read else None
         return c.model_copy(
             update={

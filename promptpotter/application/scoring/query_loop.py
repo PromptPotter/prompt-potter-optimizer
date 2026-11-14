@@ -894,7 +894,7 @@ class _ScoringPhase[K: Hashable]:
                     by_cell.setdefault(cell.key, {})[prior] = address
         if not by_cell:
             return
-        slot_of = walk.ctx.session.bank.slot_of
+        position_of = walk.ctx.session.bank.position_of
         append_record(
             *(
                 RaceCatchUpRecord(
@@ -902,7 +902,7 @@ class _ScoringPhase[K: Hashable]:
                     arm=ArmKey(arm.individual_id),
                     member=caught.member,
                     sample_key=key,
-                    position=slot_of[key],
+                    position=position_of[key],
                     cells=taken,
                 )
                 for key, taken in by_cell.items()

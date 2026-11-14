@@ -113,7 +113,7 @@ from promptpotter.application.optimizer_manifest import checkin_manifest, select
 from promptpotter.application.optimizers.nodes import Race
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config
 from promptpotter.application.run_phase_control import RunControl, budget_stop
-from promptpotter.application.runner.bench import cycle_bench, line_run
+from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.termination import run_stop_reason
@@ -199,8 +199,8 @@ from promptpotter.domain.records.run_records import (
     CallPrice,
     ConfigOverrides,
     CycleMintedRecord,
-    CycleSeed,
     CycleShareRecord,
+    CycleStart,
     ForkRemainder,
     ForkSpec,
     ForkTrigger,
@@ -1516,20 +1516,20 @@ def test_a_ledger_index_serves_the_file_as_it_stands_grown_compacted_raced_and_s
 
     def seed(model: str) -> None:
         overlay = {"llm_only": NodeCall(model=model)}
-        index.append(CycleMintedRecord(seed=CycleSeed(pipeline_overlay=overlay)))
+        index.append(CycleMintedRecord(start=CycleStart(pipeline_overlay=overlay)))
 
-    def tailed() -> tuple[float, int, CycleSeed | None]:
+    def tailed() -> tuple[float, int, CycleStart | None]:
         spend, calls, _worked_s = scan_ledger_spend([LedgerSpan(index.path)])
         seeded = scan_last([LedgerSpan(index.path)], CycleMintedRecord)
-        return spend.total_used_usd, calls, None if seeded is None else seeded.seed
+        return spend.total_used_usd, calls, None if seeded is None else seeded.start
 
-    def cold() -> tuple[float, int, CycleSeed | None]:
+    def cold() -> tuple[float, int, CycleStart | None]:
         rows = [json.loads(line) for line in read_lines(index.path)]
         bills = [
             row["money"]["price"]["cost_usd"] for row in rows if row["record_type"] == "token_usage"
         ]
-        seeds = [row["seed"] for row in rows if row["record_type"] == "cycle_minted"]
-        seeded = CycleSeed.model_validate(seeds[-1]) if seeds else None
+        seeds = [row["start"] for row in rows if row["record_type"] == "cycle_minted"]
+        seeded = CycleStart.model_validate(seeds[-1]) if seeds else None
         return sum(bills), len(bills), seeded
 
     bill(3)
@@ -3684,7 +3684,7 @@ def test_a_cycle_retaken_after_a_killed_bench_pass_closes_its_dead_bracket(
             declared=Budget(),
             sends=_CELLS,
         ):
-            return line_run(killed, _HELD_HOP).pass_open
+            return live_cycle_run(killed, _HELD_HOP).pass_open
 
     assert not asyncio.run(_retaken()), (
         "a cycle retaken after a killed bench pass read the dead bracket as a pass in flight"

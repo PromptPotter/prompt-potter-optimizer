@@ -5,7 +5,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from promptpotter.application import optimizers
-from promptpotter.application.knobs import check_couplings
+from promptpotter.application.config_map import check_couplings
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
 from promptpotter.domain.campaign import Arm
 from promptpotter.domain.campaign_config import CampaignConfig

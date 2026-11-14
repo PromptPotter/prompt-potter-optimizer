@@ -378,6 +378,31 @@
         "title": "ArmName",
         "type": "object"
       },
+      "ArmPosition": {
+        "additionalProperties": false,
+        "description": "Where an individual was walked as an arm, its latest walk for a re-read: the ``idx``-th of its round's ``total``.",
+        "properties": {
+          "idx": {
+            "title": "Idx",
+            "type": "integer"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "round",
+          "idx",
+          "total"
+        ],
+        "title": "ArmPosition",
+        "type": "object"
+      },
       "ArmRecord": {
         "additionalProperties": false,
         "description": "One arm's transition, LAST wins: proposed, walking, then cut or measured.",
@@ -433,31 +458,6 @@
           "state"
         ],
         "title": "ArmRecord",
-        "type": "object"
-      },
-      "ArmSlot": {
-        "additionalProperties": false,
-        "description": "Where an individual was walked as an arm, its latest walk for a re-read: the ``idx``-th of its round's ``total``.",
-        "properties": {
-          "idx": {
-            "title": "Idx",
-            "type": "integer"
-          },
-          "round": {
-            "title": "Round",
-            "type": "integer"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "round",
-          "idx",
-          "total"
-        ],
-        "title": "ArmSlot",
         "type": "object"
       },
       "ArmsGate": {
@@ -1746,6 +1746,16 @@
             "title": "Overlay",
             "type": "object"
           },
+          "position": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reason": {
             "discriminator": {
               "mapping": {
@@ -1790,16 +1800,6 @@
             "title": "Role",
             "type": "string"
           },
-          "slot": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmSlot"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "sp_hash": {
             "title": "Sp Hash",
             "type": "string"
@@ -1820,7 +1820,7 @@
         },
         "required": [
           "role",
-          "slot",
+          "position",
           "individual",
           "sp_hash",
           "resolved_params",
@@ -1994,7 +1994,7 @@
       },
       "CycleMintedRecord": {
         "additionalProperties": false,
-        "description": "One per cycle's own ledger, after only the lines it adopted, and its first own fact: a chain\nis walked off it alone. A cycle runs every seed its chain's mints hold, root first.",
+        "description": "One per cycle's own ledger, after only the lines it adopted, and its first own fact: a chain\nis walked off it alone. A cycle runs every start its chain's mints hold, root first.",
         "properties": {
           "babysat": {
             "default": false,
@@ -2054,10 +2054,10 @@
             "title": "Record Type",
             "type": "string"
           },
-          "seed": {
+          "start": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CycleSeed"
+                "$ref": "#/components/schemas/CycleStart"
               },
               {
                 "type": "null"
@@ -2266,62 +2266,6 @@
           }
         ]
       },
-      "CycleSeed": {
-        "additionalProperties": false,
-        "description": "One cycle's own delta, laid over its parent's laid seeds (`CycleConfig.laid`).",
-        "properties": {
-          "config_overrides": {
-            "$ref": "#/components/schemas/ConfigOverrides"
-          },
-          "optimizer_narrowing": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/NodeSearchNarrowing"
-            },
-            "description": "Per-fork search-space lock edits, laid on its parent's by part (`NodeSearchNarrowing`'s fields): `param_keys` subsets, `prompt_fields_held` joins, `param_allowed_values` replaces per param. Empty for an unedited fork or a campaign-from-origin seed.",
-            "title": "Optimizer Narrowing",
-            "type": "object"
-          },
-          "origin_params": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The params twin of `origin_prompts`: a fork off a candidate runs that candidate's record (`resolved_params`), laid under `pipeline_overlay`, the operator's edit. None on a seed off no candidate.",
-            "title": "Origin Params"
-          },
-          "origin_prompts": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/NodePrompt"
-            },
-            "description": "C0's prompt loci, per prompt node; empty when the seed carries no origin.",
-            "title": "Origin Prompts",
-            "type": "object"
-          },
-          "origin_source": {
-            "$ref": "#/components/schemas/OriginSource",
-            "default": "",
-            "description": "Which act seeded C0 — 'fork_seed' | 'campaign_origin', naming its lineage's `changes_description`; empty when the seed carries no origin (an L2/L3 rebase replays its own)."
-          },
-          "pipeline_overlay": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/NodeCall"
-            },
-            "title": "Pipeline Overlay",
-            "type": "object"
-          }
-        },
-        "title": "CycleSeed",
-        "type": "object"
-      },
       "CycleShareRecord": {
         "additionalProperties": false,
         "description": "The cycle's share of its campaign's ceiling, LAST wins and never inherited; every move lands through `hold_moved`.",
@@ -2344,6 +2288,62 @@
           "allotment"
         ],
         "title": "CycleShareRecord",
+        "type": "object"
+      },
+      "CycleStart": {
+        "additionalProperties": false,
+        "description": "One cycle's own delta, laid over its parent's laid starts (`CycleConfig.laid`).",
+        "properties": {
+          "config_overrides": {
+            "$ref": "#/components/schemas/ConfigOverrides"
+          },
+          "optimizer_narrowing": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodeSearchNarrowing"
+            },
+            "description": "Per-fork search-space lock edits, laid on its parent's by part (`NodeSearchNarrowing`'s fields): `param_keys` subsets, `prompt_fields_held` joins, `param_allowed_values` replaces per param. Empty for an unedited fork or a campaign-from-origin start.",
+            "title": "Optimizer Narrowing",
+            "type": "object"
+          },
+          "origin_params": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The params twin of `origin_prompts`: a fork off a candidate runs that candidate's record (`resolved_params`), laid under `pipeline_overlay`, the operator's edit. None on a start off no candidate.",
+            "title": "Origin Params"
+          },
+          "origin_prompts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodePrompt"
+            },
+            "description": "C0's prompt loci, per prompt node; empty when the start carries no origin.",
+            "title": "Origin Prompts",
+            "type": "object"
+          },
+          "origin_source": {
+            "$ref": "#/components/schemas/OriginSource",
+            "default": "",
+            "description": "Which act started C0 — 'fork_start' | 'campaign_origin', naming its lineage's `changes_description`; empty when the start carries no origin (an L2/L3 rebase replays its own)."
+          },
+          "pipeline_overlay": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodeCall"
+            },
+            "title": "Pipeline Overlay",
+            "type": "object"
+          }
+        },
+        "title": "CycleStart",
         "type": "object"
       },
       "CycleSupersededRecord": {
@@ -4235,6 +4235,16 @@
             "title": "Overlay",
             "type": "object"
           },
+          "position": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "resolved_params": {
             "additionalProperties": true,
             "title": "Resolved Params",
@@ -4248,16 +4258,6 @@
             ],
             "title": "Role",
             "type": "string"
-          },
-          "slot": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmSlot"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "sp_hash": {
             "title": "Sp Hash",
@@ -4279,7 +4279,7 @@
         },
         "required": [
           "role",
-          "slot",
+          "position",
           "individual",
           "sp_hash",
           "resolved_params",
@@ -4417,6 +4417,16 @@
             "title": "Overlay",
             "type": "object"
           },
+          "position": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "resolved_params": {
             "additionalProperties": true,
             "title": "Resolved Params",
@@ -4438,16 +4448,6 @@
             "title": "Sample Order",
             "type": "array"
           },
-          "slot": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmSlot"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "sp_hash": {
             "title": "Sp Hash",
             "type": "string"
@@ -4468,7 +4468,7 @@
         },
         "required": [
           "role",
-          "slot",
+          "position",
           "individual",
           "sp_hash",
           "resolved_params",
@@ -5135,7 +5135,7 @@
       },
       "OriginSource": {
         "enum": [
-          "fork_seed",
+          "fork_start",
           "campaign_origin",
           ""
         ],
@@ -5860,7 +5860,7 @@
                   "dataset",
                   "campaign",
                   "free_tier",
-                  "seed"
+                  "start"
                 ],
                 "type": "string"
               },
@@ -6221,6 +6221,16 @@
             "title": "Overlay",
             "type": "object"
           },
+          "position": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "role": {
             "enum": [
               "origin",
@@ -6229,16 +6239,6 @@
             ],
             "title": "Role",
             "type": "string"
-          },
-          "slot": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmSlot"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "state": {
             "const": "proposed",
@@ -6256,7 +6256,7 @@
         },
         "required": [
           "role",
-          "slot",
+          "position",
           "individual"
         ],
         "title": "Proposed",

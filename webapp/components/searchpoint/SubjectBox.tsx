@@ -1,4 +1,4 @@
-import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedCycle } from "@/lib/state/lineage";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
 import { useOrigin } from "@/lib/hooks/useOrigin";
@@ -23,8 +23,8 @@ export function SubjectBox() {
   const { point, reading } = subject;
   const shown = useSearchpointRead(point);
   const origin = useOrigin();
-  const course = useViewedCourse();
-  const standing = course?.facts.standing ?? null;
+  const cycle = useViewedCycle();
+  const standing = cycle?.facts.standing ?? null;
 
   const cfg = shown.cfg;
   const evidence = useOriginEvidence(point);

@@ -283,5 +283,5 @@ def declared_files(layout: CycleLayout | CampaignLayout, root: Path) -> list[Pat
     ]
 
 
-def course_validator_ns(cycle_dir: Path) -> int | None:
+def cycle_validator_ns(cycle_dir: Path) -> int | None:
     return newest_mtime_ns(CycleLayout(cycle_dir).ledger)

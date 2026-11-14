@@ -28,7 +28,7 @@ from promptpotter.application.runner.bench import (
     bench_selection,
     declare_line_bench,
     line_passes,
-    line_run,
+    live_cycle_run,
     own_level,
     read_cycle_bench,
 )
@@ -295,7 +295,7 @@ async def verify_candidate(
 
         # By sample key under every bank: a re-cut bank re-measures none of the rows it kept.
         prior = stores.archive.measurements_for_config(predicate)
-        measured_keys = {m.cell.sample_key for m in prior} & session.bank.slot_of.keys()
+        measured_keys = {m.cell.sample_key for m in prior} & session.bank.position_of.keys()
         # Search split only: `verify_on_saturation` runs inside the loop, which must decide on no bench row.
         search = session.state.scoring.partition.search
         unmeasured = [s for s in search if s.key not in measured_keys]
@@ -617,7 +617,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                     config,
                     passes=banked,
                     selecting=False,
-                    ending=line_run(stores, hop).ending,
+                    ending=live_cycle_run(stores, hop).ending,
                 )
             except RUN_STOPS as stop:
                 info = STOP_REASON_INFO[run_stop_reason(stop)]

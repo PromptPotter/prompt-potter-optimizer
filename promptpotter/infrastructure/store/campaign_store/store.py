@@ -18,7 +18,7 @@ from promptpotter.domain.campaign import (
 )
 from promptpotter.domain.campaign_config import LaidSpan
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, Subject, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.pipeline_schema import CapabilityMenu
@@ -570,7 +570,7 @@ class CampaignStore:
             out.insert(0, up)
         return out
 
-    def line_holder(self, hop: CycleHop, *, moment: Moment | None = None) -> CycleHop:
+    def live_cycle(self, hop: CycleHop, *, moment: Moment | None = None) -> CycleHop:
         return self.line(hop, moment=moment)[-1]
 
     def _successor(self, hop: CycleHop, moment: Moment | None) -> str | None:
@@ -647,7 +647,7 @@ class CampaignStore:
         """One per ledger of *hop*'s chain, its root's first: a child's lays over its parent's."""
         chain = self.chain(hop)
         return [
-            LaidSpan(seed=None if record is None else record.seed, scoring_lock=lock)
+            LaidSpan(start=None if record is None else record.start, scoring_lock=lock)
             for record, lock in zip(
                 scan_each_last(chain, CycleMintedRecord),
                 scan_each_last(chain, ScoringLockedRecord),
@@ -673,7 +673,7 @@ class CampaignStore:
 
     def run_limits(self, hop: CycleHop, *, at: int | None = None) -> RunLimits | None:
         """The cycle's fold to *at*, its line's root ceiling laid over; ``None`` before its first wiring."""
-        folded = run_limits_at(Cut(cycle=CycleDir(self.cycle_dir(hop)), hop=hop, offset=at))
+        folded = run_limits_at(CycleAt(cycle=CycleDir(self.cycle_dir(hop)), hop=hop, offset=at))
         if folded is None:
             return None
         return folded.model_copy(

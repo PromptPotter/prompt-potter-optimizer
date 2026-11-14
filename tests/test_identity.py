@@ -79,7 +79,8 @@ from promptpotter.application.bench.task_context import (
 )
 from promptpotter.application.commands import launching, origin_resolving
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher, Opened
-from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
+from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_start
+from promptpotter.application.config_map import bench_defaults_pin
 from promptpotter.application.datasets import (
     ingest,
     loaders,
@@ -137,7 +138,6 @@ from promptpotter.application.jobs.mint import (
     resolve_resume,
 )
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     base_optimizer_template,
@@ -147,7 +147,7 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect, ParetoScores
-from promptpotter.application.optimizers.nodes import MintFacts, Panel, Proposals
+from promptpotter.application.optimizers.nodes import MintFacts, Proposals, RoundSamples
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.injections.panels import detectable_rows
 from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
@@ -236,14 +236,14 @@ from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBas
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     Door,
-    ForkSeed,
+    ForkStart,
     HeadToHeadRequest,
     PauseCyclePayload,
     ResolveOriginPayload,
     StartCheckinPayload,
     SubmittedArm,
 )
-from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
@@ -292,7 +292,7 @@ from promptpotter.domain.records.run_records import (
     ArmActRecord,
     ConfigOverrides,
     CycleMintedRecord,
-    CycleSeed,
+    CycleStart,
     PipelineRead,
     RoundWarningRecord,
     RunPhaseRecord,
@@ -2274,22 +2274,22 @@ def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_late
             f"{hop}: the criterion its origin locked rides the root's ledger, and every cycle "
             "runs under it"
         )
-    seed = CycleSeed(
+    start = CycleStart(
         optimizer_narrowing={"a": NodeSearchNarrowing(param_keys=[])},
         config_overrides=ConfigOverrides(budget=Budget(rounds=4)),
     )
     seeded = campaign.root_hop.model_copy(update={"cycle_id": "cycle_seeded"})
-    stores.campaigns.mint_cycle(seeded, CycleMintedRecord(seed=seed))
+    stores.campaigns.mint_cycle(seeded, CycleMintedRecord(start=start))
     forked = cycle_config(stores, campaign, seeded).config
-    assert forked.optimization.budget.rounds == 4, "a seed's override did not reach its cycle"
+    assert forked.optimization.budget.rounds == 4, "a start's override did not reach its cycle"
     assert [forked.optimizer_narrowing[n].param_keys for n in "ab"] == [[], ["k"]], (
-        "a seed's narrowing replaced the nodes it did not name"
+        "a start's narrowing replaced the nodes it did not name"
     )
 
 
 def test_a_steer_lays_over_the_campaigns_narrowing_by_part() -> None:
     # Its closed axes stay closed, its held fields held, and the steered model joins the menu
-    # without sanctioning the steer; an onward seed lays over the steer's laid narrowing.
+    # without sanctioning the steer; an onward start lays over the steer's laid narrowing.
     probe = _connector_config(
         optimizer_narrowing={
             "solve": {
@@ -2300,30 +2300,30 @@ def test_a_steer_lays_over_the_campaigns_narrowing_by_part() -> None:
         }
     )
     steering = declare_steered_values(
-        CycleSeed(pipeline_overlay={"solve": NodeCall(model="x")}), probe.optimizer_narrowing
+        CycleStart(pipeline_overlay={"solve": NodeCall(model="x")}), probe.optimizer_narrowing
     )
-    laid = CycleConfig.laid(probe, [LaidSpan(seed=steering, scoring_lock=None)])
+    laid = CycleConfig.laid(probe, [LaidSpan(start=steering, scoring_lock=None)])
     assert laid.config.optimizer_narrowing["solve"] == NodeSearchNarrowing(
         param_keys=[],
         prompt_fields_held=["instruction"],
         param_allowed_values={"model": ["x", "a", "b"]},
     ), "a steer reopened an axis, released a held field or dropped a permitted model"
     assert laid.steers_outside(probe.optimizer_narrowing), (
-        "a seed widening its own menu sanctioned the steer the campaign never did"
+        "a start widening its own menu sanctioned the steer the campaign never did"
     )
-    # An onward seed lays by part over its parent's laid narrowing: a subset of a closed axis
+    # An onward start lays by part over its parent's laid narrowing: a subset of a closed axis
     # stays closed, and a held field joins the ones its line held.
-    onward = CycleSeed(
+    onward = CycleStart(
         config_overrides=ConfigOverrides(budget=Budget(rounds=2)),
         optimizer_narrowing={
             "solve": NodeSearchNarrowing(param_keys=["model"], prompt_fields_held=["persona"])
         },
     )
     grand = CycleConfig.laid(
-        probe, [LaidSpan(seed=s, scoring_lock=None) for s in (steering, onward)]
+        probe, [LaidSpan(start=s, scoring_lock=None) for s in (steering, onward)]
     )
-    assert (grand.seed_overlay, grand.steers_outside(probe.optimizer_narrowing)) == (
-        laid.seed_overlay,
+    assert (grand.start_overlay, grand.steers_outside(probe.optimizer_narrowing)) == (
+        laid.start_overlay,
         True,
     ), "a fork of a steered fork ran without its parent's steer"
     onward_laid = grand.config.optimizer_narrowing["solve"]
@@ -2381,10 +2381,10 @@ def test_a_fork_closes_the_axis_its_operator_closed_on_its_own_menu(
     # Ticks equal to the ROOT's whole menu still close the rung only the fork's menu carries.
     stores = built_stores
     fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
-    fork_seed = parse_cycle_seed(
-        ForkSeed.model_validate({"node_narrowing": {"a": _ROWS}}), stores, steered, fork
+    fork_start = parse_cycle_start(
+        ForkStart.model_validate({"node_narrowing": {"a": _ROWS}}), stores, steered, fork
     )
-    assert fork_seed.optimizer_narrowing == {
+    assert fork_start.optimizer_narrowing == {
         "a": NodeSearchNarrowing(
             param_keys=["reasoning_effort"],
             param_allowed_values={"reasoning_effort": ["low", "high"]},
@@ -2398,8 +2398,8 @@ def test_a_seed_never_steers_outside_its_own_menu_or_off_its_keys_type(
     stores = built_stores
     fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
     with pytest.raises(PayloadInvalidError):
-        parse_cycle_seed(
-            ForkSeed.model_validate(
+        parse_cycle_start(
+            ForkStart.model_validate(
                 {
                     "node_narrowing": {"a": _ROWS},
                     "pipeline_overlay": {"a": {"reasoning_effort": "xhigh"}},
@@ -2411,8 +2411,8 @@ def test_a_seed_never_steers_outside_its_own_menu_or_off_its_keys_type(
         )
     # A steer off its engine key's type is refused typed at the door, never minted.
     with pytest.raises(PayloadInvalidError, match="temperature"):
-        parse_cycle_seed(
-            ForkSeed.model_validate({"pipeline_overlay": {"a": {"temperature": '"warm"'}}}),
+        parse_cycle_start(
+            ForkStart.model_validate({"pipeline_overlay": {"a": {"temperature": '"warm"'}}}),
             stores,
             steered,
             fork,
@@ -2869,7 +2869,7 @@ def test_a_manifest_over_moved_defaults_runs_on_them_and_says_so(
     declared = decl.declared
     opened, held_campaign = held
     CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
-    root_cut = Cut(
+    root_cut = CycleAt(
         cycle=CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)),
         hop=held_campaign.root_hop,
     )
@@ -2920,9 +2920,7 @@ def test_a_resume_never_runs_on_another_origin_than_its_rounds_stand_on(
         resolve_resume(recut, held_campaign, rows_30[:-1])
     # The candidates a ranker reads beside the bank's answers are origin content too.
     with pytest.raises(ConfigDriftError):
-        resolve_resume(
-            replace(opened, candidate_library=("an unlisted label",)), held_campaign, rows_30
-        )
+        resolve_resume(replace(opened, answer_terms=("an unlisted label",)), held_campaign, rows_30)
     # The capability menu the origin hashed under is on record: a moved one is the cause named.
     floored = ModelCapability(
         model="m", provider="", reasoning_efforts=["high"], reasoning_note="", source="test"
@@ -3022,7 +3020,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
         "a door probed or bound a connector before it refused the moved one"
     )
     # The served bench reads the one refusal its pass's admission raises: no grade is offered.
-    holder = stores.campaigns.line_holder(held_campaign.root_hop)
+    holder = stores.campaigns.live_cycle(held_campaign.root_hop)
     bench_config = cycle_config(stores, held_campaign, holder).config.model_copy(
         update={"scoring": {"per_sample": "label_match(predicted, ground_truth)"}}
     )
@@ -3043,7 +3041,7 @@ def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
     steered_hop = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_steered")
     stores.campaigns.mint_cycle(
         steered_hop,
-        CycleMintedRecord(seed=CycleSeed(pipeline_overlay={"solve": NodeCall(temperature=0.3)})),
+        CycleMintedRecord(start=CycleStart(pipeline_overlay={"solve": NodeCall(temperature=0.3)})),
     )
     partition = stores.campaigns.last(held_campaign.root_hop, PartitionRecord)
     assert partition is not None, "the held campaign banked no partition"
@@ -3539,7 +3537,7 @@ def _two_prompt_nodes() -> PipelineSchema:
                 name="review",
                 kind=NodeKind.LLM,
                 prompt_info=NodePromptInfo(
-                    fields=("instruction", "rubric"), rewrite_slot="instruction"
+                    fields=("instruction", "rubric"), rewrite_field="instruction"
                 ),
                 tunes_llm=True,
             ),
@@ -3700,7 +3698,7 @@ def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
     reflected: list[set[str]] = []
     for _ in range(3):
         reflecting = NodeContext(reflected_on, optimizers.NODE_MEMBERS.get("gepa_reflect"))
-        no_cells = Panel(cells=[], order=[], block_size=0)
+        no_cells = RoundSamples(cells=[], order=[], block_size=0)
         with (
             scoped(
                 determinism=reflected_on.cycle.config.optimization.determinism,
@@ -3747,8 +3745,8 @@ def test_a_whole_prompt_rewrite_lands_in_the_slot_the_node_declares() -> None:
     assert optimizers.unfit_pipeline(gepa, slot_held, "termnorm") is not None, (
         "a peer was admitted to rewrite a slot its campaign holds"
     )
-    with pytest.raises(ValidationError, match="rewrite_slot"):
-        NodePromptInfo(fields=("rubric",), rewrite_slot="instruction")
+    with pytest.raises(ValidationError, match="rewrite_field"):
+        NodePromptInfo(fields=("rubric",), rewrite_field="instruction")
 
 
 def test_every_committed_datasets_framing_reads_within_its_budget(tmp_path: Path) -> None:
@@ -3980,7 +3978,7 @@ def test_an_l4_pool_seats_a_held_out_environment_out_of_the_pin() -> None:
 
     def resolved(*tasks: dict[str, Any]) -> dict[str, Any]:
         return {
-            "panel": {**seats, "tasks": list(tasks)},
+            "inner_panel": {**seats, "tasks": list(tasks)},
             "instruments": {task["id"]: "i", other["id"]: "j"},
             "datasets": {task["id"]: "gsm_hard", other["id"]: "hotpotqa"},
         }

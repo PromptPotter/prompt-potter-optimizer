@@ -287,7 +287,7 @@ export interface MachineSlot {
   /** WHAT holds the slot, by `kind`: a `campaign_launch` or a `scoring_pass` (a
    * paid verb outside any run). */
   holder: CampaignLaunch | ScoringPass;
-  /** The cycle the job holds, which `/hierarchy` serves as a course entry with its
+  /** The cycle the job holds, which `/hierarchy` serves as a cycle entry with its
    * run phase — `scoring` for a pass on it; null for a fresh mint and a pass
    * scoring no cycle. */
   cycle: CycleHop | null;
@@ -502,13 +502,13 @@ export interface HierarchyResponse {
 }
 
 /** A campaign as the listing serves it: its state and line stats are its line
- * course's. */
+ * cycle's. */
 export interface HierarchyCampaign {
-  /** Server-minted and stable: the key of every row and every open set. A course's
+  /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
   address: string;
   /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
+   * the outer cycle it sits under. */
   parent: string | null;
   /** The display name. */
   label: string;
@@ -521,10 +521,10 @@ export interface HierarchyCampaign {
   lines: Said[];
   state: HierarchyState;
   span: HierarchySpan;
-  level: 'campaign';
+  entry_kind: 'campaign';
   facts: CampaignFacts;
-  /** Its courses to `?depth=`, root first; none at depth 0. */
-  children: HierarchyCourse[];
+  /** Its cycles to `?depth=`, root first; none at depth 0. */
+  children: HierarchyCycle[];
 }
 
 /** One chip an entry wears, worded by the server. */
@@ -616,40 +616,40 @@ export interface CampaignFacts {
   /** The operator's own name for it; null where none was given, and the envelope's
    * `label` falls back to the dataset. */
   label: string | null;
-  /** The root course's address. */
+  /** The root cycle's address. */
   root: string;
-  /** The address of the course holding the line now: the root, or the fork a
-   * supersede handed it to. */
-  line: string;
+  /** The live cycle's address: the root, or the fork a supersede handed the line
+   * to. */
+  live_cycle: string;
   lifecycle: 'active' | 'archived' | 'deleted';
-  /** What the root course runs with; null where its pipeline did not resolve. */
+  /** What the root cycle runs with; null where its pipeline did not resolve. */
   runs_with: CampaignRunsWith | null;
 }
 
-/** What a campaign's root course runs with — the root's pipeline resolution, cut
+/** What a campaign's root cycle runs with — the root's pipeline resolution, cut
  * to settings. */
 export interface CampaignRunsWith {
   /** Scalar settings in active-step order, `model` included; no prompt text */
   params: RunsWithParam[];
   /** Every model in `params`, grouped under its vendor in first-seen order */
   vendors: VendorModels[];
-  /** The optimizer manifest the root course runs */
+  /** The optimizer manifest the root cycle runs */
   optimizer: string;
   /** The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = no
    * rounds axis */
   budget_rounds: number | null;
 }
 
-/** One setting a campaign's root course runs with, and the layer that chose it. */
+/** One setting a campaign's root cycle runs with, and the layer that chose it. */
 export interface RunsWithParam {
   node: string;
   /** The config grid's own param key (`NodeConfigParam.key`) */
   key: string;
   value: unknown;
-  source: 'dataset' | 'campaign' | 'free_tier' | 'seed' | 'model_floor' | 'identity' | 'evolved' | 'unset';
+  source: 'dataset' | 'campaign' | 'free_tier' | 'start' | 'model_floor' | 'identity' | 'evolved' | 'unset';
 }
 
-/** The models of one vendor that a campaign's root course runs. */
+/** The models of one vendor that a campaign's root cycle runs. */
 export interface VendorModels {
   /** Who TRAINED them: the namespace of the model id, or the bare id where it names
    * none. Lowercased, routing suffix dropped. */
@@ -659,13 +659,13 @@ export interface VendorModels {
   models: string[];
 }
 
-/** A course — one cycle's run, root, fork or inner — as the listing serves it. */
-export interface HierarchyCourse {
-  /** Server-minted and stable: the key of every row and every open set. A course's
+/** One cycle's run — root, fork or inner — as the listing serves it. */
+export interface HierarchyCycle {
+  /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
   address: string;
   /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
+   * the outer cycle it sits under. */
   parent: string | null;
   /** The display name. */
   label: string;
@@ -678,8 +678,8 @@ export interface HierarchyCourse {
   lines: Said[];
   state: HierarchyState;
   span: HierarchySpan;
-  level: 'course';
-  facts: CourseFacts;
+  entry_kind: 'cycle';
+  facts: CycleEntryFacts;
   /** The lead line (`RunStanding.climb`): the selection's lift vs origin and vs
    * parent, then per search dollar, per candidate tested and in worked time
    * per unit. Its detail is what they all read in: the measurand and, under
@@ -691,33 +691,33 @@ export interface HierarchyCourse {
   said: Said | null;
 }
 
-/** A course's typed facts, for a pane or a route argument; its rows read the
+/** A cycle's typed facts, for a pane or a route argument; its rows read the
  * envelope. */
-export interface CourseFacts {
-  /** How the course was minted; the `mint` tag renders it. */
+export interface CycleEntryFacts {
+  /** How the cycle was minted; the `mint` tag renders it. */
   mint: 'root' | 'fork' | 'inner';
   /** Null on a root, and on a cycle cut from another tree. */
-  spawn: CourseSpawn | null;
-  /** The outer panel cell an L4 inner course measures. */
+  spawn: CycleSpawn | null;
+  /** The outer panel cell an L4 inner cycle measures. */
   task: string | null;
   /** Null before round 0 closes. */
   standing: RunStanding | null;
   /** Rounds closed AFTER the origin. */
   rounds_closed: number;
-  /** The column the course's newest election elected on; null before its first.
+  /** The column the cycle's newest election elected on; null before its first.
    * `ability`: its rounds are won on θ, not on fitness. */
   elects_on: 'fitness' | 'composite' | 'ability' | null;
-  /** This course's own ledger's bill, at the moment. */
+  /** This cycle's own ledger's bill, at the moment. */
   spend: MeteredSpend;
-  /** The campaign's bench, on the course holding the line, read whole at the head;
-   * null on every other course (the line's reads `held_elsewhere` there) and
+  /** The campaign's bench, on the cycle holding the line, read whole at the head;
+   * null on every other cycle (the line's reads `held_elsewhere` there) and
    * under a moment. */
   bench: BenchScore | null;
 }
 
 /** Where a fork was born on its parent's time line: the cut, as an event. */
-export interface CourseSpawn {
-  /** The address of the course it branched from. */
+export interface CycleSpawn {
+  /** The address of the cycle it branched from. */
   parent: string;
   /** The first round it ran itself: every round below it is its parent line's. */
   cut_round: number;
@@ -1101,14 +1101,14 @@ export interface OwnLevel {
 }
 
 /** An open check-in, listed as a campaign: no Start has minted it, so it has no
- * cycle, course, line or run. Its `address` is the draft id Start mints from
+ * cycle, cycle, line or run. Its `address` is the draft id Start mints from
  * and `discard-draft` deletes. */
 export interface UnstartedCampaign {
-  /** Server-minted and stable: the key of every row and every open set. A course's
+  /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
   address: string;
   /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
+   * the outer cycle it sits under. */
   parent: string | null;
   /** The display name. */
   label: string;
@@ -1119,11 +1119,11 @@ export interface UnstartedCampaign {
   /** Its sentences under the figures, without a value; what could not be read is
    * among them. */
   lines: Said[];
-  level: 'unstarted';
+  entry_kind: 'unstarted';
   span: HierarchySpan;
 }
 
-/** One window of a family's chronology, oldest-first: a course, its forks and
+/** One window of a family's chronology, oldest-first: a cycle, its forks and
  * inner runs. */
 export interface HierarchySteps {
   steps: HierarchyStep[];
@@ -1132,23 +1132,23 @@ export interface HierarchySteps {
   cursor_prev: string | null;
 }
 
-/** One ledger record that reads as a line, under its own course; served in a
+/** One ledger record that reads as a line, under its own cycle; served in a
  * window only. */
 export interface HierarchyStep {
-  /** Server-minted and stable: the key of every row and every open set. A course's
+  /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
   address: string;
-  /** The course whose own ledger holds the record. */
+  /** The cycle whose own ledger holds the record. */
   parent: string;
-  level: 'step';
+  entry_kind: 'step';
   facts: StepFacts;
 }
 
 export interface StepFacts {
-  /** The line index in its course's OWN ledger — the space `?at=` and
+  /** The line index in its cycle's OWN ledger — the space `?at=` and
    * `ProjectionEnvelope.sequence` speak, so a live frame de-duplicates
-   * against a step on (course, offset). SPARSE: a record no line is made of
-   * is no step. */
+   * against a step on (cycle, offset). SPARSE: a record no line is made of is
+   * no step. */
   offset: number;
   /** The record's own time, raised to its file predecessor's when the two invert
    * (records are stamped at construction but appended later). */
@@ -1158,7 +1158,7 @@ export interface StepFacts {
    * slot of a window, so a long open call never serves one empty. */
   gap_before_s: number;
   /** The record's line, as the readout log writes it. A `live` step with no later
-   * step on its course is a call still open. */
+   * step on its cycle is a call still open. */
   activity: Said;
   /** The round the record names. */
   round: number | null;
@@ -1168,11 +1168,11 @@ export interface StepFacts {
 
 /** A campaign as the subtree read serves it: every level under it. */
 export interface SubtreeCampaign {
-  /** Server-minted and stable: the key of every row and every open set. A course's
+  /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
   address: string;
   /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
+   * the outer cycle it sits under. */
   parent: string | null;
   /** The display name. */
   label: string;
@@ -1185,10 +1185,10 @@ export interface SubtreeCampaign {
   lines: Said[];
   state: HierarchyState;
   span: HierarchySpan;
-  level: 'campaign';
+  entry_kind: 'campaign';
   facts: SubtreeCampaignFacts;
-  /** Its courses, root first. */
-  children: SubtreeCourse[];
+  /** Its cycles, root first. */
+  children: SubtreeCycle[];
 }
 
 /** What only the subtree read knows: it scans every sibling's ledger. */
@@ -1196,13 +1196,13 @@ export interface SubtreeCampaignFacts {
   /** The operator's own name for it; null where none was given, and the envelope's
    * `label` falls back to the dataset. */
   label: string | null;
-  /** The root course's address. */
+  /** The root cycle's address. */
   root: string;
-  /** The address of the course holding the line now: the root, or the fork a
-   * supersede handed it to. */
-  line: string;
+  /** The live cycle's address: the root, or the fork a supersede handed the line
+   * to. */
+  live_cycle: string;
   lifecycle: 'active' | 'archived' | 'deleted';
-  /** What the root course runs with; null where its pipeline did not resolve. */
+  /** What the root cycle runs with; null where its pipeline did not resolve. */
   runs_with: CampaignRunsWith | null;
   /** How many cycles `cleanup-empty-cycles` deletes here now
    * (`admission.py::deletable_stubs`, the command's own list: no held stub
@@ -1210,13 +1210,13 @@ export interface SubtreeCampaignFacts {
   deletable_stubs: number;
 }
 
-/** A course as the subtree read serves it: its rounds under it. */
-export interface SubtreeCourse {
-  /** Server-minted and stable: the key of every row and every open set. A course's
+/** A cycle as the subtree read serves it: its rounds under it. */
+export interface SubtreeCycle {
+  /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
   address: string;
   /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
+   * the outer cycle it sits under. */
   parent: string | null;
   /** The display name. */
   label: string;
@@ -1229,8 +1229,8 @@ export interface SubtreeCourse {
   lines: Said[];
   state: HierarchyState;
   span: HierarchySpan;
-  level: 'course';
-  facts: SubtreeCourseFacts;
+  entry_kind: 'cycle';
+  facts: SubtreeCycleEntryFacts;
   /** The lead line (`RunStanding.climb`): the selection's lift vs origin and vs
    * parent, then per search dollar, per candidate tested and in worked time
    * per unit. Its detail is what they all read in: the measurand and, under
@@ -1247,44 +1247,44 @@ export interface SubtreeCourse {
 
 /** What only the subtree read knows: it reads every candidate, under the
  * request's lens. */
-export interface SubtreeCourseFacts {
-  /** How the course was minted; the `mint` tag renders it. */
+export interface SubtreeCycleEntryFacts {
+  /** How the cycle was minted; the `mint` tag renders it. */
   mint: 'root' | 'fork' | 'inner';
   /** Null on a root, and on a cycle cut from another tree. */
-  spawn: CourseSpawn | null;
-  /** The outer panel cell an L4 inner course measures. */
+  spawn: CycleSpawn | null;
+  /** The outer panel cell an L4 inner cycle measures. */
   task: string | null;
   /** Null before round 0 closes. */
   standing: RunStanding | null;
   /** Rounds closed AFTER the origin. */
   rounds_closed: number;
-  /** The column the course's newest election elected on; null before its first.
+  /** The column the cycle's newest election elected on; null before its first.
    * `ability`: its rounds are won on θ, not on fitness. */
   elects_on: 'fitness' | 'composite' | 'ability' | null;
-  /** This course's own ledger's bill, at the moment. */
+  /** This cycle's own ledger's bill, at the moment. */
   spend: MeteredSpend;
-  /** The campaign's bench, on the course holding the line, read whole at the head;
-   * null on every other course (the line's reads `held_elsewhere` there) and
+  /** The campaign's bench, on the cycle holding the line, read whole at the head;
+   * null on every other cycle (the line's reads `held_elsewhere` there) and
    * under a moment. */
   bench: BenchScore | null;
-  /** The `per_cell` formula this course was read under for the request's lens — a
+  /** The `per_cell` formula this cycle was read under for the request's lens — a
    * `dials:` lens realized against this campaign's anchors, a `score:` one as
    * given. What a fork applying the lens carries as `scoring.per_cell`. Null
    * without one. */
   lens_criterion: string | null;
-  /** How the request's lens reorders this course's candidates. Null without a lens,
+  /** How the request's lens reorders this cycle's candidates. Null without a lens,
    * and where it ranked none of them. */
   lens_shift: LensShift | null;
-  /** The address of the arm the course's standing is paired against: the round-0
-   * pick its line holds, whichever course ran it. Null on a branch cut at
+  /** The address of the arm the cycle's standing is paired against: the round-0
+   * pick its line holds, whichever cycle ran it. Null on a branch cut at
    * round 0 before it measured its own. */
   origin: string | null;
   /** The address of the candidate a fork hangs from: the arm its mint record names,
-   * on the course of its parent's line that ran it. Null on a root. */
+   * on the cycle of its parent's line that ran it. Null on a root. */
   from_candidate: string | null;
 }
 
-/** What the request's lens did to one course's candidate ordering. */
+/** What the request's lens did to one cycle's candidate ordering. */
 export interface LensShift {
   /** The address of the candidate ranked first by composite; null where that
    * candidate is retired. */
@@ -1298,16 +1298,16 @@ export interface LensShift {
   unchanged: number;
 }
 
-/** One round of a course's own ledger; its children are the candidates it
+/** One round of a cycle's own ledger; its children are the candidates it
  * proposed. */
 export interface HierarchyRound {
-  /** Server-minted and stable: the key of every row and every open set. A course's
+  /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
   address: string;
   /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
+   * the outer cycle it sits under. */
   parent: string | null;
-  level: 'round';
+  entry_kind: 'round';
   facts: RoundFacts;
   /** In slot order. */
   children: HierarchyCandidate[];
@@ -1324,11 +1324,11 @@ export interface RoundFacts {
 /** One candidate a round proposed; its children are the inner campaigns it
  * spawned. */
 export interface HierarchyCandidate {
-  /** Server-minted and stable: the key of every row and every open set. A course's
+  /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
   address: string;
   /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
+   * the outer cycle it sits under. */
   parent: string | null;
   /** The display name. */
   label: string;
@@ -1339,7 +1339,7 @@ export interface HierarchyCandidate {
   /** Its sentences under the figures, without a value; what could not be read is
    * among them. */
   lines: Said[];
-  level: 'candidate';
+  entry_kind: 'candidate';
   facts: CandidateFacts;
   children: SubtreeCampaign[];
 }
@@ -1357,22 +1357,22 @@ export interface CandidateFacts {
    * on an origin. */
   variations: Variation[];
   standing: 'origin' | 'proposed' | 'rewound' | 'rewound_stood_on' | 'retired';
-  /** `reading.arm` is the key every per-cycle document of this course speaks;
+  /** `reading.arm` is the key every per-cycle document of this cycle speaks;
    * `reading.sp_hash` joins to the archive rows. A retired candidate's
-   * election wears no crown: the course that took its place re-asks it. */
+   * election wears no crown: the cycle that took its place re-asks it. */
   reading: ArmReading;
-  /** The newest crowned live candidate of its course — the parent the next round
-   * mutates from. At most one per course. */
+  /** The newest crowned live candidate of its cycle — the parent the next round
+   * mutates from. At most one per cycle. */
   stands: boolean;
-  /** The newest candidate its course proposed. */
-  course_latest: boolean;
+  /** The newest candidate its cycle proposed. */
+  cycle_latest: boolean;
   /** The ONE candidate across the subtree a remembered individual id resolves to:
    * the live one where a supersede left the individual on two, the first
    * where several stand. */
   answers_for_id: boolean;
   /** The main line to THIS candidate, origin first: the line of the candidate its
-   * course hangs from (a fork's from-candidate, an inner course's host) up to
-   * the cut, each elected round of its course before it with the candidates
+   * cycle hangs from (a fork's from-candidate, an inner cycle's host) up to
+   * the cut, each elected round of its cycle before it with the candidates
    * crowned, then this candidate, then any later round that crowned nobody up
    * to the next crown. Read off crowns, never `parent_ids`. */
   main_line: MainLineStep[];
@@ -1394,7 +1394,7 @@ export interface CandidateFacts {
   /** This candidate's composite fitness under the request's `score:` lens. Null
    * without a lens, or where no row carries a verdict under it. */
   lens_value: number | null;
-  /** Which way the lens moved this candidate among its course's: its position by
+  /** Which way the lens moved this candidate among its cycle's: its position by
    * `lens_value` against its position by the reading's composite. Null
    * without a lens, or where either value is. */
   lens_rank_move: 'up' | 'down' | 'unchanged' | null;
@@ -1467,7 +1467,7 @@ export interface ArmReading {
    * the cells that answered it: an L4 outer arm's `held_out_lift` and
    * `floored` share. */
   fitness_terms: Record<string, number>;
-  panel: ArmPanel;
+  panel: ArmSamples;
   /** What measuring it consumed, the BACKEND bucket alone, replayed rows excluded;
    * null until its score report folds an account. */
   tokens: TokenAccount | null;
@@ -1495,7 +1495,7 @@ export interface ArmReading {
 }
 
 /** The cells one arm's walk holds of the panel its round asked of it. */
-export interface ArmPanel {
+export interface ArmSamples {
   /** Cells the walk holds. Null on an arm with no score report — never measured,
    * which is not a walk of zero cells. */
   scored: number | null;
@@ -2558,7 +2558,7 @@ export interface Evidence {
  * reached two ways. */
 export interface SubjectReading {
   key: string;
-  kind: 'campaign' | 'course' | 'candidate';
+  kind: 'campaign' | 'cycle' | 'candidate';
   inside: CycleHop[];
   campaign_id: string;
   cycle_id: string;
@@ -2961,7 +2961,7 @@ export interface FactorCell {
 
 /** One arm — a CONFIGURATION identity, which is what the word keeps meaning here
  * — that ran more than once. Computed over ``campaign`` subjects only: a
- * course and a candidate share their campaign's round-0 hashes, so grouping
+ * cycle and a candidate share their campaign's round-0 hashes, so grouping
  * them by it would report a branch as a replicate of the trunk it grew out
  * of. ``level_spread`` is the cheapest noise reading on the board — taken
  * from campaigns already paid for, and invisible to a roster that lists
@@ -3271,7 +3271,7 @@ export interface DraftCampaignWire {
    * in fills it. A step bearing no prompt reads none. */
   origin_prompts: Record<string, Record<string, string>>;
   /** A count, not the list: a library runs to tens of thousands of entries. */
-  candidate_library_size: number;
+  answer_terms_size: number;
   created_at: string;
   /** The chain this draft runs, in order. Who may move a node's axes is
    * `pipeline.node_config_schema`'s answer alone. */
@@ -3344,7 +3344,7 @@ export interface CampaignConfig {
    * carries. `param_allowed_values['model']` is also the ONE permitted model
    * set: what the optimizer may pick, and what a human fork may steer to
    * without tainting the branch. A steer outside it is a `campaign.babysit`
-   * act — warned + graded C (`steer_verdict`, asked when a fork's seed is
+   * act — warned + graded C (`steer_verdict`, asked when a fork's start is
    * parsed). Nothing declared for a node = nothing sanctioned there, the
    * restrictive default. */
   optimizer_narrowing: Record<string, NodeSearchNarrowing>;
@@ -3474,7 +3474,7 @@ export interface OptimizationConfig {
    * cycles and checked at the next boundary; ``rounds`` caps one cycle's
    * closed rounds after the origin (0 measures the origin and stops; null
    * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
-   * cutting a remote cell still open at its edge. A fork seed, a standing
+   * cutting a remote cell still open at its edge. A fork start, a standing
    * ``set-limits`` and a launch flag each lay over it axis by axis, and the
    * account admits the result whole or refuses the launch. A null axis is
    * unbounded. ``tokens`` is unset by default: a token is worth a different
@@ -3574,19 +3574,19 @@ export interface CampaignPipelineResponse {
   campaign_id: string;
   cycle_id: string;
   dataset_name: string;
-  /** The connector the course runs on, as `dataset.yaml::pipeline.connector` names
+  /** The connector the cycle runs on, as `dataset.yaml::pipeline.connector` names
    * it: the id `GET /backends` lists */
   connector: string;
   /** This campaign optimizes the optimizer itself (L4): its connector is
    * `promptpotter`, and one measured row is a whole inner campaign, so it has
    * no per-sample data of its own */
   self_optimization: boolean;
-  /** The optimizer manifest the addressed course runs — the one answer a surface
+  /** The optimizer manifest the addressed cycle runs — the one answer a surface
    * reads which optimizer's graph, knobs and analytics apply by, a check-in's
    * draft included */
   optimizer: string;
-  /** That optimizer as the addressed course runs it — the manifest's knobs under
-   * the campaign's and the cycle seed's overlays, its arms and its pools */
+  /** That optimizer as the addressed cycle runs it — the manifest's knobs under the
+   * campaign's and the cycle seed's overlays, its arms and its pools */
   optimizer_setup: OptimizerSetup;
   /** Resolved config as the engine holds it — the bytes each arm of a round file
    * carries as `resolved_params`, which makes that field this endpoint's
@@ -3759,7 +3759,7 @@ export interface PoolRow {
   /** The pool's state kind, e.g. `block_pool` */
   pool: string;
   /** Where its entries come from */
-  source: 'library' | 'partition';
+  source: 'packs' | 'partition';
   /** The run-init node writing it once, before round 0 */
   initializer: string;
   /** The initializer's `active` paths: the entries in play */
@@ -3861,7 +3861,7 @@ export interface NodeConfigParam {
   never_axis: '' | 'cost_lever' | 'schema_owned';
   movable_by: ('proposer' | 'optimizer')[];
   held: boolean;
-  source: 'dataset' | 'campaign' | 'free_tier' | 'seed' | 'model_floor' | 'identity' | 'evolved' | 'unset';
+  source: 'dataset' | 'campaign' | 'free_tier' | 'start' | 'model_floor' | 'identity' | 'evolved' | 'unset';
   permitted: string[];
   permitted_stated: boolean;
   /** `provider` the route's host, `effort` the reasoning ladder a model answers,
@@ -4008,12 +4008,12 @@ export interface EditDraftPatch {
   column_query: string | null;
   column_ground_truth: string | null;
   origin_prompts: Record<string, Record<string, string>> | null;
-  candidate_library: string[] | null;
-  /** Build the candidate library from the distinct values of this draft column. */
-  candidate_library_column: string | null;
-  /** Parse the candidate library from a file: one entry per line, or the first
-   * column of a CSV/Excel. */
-  candidate_library_file: LibraryFile | null;
+  answer_terms: string[] | null;
+  /** Build the answer terms from the distinct values of this draft column. */
+  answer_terms_column: string | null;
+  /** Parse the answer terms from a file: one entry per line, or the first column of
+   * a CSV/Excel. */
+  answer_terms_file: AnswerTermsFile | null;
 }
 
 /** A check-in edit's ``config``, by `CampaignConfig`'s own paths. Only the fields
@@ -4057,7 +4057,7 @@ export interface ConfigEdit {
    * carries. `param_allowed_values['model']` is also the ONE permitted model
    * set: what the optimizer may pick, and what a human fork may steer to
    * without tainting the branch. A steer outside it is a `campaign.babysit`
-   * act — warned + graded C (`steer_verdict`, asked when a fork's seed is
+   * act — warned + graded C (`steer_verdict`, asked when a fork's start is
    * parsed). Nothing declared for a node = nothing sanctioned there, the
    * restrictive default. */
   optimizer_narrowing: Record<string, NodeSearchNarrowing> | null;
@@ -4149,8 +4149,8 @@ export interface NodeOutputEdit {
   answer_fields: string[] | null;
 }
 
-/** An uploaded candidate library, under every upload's one bound. */
-export interface LibraryFile {
+/** Uploaded answer terms, under every upload's one bound. */
+export interface AnswerTermsFile {
   filename: string;
   /** The file's bytes, base64. */
   blob: unknown;
@@ -4209,7 +4209,7 @@ export interface ConfigKnob {
    * node's knob, as its manifest declares it) | the layer that set it:
    * campaign (the operator's edit; any set bench knob), and on an optimizer
    * node's knob dataset, free_tier or seed */
-  source: 'default' | 'dataset' | 'campaign' | 'free_tier' | 'seed' | 'manifest';
+  source: 'default' | 'dataset' | 'campaign' | 'free_tier' | 'start' | 'manifest';
 }
 
 export interface ConfigCoupling {
@@ -4558,7 +4558,7 @@ export interface CommandAcceptedBody {
   command_id: string;
   /** The address the dispatcher resolved and filed it on: empty for the workspace,
    * `draft:<id>` for a draft, else its campaign or cycle as a subject spells
-   * it (`campaign:<id>`, `course:<id>/<cycle>`, `;in=` its sandbox chain). */
+   * it (`campaign:<id>`, `cycle:<id>/<cycle>`, `;in=` its sandbox chain). */
   subject: string;
 }
 
@@ -4782,10 +4782,10 @@ export interface ForkCyclePayload {
   mode: RunMode;
   round: number;
   candidate_id: string;
-  seed: ForkSeed;
+  start: ForkStart;
   /** False (the default) is `operator_steered`: a clean offshoot from the origin,
    * re-scoring the edited searchpoint. True is `operator_rewind` — rounds
-   * 0..round-1 are lifted and the fork continues at `round` under the seed's
+   * 0..round-1 are lifted and the fork continues at `round` under the start's
    * overrides, which is what an 'apply this from here' press means and what
    * the terminal spells `resume --rewind N`. */
   keep_rounds: boolean;
@@ -4801,9 +4801,9 @@ export interface RunMode {
   on_divergence: 'halt' | 'accept' | 'fork';
 }
 
-/** A fork's `CycleSeed` as sent: the applier freezes `node_narrowing` on the
+/** A fork's `CycleStart` as sent: the applier freezes `node_narrowing` on the
  * forked cycle's own rows and stamps the `origin_source` the wire omits. */
-export interface ForkSeed {
+export interface ForkStart {
   origin_prompts: Record<string, NodePrompt>;
   /** Per node, its keys laid over the forked candidate's: `null` drops the
    * candidate's own value, so the layer below shows through. */
@@ -4888,7 +4888,7 @@ export interface CampaignLayer {
    * carries. `param_allowed_values['model']` is also the ONE permitted model
    * set: what the optimizer may pick, and what a human fork may steer to
    * without tainting the branch. A steer outside it is a `campaign.babysit`
-   * act — warned + graded C (`steer_verdict`, asked when a fork's seed is
+   * act — warned + graded C (`steer_verdict`, asked when a fork's start is
    * parsed). Nothing declared for a node = nothing sanctioned there, the
    * restrictive default. */
   optimizer_narrowing: Record<string, NodeSearchNarrowing> | null;
@@ -4992,7 +4992,7 @@ export interface OptimizationLayer {
    * cycles and checked at the next boundary; ``rounds`` caps one cycle's
    * closed rounds after the origin (0 measures the origin and stops; null
    * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
-   * cutting a remote cell still open at its edge. A fork seed, a standing
+   * cutting a remote cell still open at its edge. A fork start, a standing
    * ``set-limits`` and a launch flag each lay over it axis by axis, and the
    * account admits the result whole or refuses the launch. A null axis is
    * unbounded. ``tokens`` is unset by default: a token is worth a different
@@ -5481,7 +5481,7 @@ export type StopCategory = 'search' | 'limit' | 'budget' | 'operator' | 'externa
 export type MovableAgent = 'proposer' | 'optimizer';
 
 // promptpotter.domain.pool::PoolSource
-export type PoolSource = 'library' | 'partition';
+export type PoolSource = 'packs' | 'partition';
 
 // promptpotter.domain.ruler::ThetaCaveat
 export type ThetaCaveat = 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta';
@@ -5503,6 +5503,10 @@ export interface SignInRefusalInfo {
   tone: Tone;
 }
 
+export interface CouplingSeverityInfo {
+  tone: Tone;
+}
+
 export interface GuardStateInfo {
   label: string;
   sentence: string;
@@ -5511,10 +5515,6 @@ export interface GuardStateInfo {
 export interface ActivityWindowInfo {
   label: string;
   seconds: number;
-}
-
-export interface CouplingSeverityInfo {
-  tone: Tone;
 }
 
 export interface SteerOutsideInfo {
@@ -5664,6 +5664,13 @@ export const SIGN_IN_REFUSAL_INFO: Record<'state_invalid_or_expired' | 'code_exc
   "accounts_full": { label: "This server has reached its account limit, so it can't open a new account. If you already have one, sign in with it.", tone: "warn" },
 };
 
+// Mirror of application/config_map.py::COUPLING_SEVERITY_INFO, in display order.
+export const COUPLING_SEVERITY_INFO: Record<'collision' | 'inert' | 'info', CouplingSeverityInfo> = {
+  "collision": { tone: "danger" },
+  "inert": { tone: "attention" },
+  "info": { tone: "quiet" },
+};
+
 // Mirror of application/datasets/origin_readiness.py::SETUP_STEP_TITLES, in display order.
 export const SETUP_STEP_TITLES: Record<SetupStep, string> = {
   "optimizer": "Optimizer",
@@ -5704,9 +5711,9 @@ export const VERDICT_ABSENT_INFO: Partial<Record<ReadingState, string>> = {
 };
 
 // Mirror of application/evidence/subjects.py::SUBJECT_KIND_LABELS, in display order.
-export const SUBJECT_KIND_LABELS: Record<'campaign' | 'course' | 'candidate', string> = {
+export const SUBJECT_KIND_LABELS: Record<'campaign' | 'cycle' | 'candidate', string> = {
   "campaign": "origin",
-  "course": "branch head",
+  "cycle": "branch head",
   "candidate": "searchpoint",
 };
 
@@ -5736,13 +5743,6 @@ export const LAUNCH_REFUSAL_LABELS: Record<LaunchRefusalReason, string> = {
   "over_declared": "Ceiling past the allowance",
   "no_key": "No key for a provider",
   "unpriced": "No rate bounds the cells",
-};
-
-// Mirror of application/knobs.py::COUPLING_SEVERITY_INFO, in display order.
-export const COUPLING_SEVERITY_INFO: Record<'collision' | 'inert' | 'info', CouplingSeverityInfo> = {
-  "collision": { tone: "danger" },
-  "inert": { tone: "attention" },
-  "info": { tone: "quiet" },
 };
 
 // Mirror of application/mask/record.py::SCORE_LENS_LABELS, in display order.
@@ -6084,7 +6084,7 @@ export const NODE_KIND_INFO: Record<'io' | 'llm' | 'tool' | 'retriever' | 'cache
 
 // Mirror of domain/pool.py::POOL_SOURCE_INFO, in display order.
 export const POOL_SOURCE_INFO: Record<PoolSource, PoolSourceInfo> = {
-  "library": { one: "snippet", many: "snippets", in_play: "Snippets in play" },
+  "packs": { one: "snippet", many: "snippets", in_play: "Snippets in play" },
   "partition": { one: "row", many: "rows", in_play: "Rows in play" },
 };
 
@@ -6211,15 +6211,15 @@ export const LEAF_INFO: Record<Leaf, LeafInfo> = {
 // Each table's keys in display order (lib/api/words.ts walks a table by it).
 export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object, readonly string[]>([
   [SIGN_IN_REFUSAL_INFO, ["state_invalid_or_expired", "code_exchange_failed", "provider_returned_error", "callback_missing_params", "signin_unavailable", "accounts_full"]],
+  [COUPLING_SEVERITY_INFO, ["collision", "inert", "info"]],
   [SETUP_STEP_TITLES, ["optimizer", "data", "scoring", "pipeline", "head_to_head", "run"]],
   [GUARD_DIFFERENCE_INFO, ["instrument_id", "dataset_hash", "split", "bench_rows", "scorer_id", "models", "origin", "budget", "defaults", "optimizer_models", "human_intervened", "origin_reading"]],
   [GUARD_STATE_INFO, ["controlled", "uncontrolled", "differs"]],
   [VERDICT_ABSENT_INFO, ["under_two_cells", "pending"]],
-  [SUBJECT_KIND_LABELS, ["campaign", "course", "candidate"]],
+  [SUBJECT_KIND_LABELS, ["campaign", "cycle", "candidate"]],
   [ACTIVITY_WINDOW_INFO, ["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"]],
   [SLOT_BOUND_WORDS, ["throttle", "machine"]],
   [LAUNCH_REFUSAL_LABELS, ["used_up", "held", "over_declared", "no_key", "unpriced"]],
-  [COUPLING_SEVERITY_INFO, ["collision", "inert", "info"]],
   [SCORE_LENS_LABELS, ["score:fitness"]],
   [ABORT_LENS_LABELS, ["abort:epsilon_off", "abort:all_off"]],
   [STEER_OUTSIDE_INFO, ["babysat", "refused"]],
@@ -6253,7 +6253,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [STOP_REASON_INFO, ["rounds_budget", "target_hit", "lives_exhausted", "hard_cap_reached", "optimizer_exhausted", "rebased_to_fork", "paused", "panel_cut", "adapter_output_owed", "optimizer_abort", "spend_budget", "token_budget", "host_allowance", "wall_clock", "origin_gate", "backend_unreachable", "provider_credit_exhausted", "provider_throttled", "price_list_unreachable", "no_rate", "crashed", "input_refused", "not_admitted", "producer_vanished", "render_error", "diverged", "optimizer_timeout"]],
   [MOVABLE_AGENT_LABELS, ["proposer", "optimizer"]],
   [NODE_KIND_INFO, ["io", "llm", "tool", "retriever", "cache", "measurement", "member"]],
-  [POOL_SOURCE_INFO, ["library", "partition"]],
+  [POOL_SOURCE_INFO, ["packs", "partition"]],
   [PROMPT_FIELD_INFO, ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format", "shots", "plan"]],
   [VERIFY_WORDS, ["saturated"]],
   [HEALTH_CAUSE_INFO, ["origin_unmeasured", "origin_incomplete", "structural", "unscoreable", "holed", "evidence_starved", "structural_untested", "persistent", "degraded", "transient"]],

@@ -2,7 +2,7 @@ import type {
   ArmAbility,
   ArmReading,
   HierarchyCandidate,
-  HierarchyCourse,
+  HierarchyCycle,
   VerificationMark,
 } from "@/lib/api/types";
 
@@ -40,10 +40,10 @@ export interface ArmBar extends BarBase {
   bench: VerificationMark | null;
 }
 
-// A run drawn as a bar: no arm, so no reading — its level is its course's served `facts.standing`.
-interface CourseBar extends BarBase {
-  node: HierarchyCourse;
+// A run drawn as a bar: no arm, so no reading — its level is its cycle's served `facts.standing`.
+interface CycleBar extends BarBase {
+  node: HierarchyCycle;
   reading: null;
 }
 
-export type CandidateBar = ArmBar | CourseBar;
+export type CandidateBar = ArmBar | CycleBar;

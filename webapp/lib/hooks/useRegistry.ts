@@ -4,26 +4,26 @@ import type {
   ActiveSessionResponse,
   CycleHop,
   HierarchyCampaign,
-  HierarchyCourse,
+  HierarchyCycle,
   HierarchyEntry,
   HierarchyResponse,
   ListedCampaign,
   UnstartedCampaign,
 } from "@/lib/api/types";
-import { campaignAt, runningCourses } from "@/lib/derivations";
+import { campaignAt, runningCycles } from "@/lib/derivations";
 import type { ReadResult } from "@/lib/read-cache";
 import { shownData, useRead } from "./useRead";
 
 interface RegistryIndex {
   // Every lifecycle, so an address resolves whatever the filter lists; the unstarted lead.
   entries: readonly ListedCampaign[];
-  // `entries` with a run: the ones `byAddress` holds, with their courses.
+  // `entries` with a run: the ones `byAddress` holds, with their cycles.
   started: readonly HierarchyCampaign[];
   // The open check-ins, most recently edited first; each `address` is its draft id.
   unstarted: readonly UnstartedCampaign[];
   // An unstarted campaign is reached by its check-in, never an address here.
   byAddress: ReadonlyMap<string, HierarchyEntry>;
-  running: readonly HierarchyCourse[];
+  running: readonly HierarchyCycle[];
 }
 
 const EMPTY: RegistryIndex = {
@@ -42,18 +42,18 @@ function indexOf(body: HierarchyResponse | null): RegistryIndex {
   const hit = indexed.get(body);
   if (hit) return hit;
   const entries = body.entries;
-  const started = entries.filter((c): c is HierarchyCampaign => c.level === "campaign");
+  const started = entries.filter((c): c is HierarchyCampaign => c.entry_kind === "campaign");
   const byAddress = new Map<string, HierarchyEntry>();
   for (const campaign of started) {
     byAddress.set(campaign.address, campaign);
-    for (const course of campaign.children) byAddress.set(course.address, course);
+    for (const cycle of campaign.children) byAddress.set(cycle.address, cycle);
   }
   const index: RegistryIndex = {
     entries,
     started,
-    unstarted: entries.filter((c): c is UnstartedCampaign => c.level === "unstarted"),
+    unstarted: entries.filter((c): c is UnstartedCampaign => c.entry_kind === "unstarted"),
     byAddress,
-    running: runningCourses(started),
+    running: runningCycles(started),
   };
   indexed.set(body, index);
   return index;

@@ -18,7 +18,7 @@ import type {
   HierarchyCandidate,
   ListedCampaign,
   SubtreeCampaign,
-  SubtreeCourse,
+  SubtreeCycle,
   UnstartedCampaign,
 } from "@/lib/api/types";
 import { useLineageTree } from "@/lib/state/lineage";
@@ -34,7 +34,7 @@ export interface TreeCtx {
   isNodeOpen: (key: string, openByDefault: boolean) => boolean;
   toggleNode: (key: string) => void;
   viewedPath: CyclePath | null;
-  // A candidate is picked on the viewed path, so no course row is the one selected.
+  // A candidate is picked on the viewed path, so no cycle row is the one selected.
   picked: boolean;
   showCandidates: boolean;
 }
@@ -126,7 +126,7 @@ function shortOrigin(originId: string): string {
 }
 
 function ListedRow({ campaign, ctx }: { campaign: ListedCampaign; ctx: TreeCtx }) {
-  return campaign.level === "unstarted" ? (
+  return campaign.entry_kind === "unstarted" ? (
     <UnstartedRow campaign={campaign} />
   ) : (
     <RunRow campaign={campaign} ctx={ctx} />
@@ -203,15 +203,15 @@ function RunRow({ campaign, ctx: shared }: { campaign: HierarchyCampaign; ctx: T
 }
 
 function CampaignBody({ body, ctx }: { body: SubtreeCampaign; ctx: TreeCtx }) {
-  const courses = body.children;
+  const cycles = body.children;
   return (
     <ul className="unit-library-children">
-      {courses.length === 1 ? (
-        <CourseBody course={courses[0]!} ctx={ctx} />
+      {cycles.length === 1 ? (
+        <CycleBody cycle={cycles[0]!} ctx={ctx} />
       ) : (
-        courses.map((course) => (
-          <li key={course.address}>
-            <CourseRow course={course} holdsLine={course.address === body.facts.line} ctx={ctx} />
+        cycles.map((cycle) => (
+          <li key={cycle.address}>
+            <CycleRow cycle={cycle} isLiveCycle={cycle.address === body.facts.live_cycle} ctx={ctx} />
           </li>
         ))
       )}
@@ -219,48 +219,48 @@ function CampaignBody({ body, ctx }: { body: SubtreeCampaign; ctx: TreeCtx }) {
   );
 }
 
-function CourseRow({
-  course,
-  holdsLine,
+function CycleRow({
+  cycle,
+  isLiveCycle,
   ctx,
 }: {
-  course: SubtreeCourse;
-  holdsLine: boolean;
+  cycle: SubtreeCycle;
+  isLiveCycle: boolean;
   ctx: TreeCtx;
 }) {
   const { navigate } = useWorkspace();
-  const path = pathOfAddress(course.address);
-  const viewed = ctx.viewedPath != null && encodeCyclePath(ctx.viewedPath) === course.address;
-  // Every course open stacks each fork's whole roster on a phone: the line and the viewed one open.
-  const open = ctx.isNodeOpen(course.address, holdsLine || viewed);
+  const path = pathOfAddress(cycle.address);
+  const viewed = ctx.viewedPath != null && encodeCyclePath(ctx.viewedPath) === cycle.address;
+  // Every cycle open stacks each fork's whole roster on a phone: the line and the viewed one open.
+  const open = ctx.isNodeOpen(cycle.address, isLiveCycle || viewed);
   const selected = viewed && !ctx.picked;
   return (
     <>
-      <RowHoverCard card={course}>
+      <RowHoverCard card={cycle}>
         <div className={cx("unit-library-family", selected && "selected")}>
-          <Twist open={open} onClick={() => ctx.toggleNode(course.address)} />
+          <Twist open={open} onClick={() => ctx.toggleNode(cycle.address)} />
           <button
             type="button"
             className="unit-library-item"
             onClick={() => navigate({ path }, { resume: true })}
             aria-current={selected ? "true" : undefined}
           >
-            <CourseRowLabel course={course} />
+            <CycleRowLabel cycle={cycle} />
           </button>
         </div>
       </RowHoverCard>
       {open && (
         <ul className="unit-library-children">
-          <CourseBody course={course} ctx={ctx} />
+          <CycleBody cycle={cycle} ctx={ctx} />
         </ul>
       )}
     </>
   );
 }
 
-function CourseBody({ course, ctx }: { course: SubtreeCourse; ctx: TreeCtx }) {
-  const rows = candidatesOf(course);
-  const unplaced = course.children.filter((c): c is SubtreeCampaign => c.level === "campaign");
+function CycleBody({ cycle, ctx }: { cycle: SubtreeCycle; ctx: TreeCtx }) {
+  const rows = candidatesOf(cycle);
+  const unplaced = cycle.children.filter((c): c is SubtreeCampaign => c.entry_kind === "campaign");
   const { live, retired } = splitRetired(rows);
   return (
     <>
@@ -272,7 +272,7 @@ function CourseBody({ course, ctx }: { course: SubtreeCourse; ctx: TreeCtx }) {
       ))}
       {retired.map((group) => (
         <li key={group.branch}>
-          <RetiredGroupRow course={course} group={group} ctx={ctx} />
+          <RetiredGroupRow cycle={cycle} group={group} ctx={ctx} />
         </li>
       ))}
       {unplaced.map((campaign) => (
@@ -299,13 +299,13 @@ function Twist({ open, onClick }: { open: boolean; onClick: () => void }) {
   );
 }
 
-function CourseRowLabel({ course }: { course: SubtreeCourse }) {
-  const lift = figureOf(course, "lift")?.value ?? PLACEHOLDER;
+function CycleRowLabel({ cycle }: { cycle: SubtreeCycle }) {
+  const lift = figureOf(cycle, "lift")?.value ?? PLACEHOLDER;
   return (
     <span className="unit-library-row">
-      <span className="unit-library-name">{course.label}</span>
+      <span className="unit-library-name">{cycle.label}</span>
       <span className="unit-library-meta unit-library-meta-marked">
-        <PhaseMark entry={course} />
+        <PhaseMark entry={cycle} />
         <span title={lift}>{lift}</span>
       </span>
     </span>
@@ -313,11 +313,11 @@ function CourseRowLabel({ course }: { course: SubtreeCourse }) {
 }
 
 function RetiredGroupRow({
-  course,
+  cycle,
   group,
   ctx,
 }: {
-  course: SubtreeCourse;
+  cycle: SubtreeCycle;
   group: RetiredGroup;
   ctx: TreeCtx;
 }) {
@@ -325,7 +325,7 @@ function RetiredGroupRow({
   const [first] = group.candidates;
   return (
     <GroupRow
-      addr={`${course.address}/retired/${group.branch}`}
+      addr={`${cycle.address}/retired/${group.branch}`}
       openByDefault={false}
       ctx={ctx}
       className="retired"

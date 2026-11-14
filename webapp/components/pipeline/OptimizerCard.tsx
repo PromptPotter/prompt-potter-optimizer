@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { cx } from "@/lib/cx";
 import { figureOf, phaseWalks } from "@/lib/derivations";
-import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedCycle } from "@/lib/state/lineage";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData } from "@/lib/hooks/useRead";
@@ -26,7 +26,7 @@ export function OptimizerCard() {
   const clashes = useKnobClashes();
   const clashCount = clashes.active?.length ?? 0;
   const { dash, isLive } = useViewedDashboard();
-  const runState = figureOf(useViewedCourse(), "state");
+  const runState = figureOf(useViewedCycle(), "state");
   const activeId = dash?.current_round.active_node ?? null;
   const { nodes: roundNodes, showsCurrent: viewingLive } = useRoundNodes();
   const read = useConnector();

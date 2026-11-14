@@ -49,7 +49,7 @@ const metricInk =
   (ctx: SeriesCtx): string =>
     metricInkToken(m, ctx.displayMetric);
 
-// A course bar carries no arm, so no pass of this cycle reads it.
+// A cycle bar carries no arm, so no pass of this cycle reads it.
 const verifyOf = (v: CandidateBar) => (v.reading ? v.verify : null);
 const benchOf = (v: CandidateBar) => (v.reading ? v.bench : null);
 

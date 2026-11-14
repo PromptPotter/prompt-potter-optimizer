@@ -315,8 +315,8 @@ class _Cycle(NamedTuple):
         """A `;samples=` mask names slots in the bank the cycle drew; rows pair on keys."""
         if samples is None:
             return None
-        slot_of = cycle_bank(self.stores, self.hop).slot_of
-        return frozenset(k for k, s in slot_of.items() if s in samples)
+        position_of = cycle_bank(self.stores, self.hop).position_of
+        return frozenset(k for k, s in position_of.items() if s in samples)
 
     def sheet(self, individual_id: str, scope: RoleScope = RoleScope.REPORT) -> CellSheet:
         measured = individual_cells(self.walks, individual_id, scope)
@@ -432,7 +432,7 @@ def subject_evidence(
     if grader is None or not heads:
         raise BadRequestError(
             f"None of {', '.join(sorted(wanted)) or 'the subjects named'} has scored rows to read. "
-            "A campaign answers here once its origin has run, a course once its branch has, a "
+            "A campaign answers here once its origin has run, a cycle once its branch has, a "
             "candidate once it has been measured; one that does not exist answers never."
         )
     available = available_channels(channels_by_subject)
@@ -643,7 +643,7 @@ def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
             return None
         scenario, chain = resolved
         point: _ChainPoint | None = chain[-1]
-    elif spec.kind == "course":
+    elif spec.kind == "cycle":
         stands = cycle.walked.standing
         picked = None if stands is None else stands.selection
         point = (
@@ -656,7 +656,7 @@ def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
     masked = _masked(point, cycle.mask(spec.samples))
     return _Head(
         cycle_dir=cycle_dir,
-        label=spec.cycle_id if spec.kind == "course" else point.label,
+        label=spec.cycle_id if spec.kind == "cycle" else point.label,
         dataset_name=dataset_name,
         created_at="" if index is None else index.created_at,
         point=masked,

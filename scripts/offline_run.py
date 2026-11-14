@@ -71,7 +71,7 @@ from promptpotter.application.embedded_run import host_dispatcher, run_campaign,
 from promptpotter.application.evidence.head_to_head import GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
-from promptpotter.application.maintenance.landing import plan_landing, read_every_treatment
+from promptpotter.application.maintenance.landing import check_every_treatment, plan_landing
 from promptpotter.application.optimizer_manifest import (
     manifest_directories,
     running_prompt,
@@ -111,7 +111,7 @@ from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_F
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.records.run_records import CycleSeed, OriginGatePass
+from promptpotter.domain.records.run_records import CycleStart, OriginGatePass
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.domain.sample import Bank, Sample
@@ -747,13 +747,13 @@ def forked_at_init(stores: Stores, parent: CycleHop, fork: CycleHop) -> None:
 
 
 async def forked_twice(stores: Stores, fork: CycleHop, rounds: int) -> None:
-    """An operator fork off the divergence fork, then one off that: one campaign, four courses."""
+    """An operator fork off the divergence fork, then one off that: one campaign, four cycles."""
     # Each cut leaves the fork a round of its own to close under the campaign's rounds cap.
     for from_round in (rounds - 2, rounds - 1):
         asked = ForkCyclePayload(
             campaign_id=fork.campaign_id, cycle_id=fork.cycle_id, round=from_round, keep_rounds=True
         )
-        cycle_id = cut_operator_fork(stores, asked, CycleSeed()).take(stores)
+        cycle_id = cut_operator_fork(stores, asked, CycleStart()).take(stores)
         fork = CycleHop(campaign_id=fork.campaign_id, cycle_id=cycle_id)
         session, result = await run_campaign(
             fork,
@@ -1501,7 +1501,7 @@ def _cells(rows: Any) -> list[dict[str, Any]]:
 
 
 ARM_KEYS = (
-    "state", "role", "reason", "locked_in", "slot", "overlay", "resolved_params",
+    "state", "role", "reason", "locked_in", "position", "overlay", "resolved_params",
     "expected_samples", "validation_failures",
 )  # fmt: skip
 ROUND_KEYS = ("round", "overlap", "overlap_results", "optimizer_state")
@@ -1566,7 +1566,7 @@ def _ledger(ledger: list[dict[str, Any]], canon: Canon) -> dict[str, Any]:
         entry = {k: r.get(k) for k in keys}
         if kind == "arm":
             state = r["state"]
-            entry["state"] = {"state": state["state"], "slot": state.get("slot")}
+            entry["state"] = {"state": state["state"], "position": state.get("position")}
         if kind == "round_closed":
             series = r["level_series"]
             levels = {
@@ -1635,7 +1635,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
 
 
 def digests() -> dict[str, str]:
-    read_every_treatment()
+    check_every_treatment()
     out = {"estimator": estimator()}
     for name in sorted(optimizers.MANIFESTS.table):
         selected = select_optimizer(OptimizerChoice(optimizer=name))
@@ -2245,7 +2245,7 @@ def main() -> int:
     asked = [f"--{k}={v}" for k, v in sorted(vars(args).items()) if v != ap.get_default(k)]
     run = " ".join([OFFLINE_RUN, *(a for a in asked if not a.startswith("--against="))])
     home = named_home()
-    read_every_treatment()
+    check_every_treatment()
     arm_names = args.optimizer or ["potter", "capo"]
     names = (
         list(CONTROLLED)

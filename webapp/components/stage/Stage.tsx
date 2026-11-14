@@ -2,7 +2,7 @@ import { Figure, FigureRow } from "@/components/shell/FigureRow";
 import { Empty, Loading, ReadState, Said } from "@/components/ui";
 import { figureOf, type FigureKey } from "@/lib/derivations";
 import { useActivePointer } from "@/lib/hooks/useRegistry";
-import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedCycle } from "@/lib/state/lineage";
 import { useViewedListing } from "@/lib/state/workspace";
 
 // The live round's figures, then the lift, as the masthead's row serves them.
@@ -33,10 +33,10 @@ export function Stage() {
 
 function StageRun() {
   const listing = useViewedListing();
-  const course = useViewedCourse();
-  if (course === null) return <Loading>Reading this run…</Loading>;
-  const figures = SHOWN.map((key) => figureOf(course, key)).filter((row) => row !== null);
-  const climb = course.climb;
+  const cycle = useViewedCycle();
+  if (cycle === null) return <Loading>Reading this run…</Loading>;
+  const figures = SHOWN.map((key) => figureOf(cycle, key)).filter((row) => row !== null);
+  const climb = cycle.climb;
   return (
     <div className="stage">
       {listing !== null && <h1 className="stage-name">{listing.label}</h1>}

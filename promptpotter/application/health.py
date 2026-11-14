@@ -182,7 +182,7 @@ def probes() -> list[Probe]:
     ]
 
 
-class _Standing:
+class _LastProbes:
     records: ClassVar[RecordClasses] = (HealthRecord,)
 
     def __init__(self) -> None:
@@ -196,7 +196,7 @@ class _Standing:
 
 
 # Joined to the roster where the registries complete (`maintenance/landing.py::complete_registries`).
-LEDGER_FOLDS = (_Standing,)
+LEDGER_FOLDS = (_LastProbes,)
 
 
 def _box(projects_root: Path) -> WorkspaceDir:
@@ -207,7 +207,7 @@ def _box(projects_root: Path) -> WorkspaceDir:
 def standing(projects_root: Path) -> dict[str, HealthRecord]:
     """Each probe's last change; no record reads as held."""
     ledger = CycleEventLog.workspace_path(_box(projects_root))
-    return LedgerIndex.of(ledger).view(_Standing)
+    return LedgerIndex.of(ledger).view(_LastProbes)
 
 
 def is_broken(projects_root: Path, name: str) -> bool:

@@ -62,7 +62,7 @@ class _PoolInitializer(nodes.Initializer):
 
     def packs(self, selected: SelectedOptimizer) -> list[str] | None:
         # A library's pool names its packs, so its knobs must be `BlockPoolKnobs`.
-        if self.pool.source is not PoolSource.LIBRARY:
+        if self.pool.source is not PoolSource.PACKS:
             return None
         return list(selected.knobs_of(self.name, BlockPoolKnobs).packs)
 

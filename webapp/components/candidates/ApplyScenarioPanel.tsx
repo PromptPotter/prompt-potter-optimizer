@@ -32,7 +32,7 @@ export function ApplyScenarioPanel({
           ...cycleAddress(path),
           round: at,
           // No `origin_prompts`: the lifted round 0 is the origin, and the server refuses the pair.
-          seed: { config_overrides: { scoring: { per_cell: criterion } } },
+          start: { config_overrides: { scoring: { per_cell: criterion } } },
           keep_rounds: true,
         }),
       () => setDone(true),

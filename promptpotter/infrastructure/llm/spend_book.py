@@ -93,7 +93,7 @@ class SendBound:
 FRAMING_TOKENS = 512
 
 
-class Reported(NamedTuple):
+class ReportedSpend(NamedTuple):
     """``unknown`` is the bound of attempts inside the send that reported nothing; it stays held."""
 
     parts: tuple[Billed, ...]
@@ -103,7 +103,7 @@ class Reported(NamedTuple):
 class SendOutcome(NamedTuple):
     sent: bool
     may_have_billed: bool
-    reported: Reported | None = None
+    reported: ReportedSpend | None = None
     failure: ErrorCategory | None = None
     # Never a timeout: the provider may still be generating, and a resend is a second bill.
     resendable: bool = False
@@ -137,7 +137,7 @@ def _status_failure(
 
 def answered(bill: Billed | None) -> SendOutcome:
     return SendOutcome(
-        sent=True, may_have_billed=True, reported=None if bill is None else Reported((bill,))
+        sent=True, may_have_billed=True, reported=None if bill is None else ReportedSpend((bill,))
     )
 
 
@@ -146,7 +146,7 @@ def replied(
     *,
     headers: object | None,
     said: str,
-    reported: Reported | None = None,
+    reported: ReportedSpend | None = None,
     credit_statuses: frozenset[int] | None = None,
     answered_on: frozenset[int] = frozenset(),
 ) -> SendOutcome:

@@ -16,7 +16,7 @@ from promptpotter.application.runner.bench import (
     bench_members,
     line_launches,
     line_passes,
-    line_run,
+    live_cycle_run,
     pair_on_bench,
     read_bench,
 )
@@ -378,7 +378,7 @@ class Grader(NamedTuple):
     record: HeadToHeadRecord | None
 
 
-class _Graded(NamedTuple):
+class _Entry(NamedTuple):
     row: HeadToHeadRow
     member: GuardMember
     walks: frozenset[str]
@@ -499,7 +499,7 @@ def head_to_head(
     )
 
 
-def _guard(graded: Sequence[_Graded], record: HeadToHeadRecord | None, scorer: Scorer) -> PairGuard:
+def _guard(graded: Sequence[_Entry], record: HeadToHeadRecord | None, scorer: Scorer) -> PairGuard:
     return pair_guard(
         [g.member for g in graded],
         record,
@@ -511,7 +511,7 @@ def _guard(graded: Sequence[_Graded], record: HeadToHeadRecord | None, scorer: S
     )
 
 
-def _agree(a: _Graded, b: _Graded, record: HeadToHeadRecord | None, scorer: Scorer) -> bool:
+def _agree(a: _Entry, b: _Entry, record: HeadToHeadRecord | None, scorer: Scorer) -> bool:
     return _guard([a, b], record, scorer).state is not GuardState.DIFFERS
 
 
@@ -531,11 +531,11 @@ def _ratios(row: HeadToHeadRow, base: HeadToHeadRow | None) -> dict[str, float |
     }
 
 
-def _overlapped(a: _Graded, b: _Graded) -> bool:
+def _overlapped(a: _Entry, b: _Entry) -> bool:
     return any(sa < eb and sb < ea for sa, ea in a.windows for sb, eb in b.windows)
 
 
-def _read_alike(a: _Graded, b: _Graded, scorer: Scorer) -> bool:
+def _read_alike(a: _Entry, b: _Entry, scorer: Scorer) -> bool:
     if a.origin is None or b.origin is None:
         return True
     gap = pair_on_bench(
@@ -558,7 +558,7 @@ def _campaign(entry: HeadToHeadEntry) -> Campaign:
 
 
 def _status(stores: Stores, campaign: Campaign) -> RunStatus:
-    holder = stores.campaigns.line_holder(campaign.root_hop)
+    holder = stores.campaigns.live_cycle(campaign.root_hop)
     index = stores.campaigns.load(holder, moment=None)
     run = stores.run_state(holder)
     return RunStatus.of(
@@ -574,13 +574,13 @@ def _read(
     config: CampaignConfig,
     scorer: Scorer,
     record: HeadToHeadRecord | None,
-) -> _Graded:
+) -> _Entry:
     reading, stores = entry
-    hop = stores.campaigns.line_holder(campaign.root_hop)
+    hop = stores.campaigns.live_cycle(campaign.root_hop)
     selected = select_optimizer(config.optimization)
     optimizer_models = sorted({selected.model(node) for node in selected.llm_nodes})
     passes = line_passes(stores, campaign.campaign_id)
-    run = line_run(stores, hop)
+    run = live_cycle_run(stores, hop)
     line = bench_line(stores, campaign, hop, config, run=run)
     bench = read_bench(stores, passes, scorer, line=line)
     origin_pass, selected_pass = (
@@ -637,7 +637,7 @@ def _read(
         human_intervened=reading.human_intervened,
         left_comparison=tuple(stores.campaigns.arm_acts(hop.campaign_id)),
     )
-    return _Graded(
+    return _Entry(
         row=HeadToHeadRow(
             subject=reading.key,
             campaign_id=reading.campaign_id,
@@ -683,9 +683,9 @@ def _read(
 
 
 def _contrasts(
-    graded: list[_Graded], record: HeadToHeadRecord | None, scorer: Scorer
+    graded: list[_Entry], record: HeadToHeadRecord | None, scorer: Scorer
 ) -> list[ArmContrast]:
-    arms: dict[str, list[_Graded]] = {}
+    arms: dict[str, list[_Entry]] = {}
     for g in graded:
         if g.selected is not None:
             arms.setdefault(g.row.treatment_digest, []).append(g)
@@ -714,9 +714,9 @@ def _contrasts(
 
 
 def _contrast(
-    a: list[_Graded], b: list[_Graded], headline: Measurand, guard: PairGuard
+    a: list[_Entry], b: list[_Entry], headline: Measurand, guard: PairGuard
 ) -> ArmContrast:
-    def arm(group: list[_Graded]) -> ContrastArm:
+    def arm(group: list[_Entry]) -> ContrastArm:
         return ContrastArm(
             optimizer=group[0].row.optimizer,
             treatment_digest=group[0].row.treatment_digest,

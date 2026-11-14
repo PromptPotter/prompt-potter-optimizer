@@ -440,7 +440,7 @@ def _r_sample_transcripts(b: PotterView) -> list[Item]:
     )
     sections = [Item(header)]
     for r in plan.shown:
-        parts = [f"[{sample_tag(b.slot_of[r.key])}] QUERY:\n{_query_excerpt(r)}"]
+        parts = [f"[{sample_tag(b.position_of[r.key])}] QUERY:\n{_query_excerpt(r)}"]
         if (loss := plan.losses.get(r.key)) is not None:
             parts.append(
                 f"THE PARENT'S RUN HIT THIS — {loss.lost} of {loss.tried} edits missed it; "
@@ -553,9 +553,9 @@ def _narrated_cells(b: PotterView) -> list[_NarratedCell]:
 def clustered_sample_ids(b: PotterView) -> list[int]:
     """The rows a critique cluster may span, and the only ones a panel marks ``[#id]``: the misses shown and the cells edits keep losing, or one level up the narrated cells."""
     if narrated := _narrated_cells(b):
-        return [b.slot_of[c.cell.key] for c in narrated]
+        return [b.position_of[c.cell.key] for c in narrated]
     return [
-        b.slot_of[key]
+        b.position_of[key]
         for key in (
             *(r.key for _, r in _shown_misses(b)),
             *(key for key, _ in _repeatedly_lost(_edits(b))),
@@ -607,7 +607,7 @@ def _r_inner_narratives(b: PotterView) -> list[Item]:
         trace = r.facts.pipeline.reasoning_trace or ""
         sections.append(
             Item(
-                f"[{sample_tag(b.slot_of[r.key])}] {label} {mark}\n{_head_at_line(trace, INNER_NARRATIVE_CAP)}",
+                f"[{sample_tag(b.position_of[r.key])}] {label} {mark}\n{_head_at_line(trace, INNER_NARRATIVE_CAP)}",
                 trusted=False,
             )
         )
@@ -744,7 +744,7 @@ def _shown_misses(b: PotterView) -> list[tuple[float | None, GradedCell]]:
     """Tied and uncarried rows are capped: with no order among them, more repeat the claim."""
     ordered = _ordered_misses(b)
     if clustered := _cluster_rows(b):
-        return [(d, r) for d, r in ordered if b.slot_of[r.key] in clustered]
+        return [(d, r) for d, r in ordered if b.position_of[r.key] in clustered]
     extent = _extent_can_miss(b)
     near = [(d, r) for d, r in ordered if extent and _span_near_miss(r)]
     near_keys = {r.key for _, r in near}
@@ -776,7 +776,7 @@ def _miss_row(
     verifier: bool,
 ) -> Item:
     row = (
-        f"  [{sample_tag(b.slot_of[r.key])}] "
+        f"  [{sample_tag(b.position_of[r.key])}] "
         + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
         + f" | {_query_stem(r, MISS_QUERY_CAP)}"
         + (_verifier_outcome(r) if verifier else _miss_outcome(r))
@@ -864,7 +864,7 @@ def _candidate_mutation(
     cand: Concluded,
     parent: Mapping[str, NodePrompt],
     parent_pp: PipelineParams,
-    slot_of: Mapping[str, int],
+    position_of: Mapping[str, int],
 ) -> list[tuple[str, str]]:
     delta = candidate_delta(cand.individual.prompts, parent, cand.overlay, parent_pp)
     pp_nested: dict[str, Any] = {}
@@ -880,7 +880,10 @@ def _candidate_mutation(
     ]
     # In the DEMO POOL panel's ids, the only shot vocabulary L1 is shown.
     pairs += [
-        (Locus(node, SHOTS_KEY).name, ", ".join(sample_tag(slot_of[k]) for k in shots) or "none")
+        (
+            Locus(node, SHOTS_KEY).name,
+            ", ".join(sample_tag(position_of[k]) for k in shots) or "none",
+        )
         for node, shots in delta.shots.items()
     ]
     return pairs[:MEMORY_FIELD_CAP]
@@ -942,7 +945,7 @@ def _edits(b: PotterView) -> list[_Edit]:
             if isinstance(cand, Cut | Measured)
             and (
                 changed := _candidate_mutation(
-                    cand, parent.prompts, parent.pipeline_params, b.slot_of
+                    cand, parent.prompts, parent.pipeline_params, b.position_of
                 )
             )
         ]
@@ -1000,7 +1003,7 @@ def _r_mutation_memory(b: PotterView) -> list[Item]:
         if not edit.verdict:
             continue
         mark = f"  ↺ same idea as r{echoes[0]} (x{len(echoes) + 1})" if echoes else ""
-        row = _edit_row(edit, b.slot_of, charged=charged)
+        row = _edit_row(edit, b.position_of, charged=charged)
         lines.append(f"  r{edit.round.round} {row}{mark}")
     lines.reverse()
     items = (
@@ -1018,13 +1021,13 @@ def _r_mutation_memory(b: PotterView) -> list[Item]:
     )
     if lost := _repeatedly_lost(edits):
         cells = " · ".join(
-            f"{sample_tag(b.slot_of[key])} in {c.lost} of {c.tried}" for key, c in lost
+            f"{sample_tag(b.position_of[key])} in {c.lost} of {c.tried}" for key, c in lost
         )
         items.append(Item(f"CELLS THE PARENT'S RUN HIT THAT EDITS KEEP MISSING: {cells} edits"))
     return items
 
 
-def _edit_row(edit: _Edit, slot_of: Mapping[str, int], *, charged: bool) -> str:
+def _edit_row(edit: _Edit, position_of: Mapping[str, int], *, charged: bool) -> str:
     cand = edit.candidate
     mutation = "; ".join(f"{field}: {value[:MEMORY_VALUE_CAP]}" for field, value in edit.changed)
     fold = edit.round.folds.get(edit.key)
@@ -1041,7 +1044,7 @@ def _edit_row(edit: _Edit, slot_of: Mapping[str, int], *, charged: bool) -> str:
         scored += f", composite {fold.composite_fitness:.3f} vs {composite:.3f}"
     delta = edit.flipped()
     cells = "".join(
-        f" · {verb} {', '.join(sample_tag(slot_of[key]) for key in keys)}"
+        f" · {verb} {', '.join(sample_tag(position_of[key]) for key in keys)}"
         for verb, keys in (("gained", delta.gained), ("lost", delta.lost))
         if keys
     )

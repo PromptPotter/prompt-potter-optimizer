@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { commands } from "@/lib/api";
-import type { HierarchyCourse, SubtreeCampaign, DisplayMetric } from "@/lib/api/types";
+import type { HierarchyCycle, SubtreeCampaign, DisplayMetric } from "@/lib/api/types";
 import {
   candidatesAtPath,
-  courseAt,
+  cycleAt,
   nodeOverlays,
   primaryMetric,
 } from "@/lib/derivations";
@@ -30,14 +30,14 @@ interface CampaignForest {
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
-  // The forks cut from each of the viewed course's candidates, by candidate address.
-  forkedFrom: ReadonlyMap<string, HierarchyCourse>;
+  // The forks cut from each of the viewed cycle's candidates, by candidate address.
+  forkedFrom: ReadonlyMap<string, HierarchyCycle>;
   expanded: ReadonlySet<string>;
-  onLaneActivate: (courseKey: string) => void;
+  onLaneActivate: (cycleKey: string) => void;
   // The lineage tree detached from the candidates bars into its own card; else paired under them.
   treeFreed: boolean;
   setTreeFreed: (freed: boolean) => void;
-  revealLane: (courseKey: string) => void;
+  revealLane: (cycleKey: string) => void;
   totalDescendants: number;
   viewedHasRounds: boolean;
   isInheritedSibling: boolean;
@@ -66,7 +66,7 @@ export function useCampaignForest({
   const { treeFreed, expandedLanes, expandedForLane } = viewFor(campaignId);
   const metric = primaryMetric(useMetrics(cycleId, displayMetric), displayMetric);
 
-  const viewedLaneKey = useMemo(() => courseAt(index, path)?.address ?? null, [index, path]);
+  const viewedLaneKey = useMemo(() => cycleAt(index, path)?.address ?? null, [index, path]);
   // The viewed lane opens once per visit; the latch keeps a manual collapse from being undone.
   const opening = viewedLaneKey !== null && viewedLaneKey !== expandedForLane ? viewedLaneKey : null;
   const expanded = useMemo<ReadonlySet<string>>(
@@ -92,19 +92,19 @@ export function useCampaignForest({
     [campaignId, recordView],
   );
 
-  // Takes a LANE KEY (a course address); a raw cycle id silently never matches the layout.
+  // Takes a LANE KEY (a cycle address); a raw cycle id silently never matches the layout.
   const revealLane = useCallback(
-    (courseKey: string) =>
-      recordView(campaignId, { treeFreed: true, expandedLanes: [...new Set(expanded).add(courseKey)] }),
+    (cycleKey: string) =>
+      recordView(campaignId, { treeFreed: true, expandedLanes: [...new Set(expanded).add(cycleKey)] }),
     [expanded, campaignId, recordView],
   );
 
-  const forkedFrom = useMemo<ReadonlyMap<string, HierarchyCourse>>(() => {
-    const m = new Map<string, HierarchyCourse>();
+  const forkedFrom = useMemo<ReadonlyMap<string, HierarchyCycle>>(() => {
+    const m = new Map<string, HierarchyCycle>();
     const own = new Set(candidatesAtPath(index, path).map((c) => c.address));
-    for (const course of index.courses) {
-      const from = course.facts.from_candidate;
-      if (from && own.has(from)) m.set(from, course);
+    for (const cycle of index.cycles) {
+      const from = cycle.facts.from_candidate;
+      if (from && own.has(from)) m.set(from, cycle);
     }
     return m;
   }, [index, path]);
@@ -155,7 +155,7 @@ export function useCampaignForest({
     treeFreed,
     setTreeFreed,
     revealLane,
-    totalDescendants: Math.max(index.courses.length - 1, 0),
+    totalDescendants: Math.max(index.cycles.length - 1, 0),
     viewedHasRounds,
     isInheritedSibling,
     parentId,

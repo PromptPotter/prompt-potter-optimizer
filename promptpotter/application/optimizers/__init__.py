@@ -168,11 +168,11 @@ def unfit_pipeline(
         for node in prompt_nodes:
             if knobs.rewrites != "prompt":
                 slot: str | None = knobs.rewrites
-            elif (slot := node.prompt_info.rewrite_slot if node.prompt_info else None) is None:
+            elif (slot := node.prompt_info.rewrite_field if node.prompt_info else None) is None:
                 return (
                     f"optimizer {selected.name!r} node {name!r} rewrites node {node.name!r}'s "
                     f"whole prompt, and connector {connector!r} declares no field it lands in "
-                    "(`prompt_info.rewrite_slot`)."
+                    "(`prompt_info.rewrite_field`)."
                 )
             if slot not in node.open_prompt_fields:
                 return (

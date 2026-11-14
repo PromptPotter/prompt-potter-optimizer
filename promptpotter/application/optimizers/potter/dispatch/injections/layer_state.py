@@ -14,9 +14,9 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
-    L1_LAYOUT_SLOTS,
+    L1_LAYOUT_REGIONS,
     NODE_LAYOUTS,
-    VOLATILE_SLOT,
+    VOLATILE_REGION,
     resolve_node_layout,
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
@@ -131,7 +131,7 @@ def _r_l1_overrides(b: PotterView) -> list[Item]:
     citable=False,
 )
 def _r_l1_layout(b: PotterView) -> list[Item]:
-    """Listed slot → panels, the shape an edit takes, so each line is an edit ready to answer."""
+    """Listed region → panels, the shape an edit takes, so each line is an edit ready to answer."""
     steered = b.l2.steered_layout("l1_generate")
     layout = (
         resolve_node_layout("l1_generate", b.ctx.read(Calls).levers("l1_generate"))
@@ -139,13 +139,13 @@ def _r_l1_layout(b: PotterView) -> list[Item]:
         else steered
     )
     lines = [
-        f'  "{slot}": {json.dumps([p for p in layout.slot(slot) if p not in b.silent_l1_panels])}'
-        for slot in L1_LAYOUT_SLOTS
+        f'  "{region}": {json.dumps([p for p in layout.region(region) if p not in b.silent_l1_panels])}'
+        for region in L1_LAYOUT_REGIONS
     ]
     offered = NODE_LAYOUTS["l1_generate"].possible - b.silent_l1_panels
     if unplaced := sorted(offered - set(layout.all_placeholders())):
         lines.append(
-            f"  in no slot; to place one, add it to a slot's list — {VOLATILE_SLOT!r} unless the "
+            f"  in no slot; to place one, add it to a slot's list — {VOLATILE_REGION!r} unless the "
             f"failures need it read earlier: {json.dumps(unplaced)}"
         )
     return [

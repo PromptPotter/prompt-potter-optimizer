@@ -136,7 +136,7 @@ def render_population(
     """Each proposal (an arm of *arms*, the round's announced, slotted this round) a column beside
     the heads of *origin* and *parent*."""
     src = "loaded from disk" if v.replayed else "from LLM"
-    arms = [arm for arm in arms if arm.slot is not None and arm.slot.round == round_num]
+    arms = [arm for arm in arms if arm.position is not None and arm.position.round == round_num]
     parent_flat = _flat(_head(parent), schema)
     columns = [("Start", _flat(_head(origin), schema)), ("Parent", parent_flat)]
     columns.extend(

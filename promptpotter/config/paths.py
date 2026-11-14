@@ -61,12 +61,6 @@ LEDGER_FOLDS_DIR = f"{INSTALL_CACHE_DIR}/ledger-folds"
 READOUT_POINTER = "logs/latest-readout-path.txt"
 
 
-def install_cache_root() -> Path:
-    """What derives from the installed code alone, so every home on one install shares it."""
-    checkout = source_checkout_root()
-    return (checkout if checkout is not None else _os_app_data_dir()) / INSTALL_CACHE_DIR
-
-
 PROJECTS_DIR = "projects"
 # Under the projects root: held while an account opens.
 ACCOUNTS_LOCK = ".accounts.lock"

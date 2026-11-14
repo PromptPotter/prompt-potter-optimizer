@@ -14,7 +14,7 @@ from promptpotter.application.views.render.primitives import bench_readout
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import ExportTier, PromptExport
-from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyRound, SubtreeCourse
+from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyRound, SubtreeCycle
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     PairedReading,
@@ -26,7 +26,7 @@ from promptpotter.shared.errors import ConflictError
 
 
 @dataclass(frozen=True)
-class Provenance:
+class ExportProvenance:
     """What a reader needs to find the run again: the header every tier carries."""
 
     tool_version: str
@@ -74,8 +74,8 @@ class ExportFiles:
 
 def export_files(
     tier: ExportTier,
-    course: SubtreeCourse,
-    provenance: Provenance,
+    cycle: SubtreeCycle,
+    provenance: ExportProvenance,
     *,
     unit: MeasuredUnit,
     export: PromptExport | None,
@@ -83,7 +83,7 @@ def export_files(
 ) -> ExportFiles:
     """*no_export* says why ``export`` is absent, for the tiers that cannot stand without it."""
 
-    def needs_export() -> PromptExport:
+    def required_export() -> PromptExport:
         if export is None:
             raise ConflictError(f"The {tier} tier carries export.json, and {no_export}")
         return export
@@ -91,29 +91,29 @@ def export_files(
     base = provenance.base
     match tier:
         case "chat":
-            return ExportFiles(f"{base}-chat", {"candidates.txt": chat_text(course, unit)})
+            return ExportFiles(f"{base}-chat", {"candidates.txt": chat_text(cycle, unit)})
         case "report":
-            text = "\n".join([*provenance_lines(provenance, "report"), "", chat_text(course, unit)])
+            text = "\n".join([*provenance_lines(provenance, "report"), "", chat_text(cycle, unit)])
             return ExportFiles(f"{base}-report", {"report.txt": text})
         case "notebook":
             return ExportFiles(
                 f"{base}-notebook",
                 {
-                    "candidates.jsonl": candidates_jsonl(course),
+                    "candidates.jsonl": candidates_jsonl(cycle),
                     "README.md": dataset_card(provenance, "candidates.jsonl"),
                 },
             )
         case "deploy":
-            return ExportFiles(f"{base}-export", {"export.json": needs_export().to_json()})
+            return ExportFiles(f"{base}-export", {"export.json": required_export().to_json()})
         case "package":
-            winner = needs_export()
+            winner = required_export()
             return ExportFiles(
                 base,
                 {
                     "SKILL.md": skill_md(winner, provenance),
                     **{f"prompts/{node}.md": winner.render(node) + "\n" for node in winner.prompts},
                     "export.json": winner.to_json(),
-                    "evidence/candidates.jsonl": candidates_jsonl(course),
+                    "evidence/candidates.jsonl": candidates_jsonl(cycle),
                 },
             )
         case _:
@@ -129,7 +129,7 @@ def winner_pointer(hop: CycleHop) -> str:
     )
 
 
-def provenance_lines(p: Provenance, kind: str) -> list[str]:
+def provenance_lines(p: ExportProvenance, kind: str) -> list[str]:
     """The first line is the stamp every copy opens with, so a paste back is recognised."""
     stamp = json.dumps({"tool": "promptpotter", "kind": kind, "tool_version": p.tool_version})
     models = ", ".join(f"{node}={model}" for node, model in p.models.items()) or "—"
@@ -144,26 +144,26 @@ def provenance_lines(p: Provenance, kind: str) -> list[str]:
     ]
 
 
-def _live(course: SubtreeCourse) -> list[HierarchyCandidate]:
+def _live(cycle: SubtreeCycle) -> list[HierarchyCandidate]:
     """The live side of each supersede cut: a retired tail doubles its round."""
     return [
         c
-        for rnd in course.children
+        for rnd in cycle.children
         if isinstance(rnd, HierarchyRound)
         for c in rnd.children
         if c.tag("superseded") is None
     ]
 
 
-def chat_text(course: SubtreeCourse, unit: MeasuredUnit) -> str:
+def chat_text(cycle: SubtreeCycle, unit: MeasuredUnit) -> str:
     """One block per candidate in round order, every number a served one under its served name."""
-    arms = _live(course)
+    arms = _live(cycle)
     label_of: dict[str, str] = {}
     for c in arms:
         label_of.setdefault(c.facts.individual, c.label)
     lines = [
-        f"candidates of {course.label} · {len(arms)} rows · elected on "
-        f"{course.facts.elects_on or '—'} · in round order"
+        f"candidates of {cycle.label} · {len(arms)} rows · elected on "
+        f"{cycle.facts.elects_on or '—'} · in round order"
     ]
     for c in arms:
         lines += ["", *_arm_lines(c, label_of, unit)]
@@ -270,7 +270,7 @@ _CYCLE_ADDRESS: dict[str, Any] = {
 }
 
 
-def candidate_records(course: SubtreeCourse) -> list[dict[str, Any]]:
+def candidate_records(cycle: SubtreeCycle) -> list[dict[str, Any]]:
     """One flat record per candidate, its reading keyed by the names the API serves it under."""
     return [
         {
@@ -283,12 +283,12 @@ def candidate_records(course: SubtreeCourse) -> list[dict[str, Any]]:
             "members": [v.node for v in c.facts.variations],
             **_flat(c.facts.reading.model_dump(mode="json", exclude=_CYCLE_ADDRESS)),
         }
-        for c in _live(course)
+        for c in _live(cycle)
     ]
 
 
-def candidates_jsonl(course: SubtreeCourse) -> str:
-    return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in candidate_records(course))
+def candidates_jsonl(cycle: SubtreeCycle) -> str:
+    return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in candidate_records(cycle))
 
 
 def _yaml_str(text: str) -> str:
@@ -296,7 +296,7 @@ def _yaml_str(text: str) -> str:
     return json.dumps(text, ensure_ascii=False)
 
 
-def dataset_card(p: Provenance, data_file: str) -> str:
+def dataset_card(p: ExportProvenance, data_file: str) -> str:
     """A Hugging Face dataset card: YAML frontmatter, then what one record is."""
     return "\n".join(
         [
@@ -337,7 +337,7 @@ def _bench_readout(export: PromptExport) -> tuple[str, str]:
     return lift.estimate.point, lift.estimate.band or "—"
 
 
-def skill_md(export: PromptExport, p: Provenance) -> str:
+def skill_md(export: PromptExport, p: ExportProvenance) -> str:
     """Agent Skills' envelope: ``name`` and ``description`` required, the binding in ``metadata``."""
     models = ", ".join(f"{node}={model}" for node, model in p.models.items()) or "—"
     lift, ci = _bench_readout(export)

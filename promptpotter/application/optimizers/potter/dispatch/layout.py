@@ -29,21 +29,21 @@ L1_MANDATORY: frozenset[str] = frozenset(
 )
 
 # IN RENDER ORDER; ``answer_format`` is omitted, carrying the output JSON schema the template owns.
-L1_LAYOUT_SLOTS: tuple[str, ...] = tuple(L1Layout.model_fields)
+L1_LAYOUT_REGIONS: tuple[str, ...] = tuple(L1Layout.model_fields)
 
-VOLATILE_SLOT: str = L1_LAYOUT_SLOTS[-1]
+VOLATILE_REGION: str = L1_LAYOUT_REGIONS[-1]
 """The provider's prefix-cache boundary: a changing panel ahead of it voids the discount on every byte behind (`dispatch-hub.md` § L1 layout — L2's structural edit surface)."""
 
 PREFIX_STABLE_PANELS: frozenset[str] = frozenset({"task_context"})
 """Membership is a claim about a WRITER, never a renderer: re-read both before adding a name (`dispatch-hub.md` § L1 layout — L2's structural edit surface)."""
 
 _OPTIMIZER_ORDER = OptimizerPromptTemplate.RENDER_ORDER
-assert _OPTIMIZER_ORDER[-1] == VOLATILE_SLOT, (
-    f"the optimizer prompt must render {VOLATILE_SLOT!r} last — it is where every NODE_LAYOUTS "
+assert _OPTIMIZER_ORDER[-1] == VOLATILE_REGION, (
+    f"the optimizer prompt must render {VOLATILE_REGION!r} last — it is where every NODE_LAYOUTS "
     f"floor puts its evidence, so a field behind it can never sit in a provider's stable prefix."
 )
-assert [f for f in _OPTIMIZER_ORDER if f in L1_LAYOUT_SLOTS] == list(L1_LAYOUT_SLOTS), (
-    f"L1Layout's fields {L1_LAYOUT_SLOTS} must be a subsequence of RENDER_ORDER "
+assert [f for f in _OPTIMIZER_ORDER if f in L1_LAYOUT_REGIONS] == list(L1_LAYOUT_REGIONS), (
+    f"L1Layout's fields {L1_LAYOUT_REGIONS} must be a subsequence of RENDER_ORDER "
     f"{_OPTIMIZER_ORDER} — reorder the fields, so 'ahead of the boundary' means one thing."
 )
 
@@ -53,8 +53,8 @@ class NodeLayoutSpec(FrozenModel):
     extras: frozenset[str]
     mandatory: frozenset[str]
     floor: L1Layout
-    # The slots an edit may place into, in render order.
-    slots: tuple[str, ...] = L1_LAYOUT_SLOTS
+    # The regions an edit may place into, in render order.
+    regions: tuple[str, ...] = L1_LAYOUT_REGIONS
     # Only the DISCRETIONARY panels: the mandatory floor is the dataset's, so no whole-prompt ceiling.
     discretionary_chars: int
     # `compile_prompt` extras that are not signals; any other unknown token in a template body raises.
@@ -71,13 +71,13 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     "l1_generate": NodeLayoutSpec(
         # Room for two whole transcripts behind the frame.
         discretionary_chars=11_000,
-        # An edit places evidence, never a position: the slot names read as the target's fields.
-        slots=(VOLATILE_SLOT,),
+        # An edit places evidence, never a position: the region names read as the target's fields.
+        regions=(VOLATILE_REGION,),
         caller_extras=frozenset({"n_variants"}),
         extras=frozenset({"diagnostics", "axis_memory"}),
         mandatory=L1_MANDATORY,
         floor=L1Layout(
-            # The one floor placement ahead of `VOLATILE_SLOT`, free because it is prefix-stable.
+            # The one floor placement ahead of `VOLATILE_REGION`, free because it is prefix-stable.
             task_intent=["task_context"],
             problem_description=[
                 "rendered_prompt",
@@ -203,13 +203,15 @@ for _node, _spec in NODE_LAYOUTS.items():
         f"{_node}: floor names a placeholder in two places"
     )
     assert not _floor_ph & _spec.extras, f"{_node}: extras re-list a floor placeholder"
-    assert set(_spec.slots) <= set(L1_LAYOUT_SLOTS), f"{_node}: an edit slot L1Layout lacks"
+    assert set(_spec.regions) <= set(L1_LAYOUT_REGIONS), f"{_node}: an edit region L1Layout lacks"
     assert _floor_ph >= _spec.mandatory, (
         f"{_node}: floor must reference every mandatory placeholder"
     )
-    _early = {n for s in L1_LAYOUT_SLOTS[:-1] for n in _spec.floor.slot(s)} - PREFIX_STABLE_PANELS
+    _early = {
+        n for s in L1_LAYOUT_REGIONS[:-1] for n in _spec.floor.region(s)
+    } - PREFIX_STABLE_PANELS
     assert not _early, (
-        f"{_node}: floor places {sorted(_early)} ahead of {VOLATILE_SLOT!r}, voiding the prefix "
+        f"{_node}: floor places {sorted(_early)} ahead of {VOLATILE_REGION!r}, voiding the prefix "
         f"cache for every field behind it. Move it there, or — only if its text cannot change "
         f"within a run — add it to PREFIX_STABLE_PANELS with the writer that freezes it."
     )
@@ -219,12 +221,12 @@ del _node, _spec, _floor_ph, _early
 def layout_json_schema(
     spec: NodeLayoutSpec, *, description: str, withheld: frozenset[str] = frozenset()
 ) -> dict[str, Any]:
-    """Keyed by the spec's SLOTS, each an array of its legal panels, so the wire states both menus; a host may enforce none of it, so `unplaceable_edit` and `validate_l1_layout` still decide."""
+    """Keyed by the spec's REGIONS, each an array of its legal panels, so the wire states both menus; a host may enforce none of it, so `unplaceable_edit` and `validate_l1_layout` still decide."""
     panels = {"type": "string", "enum": sorted(spec.possible - withheld)}
     return {
         "type": "object",
         "description": description,
-        "properties": {slot: {"type": "array", "items": panels} for slot in spec.slots},
+        "properties": {region: {"type": "array", "items": panels} for region in spec.regions},
         "additionalProperties": False,
     }
 
@@ -235,11 +237,11 @@ def unplaceable_edit(raw_layout: object, spec: NodeLayoutSpec) -> ValidatorOutco
         return None
     asked = raw_layout if isinstance(raw_layout, dict) else {}
     stray = sorted(
-        str(slot)[:40]
-        for slot, panels in asked.items()
+        str(region)[:40]
+        for region, panels in asked.items()
         if not (
-            isinstance(slot, str)
-            and slot in spec.slots
+            isinstance(region, str)
+            and region in spec.regions
             and isinstance(panels, list)
             and all(isinstance(p, str) for p in panels)
         )
@@ -250,7 +252,7 @@ def unplaceable_edit(raw_layout: object, spec: NodeLayoutSpec) -> ValidatorOutco
         return None
     return ValidatorOutcome(
         validator_id="l1_layout_unparseable",
-        evidence={"not_a_slot": stray, "placed_twice": twice, "slots": list(spec.slots)},
+        evidence={"not_a_slot": stray, "placed_twice": twice, "slots": list(spec.regions)},
     )
 
 
@@ -259,12 +261,12 @@ def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
     if not raw_layout:
         return None
     moves: dict[str, str] = {
-        panel: slot for slot, panels in dict(raw_layout).items() for panel in panels
+        panel: region for region, panels in dict(raw_layout).items() for panel in panels
     }
     update: dict[str, list[str]] = {}
-    for slot in L1_LAYOUT_SLOTS:
-        kept = [n for n in base.slot(slot) if moves.get(n, slot) == slot]
-        update[slot] = kept + [n for n, s in moves.items() if s == slot and n not in kept]
+    for region in L1_LAYOUT_REGIONS:
+        kept = [n for n in base.region(region) if moves.get(n, region) == region]
+        update[region] = kept + [n for n, s in moves.items() if s == region and n not in kept]
     out = base.model_copy(update=update, deep=True)
     placed = out.all_placeholders()
     assert len(placed) == len(set(placed)), f"a layout edit placed one panel twice: {placed}"
@@ -315,15 +317,15 @@ def validate_l1_layout(
     # SOFT: costs money, not correctness, and placement is a real axis, so it reports and never rolls back.
     early = [
         name
-        for slot in L1_LAYOUT_SLOTS[:-1]
-        for name in layout.slot(slot)
+        for region in L1_LAYOUT_REGIONS[:-1]
+        for name in layout.region(region)
         if name not in PREFIX_STABLE_PANELS
     ]
     if early:
         outcomes.append(
             ValidatorOutcome(
                 validator_id="l1_layout_voids_prefix",
-                evidence={"panels": early, "stable_slot": VOLATILE_SLOT},
+                evidence={"panels": early, "stable_slot": VOLATILE_REGION},
             )
         )
 
@@ -332,7 +334,7 @@ def validate_l1_layout(
         outcomes.append(
             ValidatorOutcome(
                 validator_id="l1_layout_unchanged_from_prior",
-                evidence={"slots": list(L1_LAYOUT_SLOTS)},
+                evidence={"slots": list(L1_LAYOUT_REGIONS)},
             )
         )
 

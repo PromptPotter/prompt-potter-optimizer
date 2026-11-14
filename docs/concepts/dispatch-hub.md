@@ -237,7 +237,7 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 
 L1_GENERATE's prompt is composed by walking a per-slot list of injection names (`records.py::L1Layout`, declared IN RENDER ORDER) through the registry. L2 owns the layout; the registry is closed and code-derived. Static text in each slot stays; `answer_format` is not a slot (L1's output schema, a code contract). An injection needing to differ per layer is two injections.
 
-**`VOLATILE_SLOT` is the provider prefix-cache boundary**: a changing panel ahead of it re-bills the static template at full rate every round. An import-time assert holds every floor behind the line; `validate_l1_layout` reports an EDIT that crosses it (`l1_layout_voids_prefix`, soft — placement is a real axis). `PREFIX_STABLE_PANELS` is the exemption, and **membership is a claim about a WRITER, not a renderer**: `task_context` is its one member because no layer writes the operator's framing.
+**`VOLATILE_REGION` is the provider prefix-cache boundary**: a changing panel ahead of it re-bills the static template at full rate every round. An import-time assert holds every floor behind the line; `validate_l1_layout` reports an EDIT that crosses it (`l1_layout_voids_prefix`, soft — placement is a real axis). `PREFIX_STABLE_PANELS` is the exemption, and **membership is a claim about a WRITER, not a renderer**: `task_context` is its one member because no layer writes the operator's framing.
 
 **Default floor** — `NODE_LAYOUTS["l1_generate"].floor`. Order is priority: `dispatch/compose.py` selects in layout order, so the decision frame is placed before a large panel can crowd it.
 

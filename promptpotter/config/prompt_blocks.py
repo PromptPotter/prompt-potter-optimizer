@@ -90,7 +90,7 @@ def _serving(pack: BlockPack, kept: list[Snippet]) -> BlockPack:
 
 
 @dataclass(frozen=True)
-class _Read:
+class _PackRead:
     shelved: dict[str, BlockPack | Refusal]
     # Snippets of the account's packs that serve as an install pack's snippet of the same text.
     skipped: list[Refusal] = field(default_factory=list)
@@ -119,11 +119,11 @@ class PackShelf:
         return _parsed(name, held[0])
 
     @cached_property
-    def _read(self) -> _Read:
+    def _read(self) -> _PackRead:
         """The install's packs first, by name, a pack holding a text one before it holds refused;
         then the account's, by name, where a text the shelf already holds is that snippet, so it
         is skipped alone and the account's pack is never refused for it."""
-        read = _Read(shelved={})
+        read = _PackRead(shelved={})
         holder: dict[str, str] = {}
         for name in _found(block_packs_root()):
             opened = self._opened(name)

@@ -15,7 +15,7 @@ from promptpotter.shared.worded import Worded
 SUBJECT_KIND_LABELS: Worded[SubjectKind, str] = Worded(
     {
         "campaign": "origin",
-        "course": "branch head",
+        "cycle": "branch head",
         "candidate": "searchpoint",
     }
 )
@@ -131,7 +131,7 @@ class SubjectReading(StrictModel):
     comparable: bool | None
     comparable_note: str
     mask: SubjectMask | None
-    # What the mask did to this branch (`scenario_said`), on a masked course alone.
+    # What the mask did to this branch (`scenario_said`), on a masked cycle alone.
     scenario: Said | None
     winner_chain: list[WinnerChainPoint] | None
     config: dict[str, str] | None

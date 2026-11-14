@@ -236,7 +236,7 @@ def export_lineage(rounds: Sequence[RoundOutcome]) -> list[LineageEntity]:
                     label=arm.label,
                     was_derived_from=list(lineage.parent_ids),
                     was_generated_by=RoundActivity(
-                        round=rr.round if arm.slot is None else arm.slot.round,
+                        round=rr.round if arm.position is None else arm.position.round,
                         members=[v.node for v in lineage.variations],
                     ),
                     changes=_delta(individual, parent),

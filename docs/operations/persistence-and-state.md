@@ -19,14 +19,14 @@ Every served entry (`GET /hierarchy`, [`webapp/CLAUDE.md`](../../webapp/CLAUDE.m
 
 ```
 campaign := [inside "~"] campaign_id                 bbeh__7c2e9a
-course   := campaign "::" cycle_id                   bbeh__7c2e9a::cycle_7f3a
-round    := course "/r" round_n                      bbeh__7c2e9a::cycle_7f3a/r2
+cycle   := campaign "::" cycle_id                   bbeh__7c2e9a::cycle_7f3a
+round    := cycle "/r" round_n                      bbeh__7c2e9a::cycle_7f3a/r2
 candidate:= round "/" arm_key                        bbeh__7c2e9a::cycle_7f3a/r2/<ArmKey>
-step     := course "/@" offset                       bbeh__7c2e9a::cycle_7f3a/@418
-inside   := course ("~" course)*                     the L4 sandbox chain, the `?descend=` wire byte-exact
+step     := cycle "/@" offset                       bbeh__7c2e9a::cycle_7f3a/@418
+inside   := cycle ("~" cycle)*                     the L4 sandbox chain, the `?descend=` wire byte-exact
 ```
 
-A step's offset is the line index in its course's own ledger. A fork is stored as a sibling cycle, served as a child course.
+A step's offset is the line index in its cycle's own ledger. A fork is stored as a sibling cycle, served as a child cycle.
 
 ## Active session pointer
 

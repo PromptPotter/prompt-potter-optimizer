@@ -302,7 +302,7 @@ def inventory_measurement_archive(
 
 
 @dataclass(frozen=True, slots=True)
-class _Moved:
+class _Swept:
     rows: int
     bytes_before: int
     bytes_after: int
@@ -323,7 +323,7 @@ class _Conflict:
 @dataclass(frozen=True, slots=True)
 class _FileOutcome:
     # `None`: the file holds nothing this pass moves.
-    change: _Moved | _Purged | _Conflict | None
+    change: _Swept | _Purged | _Conflict | None
     skipped: Mapping[str, int] = field(default_factory=dict)
     unrestorable: int = 0
 
@@ -352,7 +352,7 @@ def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool) -> ArchiveReport
         skipped.update(outcome.skipped)
         unrestorable += outcome.unrestorable
         match outcome.change:
-            case _Moved() as moved:
+            case _Swept() as moved:
                 touched += 1
                 rows += moved.rows
                 before += moved.bytes_before
@@ -417,7 +417,7 @@ def _compacted(
     if not moving:
         return None, _FileOutcome(None, skipped=skipped)
     payload = [*cold, *moving]
-    moved_off = _Moved(len(moving), _size(lines), _size(out), cold_size(payload) - cold_size(cold))
+    moved_off = _Swept(len(moving), _size(lines), _size(out), cold_size(payload) - cold_size(cold))
     return CellRewrite(out, payload), _FileOutcome(moved_off, skipped=skipped)
 
 
@@ -481,7 +481,7 @@ def _restored(
         else line
         for line, a in answers
     ]
-    moved_back = _Moved(len(mine), _size(lines), _size(new_lines), 0)
+    moved_back = _Swept(len(mine), _size(lines), _size(new_lines), 0)
     return CellRewrite(new_lines, rest), _FileOutcome(moved_back, unrestorable=unrestorable)
 
 

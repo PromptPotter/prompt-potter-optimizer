@@ -96,7 +96,7 @@ class Session:
     # The label's bank at init; a bound cycle's is the one it drew, never re-cut.
     bank: Bank = field(default_factory=lambda: Bank.of(()))
     # Ranked beside the bank's ground truths; empty where a connector owns the panel.
-    candidate_library: tuple[str, ...] = ()
+    answer_terms: tuple[str, ...] = ()
     identity: IdentityContext = field(default_factory=default_identity)
     dataset_name: str | None = None
     # Where `dataset_name` resolved at init; `None` where a session measures no definition.

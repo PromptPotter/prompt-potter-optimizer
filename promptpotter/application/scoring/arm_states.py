@@ -81,7 +81,7 @@ def measuring(
 ) -> Measuring:
     return Measuring(
         role=arm.role,
-        slot=arm.slot,
+        position=arm.position,
         individual=arm.individual,
         overlay=arm.overlay,
         validation_failures=arm.validation_failures,

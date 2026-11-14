@@ -197,7 +197,7 @@ class RunControl:
             self._log().ack(asked.command_id, "applied")
 
 
-class CycleHold:
+class ProducerHold:
     """One producer's hold of a cycle, a run's or a scoring pass's, which holds the pass lock too.
     Its release voids what the producer never took: only a producer stopping on a pause takes it."""
 

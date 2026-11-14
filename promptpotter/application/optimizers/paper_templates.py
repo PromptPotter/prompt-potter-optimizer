@@ -40,7 +40,7 @@ def rewritten(ctx: NodeContext, node: PipelineNode, text: str) -> dict[Locus, st
     rewrites = ctx.knobs(RewriteKnobs).rewrites
     if rewrites != "prompt":
         return {Locus(node.name, rewrites): text}
-    slot = node.prompt_info.rewrite_slot if node.prompt_info else None
+    slot = node.prompt_info.rewrite_field if node.prompt_info else None
     assert slot is not None, "the preflight refuses a whole-prompt rewrite of a node with no slot"
     return {
         **{Locus(node.name, f): "" for f in node.open_prompt_fields},

@@ -3,13 +3,13 @@ import { Button, FailureLine, Term } from "@/components/ui";
 import { commands, mintCommandId } from "@/lib/api/commands";
 import { BENCH_REFUSAL_INFO } from "@/lib/api/types";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedCycle } from "@/lib/state/lineage";
 import { useWorkspace } from "@/lib/state/workspace";
 
 // The bench's one control, on the Leader it grades: a refusal is the served reason, read on its Term.
 export function BenchGradeAction() {
   const { viewed } = useWorkspace();
-  const status = useViewedCourse()?.facts.bench?.status ?? null;
+  const status = useViewedCycle()?.facts.bench?.status ?? null;
   const scope = viewed?.address ?? null;
   const cmd = useCommand<"grade-bench">("grade-bench", { scope });
   const stop = useCommand<"cancel">("cancel", { scope });

@@ -269,23 +269,23 @@ class InnerTasks(FrozenModel):
         return self
 
 
-def parse_panel(raw: object) -> InnerTasks:
+def parse_inner_panel(raw: object) -> InnerTasks:
     return InnerTasks.model_validate(raw)
 
 
-class ResolvedPanel(FrozenModel):
-    """The panel with each cell's instrument (`spawn.py::_resolve_panel`): the ONE document run
+class ResolvedInnerPanel(FrozenModel):
+    """The panel with each cell's instrument (`spawn.py::_resolve_inner_panel`): the ONE document run
     init, the samples and the fingerprint read."""
 
-    panel: InnerTasks
+    inner_panel: InnerTasks
     # By cell id.
     instruments: dict[str, str]
     # By cell id: the dataset each cell's inner campaign measures, its δ scale's.
     datasets: dict[str, str]
 
     @model_validator(mode="after")
-    def _every_cell_measured(self) -> ResolvedPanel:
-        ids = {cell.id for cell in self.panel.tasks}
+    def _every_cell_measured(self) -> ResolvedInnerPanel:
+        ids = {cell.id for cell in self.inner_panel.tasks}
         if set(self.instruments) != ids or set(self.datasets) != ids:
             raise ValueError(
                 "a resolved panel carries one instrument and one dataset per cell, and no other"
@@ -303,12 +303,12 @@ class ResolvedPanel(FrozenModel):
                 "held_out": t.held_out,
                 "measured_dataset": self.datasets[t.id],
             }
-            for t in self.panel.tasks
+            for t in self.inner_panel.tasks
         ]
 
 
-def parse_resolved(raw: object) -> ResolvedPanel:
-    return ResolvedPanel.model_validate(raw)
+def parse_resolved(raw: object) -> ResolvedInnerPanel:
+    return ResolvedInnerPanel.model_validate(raw)
 
 
 def estimator() -> str:
@@ -451,7 +451,7 @@ def _outer_cells(session: Session) -> InnerCells | None:
     samples and fingerprint came from."""
     if not session.backend_client.connector.self_optimization:
         return None
-    return parse_resolved(session.backend_client.workload.experiment).panel.resolve_cells(
+    return parse_resolved(session.backend_client.workload.experiment).inner_panel.resolve_cells(
         session.store
     )
 

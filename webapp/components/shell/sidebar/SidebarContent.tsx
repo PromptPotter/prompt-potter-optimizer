@@ -46,7 +46,7 @@ export function SidebarContent() {
     return [...s].sort();
   }, [listed]);
 
-  // The ACTIVE cycle, never the viewed one: a manual selection must not pop a course open.
+  // The ACTIVE cycle, never the viewed one: a manual selection must not pop a cycle open.
   const focusKey = active?.campaign_id ?? null;
 
   // Latched per (campaign, active cycle): unlatched, a remount re-opens a row just collapsed.

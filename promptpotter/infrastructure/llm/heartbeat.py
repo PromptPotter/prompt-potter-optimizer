@@ -59,10 +59,10 @@ async def heartbeat(
     """A beat's I/O fault is logged, never raised, so it never replaces the awaited call's reply or raise; an unbound or muted scope still ticks, so a missing ledger cannot disarm ``on_suspend``."""
     ledger = run_scope().ledger
     while True:
-        overshoot = await sleep_measuring_suspend(HEARTBEAT_INTERVAL_S)
+        lateness = await sleep_measuring_suspend(HEARTBEAT_INTERVAL_S)
         try:
-            if on_suspend is not None and overshoot > SUSPEND_GRACE_S:
-                on_suspend(overshoot)
+            if on_suspend is not None and lateness > SUSPEND_GRACE_S:
+                on_suspend(lateness)
             if isinstance(ledger, CycleEventLog):
                 elapsed_s = time.monotonic() - start_monotonic
                 detail, inner = _safe_read(detail_fn), _safe_read(inner_fn)

@@ -4,7 +4,7 @@ export function descendantsOf(index: LineageIndex, seeds: Iterable<string>): Rea
   const out = new Set(seeds);
   if (out.size === 0) return out;
 
-  // Whole family at once: a candidate's children may sit on another course.
+  // Whole family at once: a candidate's children may sit on another cycle.
   const kids = new Map<string, string[]>();
   for (const arm of index.candidates) {
     for (const parent of arm.facts.parent_ids) {

@@ -32,7 +32,7 @@ from promptpotter.application.optimizers.potter.dispatch.injections.registry imp
     injection_table,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
-    L1_LAYOUT_SLOTS,
+    L1_LAYOUT_REGIONS,
     NODE_LAYOUTS,
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import node_layout
@@ -174,14 +174,14 @@ class DispatchHub:
             raise MandatoryPanelStarvedError(node, starved)
 
         update: dict[str, str] = {}
-        for slot in L1_LAYOUT_SLOTS:
-            static = getattr(template, slot)
-            non_empty = [text for p in layout.slot(slot) if (text := rendered[p])]
+        for region in L1_LAYOUT_REGIONS:
+            static = getattr(template, region)
+            non_empty = [text for p in layout.region(region) if (text := rendered[p])]
             if non_empty:
                 joined = "\n\n".join(non_empty)
-                update[slot] = (static + "\n\n" + joined) if static else joined
+                update[region] = (static + "\n\n" + joined) if static else joined
             else:
-                update[slot] = static
+                update[region] = static
         remaining = template.model_copy(update=update).slots()
         injection_vars = {
             name: DispatchHub.render(name, view) for name in remaining if name in table
@@ -378,9 +378,9 @@ class PotterView:
         return self.ctx.read(Ruler).axes
 
     @property
-    def slot_of(self) -> Mapping[str, int]:
-        """Each sample's slot in the cycle's bank: the `[#id]` a panel marks a row by."""
-        return self.ctx.read(Ruler).slot_of
+    def position_of(self) -> Mapping[str, int]:
+        """Each sample's position in the cycle's bank: the `[#id]` a panel marks a row by."""
+        return self.ctx.read(Ruler).position_of
 
     @functools.cached_property
     def runtime_failures(self) -> tuple[RuntimeFailure, ...]:

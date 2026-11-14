@@ -631,8 +631,8 @@ class StartRunPayload(CyclePayload, kind=CommandKind.START_RUN):
     mode: RunMode = RunMode()
 
 
-class ForkSeed(StrictModel):
-    """A fork's `CycleSeed` as sent: the applier freezes `node_narrowing` on the forked cycle's
+class ForkStart(StrictModel):
+    """A fork's `CycleStart` as sent: the applier freezes `node_narrowing` on the forked cycle's
     own rows and stamps the `origin_source` the wire omits."""
 
     origin_prompts: dict[str, NodePrompt] = Field(default_factory=dict)
@@ -649,7 +649,7 @@ class ForkSeed(StrictModel):
     )
 
     @model_validator(mode="after")
-    def _budget_rides_the_payload(self) -> ForkSeed:
+    def _budget_rides_the_payload(self) -> ForkStart:
         if self.config_overrides.budget.named:
             raise ValueError("a fork's budget is the payload's own `budget`, not the seed's")
         return self
@@ -689,13 +689,13 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
     mode: RunMode = RunMode()
     round: int = Field(default=0, ge=0)
     candidate_id: str = Field(default="", max_length=128)
-    seed: ForkSeed = ForkSeed()
+    start: ForkStart = ForkStart()
     keep_rounds: bool = Field(
         default=False,
         description=(
             "False (the default) is `operator_steered`: a clean offshoot from the origin, "
             "re-scoring the edited searchpoint. True is `operator_rewind` — rounds 0..round-1 "
-            "are lifted and the fork continues at `round` under the seed's overrides, which is "
+            "are lifted and the fork continues at `round` under the start's overrides, which is "
             "what an 'apply this from here' press means and what the terminal spells "
             "`resume --rewind N`."
         ),
@@ -718,9 +718,9 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
                 "keep_rounds re-runs round `round` from where its line stood going into it, so it "
                 "names no candidate; fork without keep_rounds to start from one"
             )
-        if self.keep_rounds and self.seed.origin_prompts:
+        if self.keep_rounds and self.start.origin_prompts:
             raise ValueError(
-                "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "
+                "keep_rounds lifts the parent's round 0 as its origin, so the start must not "
                 "declare origin_prompts; fork without keep_rounds to start from an edited origin"
             )
         return self
@@ -744,11 +744,11 @@ class VerifyCandidatePayload(CyclePayload, kind=CommandKind.VERIFY_CANDIDATE):
     seed: WireInt | None = None
 
 
-class LinePayload(CampaignPayload):
+class LiveCyclePayload(CampaignPayload):
     """Addressed to a campaign, applied to and recorded on the cycle holding its line."""
 
 
-class GradeBenchPayload(LinePayload, kind=CommandKind.GRADE_BENCH):
+class GradeBenchPayload(LiveCyclePayload, kind=CommandKind.GRADE_BENCH):
     """Grade the campaign's origin and its selection on the held-out bench rows."""
 
 
@@ -1178,7 +1178,7 @@ class CommandAcceptedBody(StrictModel):
     subject: str = Field(
         description="The address the dispatcher resolved and filed it on: empty for the "
         "workspace, `draft:<id>` for a draft, else its campaign or cycle as a subject spells it "
-        "(`campaign:<id>`, `course:<id>/<cycle>`, `;in=` its sandbox chain)."
+        "(`campaign:<id>`, `cycle:<id>/<cycle>`, `;in=` its sandbox chain)."
     )
 
 

@@ -41,7 +41,7 @@ class MachineSlot(StrictModel):
         "(a paid verb outside any run)."
     )
     cycle: CycleHop | None = Field(
-        description="The cycle the job holds, which `/hierarchy` serves as a course entry with its run phase — "
+        description="The cycle the job holds, which `/hierarchy` serves as a cycle entry with its run phase — "
         "`scoring` for a pass on it; null for a fresh mint and a pass scoring no cycle."
     )
     user: str = Field(description="user_id of the account whose job holds the slot")

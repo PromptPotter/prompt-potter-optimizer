@@ -1,7 +1,7 @@
 import { memo, useMemo } from "react";
 import { cx } from "@/lib/cx";
 import { barValueLabel } from "@/lib/derivations";
-import type { DisplayMetric, HierarchyCourse } from "@/lib/api/types";
+import type { DisplayMetric, HierarchyCycle } from "@/lib/api/types";
 import { cssPct, PLACEHOLDER } from "@/lib/format";
 import { useStableContent } from "@/lib/stable";
 import { pressable } from "@/components/ui";
@@ -16,8 +16,8 @@ interface Props {
   // The pick's address (`workspace.tsx::pick`): the one pick the freed tree lights too.
   pickedAddress: string | null;
   onSelect: (view: CandidateBar | null) => void;
-  forkedFrom: ReadonlyMap<string, HierarchyCourse>;
-  onFreeHierarchy: (course: HierarchyCourse) => void;
+  forkedFrom: ReadonlyMap<string, HierarchyCycle>;
+  onFreeHierarchy: (cycle: HierarchyCycle) => void;
 }
 
 export const DendrogramStrip = memo(function DendrogramStrip({

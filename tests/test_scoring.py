@@ -128,7 +128,7 @@ from promptpotter.application.optimizers.gepa.members import (
     MinibatchBars,
     MinibatchGate,
 )
-from promptpotter.application.optimizers.nodes import Panel
+from promptpotter.application.optimizers.nodes import RoundSamples
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -243,7 +243,7 @@ from promptpotter.connectors import n8n
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import (
-    ArmSlot,
+    ArmPosition,
     Cut,
     CutKind,
     Measured,
@@ -2295,7 +2295,9 @@ def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
         ArmRecord(
             round=0,
             arm=ArmKey(origin.id),
-            state=Proposed(role=c0_arm.role, slot=c0_arm.slot, individual=c0_arm.individual),
+            state=Proposed(
+                role=c0_arm.role, position=c0_arm.position, individual=c0_arm.individual
+            ),
         )
     )
     with scoped(round=0):
@@ -2872,7 +2874,7 @@ def test_a_bench_line_reads_the_pick_it_holds_or_says_why_it_reads_nothing(
         chosen = "origin" if banked and banked.get("pick") == "origin" else pick.id
         line = bench_line(
             ArmName(key=ArmKey(chosen), round=1, label="C1.1"),
-            on_line="held_by" not in run,
+            on_live_cycle="held_by" not in run,
             **run,
         )
         line_bench = read_bench(line_stores, line_passes, line_scorer, line=line)
@@ -2880,7 +2882,7 @@ def test_a_bench_line_reads_the_pick_it_holds_or_says_why_it_reads_nothing(
         headline = line_bench.vs_origin.headline
         assert (None if headline is None else headline.estimate.value) == lift, case
         assert line_bench.status.subject == stopped or not stopped, f"{case}: names who stopped"
-        pick_arm = arm_state("C1.1", slot=ArmSlot(round=1, idx=0, total=1), individual=pick)
+        pick_arm = arm_state("C1.1", position=ArmPosition(round=1, idx=0, total=1), individual=pick)
         on_line = round_result(1, arms={ArmKey(pick.id): pick_arm}, selected=pick.id, cells={})
         assert bench_series(line_stores, line_passes, line_scorer, rounds=[on_line]) == series, case
 
@@ -3382,7 +3384,7 @@ def test_gepas_gate_tests_each_arm_against_the_minibatch_scores_of_its_own_paren
     minibatch = samples(2)
 
     race = gate.race(
-        NodeContext(gated, gate), Panel(cells=minibatch, order=minibatch, block_size=2)
+        NodeContext(gated, gate), RoundSamples(cells=minibatch, order=minibatch, block_size=2)
     )
     assert race.priors == {}, "the gate paired a prior, so the bench would catch it up"
     level = [measurement(i, 1.0, objective=0.5) for i in range(2)]
@@ -3821,7 +3823,9 @@ def test_the_bench_stops_a_peer_on_spent_lives(
         lives = cycle.config.optimization.lives
         assert lives is not None
         origin_key = ArmKey(cycle.parent.id)
-        origin_arm = arm_state("C0", slot=ArmSlot(round=0, idx=0, total=1), individual=cycle.parent)
+        origin_arm = arm_state(
+            "C0", position=ArmPosition(round=0, idx=0, total=1), individual=cycle.parent
+        )
         origin = round_result(0, arms={origin_key: origin_arm}, selected=origin_key, cells={})
 
         def stop_after(*closes: tuple[bool, int]) -> tuple[int | None, StopReason | None]:
@@ -3918,7 +3922,7 @@ def test_a_round_of_no_op_variants_measures_no_candidate_and_books_zero_candidat
             RoundContext(cycle=cycle, round_num=1),
             optimizers.NODE_MEMBERS.get("l1_generate"),
         )
-        no_cells = Panel(cells=[], order=[], block_size=0)
+        no_cells = RoundSamples(cells=[], order=[], block_size=0)
         member = optimizers.NODE_MEMBERS.get("l1_generate")
         assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
         proposed = asyncio.run(member.propose(generating, no_cells, node_contract.Proposals([])))
@@ -3938,7 +3942,7 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
 ) -> None:
     # The scorer parses answer_format.
     member = cast("L1Generate", optimizers.NODE_MEMBERS.get("l1_generate"))
-    no_cells = Panel(cells=[], order=[], block_size=0)
+    no_cells = RoundSamples(cells=[], order=[], block_size=0)
     with _peer_cycle(
         workspace(tmp_path / "held_format"),
         _PEER_HOP,
@@ -3984,7 +3988,7 @@ def test_capo_inits_reply_of_only_blank_instructions_is_one_refused_child(
     ) as (cycle, _):
         offline.llm.says = lambda _body: json.dumps(["  ", ""])
         drawing = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
-        no_cells = Panel(cells=[], order=[], block_size=0)
+        no_cells = RoundSamples(cells=[], order=[], block_size=0)
         proposed = asyncio.run(member.propose(drawing, no_cells, node_contract.Proposals([])))
     assert [p.refused for p in proposed.proposals] == [True], (
         "a reply of blank instructions drew no child and refused none"
@@ -4006,7 +4010,9 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         lambda _p, _s: True,
     ) as (cycle, ledger):
         origin_key = ArmKey(cycle.parent.id)
-        origin_arm = arm_state("C0", slot=ArmSlot(round=0, idx=0, total=1), individual=cycle.parent)
+        origin_arm = arm_state(
+            "C0", position=ArmPosition(round=0, idx=0, total=1), individual=cycle.parent
+        )
         # Walked on no cell this cycle's bank draws, so no panel renders a row the bank lacks.
         unwalked = {ArmKey(f"c{i}"): sheet(()) for i in range(3)}
         line = [
@@ -4278,7 +4284,7 @@ def test_a_population_table_holds_each_candidates_own_rendered_prompt() -> None:
         proposer="l1_generate",
         origin=round_result(0, improved=False),
         parent=round_result(1, improved=False),
-        arms=[arm_state("changed", slot=ArmSlot(round=2, idx=0, total=1))],
+        arms=[arm_state("changed", position=ArmPosition(round=2, idx=0, total=1))],
         schema=schema,
     )
     assert Locus("solve", "prompt").name in table, (
@@ -4310,7 +4316,10 @@ def _reference_reading(
         )
 
     bar = OptSearchPoint()
-    key, scored = ArmKey("c1"), arm_state("C1.1", slot=ArmSlot(round=1, idx=0, total=1), cut=cut)
+    key, scored = (
+        ArmKey("c1"),
+        arm_state("C1.1", position=ArmPosition(round=1, idx=0, total=1), cut=cut),
+    )
     reference_rows = rows(reference)
     pairs = ReferencePairs.of_round(
         seat(stores, bank=bank, scorer=scorer),
@@ -4420,7 +4429,7 @@ def _evidence_campaign(
     if graded:
         key, pick = (
             ArmKey(f"{cid}:selected"),
-            arm_state("C1.1", slot=ArmSlot(round=1, idx=0, total=1)),
+            arm_state("C1.1", position=ArmPosition(round=1, idx=0, total=1)),
         )
         answered = sheet(
             cell.filed(dataclasses.replace(cell.facts, answer=answer))
@@ -5018,7 +5027,7 @@ def standing_run() -> _StandingRun:
         """A held round ends on its parent *on*, re-read as the reference arm."""
         proposed = {
             ArmKey(sp.id): arm_state(
-                label, slot=ArmSlot(round=rnd, idx=idx, total=len(arms)), individual=sp
+                label, position=ArmPosition(round=rnd, idx=idx, total=len(arms)), individual=sp
             )
             for idx, label in enumerate(arms)
             for sp in [named.get(label) or prompted(instruction=label)]
@@ -5181,7 +5190,7 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
 ) -> None:
     h2h_stores = declared_head_to_heads.stores
     potter_a, capo_b = Subject("potter_a"), Subject("capo_b")
-    potter_course = Subject("potter_a", "cycle_potter_a_fork_r1")
+    potter_cycle = Subject("potter_a", "cycle_potter_a_fork_r1")
     _evidence_campaign(h2h_stores, "potter_a", 1, selected=0.5, rebased=True)
     _evidence_campaign(h2h_stores, "capo_b", 2, selected=0.7, incurred=0.3, loop=0.15, wall=50)
     shared = subject_evidence(h2h_stores, [potter_a, capo_b]).head_to_head
@@ -5191,8 +5200,8 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
         ...,
     ] = (
         ((potter_a, capo_b), None, True, [], 1, 1),
-        ((potter_course, capo_b), None, True, [], 1, 1),
-        ((potter_course, potter_a, capo_b), None, True, [], 1, 1),
+        ((potter_cycle, capo_b), None, True, [], 1, 1),
+        ((potter_cycle, potter_a, capo_b), None, True, [], 1, 1),
         (
             (potter_a, capo_b),
             {"cid": "gepa_c", "n": 3, "seed": 1},
@@ -5330,12 +5339,12 @@ def test_the_arms_of_one_declared_head_to_head_are_controlled_only_on_their_reco
             rewound = h2h_stores.campaigns.load_campaign(f"capo_rewound_{h2h_id}")
             assert rewound is not None
             h2h_stores.campaigns.act(
-                h2h_stores.campaigns.line_holder(rewound.root_hop), ArmAct.REWIND
+                h2h_stores.campaigns.live_cycle(rewound.root_hop), ArmAct.REWIND
             )
         if "forked" in arms:
             forked = h2h_stores.campaigns.load_campaign(f"capo_forked_{h2h_id}")
             assert forked is not None
-            line = h2h_stores.campaigns.line_holder(forked.root_hop)
+            line = h2h_stores.campaigns.live_cycle(forked.root_hop)
             parent = h2h_stores.campaigns.cycle_dir(line)
             fork = CycleHop(campaign_id=line.campaign_id, cycle_id=f"{line.cycle_id}_fork_r1")
             mint_fork(

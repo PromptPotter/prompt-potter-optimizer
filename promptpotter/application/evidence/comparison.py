@@ -161,7 +161,7 @@ class EvidencePower(StrictModel):
 
 class ArmReplicate(StrictModel):
     """One arm — a CONFIGURATION identity, which is what the word keeps meaning here — that ran
-    more than once. Computed over ``campaign`` subjects only: a course and a candidate share their
+    more than once. Computed over ``campaign`` subjects only: a cycle and a candidate share their
     campaign's round-0 hashes, so grouping them by it would report a branch as a replicate of the
     trunk it grew out of. ``level_spread`` is the cheapest noise reading on the board — taken from
     campaigns already paid for, and invisible to a roster that lists campaigns rather than arms.

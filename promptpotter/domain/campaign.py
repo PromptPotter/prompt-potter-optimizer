@@ -217,7 +217,7 @@ def _pinned(loop: Mapping[str, Any], keys: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class RunsWithParam(StrictModel):
-    """One setting a campaign's root course runs with, and the layer that chose it."""
+    """One setting a campaign's root cycle runs with, and the layer that chose it."""
 
     node: str
     key: str = Field(description="The config grid's own param key (`NodeConfigParam.key`)")
@@ -226,7 +226,7 @@ class RunsWithParam(StrictModel):
 
 
 class VendorModels(StrictModel):
-    """The models of one vendor that a campaign's root course runs."""
+    """The models of one vendor that a campaign's root cycle runs."""
 
     vendor: str = Field(
         description="Who TRAINED them: the namespace of the model id, or the bare id where it "
@@ -239,7 +239,7 @@ class VendorModels(StrictModel):
 
 
 class CampaignRunsWith(StrictModel):
-    """What a campaign's root course runs with — the root's pipeline resolution, cut to settings."""
+    """What a campaign's root cycle runs with — the root's pipeline resolution, cut to settings."""
 
     params: list[RunsWithParam] = Field(
         description="Scalar settings in active-step order, `model` included; no prompt text"
@@ -247,7 +247,7 @@ class CampaignRunsWith(StrictModel):
     vendors: list[VendorModels] = Field(
         description="Every model in `params`, grouped under its vendor in first-seen order"
     )
-    optimizer: str = Field(description="The optimizer manifest the root course runs")
+    optimizer: str = Field(description="The optimizer manifest the root cycle runs")
     budget_rounds: int | None = Field(
         description="The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = "
         "no rounds axis"

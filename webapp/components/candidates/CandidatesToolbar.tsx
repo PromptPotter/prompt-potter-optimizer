@@ -61,7 +61,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
           type="button"
           className="cand-title cand-crumb"
           onClick={() => m.pickCandidate(null)}
-          title="Back to this course's candidates"
+          title="Back to this cycle's candidates"
         >
           ‹ {m.viewedLabel} · runs
         </button>
@@ -90,7 +90,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
         ))}
         <HoverCard
           content={
-            m.areCourses ? "Bars are runs: open one to compare its candidates" : overlapNext[rung]
+            m.areCycles ? "Bars are runs: open one to compare its candidates" : overlapNext[rung]
           }
         >
           <Chip

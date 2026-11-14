@@ -22,6 +22,7 @@ from promptpotter.application.backend_listing import (
 )
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import CommandReading, read_command
+from promptpotter.application.config_map import ConfigMapResponse
 from promptpotter.application.cycle_addressing import (
     ActiveSessionResponse,
     active_session,
@@ -62,7 +63,6 @@ from promptpotter.application.jobs.quota import (
     coupon_status,
     quota_status,
 )
-from promptpotter.application.knobs import ConfigMapResponse
 from promptpotter.application.library import LibraryResponse, library
 from promptpotter.application.maintenance.storage_report import (
     LeafBytes,
@@ -310,7 +310,7 @@ class BackendHealthParams(
 
 
 class HierarchyParams(ReadParams, read=ReadKind.HIERARCHY, route="/hierarchy"):
-    """Every campaign in one store the caller owns, as hierarchy entries, each with its courses.
+    """Every campaign in one store the caller owns, as hierarchy entries, each with its cycles.
 
     ``descend`` enters an inner store exactly as every per-cycle read does.
     """
@@ -323,9 +323,9 @@ class HierarchyParams(ReadParams, read=ReadKind.HIERARCHY, route="/hierarchy"):
         "'unstarted' — the open check-ins; or 'all'",
     )
     campaign: str | None = Field(default=None, description="Filter to one campaign id")
-    attached: bool = Field(default=False, description="Keep only the courses a producer holds")
+    attached: bool = Field(default=False, description="Keep only the cycles a producer holds")
     depth: int = Field(
-        default=1, ge=0, le=1, description="0 serves campaigns alone, 1 their courses"
+        default=1, ge=0, le=1, description="0 serves campaigns alone, 1 their cycles"
     )
 
     @property
@@ -349,7 +349,7 @@ class HierarchyParams(ReadParams, read=ReadKind.HIERARCHY, route="/hierarchy"):
 class HierarchyStepsParams(
     ReadParams, read=ReadKind.HIERARCHY_STEPS, route="/hierarchy/{address:path}/@"
 ):
-    """The course's chronology: its steps, its forks' and its inner runs', merged by time.
+    """The cycle's chronology: its steps, its forks' and its inner runs', merged by time.
 
     The replay read: the SSE tail always seeks to EOF, so history has no other home. Windowed
     newest-first, delivered oldest-first; ``before`` is the opaque ``cursor_prev`` of a prior
@@ -357,7 +357,7 @@ class HierarchyStepsParams(
     overlap or hole; any window revalidates with ``If-None-Match``.
     """
 
-    address: str = Field(min_length=1, description="A course's hierarchy address")
+    address: str = Field(min_length=1, description="A cycle's hierarchy address")
     limit: int = Field(default=DEFAULT_STEP_LIMIT, ge=1, le=MAX_STEP_LIMIT)
     before: str | None = Field(default=None, description="A prior window's `cursor_prev`")
 
@@ -373,10 +373,10 @@ class HierarchyStepsParams(
 class HierarchySubtreeParams(
     ReadParams, read=ReadKind.HIERARCHY_SUBTREE, route="/hierarchy/{address:path}"
 ):
-    """The entry at ``address`` with every level under it: courses, rounds, candidates, inner
+    """The entry at ``address`` with every level under it: cycles, rounds, candidates, inner
     campaigns.
 
-    ``at`` is a line of the ledger of ``at_cycle``: a course minted later is not in the subtree,
+    ``at`` is a line of the ledger of ``at_cycle``: a cycle minted later is not in the subtree,
     and run-state stays live. ``lens`` re-grades rows under another ``per_cell`` composite
     (``score:``), the same as weights (``dials:``), or with a gate off (``abort:<gate>_off`` or
     ``abort:all_off``); ``samples`` masks to those sample ids. With neither, the subtree is the
@@ -555,7 +555,7 @@ class EvidenceParams(ReadParams, read=ReadKind.EVIDENCE, route="/evidence"):
         default_factory=list,
         description=(
             "Subjects to pool, one per repetition of the parameter: "
-            "`campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` "
+            "`campaign:<campaign_id>` (its root origin), `cycle:<campaign_id>/<cycle_id>` "
             "(one branch, read at its last elected winner) or "
             "`candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span "
             "campaigns and datasets, which the comparability verdict then reports on.\n\n"
@@ -565,7 +565,7 @@ class EvidenceParams(ReadParams, read=ReadKind.EVIDENCE, route="/evidence"):
             "ordinary projects tree, so every kind above resolves inside one unchanged.\n\n"
             "A MASK rides the address, `;`-separated, so the record and the "
             "counterfactual can be two channels of one read: `;samples=3,7,11` restricts "
-            "every value to those samples, and `;lens=score:<formula>` (courses only) "
+            "every value to those samples, and `;lens=score:<formula>` (cycles only) "
             "re-decides the branch's elections under another criterion and reads it at the "
             "winner that would have stood. The response carries what that changed in "
             "`subjects[].scenario`, worded once as `scenario.said`, its caveat the said's detail."
@@ -594,7 +594,7 @@ class EvidenceParams(ReadParams, read=ReadKind.EVIDENCE, route="/evidence"):
     winner_chain: bool = Field(
         default=False,
         description=(
-            "Also serve the branch standing behind each course / candidate subject — the "
+            "Also serve the branch standing behind each cycle / candidate subject — the "
             "winner chain from its origin to its head, each point read on its own cells. "
             "OFF by default for the same reason as `ranking`: every point past the origin "
             "opens a round file. A campaign subject serves none, having no branch."
@@ -701,7 +701,7 @@ class ForkPreviewParams(
 
     campaign_id: str = Field(min_length=1, max_length=128)
     pipeline_overlay: dict[str, dict[str, Any]] = Field(
-        description="The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it"
+        description="The `nodes.*.config` overlay the fork would carry, as its `CycleStart` sends it"
     )
 
     def answer(self, caller: Caller) -> ForkPreviewResponse:

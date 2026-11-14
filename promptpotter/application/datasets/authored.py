@@ -7,7 +7,7 @@ from typing import Any, NamedTuple
 
 from pydantic import ValidationError
 
-from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
+from promptpotter.application.datasets.tabular_ingest import read_answer_terms_file
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
 from promptpotter.application.scoring.judges.registry import judge_instrument
@@ -45,8 +45,8 @@ class AuthoredDataset:
     task_description: str
     """``task.md``'s body, stripped; ``""`` when the definition has none."""
 
-    candidate_library: tuple[str, ...]
-    """``candidate_library.txt`` — the per-pipeline origin's target list, part of
+    answer_terms: tuple[str, ...]
+    """``answer_terms.txt`` — the per-pipeline origin's target list, part of
     the origin spec (a ``candidate_source`` node ranks each query against it).
     ``()`` when absent. The draft path carries this so reopening a dataset surfaces
     its already-dropped library as FULFILLED (the origin HOLDS the value); the run
@@ -243,5 +243,5 @@ def read_authored_dataset(dataset: ResolvedDataset) -> AuthoredDataset:
             _campaign_block(definition), path=dataset.directory / DEFINITION_FILE
         ),
         task_description=read_dataset_framing(dataset).description,
-        candidate_library=read_candidate_library_file(dataset.directory),
+        answer_terms=read_answer_terms_file(dataset.directory),
     )

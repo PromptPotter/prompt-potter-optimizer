@@ -5,7 +5,7 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.domain.arms import ArmSlot, Concluded, arm_name
+from promptpotter.domain.arms import ArmPosition, Concluded, arm_name
 from promptpotter.domain.bench import COST_ABSENCE_WORDS, LiftCost
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.origin_panel import RoundAdvance, StallEffect
@@ -433,14 +433,14 @@ def measured_arm(rounds: Sequence[RoundOutcome], individual_id: str) -> Conclude
     raise KeyError(f"no closed round measured individual {individual_id}")
 
 
-def walked_slot(rounds: Sequence[RoundOutcome], key: ArmKey) -> ArmSlot | None:
+def walked_position(rounds: Sequence[RoundOutcome], key: ArmKey) -> ArmPosition | None:
     """The candidate a re-read of *key* reads: its latest walk as a proposal; ``None`` for one no round walked."""
     return next(
         (
-            arm.slot
+            arm.position
             for rr in reversed(rounds)
             if (arm := rr.arms.get(key)) is not None
-            and arm.slot is not None
+            and arm.position is not None
             and arm.role != MeasurementRole.PARENT
         ),
         None,

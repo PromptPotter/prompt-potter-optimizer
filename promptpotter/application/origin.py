@@ -23,7 +23,7 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import ScoredWalk
-from promptpotter.domain.arms import ArmSlot, Concluded, Proposed
+from promptpotter.domain.arms import ArmPosition, Concluded, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -33,7 +33,7 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import (
     OPERATOR_ORIGIN_SOURCES,
-    CycleSeed,
+    CycleStart,
     OriginSource,
     ScoringLockedRecord,
 )
@@ -53,7 +53,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-ORIGIN_SLOT = ArmSlot(round=0, idx=0, total=1)
+ORIGIN_POSITION = ArmPosition(round=0, idx=0, total=1)
 
 
 class CampaignOrigin(NamedTuple):
@@ -86,17 +86,17 @@ def lock_criterion(cycle: Cycle, read: ReadArm) -> ReadArm:
 
 def try_inherit_fork_origin(
     session: Session,
-    seed: CycleSeed | None,
+    start: CycleStart | None,
     *,
     resolved_origin: OptSearchPoint,
     sp: JobSearchPoint,
     framing: TaskDecomposition,
 ) -> CampaignOrigin | None:
     """Re-scoring a no-edit or model/provider-only fork re-rolls C0 and the lineage jumps."""
-    if seed is None:
+    if start is None:
         return None
     # A non-locked param edit changes what the origin measures → re-score.
-    if seed.pipeline_overlay and not overlay_is_locked_axis_only(seed.pipeline_overlay):
+    if start.pipeline_overlay and not overlay_is_locked_axis_only(start.pipeline_overlay):
         return None
     store = session.store.campaigns
     index = store.load(session.hop, moment=None)
@@ -140,11 +140,11 @@ def try_inherit_fork_origin(
         fold.fitness,
         len(inherited_results),
     )
-    # The OSP object, not a prompt-field dict, so the inherited C0 keeps the seed's lineage.
+    # The OSP object, not a prompt-field dict, so the inherited C0 keeps the start's lineage.
     inherited = cand.model_copy(
         update={
             "role": MeasurementRole.ORIGIN,
-            "slot": ORIGIN_SLOT,
+            "position": ORIGIN_POSITION,
             "individual": resolved_origin,
             "sp_hash": sp.sp_hash(session.pipeline_schema),
             "resolved_params": sp.config_params.dump(),
@@ -168,28 +168,28 @@ def standing_origin(session: Session, resolved_origin: OptSearchPoint) -> ReadAr
     return ReadArm(key, head, origin.rows(key))
 
 
-_SEED_ORIGIN_LINEAGE = {
-    OriginSource.FORK_SEED: "Operator-steered fork — edited searchpoint as origin",
+_START_ORIGIN_LINEAGE = {
+    OriginSource.FORK_START: "Operator-steered fork — edited searchpoint as origin",
     OriginSource.CAMPAIGN_ORIGIN: "Fresh campaign minted from a chosen prior origin",
 }
-assert set(_SEED_ORIGIN_LINEAGE) == OPERATOR_ORIGIN_SOURCES
+assert set(_START_ORIGIN_LINEAGE) == OPERATOR_ORIGIN_SOURCES
 
 
 def resolve_origin_opt_search_point(
     dataset: ResolvedDataset | None = None,
     *,
-    seed: CycleSeed | None = None,
+    start: CycleStart | None = None,
     pipeline_params: PipelineParams,
     schema: PipelineSchema,
 ) -> OptSearchPoint:
-    """Seed → every prompt node's starting prompt in ``origin.yaml`` → empty."""
+    """Start → every prompt node's starting prompt in ``origin.yaml`` → empty."""
     origin: OptSearchPoint | None = None
-    if seed is not None and seed.origin_prompts:
+    if start is not None and start.origin_prompts:
         # A step bearing no prompt reads none: a check-in seeds every active step alike.
         borne = {node.name for node in schema.prompt_nodes()}
-        prompts = {n: p for n, p in seed.origin_prompts.items() if n in borne}
+        prompts = {n: p for n, p in start.origin_prompts.items() if n in borne}
         origin = OptSearchPoint(prompts=prompts).as_origin(
-            changes_description=_SEED_ORIGIN_LINEAGE[seed.origin_source]
+            changes_description=_START_ORIGIN_LINEAGE[start.origin_source]
         )
     elif dataset is not None and (
         authored := declared_origin_prompts(dataset, schema.prompt_nodes())
@@ -215,7 +215,7 @@ def seat_campaign_origin(
     after INIT closes (`runner/loop.py::open_origin_round`)."""
     resolved_origin = resolve_origin_opt_search_point(
         dataset=session.dataset,
-        seed=cycle.origin,
+        start=cycle.origin,
         pipeline_params=session.pipeline_params,
         schema=session.pipeline_schema,
     )
@@ -223,7 +223,7 @@ def seat_campaign_origin(
     framing = campaign_framing(session.store, campaign_config, session.dataset)
     sp = session.points(framing).job(resolved_origin)
     inherited = try_inherit_fork_origin(
-        session, cycle.own_seed, resolved_origin=resolved_origin, sp=sp, framing=framing
+        session, cycle.own_start, resolved_origin=resolved_origin, sp=sp, framing=framing
     )
     if inherited is not None:
         return inherited
@@ -238,7 +238,9 @@ def seat_campaign_origin(
             code="pipeline_config_invalid",
         )
     scoring_set = sample_dataset(dataset, campaign_config.sp_budget_origin) if dataset else []
-    proposed = Proposed(role=MeasurementRole.ORIGIN, slot=ORIGIN_SLOT, individual=resolved_origin)
+    proposed = Proposed(
+        role=MeasurementRole.ORIGIN, position=ORIGIN_POSITION, individual=resolved_origin
+    )
     unmeasured = measuring(
         proposed,
         sp,

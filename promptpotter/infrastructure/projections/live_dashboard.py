@@ -18,7 +18,7 @@ from promptpotter.domain.arms import Concluded, Measuring, arm_name
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardSample,
     LiveCandidate,
@@ -302,7 +302,7 @@ class LiveDashboardState(DashboardFacts):
     declared_phase: RunPhase = RunPhase.RUNNING
     # A FAILED stop's failure, else absent: served only as the run's pinned `said` row.
     error: ErrorRecord | None = None
-    # The course entry serves both (`CourseFacts.standing` / `elects_on`); the file keeps them.
+    # The cycle entry serves both (`CycleEntryFacts.standing` / `elects_on`); the file keeps them.
     run_standing: RunStanding | None = None
     elects_on: DisplayMetric
     # The cell the open call holds; served only as `ServedDashboard.held_call`.
@@ -973,7 +973,7 @@ class RunLimitsProjection(Projection):
         return self._limits
 
 
-def fold_at(cut: Cut) -> LiveDashboardState | None:
+def fold_at(cut: CycleAt) -> LiveDashboardState | None:
     """`None`: the cut holds no `RunWiringRecord` yet (a check-in still authoring its origin)."""
     *prefix, own = ledger_chain(cut.cycle, moment=None)
     return LedgerIndex.of(own.path).view(
@@ -981,14 +981,14 @@ def fold_at(cut: Cut) -> LiveDashboardState | None:
     )
 
 
-def run_limits_at(cut: Cut) -> RunLimits | None:
+def run_limits_at(cut: CycleAt) -> RunLimits | None:
     *prefix, own = ledger_chain(cut.cycle, moment=None)
     return LedgerIndex.of(own.path).view(
         RunLimitsProjection, _until(cut), seed=_seed(RunLimitsProjection, prefix)
     )
 
 
-def _until(cut: Cut) -> int | None:
+def _until(cut: CycleAt) -> int | None:
     return None if cut.offset is None else cut.offset + 1
 
 

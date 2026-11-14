@@ -37,13 +37,13 @@ from promptpotter.domain.hierarchy import (
     CANDIDATE_STANDING_INFO,
     CampaignFacts,
     CandidateStanding,
-    CourseFacts,
-    CourseKind,
-    CourseSpawn,
+    CycleEntryFacts,
+    CycleMint,
+    CycleSpawn,
     Figure,
     FigureKey,
     HierarchyCampaign,
-    HierarchyCourse,
+    HierarchyCycle,
     HierarchyResponse,
     HierarchySpan,
     HierarchyState,
@@ -76,16 +76,16 @@ from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, fil
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError
 
-_MINT_WORDS: dict[CourseKind, str] = {
+_MINT_WORDS: dict[CycleMint, str] = {
     "root": "root",
     "fork": "fork",
     "inner": "inner run",
 }
-_UNMINTED = "Its line course has no mint record, so its rounds and standing are unread."
+_UNMINTED = "Its live cycle has no mint record, so its rounds and standing are unread."
 _UNSCORED = "Its config did not resolve, so its limits and bench are unread."
 
 
-def _course_label(mint: CourseKind, cycle_id: str) -> str:
+def _cycle_label(mint: CycleMint, cycle_id: str) -> str:
     return f"{_MINT_WORDS[mint]} ·{cycle_id.rpartition('_')[2][:6]}"
 
 
@@ -151,7 +151,7 @@ def _lift_row(key: FigureKey, pair: PairedReading, over: str) -> Figure:
     )
 
 
-def _course_climb(facts: CourseFacts) -> Said | None:
+def _cycle_climb(facts: CycleEntryFacts) -> Said | None:
     climb = None if facts.standing is None else facts.standing.climb
     if climb is None:
         return None
@@ -184,13 +184,13 @@ def _bench_row(state: ReadingState, bench: BenchScore | None) -> Figure:
     )
 
 
-def _course_figures(
+def _cycle_figures(
     status: RunStatus,
-    facts: CourseFacts,
+    facts: CycleEntryFacts,
     cap: int | None,
     runs_with: CampaignRunsWith | None,
     *,
-    on_line: bool,
+    on_live_cycle: bool,
 ) -> list[Figure]:
     bench = facts.bench
     rows = [_state_row(status)]
@@ -198,7 +198,7 @@ def _course_figures(
         models = [model for vendor in runs_with.vendors for model in vendor.models]
         rows.append(_figure("optimizer", "Optimizer", runs_with.optimizer, " · ".join(models)))
     rows.append(_spend_row("spend", "Spend", facts.spend, None))
-    if not on_line:
+    if not on_live_cycle:
         rows.append(_bench_row(ReadingState.HELD_ELSEWHERE, None))
     elif bench is not None:
         rows.append(_bench_row(bench.status.state, bench))
@@ -219,7 +219,7 @@ def _unresolved_lines(root: RootRunsWith) -> list[Said]:
     return [] if root.unread is None else [caveat_row("unresolved", root.unread)]
 
 
-def _course_lines(root: RootRunsWith, line: LineConfig) -> list[Said]:
+def _cycle_said_lines(root: RootRunsWith, line: LineConfig) -> list[Said]:
     if root.unread is not None:
         return _unresolved_lines(root)
     if line.unread is not None:
@@ -264,13 +264,13 @@ def candidate_figures(reading: ArmReading) -> list[Figure]:
 
 
 def superseded_tag(successor: str) -> HierarchyTag:
-    """Worn by a retired course or candidate: the course that took its place, named as its card."""
+    """Worn by a retired cycle or candidate: the cycle that took its place, named as its card."""
     cycle_id = Subject.parse_address(successor).cycle_id
-    label = f"retired by {_course_label(sibling_kind(cycle_id), cycle_id)}"
+    label = f"retired by {_cycle_label(sibling_kind(cycle_id), cycle_id)}"
     return HierarchyTag(kind="superseded", value=successor, label=label)
 
 
-def course_entry(
+def cycle_entry(
     stores: Stores,
     inside: CyclePath,
     campaign: Campaign,
@@ -283,13 +283,13 @@ def course_entry(
     root: RootRunsWith,
     line: LineConfig,
     bench: BenchScore | None,
-) -> HierarchyCourse:
+) -> HierarchyCycle:
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
     runs_with = root.runs_with
     # The producer as it is now: a moment replays the record, never a process.
     run = stores.run_state(hop)
     limits = binding_run_limits(stores, hop, line.config, run)
-    # Before its first launch a course declares no wiring, so its campaign's declared cap binds.
+    # Before its first launch a cycle declares no wiring, so its campaign's declared cap binds.
     cap = (
         (None if runs_with is None else runs_with.budget_rounds)
         if limits is None
@@ -302,7 +302,7 @@ def course_entry(
         ).spend,
         ceiling_meter(campaign.declaration.purpose),
     )
-    mint: CourseKind = sibling_kind(hop.cycle_id)
+    mint: CycleMint = sibling_kind(hop.cycle_id)
     # Inner by where it lives: a rebase pair in the sandbox has no `spawned_by`.
     if mint == "root" and (index.spawned_by is not None or stores.inner):
         mint = "inner"
@@ -316,7 +316,7 @@ def course_entry(
     spawn = (
         None
         if fork is None or parent_id is None or cut is None
-        else CourseSpawn(
+        else CycleSpawn(
             parent=Subject(hop.campaign_id, parent_id, inside=inside).address,
             cut_round=cut,
             trigger=fork.trigger,
@@ -329,7 +329,7 @@ def course_entry(
     state = HierarchyState.of(
         run, head, lifecycle=campaign.lifecycle_status, admission=admitted(stores, campaign, run)
     )
-    facts = CourseFacts(
+    facts = CycleEntryFacts(
         mint=mint,
         spawn=spawn,
         task=task,
@@ -339,15 +339,15 @@ def course_entry(
         spend=spent,
         bench=bench,
     )
-    return HierarchyCourse(
+    return HierarchyCycle(
         address=Subject(hop.campaign_id, hop.cycle_id, inside=inside).address,
         parent=Subject(hop.campaign_id, inside=inside).address,
-        # An inner course is named for the outer panel cell it measures, by its last segment.
-        label=_course_label(mint, hop.cycle_id) if task is None else task.rpartition("/")[2],
+        # An inner cycle is named for the outer panel cell it measures, by its last segment.
+        label=_cycle_label(mint, hop.cycle_id) if task is None else task.rpartition("/")[2],
         tags=tags,
-        figures=_course_figures(state.status, facts, cap, runs_with, on_line=hop == holder),
-        climb=_course_climb(facts),
-        lines=_course_lines(root, line),
+        figures=_cycle_figures(state.status, facts, cap, runs_with, on_live_cycle=hop == holder),
+        climb=_cycle_climb(facts),
+        lines=_cycle_said_lines(root, line),
         state=state,
         span=HierarchySpan(
             opened_at=index.created_at,
@@ -394,16 +394,18 @@ def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> li
 
 
 @dataclass(frozen=True)
-class CourseReads:
-    """A campaign's courses as of one moment: each index at it and at its head, root first."""
+class CycleReads:
+    """A campaign's cycles as of one moment: each index at it and at its head, root first."""
 
     moment: Moment | None
-    courses: list[tuple[CycleHop, CycleIndex, CycleIndex]]
+    cycles: list[tuple[CycleHop, CycleIndex, CycleIndex]]
 
 
-def campaign_courses(stores: Stores, campaign: Campaign, *, moment: Moment | None) -> CourseReads:
-    """Each course's index read once: a course minted after the moment is not among them."""
-    return CourseReads(
+def campaign_cycle_reads(
+    stores: Stores, campaign: Campaign, *, moment: Moment | None
+) -> CycleReads:
+    """Each cycle's index read once: a cycle minted after the moment is not among them."""
+    return CycleReads(
         moment,
         sorted(
             (
@@ -425,12 +427,12 @@ def campaign_entry(
     stores: Stores,
     inside: CyclePath,
     campaign: Campaign,
-    held: CourseReads,
+    held: CycleReads,
     *,
     depth: int,
 ) -> HierarchyCampaign:
     moment = held.moment
-    holder = stores.campaigns.line_holder(campaign.root_hop, moment=moment)
+    holder = stores.campaigns.live_cycle(campaign.root_hop, moment=moment)
     root = campaign_runs_with(stores, campaign)
     runs_with = root.runs_with
     held_line = line_config(stores, campaign, holder)
@@ -441,11 +443,11 @@ def campaign_entry(
             bench = cycle_bench(stores, campaign, holder, held_line.config)
         except ScoringFormulaError as exc:
             held_line = LineConfig(None, str(exc))
-    courses: dict[str, HierarchyCourse] = {}
-    for hop, index, now in held.courses:
+    cycles: dict[str, HierarchyCycle] = {}
+    for hop, index, now in held.cycles:
         if depth == 0 and hop != holder:
             continue
-        courses[hop.cycle_id] = course_entry(
+        cycles[hop.cycle_id] = cycle_entry(
             stores,
             inside,
             campaign,
@@ -458,8 +460,8 @@ def campaign_entry(
             line=held_line if hop == holder else line_config(stores, campaign, hop),
             bench=bench if hop == holder else None,
         )
-    line = courses.get(holder.cycle_id)
-    if line is None:
+    live = cycles.get(holder.cycle_id)
+    if live is None:
         held_run = stores.run_state(holder)
         state = HierarchyState.of(
             held_run,
@@ -468,7 +470,7 @@ def campaign_entry(
             admission=admitted(stores, campaign, held_run),
         )
     else:
-        state = line.state
+        state = live.state
     spent = campaign_spend(stores.campaigns, stores.charges, campaign.campaign_id)
     lifetime = LifetimeSpend.of(spent.total)
     return HierarchyCampaign(
@@ -476,25 +478,25 @@ def campaign_entry(
         parent=Subject.of(inside).address if inside else None,
         label=campaign.label or campaign.dataset_name,
         tags=_campaign_tags(campaign, runs_with),
-        # The campaign's row reads its line course's as its own, its bill the campaign's whole life.
+        # The campaign's row reads its live cycle's as its own, its bill the campaign's whole life.
         figures=[_state_row(state.status), _lifetime_row(lifetime)]
-        if line is None
-        else [_lifetime_row(lifetime) if row.key == "spend" else row for row in line.figures],
+        if live is None
+        else [_lifetime_row(lifetime) if row.key == "spend" else row for row in live.figures],
         lines=[caveat_row("unminted", _UNMINTED), *_unresolved_lines(root)]
-        if line is None
-        else line.lines,
+        if live is None
+        else live.lines,
         state=state,
         span=HierarchySpan(
             opened_at=campaign.created_at,
             last_at=max(
-                (index.updated_at for _, index, _ in held.courses), default=campaign.created_at
+                (index.updated_at for _, index, _ in held.cycles), default=campaign.created_at
             ),
         ),
-        children=list(courses.values()) if depth > 0 else [],
+        children=list(cycles.values()) if depth > 0 else [],
         facts=CampaignFacts(
             label=campaign.label or None,
             root=Subject(campaign.campaign_id, campaign.root_cycle_id, inside=inside).address,
-            line=Subject(campaign.campaign_id, holder.cycle_id, inside=inside).address,
+            live_cycle=Subject(campaign.campaign_id, holder.cycle_id, inside=inside).address,
             lifecycle=campaign.lifecycle_status,
             runs_with=runs_with,
         ),
@@ -573,7 +575,7 @@ def list_hierarchy(
     depth: int,
 ) -> HierarchyResponse:
     if attached_only and depth == 0:
-        raise BadRequestError("`attached` keeps the courses a producer holds; depth 0 serves none.")
+        raise BadRequestError("`attached` keeps the cycles a producer holds; depth 0 serves none.")
     leaf = descend_store(stores, inside)
     # No manifest holds an open check-in, so the store is asked only after a stored lifecycle.
     stored: LifecycleFilter | None = None if lifecycle == "unstarted" else lifecycle
@@ -584,7 +586,7 @@ def list_hierarchy(
                 leaf,
                 inside,
                 campaign,
-                campaign_courses(leaf, campaign, moment=None),
+                campaign_cycle_reads(leaf, campaign, moment=None),
                 depth=depth,
             ),
         )

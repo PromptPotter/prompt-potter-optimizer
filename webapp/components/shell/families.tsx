@@ -15,7 +15,7 @@ import { AccountView, ChatPane, ComparePane, CostStrip, FilesPane } from "./lazy
 
 // The label is the view's command word (WCAG 2.5.3), so its pane's visible title contains it. A null
 // pane is mounted by chrome: the campaign list is the sidebar, which a phone shows while it is the last view.
-// `glance` keys the viewed course's figure the view reads at a glance: the masthead draws it as the view's door.
+// `glance` keys the viewed cycle's figure the view reads at a glance: the masthead draws it as the view's door.
 type Family = { label: string; pane: ((key: string | null) => ReactNode) | null; glance?: FigureKey };
 
 export const FAMILIES: Record<FamilyId, Family> = {

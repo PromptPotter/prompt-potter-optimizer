@@ -36,7 +36,7 @@ export function MeasurementRun({
     unfiled: isLiveView,
     read: roundRead,
     rows: candidates,
-    seed,
+    start,
     verdicts,
   } = useRound(viewedPath, round);
 
@@ -99,7 +99,7 @@ export function MeasurementRun({
         {shown.map((c) => {
           const { reading } = c;
           const { arm, end } = reading;
-          const spec = oneCandidate ? seed(arm.key) : null;
+          const spec = oneCandidate ? start(arm.key) : null;
           const invalid = end === "invalid";
           // An invalid arm never started a walk: it renders as rejected below, never as a stop.
           const early = reading.walked_short ? end : null;

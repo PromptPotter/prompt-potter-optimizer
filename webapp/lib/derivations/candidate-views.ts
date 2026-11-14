@@ -1,6 +1,6 @@
 import {
   type ArmReading,
-  type HierarchyCourse,
+  type HierarchyCycle,
   type LineageNode,
   type VerificationMark,
   DISPLAY_METRIC_INFO,
@@ -14,16 +14,16 @@ import { readPaired } from "./paired-reading";
 import { childNodes, splitRetired } from "./lineage-candidates";
 
 // A run's served standing rate against its origin; `null` renders BLANK, never 0.
-function courseLevel(node: HierarchyCourse): number | null {
+function cycleLevel(node: HierarchyCycle): number | null {
   const served = node.facts.standing;
   const standing = served ? readPaired(served.vs_origin) : null;
   return standing?.read ? standing.lift.rate_b : null;
 }
 
-// A course bar's standing rate is a fitness, so it is blank under the other metrics.
+// A cycle bar's standing rate is a fitness, so it is blank under the other metrics.
 export function barLevel(metric: DisplayMetric, bar: CandidateBar): number | null {
   if (bar.reading) return metricLevel(metric, bar.reading);
-  return metric === "fitness" ? courseLevel(bar.node) : null;
+  return metric === "fitness" ? cycleLevel(bar.node) : null;
 }
 
 export function barStarted(bar: CandidateBar): boolean {
@@ -34,8 +34,8 @@ export function barValueLabel(metric: DisplayMetric, bar: CandidateBar): string 
   return fmtUnit(DISPLAY_METRIC_INFO[metric].unit, barLevel(metric, bar));
 }
 
-export function barsAreCourses(viewedNode: LineageNode | undefined): boolean {
-  return viewedNode?.level === "candidate" && childNodes(viewedNode).length > 0;
+export function barsAreCycles(viewedNode: LineageNode | undefined): boolean {
+  return viewedNode?.entry_kind === "candidate" && childNodes(viewedNode).length > 0;
 }
 
 interface CandidateBarsInput {
@@ -57,7 +57,7 @@ export function candidateBars({
   const nodes: readonly LineageNode[] = viewedNode ? childNodes(viewedNode) : [];
   return splitRetired(nodes).live.map<CandidateBar>((node, idx) => {
     const key = node.address;
-    if (node.level === "course") {
+    if (node.entry_kind === "cycle") {
       return {
         key,
         idx,

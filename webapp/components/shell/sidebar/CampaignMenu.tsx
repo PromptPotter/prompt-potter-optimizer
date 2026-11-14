@@ -18,7 +18,7 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
   const viewedCampaignId = viewed?.root.campaignId ?? null;
   const flow = useIngest();
   // An unstarted campaign has no run to rename or archive: Delete is its one action.
-  const unstarted = campaign.level === "unstarted";
+  const unstarted = campaign.entry_kind === "unstarted";
 
   const runArchive = () =>
     void cmd.run("archive", () =>

@@ -34,7 +34,7 @@ export function useRemoteModel() {
   };
 
   return {
-    babysat: leafEntry?.level === "course" && leafEntry.state.intervened,
+    babysat: leafEntry?.entry_kind === "cycle" && leafEntry.state.intervened,
     inner: !isOuterView,
     innerHop,
     toOuter: () => navigate({ path: viewedPath.slice(0, 1) }),

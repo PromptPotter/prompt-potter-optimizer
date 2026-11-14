@@ -29,7 +29,7 @@ EARNED_SOURCE: str = "earned"
 class PoolSource(enum.StrEnum):
     # The installed block packs and the blocks runs earned beside them: both move under a
     # running campaign, so the pool banks its entries whole.
-    LIBRARY = "library"
+    PACKS = "packs"
     # The cycle's demo split, pinned by its bank's hash: the pool banks sample keys.
     PARTITION = "partition"
 
@@ -44,7 +44,7 @@ class PoolSourceInfo(NamedTuple):
 
 POOL_SOURCE_INFO: Worded[PoolSource, PoolSourceInfo] = Worded(
     {
-        PoolSource.LIBRARY: PoolSourceInfo("snippet", "snippets", "Snippets in play"),
+        PoolSource.PACKS: PoolSourceInfo("snippet", "snippets", "Snippets in play"),
         PoolSource.PARTITION: PoolSourceInfo("row", "rows", "Rows in play"),
     }
 )
@@ -154,7 +154,7 @@ class Pool(StateSlice, kind=None):
 
 
 class BlockPool(Pool, kind="block_pool"):
-    source: ClassVar[PoolSource] = PoolSource.LIBRARY
+    source: ClassVar[PoolSource] = PoolSource.PACKS
     # Required, so a reader no walked initializer writes for is refused at load.
     entries: tuple[PoolEntry, ...]
 

@@ -88,7 +88,7 @@ def _rebank_on_branch(
                 cycle.difficulty,
                 lives=cycle.config.optimization.lives,
                 close=closes[t.round].close,
-                slot_of=session.bank.slot_of,
+                position_of=session.bank.position_of,
             ),
         )
         if offset is None:

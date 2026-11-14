@@ -2,9 +2,9 @@
 
 import { useMemo } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api/reads";
-import type { Said, SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
+import type { Said, SubtreeCampaign, SubtreeCycle } from "@/lib/api/types";
 import { MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
-import { courseAt, indexLineage, type LineageIndex } from "@/lib/derivations";
+import { cycleAt, indexLineage, type LineageIndex } from "@/lib/derivations";
 import { lensOf, useMaskState, type MaskState } from "@/lib/state/scoring-mask";
 import { useCellTerms } from "@/lib/hooks/useConnector";
 import { shownData, useRead } from "@/lib/hooks/useRead";
@@ -152,18 +152,18 @@ export function useViewedLineage(): ViewedLineage {
       lens,
       setLens: (next: string) => lensStore.set({ campaignId, lens: next }),
       maskActive: maskActiveOf(index),
-      readUnder: courseAt(index, leafPath)?.lines.find((l) => l.key === "read_under") ?? null,
+      readUnder: cycleAt(index, leafPath)?.lines.find((l) => l.key === "read_under") ?? null,
       scoringMaskActive: maskOpen,
     }),
     [tree, treeRead, index, lens, campaignId, leafPath, maskOpen],
   );
 }
 
-// The viewed leaf's course entry: its `state` is the one word and next step every surface reads.
-export function useViewedCourse(): SubtreeCourse | null {
+// The viewed leaf's cycle entry: its `state` is the one word and next step every surface reads.
+export function useViewedCycle(): SubtreeCycle | null {
   const { index } = useViewedLineage();
   const path = useWorkspace().viewed?.path ?? null;
-  return useMemo(() => courseAt(index, path), [index, path]);
+  return useMemo(() => cycleAt(index, path), [index, path]);
 }
 
 // A campaign's tree by its address: the viewed campaign's under the viewed mask and moment.

@@ -43,7 +43,7 @@ describe("formatAddress", () => {
     expect(formatAddress(at(null, [view("samples"), view("spend")]))).toBe("#/samples/spend");
   });
 
-  it("spells a course as the served hierarchy address, and omits the default view", () => {
+  it("spells a cycle as the served hierarchy address, and omits the default view", () => {
     expect(formatAddress(at({ path: PATH }))).toBe("#/justlogic__cf67b3::cycle_ee7bb41bbde0");
   });
 

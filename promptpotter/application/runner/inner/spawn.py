@@ -33,12 +33,12 @@ from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.inner.narrative import inner_narrative, narrative_head
 from promptpotter.application.runner.inner.tasks import (
-    ResolvedPanel,
+    ResolvedInnerPanel,
     enter_inner_cell,
     inner_instrument_config,
     inner_spawn_context,
     panel_cell,
-    parse_panel,
+    parse_inner_panel,
     parse_resolved,
     seat_draw,
 )
@@ -168,7 +168,7 @@ def claim_sandbox(ctx: InnerSpawnContext) -> Stores:
 
 
 def _banked_inner_rounds(store: CampaignStore, root: CycleHop) -> int:
-    index = store.load(store.line_holder(root), moment=None)
+    index = store.load(store.live_cycle(root), moment=None)
     return len(index.rounds) if index else 0
 
 
@@ -186,7 +186,7 @@ def inner_cell_hop(sample: Sample, payload: dict[str, Any]) -> CycleHop | None:
     cell = _resolve_inner_cell(sample, payload)
     store = sandbox_stores(cell.ctx).campaigns
     campaign = store.load_campaign(cell.campaign_id)
-    return None if campaign is None else store.line_holder(campaign.root_hop)
+    return None if campaign is None else store.live_cycle(campaign.root_hop)
 
 
 def _continue_inner_campaign(
@@ -195,7 +195,7 @@ def _continue_inner_campaign(
     """``stop_reason_outcome`` governs scoring, never resumption."""
     store = session.store.campaigns
     # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.
-    hop = store.line_holder(campaign.root_hop)
+    hop = store.live_cycle(campaign.root_hop)
     run = session.store.run_state(hop)
     if store.load(hop, moment=None) is None:
         raise CellUnscoreableError(
@@ -428,7 +428,7 @@ def _inner_cells(stores: Stores, experiment: Mapping[str, Any] | None) -> InnerC
             "which this box does not hold.",
             code="pipeline_config_invalid",
         )
-    return parse_resolved(experiment).panel.resolve_cells(stores)
+    return parse_resolved(experiment).inner_panel.resolve_cells(stores)
 
 
 def _pipeline_declaration(stores: Stores, experiment: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -456,13 +456,13 @@ def promptpotter_wire_adapter(
     return payload
 
 
-def _resolve_panel(stores: Stores, panel: Mapping[str, Any]) -> dict[str, Any]:
+def _resolve_inner_panel(stores: Stores, panel: Mapping[str, Any]) -> dict[str, Any]:
     """Each cell's instrument beside the panel; only what was declared survives the dump, so a
     field that gains a default re-keys no banked cell."""
-    parsed = parse_panel(panel)
+    parsed = parse_inner_panel(panel)
     cells = parsed.resolve_cells(stores)
-    resolved = ResolvedPanel(
-        panel=parsed,
+    resolved = ResolvedInnerPanel(
+        inner_panel=parsed,
         instruments={t.id: cells.spec(t).key() for t in parsed.tasks},
         datasets={t.id: parsed.dataset_for(t) for t in parsed.tasks},
     )
@@ -509,7 +509,7 @@ CONNECTOR = Connector(
     required_observation_keys=(INNER_RESULT_KEY,),
     cell_terms=INNER_CELL_TERMS,
     reported_keys=INNER_REPORTED_KEYS,
-    resolve_experiment=_resolve_panel,
+    resolve_experiment=_resolve_inner_panel,
     # The outer's graph IS the inner optimizer's, so it is served here, never mirrored in a file.
     pipeline_declaration=_pipeline_declaration,
     prompt_fields_as_node_params=True,

@@ -11,7 +11,7 @@ from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.free_tier import FREE_TIER_ADAPTER, Bounds, FreeTier
+from promptpotter.domain.free_tier_file import FREE_TIER_ADAPTER, Bounds, FreeTier
 from promptpotter.domain.judges import JudgeStage
 from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams

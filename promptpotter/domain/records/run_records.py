@@ -257,7 +257,7 @@ class RoundStatement(RoundOutcome):
     def of(
         cls,
         line: Sequence[RoundResult],
-        slot_of: Mapping[str, int],
+        position_of: Mapping[str, int],
         level_series: LevelSeries,
         run_standing: RunStanding,
         **own: Any,
@@ -268,7 +268,7 @@ class RoundStatement(RoundOutcome):
         return cls(
             **{name: getattr(rr, name) for name in RoundOutcome.model_fields},
             cells=cells,
-            positions={key: slot_of[key] for key in cells.sample_keys()},
+            positions={key: position_of[key] for key in cells.sample_keys()},
             level_series=level_series,
             run_standing=run_standing,
             panel_precision=None
@@ -950,27 +950,27 @@ class ForkRemainder(FrozenModel):
 
 
 class OriginSource(enum.StrEnum):
-    FORK_SEED = "fork_seed"
+    FORK_START = "fork_start"
     CAMPAIGN_ORIGIN = "campaign_origin"
-    # The seed carries no origin: an L2/L3 rebase replays its own C0, which has none to stamp.
+    # The start carries no origin: an L2/L3 rebase replays its own C0, which has none to stamp.
     REPLAYED = ""
 
 
 OPERATOR_ORIGIN_SOURCES = frozenset(OriginSource) - {OriginSource.REPLAYED}
 
 
-class CycleSeed(FrozenModel):
-    """One cycle's own delta, laid over its parent's laid seeds (`CycleConfig.laid`)."""
+class CycleStart(FrozenModel):
+    """One cycle's own delta, laid over its parent's laid starts (`CycleConfig.laid`)."""
 
     origin_prompts: dict[str, NodePrompt] = Field(
         default_factory=dict,
-        description="C0's prompt loci, per prompt node; empty when the seed carries no origin.",
+        description="C0's prompt loci, per prompt node; empty when the start carries no origin.",
     )
     origin_params: dict[str, dict[str, Any]] | None = Field(
         default=None,
         description="The params twin of `origin_prompts`: a fork off a candidate runs that "
         "candidate's record (`resolved_params`), laid under `pipeline_overlay`, the operator's "
-        "edit. None on a seed off no candidate.",
+        "edit. None on a start off no candidate.",
     )
     pipeline_overlay: dict[str, NodeCall] = Field(default_factory=dict)
     optimizer_narrowing: dict[str, NodeSearchNarrowing] = Field(
@@ -978,20 +978,20 @@ class CycleSeed(FrozenModel):
         description="Per-fork search-space lock edits, laid on its parent's by part "
         "(`NodeSearchNarrowing`'s fields): `param_keys` subsets, `prompt_fields_held` joins, "
         "`param_allowed_values` replaces per param. Empty for an unedited fork or a "
-        "campaign-from-origin seed.",
+        "campaign-from-origin start.",
     )
     config_overrides: ConfigOverrides = Field(default_factory=ConfigOverrides)
     origin_source: OriginSource = Field(
         default=OriginSource.REPLAYED,
         description=(
-            "Which act seeded C0 — 'fork_seed' | 'campaign_origin', naming its lineage's "
-            "`changes_description`; empty when the seed carries no origin (an L2/L3 rebase "
+            "Which act started C0 — 'fork_start' | 'campaign_origin', naming its lineage's "
+            "`changes_description`; empty when the start carries no origin (an L2/L3 rebase "
             "replays its own)."
         ),
     )
 
     @model_validator(mode="after")
-    def _origin_needs_provenance(self) -> CycleSeed:
+    def _origin_needs_provenance(self) -> CycleStart:
         if self.origin_prompts and not self.origin_source:
             raise ValueError("origin_prompts set without an origin_source stamp")
         return self
@@ -1250,7 +1250,7 @@ class SpawnedBy(StrictModel):
 
 class CycleMintedRecord(CycleRecord):
     """One per cycle's own ledger, after only the lines it adopted, and its first own fact: a chain
-    is walked off it alone. A cycle runs every seed its chain's mints hold, root first."""
+    is walked off it alone. A cycle runs every start its chain's mints hold, root first."""
 
     record_type: Literal["cycle_minted"] = "cycle_minted"
     # The parent's cycle dir relative to this one's, POSIX-separated: `../<id>` for a sibling.
@@ -1259,8 +1259,8 @@ class CycleMintedRecord(CycleRecord):
     # The first round the fork runs itself: every round below it is its parent's line's.
     cut_round: int | None = None
     fork: ForkSpec | None = None
-    seed: CycleSeed | None = None
-    # decisions.md § 0005: its seed steers outside the permitted narrowing, read as a `BABYSAT` act.
+    start: CycleStart | None = None
+    # decisions.md § 0005: its start steers outside the permitted narrowing, read as a `BABYSAT` act.
     babysat: bool = False
     timestamp: str = Field(default_factory=utcnow_iso)
 

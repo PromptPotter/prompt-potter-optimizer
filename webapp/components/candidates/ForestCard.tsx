@@ -20,7 +20,7 @@ import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { TreePairing } from "./CandidatesCard";
 import { Forest, type CladogramCtx } from "./Forest";
 import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
-import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedCycle } from "@/lib/state/lineage";
 
 export function ForestCard() {
   const { dash } = useViewedDashboard();
@@ -39,7 +39,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
   const campaignId = viewed?.root.campaignId ?? null;
   const cycleId = viewed?.root.cycleId ?? null;
   const viewedPath = viewed?.path ?? null;
-  const selection = useViewedCourse()?.facts.standing?.selection ?? null;
+  const selection = useViewedCycle()?.facts.standing?.selection ?? null;
   const {
     tree,
     valueByKey,
@@ -72,7 +72,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
       onPickCandidate: (n) =>
         n.node.address === pick?.address
           ? pickCandidate(null)
-          : pickCandidate(pickOf(n.node), n.coursePath),
+          : pickCandidate(pickOf(n.node), n.cyclePath),
     }),
     [viewed, pick, pickCandidate],
   );

@@ -14,6 +14,7 @@ from promptpotter.application.bench.task_context import (
     committed_task_context,
     draft_ledger,
 )
+from promptpotter.application.config_map import bench_defaults_pin
 from promptpotter.application.datasets.authored import declare_run, effective_config
 from promptpotter.application.datasets.draft_campaign import mint_draft_id
 from promptpotter.application.free_tier import (
@@ -22,7 +23,6 @@ from promptpotter.application.free_tier import (
     refuse_outside_free_tier,
 )
 from promptpotter.application.jobs.launcher.admission import paid_call
-from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
@@ -77,7 +77,7 @@ from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     BackendRevision,
     CycleMintedRecord,
-    CycleSeed,
+    CycleStart,
     DefaultsDrift,
     OriginSource,
     RunWiringRecord,
@@ -153,7 +153,7 @@ class CyclePlan:
     partition: BankPartition
     # The draw every later read of the cycle restores, written by the seam that mints it.
     drawn: PartitionRecord
-    # What the cycle runs under: a mint writes its seed, a minted cycle's ledger holds it.
+    # What the cycle runs under: a mint writes its start, a minted cycle's ledger holds it.
     cycle: CycleConfig
     # Configured as the declaration runs; a mint binds it to the cycle.
     session: Session
@@ -166,7 +166,7 @@ class CyclePlan:
             self.origin,
             points,
             list(self.partition.search),
-            candidate_library=self.session.candidate_library,
+            answer_terms=self.session.answer_terms,
         )
 
     @property
@@ -224,10 +224,10 @@ def resolve_cycle_plan(
     *,
     origin_override: dict[str, NodePrompt] | None = None,
 ) -> CyclePlan:
-    """Bound to a cycle, what it RUNS: its line's seeds, the origin among them, as the configure lays them."""
+    """Bound to a cycle, what it RUNS: its line's starts, the origin among them, as the configure lays them."""
     schema = session.pipeline_schema
     if session.cycle_id:
-        assert origin_override is None, "a minted cycle's origin is its line's seeds"
+        assert origin_override is None, "a minted cycle's origin is its line's starts"
         campaign = session.store.campaigns.load_campaign(session.hop.campaign_id)
         assert campaign is not None, "a hop names a minted campaign"
         cycle = cycle_config(session.store, campaign, session.hop)
@@ -235,7 +235,7 @@ def resolve_cycle_plan(
         spans = (
             [
                 LaidSpan(
-                    seed=CycleSeed(
+                    start=CycleStart(
                         origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN
                     ),
                     scoring_lock=None,
@@ -263,7 +263,7 @@ def resolve_cycle_plan(
         pipeline_params=pipeline_params,
         origin=resolve_origin_opt_search_point(
             dataset=session.dataset,
-            seed=cycle.origin,
+            start=cycle.origin,
             pipeline_params=pipeline_params,
             schema=schema,
         ),
@@ -302,7 +302,7 @@ class ConfigDriftError(ConflictError):
         if revision_moved is not None:
             causes.append(revision_moved)
         cause = "; ".join(causes) or (
-            "the dataset, its origin prompts, its candidate library or its framing changed, "
+            "the dataset, its origin prompts, its answer terms or its framing changed, "
             "not its declaration"
         )
         super().__init__(
@@ -353,7 +353,7 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
     plan = resolve_cycle_plan(session, campaign.declaration, dataset)
     checked = plan
     if session.hop != campaign.root_hop:
-        # A fork's seed is its cycle's declared delta: the root's own content is what is checked.
+        # A fork's start is its cycle's declared delta: the root's own content is what is checked.
         root = session.bound(campaign.root_hop, purpose=session.purpose)
         checked = resolve_cycle_plan(root, campaign.declaration, dataset)
     if campaign.root_content_hash == checked.origin_hash:
@@ -558,9 +558,9 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
         log = session.store.commands
         if log.book().subject_events(drafted):
             log.append(CommandLanded(subject=drafted, onto=subject_key(session.store.subject(hop))))
-    # The mint first, its seed on it; then the draw, so it is on disk before any launch, fork or
+    # The mint first, its start on it; then the draw, so it is on disk before any launch, fork or
     # read of the cycle, and what the origin hash was taken under, before the campaign is visible.
-    campaigns.mint_cycle(hop, CycleMintedRecord(seed=plan.cycle.own_seed))
+    campaigns.mint_cycle(hop, CycleMintedRecord(start=plan.cycle.own_start))
     campaigns.append(hop, plan.drawn)
     session = session.bound(hop, purpose=declaration.purpose)
     session.record_resolved_run()

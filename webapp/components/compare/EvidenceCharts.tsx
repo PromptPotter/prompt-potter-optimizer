@@ -296,7 +296,7 @@ export function SeriesLegend({
             )}
             {s.comparable === false && <span className="cmp-tag">not comparable</span>}
             {s.comparable === null && <span className="cmp-tag">ruler unknown</span>}
-            {s.kind === "course" && (
+            {s.kind === "cycle" && (
               <button
                 type="button"
                 className="cmp-link"

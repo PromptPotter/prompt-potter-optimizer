@@ -17,7 +17,7 @@ from promptpotter.application.datasets.loaders import (
     samples_from_dicts,
 )
 from promptpotter.application.datasets.prompts import pipeline_node_overlay
-from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
+from promptpotter.application.datasets.tabular_ingest import read_answer_terms_file
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.pipeline_resolve import ServedPipeline, served_pipeline
 from promptpotter.application.scoring.evaluators import (
@@ -156,7 +156,7 @@ def session_bank(
     connector: Connector,
     experiment: dict[str, Any] | None,
 ) -> tuple[Bank, tuple[str, ...]]:
-    """The bank and its candidate library, empty where the connector owns the panel."""
+    """The bank and its answer terms, empty where the connector owns the panel."""
     # First, never a fallback: rows cached under the same dataset name describe another instrument.
     if connector.owns_panel:
         if experiment is None:
@@ -175,7 +175,7 @@ def session_bank(
             code="dataset_not_found",
         )
     # Unioned with the ground-truth answers, never replacing them: every label stays rankable.
-    return bank, read_candidate_library_file(dataset.directory)
+    return bank, read_answer_terms_file(dataset.directory)
 
 
 @asynccontextmanager
@@ -241,7 +241,7 @@ async def _session(
         _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
         _verify_observation_names(pipeline_schema, connector, dataset_name)
         backend_revision = await _read_backend_revision(client, connector)
-        bank, candidate_library = session_bank(
+        bank, answer_terms = session_bank(
             stores, dataset, connector=connector, experiment=experiment
         )
         # By hash, never a label: every answer this session files names a bank the store holds.
@@ -259,7 +259,7 @@ async def _session(
             ),
             backend_revision=backend_revision,
             bank=bank,
-            candidate_library=candidate_library,
+            answer_terms=answer_terms,
             dataset_name=dataset_name,
             dataset=dataset,
             identity=identity,

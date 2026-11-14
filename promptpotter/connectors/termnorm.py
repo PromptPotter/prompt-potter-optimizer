@@ -64,7 +64,7 @@ class TermNormSession:
         samples: Sequence[Sample],
         library: Sequence[str],
     ) -> None:
-        # The term index: every label a row answers with, and the candidate library.
+        # The term index: every label a row answers with, and the answer terms.
         truths = {s.ground_truth for s in samples if s.ground_truth}
         self._terms = sorted(truths | set(library))
         if not self._terms:
@@ -163,7 +163,7 @@ CONNECTOR = Connector(
             "description": "One LLM call answers each row.",
             # No `reasoning_effort`: a rung named here follows no model the tenant swaps in.
             "config": {"provider": "openrouter", "model": "openai/gpt-oss-20b", "temperature": 0.0},
-            "prompt_info": {"rewrite_slot": "instruction"},
+            "prompt_info": {"rewrite_field": "instruction"},
         },
     },
 )

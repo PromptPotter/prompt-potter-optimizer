@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api/types";
+import type { Evidence, HierarchyCycle, SubjectReading } from "@/lib/api/types";
 import {
   CardFrame,
   DataTable,
@@ -67,9 +67,9 @@ export function ComparePane() {
   const [metric, setMetric] = useState("");
   const [grid, setGrid] = useState("");
   const { byAddress } = useRegistry();
-  const compared = channels.flatMap((c): HierarchyCourse[] => {
-    const line = byAddress.get(campaignAt(byAddress, c.rootCampaignId)?.facts.line ?? "");
-    return line?.level === "course" ? [line] : [];
+  const compared = channels.flatMap((c): HierarchyCycle[] => {
+    const line = byAddress.get(campaignAt(byAddress, c.rootCampaignId)?.facts.live_cycle ?? "");
+    return line?.entry_kind === "cycle" ? [line] : [];
   });
   const read = useEvidence(selected, compared.some((a) => a.state.attached), {
     ranking,

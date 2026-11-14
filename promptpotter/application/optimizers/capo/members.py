@@ -24,11 +24,11 @@ from promptpotter.application.optimizers.nodes import (
     CycleRead,
     Draw,
     MeasuredRound,
-    Panel,
     PromptArity,
     Proposals,
     Proposing,
     RewriteKnobs,
+    RoundSamples,
     Selection,
 )
 from promptpotter.application.optimizers.paper_templates import (
@@ -165,7 +165,9 @@ class FewShot(nodes.Proposer):
         DemoPool: nodes.CountKnob(nodes.ShotKnobs, "k_max")
     }
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
+    ) -> Proposals:
         k_max = ctx.knobs(nodes.ShotKnobs).k_max
         pool = [s.key for s in ctx.drawn(DemoPool)]
         node = ctx.read(Target).prompt_node.name
@@ -209,9 +211,9 @@ class Blocks(nodes.Sampler):
     knobs: ClassVar[type[StrictModel]] = BlocksKnobs
     size_knob: ClassVar[str | None] = None
 
-    def drawn(self, knobs: BlocksKnobs, search: int, _pipeline: str) -> nodes.PanelSize:
+    def drawn(self, knobs: BlocksKnobs, search: int, _pipeline: str) -> nodes.DrawSize:
         n_blocks = min(knobs.max_blocks, search // knobs.block_size)
-        return nodes.PanelSize(cells=n_blocks * knobs.block_size, block_size=knobs.block_size)
+        return nodes.DrawSize(cells=n_blocks * knobs.block_size, block_size=knobs.block_size)
 
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult
@@ -229,7 +231,7 @@ class Blocks(nodes.Sampler):
             )
         ]
 
-    def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
+    def draw(self, ctx: NodeContext, pool: list[Sample]) -> RoundSamples:
         knobs = ctx.knobs(BlocksKnobs)
         n_blocks = min(knobs.max_blocks, len(pool) // knobs.block_size)
         if n_blocks == 0:
@@ -238,7 +240,7 @@ class Blocks(nodes.Sampler):
                 f"{knobs.block_size}"
             )
         cells = pool[: n_blocks * knobs.block_size]
-        return nodes.Panel(cells=cells, order=list(cells), block_size=knobs.block_size)
+        return nodes.RoundSamples(cells=cells, order=list(cells), block_size=knobs.block_size)
 
 
 class PairedTKnobs(StrictModel):
@@ -457,7 +459,7 @@ class PairedT(nodes.Eliminator):
             )
         ]
 
-    def race(self, ctx: NodeContext, panel: Panel) -> PairedTRace:
+    def race(self, ctx: NodeContext, panel: RoundSamples) -> PairedTRace:
         return PairedTRace(
             ctx,
             survivors=ctx.knobs(SurvivalKnobs).size,
@@ -520,7 +522,9 @@ class CapoInit(nodes.Proposer):
                 "renders no prompt node CAPO could edit"
             )
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, _proposals: Proposals
+    ) -> Proposals:
         knobs = ctx.knobs(CapoInitKnobs)
         raw = await ctx.read(Calls).ask(init_prompt(ctx))
         listed = _instructions(raw)
@@ -580,7 +584,9 @@ class CapoCrossover(nodes.Proposer):
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
+    ) -> Proposals:
         pairs = _mated(ctx, proposals)
         if lone := [len(pair) for pair in pairs if len(pair) != 2]:
             raise ValueError(f"a crossover merges two parents; an offspring names {lone[0]}")
@@ -600,7 +606,9 @@ class ShotCrossover(nodes.Proposer):
     variation_mode: ClassVar[VariationMode] = "deterministic"
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Children, Lineage, Replay, Target})
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
+    ) -> Proposals:
         rng = ctx.read(Replay).rng()
         node = ctx.read(Target).prompt_node.name
         children = ctx.read(Children)
@@ -630,7 +638,9 @@ class CapoMutate(nodes.Proposer):
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
+    ) -> Proposals:
         live = [i for i, p in enumerate(proposals.proposals) if not p.refused]
         answers = await ctx.read(Calls).ask_each(
             {i: mutation_prompt(ctx, proposals.individuals[i]) for i in live}
@@ -655,7 +665,9 @@ class PopulationRejoin(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.reached_knobs(self, SurvivalKnobs).size
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
+    ) -> Proposals:
         return nodes.Proposals(
             [
                 *(Proposal(individual=m) for m in ctx.read(Lineage).population),
@@ -677,14 +689,14 @@ class PopulationSelector(nodes.Selector):
     def parent_cells(
         self,
         ctx: NodeContext,
-        panel: Panel,
+        panel: RoundSamples,
         rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         # The incumbent's reading is the cells it walked as a member; round 1's origin reads block one.
         walked = {cell.key for cell in rows.get(ArmKey(ctx.read(Lineage).parent.id), NO_CELLS)}
         return [s for s in panel.cells if s.key in walked] or panel.cells[: panel.block_size]
 
-    def parent_read(self, panel: nodes.PanelSize) -> int:
+    def parent_read(self, panel: nodes.DrawSize) -> int:
         # Round 1's origin is no arm and reads block one; later the incumbent races as an arm.
         return panel.block_size
 

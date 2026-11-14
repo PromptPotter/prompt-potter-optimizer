@@ -429,8 +429,8 @@ class ReadoutProjection(Projection):
         return lines
 
     def on_arm_measuring(self, arm: Measuring) -> None:
-        assert arm.slot is not None
-        label, idx, total, block = arm.label, arm.slot.idx, arm.slot.total, arm.block
+        assert arm.position is not None
+        label, idx, total, block = arm.label, arm.position.idx, arm.position.total, arm.block
         if block is not None:
             if block["n"] not in self._block_racing:
                 self._block_racing[block["n"]] = block["racing"]
@@ -450,8 +450,8 @@ class ReadoutProjection(Projection):
 
     def on_arm_concluded(self, scores: Concluded, fold: ScoreSummary | None) -> None:
         w = 66
-        assert scores.slot is not None
-        label, total = scores.label, scores.slot.total
+        assert scores.position is not None
+        label, total = scores.label, scores.position.total
         cut = isinstance(scores, Cut) and scores.kind == "eliminated"
         if self._block_racing and fold is not None and arm_elimination(scores) is not None:
             block = -(-fold.walked // self._block_size)

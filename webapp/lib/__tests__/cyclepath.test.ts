@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  courseAddressOf,
+  cycleAddressOf,
   decodeCyclePath,
   encodeCyclePath,
   encodeDescend,
@@ -50,14 +50,14 @@ describe("CyclePath", () => {
     expect(encodeDescend(depth2)).toBe("justlogic__ff00aa::cycle_1122ab_s3");
   });
 
-  // A null owner silently makes `toggle` a no-op, so an address below a course must still resolve.
+  // A null owner silently makes `toggle` a no-op, so an address below a cycle must still resolve.
   describe("hierarchy addresses", () => {
-    const course = encodeCyclePath(depth2);
-    const candidate = `${course}/r3/0d3d5cd5adf74270b194d23cad09e022`;
+    const cycle = encodeCyclePath(depth2);
+    const candidate = `${cycle}/r3/0d3d5cd5adf74270b194d23cad09e022`;
 
-    it("heads an address below a course with the course's own", () => {
-      expect(courseAddressOf(candidate)).toBe(course);
-      expect(courseAddressOf(course)).toBe(course);
+    it("heads an address below a cycle with the cycle's own", () => {
+      expect(cycleAddressOf(candidate)).toBe(cycle);
+      expect(cycleAddressOf(cycle)).toBe(cycle);
       expect(pathOfAddress(candidate)).toEqual(depth2);
     });
 

@@ -115,7 +115,7 @@ class DraftFile(FrozenModel):
     field_provenance: dict[str, Provenance]
     origin_prompts: dict[str, dict[str, str]]
     decomposed_task_context: dict[str, Any]
-    candidate_library: tuple[str, ...]
+    answer_terms: tuple[str, ...]
     # A resolver turn has run on it: an edit keeps it, so a reopen reviews, never re-resolves.
     resolver_ran: bool
     # What the last turn left; an edit (`patch`) clears it, the turn's own patch sets it.

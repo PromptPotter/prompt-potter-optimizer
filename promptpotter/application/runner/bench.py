@@ -41,7 +41,7 @@ from promptpotter.domain.bench import (
     BenchTrigger,
     CampaignRefusal,
     LiftCost,
-    LineRun,
+    LiveCycleRun,
     OwnLevel,
     PassOutcome,
     PassStop,
@@ -114,7 +114,7 @@ class _PassReading(NamedTuple):
 @dataclass(frozen=True, kw_only=True)
 class BenchLine:
     hop: CycleHop
-    on_line: bool
+    on_live_cycle: bool
     inner: bool
     # The campaign's own refusal (`admission.py::campaign_refusal`): its pass is refused with it.
     refused: CampaignRefusal | None
@@ -123,7 +123,7 @@ class BenchLine:
     held_out: int
     # The pair refuses two passes whose instruments differ; a cycle that drew no bank names none.
     instrument_id: str | None
-    run: LineRun
+    run: LiveCycleRun
     spend: SpendRollup | None
 
 
@@ -298,7 +298,7 @@ def read_bench(
     status = bench_status(
         trigger=line.trigger,
         bench_size=line.held_out if passes is None else len(passes.origin.sample_keys),
-        on_line=line.on_line,
+        on_live_cycle=line.on_live_cycle,
         inner=line.inner,
         refused=line.refused,
         held_by=line.held_by,
@@ -380,7 +380,7 @@ def bench_members(
     return _grade_bench(stores, passes, scorer, line).members
 
 
-def _standing_pass(passes: BenchPasses, run: LineRun) -> BenchPass | None:
+def _standing_pass(passes: BenchPasses, run: LiveCycleRun) -> BenchPass | None:
     if run.selection is None or not run.rounds_closed:
         return None
     return passes.pass_of(run.selection.key)
@@ -718,7 +718,7 @@ async def bench_origin(
     return passes
 
 
-def line_run(stores: Stores, hop: CycleHop) -> LineRun:
+def live_cycle_run(stores: Stores, hop: CycleHop) -> LiveCycleRun:
     # A launch stopped before run init names no cycle.
     named = bool(hop.cycle_id)
     index = stores.campaigns.load(hop, moment=None) if named else None
@@ -727,7 +727,7 @@ def line_run(stores: Stores, hop: CycleHop) -> LineRun:
     run = stores.run_state(hop) if named else None
     attached = run is not None and run.producer.attached
     scoring = run is not None and run.run_phase is RunPhase.SCORING
-    return LineRun(
+    return LiveCycleRun(
         selecting=attached and not scoring,
         # The bracket, not the lock alone: `grade-bench` reads this under its own pass's lock.
         pass_open=attached and scan_bench_open(stores.campaigns.ledger(hop)),
@@ -761,7 +761,7 @@ def cycle_bench(
         line_passes(stores, campaign.campaign_id),
         config,
         scorer_of(config, verifier_graded=False),
-        run=line_run(stores, hop),
+        run=live_cycle_run(stores, hop),
     )
 
 
@@ -771,14 +771,14 @@ def bench_line(
     hop: CycleHop,
     config: CampaignConfig,
     *,
-    run: LineRun,
+    run: LiveCycleRun,
 ) -> BenchLine:
-    holder = stores.campaigns.line_holder(campaign.root_hop)
+    holder = stores.campaigns.live_cycle(campaign.root_hop)
     drawn = stores.campaigns.last(hop, PartitionRecord)
     split = config.dataset_split
     return BenchLine(
         hop=hop,
-        on_line=holder == hop,
+        on_live_cycle=holder == hop,
         inner=stores.inner,
         refused=_refused(stores, campaign),
         held_by=None if holder == hop else holder.cycle_id,
@@ -809,10 +809,10 @@ def bench_under(
     config: CampaignConfig,
     scorer: Scorer,
     *,
-    run: LineRun,
+    run: LiveCycleRun,
 ) -> BenchScore:
     line = bench_line(stores, campaign, hop, config, run=run)
-    return read_bench(stores, passes if line.on_line else None, scorer, line=line)
+    return read_bench(stores, passes if line.on_live_cycle else None, scorer, line=line)
 
 
 def declare_line_bench(
@@ -826,13 +826,13 @@ def declare_line_bench(
     stores, hop = session.store, session.hop
     scorer = scorer_of(config, verifier_graded=False)
     # The index says `selecting` / `ending` only once the run closes; the launch's own word wins.
-    run = line_run(stores, hop)._replace(selecting=selecting, ending=ending)
+    run = live_cycle_run(stores, hop)._replace(selecting=selecting, ending=ending)
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None or not hop.cycle_id:
         split = config.dataset_split
         line = BenchLine(
             hop=hop,
-            on_line=False,
+            on_live_cycle=False,
             inner=stores.inner,
             refused=None if campaign is None else _refused(stores, campaign),
             held_by=None,

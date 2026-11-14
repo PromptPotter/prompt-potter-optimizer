@@ -121,14 +121,14 @@ def bench_reads(stores: Stores, *, bank: Bank, sample_keys: frozenset[str]) -> i
 
 def load_population(stores: Stores, entry: ArchiveEntry, bank: Bank) -> list[FiledAnswer]:
     """The configuration's answers on *bank*'s rows, whichever bank measured them."""
-    answers = stores.archive.measured(entry, frozenset(bank.slot_of))
+    answers = stores.archive.measured(entry, frozenset(bank.position_of))
     if (remembered := _remembered()) is not None:
         answers = [answer for answer in answers if remembered(answer)]
     return list(standing(answers).values())
 
 
 def list_populations(stores: Stores, bank: Bank) -> list[ArchiveEntry]:
-    entries = _configurations_on(stores, bank, frozenset(bank.slot_of))
+    entries = _configurations_on(stores, bank, frozenset(bank.position_of))
     if _remembered() is None:
         return entries
     return [e for e in entries if load_population(stores, e, bank)]
@@ -137,7 +137,7 @@ def list_populations(stores: Stores, bank: Bank) -> list[ArchiveEntry]:
 def population_signatures(stores: Stores, bank: Bank) -> dict[str, list[list[Any]]]:
     sigs = stores.archive.cell_signatures()
     out: dict[str, list[list[Any]]] = {}
-    for entry in _configurations_on(stores, bank, frozenset(bank.slot_of)):
+    for entry in _configurations_on(stores, bank, frozenset(bank.position_of)):
         held = stores.archive.signature(entry, sigs) or ()
         out[entry.config_key] = [list(part) for part in held]
     return out

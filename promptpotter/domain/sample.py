@@ -65,7 +65,7 @@ class Bank:
 
     samples: tuple[Sample, ...]
     dataset_hash: str
-    slot_of: Mapping[str, int]
+    position_of: Mapping[str, int]
 
     @classmethod
     def of(cls, rows: Iterable[Sample]) -> Bank:

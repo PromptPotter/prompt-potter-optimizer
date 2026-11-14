@@ -16,10 +16,10 @@ row it closes.
 ### batch/26 · admit-2 (links 1-5 landed; the rows its cap left)
 
 - **A cycle's hold is released twice on every normal exit**: `runner/entry.py`'s `finally` releases a
-  hold `drain_all` already released, so `run_phase_control.py::CycleHold.release` keeps a double-release
+  hold `drain_all` already released, so `run_phase_control.py::ProducerHold.release` keeps a double-release
   guard. Action: `drain_all` only drains; the release is the `finally`'s and the fork handoff's. This
   keeps the parent cycle attached through the fork mint, which moves `account_spend`'s holds, so it
-  needs its own proof. **Re-test:** `CycleHold.release` holds no already-released branch.
+  needs its own proof. **Re-test:** `ProducerHold.release` holds no already-released branch.
 - **A seat refused before it runs keeps its observers**: `runner/inner/spawn.py` (~:364) never releases
   the observers it opened when `admission.py::slotless_share` refuses. Action: the observers open after
   admission, or close on its refusal. **Rides with:** the slotless-doors row below. **Re-test:** a test
@@ -152,7 +152,7 @@ row it closes.
   answers it with the paused exit code. **Rides with:** passb-2 3. **Re-test:**
   `git grep -lE "except PassStoppedError" -- promptpotter/presentation` names `cli/main.py` alone.
 - **`line_run` reads a paused pass as selecting**: a pass with a pause asked reads `PAUSED`
-  (`infrastructure/run_state.py:82`), so `runner/bench.py::line_run` takes its hold for the loop's.
+  (`infrastructure/run_state.py:82`), so `runner/bench.py::live_cycle_run` takes its hold for the loop's.
   Action: the pass's hold is read by its bracket (`producer_lock.pass_held`). **Rides with:** passb-2 3.
   **Re-test:** a bench pass with a pause asked reads `selecting=False`.
 - **A bench pass's served delta is always zero**: `runner/bench.py::_bench_counted` (called at `:769`, `:780`
@@ -238,7 +238,7 @@ row it closes.
 - **The browser inks a served state from its own map**: `webapp/lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`
   and `PipelineFlow`'s `tone`. Action: they go once a served word row carries its `Tone`
   (`domain/said.py`). **Re-test:** `git grep -n "MOVEMENT_CLASS" -- webapp/lib`.
-- **Potter's layers keep a second member protocol**: `escalation.py::Layer` and
+- **Potter's layers keep a second member protocol**: `escalation.py::EscalationLayer` and
   `escalation.py::TransitionResult` carry L2 and L3 beside `nodes.py`'s member protocol, so a layer
   fired by the `escalation` controller parses, lands and reports through its own door. **Re-test:**
   `git grep -n "class Layer(Protocol)" -- promptpotter`.
@@ -355,10 +355,10 @@ row it closes.
   landed `Session`. Action: a check-in plans its cycles off the draft before landing, and a campaign's
   cycle config carries its selection. **Rides with:** rk-run. **Re-test:** one `select_optimizer` call
   between a draft's Start and its first cycle plan.
-- **`application/knobs.py::config_map` selects for itself** beside `pipeline_resolve.py::_Merge`'s
+- **`application/config_map.py::config_map` selects for itself** beside `pipeline_resolve.py::_Merge`'s
   `optimizer`, which its caller holds; it does not depend on landing. Action: `config_map` takes the
   caller's selection. **Rides with:** rk-run. **Re-test:**
-  `git grep -n "select_optimizer(" -- promptpotter/application/knobs.py` is empty.
+  `git grep -n "select_optimizer(" -- promptpotter/application/config_map.py` is empty.
 - **A per-cell criterion naming a term no cell carries compiles** (`authored.py::scorer_of`, called at
   the check-in by `datasets/draft_patch.py`) and refuses per cell at the run. Root: `compiler.py::compile_scorer`
   refuses a name no owner holds, `evaluators.py::cell_name_owners` beside the campaign's own owners (the
@@ -391,10 +391,10 @@ row it closes.
   that proceeds (the halted readout says only that nobody has asked for it; the design sentence lives in
   the CHANGELOG and `offline-run.md`). Action: `False`, and the `next_step` names the owed pass.
   **Rides with:** rk-run, which holds `domain/phases.py`. **Re-test:** `git grep -n "\"origin_gate\".*grades_selection: true" -- webapp/lib/api/types.generated.ts` is empty.
-- **TermNorm serves no rewrite slot**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
-  `rewrite_slot`. Action (TermNorm repo): serve `rewrite_slot: instruction`, then
+- **TermNorm serves no rewrite field**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
+  `rewrite_field`. Action (TermNorm repo): serve `rewrite_field: instruction`, then
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
-  `git grep -n "rewrite_slot" -- promptpotter/connectors/termnorm.py` is empty.
+  `git grep -n "rewrite_field" -- promptpotter/connectors/termnorm.py` is empty.
 
 ### batch/26 · addr
 
@@ -497,8 +497,8 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **The node document is typed two ways and the L2 steer is a side memory**: every door now parses a
   patch through `layer_fold.py::wire_patch`, but L2's steer is read through `L2Memory.steered` /
   `steered_layout` beside the fold, not as a named layer of `l1_generate`'s config, and about 58 of
-  the engine's `dict[str, Any]` sites are node-config bags (`dict[str, NodeCall]` on `CycleSeed`,
-  `dict[str, dict[str, Any]]` on `ForkSeed`, which carries a null clear and text a `NodeCall` refuses
+  the engine's `dict[str, Any]` sites are node-config bags (`dict[str, NodeCall]` on `CycleStart`,
+  `dict[str, dict[str, Any]]` on `ForkStart`, which carries a null clear and text a `NodeCall` refuses
   before the schema types it). Action: one typed node document with knobs a view on it; the steer a
   named layer. It closes ren 8's node-config census and the pipeline-switch row. **Rides with:** cfg.
 - **A sub-model's knobs still default in code**: every `CampaignConfig` / `OptimizationConfig` knob's
@@ -508,7 +508,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   50) laid under every budget a layer names. Action: each into `defaults.yaml`, its field required.
   **Rides with:** cfg. **Re-test:** no field of a model `CampaignConfig` nests carries a valued default.
 - **Potter's demo axis is dead wherever a dataset holds out no demo pool**: the derived coupling
-  `l1_generate.shots_without_demo_pool` (`application/knobs.py::_draw_couplings`) now badges every default potter
+  `l1_generate.shots_without_demo_pool` (`application/config_map.py::_draw_couplings`) now badges every default potter
   campaign, because `defaults.yaml` holds out no `dataset_split.demo` and only justlogic declares one
   (`demo: 50`), while `l1_generate.k_max` is 5. The badge is true; the default is the fork. Action
   (operator's call): hold out a demo split by default (every split re-keys, search loses rows) or drop
@@ -585,12 +585,16 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **A rename re-keys every banked L4 cell**: the estimator id hashes its modules' source, so rn-conn's
   `is_self_optimization(connector)` rename in `runner/inner/tasks.py` moved it `ff29c7fc` → `75e905b2`
   and filed every banked L4 cell under an id no read finds, while `behaviour_keys.json` held. Root: the
-  estimator is keyed by its behaviour key, as the treatments are since bkeys. **Rides with:** bkeys-2.
+  estimator is keyed by its behaviour key, as the treatments are since bkeys. ren's renames moved it
+  again (`dadf1d74` → `4e88e431`) and all five treatment digests with it, every request byte-identical
+  (`nodes.py::behaviour_key` and `tasks.py::estimator` hash source text). **Rides with:** bkeys-2.
   **Re-test:** a rename in `runner/inner/tasks.py` leaves the estimator id unchanged.
 - **The trace hashes a display field** (rec's landing, reported): `MemberAddress.pass_role` has no
   reader but rides the round-file readings the trace hashes, so deleting it moves the behaviour keys.
-  Root: the behaviour key reads the decisions, not the display fields. **Rides with:** bkeys-2.
-  **Re-test:** deleting `pass_role` leaves `behaviour_keys.json` unchanged.
+  Root: the behaviour key reads the decisions, not the display fields nor their spelling: ren's renames
+  re-keyed `behaviour_keys.json` by field names alone (decisions identical once normalized), and its
+  landing wiped the banked origins with them. **Rides with:** bkeys-2. **Re-test:** deleting
+  `pass_role`, or renaming a trace field, leaves `behaviour_keys.json` unchanged.
 
 - **An L4 cell's instrument hashes a hand-picked subset, not what its session loads** (✓): the pin's
   `InnerTaskSpec.instrument` (`runner/inner/tasks.py::InnerTasks`: node config, campaign identity,
@@ -750,7 +754,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `:383-385`); `dropCachedRead` runs while the read has subscribers (`read-cache.ts:300-310`, caller
   `useIngestFlow.ts:374`). **Rides with:** webd.
 - **The served contract has three hand copies** (✓): `commands.ts:103-108` hand-writes `Partial`
-  `ConfigOverrides` / `ForkSeed` beside the generated `CommandSent`; SSE frames are cast with `as`
+  `ConfigOverrides` / `ForkStart` beside the generated `CommandSent`; SSE frames are cast with `as`
   (`useCycleEvents.ts:49`, `read-cache.ts:390`); the build handshake covers fetches, not streams; and
   the client decides what Delete files (`CampaignMenu.tsx:44-54` vs `workspace_edits.py:62-77`).
   **Rides with:** webd.
@@ -1061,6 +1065,11 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   own calls too. Decided: a model keeps its pin only where its
   realized cache share and effective $/M beat running uncached. **Rides with:** tune 3. **Re-test:**
   `SpendRollup.by_node` in each twin's `review.md`.
+- **"slot" survives in the text an LLM reads** (ren's report): prompt prose, `{{slot}}` tokens and the
+  `not_a_slot` / `stable_slot` names keep the word ren retired in code (arm position, prompt field,
+  region). Root: the optimizer prompts say what the code says; a prompt edit is a measured change,
+  so it lands with its paid comparison. **Rides with:** tune 1. **Re-test:**
+  `git grep -c "slot" -- 'promptpotter/assets/optimizers/*/pipeline.yaml'` is 0.
 
 ### batch/31 · small
 
@@ -1071,6 +1080,14 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   `optimizer_manifest.py::treatment`'s manifest hash, so all four treatment digests move, and the
   bench pin if the fact lands in the bench defaults; no measurement key reads it. **Rides with:** its
   own small chain after narr 3. **Re-test:** `git grep -c "model:" -- 'promptpotter/assets/optimizers/*/pipeline.yaml'` is 0.
+- **`propose` hands every optimizer the round's samples only gepa reads** (ren's report): twelve of
+  thirteen `propose` signatures take `RoundSamples` and ignore it. Root: gepa reads them through
+  `NodeContext` as a declared read, and the parameter goes. **Rides with:** small 3. **Re-test:** no
+  `propose` signature in `promptpotter/application/optimizers/` takes `RoundSamples`.
+- **"panel" names two things; a fold still says `seed=`** (ren's report): `RoundResult.panel` (a
+  round's arms) beside the origin panel (its cells), and `read_model.py` / `live_dashboard.py` fold a
+  cycle's start as `seed=`. Root: each named for what it holds (`start` for the fold). **Rides with:**
+  small 3. **Re-test:** `git grep -n "seed=" -- promptpotter/infrastructure/read_model.py promptpotter/infrastructure/projections/live_dashboard.py` is empty.
 - **Archive hygiene before the next bulk delete**: (1) reclaim, a dataset-scoped destructive `delete`,
   dry-run by default, refusing while a producer can append; (2) attribution, an L4 outer cell stamps the
   runs its inner campaign produced; (3) the entry-to-run lookup (which runs an archive entry serves,
@@ -1187,44 +1204,9 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** the old word's
 `git grep -c` for that sense is 0.
 
-- **`overshoot` names a sleep's excess** (overshoot's census): `heartbeat.py`'s local `overshoot` is a
-  timer's lateness, while the word now names a bill past its hold. Action: `lateness`.
-
-- **Six class names name two things each**: `Cut` (an arm's cut state in `arms.py`, a fork cut in
-  `cycle_paths.py`), `PanelCoverage` (`dispatch/compose.py`'s produced / placed / chars, a checkpoint's
-  holes by arm in `run_records.py`), `FailureCluster` (`intelligence/indexes/sample.py`, the
-  `dispatch/schemas.py` wire model), `Provenance` (`views/render/export.py`'s export header,
-  `origin_provenance.py`'s StrEnum), `Progress` (`bench/node_context.py`'s `CycleRead`,
-  `ledger_scan.py`'s liveness tuple beside its own `_Progress`) and `Reported` (`prompt_block.py`'s
-  published metrics, `spend_book.py`'s billing parts). Action: each is renamed to what it holds, and a
-  gate check refuses a top-level class name defined twice. **Rides with:** ren. **Re-test:** the
-  check passes with an empty allowlist.
-- **Two functions named for another act**: `maintenance/landing.py::read_treatment` returns None and
-  raises (a check, named as a read); `views/render/export.py`'s local `needs_export` returns a
-  `PromptExport` (a getter, named as a predicate). Action: each named for its act. **Rides with:** ren.
-
-- **`candidate_library` → `answer_terms`**, and `PoolSource.LIBRARY` → `PACKS`: `EditDraftPatch`'s three
-  `candidate_library*` fields and the dataset file move, and `shared/hashing.py::content_hash`'s key
-  re-keys root ids. **Rides with:** ren 1.
-- **"course" → "cycle" in the served and doc layer** (`HierarchyCourse`, `level: "course"`,
-  `/hierarchy/{course}`, `ids.ts::courseAddressOf`). **Rides with:** ren 2.
-- **"line" in its live-cycle sense → `live_cycle`** (`command_kinds.py::LinePayload`, `BenchLine.on_line`,
-  `domain/bench.py::LineRun`): ledger shape. **Rides with:** ren 3.
-- **`nodes.py::Panel` / served `ArmPanel` → `RoundSamples` / `ArmSamples`**, the L4 roster →
-  `inner_panel`. **Rides with:** ren 4.
-- **"slot"**: prompt slot → prompt field, layout slot → region, `domain/arms.py::ArmSlot` → `ArmPosition`,
-  bank `slot_of` → `position_of`. **Rides with:** ren 5.
-- **`CycleSeed*` / `ForkSeed` → `CycleStart*` / `ForkStart`**, so "seed" is the RNG seed alone.
-  **Rides with:** ren 6.
-- **The served hierarchy discriminator `level` → `entry_kind`**. **Rides with:** ren 7.
-- **Two `knobs.py` and two `free_tier.py` modules**: `application/knobs.py` (the served knob
-  projection) beside `optimizers/potter/knobs.py`, and `domain/free_tier.py` beside
-  `application/free_tier.py`. Action: each named for what it holds, or the pair folds where one fact
-  has two homes (payer's census reads the free-tier pair first). **Rides with:** ren 8.
 - **Node config is one document read through ~11 modules**: schema, parsing, overlay and knobs each
   hold a view of it after landing 30's one layered read. Action: one model of the node document with
   knobs a view on it. **Rides with:** cfg (its declared merge rule).
-- **`_DETACHED` names two things**: `jobs/launch.py:29` and `run_job.py:56`. **Rides with:** ren.
 
 ### batch/32 · rel
 

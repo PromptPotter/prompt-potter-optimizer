@@ -60,7 +60,7 @@ To strip this down to a generic chat + tool-activity app, remove:
   `submit-arms` verb `LiveSegment` fires; keep `LiveSegment`'s button rendering and point it at
   your own gated commands.
 - **The run card** — `components/chat/RunCard.tsx` (the sample walk, `HardSamplesPreview.tsx`),
-  plus `RunSummaryItem`, which renders the frozen course entry. Keep the
+  plus `RunSummaryItem`, which renders the frozen cycle entry. Keep the
   `run` item kind and hand `Thread` a `renderRun` for your own task summary.
 - **`ingest/ComposerTools.tsx`** — its Tools popover and coming-soon rows are the generic
   composer's: move them beside `Composer.tsx`.

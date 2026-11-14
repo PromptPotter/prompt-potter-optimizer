@@ -1,6 +1,6 @@
-"""The deep read: a campaign's courses, their rounds and candidates, and the inner campaigns under them.
+"""The deep read: a campaign's cycles, their rounds and candidates, and the inner campaigns under them.
 
-A fork IS a course, hung off the candidate it was cut from; status is derived after every line resolves.
+A fork IS a cycle, hung off the candidate it was cut from; status is derived after every line resolves.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from functools import cached_property, lru_cache
 from typing import Any, Literal
 
 from promptpotter.application.hierarchy import (
-    CourseReads,
-    campaign_courses,
+    CycleReads,
+    campaign_cycle_reads,
     campaign_entry,
     candidate_figures,
     candidate_lines,
@@ -39,7 +39,7 @@ from promptpotter.domain.hierarchy import (
     CandidateStanding,
     GeneSource,
     HierarchyCandidate,
-    HierarchyCourse,
+    HierarchyCycle,
     HierarchyEntry,
     HierarchyRound,
     HierarchyTag,
@@ -47,8 +47,8 @@ from promptpotter.domain.hierarchy import (
     RoundFacts,
     SubtreeCampaign,
     SubtreeCampaignFacts,
-    SubtreeCourse,
-    SubtreeCourseFacts,
+    SubtreeCycle,
+    SubtreeCycleEntryFacts,
     entries_under,
 )
 from promptpotter.domain.job import ScoringPass
@@ -60,10 +60,10 @@ from promptpotter.domain.results import Election
 from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.lineage_queries import (
-    MAX_COURSE_DEPTH,
-    CourseArm,
-    iter_family_courses,
-    read_course,
+    MAX_CYCLE_DEPTH,
+    CycleArm,
+    iter_family_cycles,
+    read_cycle,
 )
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.infrastructure.store.stores import (
@@ -92,24 +92,24 @@ type _Status = Literal["live", "rewound"] | _Retired
 
 @dataclass
 class _Read:
-    """One course's record as one read saw it, and the line it stood on then."""
+    """One cycle's record as one read saw it, and the line it stood on then."""
 
-    course: _Course
+    cycle: _ListedCycle
     elections: dict[int, Election | None]
-    arms: dict[tuple[int, ArmKey], CourseArm]
+    arms: dict[tuple[int, ArmKey], CycleArm]
     rereads: dict[tuple[int, ArmKey], RoundArm]
     below: _Read | None
     owner: dict[int, _Read] = field(init=False)
 
     def __post_init__(self) -> None:
-        cut, below = self.course.index.cut_round or 0, self.below
+        cut, below = self.cycle.index.cut_round or 0, self.below
         lifted = {} if below is None else {r: o for r, o in below.owner.items() if r < cut}
         self.owner = lifted | dict.fromkeys(self.elections, self)
 
     def address(self, arm: RoundArm) -> str | None:
         """The candidate a record names by round and arm on this line: an id alone names none."""
         o = self.owner.get(arm.round)
-        return None if o is None else o.course.at_round(arm.round, arm.arm)
+        return None if o is None else o.cycle.at_round(arm.round, arm.arm)
 
     def crown(self, round_: int) -> str | None:
         election = self.owner[round_].elections[round_]
@@ -118,14 +118,14 @@ class _Read:
 
     def holds(self, c: _Candidate) -> bool:
         o = self.owner.get(c.round)
-        return o is not None and o.course is c.read_in.course and (c.round, c.arm.key) in o.arms
+        return o is not None and o.cycle is c.read_in.cycle and (c.round, c.arm.key) in o.arms
 
 
 @dataclass
 class _Candidate:
     address: str
-    arm: CourseArm
-    # The read it was read in: its course's head, or one as of a fork's cut for an arm since re-run.
+    arm: CycleArm
+    # The read it was read in: its cycle's head, or one as of a fork's cut for an arm since re-run.
     read_in: _Read
     status: _Status = "live"
     inner: list[SubtreeCampaign] = field(default_factory=list)
@@ -177,7 +177,7 @@ def _earlier(c: _Candidate, everyone: list[_Candidate]) -> dict[str, _Candidate]
     latest: dict[str, _Candidate] = {}
     for x in sorted(
         (x for x in everyone if x.round < c.round),
-        key=lambda x: (c.read_in.holds(x), x.round, x.read_in.course is c.read_in.course),
+        key=lambda x: (c.read_in.holds(x), x.round, x.read_in.cycle is c.read_in.cycle),
     ):
         latest[x.individual.id] = x
     return latest
@@ -232,11 +232,11 @@ def _descent(c: _Candidate, everyone: list[_Candidate]) -> None:
 
 
 @dataclass
-class _Course:
-    entry: HierarchyCourse
+class _ListedCycle:
+    entry: HierarchyCycle
     hop: CycleHop
     index: CycleIndex
-    parent: _Course | None = None
+    parent: _ListedCycle | None = None
     # Its reads by the ledger offset each stands at: `None` is its head.
     at: dict[int | None, _Read] = field(default_factory=dict)
     # Every arm it ran by round and key — its head's, then those re-run away since a cut — and each
@@ -245,7 +245,7 @@ class _Course:
     candidates: list[_Candidate] = field(default_factory=list)
     # Inner campaigns no arm of one of its rounds asked for.
     unplaced: list[SubtreeCampaign] = field(default_factory=list)
-    # The candidate it hangs from: a fork's from-candidate, an inner root course's host.
+    # The candidate it hangs from: a fork's from-candidate, an inner root cycle's host.
     hangs_from: _Candidate | None = None
 
     @property
@@ -275,13 +275,13 @@ class _Course:
         return max((r for r, _ in self.head.arms), default=-1)
 
 
-def _superseding(course: _Course, courses: list[_Course]) -> list[_Course]:
-    """Every fork the line was superseded through below *course*, nearest link first, then newest."""
-    line: list[_Course] = []
-    level = [course]
+def _superseding(cycle: _ListedCycle, cycles: list[_ListedCycle]) -> list[_ListedCycle]:
+    """Every fork the line was superseded through below *cycle*, nearest link first, then newest."""
+    line: list[_ListedCycle] = []
+    level = [cycle]
     while level := [
         child
-        for child in courses
+        for child in cycles
         if any(child.parent is c for c in level)
         and (spec := child.index.fork)
         and spec.resolved_direction is ForkDirection.SUPERSEDE
@@ -290,19 +290,19 @@ def _superseding(course: _Course, courses: list[_Course]) -> list[_Course]:
     return line
 
 
-def _status(c: _Candidate, superseding: list[_Course]) -> _Status:
+def _status(c: _Candidate, superseding: list[_ListedCycle]) -> _Status:
     """Retired iff it is off the line of a supersede fork that reached its round, else rewound."""
     by = [fork for fork in superseding if c.round <= fork.reach and not fork.head.holds(c)]
     if by:
         return _Retired(min(by, key=lambda f: (f.index.cut_round or 0, by.index(f))).address)
-    return "live" if c.read_in is c.read_in.course.head else "rewound"
+    return "live" if c.read_in is c.read_in.cycle.head else "rewound"
 
 
 def _main_line(c: _Candidate) -> list[MainLineStep]:
     """As it ran, on the line it was read on, up to the first crown after it."""
     line = c.read_in
     rounds = sorted(line.owner.keys() | {c.round})
-    base = line.owner[rounds[0]].course if rounds[0] in line.owner else line.course
+    base = line.owner[rounds[0]].cycle if rounds[0] in line.owner else line.cycle
     hung = None if base.index.cut_round else base.hangs_from
     steps = [] if hung is None else _through(hung)
     for round_ in rounds:
@@ -330,13 +330,13 @@ def _unplaced(spawned: SpawnedBy | None, *, asker_listed: bool) -> str:
         if spawned is None
         else "it was spawned by an origin pass, which measures no candidate"
         if spawned.role is None
-        else "the cycle its record names is not among this campaign's courses"
+        else "the cycle its record names is not among this campaign's cycles"
         if not asker_listed
-        else f"the {spawned.role.value} arm its record names is not on that course as read"
+        else f"the {spawned.role.value} arm its record names is not on that cycle as read"
         if PASSES[spawned.role].arm
         else f"the pass that spawned it ({spawned.role.value}) is not one of a round's arms"
     )
-    return f"No candidate holds it: {asked}, so it hangs under the course."
+    return f"No candidate holds it: {asked}, so it hangs under the cycle."
 
 
 def _fields(entry: FrozenModel) -> dict[str, Any]:
@@ -353,7 +353,7 @@ def _standing(c: _Candidate, *, stood_on: bool) -> CandidateStanding:
 
 
 class _Build:
-    """Per-request and thrown away: one subtree read, every course read once per offset."""
+    """Per-request and thrown away: one subtree read, every cycle read once per offset."""
 
     def __init__(self, moment: Moment | None) -> None:
         self.moment = moment
@@ -363,27 +363,27 @@ class _Build:
         stores: Stores,
         inside: CyclePath,
         campaign: Campaign,
-        held: CourseReads,
+        held: CycleReads,
         *,
         depth: int,
         host: _Candidate | None,
     ) -> SubtreeCampaign:
         entry = campaign_entry(stores, inside, campaign, held, depth=1)
-        index_of = {hop.cycle_id: index for hop, index, _ in held.courses}
-        courses = [
-            _Course(listed, hop, index_of[hop.cycle_id])
+        index_of = {hop.cycle_id: index for hop, index, _ in held.cycles}
+        cycles = [
+            _ListedCycle(listed, hop, index_of[hop.cycle_id])
             for listed in entry.children
             for hop in (Subject.parse_address(listed.address).path[-1],)
         ]
-        self._place(stores, courses, host)
-        for course in courses:
-            sandbox = inner_sandbox_store(stores, course.hop.campaign_id, course.hop.cycle_id)
+        self._place(stores, cycles, host)
+        for cycle in cycles:
+            sandbox = inner_sandbox_store(stores, cycle.hop.campaign_id, cycle.hop.cycle_id)
             if sandbox is not None and depth > 0:
-                self._inner(sandbox, (*inside, course.hop), course, courses, depth=depth - 1)
+                self._inner(sandbox, (*inside, cycle.hop), cycle, cycles, depth=depth - 1)
         return SubtreeCampaign(
             **_fields(entry)
             | {
-                "children": [self._course(course, courses) for course in courses],
+                "children": [self._cycle(cycle, cycles) for cycle in cycles],
                 "facts": SubtreeCampaignFacts(
                     **_fields(entry.facts),
                     deletable_stubs=len(deletable_stubs(stores, campaign.root_hop)),
@@ -391,53 +391,53 @@ class _Build:
             }
         )
 
-    def _place(self, stores: Stores, courses: list[_Course], host: _Candidate | None) -> None:
+    def _place(self, stores: Stores, cycles: list[_ListedCycle], host: _Candidate | None) -> None:
         """Every line first, then every candidate's status as a function of those lines."""
-        by_address = {c.address: c for c in courses}
-        for course in courses:
-            spawn = course.entry.facts.spawn
-            course.parent = None if spawn is None else by_address.get(spawn.parent)
-        for course in courses:
-            self._read(stores, course, None)
+        by_address = {c.address: c for c in cycles}
+        for cycle in cycles:
+            spawn = cycle.entry.facts.spawn
+            cycle.parent = None if spawn is None else by_address.get(spawn.parent)
+        for cycle in cycles:
+            self._read(stores, cycle, None)
         found: dict[str, _Candidate] = {}
-        for course in courses:
-            for read in course.reads:
+        for cycle in cycles:
+            for read in cycle.reads:
                 for key, arm in read.arms.items():
-                    if key not in course.ran:
-                        c = _Candidate(course.at_round(*key), arm, read)
-                        course.ran[key] = found[c.address] = c
-                        course.candidates.append(c)
-        for course in courses:
-            spec, then = course.index.fork, course.head.below
+                    if key not in cycle.ran:
+                        c = _Candidate(cycle.at_round(*key), arm, read)
+                        cycle.ran[key] = found[c.address] = c
+                        cycle.candidates.append(c)
+        for cycle in cycles:
+            spec, then = cycle.index.fork, cycle.head.below
             if spec is None:
-                course.hangs_from = host
+                cycle.hangs_from = host
             elif then is not None and (address := then.address(spec.from_candidate)) is not None:
-                course.hangs_from = found[address]
-        for course in courses:
-            for read in course.reads:
+                cycle.hangs_from = found[address]
+        for cycle in cycles:
+            for read in cycle.reads:
                 for key, ref in read.rereads.items():
                     if (held := found.get(read.address(ref) or "")) is not None:
-                        course.ran.setdefault(key, held)
-            superseding = _superseding(course, courses)
-            for c in course.candidates:
+                        cycle.ran.setdefault(key, held)
+            superseding = _superseding(cycle, cycles)
+            for c in cycle.candidates:
                 c.status = _status(c, superseding)
         everyone = list(found.values())
         for c in everyone:
             _descent(c, everyone)
 
-    def _read(self, stores: Stores, course: _Course, offset: int | None) -> _Read:
-        """*course* at its head, or as its ledger stood at a fork's cut, over its parent as of ITS cut."""
-        if (read := course.at.get(offset)) is None:
+    def _read(self, stores: Stores, cycle: _ListedCycle, offset: int | None) -> _Read:
+        """*cycle* at its head, or as its ledger stood at a fork's cut, over its parent as of ITS cut."""
+        if (read := cycle.at.get(offset)) is None:
             moment = (
                 self.moment
                 if offset is None
-                else Moment(stores.campaigns.ledger(course.hop), offset - 1)
+                else Moment(stores.campaigns.ledger(cycle.hop), offset - 1)
             )
-            got = read_course(stores, course.hop, course.index, moment=moment)
-            cut, parent = course.index.forked_at_offset, course.parent
+            got = read_cycle(stores, cycle.hop, cycle.index, moment=moment)
+            cut, parent = cycle.index.forked_at_offset, cycle.parent
             below = None if parent is None or cut is None else self._read(stores, parent, cut)
-            read = course.at[offset] = _Read(
-                course, got.rounds, {(a.round, a.key): a for a in got.arms}, got.rereads, below
+            read = cycle.at[offset] = _Read(
+                cycle, got.rounds, {(a.round, a.key): a for a in got.arms}, got.rereads, below
             )
         return read
 
@@ -445,16 +445,16 @@ class _Build:
         self,
         sandbox: Stores,
         inside: CyclePath,
-        course: _Course,
-        siblings: list[_Course],
+        cycle: _ListedCycle,
+        siblings: list[_ListedCycle],
         *,
         depth: int,
     ) -> None:
         """Each run hangs under the candidate its spawn record names, looked up, never searched for."""
         by_cycle = {s.hop.cycle_id: s for s in siblings}
         for listed in sandbox.campaigns.list_campaigns(None, lifecycle="all"):
-            held = campaign_courses(sandbox, listed, moment=self.moment)
-            index = next((i for hop, i, _ in held.courses if hop == listed.root_hop), None)
+            held = campaign_cycle_reads(sandbox, listed, moment=self.moment)
+            index = next((i for hop, i, _ in held.cycles if hop == listed.root_hop), None)
             if index is None:
                 continue
             spawned = index.spawned_by
@@ -465,7 +465,7 @@ class _Build:
             if host is not None:
                 host.inner.append(nested.model_copy(update={"parent": host.address}))
                 continue
-            under = asker or course
+            under = asker or cycle
             unplaced = caveat_row("unplaced", _unplaced(spawned, asker_listed=asker is not None))
             under.unplaced.append(
                 nested.model_copy(
@@ -473,15 +473,15 @@ class _Build:
                 )
             )
 
-    def _course(self, course: _Course, siblings: list[_Course]) -> SubtreeCourse:
-        head = course.head
+    def _cycle(self, cycle: _ListedCycle, siblings: list[_ListedCycle]) -> SubtreeCycle:
+        head = cycle.head
         crowned = [
-            c for c in course.candidates if c.status == "live" and c.arm.reading.election.selected
+            c for c in cycle.candidates if c.status == "live" and c.arm.reading.election.selected
         ]
         stands = crowned[-1].address if crowned else None
-        latest = next((c.address for c in reversed(course.candidates) if c.read_in is head), None)
+        latest = next((c.address for c in reversed(cycle.candidates) if c.read_in is head), None)
         cohorts: dict[tuple[int, bool], list[_Candidate]] = {}
-        for c in course.candidates:
+        for c in cycle.candidates:
             cohorts.setdefault((c.round, c.status == "live"), []).append(c)
         cut: dict[str, bool] = {}
         for cohort in cohorts.values():
@@ -491,39 +491,39 @@ class _Build:
             cut |= {c.address: flag for c, flag in zip(cohort, flags, strict=True)}
         rounds: list[HierarchyRound] = []
         # A round re-run in place short of where a fork's cut stood still lists what ran there.
-        for round_ in sorted(head.elections.keys() | {c.round for c in course.candidates}):
+        for round_ in sorted(head.elections.keys() | {c.round for c in cycle.candidates}):
             election = head.elections.get(round_)
             elects_on = None if election is None else election.elects_on
             members = [
                 self._candidate(
-                    course,
+                    cycle,
                     c,
                     cut=cut[c.address],
                     stands=stands,
                     latest=latest,
                     stood_on=any(s.head.holds(c) for s in siblings),
                 )
-                for c in course.candidates
+                for c in cycle.candidates
                 if c.round == round_
             ]
             rounds.append(
                 HierarchyRound(
-                    address=course.at_round(round_),
-                    parent=course.address,
+                    address=cycle.at_round(round_),
+                    parent=cycle.address,
                     children=members,
                     facts=RoundFacts(round=round_, elects_on=elects_on),
                 )
             )
-        hung = course.hangs_from
-        return SubtreeCourse(
-            **_fields(course.entry)
+        hung = cycle.hangs_from
+        return SubtreeCycle(
+            **_fields(cycle.entry)
             | {
-                "children": [*rounds, *course.unplaced],
-                "facts": SubtreeCourseFacts(
-                    **_fields(course.entry.facts),
+                "children": [*rounds, *cycle.unplaced],
+                "facts": SubtreeCycleEntryFacts(
+                    **_fields(cycle.entry.facts),
                     origin=head.crown(0) if 0 in head.owner else None,
                     from_candidate=None
-                    if course.index.fork is None or hung is None
+                    if cycle.index.fork is None or hung is None
                     else hung.address,
                     lens_criterion=None,
                     lens_shift=None,
@@ -533,7 +533,7 @@ class _Build:
 
     def _candidate(
         self,
-        course: _Course,
+        cycle: _ListedCycle,
         c: _Candidate,
         *,
         cut: bool,
@@ -552,7 +552,7 @@ class _Build:
         verdict = arm_verdict(reading, retired=retired)
         tags = [HierarchyTag(kind="verdict", value=verdict, label=ARM_VERDICT_LABELS[verdict])]
         if retired:
-            by = c.status.by if isinstance(c.status, _Retired) else course.address
+            by = c.status.by if isinstance(c.status, _Retired) else cycle.address
             tags.append(superseded_tag(by))
         lineage = c.arm.state.individual.lineage
         standing = _standing(c, stood_on=stood_on)
@@ -563,7 +563,7 @@ class _Build:
             standing=standing,
             reading=reading,
             stands=c.address == stands,
-            course_latest=c.address == latest,
+            cycle_latest=c.address == latest,
             answers_for_id=False,
             main_line=_main_line(c),
             descends_from=None if c.descends_from is None else c.descends_from.address,
@@ -579,7 +579,7 @@ class _Build:
         )
         return HierarchyCandidate(
             address=c.address,
-            parent=course.at_round(c.round),
+            parent=cycle.at_round(c.round),
             label=reading.arm.label,
             tags=tags,
             figures=candidate_figures(reading),
@@ -633,9 +633,9 @@ def _read_under(
     samples: frozenset[int] | None,
     moment: Moment | None,
 ) -> SubtreeCampaign:
-    """Every course says what re-read its stats, so a frozen copy never passes as the record."""
+    """Every cycle says what re-read its stats, so a frozen copy never passes as the record."""
     samples = read_samples(lens, samples)
-    # Every course is cut at the moment's wall clock; its offset is only the viewed leaf's line.
+    # Every cycle is cut at the moment's wall clock; its offset is only the viewed leaf's line.
     instant = None if moment is None else moment.instant
     # (the tag a toolbar badge carries, the clause the sentence behind it reads)
     under = [
@@ -669,7 +669,7 @@ def _read_under(
     )
     return _restamped(
         root,
-        lambda e: {"lines": [*e.lines, read_under]} if isinstance(e, SubtreeCourse) else {},
+        lambda e: {"lines": [*e.lines, read_under]} if isinstance(e, SubtreeCycle) else {},
     )
 
 
@@ -683,9 +683,9 @@ def hierarchy_subtree(
 ) -> HierarchyEntry:
     """The entry at *address* with everything under it; *moment* replays the ledgers only."""
     campaign = owned_campaign(stores, _top_campaign(Subject.parse_address(address)))
-    held = campaign_courses(stores, campaign, moment=moment)
+    held = campaign_cycle_reads(stores, campaign, moment=moment)
     root = _answering(
-        _Build(moment).campaign(stores, (), campaign, held, depth=MAX_COURSE_DEPTH, host=None)
+        _Build(moment).campaign(stores, (), campaign, held, depth=MAX_CYCLE_DEPTH, host=None)
     )
     if lens is not None or samples:
         root = lensed(stores, root, lens, samples)
@@ -719,7 +719,7 @@ def subtree_moment(
 def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
     """Every store the TOP campaign's family spans: the body is built from all of them."""
     top = (owned_campaign(stores, _top_campaign(Subject.parse_address(address))).root_hop,)
-    held = [c.store for c in iter_family_courses(stores, top)]
+    held = [c.store for c in iter_family_cycles(stores, top)]
     workspaces = {str(s.campaigns.workspace) for s in held}
     passes = sorted(
         (job.workspace, job.campaign_id, job.cycle_id)
@@ -730,17 +730,17 @@ def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
     return (*entries_version(held), *passes)
 
 
-def subtree_course(stores: Stores, path: CyclePath) -> SubtreeCourse:
-    """One course and its rounds, unlensed and at the head: only its own campaign is built."""
+def subtree_cycle(stores: Stores, path: CyclePath) -> SubtreeCycle:
+    """One cycle and its rounds, unlensed and at the head: only its own campaign is built."""
     owned_campaign(stores, path[0].campaign_id)
     inside, hop = path[:-1], path[-1]
     leaf = descend_store(stores, inside)
     campaign = leaf.campaigns.load_campaign(hop.campaign_id)
     address = Subject.of(path).address
     if campaign is not None:
-        held = campaign_courses(leaf, campaign, moment=None)
+        held = campaign_cycle_reads(leaf, campaign, moment=None)
         built = _Build(None).campaign(leaf, inside, campaign, held, depth=0, host=None)
-        for course in built.children:
-            if course.address == address:
-                return course
+        for cycle in built.children:
+            if cycle.address == address:
+                return cycle
     raise NotFoundError(f"No hierarchy entry at {address!r}")

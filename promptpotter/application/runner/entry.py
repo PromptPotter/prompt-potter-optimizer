@@ -39,7 +39,7 @@ from promptpotter.application.runner.termination import (
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import run_clamp
-from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, seed_layer
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, start_layer
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.phases import (
     SELF_PAUSE_CAUSE,
@@ -53,7 +53,7 @@ from promptpotter.domain.records.run_records import (
     ConfigOverrides,
     CycleFinal,
     CycleFinalRecord,
-    CycleSeed,
+    CycleStart,
     RebaseRequest,
 )
 from promptpotter.domain.run_mode import RunMode
@@ -350,7 +350,7 @@ async def _run_single_cycle(
 def _cut_rebase_fork(
     prep: PreparedRun, session: Session, rebase_req: RebaseRequest
 ) -> tuple[PreparedRun, ForkCut]:
-    """``config_overrides`` re-snapshot BEFORE the mint, so seed and in-process config agree. The
+    """``config_overrides`` re-snapshot BEFORE the mint, so start and in-process config agree. The
     fork's cap is what its line has left; its working state is the parent's latest, since the cut
     rewinds the line, never what the optimizer learned on it. A re-election is the round it hangs
     from, so the line continues from the arm a layer named. Untaken: `onto_fork` takes it."""
@@ -362,7 +362,7 @@ def _cut_rebase_fork(
         .past_cut(cut)
         .under(rebase_req.config_overrides or ConfigOverrides())
     )
-    prep = replace(prep, campaign_config=prep.campaign_config.overlaid(seed_layer(overrides)))
+    prep = replace(prep, campaign_config=prep.campaign_config.overlaid(start_layer(overrides)))
     held = store.standing_rounds(parent, moment=None).rounds
     learned = held[max(held)].close.optimizer_state
     fork = cut_fork(
@@ -373,7 +373,7 @@ def _cut_rebase_fork(
         reason=rebase_req.reason,
         issued_by=rebase_req.issued_by,
         # No `origin_prompts`: a rebase replays its origin from the parent's round.
-        seed=CycleSeed(config_overrides=overrides),
+        start=CycleStart(config_overrides=overrides),
     )
     branch = (
         rebase_req.hangs_from

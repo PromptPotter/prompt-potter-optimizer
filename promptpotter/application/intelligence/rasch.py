@@ -567,8 +567,8 @@ def build_round_order(
 
     # θ-readable cells fill the first `n_min` slots, so a cut can land there; a losing arm then
     # buys fewer off-ruler cells, and the ruler learns those more slowly.
-    slot_of = {key: sid for sid, key in cells.items()}
-    readable = set(theta_cells(slot_of, parent_grades, ruler).values())
+    position_of = {key: sid for sid, key in cells.items()}
+    readable = set(theta_cells(position_of, parent_grades, ruler).values())
     lead = min(n_min, len(readable))
     strata = (miss_stratum, unknown_stratum, hit_stratum)
     order: list[int] = []

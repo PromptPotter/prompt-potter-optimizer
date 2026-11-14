@@ -6,7 +6,7 @@ import type {
   CommandPayloads,
   CommandResponses,
   ConfigOverrides as WireConfigOverrides,
-  ForkSeed as WireForkSeed,
+  ForkStart as WireForkStart,
   VerifyReading,
 } from "@/lib/api/types";
 
@@ -103,7 +103,7 @@ export function cycleAddress(path: CyclePath): {
 export type ConfigOverrides = Partial<WireConfigOverrides>;
 // The reconcile dialog's subset: the policy knobs break search comparability, so it sets none.
 export type RunLimitOverrides = Partial<Pick<WireConfigOverrides, "budget" | "nodes">>;
-export type ForkSeed = Partial<Omit<WireForkSeed, "config_overrides">> & {
+export type ForkStart = Partial<Omit<WireForkStart, "config_overrides">> & {
   config_overrides?: ConfigOverrides;
 };
 // Per press, never draft state: a reopened check-in must not show a budget nobody re-entered.

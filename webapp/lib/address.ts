@@ -49,7 +49,7 @@ export function nodeOfKey(key: string): SelectedNode | null {
   return (scope === "optimizer" || scope === "target") && id ? { scope, id } : null;
 }
 
-// A candidate picked on a course: its place below the course, the served address's `r{round}/{arm_key}` tail.
+// A candidate picked on a cycle: its place below the cycle, the served address's `r{round}/{arm_key}` tail.
 export interface CandidatePick {
   round: number;
   arm: string;
@@ -64,9 +64,9 @@ export function parsePick(s: string): CandidatePick | null {
   return m && validIdComponent(m[2]!) ? { round: Number(m[1]), arm: m[2]! } : null;
 }
 
-// The picked candidate's hierarchy address under its course's.
-export function pickedAddressOf(course: string, pick: CandidatePick): string {
-  return `${course}/${formatPick(pick)}`;
+// The picked candidate's hierarchy address under its cycle's.
+export function pickedAddressOf(cycle: string, pick: CandidatePick): string {
+  return `${cycle}/${formatPick(pick)}`;
 }
 
 // null follows the active run; a check-in's null draft is a fresh one no file or pick has minted.
@@ -129,8 +129,8 @@ export function formatAddress({ subject, views, keys }: Address): string {
   if (subject !== null && "draftId" in subject) {
     segs.push(...(subject.draftId === null ? [NEW_SEG] : [DRAFT_SEG, subject.draftId]));
   } else if (subject !== null) {
-    const course = encodeCyclePath(subject.path);
-    segs.push(subject.pick ? pickedAddressOf(course, subject.pick) : course);
+    const cycle = encodeCyclePath(subject.path);
+    segs.push(subject.pick ? pickedAddressOf(cycle, subject.pick) : cycle);
     if (subject.at != null) named.push(`at=${subject.at}`);
   }
   // The default view is omitted, so the common address stays short.
@@ -168,7 +168,7 @@ function takeSubject(segs: string[]): ViewedSubject | undefined {
     segs.splice(0, 2);
     return draftId !== undefined && validIdComponent(draftId) ? { draftId } : undefined;
   }
-  // Only a hop holds the unit separator, so a view or a typo never reads as a course.
+  // Only a hop holds the unit separator, so a view or a typo never reads as a cycle.
   if (head === undefined || !head.includes(CYCLE_PATH_UNIT_SEP)) return null;
   const path = decodeCyclePath(head);
   segs.shift();

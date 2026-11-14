@@ -1,11 +1,11 @@
 import { memo } from "react";
-import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedCycle } from "@/lib/state/lineage";
 import { figureOf } from "@/lib/derivations";
 import { Hearts } from "@/components/ui";
 
 // A grid box of its own: with no hearts it renders nothing, and leaves no gap.
 export const TopStrip = memo(function TopStrip() {
-  const lives = figureOf(useViewedCourse(), "lives");
+  const lives = figureOf(useViewedCycle(), "lives");
   if (!lives) return null;
 
   return (

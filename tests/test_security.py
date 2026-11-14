@@ -134,7 +134,7 @@ from promptpotter.config.paths import (
     jobs_dir,
 )
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
-from promptpotter.domain.arms import ArmSlot, Broken, Cut
+from promptpotter.domain.arms import ArmPosition, Broken, Cut
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import CampaignRefusedError, Optimize
 from promptpotter.domain.campaign_config import OptimizerChoice
@@ -698,13 +698,13 @@ def poisoned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Poisoned:
         reason=ValidationReason.NOT_IN_AVAILABLE_MODELS,
     )
     # The broken arm carries the backend's warning, and the round reads the poisoned sample.
-    broken = arm_state("c1", slot=ArmSlot(round=1, idx=1, total=2), cut="broken")
+    broken = arm_state("c1", position=ArmPosition(round=1, idx=1, total=2), cut="broken")
     assert isinstance(broken, Cut)
     measured = round_result(
         1,
         arms={
             ArmKey("c0"): arm_state(
-                "c0", slot=ArmSlot(round=1, idx=0, total=2), validation_failures=[rejected]
+                "c0", position=ArmPosition(round=1, idx=0, total=2), validation_failures=[rejected]
             ),
             ArmKey("c1"): broken.model_copy(
                 update={"reason": Broken(failure=runtime_failure, degradation={})}
@@ -2313,9 +2313,9 @@ async def test_a_silent_producer_holding_its_cycle_reads_wedged_and_only_the_das
         argparse.Namespace(command="cycles", tenant=None, verbose=False, attached=False)
     )
     assert listed.human is not None and listed.data is not None
-    [course] = listed.data["entries"][0]["children"]
-    assert course["said"] is None, "the listing pinned a line read against the clock"
-    rows = [Said.model_validate(row) for row in [*course["figures"], *course["lines"]]]
+    [cycle] = listed.data["entries"][0]["children"]
+    assert cycle["said"] is None, "the listing pinned a line read against the clock"
+    rows = [Said.model_validate(row) for row in [*cycle["figures"], *cycle["lines"]]]
     assert rows and all(said_text(row) in listed.human for row in rows), (
         "the terminal's cycle list did not say every figure and line the listing serves"
     )
@@ -4177,11 +4177,11 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
     monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
     for status, ending in endings.items():
         key = uuid.uuid4().hex
-        idle = set(launcher_launch._DETACHED)
+        idle = set(launcher_launch._DETACHED_TASKS)
         ran = await CommandDispatcher(caller.stores, job_registry=queuing).dispatch(
             CommandCall(step, key, door=Door.HOST)
         )
-        waiter = set(launcher_launch._DETACHED) - idle
+        waiter = set(launcher_launch._DETACHED_TASKS) - idle
         assert waiter, "guard: the queued step left no waiter to wake"
         assert isinstance(ran.result, launcher_launch.Launched)
         launched = ran.result.launch
@@ -4203,7 +4203,7 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         read_back = await stepping.answer(TaskStatusOf(task.task_id))
         assert read_back.status == status, f"a reaped {status} launch read {read_back.status}"
         assert not queuing.list_queued(), "a retried launch launched again"
-    for detached in list(launcher_launch._DETACHED):
+    for detached in list(launcher_launch._DETACHED_TASKS):
         detached.cancel()
 
 

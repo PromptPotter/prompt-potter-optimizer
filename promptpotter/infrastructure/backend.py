@@ -35,7 +35,7 @@ from promptpotter.infrastructure.llm.send_pacing import (
 from promptpotter.infrastructure.llm.spend_book import (
     Admission,
     CallLabel,
-    Reported,
+    ReportedSpend,
     SendBound,
     SendOutcome,
     admitted,
@@ -60,7 +60,7 @@ _OUTAGE_WAIT_S = 600.0
 _HTTP_TIMEOUT_S = 30.0
 
 # reply data -> (what it billed, `None` = reports nothing; caller's read).
-type CellBilling[S] = Callable[[dict[str, Any]], tuple[Reported | None, S]]
+type CellBilling[S] = Callable[[dict[str, Any]], tuple[ReportedSpend | None, S]]
 # The 4xx a backend answers a model that generated nothing gradeable with: answered, so billed.
 _ANSWERED_STATUSES = frozenset({422})
 CELL = CallLabel("backend_cell", "backend")

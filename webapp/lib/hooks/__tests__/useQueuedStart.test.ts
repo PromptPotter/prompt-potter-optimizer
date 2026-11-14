@@ -136,7 +136,7 @@ describe("a reopened queued Start follows the Start's own command, as the tab th
     slug: "rows",
     n_samples: 3,
     raw_task_description: "label each row",
-    candidate_library_size: 0,
+    answer_terms_size: 0,
   } as DraftCampaignWire;
   let command: Pick<CommandReading, "status" | "said"> & { hop: CycleHop | null };
   // The Start holding the draft as its reopen serves it; past the mint the draft is closed (404).

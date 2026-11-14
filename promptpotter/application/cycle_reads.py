@@ -9,12 +9,12 @@ from pathlib import Path
 from pydantic import Field
 
 from promptpotter.application.hierarchy import entries_version
-from promptpotter.application.hierarchy_subtree import subtree_course
+from promptpotter.application.hierarchy_subtree import subtree_cycle
 from promptpotter.application.jobs.machine_status import served_machine_status
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.scoring.closed_rounds import campaign_scorer, closed_round
 from promptpotter.application.served_dashboard import WarmingDashboard, served_dashboard
-from promptpotter.application.views.render.export import ExportFiles, Provenance, export_files
+from promptpotter.application.views.render.export import ExportFiles, ExportProvenance, export_files
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.connector import MeasuredUnit
@@ -35,8 +35,8 @@ from promptpotter.infrastructure.store.family_ray_queries import (
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.lineage_queries import (
-    FamilyCourse,
-    iter_family_courses,
+    FamilyCycle,
+    iter_family_cycles,
 )
 from promptpotter.infrastructure.store.read_model import Moment, file_sig
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
@@ -132,8 +132,8 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
     offset = None
     if not isinstance(dash, WarmingDashboard):
         unit, offset = dash.measured_unit, dash.at_offset
-    course = subtree_course(stores, path)
-    standing = course.facts.standing
+    entry = subtree_cycle(stores, path)
+    standing = entry.facts.standing
     selection = None if standing is None else standing.selection
     closed = None if selection is None else _closed(cycle.stores, hop, selection.round, moment=None)
     arm = None if closed is None or selection is None else closed.arms.get(selection.key)
@@ -150,8 +150,8 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
     export = cycle.stores.campaigns.read_export(hop)
     return export_files(
         tier,
-        course,
-        Provenance(
+        entry,
+        ExportProvenance(
             tool_version=APP_VERSION,
             campaign_id=hop.campaign_id,
             cycle_id=hop.cycle_id,
@@ -239,17 +239,17 @@ async def feed_frames(stores: Stores, jobs: JobRegistry) -> AsyncIterator[str]:
 class FamilyRay:
     """Opened, not yet read: a matching ``validator`` lets the caller skip the ledger reads."""
 
-    courses: list[FamilyCourse]
+    cycles: list[FamilyCycle]
     limit: int
     before: str | None
     cursor: RayCursor | None
 
     @property
     def validator(self) -> tuple[object, ...]:
-        return ray_validator_parts(self.courses, limit=self.limit, before=self.before)
+        return ray_validator_parts(self.cycles, limit=self.limit, before=self.before)
 
     def window(self) -> HierarchySteps:
-        return build_family_ray(self.courses, limit=self.limit, before=self.cursor)
+        return build_family_ray(self.cycles, limit=self.limit, before=self.cursor)
 
 
 def open_family_ray(
@@ -260,8 +260,8 @@ def open_family_ray(
         cursor = decode_ray_cursor(before)
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc
-    courses = iter_family_courses(stores, path)
-    leaf = courses[0].path[-1]
-    if not cycle_dir_for(courses[0].store.base_dir, leaf).is_dir():
+    cycles = iter_family_cycles(stores, path)
+    leaf = cycles[0].path[-1]
+    if not cycle_dir_for(cycles[0].store.base_dir, leaf).is_dir():
         raise _not_found(leaf)
-    return FamilyRay(courses, limit, before, cursor)
+    return FamilyRay(cycles, limit, before, cursor)

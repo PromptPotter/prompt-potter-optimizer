@@ -84,7 +84,7 @@ ArmStateKind = Literal["proposed", "measuring", "cut", "measured"]
 ArmRole = Literal[MeasurementRole.ORIGIN, MeasurementRole.PANEL, MeasurementRole.PARENT]
 
 
-class ArmSlot(FrozenModel):
+class ArmPosition(FrozenModel):
     """Where an individual was walked as an arm, its latest walk for a re-read: the ``idx``-th of its round's ``total``."""
 
     round: int
@@ -99,7 +99,7 @@ class ArmSlot(FrozenModel):
 def arm_key(
     individual: OptSearchPoint, failures: Iterable[ValidationFailure], round_num: int, idx: int
 ) -> ArmKey:
-    """A refused proposal is keyed by its SLOT: its content is often its parent's or a sibling's."""
+    """A refused proposal is keyed by its POSITION: its content is often its parent's or a sibling's."""
     if fatal_validation_failures(failures):
         return ArmKey(stable_hash([round_num, idx, individual.id]))
     return ArmKey(individual.id)
@@ -129,20 +129,20 @@ class _Arm(FrozenModel):
     role: ArmRole
     # Its walk as a proposal — for a re-read, the latest walk it re-reads; ``None``: a reference no
     # round of this cycle walked as an arm.
-    slot: ArmSlot | None
+    position: ArmPosition | None
     individual: OptSearchPoint
     overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _only_a_parent_is_unwalked(self) -> Self:
-        if self.slot is None and self.role != MeasurementRole.PARENT:
-            raise ValueError(f"a {self.role} arm is walked: it holds its slot")
+        if self.position is None and self.role != MeasurementRole.PARENT:
+            raise ValueError(f"a {self.role} arm is walked: it holds its position")
         return self
 
     @property
     def label(self) -> str:
-        return "parent" if self.slot is None else self.slot.label
+        return "parent" if self.position is None else self.position.label
 
     @property
     def refused(self) -> bool:
@@ -315,10 +315,10 @@ def is_electable(arm: ArmState, rows: Sequence[GradedCell], parent: CellSheet) -
 
 
 def arm_name(key: ArmKey, arm: ArmState, round_num: int) -> ArmName:
-    """An arm by its slot; a parent no round of the cycle walked is the one *round_num* read."""
-    if arm.slot is None:
+    """An arm by its position; a parent no round of the cycle walked is the one *round_num* read."""
+    if arm.position is None:
         return ArmName(key=key, round=round_num, label=arm.label)
-    return ArmName(key=key, round=arm.slot.round, label=arm.slot.label)
+    return ArmName(key=key, round=arm.position.round, label=arm.position.label)
 
 
 class BankedSearchPointError(ConflictError):

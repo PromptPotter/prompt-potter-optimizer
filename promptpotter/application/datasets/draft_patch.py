@@ -9,8 +9,8 @@ from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.datasets.draft_campaign import draft_criterion
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import (
-    candidate_library_from_rows,
-    parse_candidate_library,
+    answer_terms_from_rows,
+    parse_answer_terms,
 )
 from promptpotter.application.free_tier import (
     FreeFence,
@@ -101,8 +101,8 @@ async def plan_draft_patch(
     config = draft.config
     if patch.origin_prompts is not None:
         changes["origin_prompts"] = patch.origin_prompts
-    if (library := await _candidate_library(stores, draft, patch)) is not None:
-        changes["candidate_library"] = library
+    if (library := await _answer_terms(stores, draft, patch)) is not None:
+        changes["answer_terms"] = library
 
     was = draft_pipeline(stores, draft, held)
     sent = (
@@ -310,29 +310,29 @@ def _narrowing_follows_schema(
     return {**config, "optimizer_narrowing": out} if out != narrowed else config
 
 
-_LIBRARY_SOURCES = ("candidate_library", "candidate_library_column", "candidate_library_file")
+_ANSWER_TERMS_SOURCES = ("answer_terms", "answer_terms_column", "answer_terms_file")
 
 
-async def _candidate_library(
+async def _answer_terms(
     stores: Stores, draft: DraftFile, patch: EditDraftPatch
 ) -> tuple[str, ...] | None:
     """The library a patch sets, from the one source it sends: the terms, a draft column's
     distinct values, or a parsed file."""
-    sent = [name for name in _LIBRARY_SOURCES if getattr(patch, name) is not None]
+    sent = [name for name in _ANSWER_TERMS_SOURCES if getattr(patch, name) is not None]
     if len(sent) > 1:
         raise PayloadInvalidError(f"patch sends {sent}; a library comes from one of them.")
-    if patch.candidate_library_file is not None:
-        upload = patch.candidate_library_file
-        return await parse_candidate_library(upload.blob, upload.filename)
-    if (column := patch.candidate_library_column) is None:
-        return None if patch.candidate_library is None else tuple(patch.candidate_library)
+    if patch.answer_terms_file is not None:
+        upload = patch.answer_terms_file
+        return await parse_answer_terms(upload.blob, upload.filename)
+    if (column := patch.answer_terms_column) is None:
+        return None if patch.answer_terms is None else tuple(patch.answer_terms)
     if column not in draft.headers:
         raise PayloadInvalidError(
-            f"patch.candidate_library_column {column!r} is not one of the dataset's columns "
+            f"patch.answer_terms_column {column!r} is not one of the dataset's columns "
             f"{list(draft.headers)}."
         )
     rows = await asyncio.to_thread(checkin_rows, stores, draft)
-    terms = candidate_library_from_rows(rows, column)
+    terms = answer_terms_from_rows(rows, column)
     if not terms:
         raise PayloadInvalidError(
             f"column {column!r} has no usable values.",

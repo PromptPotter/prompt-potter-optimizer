@@ -25,7 +25,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     Admission,
     Billed,
     CallLabel,
-    Reported,
+    ReportedSpend,
     admitted,
     answered,
 )
@@ -74,7 +74,7 @@ def dspy_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> dict[s
 
 
 def _configured(
-    student: Any, prompt: str | None, lm_kwargs: dict[str, Any], sends: _CellSends
+    student: Any, prompt: str | None, lm_kwargs: dict[str, Any], sends: _ProgramCalls
 ) -> Any:
     import dspy
 
@@ -106,7 +106,7 @@ _SEND = CallLabel(PROGRAM_NODE, "backend")
 _CELL_ENVELOPE_S = 600.0
 
 
-class _CellSends:
+class _ProgramCalls:
     """A forward-only student calls from a worker thread; the spend book is the event loop's."""
 
     def __init__(
@@ -121,7 +121,7 @@ class _CellSends:
         # Raised again on every later call: the program may catch a failure or answer around it.
         self.ended: Exception | None = None
 
-    def __deepcopy__(self, _memo: object) -> _CellSends:
+    def __deepcopy__(self, _memo: object) -> _ProgramCalls:
         # DSPy deep-copies an LM to vary a call; the copy's sends are still this cell's.
         return self
 
@@ -199,7 +199,7 @@ class _CellSends:
                 return False
             outcome = failed_send(failure)
             if bill is not None:
-                outcome = outcome._replace(reported=Reported((bill,)))
+                outcome = outcome._replace(reported=ReportedSpend((bill,)))
             admission.close(outcome)
         wait = self.budget.resend_wait() if outcome.resendable else None
         if wait is not None:
@@ -285,7 +285,7 @@ class _CellSends:
 
 
 class _Metered:
-    cell_sends: _CellSends
+    cell_sends: _ProgramCalls
     model: str
     kwargs: dict[str, Any]
 
@@ -301,7 +301,7 @@ class _Metered:
 _METERED: dict[type[Any], type[Any]] = {}
 
 
-def _metered(lm: Any, sends: _CellSends, changed: dict[str, Any]) -> Any:
+def _metered(lm: Any, sends: _ProgramCalls, changed: dict[str, Any]) -> Any:
     # `copy`, not `dspy.LM(...)`: reconstructing swaps the caller's LM subclass for a generic one.
     own = lm.copy(**changed)
     lm_class = type(own)
@@ -360,7 +360,7 @@ async def _in_process_run(
     cfg = NodeCall.model_validate(params)
     calls = (cfg.model_extra or {}).get("max_calls")
     lm_kwargs = {k: v for k, v in params.items() if k in _LM_KEYS}
-    sends = _CellSends(
+    sends = _ProgramCalls(
         sample.id,
         None if calls is None else int(calls),
         priced_pair(cfg.model, cfg.provider, names_provider=CONNECTOR.model_names_provider),
@@ -421,7 +421,7 @@ def dataset_pipeline(
         "prompt_info": {
             "template_variables": [],
             "fields": list(_PROGRAM_FIELDS),
-            "rewrite_slot": "instruction",
+            "rewrite_field": "instruction",
         },
         "config": {"model": model, "temperature": temperature, **extra},
         "optimizer": {

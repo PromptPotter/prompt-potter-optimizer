@@ -19,10 +19,10 @@ from promptpotter.domain.projection_envelope import bearing_record
 from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.records import CycleRecord
 from promptpotter.infrastructure.store.layout import (
-    course_validator_ns,
     cycle_dir_for,
+    cycle_validator_ns,
 )
-from promptpotter.infrastructure.store.lineage_queries import FamilyCourse
+from promptpotter.infrastructure.store.lineage_queries import FamilyCycle
 from promptpotter.infrastructure.store.read_model import (
     EVERY_ARM,
     LedgerIndex,
@@ -55,7 +55,7 @@ class _Raw(NamedTuple):
     epoch: float
     ts: str
     row: Narrated
-    # This ledger's previous step or heartbeat: what ends a silence, on this course or any after it.
+    # This ledger's previous step or heartbeat: what ends a silence, on this cycle or any after it.
     heard: float | None
 
 
@@ -162,13 +162,13 @@ def decode_ray_cursor(raw: str | None) -> RayCursor | None:
 
 
 def ray_validator_parts(
-    courses: list[FamilyCourse], *, limit: int, before: str | None
+    cycles: list[FamilyCycle], *, limit: int, before: str | None
 ) -> tuple[object, ...]:
     """Deep windows revalidate like the head: immutability would bet against a backdated append."""
     parts: list[object] = ["ray", _CURATION_TAG, limit, before]
-    for course in courses:
-        parts.append(Subject.of(course.path).address)
-        parts.append(course_validator_ns(cycle_dir_for(course.store.base_dir, course.path[-1])))
+    for cycle in cycles:
+        parts.append(Subject.of(cycle.path).address)
+        parts.append(cycle_validator_ns(cycle_dir_for(cycle.store.base_dir, cycle.path[-1])))
     return tuple(parts)
 
 
@@ -179,20 +179,20 @@ def _silence(epoch: float, heard: list[float]) -> float:
 
 
 def build_family_ray(
-    courses: list[FamilyCourse], *, limit: int, before: RayCursor | None
+    cycles: list[FamilyCycle], *, limit: int, before: RayCursor | None
 ) -> HierarchySteps:
     pool: list[tuple[RayCursor, CyclePath, _Raw]] = []
     truncated = False
 
-    for course in courses:
-        ledger = course.store.campaigns.ledger(course.path[-1])
-        key = Subject.of(course.path).address
+    for cycle in cycles:
+        ledger = cycle.store.campaigns.ledger(cycle.path[-1])
+        key = Subject.of(cycle.path).address
         rows, dropped = _read_curated(
-            ledger, encoded_path=key, depth=course.depth, keep=limit, bound=before
+            ledger, encoded_path=key, depth=cycle.depth, keep=limit, bound=before
         )
         truncated = truncated or dropped
         for row in rows:
-            pool.append(((row.epoch, key, row.offset), course.path, row))
+            pool.append(((row.epoch, key, row.offset), cycle.path, row))
 
     pool.sort(key=lambda entry: entry[0])
     if len(pool) > limit:

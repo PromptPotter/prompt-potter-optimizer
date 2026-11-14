@@ -61,7 +61,7 @@ from promptpotter.domain.command_kinds import (
     Door,
     ReadKind,
 )
-from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
+from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCycle
 from promptpotter.domain.records.run_records import LaunchAnswer
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import (
@@ -239,7 +239,7 @@ class HostAnswer:
     task: HostTask | None = None
 
 
-# Resources: every course and campaign by its hierarchy address, read as its subtree.
+# Resources: every cycle and campaign by its hierarchy address, read as its subtree.
 RESOURCE_PREFIX = "promptpotter://hierarchy/"
 RESOURCE_TEMPLATE = RESOURCE_PREFIX + "{address}"
 
@@ -323,7 +323,7 @@ class CancelTask(HostRequest[HostTask]):
 
 @dataclass(frozen=True, slots=True)
 class ListResources(HostRequest[list[HostResource]]):
-    """The caller's campaigns and their courses, as the hierarchy listing serves them."""
+    """The caller's campaigns and their cycles, as the hierarchy listing serves them."""
 
     async def answered_by(self, session: HostSession) -> list[HostResource]:
         return await session._host_resources()
@@ -437,9 +437,9 @@ class HostSession:
         for campaign in listing.entries:  # type: ignore[attr-defined]
             if not isinstance(campaign, HierarchyCampaign):
                 continue
-            entries: list[HierarchyCampaign | HierarchyCourse] = [campaign, *campaign.children]
+            entries: list[HierarchyCampaign | HierarchyCycle] = [campaign, *campaign.children]
             listed += [
-                HostResource(resource_uri(e.address), e.label, f"The {e.level}'s subtree")
+                HostResource(resource_uri(e.address), e.label, f"The {e.entry_kind}'s subtree")
                 for e in entries
             ]
         return listed

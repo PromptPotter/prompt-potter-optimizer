@@ -60,7 +60,7 @@ function Facts({ facts }: { facts: [string, string][] }) {
 }
 
 function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
-  const campaign = entry.level === "campaign" ? entry : null;
+  const campaign = entry.entry_kind === "campaign" ? entry : null;
   // Storage and config are routed by a top-level campaign id; an inner run's sandbox has neither.
   const campaignId = campaign && campaign.parent === null ? campaign.address : null;
   const read = useRead(campaignId != null ? campaignStorageRead(campaignId) : null);
@@ -75,8 +75,8 @@ function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
   const runsWith = campaign?.facts.runs_with ?? null;
 
   // A round and a candidate have no run of their own, so no span.
-  const span = entry.level === "candidate" ? null : entry.span;
-  const reading = entry.level === "candidate" ? entry.facts.reading : null;
+  const span = entry.entry_kind === "candidate" ? null : entry.span;
+  const reading = entry.entry_kind === "candidate" ? entry.facts.reading : null;
   const facts: [string, string][] = span
     ? [
         ["Last activity", fmtAgo(span.last_at) || fmtDateTime(span.last_at)],

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.dataset_name import validate_dataset_name
-from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
+from promptpotter.domain.pipeline_schema import ANSWER_TERMS_FILE
 from promptpotter.domain.sample import Bank, Sample, banked_row
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.strict_model import FrozenModel
@@ -205,8 +205,8 @@ class TenantDatasetStore:
         write_yaml(path, framing.to_dict())
         return path
 
-    def write_candidate_library(self, slug: str, library: Sequence[str]) -> Path:
-        path = self.dataset_dir(slug) / CANDIDATE_LIBRARY_FILE
+    def write_answer_terms(self, slug: str, library: Sequence[str]) -> Path:
+        path = self.dataset_dir(slug) / ANSWER_TERMS_FILE
         write_text(path, "\n".join(library))
         return path
 

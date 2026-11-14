@@ -99,12 +99,12 @@ def _trim(text: object) -> str:
     return t if len(t) <= _PREDICTED_CHARS else t[: _PREDICTED_CHARS - 1] + "…"
 
 
-def _row_cell(cell: GradedCell, *, key: str, slot: int) -> CellRow:
+def _row_cell(cell: GradedCell, *, key: str, position: int) -> CellRow:
     facts = cell.facts
     if facts.answer is None:
         raise KeyError(f"the cell of sample {facts.sample_key} names no archive answer")
     return CellRow(
-        position=slot,
+        position=position,
         answer=facts.answer,
         candidate=key,
         status=sample_status(facts, cell.grade),
@@ -187,7 +187,7 @@ def _assemble(
 
 
 async def open_cell(stores: Stores, name: str, answer: str) -> Cell:
-    """The slot is the answer's own bank's: *name* may label a re-cut that moved or dropped its row."""
+    """The position is the answer's own bank's: *name* may label a re-cut that moved or dropped its row."""
     dataset = resolve_dataset(stores, name)
     filed = stores.archive.answer(answer)
     if filed is None:
@@ -198,13 +198,13 @@ async def open_cell(stores: Stores, name: str, answer: str) -> Cell:
     bank = stores.tenant_datasets.bank(filed.dataset_hash)
     if bank is None:
         raise NotFoundError(f"Answer '{answer}' is filed under a bank no longer held")
-    slot = bank.slot_of[filed.cell.sample_key]
+    position = bank.position_of[filed.cell.sample_key]
     filed = stores.archive.whole(filed)
     declared = await dataset_pipeline(
         stores, dataset, experiment=experiment_outside_run(stores, dataset)
     )
     schema = parse_pipeline_response(declared)
-    return _assemble(described, filed, dataset_scorer(dataset).grade(filed.cell), schema, slot)
+    return _assemble(described, filed, dataset_scorer(dataset).grade(filed.cell), schema, position)
 
 
 def campaign_scope_cycle(stores: Stores, campaign_id: str) -> CycleHop:
@@ -212,7 +212,7 @@ def campaign_scope_cycle(stores: Stores, campaign_id: str) -> CycleHop:
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         raise NotFoundError(f"Campaign '{campaign_id}' not found")
-    return stores.campaigns.line_holder(campaign.root_hop)
+    return stores.campaigns.live_cycle(campaign.root_hop)
 
 
 def _scope_cycle(
@@ -365,7 +365,7 @@ def cycle_hard_samples(stores: Stores, hop: CycleHop) -> HardSamples:
         None if judging is None else judging.ruler,
         frontier=None if frontier is None else (frontier.theta, frontier.se),
         arm_theta=arm_thetas(rounds),
-        slots=bank.slot_of,
+        slots=bank.position_of,
         cycle_id=hop.cycle_id,
     )
 
@@ -382,7 +382,7 @@ def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
         observations = [
             Observation(address, key, y)
             for address, key, y in stores.ruler.rows(scope, reach)
-            if key in bank.slot_of
+            if key in bank.position_of
         ]
         # No election reads this scale, so it judges no one.
         judging = judging_ruler(
@@ -399,7 +399,7 @@ def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
             judging.ruler,
             frontier=None,
             arm_theta={},
-            slots=bank.slot_of,
+            slots=bank.position_of,
             cycle_id=None,
         )
 
@@ -523,7 +523,9 @@ def _cycle_cells(
         measured = individual_cells(walks, individual_id, RoleScope.REPORT)
         sheet = walked_rows(stores, measured, scorer).standing()
         cells.extend(
-            _row_cell(cell, key=key, slot=wanted[cell.key]) for cell in sheet if cell.key in wanted
+            _row_cell(cell, key=key, position=wanted[cell.key])
+            for cell in sheet
+            if cell.key in wanted
         )
     return list(candidates.values()), cells
 
@@ -558,7 +560,7 @@ def _dataset_cells(
                 )
             )
             cells.extend(
-                _row_cell(cell, key=key, slot=wanted[cell.key])
+                _row_cell(cell, key=key, position=wanted[cell.key])
                 for cell in sheet
                 if cell.key in wanted
             )

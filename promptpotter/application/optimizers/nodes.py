@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
-from promptpotter.domain.arms import ArmSlot, Concluded, Elimination, Proposal, Proposed
+from promptpotter.domain.arms import ArmPosition, Concluded, Elimination, Proposal, Proposed
 from promptpotter.domain.campaign_config import ArmGateMode, CampaignConfig, Estimand, Knob
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.dashboard_rows import OptimizerLimit
@@ -51,7 +51,7 @@ from promptpotter.shared.measurement_context import MeasurementRole
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import ReadArm, RoundContext
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.knobs import CouplingSeverity
+    from promptpotter.application.config_map import CouplingSeverity
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.scoring.query_loop import BlockRace
 
@@ -79,7 +79,7 @@ class RewriteKnobs(StrictModel):
         min_length=1,
         description="Which loci of a prompt node the reply replaces. `prompt`: the whole prompt "
         "as one text — the model is shown every field rendered together, its reply lands in the "
-        "field the node declares as its `prompt_info.rewrite_slot` and the node's other open "
+        "field the node declares as its `prompt_info.rewrite_field` and the node's other open "
         "fields empty, as the papers' one-text prompts do. A field's name: that field alone — "
         "the model is shown it alone, and the child inherits every other locus from its first "
         "parent. Every prompt node the member rewrites leaves the field open, or the campaign is "
@@ -380,7 +380,7 @@ def behaviour_key(name: str, members: Iterable[NodeMember], manifests: Sequence[
 
 
 @dataclass(frozen=True)
-class Panel:
+class RoundSamples:
     """The parent's re-score reads ``cells``; the walks read ``order``, a block closing every ``block_size``."""
 
     cells: list[Sample]
@@ -389,8 +389,8 @@ class Panel:
 
 
 @dataclass(frozen=True)
-class PanelSize:
-    """A walk's ``Panel`` as counted BEFORE any round runs: no ``cells`` where the search split holds none."""
+class DrawSize:
+    """A walk's ``RoundSamples`` as counted BEFORE any round runs: no ``cells`` where the search split holds none."""
 
     cells: int
     block_size: int
@@ -414,7 +414,7 @@ class Proposals:
                 p.key(round_num, idx),
                 Proposed(
                     role=MeasurementRole.PANEL,
-                    slot=ArmSlot(round=round_num, idx=idx, total=len(self.proposals)),
+                    position=ArmPosition(round=round_num, idx=idx, total=len(self.proposals)),
                     individual=p.individual,
                     overlay=p.overlay,
                     validation_failures=p.validation_failures,
@@ -468,11 +468,11 @@ class Sampler(NodeMember, Protocol):
         """What a caller sizing the panel from outside (an L4 per-round count) writes; ``None`` where no one knob does."""
         ...
 
-    def drawn(self, knobs: Any, search: int, pipeline: str) -> PanelSize:
+    def drawn(self, knobs: Any, search: int, pipeline: str) -> DrawSize:
         """The panel a walk of *pipeline* asks for under *knobs*; ``SelectedOptimizer.round_cells_ceiling`` prices each walk off it."""
         ...
 
-    def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel: ...
+    def draw(self, ctx: NodeContext, pool: list[Sample]) -> RoundSamples: ...
 
 
 # What a proposer does with the proposals it is handed: `opens` ignores them and makes the round's
@@ -497,7 +497,7 @@ class Proposer(NodeMember, Protocol):
         """The arms it adds to its walk, whose arms are the sum and a round's the most of any walk it runs alone; an editor of arms another made adds none."""
         return 0
 
-    def parent_read(self, _panel: PanelSize) -> int:
+    def parent_read(self, _panel: DrawSize) -> int:
         """The cells of *panel* it reads the parent on (``Frontier.measure_parent``)."""
         return 0
 
@@ -505,7 +505,9 @@ class Proposer(NodeMember, Protocol):
         """Asked of the walk's ``lead``: the bench's own, *bench*, unless it keeps a reading of its own."""
         return bench
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals: ...
+    async def propose(
+        self, ctx: NodeContext, panel: RoundSamples, proposals: Proposals
+    ) -> Proposals: ...
 
 
 @dataclass(frozen=True)
@@ -564,7 +566,7 @@ class Eliminator(NodeMember, Protocol):
         """False where a stop only ends the buying of an arm the selector still reads; True takes it out of ``MeasuredRound.electable``."""
         ...
 
-    def race(self, ctx: NodeContext, panel: Panel) -> Race: ...
+    def race(self, ctx: NodeContext, panel: RoundSamples) -> Race: ...
 
 
 class Selector(NodeMember, Protocol):
@@ -579,12 +581,12 @@ class Selector(NodeMember, Protocol):
         ...
 
     def parent_cells(
-        self, _ctx: NodeContext, panel: Panel, _rows: Mapping[ArmKey, CellSheet]
+        self, _ctx: NodeContext, panel: RoundSamples, _rows: Mapping[ArmKey, CellSheet]
     ) -> list[Sample]:
         """The cells the bench re-scores the parent on: all an arm's lift against it can pair on."""
         return panel.cells
 
-    def parent_read(self, panel: PanelSize) -> int:
+    def parent_read(self, panel: DrawSize) -> int:
         """The most of *panel*'s cells ``parent_cells`` names that no arm's walk buys."""
         return panel.cells
 

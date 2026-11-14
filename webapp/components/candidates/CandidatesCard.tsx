@@ -146,7 +146,7 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
               descendants={m.totalDescendants}
             />
           </div>
-          {!m.areCourses && m.wonOnTheta && (
+          {!m.areCycles && m.wonOnTheta && (
             <div className="fitness-notes">
               <ThetaCaveats caveat={m.ability?.caveat ?? null} priorDominated={m.priorDominated} />
             </div>

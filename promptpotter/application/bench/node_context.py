@@ -74,7 +74,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.results import Reelection, RoundResult, round_document_digest
 from promptpotter.domain.ruler import LevelSeries
-from promptpotter.domain.run_standing import LineOutlay, RunStanding, walked_slot
+from promptpotter.domain.run_standing import LineOutlay, RunStanding, walked_position
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint, TaskDecomposition
@@ -121,14 +121,14 @@ def restated_round(
     *,
     lives: LivesConfig | None,
     close: RoundStatement,
-    slot_of: Mapping[str, int],
+    position_of: Mapping[str, int],
 ) -> RoundRestatedRecord:
     """*closing* stated again under its round's own outlay (*close*), never the
     launch restating it."""
     line, series, standing = stated_line(
         closing, prior, difficulty, lives=lives, outlay=close.run_standing.outlay
     )
-    return RoundRestatedRecord.of(line, slot_of, series, standing)
+    return RoundRestatedRecord.of(line, position_of, series, standing)
 
 
 def closed_round(
@@ -138,7 +138,7 @@ def closed_round(
     line, series, standing = stated_line(
         closing, prior, cycle.difficulty, lives=cycle.config.optimization.lives, outlay=outlay
     )
-    return RoundClosedRecord.of(line, cycle.session.bank.slot_of, series, standing)
+    return RoundClosedRecord.of(line, cycle.session.bank.position_of, series, standing)
 
 
 def bank_proposals(round_: RoundContext, proposals: Sequence[Proposal], *, submitted: bool) -> None:
@@ -212,7 +212,7 @@ async def measure_as_parent(
     # A panel arm keeps its panel state: a read of it adds only its cells' records.
     announce = walking is None or walking.arm.state.role == MeasurementRole.PARENT
     arm = measuring(
-        Proposed(role=role, slot=walked_slot(cycle.rounds, key), individual=individual),
+        Proposed(role=role, position=walked_position(cycle.rounds, key), individual=individual),
         sp,
         session.pipeline_schema,
         expected=len(asked),
@@ -340,7 +340,7 @@ class Lineage(CycleRead):
             cycle.difficulty,
             lives=cycle.config.optimization.lives,
             close=standing.rounds[at.round].close,
-            slot_of=session.bank.slot_of,
+            position_of=session.bank.position_of,
         )
 
     def branch_round(self, *, changing: bool) -> int | None:
@@ -416,8 +416,8 @@ class Ruler(CycleRead):
         return self._cycle.axes()
 
     @property
-    def slot_of(self) -> Mapping[str, int]:
-        return self._cycle.session.bank.slot_of
+    def position_of(self) -> Mapping[str, int]:
+        return self._cycle.session.bank.position_of
 
 
 class Bounds(CycleRead):

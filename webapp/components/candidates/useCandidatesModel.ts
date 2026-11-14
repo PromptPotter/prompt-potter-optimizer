@@ -15,17 +15,17 @@ import { useCompareSelection } from "@/lib/state/compare-selection";
 import { useSelection } from "@/lib/state/selection";
 import { lensOf, useMaskState } from "@/lib/state/scoring-mask";
 import { useCellTerms } from "@/lib/hooks/useConnector";
-import type { HierarchyCourse, ServedDashboard, DisplayMetric } from "@/lib/api/types";
+import type { HierarchyCycle, ServedDashboard, DisplayMetric } from "@/lib/api/types";
 import {
   candidatesAtPath,
-  courseAt,
+  cycleAt,
   type LineageIndex,
 } from "@/lib/derivations";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/state/workspace";
 import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
-import { useViewedCourse, useViewedLineage } from "@/lib/state/lineage";
+import { useViewedCycle, useViewedLineage } from "@/lib/state/lineage";
 import type { CandidateBar } from "@/lib/types";
 import { barRound } from "./lineage-tree";
 
@@ -45,9 +45,9 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const displayMetric = dash.display_metric;
   const metrics = useMetrics(cycleId, displayMetric);
   const overlay = useViewedLineage();
-  const wonOnTheta = useViewedCourse()?.facts.elects_on === "ability";
+  const wonOnTheta = useViewedCycle()?.facts.elects_on === "ability";
   const { lens, setLens, maskActive, readUnder, scoringMaskActive } = overlay;
-  const { history, overlap, coverage, sampleUniverse, viewedNode, areCourses, views, priorDominated } =
+  const { history, overlap, coverage, sampleUniverse, viewedNode, areCycles, views, priorDominated } =
     useCandidateBars(overlay.index);
 
   const { open: maskOpen, mask } = useMaskState();
@@ -78,16 +78,16 @@ export function useCandidatesModel(dash: ServedDashboard) {
 
   const onSelect = useCallback(
     (v: CandidateBar | null) => {
-      // A course bar is no arm: there is nothing to inspect.
+      // A cycle bar is no arm: there is nothing to inspect.
       pickCandidate(v?.reading ? { round: barRound(v), arm: v.reading.arm.key } : null);
     },
     [pickCandidate],
   );
 
   const onFreeHierarchy = useCallback(
-    (course: HierarchyCourse) => {
-      revealLane(course.address);
-      navigate({ path: pathOfAddress(course.address) });
+    (cycle: HierarchyCycle) => {
+      revealLane(cycle.address);
+      navigate({ path: pathOfAddress(cycle.address) });
     },
     [revealLane, navigate],
   );
@@ -97,7 +97,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
     () => (views.some((v) => v.key === pickedAddress) ? pickedAddress : null),
     [views, pickedAddress],
   );
-  const drilled = viewedNode?.level === "candidate";
+  const drilled = viewedNode?.entry_kind === "candidate";
 
   const divergentRound = useMemo(() => {
     if (!overlay.maskActive || drilled) return null;
@@ -109,7 +109,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
   }, [overlay.maskActive, overlay.index, viewedPath, drilled]);
 
   const lensCriterion =
-    courseAt(overlay.index, viewedPath)?.facts.lens_criterion ?? null;
+    cycleAt(overlay.index, viewedPath)?.facts.lens_criterion ?? null;
 
   const divergenceBoundary = useMemo(() => {
     if (divergentRound == null) return null;
@@ -130,16 +130,16 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const lensActive = lens !== "" && !scoringMaskActive;
 
   // Off the served reading, not the views, which null `overlap` for everyone off the set.
-  const hasOverlap = overlap != null && !areCourses;
+  const hasOverlap = overlap != null && !areCycles;
 
   const showOverlap = showOverlapOf(overlapPicked, cycleId, overlap != null);
   const setShowOverlap = (on: boolean) =>
     cycleId !== null && setCandidatesState({ showOverlap: { cycleId, value: on } });
 
-  const pickedSet = sampleSet != null && !areCourses;
+  const pickedSet = sampleSet != null && !areCycles;
   const rung = pickedSet ? 2 : showOverlap && hasOverlap ? 1 : 0;
   const overlapBasis = sampleSet != null ? sampleSet.length : dash.overlap_line_n;
-  const overlapDisabled = areCourses || (!hasOverlap && sampleUniverse.length === 0);
+  const overlapDisabled = areCycles || (!hasOverlap && sampleUniverse.length === 0);
   const stepOverlap = () => {
     if (rung === 2) {
       setViewKeys({ samples: null });
@@ -196,7 +196,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
     displayMetric,
     wonOnTheta,
     views,
-    areCourses,
+    areCycles,
     priorDominated,
     metrics,
     toggleMetric: (m: DisplayMetric) => toggleMetric(m, cycleId, metrics),
@@ -222,7 +222,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
     setLens,
     lensActive,
     lensCriterion,
-    lensShift: viewedNode?.level === "course" ? (viewedNode.facts.lens_shift ?? null) : null,
+    lensShift: viewedNode?.entry_kind === "cycle" ? (viewedNode.facts.lens_shift ?? null) : null,
     maskActive,
     readUnder,
     scoringMaskActive,

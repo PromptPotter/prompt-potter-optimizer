@@ -70,8 +70,8 @@ class NodeOutputEdit(StrictModel):
     answer_fields: list[str] | None = None
 
 
-class LibraryFile(StrictModel):
-    """An uploaded candidate library, under every upload's one bound."""
+class AnswerTermsFile(StrictModel):
+    """Uploaded answer terms, under every upload's one bound."""
 
     # A JSON door sends the bytes base64, as `ingest-upload`'s.
     model_config = ConfigDict(val_json_bytes="base64", ser_json_bytes="base64")
@@ -108,17 +108,17 @@ class EditDraftPatch(StrictModel):
     # length (the shipped longest is 320).
     origin_prompts: dict[str, dict[str, Annotated[str, Field(max_length=16384)]]] | None = None
     # The library's three sources; one patch sends at most one (`draft_patch.py`).
-    candidate_library: list[Annotated[str, Field(max_length=1024)]] | None = Field(
+    answer_terms: list[Annotated[str, Field(max_length=1024)]] | None = Field(
         default=None, min_length=1
     )
-    candidate_library_column: str | None = Field(
+    answer_terms_column: str | None = Field(
         default=None,
         min_length=1,
         max_length=256,
-        description="Build the candidate library from the distinct values of this draft column.",
+        description="Build the answer terms from the distinct values of this draft column.",
     )
-    candidate_library_file: LibraryFile | None = Field(
+    answer_terms_file: AnswerTermsFile | None = Field(
         default=None,
-        description="Parse the candidate library from a file: one entry per line, or the first "
+        description="Parse the answer terms from a file: one entry per line, or the first "
         "column of a CSV/Excel.",
     )

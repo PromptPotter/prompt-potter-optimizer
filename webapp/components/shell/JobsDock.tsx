@@ -3,7 +3,7 @@ import { useWorkspace } from "@/lib/state/workspace";
 import { cx } from "@/lib/cx";
 import { decodeCyclePath, encodeCyclePath } from "@/lib/ids";
 import { fmtAgo } from "@/lib/format";
-import { STATUS_MARK_INFO, type HierarchyCourse, type MachineSlot } from "@/lib/api/types";
+import { STATUS_MARK_INFO, type HierarchyCycle, type MachineSlot } from "@/lib/api/types";
 import { figureOf } from "@/lib/derivations";
 import { readyData } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
@@ -35,16 +35,16 @@ export function JobsDock() {
 
   if (n === 0) return null;
 
-  const pick = (c: HierarchyCourse) => {
+  const pick = (c: HierarchyCycle) => {
     const path = decodeCyclePath(c.address);
     if (path) navigate({ path });
   };
   const openUsage = () => open("account", "usage");
 
-  // Served words only: the campaign the job belongs to, then which course of it — none for its root.
-  const wordsOf = (c: HierarchyCourse): [string, string | null] => {
+  // Served words only: the campaign the job belongs to, then which cycle of it — none for its root.
+  const wordsOf = (c: HierarchyCycle): [string, string | null] => {
     const campaign = c.parent === null ? undefined : byAddress.get(c.parent);
-    if (campaign?.level !== "campaign") return [c.label, null];
+    if (campaign?.entry_kind !== "campaign") return [c.label, null];
     return [campaign.label, campaign.facts.root === c.address ? null : c.label];
   };
 
@@ -120,10 +120,10 @@ export function JobsDock() {
                 }}
               >
                 <span className="jobs-dock-row">
-                  <StateChip course={r} />
+                  <StateChip cycle={r} />
                   <span className="jobs-dock-item-label">{wordsOf(r)[0]}</span>
                   {wordsOf(r)[1] !== null && (
-                    <span className="jobs-dock-item-course">{wordsOf(r)[1]}</span>
+                    <span className="jobs-dock-item-cycle">{wordsOf(r)[1]}</span>
                   )}
                 </span>
               </MenuCheck>
@@ -152,8 +152,8 @@ export function JobsDock() {
   );
 }
 
-function StateChip({ course }: { course: HierarchyCourse }) {
-  const state = figureOf(course, "state");
+function StateChip({ cycle }: { cycle: HierarchyCycle }) {
+  const state = figureOf(cycle, "state");
   return (
     <span className={cx("phase-chip", state && `tone-${state.tone}`)}>
       <span className="phase-dot" aria-hidden="true" />

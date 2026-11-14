@@ -20,10 +20,10 @@ from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.nodes import (
     CycleRead,
-    Panel,
     PromptArity,
     Proposals,
     Proposing,
+    RoundSamples,
 )
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, VariationMode
@@ -90,7 +90,9 @@ class Mating(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, MatingKnobs).offspring
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
+    ) -> Proposals:
         knobs = ctx.knobs(MatingKnobs)
         if knobs.offspring == 0:
             return proposals
@@ -173,7 +175,9 @@ class LocusCrossover(nodes.Proposer):
     variation_mode: ClassVar[VariationMode] = "deterministic"
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Children, Lineage, Replay, Target})
 
-    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(
+        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
+    ) -> Proposals:
         rng = ctx.read(Replay).rng()
         lineage, children = ctx.read(Lineage), ctx.read(Children)
         schema = ctx.read(Target).schema

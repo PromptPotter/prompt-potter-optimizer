@@ -45,7 +45,7 @@ import { useViewMemory } from "./view-memory";
 type Hop = CyclePath[number];
 
 // The viewed cycle, once: its whole path, that path's encoded `address` (every read's and the
-// hierarchy's course key), and the ROOT hop (ingest, Files, view memory) beside the LEAF hop (display).
+// hierarchy's cycle key), and the ROOT hop (ingest, Files, view memory) beside the LEAF hop (display).
 export interface ViewedCycle {
   path: CyclePath;
   address: string;

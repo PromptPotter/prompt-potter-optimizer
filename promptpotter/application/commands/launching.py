@@ -69,7 +69,7 @@ from promptpotter.domain.command_kinds import (
     CommandPayload,
     Door,
     ForkCyclePayload,
-    ForkSeed,
+    ForkStart,
     HeadToHeadRequest,
     MintCampaignPayload,
     MintHeadToHeadPayload,
@@ -85,7 +85,7 @@ from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineSchema, narrowing_of
 from promptpotter.domain.records.run_records import (
     ArmAct,
-    CycleSeed,
+    CycleStart,
     LaunchedEffect,
     LaunchedJob,
     OriginSource,
@@ -112,7 +112,7 @@ def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, N
         if declared is None:
             names = ", ".join(n.name for n in schema.declared_nodes) or "(none)"
             raise PayloadInvalidError(
-                f"payload.seed steers no node called {node!r}; nodes: {names}"
+                f"payload.start steers no node called {node!r}; nodes: {names}"
             )
         params: dict[str, Any] = {}
         for param, value in cfg.items():
@@ -120,23 +120,23 @@ def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, N
             if kind is None:
                 known = ", ".join(sorted(declared.param_types)) or "(none)"
                 raise PayloadInvalidError(
-                    f"payload.seed: {node!r} carries no {param!r}; params: {known}"
+                    f"payload.start: {node!r} carries no {param!r}; params: {known}"
                 )
             if isinstance(value, str):
                 try:
                     value = wire_value(value, text=kind == "string")
                 except ValueError as exc:
                     raise PayloadInvalidError(
-                        f"payload.seed steers {node}.{param}, declared {kind}: {exc}"
+                        f"payload.start steers {node}.{param}, declared {kind}: {exc}"
                     ) from None
             params[param] = value
         typed[node] = PayloadInvalidError.validating(
-            NodeCall, params, under=("seed", "pipeline_overlay", node)
+            NodeCall, params, under=("start", "pipeline_overlay", node)
         )
     return typed
 
 
-def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop) -> CycleSeed:
+def parse_cycle_start(sent: ForkStart, stores: Stores, of: Campaign, hop: CycleHop) -> CycleStart:
     narrowing: dict[str, NodeSearchNarrowing] = {}
     if sent.node_narrowing:
         # The rows served at *hop*, not the root's: a row's menu is its cycle's own declaration.
@@ -147,7 +147,7 @@ def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop
                 for node, asked in sent.node_narrowing.items()
             }
         except ValueError as exc:
-            raise PayloadInvalidError(f"payload.seed.node_narrowing invalid: {exc}") from exc
+            raise PayloadInvalidError(f"payload.start.node_narrowing invalid: {exc}") from exc
     verdict = steer_verdict(stores, permitted_narrowing(stores, of), sent.laid)
     if verdict == "refused":
         logger.warning(
@@ -162,22 +162,22 @@ def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop
         for param, value in call.laid_keys().items():
             if param in allowed and str(value) not in allowed[param]:
                 raise PayloadInvalidError(
-                    f"payload.seed steers {node}.{param}={value!r} outside its own "
+                    f"payload.start steers {node}.{param}={value!r} outside its own "
                     f"node_narrowing {allowed[param]}"
                 )
-    seed = CycleSeed(
+    start = CycleStart(
         origin_prompts=sent.origin_prompts,
         pipeline_overlay=overlay,
         optimizer_narrowing=narrowing,
         config_overrides=sent.config_overrides,
-        origin_source=OriginSource.FORK_SEED,
+        origin_source=OriginSource.FORK_START,
     )
-    # Over what *hop* runs, so a knob its parent's seed set refuses before a fork is minted.
+    # Over what *hop* runs, so a knob its parent's start set refuses before a fork is minted.
     parent = cycle_config(stores, of, hop).config
     select_optimizer(
-        CycleConfig.laid(parent, [LaidSpan(seed=seed, scoring_lock=None)]).config.optimization
+        CycleConfig.laid(parent, [LaidSpan(start=start, scoring_lock=None)]).config.optimization
     )
-    return seed
+    return start
 
 
 def _launch_applier(
@@ -301,10 +301,10 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
         dispatched.hop,
     )
     stores = dispatcher.stores
-    seed = parse_cycle_seed(payload.seed, stores, campaign, hop)
+    start = parse_cycle_start(payload.start, stores, campaign, hop)
 
     async def _apply_fork() -> Launched:
-        cut = cut_operator_fork(stores, payload, seed)
+        cut = cut_operator_fork(stores, payload, start)
         # Bounded as a start-run is: the payload's own budget, admitted from what the parent leaves.
         return await _launch_fork(
             dispatched, cut, ExistingCycle(cut.child, campaign, payload.budget), payload.mode

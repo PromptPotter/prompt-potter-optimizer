@@ -55,23 +55,23 @@ export function decodeCyclePath(s: string): CyclePath | null {
   return hops.length ? hops : null;
 }
 
-// A hierarchy address below a course appends `/r{round}/{arm_key}`; the head is the course's path.
-export function courseAddressOf(address: string): string {
+// A hierarchy address below a cycle appends `/r{round}/{arm_key}`; the head is the cycle's path.
+export function cycleAddressOf(address: string): string {
   const cut = address.indexOf("/");
   return cut < 0 ? address : address.slice(0, cut);
 }
 
-// Only for a course or anything under one: a campaign's address names no cycle.
+// Only for a cycle or anything under one: a campaign's address names no cycle.
 export function pathOfAddress(address: string): CyclePath {
-  const path = decodeCyclePath(courseAddressOf(address));
-  if (!path) throw new Error(`not a course address: ${address}`);
+  const path = decodeCyclePath(cycleAddressOf(address));
+  if (!path) throw new Error(`not a cycle address: ${address}`);
   return path;
 }
 
 // The top-level id an address files under in view memory: its first campaign, or a bare id
 // (a top-level campaign's address, or an origin's cycle id, which groups campaigns).
 export function ownerOfAddress(address: string): string | null {
-  const top = courseAddressOf(address).split(HOP_SEP)[0] ?? "";
+  const top = cycleAddressOf(address).split(HOP_SEP)[0] ?? "";
   const cut = top.indexOf(UNIT_SEP);
   const id = cut < 0 ? top : top.slice(0, cut);
   return validIdComponent(id) ? id : null;

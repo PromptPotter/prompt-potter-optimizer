@@ -9,7 +9,7 @@ from typing import Any, TypeAliasType, Union, cast, get_args, get_origin
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from promptpotter.application.cycle_addressing import resolve_course, resolve_subject
+from promptpotter.application.cycle_addressing import resolve_cycle, resolve_subject
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.jobs.launcher.launch import Inline, LaunchOutcome
 from promptpotter.application.jobs.registry import JobRegistry
@@ -34,7 +34,7 @@ from promptpotter.domain.command_kinds import (
     CyclePayload,
     Door,
     DraftPayload,
-    LinePayload,
+    LiveCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject, decode_cycle_path
 from promptpotter.domain.phases import StopReason
@@ -256,7 +256,7 @@ def addressed[P: CommandPayload](stores: Stores, payload: P) -> P:
         return payload
     if isinstance(payload, CyclePayload):
         subject = Subject.below(payload.campaign_id, payload.cycle_id, payload.descend)
-        resolved = resolve_course(stores, subject)
+        resolved = resolve_cycle(stores, subject)
         fields: dict[str, str | None] = {"descend": None, **resolved.command_fields}
     else:
         subject = Subject(payload.campaign_id)
@@ -417,8 +417,8 @@ class CommandDispatcher:
         match call.payload:
             case CyclePayload():
                 return await self._on_cycle(call, recorded)
-            case LinePayload():
-                return await self._on_line(call, recorded)
+            case LiveCyclePayload():
+                return await self._on_live_cycle(call, recorded)
             case CampaignPayload():
                 return await self._on_campaign(call, recorded)
             case DraftPayload():
@@ -461,11 +461,11 @@ class CommandDispatcher:
             case CyclePayload():
                 hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
                 return payload, subject_key(self.stores.subject(hop))
-            case LinePayload():
+            case LiveCyclePayload():
                 campaign = self.stores.campaigns.load_campaign(payload.campaign_id)
                 if campaign is None:
                     return payload, None
-                holder = self.stores.campaigns.line_holder(campaign.root_hop)
+                holder = self.stores.campaigns.live_cycle(campaign.root_hop)
                 return payload, subject_key(self.stores.subject(holder))
             case CampaignPayload():
                 return payload, subject_key(Subject(payload.campaign_id))
@@ -483,11 +483,11 @@ class CommandDispatcher:
         subject = subject_key(Subject(call.payload.campaign_id))
         return await self._filed(subject, call, applier, recorded)
 
-    async def _on_line(
-        self, call: CommandCall[LinePayload], recorded: _Recorded
-    ) -> Opened[object, LinePayload]:
+    async def _on_live_cycle(
+        self, call: CommandCall[LiveCyclePayload], recorded: _Recorded
+    ) -> Opened[object, LiveCyclePayload]:
         campaign = owned_campaign(self.stores, call.payload.campaign_id)
-        hop = self.stores.campaigns.line_holder(campaign.root_hop)
+        hop = self.stores.campaigns.live_cycle(campaign.root_hop)
         applier = await self._applier(
             DispatchedToCycle(self, call.payload, call.command_id, campaign, hop, door=call.door)
         )

@@ -160,7 +160,7 @@ def _events(asked: _Asked, read: CycleEventsParams | FeedParams) -> Response:
 
 
 def _evidence(asked: _Asked, read: EvidenceParams) -> Response:
-    # Every store it may pool, at the versions the feed names them by: a settled course answers unread.
+    # Every store it may pool, at the versions the feed names them by: a settled cycle answers unread.
     version = sorted(feed_versions(asked.caller.stores, asked.caller.jobs, "store:").items())
     return _conditional(asked.request, (*version, read), lambda: read.answer(asked.caller))
 

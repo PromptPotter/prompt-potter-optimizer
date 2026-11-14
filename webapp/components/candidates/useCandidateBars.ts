@@ -3,10 +3,10 @@ import { useViewedDashboard } from "@/lib/state/poll";
 import type { ServedRound } from "@/lib/api/types";
 import { useSelection } from "@/lib/state/selection";
 import {
-  barsAreCourses,
+  barsAreCycles,
   candidateBars,
   candidatesAtPath,
-  courseAt,
+  cycleAt,
   liveCandidates,
   type LineageIndex,
 } from "@/lib/derivations";
@@ -31,11 +31,11 @@ export function useCandidateBars(index: LineageIndex) {
   const coverage = dash?.sample_coverage ?? null;
   const sampleUniverse = useMemo(() => coverage?.samples.map((s) => s.sample_id) ?? [], [coverage]);
 
-  // A pick holding inner courses is drilled into: its bars are those courses.
+  // A pick holding inner cycles is drilled into: its bars are those cycles.
   const viewedNode = useMemo(() => {
     if (!viewedPath) return undefined;
     const picked = candidatesAtPath(index, viewedPath).find((c) => c.address === pickedAddress);
-    return picked && barsAreCourses(picked) ? picked : (courseAt(index, viewedPath) ?? undefined);
+    return picked && barsAreCycles(picked) ? picked : (cycleAt(index, viewedPath) ?? undefined);
   }, [index, viewedPath, pickedAddress]);
 
   const inflightByKey = useMemo(
@@ -43,7 +43,7 @@ export function useCandidateBars(index: LineageIndex) {
     [dash],
   );
 
-  const areCourses = useMemo(() => barsAreCourses(viewedNode), [viewedNode]);
+  const areCycles = useMemo(() => barsAreCycles(viewedNode), [viewedNode]);
 
   const marks = dash?.verification;
   const views = useMemo<CandidateBar[]>(
@@ -69,7 +69,7 @@ export function useCandidateBars(index: LineageIndex) {
     coverage,
     sampleUniverse,
     viewedNode,
-    areCourses,
+    areCycles,
     views,
     priorDominated,
   };

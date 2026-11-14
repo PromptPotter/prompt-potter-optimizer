@@ -1,6 +1,6 @@
 import type {
   HierarchyCampaign,
-  HierarchyCourse,
+  HierarchyCycle,
   HierarchyEntry,
   HierarchyTag,
   ListedCampaign,
@@ -21,7 +21,7 @@ export interface RootGroup {
 export function groupByRoot(entries: readonly ListedCampaign[]): RootGroup[] {
   const groups: RootGroup[] = [];
   for (const campaign of entries) {
-    if (campaign.level === "unstarted") {
+    if (campaign.entry_kind === "unstarted") {
       groups.push({ rootCycleId: campaign.address, campaigns: [campaign] });
       continue;
     }
@@ -40,10 +40,10 @@ export function campaignAt(
   address: string,
 ): HierarchyCampaign | null {
   const entry = byAddress.get(address);
-  return entry?.level === "campaign" ? entry : null;
+  return entry?.entry_kind === "campaign" ? entry : null;
 }
 
-export function runningCourses(entries: readonly HierarchyCampaign[]): HierarchyCourse[] {
+export function runningCycles(entries: readonly HierarchyCampaign[]): HierarchyCycle[] {
   return entries
     .flatMap((campaign) => campaign.children)
     .filter((c) => c.state.attached)

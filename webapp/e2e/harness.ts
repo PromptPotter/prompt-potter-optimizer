@@ -150,7 +150,7 @@ export async function campaigns(
   expect(res.ok(), `GET ${API}/hierarchy → ${res.status()}`).toBeTruthy();
   const { entries } = (await res.json()) as HierarchyResponse;
   return entries.flatMap((c) => {
-    const root = c.level === "campaign" ? decodeCyclePath(c.facts.root)?.[0] : undefined;
+    const root = c.entry_kind === "campaign" ? decodeCyclePath(c.facts.root)?.[0] : undefined;
     if (!root) return [];
     return [
       {

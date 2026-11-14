@@ -181,7 +181,12 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   reads its own refusals off the run, and only a launch joins the campaign's. Run data wiped (cycles).
 - **L4 C0 re-measured** at landing 79: composite 0.518 over five of six cells, $0.198 billed; the
   sixth is excluded because it elected twice (§ Optimizer tuning — the standing board, item 4).
-- **then:** ren (classes defined twice, a gate refusing another), alone on its tip.
+- **landed 81, ren:** one word per thing: answer terms, the served hierarchy's cycle and
+  `entry_kind`, the live cycle, a round's samples, an arm's position, a cycle's start; no top-level
+  class name is defined twice (`complexity_ledger.py`'s `class_names_twice` at 0). Every request
+  byte-identical; the digests and behaviour keys moved by spelling alone (bkeys-2's rows). Run data
+  wiped (tenant answer terms, cycles, banked origins).
+- **then:** mkey beside model-lines.
 
 The re-keys end at the behaviour-key switch.
 
@@ -526,7 +531,7 @@ swaps. batch/22 deleted the mirror with `infrastructure/tracing/`: the ledger is
 sink's return as a ledger projection. Verify against a real `mlflow server`, never the offline run. In order:
 (1) a campaign opts in, one config field off by default at all five entry points; (2) the winning model
 in `register_prompt`'s `model_config`; (3) a campaign that starts from a registry prompt, fetched once at
-mint and pinned in the seed (`CycleSeed.origin_prompts`, a new `OriginSource` member), whose winner
+mint and pinned in the start (`CycleStart.origin_prompts`, a new `OriginSource` member), whose winner
 registers as version N+1 of that prompt, `origin_override` one typed field on `MintCampaignPayload` and
 `EditDraftPatch` (open: whether a restored origin carries its node's `shots`); (4) a `promptpotter.delivery` tag saying how the connector delivers the text; (5)
 cells as traces and grades as feedback, folded off the records the bench writes; (6) PromptPotter as an

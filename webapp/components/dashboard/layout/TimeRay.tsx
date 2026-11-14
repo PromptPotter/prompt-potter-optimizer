@@ -36,7 +36,7 @@ export const TimeRay = memo(function TimeRay() {
 
   const onStep = (step: RayStep): void => {
     const elsewhere = step.pathKey !== rootKey;
-    // Another course's ledger offset means nothing here: that step opens the other course at its head.
+    // Another cycle's ledger offset means nothing here: that step opens the other cycle at its head.
     if (!elsewhere) setAt(step.offset);
     if (step.arm) {
       const node = armAt(index, step.path, step.arm);
@@ -126,7 +126,7 @@ function Step({
   onPick: (step: RayStep) => void;
 }) {
   const elsewhere = step.pathKey !== rootKey;
-  // Only on this course: another ledger's offset can coincide numerically with ours.
+  // Only on this cycle: another ledger's offset can coincide numerically with ours.
   const viewing = !elsewhere && viewedOffset === step.offset;
   const when = new Date(step.ts).toLocaleString();
   const where = elsewhere ? ` · in ${step.path[step.path.length - 1]?.cycleId ?? ""}` : "";
