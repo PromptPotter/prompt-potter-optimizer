@@ -10,6 +10,8 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.views.render.ansi import (
     render_bench_scored,
     render_pass_graded,
+    render_population,
+    render_round_start,
     render_round_verdict,
     render_run_spend,
     to_text,
@@ -58,9 +60,14 @@ from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.narration import NarratedRecord, Narration
 from promptpotter.domain.paired_reading import level_text, lift_text
-from promptpotter.domain.phase_acts import CellFormula, InitClosed, InitOpened, ProposeOpened
+from promptpotter.domain.phase_acts import (
+    CellFormula,
+    InitClosed,
+    InitOpened,
+    ProposeClosed,
+    ProposeOpened,
+)
 from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
-from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.run_records import (
@@ -107,17 +114,13 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class ReadoutProjection(Projection):
-    def __init__(
-        self,
-        *,
-        sink: StatusFn | None,
-        pipeline_schema: PipelineSchema | None,
-        measured_unit: MeasuredUnit = "sample",
-    ) -> None:
+    def __init__(self, session: Session, *, sink: StatusFn | None) -> None:
         self._round_num = 0
         self._sink = sink
-        self._display_tags = display_tags(pipeline_schema)
-        self.measured_unit = measured_unit
+        self._schema = session.pipeline_schema
+        self._display_tags = display_tags(self._schema)
+        self._parent_round = 0
+        self.measured_unit: MeasuredUnit = session.backend_client.connector.measured_unit
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
         self._closed: dict[int, RoundStatement] = {}
         self.sample_counter = 0
@@ -140,19 +143,6 @@ class ReadoutProjection(Projection):
         # The election and a race speak in keys; the narration names each arm as announced.
         self._narration = Narration()
         self._order_shown: list[int] = []
-
-    @classmethod
-    def for_campaign(
-        cls,
-        session: Session,
-        *,
-        sink: StatusFn | None,
-    ) -> ReadoutProjection:
-        return cls(
-            sink=sink,
-            pipeline_schema=session.pipeline_schema,
-            measured_unit=session.backend_client.connector.measured_unit,
-        )
 
     def open_readout(self, cycle_dir: Path) -> None:
         """A fork rebinds here; the file it leaves ends on the line naming the next one."""
@@ -185,15 +175,36 @@ class ReadoutProjection(Projection):
         act = record.act
         if isinstance(act, InitOpened | InitClosed):
             self._formula = act.formula
-        if rendered := to_text(record):
+        match act:
+            case None:
+                rendered = ""
+            case ProposeOpened():
+                parent = self._closed[act.parent_round]
+                rendered = render_round_start(act, record.round, parent, self._schema)
+                self._parent_round = act.parent_round
+                self._round_best_key = None
+                self._round_best_fitness = None
+                self._round_best_label = None
+                self._round_started_at = time.monotonic()
+            case ProposeClosed():
+                assert record.round is not None, "a population is its round's"
+                rendered = render_population(
+                    act,
+                    record.round,
+                    origin=self._closed[0],
+                    parent=self._closed[self._parent_round],
+                    arms=[
+                        self._narration.state(record.round, k)
+                        for k in self._narration.announced(record.round)
+                    ],
+                    schema=self._schema,
+                )
+            case _:
+                rendered = to_text(record.phase, act)
+        if rendered:
             self._write(rendered)
         if record.round is not None:
             self._round_num = record.round
-        if isinstance(act, ProposeOpened):
-            self._round_best_key = None
-            self._round_best_fitness = None
-            self._round_best_label = None
-            self._round_started_at = time.monotonic()
         # A `--from` retracted its rounds before INIT exits, so what stands is exactly the prior line.
         if isinstance(act, InitClosed) and self._cycle_dir is not None:
             standing = scan_standing_rounds(

@@ -38,7 +38,6 @@ from promptpotter.application.runner.inner.tasks import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
 from promptpotter.domain.campaign_config import LivesConfig
 from promptpotter.domain.cell_fold import merge_known_outcomes
@@ -372,11 +371,6 @@ class Frontier(CycleRead):
         for rr in self._cycle.rounds:
             rows = merge_known_outcomes(rows, rr.rows(key))
         return rows
-
-    @property
-    def parent_fitness_text(self) -> str:
-        """On the panel it was LAST scored on, in its scorer's unit; `—` is unmeasured."""
-        return fold_fitness_text(self._cycle.parent_fold)
 
     async def measure_parent(self, individual_id: str, cells: list[Sample]) -> CellSheet:
         arm = self._cycle.measured(individual_id)

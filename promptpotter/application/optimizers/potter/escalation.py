@@ -424,9 +424,7 @@ async def _run_transition(
                 },
             )
         )
-        ctx.read(Progress).phase(
-            layer.phase.phase, "exit", StepClosed(headline="", details=(), audit=None)
-        )
+        ctx.read(Progress).phase(layer.phase.phase, "exit", StepClosed(facts={}, audit=None))
         return None
 
     layer.land(ctx, result)

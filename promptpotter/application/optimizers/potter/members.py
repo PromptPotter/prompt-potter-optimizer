@@ -109,7 +109,6 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.optimizers.potter.validators import l3_plan_breaches
 from promptpotter.application.scoring.selection import crowning_cells
-from promptpotter.application.views.render.primitives import fmt_fitness
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import VariationMode
@@ -463,36 +462,28 @@ class L2Context(LayoutNode):
         return l2_fired(ladder, fire.ask.l2)
 
     def enter_act(self, ctx: NodeContext, fire: Fire) -> StepOpened:
-        items = [(k, str(v)) for k, v in ctx.slice(L2Memory).steered("l1_generate").items()]
-        if items:
-            shown = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
-            more = f", +{len(items) - 5} more" if len(items) > 5 else ""
-            overrides = f"l1_overrides: {', '.join(shown)}{more}"
-        else:
-            overrides = "l1_overrides: (none)"
+        steered = ctx.slice(L2Memory).steered("l1_generate")
         return StepOpened(
             node=self.name,
             activity=self.phase.activity,
-            title="L2 REFINE CONTEXT",
-            tag=f"L2 fire {ctx.slice(Ladder).l2.fires + 1}",
-            lines=(
-                f"rule={fire.cause}  |  "
-                f"L1 stalled {rounds_without_advance(ctx.read(Lineage).rounds)} rounds  |  "
-                f"fit={ctx.read(Frontier).parent_fitness_text}  "
-                f"peak fitness={fmt_fitness(fire.best.composite_fitness)}",
-                overrides,
-                "LLM analyzing failure patterns...",
-            ),
+            facts={
+                "fire": ctx.slice(Ladder).l2.fires + 1,
+                "rule": fire.cause,
+                "L1 stalled rounds": rounds_without_advance(ctx.read(Lineage).rounds),
+                "peak fitness": fire.best.composite_fitness,
+                "l1_overrides": ", ".join(f"{k}={v}" for k, v in steered.items()) or None,
+            },
         )
 
     def exit_act(self, ctx: NodeContext, result: TransitionResult) -> StepClosed:
-        layout = ", l1_layout edited" if result.l1_layout is not None else ""
-        axis = f", axis={result.axis_targeted}" if result.axis_targeted else ""
-        changed = len(ctx.slice(L2Memory).steered("l1_generate"))
         return StepClosed(
-            headline=f"L2 decision: {changed} param changes{layout}{axis}",
-            details=(result.described,),
-            audit=("L2 call", self.name),
+            facts={
+                "param changes": len(ctx.slice(L2Memory).steered("l1_generate")),
+                "l1_layout": None if result.l1_layout is None else "edited",
+                "axis": result.axis_targeted or None,
+                "decided": result.described,
+            },
+            audit=self.name,
         )
 
 
@@ -553,23 +544,16 @@ class L3Plan(LayoutNode):
         return StepOpened(
             node=self.name,
             activity=self.phase.activity,
-            title="L3 MODIFY PLAN",
-            tag=f"L3 fire {ctx.slice(Ladder).l3.fires + 1}",
-            lines=(
-                "Healing L2's refused l1_layout edit"
-                if fire.ask is None
-                else f"L2 stalled {fire.ask.l2.stall_count} rounds",
-                f"Current plan: {truncate(ctx.slice(L3Memory).plan[:120], 55, '...')}",
-                "LLM designing new strategy...",
-            ),
+            facts={
+                "fire": ctx.slice(Ladder).l3.fires + 1,
+                "rule": fire.cause,
+                "L2 stalled rounds": None if fire.ask is None else fire.ask.l2.stall_count,
+                "plan": ctx.slice(L3Memory).plan,
+            },
         )
 
     def exit_act(self, _ctx: NodeContext, result: TransitionResult) -> StepClosed:
-        return StepClosed(
-            headline=f"New plan: {truncate(result.plan[:120], 55, '...')}",
-            details=(result.described,),
-            audit=None,
-        )
+        return StepClosed(facts={"plan": result.plan, "decided": result.described}, audit=None)
 
 
 class Escalation(nodes.Controller):

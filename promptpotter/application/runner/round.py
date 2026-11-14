@@ -76,15 +76,9 @@ from promptpotter.domain.arms import (
     Proposal,
     Proposed,
     arm_name,
-    candidate_label,
     is_electable,
     is_leader_eligible,
     walked_short,
-)
-from promptpotter.domain.candidate_diff import (
-    build_candidate_flat,
-    flatten_prompts,
-    flatten_sp_summary,
 )
 from promptpotter.domain.cell_fold import measured_cells, unscoreable_cells
 from promptpotter.domain.command_kinds import SubmittedArm
@@ -136,7 +130,7 @@ from promptpotter.domain.run_standing import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Scorer
 from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint
-from promptpotter.domain.wounds import ValidationFailure, ValidationReason, collapse_counts
+from promptpotter.domain.wounds import ValidationFailure, ValidationReason
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.shared.errors import SendRefusedError, graceful
@@ -1152,7 +1146,6 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
         replayed=cycle.banked_walk(ctx.round_num) is not None,
     )
     opening = walk.lead.opening(NodeContext(ctx, walk.lead), bench)
-    fold = cycle.parent_fold
     node = walk.proposer
     append_record(
         PhaseRecord(
@@ -1163,11 +1156,7 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
                 node=node,
                 budget_rounds=cycle.config.optimization.budget.rounds,
                 standing=opening.standing,
-                parent_fitness=None if fold is None else fold.fitness,
-                parent_prompt="\n\n".join(
-                    cycle.parent.render(prompt_node)
-                    for prompt_node in cycle.session.pipeline_schema.prompt_nodes()
-                )[:120],
+                parent_round=cycle.elected[0].round,
                 arms=opening.arms,
                 note=opening.note,
                 model=cycle.optimizer.model(node),
@@ -1178,24 +1167,7 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
     return opening
 
 
-def _flat(cycle: Cycle, individual: OptSearchPoint) -> dict[str, str]:
-    """One subject's diff column: its laid node params, then its prompts."""
-    laid = cycle.points.job(individual).pipeline_params.laid_nodes
-    return flatten_sp_summary(laid) | flatten_prompts(individual.prompts)
-
-
 def announce_population(ctx: RoundContext, opening: RoundOpening, population: Proposals) -> None:
-    cycle = ctx.cycle
-    origin = cycle.origin_round.head
-    assert origin is not None, "the origin's round ends on the origin"
-    parent = _flat(cycle, cycle.parent)
-    columns = [("Start", _flat(cycle, origin.individual)), ("Parent", parent)]
-    for i, cp in enumerate(population.proposals):
-        flat = build_candidate_flat(
-            parent, pipeline_overlay=cp.overlay, prompt_flat=flatten_prompts(cp.individual.prompts)
-        )
-        columns.append((candidate_label(ctx.round_num, i), flat))
-    schema = cycle.session.pipeline_schema
     append_record(
         *(
             ArmRecord(round=ctx.round_num, arm=key, state=arm)
@@ -1205,13 +1177,7 @@ def announce_population(ctx: RoundContext, opening: RoundOpening, population: Pr
             phase=CampaignPhase.PROPOSE,
             step="exit",
             round=ctx.round_num,
-            act=ProposeClosed(
-                replayed=opening.replayed,
-                proposer=opening.proposer,
-                columns=tuple(columns),
-                node_param_keys={s: sorted(k) for s, k in schema.node_param_keys().items()},
-                collapses=collapse_counts(cp.validation_failures for cp in population.proposals),
-            ),
+            act=ProposeClosed(replayed=opening.replayed, proposer=opening.proposer),
         ),
     )
 

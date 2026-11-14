@@ -66,9 +66,8 @@ class ProposeOpened(FrozenModel):
     # Null where no rounds axis binds; 0 is origin only.
     budget_rounds: int | None
     standing: str
-    # The parent's level on the cells of the round it last ended.
-    parent_fitness: float | None
-    parent_prompt: str
+    # The round the parent last ended, whose head it is: its prompt and its level are that round's.
+    parent_round: int
     arms: int | None
     note: str
     model: str | None
@@ -76,14 +75,11 @@ class ProposeOpened(FrozenModel):
 
 
 class ProposeClosed(FrozenModel):
-    """Each column a flat ``key → value`` of one subject: the start, the parent, then each candidate."""
+    """Its candidates are the round's `ArmRecord`s, appended with it."""
 
     act: Literal["propose_closed"] = "propose_closed"
     replayed: bool
     proposer: str
-    columns: tuple[tuple[str, dict[str, str]], ...]
-    node_param_keys: dict[str, list[str]] | None
-    collapses: dict[str, int]
 
 
 class MeasureOpened(FrozenModel):
@@ -105,24 +101,26 @@ class PassOpened(FrozenModel):
     strategy: VerifyStrategy | None
 
 
+# A step's fact, whole: its renderer words and cuts it; ``None`` is unmeasured.
+type StepFact = str | int | float | None
+
+
 class StepOpened(FrozenModel):
-    """An optimizer step's own words on its fire."""
+    """An optimizer step's facts on its fire, by name: generic, so an optimizer stays a plugin."""
 
     act: Literal["step_opened"] = "step_opened"
     node: str
     activity: str
-    title: str
-    tag: str
-    lines: tuple[str, ...]
+    facts: dict[str, StepFact]
 
 
 class StepClosed(FrozenModel):
-    """``headline`` is empty where the step adopted nothing."""
+    """``facts`` is empty where the step adopted nothing; ``audit`` names the node whose call the
+    round's audit holds."""
 
     act: Literal["step_closed"] = "step_closed"
-    headline: str
-    details: tuple[str, ...]
-    audit: tuple[str, str] | None
+    facts: dict[str, StepFact]
+    audit: str | None
 
 
 type PhaseAct = Annotated[

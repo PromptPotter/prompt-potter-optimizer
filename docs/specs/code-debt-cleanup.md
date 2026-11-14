@@ -300,14 +300,6 @@ row it closes.
   `RaceStandingRecord`s apart from the `Narration` that reads the same ledger. Root: the race standing
   is one fold every door reads. **Rides with:** the row above. **Re-test:**
   `git grep -n "_race_standings" -- promptpotter` is empty.
-- **The typed acts still bank render text** (narr-2's review): `domain/phase_acts.py`'s
-  `StepOpened.title/tag/lines`, `StepClosed.headline/details`, `ProposeOpened.parent_prompt` (a
-  120-char slice) and `ProposeClosed.columns` (the diff table, rebuildable from `RoundProposedRecord`,
-  the origin and the parent) are strings built in `potter/members.py:478-509,565-585` and
-  `runner/round.py`, against "its text computed at render". Action: each act keeps the facts and its
-  renderer words them; a run-data reshape, wiped. **Rides with:** narr 3, after faults 1 and small 2
-  (they take `potter/members.py` and `runner/round.py`), before ren. **Re-test:** no `phase_acts.py`
-  field holds text a renderer could build from the records.
 - **A run's ledger has two doors** (narr-2's review): inside a run, `append_record` writes the scope's
   ledger while the run's own declarations go through `CampaignStore.append` on a named cycle
   (`run_observers.py:84,175`, `runner/entry.py:216`, `runner/mint.py:199,261`, `inner/spawn.py:317`),

@@ -39,7 +39,9 @@ BASELINE = {
     # webb-5b (+138): the output contract's flattening, moved from the browser (-275 lines there).
     # faults-1 (+12): a stop's own words served and narrated at every door, a refused send's among
     # them; a payload field's terminal flag declared once beside the payload; refusal acts checked.
-    "package_lines": 109790,
+    # narr-3 (+17): the readout builds the diff table and the parent's preview off the round's
+    # records, where the writers pre-built them into the acts.
+    "package_lines": 109807,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.

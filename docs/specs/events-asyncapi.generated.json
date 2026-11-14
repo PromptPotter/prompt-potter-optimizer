@@ -6048,57 +6048,13 @@
       },
       "ProposeClosed": {
         "additionalProperties": false,
-        "description": "Each column a flat ``key → value`` of one subject: the start, the parent, then each candidate.",
+        "description": "Its candidates are the round's `ArmRecord`s, appended with it.",
         "properties": {
           "act": {
             "const": "propose_closed",
             "default": "propose_closed",
             "title": "Act",
             "type": "string"
-          },
-          "collapses": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "Collapses",
-            "type": "object"
-          },
-          "columns": {
-            "items": {
-              "maxItems": 2,
-              "minItems": 2,
-              "prefixItems": [
-                {
-                  "type": "string"
-                },
-                {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object"
-                }
-              ],
-              "type": "array"
-            },
-            "title": "Columns",
-            "type": "array"
-          },
-          "node_param_keys": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Node Param Keys"
           },
           "proposer": {
             "title": "Proposer",
@@ -6111,10 +6067,7 @@
         },
         "required": [
           "replayed",
-          "proposer",
-          "columns",
-          "node_param_keys",
-          "collapses"
+          "proposer"
         ],
         "title": "ProposeClosed",
         "type": "object"
@@ -6170,20 +6123,9 @@
             "title": "Note",
             "type": "string"
           },
-          "parent_fitness": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Fitness"
-          },
-          "parent_prompt": {
-            "title": "Parent Prompt",
-            "type": "string"
+          "parent_round": {
+            "title": "Parent Round",
+            "type": "integer"
           },
           "run_standing": {
             "anyOf": [
@@ -6204,8 +6146,7 @@
           "node",
           "budget_rounds",
           "standing",
-          "parent_fitness",
-          "parent_prompt",
+          "parent_round",
           "arms",
           "note",
           "model",
@@ -8331,7 +8272,7 @@
       },
       "StepClosed": {
         "additionalProperties": false,
-        "description": "``headline`` is empty where the step adopted nothing.",
+        "description": "``facts`` is empty where the step adopted nothing; ``audit`` names the node whose call the\nround's audit holds.",
         "properties": {
           "act": {
             "const": "step_closed",
@@ -8342,17 +8283,7 @@
           "audit": {
             "anyOf": [
               {
-                "maxItems": 2,
-                "minItems": 2,
-                "prefixItems": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "string"
-                  }
-                ],
-                "type": "array"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -8360,29 +8291,40 @@
             ],
             "title": "Audit"
           },
-          "details": {
-            "items": {
-              "type": "string"
+          "facts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StepFact"
             },
-            "title": "Details",
-            "type": "array"
-          },
-          "headline": {
-            "title": "Headline",
-            "type": "string"
+            "title": "Facts",
+            "type": "object"
           }
         },
         "required": [
-          "headline",
-          "details",
+          "facts",
           "audit"
         ],
         "title": "StepClosed",
         "type": "object"
       },
+      "StepFact": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "StepOpened": {
         "additionalProperties": false,
-        "description": "An optimizer step's own words on its fire.",
+        "description": "An optimizer step's facts on its fire, by name: generic, so an optimizer stays a plugin.",
         "properties": {
           "act": {
             "const": "step_opened",
@@ -8394,32 +8336,22 @@
             "title": "Activity",
             "type": "string"
           },
-          "lines": {
-            "items": {
-              "type": "string"
+          "facts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StepFact"
             },
-            "title": "Lines",
-            "type": "array"
+            "title": "Facts",
+            "type": "object"
           },
           "node": {
             "title": "Node",
-            "type": "string"
-          },
-          "tag": {
-            "title": "Tag",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
             "type": "string"
           }
         },
         "required": [
           "node",
           "activity",
-          "title",
-          "tag",
-          "lines"
+          "facts"
         ],
         "title": "StepOpened",
         "type": "object"
