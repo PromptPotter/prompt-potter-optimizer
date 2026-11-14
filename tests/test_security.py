@@ -310,6 +310,7 @@ from promptpotter.presentation.cli.commands.reads import cmd_read
 from promptpotter.presentation.cli.commands.writes import cmd_command
 from promptpotter.presentation.cli.main import said_text
 from promptpotter.presentation.mcp.server import _refused
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
@@ -4091,7 +4092,7 @@ def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_wh
     slotted, waiting = launch(), launch()
     assert waiting.queued and not slotted.queued
     user_id = str(caller.stores.identity.user_id)
-    assert quota.campaigns_today(registry, user_id) == 2
+    assert quota.campaigns_today(caller.stores, registry, user_id) == 2
     for job, thrown, lapse in (
         (waiting, RuntimeError("its wait raised"), "withdrawn"),
         (slotted, PotterError("its probe failed"), "refused"),
@@ -4101,8 +4102,34 @@ def test_a_launch_whose_run_died_reads_failed_and_the_daily_quota_counts_only_wh
     spent = launch()
     registry.move(spent.job_id, LaunchMove.ADMIT)
     registry.release(spent.job_id, StopReason.TARGET_HIT)
-    assert quota.campaigns_today(registry, user_id) == 1, (
+    assert quota.campaigns_today(caller.stores, registry, user_id) == 1, (
         "the daily quota counted a launch that spent nothing, or lost one that did"
+    )
+
+
+@pytest.mark.usefixtures("offline")
+def test_the_daily_quota_counts_each_campaign_minted_today_never_a_resume_of_an_older_one(
+    host_tenant: _HostTenant, launches: _Launches
+) -> None:
+    stores, registry = host_tenant.caller.stores, launches.registry
+    user_id = str(stores.identity.user_id)
+    older = CycleHop(campaign_id="camp-old", cycle_id="cycle_old0")
+    fresh = CycleHop(campaign_id="camp-new", cycle_id="cycle_new0")
+    for hop, created_at in ((older, "2026-01-01T00:00:00Z"), (fresh, utcnow_iso())):
+        stores.campaigns.create_campaign(minted_campaign(hop, created_at=created_at))
+        stores.campaigns.mint_cycle(hop)
+    # A resume of the older campaign, then the fresh one's mint and its resume.
+    for hop in (older, fresh, fresh):
+        job = registry.create(
+            user_id=user_id,
+            principal_id=user_id,
+            workspace=stores.campaigns.workspace,
+            hop=hop,
+            holder=CampaignLaunch("ds1"),
+        )
+        registry.move(job.job_id, LaunchMove.ADMIT)
+    assert quota.campaigns_today(stores, registry, user_id) == 1, (
+        "the daily quota counted a resume as a fresh campaign, or one campaign twice"
     )
 
 

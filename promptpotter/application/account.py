@@ -19,6 +19,7 @@ from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root, jobs
 from promptpotter.config.settings import LOCK_TIMEOUT, TERMS_VERSION, settings
 from promptpotter.domain.records.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.domain.said import Tone
+from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity import accounts
 from promptpotter.infrastructure.identity import grants as grant_files
@@ -45,6 +46,7 @@ from promptpotter.infrastructure.store.account_trail import (
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import held_lock
+from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.stores import Stores, build_stores, tenant_stores
 from promptpotter.infrastructure.store.user_store import (
     AccountDir,
@@ -52,13 +54,16 @@ from promptpotter.infrastructure.store.user_store import (
     ConsentLine,
     Torn,
     User,
+    UserStore,
     count_accounts,
     read_accounts,
 )
+from promptpotter.infrastructure.store.wallet_store import CouponGrant, GrantStore
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
     FileUnreadableError,
+    NotFoundError,
     PayloadInvalidError,
     PotterError,
 )
@@ -554,6 +559,17 @@ def grant(sub_user_id: str, *, delegator: str, capabilities: frozenset[str], act
         actor=actor,
         audit_path=paths.grants_audit,
     )
+
+
+def set_coupon(projects_root: Path, user_id: str, face: Budget, *, afresh: bool) -> CouponGrant:
+    """The host-admin coupon (decisions.md § 0004): *face* per unit, drawing from the window the
+    account's grant already draws from; *afresh* starts that window now. The bill stays whole:
+    nothing it holds moves, and `/auth/coupon` serves what the coupon has left of the new face."""
+    workspace = tenant_workspace(projects_root, user_id)
+    user = UserStore(workspace).load()
+    if user is None:
+        raise NotFoundError(f"No account {user_id!r} on this install.")
+    return GrantStore(workspace).set(face, afresh=afresh, opened_at=user.created_at)
 
 
 # An account's own provider keys; who pays a send is `infrastructure/llm/wallet.py::paying_key`'s.

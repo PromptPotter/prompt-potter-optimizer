@@ -92,9 +92,14 @@ class CycleHolder(NamedTuple):
 
     @property
     def run(self) -> Job | None:
-        """The run's job, its spend held: what a ceiling of the cycle's binds."""
+        """The run's job, admitted and its spend held: what a ceiling of the cycle's binds. A
+        launch still at its gate holds no money yet, so a change reads its admission as pending."""
         job = self.job
-        if job is None or not job.holds_spend or isinstance(job.holder, ScoringPass):
+        if (
+            job is None
+            or not (job.admitted and job.holds_spend)
+            or isinstance(job.holder, ScoringPass)
+        ):
             return None
         return job
 

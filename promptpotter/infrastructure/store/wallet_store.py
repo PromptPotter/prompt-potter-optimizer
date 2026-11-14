@@ -27,12 +27,16 @@ CHARGES_FILE = "charges.jsonl"
 
 
 class CouponGrant(FrozenModel):
-    """The host's hand-set coupon for one account, replacing the box's default face in both units."""
+    """The host's coupon for one account (`account.py::set_coupon`), replacing the box's default
+    face in both units."""
 
     face: Budget = Field(
         description="The coupon's face per unit; an axis left unset is unbounded on the box's keys."
     )
-    granted_at: str = Field(default_factory=utcnow_iso)
+    granted_at: str = Field(
+        description="Where the coupon draws from: each charge at or after it counts against the "
+        "face (`account_spend.py::account_bill`)."
+    )
 
 
 class GrantStore:
@@ -44,8 +48,16 @@ class GrantStore:
     def load(self) -> CouponGrant | None:
         return read_file(self.path, CouponGrant.model_validate_json, FileKind.STORED_CONFIG)
 
-    def save(self, grant: CouponGrant) -> None:
-        write_json(self.path, grant.model_dump(mode="json"))
+    def set(self, face: Budget, *, afresh: bool, opened_at: str) -> CouponGrant:
+        """Read and replaced under its write lock. It keeps the window the grant it replaces
+        draws from (from *opened_at*, the account's opening, where none stands); *afresh* starts
+        it now, so nothing the account was charged before counts against *face*."""
+        with write_lock(self.path):
+            held = self.load()
+            granted_at = utcnow_iso() if afresh else opened_at if held is None else held.granted_at
+            grant = CouponGrant(face=face, granted_at=granted_at)
+            write_json(self.path, grant.model_dump(mode="json"))
+        return grant
 
 
 class HeldKey(FrozenModel):

@@ -835,11 +835,12 @@ def derived[T](key: Hashable, *, sig: Hashable, compute: Callable[[], T]) -> T:
     return value
 
 
-def _billed(bill: Bill) -> UserSpend:
+def bill_paid(bill: Bill) -> PaidSpend:
     price, tokens = bill.price, bill.tokens
     if price.cost_usd is None and price.rate_priced_usd is None:
-        return UserSpend(0.0, tokens, tokens)
-    return UserSpend(price.cost_usd or 0.0, tokens, 0, rate_priced_usd=price.rate_priced_usd or 0.0)
+        return PaidSpend.of(bill.key_source, UserSpend(0.0, tokens, tokens))
+    usd, rate_priced = price.cost_usd or 0.0, price.rate_priced_usd or 0.0
+    return PaidSpend.of(bill.key_source, UserSpend(usd, tokens, 0, rate_priced_usd=rate_priced))
 
 
 def _unreported_of(hold: Hold) -> PaidSpend:
@@ -852,7 +853,7 @@ def _unreported_of(hold: Hold) -> PaidSpend:
 
 
 def _unpriced_of(hold: Hold) -> PaidSpend:
-    """Its bill already filed the tokens, as residue (:func:`_billed`); only the money is kept."""
+    """Its bill already filed the tokens, as residue (:func:`bill_paid`); only the money is kept."""
     usd = hold.bound.usd
     return NOTHING_PAID if usd is None else PaidSpend.of(hold.key_source, UserSpend(0.0, 0, 0, usd))
 
@@ -1093,7 +1094,7 @@ class _Money:
                 self._children[hold_id] -= 1
 
     def _bill(self, bill: Bill, *, mirrored: bool) -> None:
-        paid = PaidSpend.of(bill.key_source, _billed(bill))
+        paid = bill_paid(bill)
         self._spent = Spent(
             self._spent.cost.plus(paid),
             self._spent.billed if mirrored else self._spent.billed.plus(paid),

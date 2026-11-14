@@ -172,8 +172,11 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landed 78, faults-1:** a refusal carries its next acts as a stop does, so no message names a verb
   or flag (the gate's `refusal-words` holds it); a stop's own words reach every door; a text node's
   form failure is one refused child; a deep YAML is a refusal; 43 logs no reader needed go.
-- **then:** narr 3 and coupon (the host sets an account's coupon; the coupon's quota faults), then
-  ren (classes defined twice, a gate refusing another).
+- **landed 79, coupon:** the host sets an account's coupon (`/coupon` on the admin bot) and starts it
+  afresh, the bill kept whole; set-limits inside a launch's admission answers a retryable refusal;
+  an own-key run reserves none of the coupon, a resume none of its campaign's history; the daily
+  quota counts campaigns minted.
+- **then:** narr 3, then ren (classes defined twice, a gate refusing another).
 
 The re-keys end at the behaviour-key switch.
 

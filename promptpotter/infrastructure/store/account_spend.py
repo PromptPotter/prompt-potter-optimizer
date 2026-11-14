@@ -31,6 +31,7 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     RecordClasses,
     Spent,
+    bill_paid,
     money_on,
     still_held,
 )
@@ -76,7 +77,8 @@ class WorkspaceBank(NamedTuple):
 
 
 class _Bills:
-    """An account's bills, for the activity windows; opened by that read alone, never by a send."""
+    """An account's bills, for the activity windows and a coupon's (`account_bill`'s *since*);
+    opened by those reads alone, never by a send."""
 
     records: ClassVar[RecordClasses] = (Bill,)
 
@@ -152,10 +154,23 @@ def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[Bi
     ]
 
 
-def account_bill(charges: ChargeBook) -> PaidSpend:
-    """Every send the account made, a deleted campaign's and an L4 sandbox's included: no delete reaches a charge."""
+def account_bill(charges: ChargeBook, *, since: str | None = None) -> PaidSpend:
+    """Every send the account made, a deleted campaign's and an L4 sandbox's included: no delete
+    reaches a charge. *since* (a coupon's `CouponGrant.granted_at`) windows it: each bill at or
+    after it, and each unreported send held at or after it."""
     money = money_on(charges.path)
-    return money.spent.billed.plus(money.unreported)
+    if since is None:
+        return money.spent.billed.plus(money.unreported)
+    start = datetime.fromisoformat(since)
+
+    def after(line: Bill | Hold) -> bool:
+        return datetime.fromisoformat(line.timestamp) >= start
+
+    billed = NOTHING_PAID
+    for bill in filter(after, LedgerIndex.of(charges.path).view(_Bills)):
+        billed = billed.plus(bill_paid(bill))
+    whole, unpriced = money.unreported_holds()
+    return billed.plus(still_held(filter(after, whole), filter(after, unpriced)))
 
 
 def bank_spend(

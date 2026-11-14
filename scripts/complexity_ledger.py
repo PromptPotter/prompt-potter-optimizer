@@ -39,7 +39,9 @@ BASELINE = {
     # webb-5b (+138): the output contract's flattening, moved from the browser (-275 lines there).
     # faults-1 (+12): a stop's own words served and narrated at every door, a refused send's among
     # them; a payload field's terminal flag declared once beside the payload; refusal acts checked.
-    "package_lines": 109790,
+    # coupon (+80): the host-admin `set_coupon` verb and its bot door, the coupon's window off its
+    # grant; the daily quota counting campaigns minted, and the coupon's room net of a campaign's history.
+    "package_lines": 109870,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.

@@ -266,7 +266,7 @@ def check_launch_quotas(
         )
 
     if _new_campaign(stores, hop):
-        today = campaigns_today(job_registry, user.user_id)
+        today = campaigns_today(stores, job_registry, user.user_id)
         if today + launches > user.max_campaigns_per_day:
             raise QuotaExceededError(
                 code="quota_exceeded",
@@ -278,14 +278,20 @@ def check_launch_quotas(
             )
 
 
-def campaigns_today(job_registry: JobRegistry, user_id: str) -> int:
-    """The daily quota's count: a launch admitted or still in flight (`JobRegistry.in_flight`); a
-    refused, withdrawn or orphaned one spent nothing."""
-    return sum(
-        1
-        for job in job_registry.list_launched_today(user_id=user_id)
-        if job.admitted or job_registry.in_flight(job)
-    )
+def campaigns_today(stores: Stores, job_registry: JobRegistry, user_id: str) -> int:
+    """The daily quota's count: each campaign minted today by a launch admitted or still in flight
+    (`JobRegistry.in_flight`), once however often it ran; a refused, withdrawn or orphaned launch
+    spent nothing, and a resume or fork of an older campaign mints none. A deleted one counts."""
+    minted: set[str] = set()
+    for job in job_registry.list_launched_today(user_id=user_id):
+        if not (job.admitted or job_registry.in_flight(job)):
+            continue
+        campaign = (
+            None if job.hop == UNRESOLVED_HOP else stores.campaigns.load_campaign(job.campaign_id)
+        )
+        if campaign is None or campaign.created_at[:10] == job.created_at[:10]:
+            minted.add(job.job_id if campaign is None else job.campaign_id)
+    return len(minted)
 
 
 def overrun(face: Budget, spent: UserSpend) -> Budget:
@@ -487,7 +493,7 @@ def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
         max_concurrent_cycles_writable=concurrent_cycles_writable(stores),
         ceiling=ceiling,
         bound=SlotBound.MACHINE if user.max_concurrent_cycles > ceiling else None,
-        campaigns_today=campaigns_today(job_registry, user.user_id),
+        campaigns_today=campaigns_today(stores, job_registry, user.user_id),
         max_campaigns_per_day=user.max_campaigns_per_day,
     )
 
@@ -532,7 +538,7 @@ def admit_launch(
             spent.unpriced_tokens,
             settings.UNPRICED_GRACE_USD,
         )
-    return admitted, _reserve(admitted, wallet.headroom)
+    return admitted, _reserve(admitted, wallet.coupon_room)
 
 
 def _admitted(stores: Stores, declared: Budget, sends: tuple[Send, ...]) -> Budget:
@@ -894,11 +900,8 @@ def _clamped(
     ):
         raise unpriced
     # A campaign ceiling is the operator's: past the coupon only where none of its sends draws it.
-    clamp = (
-        room.over(Budget(usd=_lowest(room.usd, bound)))
-        if any(draws_coupon(send.payer) for send in sends)
-        else Budget(usd=bound)
-    )
+    draws = any(draws_coupon(send.payer) for send in sends)
+    clamp = room.over(Budget(usd=_lowest(room.usd, bound))) if draws else Budget(usd=bound)
     change = requested.over(
         Budget.model_validate(
             {
@@ -910,12 +913,14 @@ def _clamped(
         )
     )
     moved = requested.named & MONEY_AXES
-    return change, _reserve(change.only(moved), room).only(moved)
+    # As `admit_launch` reserves: none of the coupon for a run none of whose sends draws it.
+    reserve = _reserve(change.only(moved), wallet.coupon_room) if draws else _nothing_on(room)
+    return change, reserve.only(moved)
 
 
 def _reserve(budget: Budget, headroom: Budget) -> Budget:
     """What the coupon holds for a run, per money axis: twice the run's ceiling where it caps the
-    axis, at most the headroom; else the whole headroom. A USD ceiling the coupon bounds holds no
+    axis, at most the coupon's room (`AccountWallet.coupon_room`); else the whole room. A USD ceiling the coupon bounds holds no
     tokens: every send under it is priced (`SpendBook.refuse_unpriced`), so the dollars bound it.
     ``None`` where no coupon bounds the axis."""
     priced = budget.usd is not None and headroom.usd is not None

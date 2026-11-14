@@ -212,17 +212,6 @@ row it closes.
   `campaign_at` goes (`admission.py` sits above `quota.py`, so it cannot be the owner). **Rides with:**
   money 2, whose Owns gain `CampaignStore.campaign`, `admission.py::campaign_at` with its callers'
   lines, and each site's load line. **Re-test:** `git grep -n "def campaign_at" -- promptpotter` is empty.
-- **set-limits in a launch's admission window answers 500**: `jobs/quota.py::change_budget` (`:882`)
-  reads `money_on(…).holds[job.job_id]` for the job `registry.py:384`'s `running_job_for` returns, and
-  that is any `holds_spend` job, a STARTING one not yet admitted included (`job.py:185`), so the lookup
-  raises KeyError. Root: the run lookup answers admitted runs only. **Rides with:** money.
-  **Re-test:** set-limits between a launch and its admission answers the job's limits or a 409.
-- **Four quota faults from a code review (reported; verify each at its line first)**: `quota.py:944`
-  set-limits rewrites an own-key run's zero hold to the coupon headroom, so every other launch on the
-  account reads held; `quota.py:538` a resume's reserve counts the campaign's past host spend in its
-  headroom, overdrawing the coupon by that history; `quota.py::campaigns_today` counts resumes and forks
-  against the fresh-mint daily quota; `quota.py::coupon_status` folds the bill twice and reaps under the
-  gate on every GET. **Rides with:** money.
 - **A run's limits are one record for two facts, restated whole by three writers** (overshoot's
   census): `RunLimits` is both `RunWiringRecord`'s persisted declaration and the served limits laid over
   it, so a served-only fact (the overshoot count) rides beside it as `ServedDashboard.overshot`;
@@ -233,6 +222,10 @@ row it closes.
   limits are one record, each change a patch of the fields it names, and the projection folds in order of
   arrival. **Rides with:** money. **Re-test:** a `stand_held_budget` keeps `pause_at_round`; a standing
   record before the wiring is served.
+- **Whether a launch draws the coupon has no name** (coupon's report): `jobs/quota.py` spells
+  `any(draws_coupon(send.payer) for send in sends)` at four sites (`launch_bound`, `admit_launch`,
+  `_tier_bound`, `_clamped`). Root: one named fact of the sends that each site reads. **Rides with:**
+  money. **Re-test:** `git grep -c "draws_coupon(send.payer) for send in sends" -- promptpotter` is 1.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
@@ -844,12 +837,40 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `mint_cycle` / `cycle_minted_otherwise` 409 names no next act; `maintenance`'s `LANDING_REMEDY` and
   harbor's pin-roster `ValueError` name `land-data` and a terminal verb in prose, outside the
   `refusal-words` scan because no command kind exists for them. Root: each is a `Refusal` with its
-  `next_acts`. **Rides with:** faults 2. **Re-test:** `refusal-words` scans all three.
+  `next_acts`. **Rides with:** faults 2. **Re-test:** `refusal-words` scans all three. So does
+  `jobs/quota.py::_contended` (coupon's report): its retryable refusal carries no act, because
+  `RateLimitedError` takes none.
+- **An act's value is a string beside a typed field** (faults-1's fix pass): `shared/errors.py::NextAct`
+  holds every payload value as `str`, so a pressed `mode.from_round: "2"` meets the payload's strict
+  `WireInt` and is refused; `NextAct.kind`'s Literal re-spells `CommandKind`, since `shared/` cannot
+  import `domain/`. Root: the act lives beside the kinds, its value typed as the field it fills.
+  **Rides with:** faults 2. **Re-test:** pressing a `mode.from_round` act through the API is admitted.
+- **The command log has no file kind** (faults-1's fix pass): `dispatcher.py::Replaying.misread` and
+  `read_model.py`'s `_refusal` file the account's command log as `FileKind.LEDGER`, whose remedy speaks
+  of a run's ledger. Root: the command log's own `FileKind`. **Rides with:** faults 2. **Re-test:** a
+  torn command log's refusal names the command log.
+- **A stop becomes a refusal by two rules** (faults-1's fix pass): `scoring_scope.py::_refused` and
+  `passes.py::_grade` each map a stop to a refusal. Root: one domain mapping both read. **Rides
+  with:** faults 2. **Re-test:** one definition of the mapping in `promptpotter/`.
+- **Two parsers bound depth by hand** (faults-1's fix pass): `capo/members.py::_instructions` catches
+  `ValueError`/`SyntaxError` only, so `literal_eval`'s `RecursionError` still crashes init;
+  `store/io.py::parse_yaml` parses each text twice. Root: one bounded parse door that answers a
+  refusal. **Rides with:** faults 2. **Re-test:** a 5000-deep list as a capo init reply is one refused
+  child.
+- **Validation reasons as loose strings** (faults-1's fix pass): `INVARIANT_REASONS` and
+  `optimizer_state.py::PARSE_FAILURE_ALL_NO_OP` stay `str` beside `ValidationReason`'s enum. Root:
+  rows of the one enum. **Rides with:** faults 2. **Re-test:** `git grep -n "INVARIANT_REASONS" -- promptpotter` is empty.
+- **A positional argument has no declared spelling** (faults-1's fix pass): `cli_flag` spells flags
+  only, so `CampaignPayload.campaign_id` (positional) is spelled by the CLI alone, and `cli/main.py`'s
+  `_unsaid` prefix rule counts `head_to_head.arms` as spelled by `--head-to-head` (`--arm` spells it).
+  Root: every CLI spelling of a payload field, positional or flag, declared beside the payload.
+  **Rides with:** faults 2. **Re-test:** `_unsaid` matches whole flags only.
 - **Three served acts reach no door** (faults-1's review): `origin_listing.py::DatasetIndexEntry.refusal`
   has no webapp or CLI reader; `webapp/lib/hooks/useQueuedStart.ts`'s `said` carries a refusal's
   message without its `next_acts`; `run_records.py::ArmsGate.next_acts` is a `ClassVar`, so no wire
-  field carries it and `run-phase.ts`'s "Submit arms" control is never fed an act. Root: an act a
-  refusal or a hold names rides the row it is served on, and every door reads it there.
+  field carries it and `run-phase.ts`'s "Submit arms" control is never fed an act; `cli/commands/launch.py`
+  prints a refusal without its acts. Root: an act a refusal or a hold names rides the row it is
+  served on, and every door reads it there.
   **Rides with:** faults 2. **Re-test:** each of the three is read by the webapp (a `withActs` call)
   and by the CLI (`acts_line`).
 
@@ -1046,9 +1067,6 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 
 ### batch/31 · small
 
-- **No verb sets an account's coupon or starts it afresh**: `grant.json` is hand-written, and a reset is
-  moving `charges.jsonl` aside; `wallet_store.py::CouponGrant.granted_at` is written and never read.
-  **Rides with:** small 1.
 - **The bench's one optimizer model is spelled eleven times** (4+3+3+1: potter, levi, capo, gepa,
   each `minimax/minimax-m3.1-flash`, each yaml saying "the bench runs every optimizer on one model").
   Root: one bench fact every llm node reads unless it authors its own; the lines go (a swap verb

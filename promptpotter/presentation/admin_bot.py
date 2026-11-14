@@ -16,6 +16,7 @@ from promptpotter.application.account import (
     grants,
     host_user_id,
     revoke_grant,
+    set_coupon,
     trail_by_email,
     unblock_email,
 )
@@ -27,7 +28,7 @@ from promptpotter.application.views.trail import trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
+from promptpotter.domain.spend import RATE_PRICED_LABEL, Budget, money_text, usd_text
 from promptpotter.infrastructure.outbound import notify_operator
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
 from promptpotter.shared.tls import tls_context
@@ -36,9 +37,11 @@ logger = logging.getLogger(__name__)
 
 _POLL_TIMEOUT_S = 50
 _RETRY_BACKOFF_S = 5
+_COUPON_USAGE = "/coupon <user_id> <usd|-> <tokens|-> [afresh]"
 _USAGE = (
     "Commands:\n/block <email>\n/unblock <email>\n/blocked\n"
-    "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n/spend\n/trail <email>"
+    "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n"
+    f"{_COUPON_USAGE}\n/spend\n/trail <email>"
 )
 _TELEGRAM_MAX_CHARS = 4096
 _TRAIL_WINDOW_H = 24
@@ -78,6 +81,8 @@ def handle_command(command: str, argument: str, actor: str) -> str:
         return f"{verb} {argument.strip().lower()}. {len(emails)} email{'' if len(emails) == 1 else 's'} blocked."
     if command in ("grant", "revoke", "grants"):
         return _handle_grant_command(command, argument, actor)
+    if command == "coupon":
+        return _set_coupon(argument)
     if command == "spend":
         return _render_install_spend()
     if command == "trail":
@@ -146,6 +151,17 @@ def _render_install_spend() -> str:
             + (f" · {'; '.join(flags)}" if flags else "")
         )
     return "\n".join(lines)
+
+
+def _set_coupon(argument: str) -> str:
+    """`-` leaves a unit unbounded on the box's keys; `afresh` starts the coupon's draw now."""
+    parts = argument.split()
+    if len(parts) not in (3, 4) or parts[3:] not in ([], ["afresh"]):
+        return f"Usage: {_COUPON_USAGE}"
+    usd, tokens = (None if v == "-" else v for v in parts[1:3])
+    face = Budget.model_validate({"usd": usd, "tokens": tokens})
+    grant = set_coupon(default_projects_root(), parts[0], face, afresh=len(parts) == 4)
+    return f"Coupon for {parts[0]}: {money_text(face)}, drawing from {grant.granted_at}."
 
 
 def _handle_grant_command(command: str, argument: str, actor: str) -> str:

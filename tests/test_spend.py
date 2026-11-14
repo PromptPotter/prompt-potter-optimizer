@@ -61,7 +61,7 @@ from offline_world import NOT_A_KEY, PROVIDER_KEYS, Hang, Router, Said, completi
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from promptpotter.application import free_tier
-from promptpotter.application.account import account_of, local_stores
+from promptpotter.application.account import account_of, local_stores, set_coupon
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.task_context import checkin_template
 from promptpotter.application.commands.dispatcher import (
@@ -96,6 +96,7 @@ from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
+    RateLimitedError,
     account_wallet,
     admit_launch,
     change_budget,
@@ -316,7 +317,7 @@ from promptpotter.infrastructure.store.read_model import (
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.infrastructure.store.wallet_store import ChargeBook, CouponGrant
+from promptpotter.infrastructure.store.wallet_store import ChargeBook
 from promptpotter.presentation.api.routers import commands as commands_api
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.errors import (
@@ -2159,7 +2160,7 @@ def test_sharing_divides_the_campaigns_ceiling_never_what_the_account_admits(
             capabilities=frozenset({"campaign.run"}),
         ),
     )
-    delegate.grant.save(CouponGrant(face=Budget(usd=50.0, tokens=50_000)))
+    delegate.grant.set(Budget(usd=50.0, tokens=50_000), afresh=False, opened_at=_OPENED)
     spender, claimed = (
         CycleHop(campaign_id="camp-9", cycle_id=f"cycle_claim000{n}") for n in (1, 2)
     )
@@ -3363,6 +3364,8 @@ _CELLS = (BackendCells("termnorm", "host", priced=True),)
 # Cells no rate bounds: a dollar ceiling on them is refused at the mint.
 _UNPRICED_CELLS = (BackendCells("n8n", "host", priced=False),)
 _OWN_ONLY = (ProviderSend("openrouter", "user"),)
+# A grant set on an account opened before any charge: its coupon draws on the whole bill.
+_OPENED = "2000-01-01T00:00:00Z"
 
 
 def _account_stores(
@@ -3388,7 +3391,7 @@ def _account_stores(
     )
     stores.users.save(user)
     if face is not None:
-        stores.grant.save(CouponGrant(face=face))
+        stores.grant.set(face, afresh=False, opened_at=_OPENED)
     if own_key is not None:
         stores.api_keys.put(own_key, SecretStr("sk-own"))
     held = minted_campaign(_HELD_HOP, config=_budgeted(Budget()))
@@ -3745,6 +3748,44 @@ def test_an_accounts_own_key_wins_and_the_boxs_key_sends_only_on_a_live_coupon(
         )
 
 
+# One bill, read by each coupon the host sets over it in turn.
+def test_a_coupon_the_host_sets_is_served_and_afresh_draws_from_now_leaving_the_bill_whole(
+    tmp_path: Path,
+) -> None:
+    user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01T00:00:00Z")
+    stores = _account_stores(tmp_path, issuer=_WEB, user=user, spent=_SPENT_THE_COUPON)
+    projects = tmp_path / "projects"
+    assert stores.campaigns.workspace == projects / "sub-9", "the account is not where it is set"
+    bill = stores.charges.path.read_bytes()
+    lifetime = coupon_status(stores).host_key_spend
+    assert coupon_status(stores).used_share == 1.0, "the box's default coupon was not drawn whole"
+    set_coupon(projects, "sub-9", Budget(usd=2 * _FACE.usd_amount), afresh=False)
+    assert coupon_status(stores).used_share == pytest.approx(0.5), (
+        "a coupon set over the bill read another draw than the bill since the account opened"
+    )
+    set_coupon(projects, "sub-9", Budget(usd=_FACE.usd_amount), afresh=True)
+    fresh = coupon_status(stores)
+    assert (fresh.used_share, account_wallet(stores).state) == (0.0, AllowanceState.OPEN), (
+        "a coupon started afresh still drew what was charged before it"
+    )
+    assert (fresh.host_key_spend, stores.charges.path.read_bytes()) == (lifetime, bill), (
+        "a start afresh moved the bill or the account's lifetime spend"
+    )
+    set_coupon(projects, "sub-9", Budget(usd=_FACE.usd_amount / 2), afresh=False)
+    assert coupon_status(stores).used_share == 0.0, "a new face undid the start afresh"
+    with pytest.raises(NotFoundError):
+        set_coupon(projects, "sub-0", Budget(usd=1.0), afresh=False)
+
+
+def test_a_grant_file_without_its_start_does_not_load(tmp_path: Path) -> None:
+    # Read as granted this instant, it would never age: the coupon would draw nothing it was charged.
+    stores = workspace(tmp_path)
+    stores.grant.path.parent.mkdir(parents=True, exist_ok=True)
+    stores.grant.path.write_text(json.dumps({"face": {"usd": 1.0}}), encoding="utf-8")
+    with pytest.raises(FileUnreadableError):
+        stores.grant.load()
+
+
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_in_flight_the_reserve_binds_only_a_send_on_the_boxs_key() -> None:
     book = spend_book(None, usd_reserve=0.05)
@@ -4020,7 +4061,7 @@ def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside
     tmp_path: Path,
 ) -> None:
     passing = _web_account(tmp_path, "sub-8")
-    passing.grant.save(CouponGrant(face=Budget(usd=1.0)))
+    passing.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
     payer = account_of(passing)
     slots = JobRegistry.attach(passing.jobs_dir)
 
@@ -4169,7 +4210,7 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
     claim_cycle(forker, fork, job.job_id)
     _admitted(forker, registry, job.job_id, Budget(usd=0.8))
     hold_moved(forker, fork, Budget(usd=0.8))
-    forker.grant.save(CouponGrant(face=Budget(usd=1.0)))
+    forker.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
     allowance = account_of(forker)
     # A changed ceiling is admitted as a launch is: dollars its cells cannot be held to refuse.
     with pytest.raises(BudgetUnenforceableError):
@@ -4187,12 +4228,12 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
         hop=fork,
         sends=_CELLS,
     )
-    assert caps.usd == relaunched.usd == pytest.approx(1.0), (
+    assert caps.usd == pytest.approx(1.0), (
         "$1.00 allowance, $0.50 of it the campaign's own: its ceiling is the whole $1.00, which "
         "already counts that $0.50 — not $1.10 off a fork prefix counted twice"
     )
-    assert _reserve_of(forker, job.job_id).usd == pytest.approx(1.0), (
-        "the reservation moved off the ceiling it backs"
+    assert relaunched.usd == _reserve_of(forker, job.job_id).usd == pytest.approx(0.5), (
+        "the reservation held past the $0.50 the coupon has left"
     )
 
 
@@ -4202,7 +4243,7 @@ def test_of_two_set_limits_raises_the_second_reads_the_wallet_after_the_firsts_r
 ) -> None:
     # Set-limits is an admission, so the reserves stand within the face.
     racer = _web_account(tmp_path, "sub-8")
-    racer.grant.save(CouponGrant(face=Budget(usd=0.30)))
+    racer.grant.set(Budget(usd=0.30), afresh=False, opened_at=_OPENED)
     racing = JobRegistry(tmp_path / "jobs-8", capacity=lambda _live: 2)
     raced = [CycleHop(campaign_id=f"camp-8{n}", cycle_id=f"cycle_race80{n}") for n in (1, 2)]
     for racing_hop in raced:
@@ -4261,6 +4302,96 @@ def test_of_two_set_limits_raises_the_second_reads_the_wallet_after_the_firsts_r
     )
 
 
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_set_limits_inside_a_launchs_admission_window_answers_its_limits_or_a_typed_refusal(
+    tmp_path: Path,
+) -> None:
+    # The cycle's holder is a launch whose hold is not written yet: money waits, rounds land.
+    starter = _web_account(tmp_path, "sub-6")
+    starter.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
+    registry = JobRegistry(starter.jobs_dir, capacity=lambda _live: 1)
+    at = CycleHop(campaign_id="camp-6", cycle_id="cycle_start60")
+    starter.campaigns.create_campaign(minted_campaign(at))
+    starter.campaigns.mint_cycle(at)
+    job = registry.request_slot(
+        user_id="sub-6",
+        principal_id="sub-6",
+        workspace=starter.campaigns.workspace,
+        holder=CampaignLaunch("ds1"),
+        hop=at,
+    )
+    claim_cycle(starter, at, job.job_id)
+    assert job.holds_spend and not job.admitted, "the launch is not inside its admission window"
+    with pytest.raises(RateLimitedError) as waiting:
+        change_budget(Budget(usd=0.5), stores=starter, job_registry=registry, hop=at, sends=_CELLS)
+    assert waiting.value.code == "launch_contended", "a raise in the window read another refusal"
+    assert change_budget(
+        Budget(rounds=3), stores=starter, job_registry=registry, hop=at, sends=_CELLS
+    )
+    assert starter.campaigns.read_standing_budget(at).budget.rounds == 3, "the rounds did not land"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_set_limits_on_a_run_its_own_key_pays_holds_none_of_the_coupon(tmp_path: Path) -> None:
+    own = _web_account(tmp_path, "sub-5")
+    own.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
+    registry = JobRegistry(own.jobs_dir, capacity=lambda _live: 1)
+    at = CycleHop(campaign_id="camp-5", cycle_id="cycle_own50")
+    own.campaigns.create_campaign(minted_campaign(at))
+    own.campaigns.mint_cycle(at)
+    job = registry.request_slot(
+        user_id="sub-5",
+        principal_id="sub-5",
+        workspace=own.campaigns.workspace,
+        holder=CampaignLaunch("ds1"),
+        hop=at,
+    )
+    claim_cycle(own, at, job.job_id)
+    _admitted(own, registry, job.job_id, Budget(usd=0.0))
+    hold_moved(own, at, Budget(usd=0.0))
+    change_budget(Budget(usd=0.5), stores=own, job_registry=registry, hop=at, sends=_OWN_ONLY)
+    assert _reserve_of(own, job.job_id).usd == 0.0, (
+        "a raise on a run no send of which draws the coupon reserved the coupon for it"
+    )
+    assert account_wallet(own).state is AllowanceState.OPEN, "the account's next launch read held"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_resume_reserves_at_most_what_the_coupon_has_left_past_its_campaigns_spend(
+    tmp_path: Path,
+) -> None:
+    # The campaign's past spend widens its ceiling's room, never the coupon's.
+    resumer = _web_account(tmp_path, "sub-4")
+    resumer.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
+    at = CycleHop(campaign_id="camp-4", cycle_id="cycle_resume40")
+    resumer.campaigns.create_campaign(minted_campaign(at))
+    resumer.campaigns.mint_cycle(at)
+    with scoped(account=resumer):
+        ledger = CycleEventLog.open(CycleDir(resumer.campaigns.cycle_dir(at)))
+        _pay(ledger, 0.6, input_tokens=1_000, output_tokens=0)
+    registry = JobRegistry(resumer.jobs_dir, capacity=lambda _live: 1)
+    job = registry.request_slot(
+        user_id="sub-4",
+        principal_id="sub-4",
+        workspace=resumer.campaigns.workspace,
+        holder=CampaignLaunch("ds1"),
+        hop=at,
+    )
+    claim_cycle(resumer, at, job.job_id)
+    _, reserve = admit_launch(
+        declared=Budget(),
+        user=account_of(resumer),
+        stores=resumer,
+        job_registry=registry,
+        job_id=job.job_id,
+        hop=at,
+        sends=_CELLS,
+    )
+    assert reserve.usd == pytest.approx(0.4), (
+        "a resume reserved the coupon past what it has left, by its campaign's past spend"
+    )
+
+
 # Each headroom reads the holds and bills the steps before it left on the account.
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
@@ -4268,7 +4399,7 @@ def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
 ) -> None:
     # Its spend counts once, so a launch beside it is quoted what the coupon can still pay.
     biller = _web_account(tmp_path, "sub-6")
-    biller.grant.save(CouponGrant(face=Budget(usd=0.30)))
+    biller.grant.set(Budget(usd=0.30), afresh=False, opened_at=_OPENED)
     billed_hop = CycleHop(campaign_id="camp-6b", cycle_id="cycle_billed01")
     biller.campaigns.create_campaign(minted_campaign(billed_hop))
     biller.campaigns.mint_cycle(billed_hop)

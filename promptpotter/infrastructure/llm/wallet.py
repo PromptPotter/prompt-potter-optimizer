@@ -4,7 +4,8 @@
 A send on a provider goes out on the account's own key for it, else on the box's, which the host's
 coupon meters; a send a library makes on the process environment's key is the box's
 (`ENV_KEY_PAYER`). What the coupon has left is DERIVED, from the face (`grant.json`, else the box's
-default) less what the account's charges say the box's keys paid; nothing counts it down.
+default) less what the account's charges since the grant say the box's keys paid; nothing counts
+it down.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from promptpotter.domain.spend import (
     ZERO_SPEND,
     Budget,
     KeySource,
-    PaidSpend,
     Remainder,
     UserSpend,
     bill_is_floor,
@@ -79,10 +79,13 @@ class Coupon(NamedTuple):
         return self.left.run_out
 
 
-def read_coupon(stores: Stores, paid: PaidSpend | None = None) -> Coupon:
+def read_coupon(stores: Stores) -> Coupon:
+    """The box's default coupon draws on the account's whole life, a grant from its `granted_at`."""
+    grant = stores.grant.load()
+    since = None if grant is None else grant.granted_at
     return Coupon(
-        face=face_of(stores.grant.load(), host=is_host(stores.identity)),
-        spent=(account_bill(stores.charges) if paid is None else paid).host,
+        face=face_of(grant, host=is_host(stores.identity)),
+        spent=account_bill(stores.charges, since=since).host,
     )
 
 
@@ -192,15 +195,22 @@ class AccountWallet(NamedTuple):
     held: Budget = NOTHING_METERED
 
     @property
+    def _coupon_left(self) -> Remainder:
+        """`headroom` less the history it makes room for, which a campaign ceiling counts and the
+        coupon already drew: what the coupon itself has for the launch."""
+        return self.headroom.less(
+            Budget.amount(self.history.at_most_usd, self.history.at_most_tokens)
+        )
+
+    @property
+    def coupon_room(self) -> Budget:
+        """What the coupon may reserve for the launch."""
+        return self._coupon_left.budget
+
+    @property
     def launch_room_gone(self) -> bool:
         """A contended wallet quotes zero and has room: a launch still being admitted holds it."""
-        return not self.contended and (
-            (self.headroom.usd is not None and self.headroom.usd <= self.history.at_most_usd)
-            or (
-                self.headroom.tokens is not None
-                and self.headroom.tokens <= self.history.at_most_tokens
-            )
-        )
+        return not self.contended and self._coupon_left.run_out
 
     @property
     def state(self) -> AllowanceState:
