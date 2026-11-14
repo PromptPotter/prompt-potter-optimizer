@@ -285,6 +285,7 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptPart, Snippet
+from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     ArmAct,
@@ -294,6 +295,7 @@ from promptpotter.domain.records.run_records import (
     CycleSeed,
     PipelineRead,
     RoundWarningRecord,
+    RunPhaseRecord,
     ScoringLockedRecord,
 )
 from promptpotter.domain.results import RoundResult
@@ -3169,6 +3171,82 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
         "a run whose exit unwound kept its ledger's projections or its cycle"
     )
     assert not drained.called, "a run that raised drained its dashboard on the way out"
+
+
+def test_a_store_door_append_under_a_muted_scope_lands_nothing(
+    built_stores: Stores, held: _Held
+) -> None:
+    # A bound `None` is the declared mute of a probe render: the door answers it unopened.
+    hop = held.campaign.root_hop
+    ledger = built_stores.campaigns.ledger(hop)
+    before = ledger.read_bytes()
+    with scoped(ledger=None):
+        landed = built_stores.campaigns.append(hop, ArmActRecord(act=ArmAct.SKIP))
+    assert landed is None and ledger.read_bytes() == before, (
+        "a muted scope let a store-door append land on its cycle's ledger"
+    )
+
+
+def test_a_store_door_append_on_the_scopes_own_cycle_lands_through_its_handle(
+    built_stores: Stores, held: _Held
+) -> None:
+    # A second handle on one file is a second appender; another cycle's append opens its own.
+    stores = built_stores
+    hop = held.campaign.root_hop
+    lent: list[CycleRecord] = []
+
+    class _Lent(CycleEventLog):
+        def append(self, *records: CycleRecord) -> int:
+            lent.extend(records)
+            return super().append(*records)
+
+    other = CycleHop(campaign_id=hop.campaign_id, cycle_id="cycle_other")
+    stores.campaigns.mint_cycle(other)
+    with scoped(ledger=_Lent(stores.campaigns.ledger(hop))):
+        stores.campaigns.append(other, ArmActRecord(act=ArmAct.SKIP))
+        assert not lent and ArmAct.SKIP in stores.campaigns.ledger(other).read_text(), (
+            "an append on another cycle landed through the scope's handle"
+        )
+        stores.campaigns.append(hop, ArmActRecord(act=ArmAct.SKIP))
+    assert [type(record) for record in lent] == [ArmActRecord], (
+        "an append on the scope's own cycle opened a second handle on its ledger"
+    )
+
+
+def test_a_stop_declared_inside_its_run_scope_reaches_dashboard_json(
+    built_stores: Stores, decl: _Declared, held: _Held
+) -> None:
+    # The scope lends the door its handle, and the door's own hold still checks the dashboard out.
+    stores = built_stores
+    opened, held_campaign = held
+    hop = held_campaign.root_hop
+    launched = effective_config(decl.declared)
+    selected = select_optimizer(launched.optimization)
+    declare_run_wiring(opened, launched, campaign=held_campaign, selected=selected)
+    root_dir = CycleDir(stores.campaigns.cycle_dir(hop))
+    with scoped(ledger=CycleEventLog.open(root_dir)):
+        stores.declare_stop(hop, RunPhaseRecord.stop(StopReason.ROUNDS_BUDGET))
+    dashboard = json.loads(CycleLayout(root_dir).dashboard.read_text())
+    assert dashboard["stop_reason"] == StopReason.ROUNDS_BUDGET, (
+        "a stop declared inside its run scope left dashboard.json without it"
+    )
+
+
+def test_a_verb_refuses_a_scope_it_would_not_land_on_before_it_opens_its_cycle(
+    built_stores: Stores, held: _Held
+) -> None:
+    # A scope bound on another ledger would take the verb's lines, and a muted one sends nothing.
+    stores = built_stores
+    hop = CycleHop(campaign_id=held.campaign.campaign_id, cycle_id="cycle_unopened")
+    elsewhere = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held.campaign.root_hop)))
+    for bound in (elsewhere, None):
+        with (
+            scoped(ledger=bound),
+            pytest.raises(RuntimeError, match="a verb on"),
+            verb_ledger(stores, hop),
+        ):
+            pass
+    assert not stores.campaigns.cycle_dir(hop).exists(), "a refused verb opened its cycle"
 
 
 def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(

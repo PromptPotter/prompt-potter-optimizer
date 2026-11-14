@@ -585,18 +585,14 @@ export interface StopReading {
   said: string;
 }
 
-/** Which run verbs a cycle admits now: the one answer the run control and the
- * dispatcher read. */
+/** The launch half of a cycle's run verbs, its campaign's refusal joined: what
+ * the one run control offers. The loop's verbs answer off `RunState` alone,
+ * which no campaign moves. */
 export interface RunAdmission {
   /** The verb the one run control offers; null where it offers none. */
   offers: 'pause' | 'resume' | 'start' | null;
   /** Why the control offers none; empty where it offers one. */
   refusal: string;
-  /** `skip-searchpoint`. */
-  skip_refusal: string;
-  /** `set-sample-lookahead` for ONE round. `auto` is a mode and a disarm removes an
-   * arming, so neither needs a walk and neither is refused here. */
-  lookahead_refusal: string;
   /** What the offered start or resume sends beside the cycle's address: the `start-
    * run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent
    * as served. */
@@ -1671,10 +1667,12 @@ export interface ServedDashboard {
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** The cycle's producer, derived with the phase. */
   producer: ProducerReading;
-  /** Which run verbs the cycle admits now (`RunState.admission`): the verb the run
-   * control offers or the sentence where it offers none, and each verb's
-   * refusal — the same answer the dispatcher refuses on. */
+  /** The verb the run control offers now, its campaign's refusal joined
+   * (`admission.py::admitted`), or the sentence where it offers none. */
   admission: RunAdmission;
+  /** Why `skip-searchpoint` is refused, off the run alone (`RunState`), which no
+   * campaign moves; empty where it is admitted. */
+  skip_refusal: string;
   /** Why the cycle reads `paused` or `terminal` — what caused it, the stop it was
    * left on and what said so (`RunState.stop`); null in every other phase. */
   stop: StopReading | null;

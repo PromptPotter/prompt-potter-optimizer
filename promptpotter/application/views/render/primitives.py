@@ -285,9 +285,7 @@ _KIND_TAGS: dict[NodeKind, str] = {
 }
 
 
-def display_tags(schema: PipelineSchema | None) -> dict[str, str]:
-    if not schema:
-        return {}
+def display_tags(schema: PipelineSchema) -> dict[str, str]:
     base_tags: list[tuple[str, str]] = [
         # An UNDECLARED node has no kind to read a tag off, so it falls to its own initials.
         (

@@ -63,7 +63,8 @@ class InnerSpawnContext:
 
 @dataclass(frozen=True)
 class RunScope:
-    # The ledger every `append_record` lands on; a bound ``None`` is the declared mute of a probe render.
+    # The ledger every `append_record` lands on, lent to its cycle's store door; a bound ``None`` is
+    # the declared mute of a probe render, every door's.
     ledger: CycleEventLog | None | Literal[Unbound.UNBOUND] = UNBOUND
     # The round a record is measured in: a run binds 0 for its whole span, each round its own inside it.
     round: int | None = None

@@ -583,7 +583,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
         dashboard = DashboardCheckout(cycle_dir)
         assert dashboard.live.value() is not None, "a launched cycle with rounds is declared"
         dashboard.drain()
-        readout = ReadoutProjection.for_campaign(session, sink=None)
+        readout = ReadoutProjection(session, sink=None)
         banked: BenchPasses | None = None
         # The round an `at_end` launch grades under: its last.
         with (

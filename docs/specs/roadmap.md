@@ -176,7 +176,12 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   afresh, the bill kept whole; set-limits inside a launch's admission answers a retryable refusal;
   an own-key run reserves none of the coupon, a resume none of its campaign's history; the daily
   quota counts campaigns minted.
-- **then:** narr 3, then ren (classes defined twice, a gate refusing another).
+- **landed 80, narr-3:** an act banks facts and every renderer words and cuts them; a cycle has one
+  append door, which a muted scope mutes and a scope bound on that cycle lends its handle; the loop
+  reads its own refusals off the run, and only a launch joins the campaign's. Run data wiped (cycles).
+- **L4 C0 re-measured** at landing 79: composite 0.518 over five of six cells, $0.198 billed; the
+  sixth is excluded because it elected twice (§ Optimizer tuning — the standing board, item 4).
+- **then:** ren (classes defined twice, a gate refusing another), alone on its tip.
 
 The re-keys end at the behaviour-key switch.
 
@@ -353,6 +358,19 @@ round.
    test is τ from rounds 1–2 against the lineage's fresh θ trend from round 3 on.
 3. **Three arms instead of five** would give +9% lift per dollar and −27% lift per round. This is a
    derivation only, and it matters only where τ > 0.
+4. **An inner run that elects in two rounds is excluded** (C0 at landing 79). Since `each_round` went
+   (operator, 2026-11-12), an L4 inner seat benches `at_end`: the origin and the last selection only.
+   `runner/bench.py::bench_series` reads a displaced selection as `None`, and
+   `domain/l4/proxies.py::no_evidence_reason` excludes a cell with any such hole. The panel therefore
+   drops exactly the runs that gain early and again (1 of 6 C0 cells). **The operator's call:** (a)
+   `held_out_lift` reads the one held-out lift `at_end` measures (last − origin), and early-round AUC
+   rides the panel's own series (`mean_round_delta`), with no spend added (recommended, since it
+   follows from dropping `each_round`); or (b) the end pass grades every selection that stood, which
+   brings back `each_round`'s spend at the end (one 20-row pass per extra election). Either one moves
+   the estimator digest and is owed a C0.
+5. **The outer critique broke a rule its prompt states**, on both repair rungs (C0 at landing 79: "a
+   row in two clusters", `potter/dispatch/schemas.py` `_one_cluster_per_row`), so round 0 banked no
+   critique. A tighter `l1_critique` prompt comes first (`potter-self`).
 
 ## L4 closure
 

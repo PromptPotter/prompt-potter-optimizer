@@ -21,7 +21,7 @@ from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cell_fold import ScoreSummary, merge_known_outcomes
+from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -378,11 +378,6 @@ class Cycle:
     @property
     def parent_point(self) -> JobSearchPoint:
         return self.points.job(self.parent)
-
-    @property
-    def parent_fold(self) -> ScoreSummary | None:
-        """What the parent SCORED the round it last ended on, never a reading of the frontier."""
-        return self.elected[0].fold
 
     @property
     def frontier(self) -> list[GradedCell]:

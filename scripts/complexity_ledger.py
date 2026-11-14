@@ -41,7 +41,16 @@ BASELINE = {
     # them; a payload field's terminal flag declared once beside the payload; refusal acts checked.
     # coupon (+80): the host-admin `set_coupon` verb and its bot door, the coupon's window off its
     # grant; the daily quota counting campaigns minted, and the coupon's room net of a campaign's history.
-    "package_lines": 109870,
+    # narr-3 (+17): the readout builds the diff table and the parent's preview off the round's
+    # records, where the writers pre-built them into the acts; (+15) a cycle's one append door, which
+    # a muted scope mutes and a scope bound on that cycle lends its handle, and a verb refusing
+    # another's scope; (+105, net of the dashboard's dead meter branches) a step's facts typed by kind
+    # (a count, a fitness in its scorer's unit, a text, settings) and worded by the renderer alone,
+    # with a fold's fitness built once; the round's opening as such facts, a critique a round lacks
+    # said, the parent's fitness banked on L2's box, each candidate's
+    # rendered prompt in the population table, a readout naming the InitClosed it missed, and the
+    # browser's skip refusal served off the run, apart from the launch's admission.
+    "package_lines": 110007,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -84,7 +93,8 @@ BASELINE = {
     # and the public members of each object one of its properties exposes.
     "p_member": 12,
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
-    "p_reads": 317,
+    # narr-3 (+3): `Frontier.parent_fitness`, the parent's fitness as the `FitnessFact` L2's box banks.
+    "p_reads": 320,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 7,
     # Test functions over 150 lines across them: each holds one fact (`tests/CLAUDE.md`).

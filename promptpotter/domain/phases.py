@@ -295,6 +295,25 @@ class RunState(NamedTuple):
             return INNER_PAUSE_REFUSAL
         return "" if self.producer.attached else "No run of this cycle is in flight to pause."
 
+    @property
+    def _walking(self) -> bool:
+        # A skip and a look-ahead are spent by a walk: accepted anywhere else, the next launch
+        # would drop them.
+        return RUN_PHASE_INFO[self.run_phase].walks and self.producer.appending
+
+    @property
+    def skip_refusal(self) -> str:
+        """Why `skip-searchpoint` is refused; empty where it is admitted."""
+        if self.inner:
+            return INNER_SKIP_REFUSAL
+        return "" if self._walking else "No searchpoint is being scored to skip."
+
+    @property
+    def lookahead_refusal(self) -> str:
+        """Why `set-sample-lookahead` for ONE round is refused; empty where it is admitted. `auto`
+        is a mode and a disarm removes an arming, so neither needs a walk and neither is refused."""
+        return "" if self._walking else "No run of this cycle is in flight to hold calls ahead for."
+
     def arms_refusal(self, keep: Sequence[int]) -> str:
         """Why `submit-arms` keeping the drafts at *keep* is refused; empty where it is admitted."""
         if self.inner:
@@ -308,10 +327,6 @@ class RunState(NamedTuple):
         if stray := sorted(i for i in keep if i >= self.drafts):
             return f"This round holds drafts 0 to {self.drafts - 1}; there is no draft {stray}."
         return ""
-
-    @property
-    def admission(self) -> RunAdmission:
-        return RunAdmission.of(self)
 
 
 # ``resume`` and ``start`` both launch: a paused cycle's worker has exited.
@@ -404,19 +419,13 @@ def run_phase_label(run_phase: RunPhase, stop_reason: StopReason | None) -> str:
 
 
 class RunAdmission(FrozenModel):
-    """Which run verbs a cycle admits now: the one answer the run control and the dispatcher read.
-
-    Each ``*_refusal`` is the sentence that verb is refused with, empty where it is admitted."""
+    """The launch half of a cycle's run verbs, its campaign's refusal joined: what the one run
+    control offers. The loop's verbs answer off `RunState` alone, which no campaign moves."""
 
     offers: RunAction | None = Field(
         description="The verb the one run control offers; null where it offers none."
     )
     refusal: str = Field(description="Why the control offers none; empty where it offers one.")
-    skip_refusal: str = Field(description="`skip-searchpoint`.")
-    lookahead_refusal: str = Field(
-        description="`set-sample-lookahead` for ONE round. `auto` is a mode and a disarm removes "
-        "an arming, so neither needs a walk and neither is refused here."
-    )
     payload: dict[str, dict[str, str]] = Field(
         description="What the offered start or resume sends beside the cycle's address: the "
         "`start-run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent as served."
@@ -427,17 +436,10 @@ class RunAdmission(FrozenModel):
     )
 
     @classmethod
-    def of(cls, run: RunState, *, campaign_refusal: str = "") -> RunAdmission:
-        """*campaign_refusal* is the cycle's campaign's own (`admission.py::admitted`): a launch
-        verb it refuses is not offered."""
+    def of(cls, run: RunState, *, campaign_refusal: str) -> RunAdmission:
+        """Read only through `admission.py::admitted`, which joins *campaign_refusal*, the cycle's
+        campaign's own: a launch verb it refuses is not offered."""
         info = RUN_PHASE_INFO[run.run_phase]
-        # Both are spent by a walk: accepted anywhere else, the next launch would drop them.
-        walking = info.walks and run.producer.appending
-        if run.inner:
-            skip = INNER_SKIP_REFUSAL
-        else:
-            skip = "" if walking else "No searchpoint is being scored to skip."
-        lookahead = "" if walking else "No run of this cycle is in flight to hold calls ahead for."
         pausing = info.action == "pause"
         declined = run.pause_refusal if pausing else run.start_refusal
         if info.action is None:
@@ -457,8 +459,6 @@ class RunAdmission(FrozenModel):
         return cls(
             offers=offers,
             refusal=refusal,
-            skip_refusal=skip,
-            lookahead_refusal=lookahead,
             payload={k: v for act in acts for k, v in act.payload.items()},
             launch_refusal=campaign_refusal,
         )

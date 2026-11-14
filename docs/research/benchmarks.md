@@ -99,7 +99,12 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   justlogic-d234 ×2, +5 and +15 pts on legalbench-fods; in three legalbench-fods rounds L1 proposed
   only no-op variants. Re-measured on a3312e3e1 (cycle_524b6b54dcd5, $0.276 billed, $0.313
   incurred): **0.546** over six cells, held-out lift 0 / +2.5 on justlogic-d234, +10 / +15 on
-  legalbench-fods, 0 / 0 on hotpotqa-distractor (mean +0.046); search θ +0.142.
+  legalbench-fods, 0 / 0 on hotpotqa-distractor (mean +0.046); search θ +0.142. Re-measured on
+  dcbb0f66e (cycle_d34546396419, $0.198 billed, $0.234 incurred): **0.518** over five of six cells,
+  halted at the origin gate; held-out lift 0 / −1.3 on justlogic-d234, −5 on legalbench-fods, 0 / +15
+  on hotpotqa-distractor (mean +0.017); θ +0.052. The sixth cell (legalbench-fods seed 1) elected in
+  two rounds and was excluded (roadmap § Optimizer tuning — the standing board, item 4), so this
+  reading covers a different cell set from the two above and is not comparable.
 
 ## Protocol
 

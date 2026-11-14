@@ -95,6 +95,8 @@ from promptpotter.application.jobs.launcher import launch as launcher_launch
 from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     RunStart,
+    admitted,
+    campaign_at,
     destroying,
     paid_call,
     paid_pass,
@@ -2319,6 +2321,23 @@ async def test_a_silent_producer_holding_its_cycle_reads_wedged_and_only_the_das
     )
 
 
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+async def test_the_dashboard_offers_a_skip_while_its_walk_appends_and_refuses_it_once_it_died(
+    built_stores: Stores, held_cycle: _HeldCycle
+) -> None:
+    hop, cycle_dir, _, _ = held_cycle
+    await asyncio.to_thread(_running, cycle_dir)
+    live = served_dashboard(built_stores, hop)
+    assert isinstance(live, ServedDashboard) and live.skip_refusal == "", (
+        "the dashboard refused a skip its walk was there to take"
+    )
+    release_cycle(cycle_dir)
+    died = served_dashboard(built_stores, hop)
+    assert isinstance(died, ServedDashboard) and died.skip_refusal, (
+        "the dashboard offered a skip no walk would take"
+    )
+
+
 @pytest.mark.usefixtures("optimizing_memory", "offline", "held_cycle")
 async def test_a_terminals_act_by_an_id_prefix_reports_the_campaign_it_acted_on_never_the_prefix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -3536,7 +3555,9 @@ async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addres
     into_leaf = Subject.of((acts_hop, leaf)).command_fields
     CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(state=Running()))
     await asyncio.to_thread(hold_cycle, leaf_dir)
-    controls["inner, its own loop running"] = inner.run_state(leaf).admission.refusal
+    controls["inner, its own loop running"] = admitted(
+        inner, campaign_at(inner, leaf), inner.run_state(leaf)
+    ).refusal
     paused = CommandCall(PauseCyclePayload(**into_leaf, reason="stop"), "inner-run", door=Door.HOST)
     with pytest.raises(PayloadInvalidError):
         await sender.dispatch(paused)
@@ -3599,7 +3620,9 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Com
         ):
             pause = PauseCyclePayload(campaign_id="held", cycle_id="cycle_held", reason="stop")
             await sender.dispatch(CommandCall(pause, door=Door.HOST))
-            controls["outer, paused under a pass"] = stores.run_state(held).admission.refusal
+            controls["outer, paused under a pass"] = admitted(
+                stores, campaign_at(stores, held), stores.run_state(held)
+            ).refusal
             raise asyncio.CancelledError("aborted")
     parked = f"{RUN_PHASE_INFO[RunPhase.PAUSED].parked.capitalize()}."
     _read_as_owed(command_log, {}, {"outer, paused under a pass": parked})

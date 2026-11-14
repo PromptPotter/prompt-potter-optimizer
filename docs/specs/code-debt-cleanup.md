@@ -226,6 +226,12 @@ row it closes.
   `any(draws_coupon(send.payer) for send in sends)` at four sites (`launch_bound`, `admit_launch`,
   `_tier_bound`, `_clamped`). Root: one named fact of the sends that each site reads. **Rides with:**
   money. **Re-test:** `git grep -c "draws_coupon(send.payer) for send in sends" -- promptpotter` is 1.
+- **A run's meter is optional on the wire after it no longer can be** (narr-3's fix pass): the served
+  dashboard lost its `meter is None` branches, but `spend_metered` / `metered_line` stay nullable
+  (`spend_metered`'s description still says "null where the manifest is gone") and
+  `binding_run_limits` / `fork_remainder` still take `campaign: None`. Root: the meter and the
+  campaign are required wherever a run is served. **Rides with:** money. **Re-test:**
+  `spend_metered` is non-null in `webapp/lib/api/types.generated.ts`.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
@@ -293,21 +299,6 @@ row it closes.
   `RaceStandingRecord`s apart from the `Narration` that reads the same ledger. Root: the race standing
   is one fold every door reads. **Rides with:** the row above. **Re-test:**
   `git grep -n "_race_standings" -- promptpotter` is empty.
-- **The typed acts still bank render text** (narr-2's review): `domain/phase_acts.py`'s
-  `StepOpened.title/tag/lines`, `StepClosed.headline/details`, `ProposeOpened.parent_prompt` (a
-  120-char slice) and `ProposeClosed.columns` (the diff table, rebuildable from `RoundProposedRecord`,
-  the origin and the parent) are strings built in `potter/members.py:478-509,565-585` and
-  `runner/round.py`, against "its text computed at render". Action: each act keeps the facts and its
-  renderer words them; a run-data reshape, wiped. **Rides with:** narr 3, after faults 1 and small 2
-  (they take `potter/members.py` and `runner/round.py`), before ren. **Re-test:** no `phase_acts.py`
-  field holds text a renderer could build from the records.
-- **A run's ledger has two doors** (narr-2's review): inside a run, `append_record` writes the scope's
-  ledger while the run's own declarations go through `CampaignStore.append` on a named cycle
-  (`run_observers.py:84,175`, `runner/entry.py:216`, `runner/mint.py:199,261`, `inner/spawn.py:317`),
-  which a muted scope cannot mute; `scoring_scope.py::verb_ledger` yields any bound ledger whatever
-  the hop it was asked for. Root: one door, the scope, opened on the cycle the caller names.
-  **Rides with:** narr 3. **Re-test:** `git grep -n "campaigns.append(" -- promptpotter/application/runner
-  promptpotter/application/run_observers.py` is empty.
 - **DSPy derives its cell's priced pair beside core's**: `dspy_module.py::_in_process_run` calls
   `pricing.py::priced_pair` off the payload's `params`, while core binds each node's pair once
   (`sample_measurement.py::priced_pairs`); they agree only while the payload's `provider` is `NodeCall`'s.
@@ -731,8 +722,8 @@ and derived the knob couplings from each member's draws and the escalation ladde
   fixtures and tests: the whole `campaign_config` (`halt_at_fitness`, `origin_gate`, `panel_gate`,
   `run_seed`, `task_framing`, `bench_trigger`, …), statistics (`se_clustered`, `kendall_w`,
   `rank_agreement`, `snr`, `theta_se`, `delta_se`, `edit_effect_sd`, …), spend detail (`cache_read`,
-  `reserve_usd`, `incurred_usd_ratio`, `search_usd`, …) and refusals (`lookahead_refusal`,
-  `refused_efforts`, `indistinct_efforts`); `ReadKind.HEAD_TO_HEAD_PRICE` is the one read no webapp
+  `reserve_usd`, `incurred_usd_ratio`, `search_usd`, …) and refusals (`refused_efforts`,
+  `indistinct_efforts`); `ReadKind.HEAD_TO_HEAD_PRICE` is the one read no webapp
   source calls, so a head-to-head launch never shows its price. Accumulated data reaches the dashboard
   (operator), so each field is shown or deleted server-side; request fields of kinds the browser does
   not press (`from_round`, `keep_results`, …) come out of the count first. Action: a gate check holds
@@ -821,8 +812,14 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **A preflight warning reaches the terminal alone** (narr-2's landing): `InitOpened.warnings` is read
   by `render/ansi.py::_render_init_enter` only; `domain/narration.py` has no row for it, so the chat
   thread and the dashboard never say an inner connector's or a knob's warning. Root: the warnings are
-  a narration row every door reads. **Rides with:** faults 2. **Re-test:** a launch with a preflight
-  warning shows it in the run's thread.
+  a narration row every door reads, and `PreflightNote.title` / `detail` are facts, not text worded
+  from the config at write (narr-3's fix pass). **Rides with:** faults 2. **Re-test:** a launch with a
+  preflight warning shows it in the run's thread.
+- **A handled parse failure prints two tracebacks** (C0 at narr-3's landing): an `l1_critique` reply
+  failing both repair rungs is answered (`round 0 l1_critique landed nothing`), yet the readout
+  prints the `ValidationError` and the `OptimizerPromptParseError` chain under `shared/errors.py::graceful`.
+  Root: a handled fault is said once as its sentence; a traceback is for a fault nobody handled.
+  **Rides with:** faults 2. **Re-test:** a readout with a twice-failed critique holds no `Traceback`.
 - **A run phase spells two refusal words** (narr-2's report): `domain/phases.py::RunPhaseInfo`'s
   `no_action` and `parked` (`:325-326`) are prose `phases.py:439,444` hands out as a refusal, beside
   `Refusal`'s own message. Root: the phase's refusal is a `Refusal` with its `next_acts`.
@@ -1115,6 +1112,13 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   ack on a paused cycle.
 
 ### batch/32 · tests-w (a tests chain named at batch/25's fold; it owns `scripts/offline_world.py`)
+
+- **Two wounded legs move under load** (narr-3's landing): `offline_run.py --against` read
+  gepa/wounded and levi/wounded MOVED on `decisions.ledger.round_warnings` while `gate.py --changed`
+  ran its pytest beside it on 16 cores, and 20/20 UNMOVED alone on the same tree. A round warning in
+  a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
+  its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
+  proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
 
 - **`run_init_round`, `seat`, `_peer_cycle` and `close_round` replay production by hand**:
   `tests/factories.py::run_init_round` re-composes `runner/entry.py::run_optimization`'s preamble and

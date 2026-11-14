@@ -80,6 +80,8 @@ def _fork_sibling_setup(
         parent,
         decision(ForkCutFrom(from_round=from_round, fork=payload), child.cycle_id, node=None),
     )
+    if cut is None:
+        raise RuntimeError(f"{child.cycle_id}: a muted scope landed no cut to mint the fork at")
     # ONE record: the cut, the seed and the babysat stamp (decisions.md § 0005) land as one fact.
     campaign_store.mint_cycle(
         child,

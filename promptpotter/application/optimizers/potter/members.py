@@ -109,12 +109,18 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.optimizers.potter.validators import l3_plan_breaches
 from promptpotter.application.scoring.selection import crowning_cells
-from promptpotter.application.views.render.primitives import fmt_fitness
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import VariationMode
 from promptpotter.domain.optimizer_state import Critique, StatePart
-from promptpotter.domain.phase_acts import StepClosed, StepOpened
+from promptpotter.domain.phase_acts import (
+    CountFact,
+    FitnessFact,
+    SettingsFact,
+    StepClosed,
+    StepOpened,
+    TextFact,
+)
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool
 from promptpotter.domain.records.run_records import StopLoop
@@ -126,7 +132,6 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import ValidationReason
-from promptpotter.shared.answer_text import truncate
 
 logger = logging.getLogger(__name__)
 
@@ -257,23 +262,19 @@ class L1Generate(LayoutNode, nodes.Proposer):
 
     def opening(self, ctx: NodeContext, bench: nodes.RoundOpening) -> nodes.RoundOpening:
         knobs = ctx.knobs(L1GenerateKnobs)
-        # At patience 0 L2 fires every round, which "stall 1/0" would state as a riddle.
-        patience = ctx.knobs(EscalationKnobs).l1_patience
-        stall = ctx.slice(Ladder).l1_stall_count
-        standing = "L2 every round" if patience == 0 else f"stall {stall}/{patience} → L2"
-        if ctx.round_num and ctx.recall(Critique, ctx.round_num - 1).readout:
-            critique = f"from R{ctx.round_num - 1}"
-        elif ctx.round_num <= 1:
-            critique = "none yet (first round)"
-        else:
-            critique = f"none (R{ctx.round_num - 1} produced none)"
+        prior = ctx.round_num - 1
+        critiqued = ctx.round_num > 0 and bool(ctx.recall(Critique, prior).readout)
+        # A round the critique failed is said: the generate below runs without one.
+        critique = "critique from round" if critiqued else "no critique from round"
         return nodes.RoundOpening(
-            standing=standing,
-            note=f"Prior critique: {critique}",
+            facts={
+                "L1 stalled rounds": CountFact(value=ctx.slice(Ladder).l1_stall_count),
+                "L2 after stalled rounds": CountFact(value=ctx.knobs(EscalationKnobs).l1_patience),
+                critique: CountFact(value=prior) if prior >= 0 else None,
+            },
             arms=variants_this_round(knobs.n_variants, ctx.slice(L2Memory))
             + knobs.recombine
             + len(rejoining(ctx.read(Lineage))),
-            proposer="L1",
             replayed=bench.replayed,
         )
 
@@ -387,8 +388,6 @@ class L2Context(LayoutNode):
         )
 
     def parse(self, ctx: NodeContext, raw: L2ContextOutput) -> TransitionResult:
-        # An absent reason is REPORTED, never replaced by a sentence that reads as L2's own.
-        rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
         # Filtered here: a landed steer is carried forward on every later fire and never pruned.
         steer: dict[str, Any] = {
             key: value
@@ -426,7 +425,7 @@ class L2Context(LayoutNode):
 
         named = raw.recombinations if isinstance(raw, L2RecombiningOutput) else []
         return TransitionResult(
-            described=f"L2: {rationale}",
+            rationale=raw.rationale,
             steer=steer,
             axis_targeted=raw.axis_targeted,
             l1_layout=accepted_layout,
@@ -463,36 +462,34 @@ class L2Context(LayoutNode):
         return l2_fired(ladder, fire.ask.l2)
 
     def enter_act(self, ctx: NodeContext, fire: Fire) -> StepOpened:
-        items = [(k, str(v)) for k, v in ctx.slice(L2Memory).steered("l1_generate").items()]
-        if items:
-            shown = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
-            more = f", +{len(items) - 5} more" if len(items) > 5 else ""
-            overrides = f"l1_overrides: {', '.join(shown)}{more}"
-        else:
-            overrides = "l1_overrides: (none)"
+        steered = ctx.slice(L2Memory).steered("l1_generate")
+        peak = fire.best.composite_fitness
+        stalled = rounds_without_advance(ctx.read(Lineage).rounds)
         return StepOpened(
             node=self.name,
             activity=self.phase.activity,
-            title="L2 REFINE CONTEXT",
-            tag=f"L2 fire {ctx.slice(Ladder).l2.fires + 1}",
-            lines=(
-                f"rule={fire.cause}  |  "
-                f"L1 stalled {rounds_without_advance(ctx.read(Lineage).rounds)} rounds  |  "
-                f"fit={ctx.read(Frontier).parent_fitness_text}  "
-                f"peak fitness={fmt_fitness(fire.best.composite_fitness)}",
-                overrides,
-                "LLM analyzing failure patterns...",
-            ),
+            facts={
+                "fire": CountFact(value=ctx.slice(Ladder).l2.fires + 1),
+                "rule": TextFact(value=fire.cause),
+                "L1 stalled rounds": CountFact(value=stalled),
+                "parent fitness": ctx.read(Frontier).parent_fitness,
+                "peak fitness": None if peak is None else FitnessFact(value=peak),
+                "l1_overrides": SettingsFact(value=steered) if steered else None,
+            },
         )
 
     def exit_act(self, ctx: NodeContext, result: TransitionResult) -> StepClosed:
-        layout = ", l1_layout edited" if result.l1_layout is not None else ""
-        axis = f", axis={result.axis_targeted}" if result.axis_targeted else ""
-        changed = len(ctx.slice(L2Memory).steered("l1_generate"))
         return StepClosed(
-            headline=f"L2 decision: {changed} param changes{layout}{axis}",
-            details=(result.described,),
-            audit=("L2 call", self.name),
+            facts={
+                "param changes": CountFact(value=len(ctx.slice(L2Memory).steered("l1_generate"))),
+                # An edit's whole layout, as the panels it places.
+                "l1_layout panels": None
+                if result.l1_layout is None
+                else CountFact(value=len(result.l1_layout.all_placeholders())),
+                "axis": TextFact(value=result.axis_targeted) if result.axis_targeted else None,
+                "decided": TextFact(value=result.rationale),
+            },
+            audit=self.name,
         )
 
 
@@ -517,7 +514,6 @@ class L3Plan(LayoutNode):
         )
 
     def parse(self, ctx: NodeContext, raw: L3PlanOutput) -> TransitionResult:
-        rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
         failures = l3_plan_breaches(raw.plan, prior_plan=ctx.slice(L3Memory).plan)
         if failures:
             logger.warning(
@@ -526,7 +522,7 @@ class L3Plan(LayoutNode):
                 ", ".join(o.validator_id for o in failures),
             )
         return TransitionResult(
-            described=f"L3: {rationale}",
+            rationale=raw.rationale,
             plan=raw.plan,
             l3_note=raw.note,
             l3_guard_breaches=failures,
@@ -553,21 +549,22 @@ class L3Plan(LayoutNode):
         return StepOpened(
             node=self.name,
             activity=self.phase.activity,
-            title="L3 MODIFY PLAN",
-            tag=f"L3 fire {ctx.slice(Ladder).l3.fires + 1}",
-            lines=(
-                "Healing L2's refused l1_layout edit"
+            facts={
+                "fire": CountFact(value=ctx.slice(Ladder).l3.fires + 1),
+                "rule": TextFact(value=fire.cause),
+                "L2 stalled rounds": None
                 if fire.ask is None
-                else f"L2 stalled {fire.ask.l2.stall_count} rounds",
-                f"Current plan: {truncate(ctx.slice(L3Memory).plan[:120], 55, '...')}",
-                "LLM designing new strategy...",
-            ),
+                else CountFact(value=fire.ask.l2.stall_count),
+                "plan": TextFact(value=ctx.slice(L3Memory).plan),
+            },
         )
 
     def exit_act(self, _ctx: NodeContext, result: TransitionResult) -> StepClosed:
         return StepClosed(
-            headline=f"New plan: {truncate(result.plan[:120], 55, '...')}",
-            details=(result.described,),
+            facts={
+                "plan": TextFact(value=result.plan),
+                "decided": TextFact(value=result.rationale),
+            },
             audit=None,
         )
 

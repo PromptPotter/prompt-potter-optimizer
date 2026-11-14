@@ -1659,6 +1659,26 @@
         "title": "CostAbsence",
         "type": "string"
       },
+      "CountFact": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "count",
+            "default": "count",
+            "title": "Kind",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "CountFact",
+        "type": "object"
+      },
       "Coverage": {
         "additionalProperties": false,
         "description": "How much of the cell set a lift stands on.",
@@ -3112,6 +3132,38 @@
           "citation"
         ],
         "title": "EvidenceGrounding",
+        "type": "object"
+      },
+      "FitnessFact": {
+        "additionalProperties": false,
+        "description": "In the grading scorer's unit; a composite fitness has none.",
+        "properties": {
+          "kind": {
+            "const": "fitness",
+            "default": "fitness",
+            "title": "Kind",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasurandUnit"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "FitnessFact",
         "type": "object"
       },
       "FlightRecord": {
@@ -6048,60 +6100,12 @@
       },
       "ProposeClosed": {
         "additionalProperties": false,
-        "description": "Each column a flat ``key → value`` of one subject: the start, the parent, then each candidate.",
+        "description": "Its candidates are the round's `ArmRecord`s, appended with it.",
         "properties": {
           "act": {
             "const": "propose_closed",
             "default": "propose_closed",
             "title": "Act",
-            "type": "string"
-          },
-          "collapses": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "Collapses",
-            "type": "object"
-          },
-          "columns": {
-            "items": {
-              "maxItems": 2,
-              "minItems": 2,
-              "prefixItems": [
-                {
-                  "type": "string"
-                },
-                {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object"
-                }
-              ],
-              "type": "array"
-            },
-            "title": "Columns",
-            "type": "array"
-          },
-          "node_param_keys": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Node Param Keys"
-          },
-          "proposer": {
-            "title": "Proposer",
             "type": "string"
           },
           "replayed": {
@@ -6110,18 +6114,14 @@
           }
         },
         "required": [
-          "replayed",
-          "proposer",
-          "columns",
-          "node_param_keys",
-          "collapses"
+          "replayed"
         ],
         "title": "ProposeClosed",
         "type": "object"
       },
       "ProposeOpened": {
         "additionalProperties": false,
-        "description": "``standing`` and ``note`` are the optimizer's own words (``RoundOpening``).",
+        "description": "``facts`` are the walk's lead's (``RoundOpening``).",
         "properties": {
           "act": {
             "const": "propose_opened",
@@ -6151,6 +6151,20 @@
             ],
             "title": "Budget Rounds"
           },
+          "facts": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/StepFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Facts",
+            "type": "object"
+          },
           "model": {
             "anyOf": [
               {
@@ -6166,24 +6180,9 @@
             "title": "Node",
             "type": "string"
           },
-          "note": {
-            "title": "Note",
-            "type": "string"
-          },
-          "parent_fitness": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Fitness"
-          },
-          "parent_prompt": {
-            "title": "Parent Prompt",
-            "type": "string"
+          "parent_round": {
+            "title": "Parent Round",
+            "type": "integer"
           },
           "run_standing": {
             "anyOf": [
@@ -6194,20 +6193,14 @@
                 "type": "null"
               }
             ]
-          },
-          "standing": {
-            "title": "Standing",
-            "type": "string"
           }
         },
         "required": [
           "node",
           "budget_rounds",
-          "standing",
-          "parent_fitness",
-          "parent_prompt",
+          "parent_round",
           "arms",
-          "note",
+          "facts",
           "model",
           "run_standing"
         ],
@@ -8127,6 +8120,40 @@
         "title": "ScoringLockedRecord",
         "type": "object"
       },
+      "SettingsFact": {
+        "additionalProperties": false,
+        "description": "Knobs to their values, unjoined: a temperature stays a number.",
+        "properties": {
+          "kind": {
+            "const": "settings",
+            "default": "settings",
+            "title": "Kind",
+            "type": "string"
+          },
+          "value": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "title": "Value",
+            "type": "object"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "SettingsFact",
+        "type": "object"
+      },
       "Skipped": {
         "additionalProperties": false,
         "description": "The operator stopped it.",
@@ -8331,7 +8358,7 @@
       },
       "StepClosed": {
         "additionalProperties": false,
-        "description": "``headline`` is empty where the step adopted nothing.",
+        "description": "``facts`` is empty where the step adopted nothing; ``audit`` names the node whose call the\nround's audit holds.",
         "properties": {
           "act": {
             "const": "step_closed",
@@ -8342,17 +8369,7 @@
           "audit": {
             "anyOf": [
               {
-                "maxItems": 2,
-                "minItems": 2,
-                "prefixItems": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "string"
-                  }
-                ],
-                "type": "array"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -8360,29 +8377,56 @@
             ],
             "title": "Audit"
           },
-          "details": {
-            "items": {
-              "type": "string"
+          "facts": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/StepFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
-            "title": "Details",
-            "type": "array"
-          },
-          "headline": {
-            "title": "Headline",
-            "type": "string"
+            "title": "Facts",
+            "type": "object"
           }
         },
         "required": [
-          "headline",
-          "details",
+          "facts",
           "audit"
         ],
         "title": "StepClosed",
         "type": "object"
       },
+      "StepFact": {
+        "discriminator": {
+          "mapping": {
+            "count": "#/components/schemas/CountFact",
+            "fitness": "#/components/schemas/FitnessFact",
+            "settings": "#/components/schemas/SettingsFact",
+            "text": "#/components/schemas/TextFact"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CountFact"
+          },
+          {
+            "$ref": "#/components/schemas/FitnessFact"
+          },
+          {
+            "$ref": "#/components/schemas/TextFact"
+          },
+          {
+            "$ref": "#/components/schemas/SettingsFact"
+          }
+        ]
+      },
       "StepOpened": {
         "additionalProperties": false,
-        "description": "An optimizer step's own words on its fire.",
+        "description": "An optimizer step's facts on its fire, by name: generic, so an optimizer stays a plugin.",
         "properties": {
           "act": {
             "const": "step_opened",
@@ -8394,32 +8438,29 @@
             "title": "Activity",
             "type": "string"
           },
-          "lines": {
-            "items": {
-              "type": "string"
+          "facts": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/StepFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
-            "title": "Lines",
-            "type": "array"
+            "title": "Facts",
+            "type": "object"
           },
           "node": {
             "title": "Node",
-            "type": "string"
-          },
-          "tag": {
-            "title": "Tag",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
             "type": "string"
           }
         },
         "required": [
           "node",
           "activity",
-          "title",
-          "tag",
-          "lines"
+          "facts"
         ],
         "title": "StepOpened",
         "type": "object"
@@ -8513,6 +8554,27 @@
           "p_adjusted"
         ],
         "title": "TestFamily",
+        "type": "object"
+      },
+      "TextFact": {
+        "additionalProperties": false,
+        "description": "Whole, as banked: a rule's name, a plan, a rationale; empty is one none gave.",
+        "properties": {
+          "kind": {
+            "const": "text",
+            "default": "text",
+            "title": "Kind",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "TextFact",
         "type": "object"
       },
       "ThetaCaveat": {

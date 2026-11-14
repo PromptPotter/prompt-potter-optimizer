@@ -47,6 +47,7 @@ from promptpotter.infrastructure.projections.live_dashboard import (
     DashboardCheckout,
     run_limits_at,
 )
+from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.infrastructure.run_state import run_state_stamps
 from promptpotter.infrastructure.store.account_spend import (
     sandbox_cycle_dirs,
@@ -188,11 +189,19 @@ class CampaignStore:
     def ledger(self, hop: CycleHop) -> Path:
         return self.layout(hop).ledger
 
-    def append(self, hop: CycleHop, *records: CycleRecord) -> int:
-        """The one append door: each record lands under a one-shot hold of the cycle's `index.json`
-        (and, for a run phase, its `dashboard.json`), joining a run's in this process."""
+    def append(self, hop: CycleHop, *records: CycleRecord) -> int | None:
+        """THE append door of a named cycle, a run's own declarations included; ``None``: a muted
+        run scope muted it. Each record lands under a one-shot hold of the cycle's `index.json`
+        (and, for a run phase, its `dashboard.json`), joining a run's in this process, through the
+        scope's own handle where it is bound on *hop*'s ledger: a second is a second appender."""
+        if (bound := run_scope().ledger) is None:
+            return None
         cycle_dir = CycleDir(self.cycle_dir(hop))
-        ledger = CycleEventLog.open(cycle_dir)
+        ledger = (
+            bound
+            if isinstance(bound, CycleEventLog) and bound.path == self.ledger(hop)
+            else CycleEventLog.open(cycle_dir)
+        )
         with LedgerIndex.of(ledger.path).projecting() as projecting:
             projecting.add(CycleIndexProjection(cycle_dir))
             if any(isinstance(record, RunPhaseRecord) for record in records):

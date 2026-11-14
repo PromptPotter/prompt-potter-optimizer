@@ -39,7 +39,7 @@ async def skip_searchpoint(
     dispatched: DispatchedToCycle[SkipSearchpointPayload],
 ) -> Applier[object]:
     return Applier.for_loop(
-        dispatched, dispatched.dispatcher.stores.run_state(dispatched.hop).admission.skip_refusal
+        dispatched, dispatched.dispatcher.stores.run_state(dispatched.hop).skip_refusal
     )
 
 
@@ -58,5 +58,5 @@ async def set_sample_lookahead(
         dispatched,
         ""
         if payload.auto
-        else dispatched.dispatcher.stores.run_state(dispatched.hop).admission.lookahead_refusal,
+        else dispatched.dispatcher.stores.run_state(dispatched.hop).lookahead_refusal,
     )

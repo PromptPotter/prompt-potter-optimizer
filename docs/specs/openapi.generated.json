@@ -14691,16 +14691,11 @@
       },
       "RunAdmission": {
         "additionalProperties": false,
-        "description": "Which run verbs a cycle admits now: the one answer the run control and the dispatcher read.\n\nEach ``*_refusal`` is the sentence that verb is refused with, empty where it is admitted.",
+        "description": "The launch half of a cycle's run verbs, its campaign's refusal joined: what the one run\ncontrol offers. The loop's verbs answer off `RunState` alone, which no campaign moves.",
         "properties": {
           "launch_refusal": {
             "description": "Why the cycle's campaign refuses every launch (archived, its definition moved), so its stop's `start-run` acts are not offered; empty where a launch is admitted.",
             "title": "Launch Refusal",
-            "type": "string"
-          },
-          "lookahead_refusal": {
-            "description": "`set-sample-lookahead` for ONE round. `auto` is a mode and a disarm removes an arming, so neither needs a walk and neither is refused here.",
-            "title": "Lookahead Refusal",
             "type": "string"
           },
           "offers": {
@@ -14735,18 +14730,11 @@
             "description": "Why the control offers none; empty where it offers one.",
             "title": "Refusal",
             "type": "string"
-          },
-          "skip_refusal": {
-            "description": "`skip-searchpoint`.",
-            "title": "Skip Refusal",
-            "type": "string"
           }
         },
         "required": [
           "offers",
           "refusal",
-          "skip_refusal",
-          "lookahead_refusal",
           "payload",
           "launch_refusal"
         ],
@@ -15450,7 +15438,7 @@
         "properties": {
           "admission": {
             "$ref": "#/components/schemas/RunAdmission",
-            "description": "Which run verbs the cycle admits now (`RunState.admission`): the verb the run control offers or the sentence where it offers none, and each verb's refusal — the same answer the dispatcher refuses on."
+            "description": "The verb the run control offers now, its campaign's refusal joined (`admission.py::admitted`), or the sentence where it offers none."
           },
           "allotment": {
             "anyOf": [
@@ -15760,6 +15748,11 @@
           "sample_coverage": {
             "$ref": "#/components/schemas/SampleCoverage"
           },
+          "skip_refusal": {
+            "description": "Why `skip-searchpoint` is refused, off the run alone (`RunState`), which no campaign moves; empty where it is admitted.",
+            "title": "Skip Refusal",
+            "type": "string"
+          },
           "spend_metered": {
             "anyOf": [
               {
@@ -15850,6 +15843,7 @@
           "run_phase",
           "producer",
           "admission",
+          "skip_refusal",
           "stop",
           "overlap_line_round",
           "overlap_line_n",

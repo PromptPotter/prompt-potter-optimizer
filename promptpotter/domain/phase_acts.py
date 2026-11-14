@@ -7,7 +7,8 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from promptpotter.domain.bench import BenchSubject
-from promptpotter.domain.paired_reading import ArmName
+from promptpotter.domain.cell_fold import CellFold
+from promptpotter.domain.paired_reading import ArmName, MeasurandUnit
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.strict_model import FrozenModel
@@ -58,32 +59,66 @@ class InitClosed(FrozenModel):
     formula: CellFormula
 
 
+class CountFact(FrozenModel):
+    kind: Literal["count"] = "count"
+    value: int
+
+
+class FitnessFact(FrozenModel):
+    """In the grading scorer's unit; a composite fitness has none."""
+
+    kind: Literal["fitness"] = "fitness"
+    value: float
+    unit: MeasurandUnit | None = None
+
+
+def fold_fitness(fold: CellFold | None) -> FitnessFact | None:
+    """*fold*'s fitness in its scorer's unit; ``None`` is unmeasured."""
+    if fold is None or fold.fitness is None:
+        return None
+    return FitnessFact(value=fold.fitness, unit=fold.fitness_unit)
+
+
+class TextFact(FrozenModel):
+    """Whole, as banked: a rule's name, a plan, a rationale; empty is one none gave."""
+
+    kind: Literal["text"] = "text"
+    value: str
+
+
+class SettingsFact(FrozenModel):
+    """Knobs to their values, unjoined: a temperature stays a number."""
+
+    kind: Literal["settings"] = "settings"
+    value: dict[str, int | float | str]
+
+
+# A step's fact, by its kind, which its renderer words; ``None`` is unmeasured, never said.
+type StepFact = Annotated[
+    CountFact | FitnessFact | TextFact | SettingsFact, Field(discriminator="kind")
+]
+
+
 class ProposeOpened(FrozenModel):
-    """``standing`` and ``note`` are the optimizer's own words (``RoundOpening``)."""
+    """``facts`` are the walk's lead's (``RoundOpening``)."""
 
     act: Literal["propose_opened"] = "propose_opened"
     node: str
     # Null where no rounds axis binds; 0 is origin only.
     budget_rounds: int | None
-    standing: str
-    # The parent's level on the cells of the round it last ended.
-    parent_fitness: float | None
-    parent_prompt: str
+    # The round the parent last ended, whose head it is: its prompt and its level are that round's.
+    parent_round: int
     arms: int | None
-    note: str
+    facts: dict[str, StepFact | None]
     model: str | None
     run_standing: RunStanding | None
 
 
 class ProposeClosed(FrozenModel):
-    """Each column a flat ``key → value`` of one subject: the start, the parent, then each candidate."""
+    """Its candidates are the round's `ArmRecord`s, appended with it."""
 
     act: Literal["propose_closed"] = "propose_closed"
     replayed: bool
-    proposer: str
-    columns: tuple[tuple[str, dict[str, str]], ...]
-    node_param_keys: dict[str, list[str]] | None
-    collapses: dict[str, int]
 
 
 class MeasureOpened(FrozenModel):
@@ -106,23 +141,21 @@ class PassOpened(FrozenModel):
 
 
 class StepOpened(FrozenModel):
-    """An optimizer step's own words on its fire."""
+    """An optimizer step's facts on its fire, by name: generic, so an optimizer stays a plugin."""
 
     act: Literal["step_opened"] = "step_opened"
     node: str
     activity: str
-    title: str
-    tag: str
-    lines: tuple[str, ...]
+    facts: dict[str, StepFact | None]
 
 
 class StepClosed(FrozenModel):
-    """``headline`` is empty where the step adopted nothing."""
+    """``facts`` is empty where the step adopted nothing; ``audit`` names the node whose call the
+    round's audit holds."""
 
     act: Literal["step_closed"] = "step_closed"
-    headline: str
-    details: tuple[str, ...]
-    audit: tuple[str, str] | None
+    facts: dict[str, StepFact | None]
+    audit: str | None
 
 
 type PhaseAct = Annotated[

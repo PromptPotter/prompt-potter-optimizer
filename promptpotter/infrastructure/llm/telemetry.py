@@ -17,12 +17,6 @@ from promptpotter.infrastructure.store.layout import CampaignLayout, cycle_ledge
 from promptpotter.shared.measurement_context import measured_pass
 
 
-def active_cycle_ledger() -> CycleEventLog | None:
-    """Ask before OPENING one: a second handle is a second appender, and ``append`` is not atomic."""
-    ledger = run_scope().ledger
-    return None if ledger is UNBOUND else ledger
-
-
 def bound_ledger(what: str) -> CycleEventLog | None:
     """The run scope's ledger; ``None`` where a probe render mutes it."""
     if (ledger := run_scope().ledger) is UNBOUND:

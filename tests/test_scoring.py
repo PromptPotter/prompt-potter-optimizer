@@ -140,6 +140,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
 )
 from promptpotter.application.optimizers.potter.escalation import (
     EscalationInputs,
+    Fire,
     HighWater,
     LadderAsk,
     LayerReading,
@@ -230,6 +231,11 @@ from promptpotter.application.scoring.selection import (
     level_band,
     readable_lifts,
 )
+from promptpotter.application.views.render.ansi import (
+    render_population,
+    render_round_start,
+    to_text,
+)
 from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.config.paths import optimizers_root
 from promptpotter.config.settings import settings
@@ -279,7 +285,7 @@ from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.dashboard_rows import RoundHealth, RunLimits
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
-from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
+from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.origin_panel import (
@@ -306,6 +312,15 @@ from promptpotter.domain.paired_reading import (
     RoundArm,
 )
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
+from promptpotter.domain.phase_acts import (
+    FitnessFact,
+    ProposeClosed,
+    ProposeOpened,
+    SettingsFact,
+    StepClosed,
+    StepOpened,
+    TextFact,
+)
 from promptpotter.domain.phases import PauseCause, RunPhase, StopReason, WalkEnd
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
@@ -2924,7 +2939,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             l1 = cast("node_contract.Proposer", optimizers.NODE_MEMBERS.get("l1_generate"))
             seed = cast("node_contract.Proposer", optimizers.NODE_MEMBERS.get("mating"))
             seeded = node_contract.RoundWalk("default", (seed,), (l1,), "author")
-            blank = node_contract.RoundOpening("", "", None, "", replayed=False)
+            blank = node_contract.RoundOpening({}, None, replayed=False)
             stated = l1.opening(NodeContext(at_origin, l1), blank)
             assert announce_opening(at_origin, seeded) == stated != blank, (
                 "a seed walking ahead of L1 stated the round's standing and arms in L1's place"
@@ -4200,6 +4215,75 @@ def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_drop
             press(late, key)
     assert commanded.inbox(command_hop).skips == ()
     assert not control.pause_requested(), "a pause with no run to stop was left standing"
+
+
+def test_a_step_says_each_fact_by_its_kind_and_cuts_one_only_in_its_enter_box() -> None:
+    # A fitness reads in its scorer's unit, a knob as the number it is set to.
+    decided = "the critique names the framing, " * 4
+    facts: dict[str, Any] = {
+        "parent fitness": FitnessFact(value=0.6, unit="rate"),
+        "peak fitness": FitnessFact(value=0.61234),
+        "l1_overrides": SettingsFact(value={"temperature": 0.7, "n_variants": 3}),
+        "decided": TextFact(value=decided),
+    }
+    entered = to_text("refine_strategy", StepOpened(node="l2", activity="refining", facts=facts))
+    closed = to_text("refine_strategy", StepClosed(facts=facts, audit=None))
+    for said in ("60%", "0.6123", "temperature=0.7", "n_variants=3"):
+        assert said in entered and said in closed, f"a step's box worded a fact as {said!r} not"
+    assert decided.strip() in closed and decided.strip() not in entered, (
+        "a step's rationale was cut on its exit, or printed whole in its enter box"
+    )
+
+
+def test_a_round_start_reads_its_parents_fitness_in_its_scorers_unit() -> None:
+    schema = pipeline_schema([PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)])
+    parent = round_result(1, improved=False, folds={PARENT: score_summary(fitness=0.6)})
+    opened = ProposeOpened(
+        node="l1_generate",
+        budget_rounds=None,
+        parent_round=1,
+        arms=3,
+        facts={},
+        model=None,
+        run_standing=None,
+    )
+    assert "60%" in render_round_start(opened, 2, parent, schema), (
+        "the round's header lost the parent's fitness, or read it off its scorer's unit"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_l2s_box_banks_its_parents_fitness_in_its_scorers_unit(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The parent takes half its origin cells; the run's peak stands elsewhere.
+    monkeypatch.setattr(node_context, "inner_cells", lambda: None)
+    hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(40)]
+    seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
+    run_init(seated.cycle)
+    l2: Any = optimizers.NODE_MEMBERS.get("l2_context")
+    fire = Fire(cause="l1_patience", ask=None, best=_high_water(0.9, [], 0.1))
+    said = l2.enter_act(NodeContext(seated, l2), fire).facts["parent fitness"]
+    assert said == FitnessFact(value=0.5, unit="rate"), (
+        "L2's box lost the parent's fitness, or said it off its scorer's unit"
+    )
+
+
+def test_a_population_table_holds_each_candidates_own_rendered_prompt() -> None:
+    # Start and parent render alike, so only a candidate's own render moves the row.
+    schema = pipeline_schema([PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)])
+    table = render_population(
+        ProposeClosed(replayed=False),
+        2,
+        proposer="l1_generate",
+        origin=round_result(0, improved=False),
+        parent=round_result(1, improved=False),
+        arms=[arm_state("changed", slot=ArmSlot(round=2, idx=0, total=1))],
+        schema=schema,
+    )
+    assert Locus("solve", "prompt").name in table, (
+        "the diff table dropped a candidate's rendered prompt"
+    )
 
 
 # 7. Paired readings over shared cells

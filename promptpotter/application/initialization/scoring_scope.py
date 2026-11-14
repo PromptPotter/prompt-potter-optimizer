@@ -33,8 +33,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
-from promptpotter.infrastructure.run_scope import RunScope, run_scope, scoped
+from promptpotter.infrastructure.run_scope import UNBOUND, RunScope, run_scope, scoped
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
@@ -195,16 +194,19 @@ async def diagnostic_pass(scoring: Awaitable[ScoredWalk], session: Session) -> S
 
 
 @contextmanager
-def verb_ledger(stores: Stores, hop: CycleHop | None) -> Iterator[CycleEventLog]:
-    """Opens one only when none is bound: a second handle on one file is a second appender."""
-    if (bound := active_cycle_ledger()) is not None:
+def verb_ledger(stores: Stores, hop: CycleHop) -> Iterator[CycleEventLog]:
+    """*hop*'s, opened only where no scope is bound, asked before it opens: a second handle on one
+    file is a second appender. A muted scope, or one bound on another ledger, is refused: a muted
+    pass sends nothing, and the verb would land there."""
+    path = stores.campaigns.ledger(hop)
+    if (bound := run_scope().ledger) is None:
+        raise RuntimeError(f"a verb on {path} runs under a muted scope")
+    if bound is not UNBOUND:
+        if bound.path != path:
+            raise RuntimeError(f"a verb on {path} runs under {bound.path}'s scope")
         yield bound
         return
-    ledger = (
-        CycleEventLog.open_workspace(stores.campaigns.workspace)
-        if hop is None
-        else CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
-    )
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
     # So what an L4 cell spends beneath the verb lands here, not only on the sandbox's ledger.
     if (book := run_scope().book) is not None and book.ledger is None:
         book.ledger = ledger

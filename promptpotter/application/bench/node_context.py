@@ -38,7 +38,6 @@ from promptpotter.application.runner.inner.tasks import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
 from promptpotter.domain.campaign_config import LivesConfig
 from promptpotter.domain.cell_fold import merge_known_outcomes
@@ -58,7 +57,7 @@ from promptpotter.domain.opt_search_point import (
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
-from promptpotter.domain.phase_acts import StepClosed, StepOpened
+from promptpotter.domain.phase_acts import FitnessFact, StepClosed, StepOpened, fold_fitness
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode, PipelineSchema
 from promptpotter.domain.pool import Access, BlockPool, DemoPool, Pool, PoolEntry
@@ -374,9 +373,10 @@ class Frontier(CycleRead):
         return rows
 
     @property
-    def parent_fitness_text(self) -> str:
-        """On the panel it was LAST scored on, in its scorer's unit; `—` is unmeasured."""
-        return fold_fitness_text(self._cycle.parent_fold)
+    def parent_fitness(self) -> FitnessFact | None:
+        """What the parent SCORED the round it last ended on, in its scorer's unit, never a reading
+        of the frontier; ``None`` is unmeasured."""
+        return fold_fitness(self._cycle.elected[0].fold)
 
     async def measure_parent(self, individual_id: str, cells: list[Sample]) -> CellSheet:
         arm = self._cycle.measured(individual_id)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import assert_never
 
 from promptpotter.application.views.render.primitives import (
@@ -20,25 +20,41 @@ from promptpotter.application.views.render.primitives import (
     fmt_fitness,
 )
 from promptpotter.domain.arm_reading import DisplayMetric, fold_fitness_text
-from promptpotter.domain.candidate_diff import group_diff_keys
+from promptpotter.domain.arms import ArmState, Concluded
+from promptpotter.domain.candidate_diff import (
+    build_candidate_flat,
+    flatten_prompts,
+    flatten_sp_summary,
+    group_diff_keys,
+)
+from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import READING_STATE_INFO, level_text
 from promptpotter.domain.phase_acts import (
     CellFormula,
+    CountFact,
+    FitnessFact,
     InitClosed,
     InitOpened,
     MeasureOpened,
     PassOpened,
     ProposeClosed,
     ProposeOpened,
+    SettingsFact,
     StepClosed,
+    StepFact,
     StepOpened,
+    TextFact,
+    fold_fitness,
 )
+from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
-from promptpotter.domain.records.run_records import PhaseRecord, RoundStatement
+from promptpotter.domain.records.run_records import RoundStatement
+from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, SeriesReading, ThetaCaveat
 from promptpotter.domain.spend import RATE_PRICED_LABEL, StopSpend, usd_text
 from promptpotter.domain.verification import NoiseBand, VerifyReading
-from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_reason
+from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts, collapse_reason
 from promptpotter.shared.answer_text import truncate
 from promptpotter.shared.composite import render_composite_fitness_block
 
@@ -70,7 +86,10 @@ def _render_init_exit(v: InitClosed) -> str:
     return "\n".join(out)
 
 
-def _render_round_start(v: ProposeOpened, round_num: int | None) -> str:
+def render_round_start(
+    v: ProposeOpened, round_num: int | None, parent: RoundOutcome, schema: PipelineSchema
+) -> str:
+    """*parent* is the round the parent last ended (``parent_round``): its head and its level."""
     standing = v.run_standing
     round_label = (
         f"ROUND {round_num}  {standing.lives.bar}"
@@ -79,35 +98,89 @@ def _render_round_start(v: ProposeOpened, round_num: int | None) -> str:
         if v.budget_rounds is None
         else f"ROUND {round_num}/{v.budget_rounds}"
     )
-    arms = "?" if v.arms is None else str(v.arms)
     # The header renders before candidates exist: it describes the parent.
-    preview = v.parent_prompt.replace("\n", " ").strip()
-    preview = "(empty)" if not preview else truncate(preview, 50, "...")
+    head = _head(parent).individual
+    preview = "\n\n".join(head.render(node) for node in schema.prompt_nodes()).strip()
     return "\n".join(
         [
             "",
-            _round_rule(round_label, v.standing),
+            _round_rule(round_label),
             "",
             _node_block(
                 "GENERATE",
-                f"Parent fitness  {fmt_fitness(v.parent_fitness)}",
-                f"Parent prompt   {preview}",
-                f"Candidates      {arms}" + (f"   {v.note}" if v.note else ""),
-                f"Model           {v.model or '(default)'}",
+                *_fact_lines(
+                    {
+                        "Parent fitness": fold_fitness(parent.fold),
+                        "Parent prompt": TextFact(value=preview or "(empty)"),
+                        "Candidates": None if v.arms is None else CountFact(value=v.arms),
+                        **v.facts,
+                        "Model": TextFact(value=v.model or "(default)"),
+                    },
+                    cut=True,
+                ),
             ),
         ]
     )
 
 
-def _render_candidates_generated(v: ProposeClosed, round_num: int | None) -> str:
+def render_population(
+    v: ProposeClosed,
+    round_num: int | None,
+    *,
+    proposer: str,
+    origin: RoundOutcome,
+    parent: RoundOutcome,
+    arms: Sequence[ArmState],
+    schema: PipelineSchema,
+) -> str:
+    """Each proposal (an arm of *arms*, the round's announced, slotted this round) a column beside
+    the heads of *origin* and *parent*."""
     src = "loaded from disk" if v.replayed else "from LLM"
+    arms = [arm for arm in arms if arm.slot is not None and arm.slot.round == round_num]
+    parent_flat = _flat(_head(parent), schema)
+    columns = [("Start", _flat(_head(origin), schema)), ("Parent", parent_flat)]
+    columns.extend(
+        (
+            arm.label,
+            build_candidate_flat(
+                parent_flat,
+                pipeline_overlay=arm.overlay,
+                prompt_flat=_prompt_flat(arm.individual, schema),
+            ),
+        )
+        for arm in arms
+    )
     return "\n".join(
         [
-            f"  {GREEN}✓{RESET} {len(v.columns) - 2} candidates generated ({src})",
+            f"  {GREEN}✓{RESET} {len(arms)} candidates generated ({src})",
             "",
-            render_sp_diff(v, round_num),
+            render_sp_diff(
+                columns,
+                round_num,
+                proposer=proposer,
+                node_param_keys={s: sorted(k) for s, k in schema.node_param_keys().items()},
+                collapses=collapse_counts(arm.validation_failures for arm in arms),
+            ),
         ]
     )
+
+
+def _head(round_: RoundOutcome) -> Concluded:
+    head = round_.head
+    assert head is not None, f"round {round_.round} elected: it ends on an arm"
+    return head
+
+
+def _flat(arm: Concluded, schema: PipelineSchema) -> dict[str, str]:
+    """One subject's diff column: its resolved node params, then its prompts."""
+    laid = PipelineParams.model_validate(arm.resolved_params).laid_nodes
+    return flatten_sp_summary(laid) | _prompt_flat(arm.individual, schema)
+
+
+def _prompt_flat(individual: OptSearchPoint, schema: PipelineSchema) -> dict[str, str]:
+    """Its prompt fields and shots, then each prompt node's whole render as ``<node>.prompt``."""
+    rendered = {Locus(n.name, "prompt").name: individual.render(n) for n in schema.prompt_nodes()}
+    return flatten_prompts(individual.prompts) | rendered
 
 
 def _render_measure_enter(v: MeasureOpened) -> str:
@@ -201,41 +274,69 @@ def render_round_verdict(
     return "\n".join(out)
 
 
-def _render_step_enter(v: StepOpened) -> str:
-    return "\n" + _node_block(v.title, *v.lines, label_right=v.tag)
+def _fact_text(fact: StepFact) -> str:
+    match fact:
+        case CountFact():
+            return str(fact.value)
+        case FitnessFact(value=value, unit=unit):
+            return fmt_fitness(value) if unit is None else level_text(value, unit)
+        case TextFact():
+            return fact.value.replace("\n", " ") or "(none given)"
+        case SettingsFact():
+            return ", ".join(
+                f"{k}={v:g}" if isinstance(v, float) else f"{k}={v}" for k, v in fact.value.items()
+            )
+        case _:
+            assert_never(fact)
 
 
-def _render_step_exit(v: StepClosed) -> str:
-    if not v.headline:
+def _fact_lines(facts: Mapping[str, StepFact | None], *, cut: bool) -> list[str]:
+    """Each said fact on its own line, *cut* where an enter box holds it; an unmeasured one is
+    not said."""
+    said = {name: _fact_text(fact) for name, fact in facts.items() if fact is not None}
+    width = max(map(len, said), default=0)
+    return [
+        f"{k:<{width}}  {truncate(text, 60, '...') if cut else text}" for k, text in said.items()
+    ]
+
+
+def _render_step_enter(phase: str, v: StepOpened) -> str:
+    title = phase.replace("_", " ").upper()
+    return "\n" + _node_block(
+        title, *_fact_lines(v.facts, cut=True), f"{v.activity}...", label_right=v.node
+    )
+
+
+def _render_step_exit(phase: str, v: StepClosed) -> str:
+    if not v.facts:
         return ""
-    out = [f"  {GREEN}✓{RESET} {v.headline}", *(f"    {line}" for line in v.details)]
+    out = [
+        f"  {GREEN}✓{RESET} {phase.replace('_', ' ')}",
+        *(f"    {line}" for line in _fact_lines(v.facts, cut=False)),
+    ]
     if v.audit is not None:
-        label, node = v.audit
         out.append(
-            f"  {CYAN}{label}{RESET} {DIM}→ GET …/rounds/N/audit"
-            f"::nodes.{node} (prompt · response · usage){RESET}"
+            f"  {CYAN}{v.audit} call{RESET} {DIM}→ GET …/rounds/N/audit"
+            f"::nodes.{v.audit} (prompt · response · usage){RESET}"
         )
     return "\n".join(out)
 
 
-def to_text(record: PhaseRecord) -> str:
-    match act := record.act:
-        case None:
-            return ""
+def to_text(
+    phase: str, act: InitOpened | InitClosed | MeasureOpened | PassOpened | StepOpened | StepClosed
+) -> str:
+    """A propose act reads the round's arms besides (`render_round_start`, `render_population`)."""
+    match act:
         case InitOpened():
             return _render_init_enter(act)
         case InitClosed():
             return _render_init_exit(act)
-        case ProposeOpened():
-            return _render_round_start(act, record.round)
-        case ProposeClosed():
-            return _render_candidates_generated(act, record.round)
         case MeasureOpened():
             return _render_measure_enter(act)
         case StepOpened():
-            return _render_step_enter(act)
+            return _render_step_enter(phase, act)
         case StepClosed():
-            return _render_step_exit(act)
+            return _render_step_exit(phase, act)
         case PassOpened():
             return _render_pass_enter(act)
         case _:
@@ -336,8 +437,15 @@ _SP_DIFF_UNCHANGED = "·"
 _SP_DIFF_VAL_INLINE_MAX = 12
 
 
-def render_sp_diff(view: ProposeClosed, round_num: int | None) -> str:
-    columns_in = list(view.columns)
+def render_sp_diff(
+    columns_in: Sequence[tuple[str, dict[str, str]]],
+    round_num: int | None,
+    *,
+    proposer: str,
+    node_param_keys: dict[str, list[str]] | None,
+    collapses: Mapping[str, int],
+) -> str:
+    """Each column a flat ``key → value`` of one subject: the start, the parent, then each candidate."""
     if len(columns_in) < 2:
         return ""
 
@@ -350,16 +458,16 @@ def render_sp_diff(view: ProposeClosed, round_num: int | None) -> str:
         )
         for label, flat in columns_in
     ]
-    node_param_keys = view.node_param_keys
+
     warning_lines: list[str] = []
-    bits = [f"{view.collapses[r]} {w}" for r, w in COLLAPSE_WORDS.items() if view.collapses.get(r)]
+    bits = [f"{collapses[r]} {w}" for r, w in COLLAPSE_WORDS.items() if collapses.get(r)]
     if bits:
         n_total = sum(1 for label, _ in columns_in if label.startswith("C"))
-        n_valid = max(0, n_total - sum(view.collapses.values()))
+        n_valid = max(0, n_total - sum(collapses.values()))
         cl_text = f" ({', '.join(sorted(clone_labels))})" if clone_labels else ""
         warning_lines.append(
             _node_line(
-                f"{YELLOW}⚠ {view.proposer} produced {' / '.join(bits)} variant(s){cl_text} — "
+                f"{YELLOW}⚠ {proposer} produced {' / '.join(bits)} variant(s){cl_text} — "
                 f"synthetic-zeroed (no API cost). yield={n_valid / n_total:.0%} "
                 f"({n_valid}/{n_total} valid).{RESET}"
             )

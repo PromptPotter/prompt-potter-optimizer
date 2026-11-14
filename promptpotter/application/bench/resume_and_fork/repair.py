@@ -91,6 +91,8 @@ def _rebank_on_branch(
                 slot_of=session.bank.slot_of,
             ),
         )
+        if offset is None:
+            raise RuntimeError(f"round {t.round}: a muted scope landed no restatement on {branch}")
         # The restatement MOVES the document's address; the retired one re-folds to the holed round.
         restated[t.round] = t.model_copy(update={"at_offset": offset})
     return [restated.get(t.round, t) for t in rounds]

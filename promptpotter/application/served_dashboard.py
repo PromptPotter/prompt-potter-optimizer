@@ -5,7 +5,7 @@ from typing import Any, Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.jobs.launcher.admission import admitted
+from promptpotter.application.jobs.launcher.admission import admitted, campaign_at
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
@@ -274,9 +274,12 @@ class ServedDashboard(DashboardFacts):
     )
     producer: ProducerReading = Field(description="The cycle's producer, derived with the phase.")
     admission: RunAdmission = Field(
-        description="Which run verbs the cycle admits now (`RunState.admission`): the verb the "
-        "run control offers or the sentence where it offers none, and each verb's refusal — the "
-        "same answer the dispatcher refuses on."
+        description="The verb the run control offers now, its campaign's refusal joined "
+        "(`admission.py::admitted`), or the sentence where it offers none."
+    )
+    skip_refusal: str = Field(
+        description="Why `skip-searchpoint` is refused, off the run alone (`RunState`), which no "
+        "campaign moves; empty where it is admitted."
     )
     stop: StopReading | None = Field(
         description="Why the cycle reads `paused` or `terminal` — what caused it, the stop it was "
@@ -414,8 +417,7 @@ class _Standing(NamedTuple):
     # A pass still running on the ledger that no attached run and no paid pass's job scores.
     orphaned: bool
     fork_remainder: ForkRemainder
-    # ``None`` where the manifest, and so the meter, is gone.
-    campaign_metered: Budget | None
+    campaign_metered: Budget
     overshot: Overshoot
     at: float
 
@@ -484,7 +486,7 @@ def _lookahead(
     )
     pick_max = max(1, min(ceiling, most)) if most > 0 else ceiling
     auto = standing is not None and standing.lookahead_auto
-    pressable = ceiling > 1 and run.admission.lookahead_refusal == ""
+    pressable = ceiling > 1 and run.lookahead_refusal == ""
     return SampleLookahead(
         depth=depth,
         auto=auto,
@@ -519,7 +521,7 @@ def _serve(
     hop: CycleHop,
     run: RunState,
     admission: RunAdmission,
-    meter: CeilingMeter | None,
+    meter: CeilingMeter,
     run_limits: RunLimits,
     standing: _Standing | None,
 ) -> ServedDashboard:
@@ -546,7 +548,6 @@ def _serve(
     dials = None if formula is None else anchored_criterion_dials(formula)
     live = standing is not None and run.producer.appending
     line_round = next((r for r in reversed(rounds) if overlap_line(r.overlap)), None)
-    campaign_metered = None if standing is None else standing.campaign_metered
     axis = _round_axis(state, live=live)
     return ServedDashboard(
         **banked | {"rounds": rounds},
@@ -557,6 +558,7 @@ def _serve(
         run_phase=run.run_phase,
         producer=run.producer,
         admission=admission,
+        skip_refusal=run.skip_refusal,
         stop=run.stop,
         overlap_line_round=None if line_round is None else line_round.round,
         overlap_line_n=None if line_round is None else len(line_round.overlap.positions),
@@ -569,24 +571,20 @@ def _serve(
         lookahead=_lookahead(
             state, run=run, standing=standing, in_flight=in_flight, allowed=allowed
         ),
-        spend_metered=None if meter is None else MeteredSpend.of(state.spend, meter),
-        spend_metered_by_round=None
-        if meter is None
-        else {
+        spend_metered=MeteredSpend.of(state.spend, meter),
+        spend_metered_by_round={
             key: MeteredSpend.of(spent, meter)
             for key, spent in sorted(state.spend_by_round.items(), key=lambda kv: int(kv[0]))
         },
-        metered_line=None
-        if meter is None
-        else metered_line(
+        metered_line=metered_line(
             meter,
             metered=state.spend.metered(meter),
             cap=Budget() if standing is None else run_limits.budget,
             share=Budget() if standing is None else standing.allotment or Budget(),
         ),
         cap_lines=[]
-        if meter is None or standing is None or campaign_metered is None
-        else campaign_cap_lines(meter, campaign=campaign_metered, cap=run_limits.budget),
+        if standing is None
+        else campaign_cap_lines(meter, campaign=standing.campaign_metered, cap=run_limits.budget),
         allotment=None if standing is None else standing.allotment,
         overshot=None if standing is None else standing.overshot,
         fork_remainder=None if standing is None else standing.fork_remainder,
@@ -609,8 +607,8 @@ def served_dashboard(
     """``at`` replays to that ledger offset: live ``run_phase`` and ``producer``, nothing armed."""
     cycle_path = cycle_dir_for(stores.base_dir, hop)
     run = stores.run_state(hop)
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    meter = None if campaign is None else ceiling_meter(campaign.declaration.purpose)
+    campaign = campaign_at(stores, hop)
+    meter = ceiling_meter(campaign.declaration.purpose)
     # The read's own join, never the checkout's: the campaign's refusal moves no ledger.
     admission = admitted(stores, campaign, run)
 
@@ -636,7 +634,7 @@ def served_dashboard(
             run_limits=folded,
             standing=None,
         )
-    config = None if campaign is None else cycle_config(stores, campaign, hop).config
+    config = cycle_config(stores, campaign, hop).config
     limits = _binding(stores, hop, config, run, folded)
     armed = stores.inbox(hop)
     return _serve(
@@ -654,9 +652,7 @@ def served_dashboard(
             orphaned=any(mark.state == "running" for mark in state.verification)
             and stores.campaigns.holder(hop) is None,
             fork_remainder=_remainder(stores, hop, limits),
-            campaign_metered=None
-            if meter is None
-            else stores.campaigns.metered_spend(hop.campaign_id, meter),
+            campaign_metered=stores.campaigns.metered_spend(hop.campaign_id, meter),
             overshot=money_on(stores.charges.path).overshot.get(
                 stores.charges.held_on(CycleLayout(cycle_path).ledger), NO_OVERSHOOT
             ),

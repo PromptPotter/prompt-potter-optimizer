@@ -234,9 +234,9 @@ def campaign_refusal(stores: Stores, campaign: Campaign) -> CampaignRefusedError
     return None
 
 
-def admitted(stores: Stores, campaign: Campaign | None, run: RunState) -> RunAdmission:
-    """*run*'s admission with its campaign's refusal joined: the acts every served read offers."""
-    refused = None if campaign is None else campaign_refusal(stores, campaign)
+def admitted(stores: Stores, campaign: Campaign, run: RunState) -> RunAdmission:
+    """*run*'s launch half with its campaign's refusal joined: the acts every served read offers."""
+    refused = campaign_refusal(stores, campaign)
     return RunAdmission.of(run, campaign_refusal="" if refused is None else str(refused))
 
 

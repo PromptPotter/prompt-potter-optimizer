@@ -10,7 +10,8 @@ from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.run_records import LLMCallProgressRecord
-from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
+from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 from promptpotter.shared.errors import FileUnreadableError
 from promptpotter.shared.measurement_context import measured_pass
@@ -56,13 +57,13 @@ async def heartbeat(
     on_suspend: Callable[[float], None] | None = None,
 ) -> None:
     """A beat's I/O fault is logged, never raised, so it never replaces the awaited call's reply or raise; an unbound or muted scope still ticks, so a missing ledger cannot disarm ``on_suspend``."""
-    ledger = active_cycle_ledger()
+    ledger = run_scope().ledger
     while True:
         overshoot = await sleep_measuring_suspend(HEARTBEAT_INTERVAL_S)
         try:
             if on_suspend is not None and overshoot > SUSPEND_GRACE_S:
                 on_suspend(overshoot)
-            if ledger is not None:
+            if isinstance(ledger, CycleEventLog):
                 elapsed_s = time.monotonic() - start_monotonic
                 detail, inner = _safe_read(detail_fn), _safe_read(inner_fn)
                 match beat:

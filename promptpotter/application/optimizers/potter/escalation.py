@@ -318,7 +318,8 @@ def l3_fired(ladder: Ladder, reading: LayerReading | None) -> Ladder:
 
 @dataclass
 class TransitionResult:
-    described: str
+    # The layer's own, whole; empty where it gave none.
+    rationale: str
     steer: dict[str, Any] = field(default_factory=dict)
     plan: str = ""
     l3_note: str = ""
@@ -424,9 +425,7 @@ async def _run_transition(
                 },
             )
         )
-        ctx.read(Progress).phase(
-            layer.phase.phase, "exit", StepClosed(headline="", details=(), audit=None)
-        )
+        ctx.read(Progress).phase(layer.phase.phase, "exit", StepClosed(facts={}, audit=None))
         return None
 
     layer.land(ctx, result)

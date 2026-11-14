@@ -40,7 +40,7 @@ export function useRemoteModel() {
     toOuter: () => navigate({ path: viewedPath.slice(0, 1) }),
     toInner: (campaignId: string, cycleId: string) =>
       navigate({ path: [...viewedPath, { campaignId, cycleId }] }),
-    skipRefusal: dash.admission.skip_refusal,
+    skipRefusal: dash.skip_refusal,
     // RunLimitsControl reads the cycle's spend beside the caps it edits.
     metered: dash.spend_metered,
     budget: dash.run_limits.budget,

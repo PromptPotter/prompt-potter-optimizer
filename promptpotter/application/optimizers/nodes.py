@@ -34,6 +34,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.phase_acts import StepFact
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import INITIAL_POPULATION, NodeKind, PipelineSchema
 from promptpotter.domain.pool import Access, DemoPool, Pool, PoolEntry
@@ -250,10 +251,10 @@ class LlmNode(NodeMember):
 
 @dataclass(frozen=True)
 class RoundOpening:
-    standing: str
-    note: str
+    """The walk's lead's facts on its round, by name, as a step's (`StepOpened.facts`)."""
+
+    facts: dict[str, StepFact | None]
     arms: int | None
-    proposer: str
     replayed: bool
 
 
