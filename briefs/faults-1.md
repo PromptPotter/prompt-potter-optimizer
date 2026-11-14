@@ -2,7 +2,7 @@
 
 Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chain id `faults-1`, arc `arc/faults-1`.
 
-- **Base:** `origin/arc/readings-r` at `2b4c645da`. That is main (`fda4c2bd6`, with la landed) plus readings re-based and proved. It reaches main as one squash with the same tree. Your `<base sha>` in common.md is this commit. Branch off it, not off `origin/main`.
+- **Base:** `origin/main` at `dce5b7883`: main with readings, xconn 1–2, ws and narr-2 landed. Your `<base sha>` in common.md is this commit.
 - **The code shrinks**, judged as common.md says. Link 3 is mostly deletion: 45 log calls go. Run `git diff --shortstat <base> HEAD -- promptpotter` after each link.
 - **Spec:** the ledger section `### batch/28 · faults`, these rows only:
   - "A refusal carries prose, a stop carries acts";
@@ -23,6 +23,13 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
   - This subsumes the `ConfigDriftError` row: close it.
   - `Source.of` raises a refusal naming the field it lacks (`loaders.py:87,104`). The listing serves that refusal on the dataset's row, and a start answers 422, never 500.
   - `OPTIMIZER_ABORT` carries the optimizer's reason and an act. Its reason is served, not only logged (`escalation.py:516-531`).
+- **The arms gate's answer is an act.** narr-2's readout dropped the `[ARM GATE]` block's
+  `answer: python -m promptpotter submit-arms …` line; today only `runner/round.py`'s
+  `logger.warning` tells a terminal how to answer, and it is on your log list. The gate's row carries
+  a `NextAct` (`submit-arms`), the readout spells it as `stop_next_lines` spells a stop's, and the chat's
+  decision card (`domain/activity.py::_arms_gate`) stops spelling `submit-arms` and `--keep` in prose.
+  That log goes only after the readout names the act. Re-test: an `arm_gate: on` readout at its hold
+  names `submit-arms`.
 - **One answer to a text node's form failure: the child is refused, as a fault value.** capo's init and gepa's `fenced` read it like every other text node. Decisions move on the `wounded/` legs only: name each.
 - **`ValidationFailure.reason` is typed by an enum of its codes.** The hand list in its description goes. A move of the requests that carry the schema is expected: name it.
 - **The wound map** becomes `domain/results_health.py::classify_result`'s docstring, from `git show d9012dc0e:docs/developer/self-healing-internals.md`: the two-axis table and the two row rules, no more.
@@ -37,7 +44,7 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
 
 ## Links (one commit each, in order)
 
-1. A refusal's acts: `Refusal.next_acts`, the gate rule, the 20 + ~12 refusals, `ConfigDriftError`, `Source.of`, `OPTIMIZER_ABORT`.
+1. A refusal's acts: `Refusal.next_acts`, the gate rule, the 20 + ~12 refusals, `ConfigDriftError`, `Source.of`, `OPTIMIZER_ABORT`, the arms gate's act.
 2. One answer to a form failure; the `ValidationFailure.reason` enum; the wound map's docstring.
 3. The YAML depth bound; the reported items; the 45 logs.
 
@@ -45,8 +52,12 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
 
 Name every shared file in its link's commit body.
 
-- **narr-2** (cloud, your base) makes the ledger keep facts and serves a cycle's acts off its admission. You share `domain/phases.py`: you own `Refusal`'s acts, `STOP_REASON_INFO`'s `next_acts` and the gate rule; it owns `parked` and the per-cycle acts in `application/hierarchy.py`. It also rewrites `runner/round.py`'s writers, where your link 3 deletes two log lines and the arms-gate log. Touch only your hunks.
-- **xconn** (links 1–2) lands on main beside you, and the orchestrator re-bases you over it by hunk. It adds two refusals your base lacks: `wire_key_unknown` (a node's served wire keys bound what is sent) and harbor's refusal when `skill_delivery` is unset. At landing the orchestrator gives them their `next_acts` by your rule. It names endpoints per connector, and its served-contract probe (link 3) waits. Your `ConfigDriftError` row is yours alone; it leaves that class as it stands. It shares `initialization/wiring.py` with you only if a log you delete sits in `_read_backend_revision`: touch only your line.
+- **narr-2 is landed in your base.** The ledger keeps facts, and a cycle's acts come off its admission. You own `Refusal`'s acts, `STOP_REASON_INFO`'s `next_acts` and the gate rule. Leave narr-2's `parked` and its per-cycle acts in `application/hierarchy.py` as they stand. Re-find your link 3's log lines in `runner/round.py`, since narr-2 rewrote its writers.
+- **xconn 1–2 is landed in your base.** Its two refusals are yours under the gate rule, like every other refusal: `wire_key_unknown` (a node's served wire keys bound what is sent) and harbor's refusal when `skill_delivery` is unset. Its served-contract probe (link 3) waits on `wip/xconn` and is not yours.
+- **small-2** (cloud, same base) moves `optimizers/nodes.py::Selector`'s parent read to a default
+  (levi's and potter's overrides go) and types `spend_book.py`'s remainder. Leave both; if your link 2
+  reaches `optimizers/nodes.py`, keep your hunks off `Selector`. Both of you cut rows in
+  `code-debt-cleanup.md`: delete only your own rows.
 - **ren** (cloud, later) waits for you.
 
 ## Proof (beyond common.md)
