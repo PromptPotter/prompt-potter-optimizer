@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_fork
-from promptpotter.application.initialization.scoring_scope import session_scope
+from promptpotter.application.initialization.scoring_scope import declare_on_cycle, session_scope
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.run_observers import RunObservers, declare_run_stop
@@ -217,7 +217,8 @@ def _finalize_run(
         )
     else:
         # A pause leaves the cycle ACTIVE: the PAUSED just declared must stay the last declaration read.
-        session.store.campaigns.append(
+        declare_on_cycle(
+            session.store,
             session.hop,
             CycleFinalRecord(
                 interrupted_round=interrupted_round,

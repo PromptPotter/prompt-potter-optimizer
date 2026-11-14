@@ -300,13 +300,6 @@ row it closes.
   `RaceStandingRecord`s apart from the `Narration` that reads the same ledger. Root: the race standing
   is one fold every door reads. **Rides with:** the row above. **Re-test:**
   `git grep -n "_race_standings" -- promptpotter` is empty.
-- **A run's ledger has two doors** (narr-2's review): inside a run, `append_record` writes the scope's
-  ledger while the run's own declarations go through `CampaignStore.append` on a named cycle
-  (`run_observers.py:84,175`, `runner/entry.py:216`, `runner/mint.py:199,261`, `inner/spawn.py:317`),
-  which a muted scope cannot mute; `scoring_scope.py::verb_ledger` yields any bound ledger whatever
-  the hop it was asked for. Root: one door, the scope, opened on the cycle the caller names.
-  **Rides with:** narr 3. **Re-test:** `git grep -n "campaigns.append(" -- promptpotter/application/runner
-  promptpotter/application/run_observers.py` is empty.
 - **DSPy derives its cell's priced pair beside core's**: `dspy_module.py::_in_process_run` calls
   `pricing.py::priced_pair` off the payload's `params`, while core binds each node's pair once
   (`sample_measurement.py::priced_pairs`); they agree only while the payload's `provider` is `NodeCall`'s.

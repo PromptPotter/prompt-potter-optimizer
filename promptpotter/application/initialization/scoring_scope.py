@@ -28,12 +28,13 @@ from promptpotter.domain.campaign import Campaign, Compare, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import STOP_REASON_INFO
+from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, append_record
 from promptpotter.infrastructure.run_scope import RunScope, run_scope, scoped
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -194,17 +195,28 @@ async def diagnostic_pass(scoring: Awaitable[ScoredWalk], session: Session) -> S
     return scored
 
 
+def declare_on_cycle(stores: Stores, hop: CycleHop, *records: CycleRecord) -> None:
+    """A run's own declaration, through a scope opened on the cycle it names: a muted one mutes it."""
+    if run_scope().ledger is None:
+        return
+    with stores.campaigns.appending(hop, records) as ledger, scoped(ledger=ledger):
+        append_record(*records)
+
+
 @contextmanager
 def verb_ledger(stores: Stores, hop: CycleHop | None) -> Iterator[CycleEventLog]:
-    """Opens one only when none is bound: a second handle on one file is a second appender."""
-    if (bound := active_cycle_ledger()) is not None:
-        yield bound
-        return
+    """Opens one only when none is bound: a second handle on one file is a second appender. A bound
+    one on another ledger than *hop*'s is refused: the verb would land there."""
     ledger = (
         CycleEventLog.open_workspace(stores.campaigns.workspace)
         if hop is None
         else CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
     )
+    if (bound := active_cycle_ledger()) is not None:
+        if bound.path.resolve() != ledger.path.resolve():
+            raise RuntimeError(f"a verb on {ledger.path} runs under {bound.path}'s scope")
+        yield bound
+        return
     # So what an L4 cell spends beneath the verb lands here, not only on the sandbox's ledger.
     if (book := run_scope().book) is not None and book.ledger is None:
         book.ledger = ledger

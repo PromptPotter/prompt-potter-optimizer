@@ -95,6 +95,7 @@ from promptpotter.application.jobs.launcher import launch as launcher_launch
 from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     RunStart,
+    admitted,
     destroying,
     paid_call,
     paid_pass,
@@ -3535,7 +3536,7 @@ async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addres
     into_leaf = Subject.of((acts_hop, leaf)).command_fields
     CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(state=Running()))
     await asyncio.to_thread(hold_cycle, leaf_dir)
-    controls["inner, its own loop running"] = inner.run_state(leaf).admission.refusal
+    controls["inner, its own loop running"] = admitted(inner, None, inner.run_state(leaf)).refusal
     paused = CommandCall(PauseCyclePayload(**into_leaf, reason="stop"), "inner-run", door=Door.HOST)
     with pytest.raises(PayloadInvalidError):
         await sender.dispatch(paused)
@@ -3598,7 +3599,9 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Com
         ):
             pause = PauseCyclePayload(campaign_id="held", cycle_id="cycle_held", reason="stop")
             await sender.dispatch(CommandCall(pause, door=Door.HOST))
-            controls["outer, paused under a pass"] = stores.run_state(held).admission.refusal
+            controls["outer, paused under a pass"] = admitted(
+                stores, None, stores.run_state(held)
+            ).refusal
             raise asyncio.CancelledError("aborted")
     parked = f"{RUN_PHASE_INFO[RunPhase.PAUSED].parked.capitalize()}."
     _read_as_owed(command_log, {}, {"outer, paused under a pass": parked})

@@ -13,6 +13,7 @@ from dataclasses import replace
 from typing import Any, NamedTuple
 
 from promptpotter.application.datasets.authored import ConfigLayers
+from promptpotter.application.initialization.scoring_scope import declare_on_cycle
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import campaign_refusal, slotless_share
@@ -314,8 +315,10 @@ async def _run_inner_campaign(
     with scoped(memory=enter_inner_cell(cell.ctx, store.campaigns, cell.campaign_id)):
         async with _open_seat(cell, store) as opened:
             session, config = opened.session, opened.cycle.config
-            session.store.campaigns.append(
-                session.hop, SpawnedRecord(spawned_by=SpawnedBy.model_validate(spawned_by))
+            declare_on_cycle(
+                session.store,
+                session.hop,
+                SpawnedRecord(spawned_by=SpawnedBy.model_validate(spawned_by)),
             )
             minted.append(session.hop)
             observers = await asyncio.to_thread(

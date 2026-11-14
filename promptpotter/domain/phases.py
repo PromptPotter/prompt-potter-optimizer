@@ -309,10 +309,6 @@ class RunState(NamedTuple):
             return f"This round holds drafts 0 to {self.drafts - 1}; there is no draft {stray}."
         return ""
 
-    @property
-    def admission(self) -> RunAdmission:
-        return RunAdmission.of(self)
-
 
 # ``resume`` and ``start`` both launch: a paused cycle's worker has exited.
 RunAction = Literal["pause", "resume", "start"]
@@ -427,9 +423,9 @@ class RunAdmission(FrozenModel):
     )
 
     @classmethod
-    def of(cls, run: RunState, *, campaign_refusal: str = "") -> RunAdmission:
-        """*campaign_refusal* is the cycle's campaign's own (`admission.py::admitted`): a launch
-        verb it refuses is not offered."""
+    def of(cls, run: RunState, *, campaign_refusal: str) -> RunAdmission:
+        """Read only through `admission.py::admitted`, which joins *campaign_refusal*, the cycle's
+        campaign's own: a launch verb it refuses is not offered."""
         info = RUN_PHASE_INFO[run.run_phase]
         # Both are spent by a walk: accepted anywhere else, the next launch would drop them.
         walking = info.walks and run.producer.appending

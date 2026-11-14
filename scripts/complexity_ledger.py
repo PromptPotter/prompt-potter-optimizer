@@ -40,8 +40,9 @@ BASELINE = {
     # faults-1 (+12): a stop's own words served and narrated at every door, a refused send's among
     # them; a payload field's terminal flag declared once beside the payload; refusal acts checked.
     # narr-3 (+17): the readout builds the diff table and the parent's preview off the round's
-    # records, where the writers pre-built them into the acts.
-    "package_lines": 109807,
+    # records, where the writers pre-built them into the acts; (+33) a run's own declarations open
+    # the scope on the cycle they name (a muted one mutes them), and a verb refuses another's scope.
+    "package_lines": 109840,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
