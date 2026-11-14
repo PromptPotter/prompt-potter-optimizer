@@ -10,6 +10,7 @@ from promptpotter.application.optimizer_manifest import SelectedOptimizer, check
 from promptpotter.domain.campaign import Arm
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
+from promptpotter.domain.pipeline_overlay import fold_output_contract
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import Sample
@@ -323,6 +324,23 @@ def refuse_unfit_pipeline(
     """A member that cannot write the chain's prompt nodes would raise inside round 1, after the origin is paid."""
     if (unfit := optimizers.unfit_pipeline(selected, schema, connector)) is not None:
         raise PayloadInvalidError(unfit, code="optimizer_unfit_pipeline")
+
+
+def refuse_off_contract(pipeline_params: PipelineParams, schema: PipelineSchema) -> None:
+    """A key a node's door does not read (`PipelineNode.wire_keys`) is a 400 on every cell."""
+    refused = [
+        f"node '{node}' sends '{key}'"
+        for node, laid in fold_output_contract(pipeline_params, schema).laid_nodes.items()
+        if (declared := schema.get_node(node)) is not None
+        for key in laid
+        if not declared.reads(key)
+    ]
+    if refused:
+        raise PayloadInvalidError(
+            "a node is configured with a key its backend does not read, so every cell would be "
+            "refused (wire_key_unknown):\n  - " + "\n  - ".join(refused),
+            code="wire_key_unknown",
+        )
 
 
 def optimizer_node_configs(selected: SelectedOptimizer) -> list[tuple[str, NodeCall]]:

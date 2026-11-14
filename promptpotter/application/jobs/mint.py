@@ -38,6 +38,7 @@ from promptpotter.application.preflight import (
     optimizer_node_configs,
     refuse_arm_below_round,
     refuse_below_reasoning_floor,
+    refuse_off_contract,
     refuse_unfit_pipeline,
     refuse_unpriced,
     unpriced_routes,
@@ -117,6 +118,7 @@ def refuse_unrunnable(
     """Every refusal a run owes on *connector*, before anything is paid or written; an upload's
     Start asks it of the draft."""
     refuse_unfit_pipeline(selected, schema, connector)
+    refuse_off_contract(pipeline_params, schema)
     partition = partition_bank(
         dataset, campaign_config.dataset_split, seed=campaign_config.run_seed
     )

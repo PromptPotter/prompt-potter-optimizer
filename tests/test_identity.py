@@ -104,6 +104,7 @@ from promptpotter.application.datasets.draft_campaign import (
 )
 from promptpotter.application.datasets.draft_patch import (
     DraftPatchPlan,
+    _authored_contract,
     apply_draft_patch,
     plan_draft_patch,
 )
@@ -178,6 +179,7 @@ from promptpotter.application.pipeline_resolve import (
     resolved_output_schemas,
 )
 from promptpotter.application.pipeline_responses import ForkPreviewResponse
+from promptpotter.application.preflight import refuse_off_contract
 from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
@@ -244,7 +246,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
-from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
+from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.cells import InnerCells, InnerTaskSpec
@@ -1871,6 +1873,46 @@ def test_an_unnamed_answer_slot_is_the_last_field(frozen: Callable[..., Any]) ->
     assert authored["llm_only"].laid_keys()["answer_fields"] == ["code"], (
         "the answer slot is not the last field"
     )
+
+
+def test_a_key_a_nodes_door_does_not_read_is_refused_at_the_mint() -> None:
+    # TermNorm 11b1dbe's `accepts`: only `llm_only` reads `answer_fields` and `response_format`.
+    shared = ["prompt", "output_schema", "structured_output_mode", "route_order", "seed", "top_p"]
+    schema = parse_pipeline_response(
+        {
+            "nodes": {
+                "llm_ranking": {
+                    "type": "llm",
+                    "config": {"provider": "p", "model": "m"},
+                    "prompt_info": {"fields": ["instruction"]},
+                    "accepts": [*shared, "reasoning_effort"],
+                },
+                "llm_only": {
+                    "type": "llm",
+                    "config": {"provider": "p", "model": "m", "response_format": "text"},
+                    "prompt_info": {"fields": ["instruction"]},
+                    "accepts": [*shared, "answer_fields"],
+                },
+            }
+        }
+    )
+    ranking, only = schema.get_node("llm_ranking"), schema.get_node("llm_only")
+    assert ranking is not None and only is not None
+    assert "response_format" not in ranking.param_keys, "an axis its door refuses is offered"
+    assert "response_format" in only.param_keys, "the axis its door reads is not offered"
+    answer_schema = {"type": "object", "properties": {"reasoning": {}, "answer": {}}}
+
+    def minted(node: str, answer_fields: list[str] | None) -> None:
+        edit = NodeOutputEdit(node=node, output_schema=answer_schema, answer_fields=answer_fields)
+        declared = schema.get_node(node)
+        assert declared is not None
+        overlay = _authored_contract({}, PipelineParams(), edit, declared)["pipeline_overlay"]
+        refuse_off_contract(PipelineParams.model_validate(overlay), schema)
+
+    with pytest.raises(PayloadInvalidError, match="node 'llm_ranking' sends 'answer_fields'"):
+        minted("llm_ranking", ["answer"])
+    minted("llm_ranking", None)  # inferred, never laid where the door refuses it
+    minted("llm_only", ["answer"])
 
 
 def test_a_reused_datasets_own_contract_reopens_no_axis(built_stores: Stores) -> None:

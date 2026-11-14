@@ -1013,23 +1013,14 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/29 · xconn
 
-- **PromptPotter does not read TermNorm's served contract, so a wire skew surfaces as a 100% degraded
-  origin, not a refusal at check-in**: the box's TermNorm read `answer_field` while PromptPotter sent
-  `answer_fields` (2026-10-31). A TermNorm schema edit lays keys only `llm_only` accepts:
-  `datasets/draft_patch.py::_authored_contract` writes `answer_fields` and `response_format: json` on
-  whichever node the edit names, and `domain/pipeline_parsing.py::parse_pipeline_response` offers the
-  `response_format` axis on every `tunes_llm` node; TermNorm's `xconn` branch refuses both on
-  `entity_profiling` and `llm_ranking` (400 `wire_key_unknown`), and `top_p` on any node. And the probe
-  reads `/status` while that branch serves `GET /version` (`{revision, contract}`): `connectors/termnorm.py`
+- **PromptPotter does not read TermNorm's served wire contract**: the probe reads `/status` while
+  TermNorm's `xconn` branch serves `GET /version` (`{revision, contract}`); `connectors/termnorm.py`
   probes `/status` and `::_EXPECTED_REVISION` is `None`, so a co-owned backend fix replays stale results;
-  on the `xconn` branch `/status` loses its version word, so `_termnorm_version_check`
-  (`termnorm.py:120-127`) reads None there. Action: the probe reads `/version`; the connector serves the
-  wire contract and each node's accepted keys; the check-in refuses a node config that contract rejects,
-  a node's accepted keys bound what an edit lays and what an axis offers (refused at the mint); and the
-  revision folds into the measurement-cache key. **Rides with:** xconn 1 and 3, before TermNorm's
-  `xconn` reaches the box. **Re-test:** a launch against a backend one wire rename behind fails at the
-  probe, naming the key; a check-in schema edit on `llm_ranking` mints and its first cell answers;
-  `connectors/termnorm.py` probes `/version` and `_EXPECTED_REVISION` is not `None`.
+  on the `xconn` branch `/status` loses its version word, so `_termnorm_version_check` reads None there.
+  Action: the probe reads `/version` and refuses another contract; the revision folds into TermNorm's
+  answer identity. **Rides with:** xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** a
+  launch against a backend one contract behind fails at the probe, naming both numbers;
+  `connectors/termnorm.py` probes `/version`.
 - **A connector's endpoint is one per install**: `config/settings.py` `TERMNORM_URL`, `N8N_HARNESS_URL`;
   a second workflow edits `.env` and re-keys every banked cell of the first (`n8n.py::_identity_config`,
   `:94`, hashes `CONNECTOR.base_url()`). Action: operator config holds named endpoints per connector, and a dataset names one;
