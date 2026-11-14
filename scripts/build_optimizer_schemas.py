@@ -1,27 +1,52 @@
 from __future__ import annotations
 
+import importlib
 import json
+import sys
+import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from processes import replace_changed
+from processes import REPO, replace_changed
 from pydantic import BaseModel
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.task_context import CheckinOutput
 from promptpotter.application.optimizer_manifest import authored_manifest
+from promptpotter.application.optimizers.nodes import LlmNode
 from promptpotter.config.paths import checkin_assets_root
 from promptpotter.domain.pipeline_manifest import ManifestSwitch
 from promptpotter.infrastructure.store.io import read_yaml
 
+# The plug point's example, a distribution of its own that no gate env installs: its entry points
+# are read off its `pyproject.toml` and resolved as an install resolves them.
+_EXAMPLE = REPO / "examples" / "optimizer-plugin"
+
+
+def _resolved(ref: str) -> Any:
+    module, attr = ref.split(":")
+    return getattr(importlib.import_module(module), attr)
+
+
+def _example() -> tuple[list[optimizers.ManifestDir], dict[str, LlmNode]]:
+    sys.path.insert(0, str(_EXAMPLE))
+    points = tomllib.loads((_EXAMPLE / "pyproject.toml").read_text(encoding="utf-8"))
+    groups = points["project"]["entry-points"]
+    members = [_resolved(ref) for ref in groups[optimizers.ENTRY_POINT_GROUP].values()]
+    stated = {m.name: m for m in members if isinstance(m, LlmNode)}
+    return [
+        _resolved(ref) for ref in groups[optimizers.MANIFEST_ENTRY_POINT_GROUP].values()
+    ], stated
+
 
 def _manifests() -> dict[Path, Mapping[str, type[BaseModel]]]:
-    stated = optimizers.llm_nodes()
+    example, example_nodes = _example()
+    stated = {**optimizers.llm_nodes(), **example_nodes}
     out: dict[Path, Mapping[str, type[BaseModel]]] = {
         checkin_assets_root(): {"checkin": CheckinOutput}
     }
-    for manifest in optimizers.MANIFESTS.table.values():
+    for manifest in [*optimizers.MANIFESTS.table.values(), *example]:
         authored = authored_manifest(manifest.directory / "pipeline.yaml")
         # A switch writes none: its schemas are those of the manifests it reads its nodes from.
         if isinstance(authored, ManifestSwitch):
@@ -62,7 +87,8 @@ def main() -> int:
         out_path = directory / "resolved_schemas.json"
         # `ensure_ascii=False`: escaped prose cannot reproduce the committed output byte for byte.
         content = json.dumps(resolved, indent=2, ensure_ascii=False) + "\n"
-        print(f"{'wrote' if replace_changed(out_path, content) else 'unchanged'} {out_path}")
+        verb = "wrote" if replace_changed(out_path, content) else "unchanged"
+        print(f"{verb} {out_path.resolve().relative_to(REPO).as_posix()}")
     return 0
 
 

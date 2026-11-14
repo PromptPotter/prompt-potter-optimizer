@@ -2,4 +2,4 @@
 # Refuse a subject opening on a BOM or any non-ASCII byte. Enabled with pre-commit, by
 # `git config core.hooksPath .githooks`.
 
-exec python scripts/gate.py --commit-msg "$1"
+exec "$(dirname "$0")/pinned-python" scripts/gate.py --commit-msg "$1"

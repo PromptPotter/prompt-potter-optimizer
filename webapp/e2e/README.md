@@ -17,9 +17,10 @@ First time on a machine: `npx playwright install chromium`.
 **`gate.py` runs `cold`, `walk` and `touch`**, the walk (and `touch`, the same specs on a 390px touch
 phone) against the `walk-world` check's run
 (`scripts/gate.py::_playwright`); `spend` needs money. `walk` reads no operator campaign when
-`PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`) names a run — potter's straight run is what `gate.py --only walk-world` leaves
+`PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`) names a run — potter's straight run, with the L4 fixture's outer campaign nested in its data root
+(`offline_run.py --straight --l4`), is what `gate.py --only walk-world` leaves
 at `.gate_cache/walk-world/<key>/potter/data`, under that check's own key so a world is walked only
-by a tree whose engine built it, and building one removes every other world beside it — and `walk_world.py` serves a throwaway copy of it whose
+by a tree whose engine built it, and building one removes every other world beside it — and `walk_world.py` serves a throwaway copy of it (its projects and the inner runs' sandbox registry) whose
 account agreed to the live terms, with the `offline` backend. Unset, `walk` reads the checkout's
 own workspace, a desk tier run by hand.
 

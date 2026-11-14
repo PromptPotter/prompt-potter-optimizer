@@ -135,7 +135,7 @@ from promptpotter.shared.measurement_context import instrument_depth
 from promptpotter.shared.run_scope import run_scope, scoped
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
+    from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
@@ -1774,14 +1774,14 @@ def prepared_home(
     return covered
 
 
-def child_env(home: Path) -> dict[str, str]:
+def child_env(root: Path) -> dict[str, str]:
     env = dict(os.environ)
     for key in [*env, *Settings.model_fields]:
         if key.endswith(("_KEY", "_TOKEN")):
             env[key] = ""
     # The SDKs refuse an EMPTY key before sending; every transport they could reach is faked.
     env.update(dict.fromkeys(PROVIDER_KEYS, NOT_A_KEY))
-    env.update(PROMPTPOTTER_HOME=long_path(data_root(home)), PYTHONUTF8="1")
+    env.update(PROMPTPOTTER_HOME=long_path(root), PYTHONUTF8="1")
     return env
 
 
@@ -2017,10 +2017,10 @@ def controlled_reading(home: Path, arm_names: Sequence[str]) -> str:
     return "\n".join([*said, *(line for line in lines if line.startswith(("arm ", "head-to-")))])
 
 
-def proven_home(workspace: Path) -> None:
+def proven_home() -> None:
     """A landing's plan over what the run wrote: every file named by a row, loading as it shapes, and
     nothing for a migration to stage or the landing to drop."""
-    landing = plan_landing(data_root(workspace) / PROJECTS_DIR, reset=False)
+    landing = plan_landing(default_projects_root(), reset=False)
     unknown = list(landing.unknown)
     refused = [f"{u.path}: {u.why}" for u in (*landing.unloadable, *landing.caches, *landing.runs)]
     refused += [f"{u.path}: {u.why}" for u in landing.torn]
@@ -2040,12 +2040,36 @@ def refuse_another_tree() -> None:
         )
 
 
+def read_children(
+    home: Path,
+    children: Mapping[str, Future[int]],
+    resumed: Mapping[str, Future[int]],
+    pause_after: int,
+    *,
+    controlled: bool,
+) -> dict[str, int]:
+    """Per optimizer, its straight run's failed checks, and its resume's where one ran."""
+    failed = dict.fromkeys(children, 0)
+    for name, child in children.items():
+        workspace = home / name
+        if rc := child.result():
+            failed[name] += 1
+            print(f"{name}: FAILED (exit {rc}) -- {workspace / 'run.log'}")
+            continue
+        if not controlled:
+            failed[name] += read_straight_and_resumed(
+                name, workspace, resumed.get(name), pause_after
+            )
+    return failed
+
+
 def run_child_leg(args: argparse.Namespace) -> None:
     if any(os.environ[k] != NOT_A_KEY for k in PROVIDER_KEYS):
         raise SystemExit("offline run: --child runs only under the env its parent builds")
     if filed_into := os.environ.get(COVERAGE):
         traced(Path(filed_into))
-    workspace = Path(os.environ["PROMPTPOTTER_HOME"]).parent
+    # Its outputs land in its directory, its run in the data root it was handed.
+    workspace = Path.cwd()
     if args.terminal:
         run_terminal(
             args.child,
@@ -2087,7 +2111,7 @@ def run_child_leg(args: argparse.Namespace) -> None:
             wound=args.wound,
         )
         print(asyncio.run(one)[0])
-    proven_home(workspace)
+    proven_home()
 
 
 def main() -> int:
@@ -2141,7 +2165,12 @@ def main() -> int:
     ap.add_argument("--crossover", choices=CROSSED_HOSTS, help=argparse.SUPPRESS)
     ap.add_argument("--heal", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--wound", action="store_true", help=argparse.SUPPRESS)
-    ap.add_argument("--l4", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument(
+        "--l4",
+        action="store_true",
+        help="under --straight: an L4 campaign over inner runs, into potter's data root after its "
+        "straight run (the browser walk's world)",
+    )
     ap.add_argument("--terminal", choices=("new", "resume"), help=argparse.SUPPRESS)
     ap.add_argument("--interrupts", type=int, default=0, help=argparse.SUPPRESS)
     args = ap.parse_args()
@@ -2152,6 +2181,8 @@ def main() -> int:
     if args.child:
         run_child_leg(args)
         return 0
+    if args.l4 and not (args.straight and "potter" in (args.optimizer or ["potter"])):
+        ap.error("--l4 nests into potter's straight run: pass it with --straight")
 
     asked = [f"--{k}={v}" for k, v in sorted(vars(args).items()) if v != ap.get_default(k)]
     run = " ".join([OFFLINE_RUN, *(a for a in asked if not a.startswith("--against="))])
@@ -2200,24 +2231,30 @@ def main() -> int:
     )
     pool = ThreadPoolExecutor(RamBudget.read().offline_run_children(tasks))
 
-    def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
+    def run_child(
+        name: str, workspace: Path, log: str, rounds: int, *extra: str, root: Path
+    ) -> int:
         child = [sys.executable, __file__, "--child", name, f"--rounds={rounds}", *child_args]
         with (workspace / log).open("w", encoding="utf-8") as out:
             return subprocess.run(
                 [*child, *extra],
                 cwd=workspace,
-                env=child_env(workspace),
+                env=child_env(root),
                 stdout=out,
                 stderr=subprocess.STDOUT,
             ).returncode
 
-    def spawn(name: str, workspace: Path, *extra: str) -> Future[int]:
+    def spawn(name: str, workspace: Path, *extra: str, into: Path | None = None) -> Future[int]:
+        """*into* is the leg whose data root it runs in: its own, unless named."""
         workspace.mkdir()
-        return pool.submit(run_child, name, workspace, "run.log", args.rounds, *extra)
+        root = data_root(into or workspace)
+        return pool.submit(run_child, name, workspace, "run.log", args.rounds, *extra, root=root)
 
     def terminal(workspace: Path, verb: str, interrupts: int) -> int:
         flags = (f"--terminal={verb}", f"--interrupts={interrupts}")
-        return run_child(first, workspace, f"{verb}.log", TERMINAL_ROUNDS, *flags)
+        return run_child(
+            first, workspace, f"{verb}.log", TERMINAL_ROUNDS, *flags, root=data_root(workspace)
+        )
 
     children = {name: spawn(name, home / name) for name in due}
     stopped = (
@@ -2266,17 +2303,10 @@ def main() -> int:
             for name in due
         }
     )
-    failed = dict.fromkeys(due, 0)
-    for name, child in children.items():
-        workspace = home / name
-        if rc := child.result():
-            failed[name] += 1
-            print(f"{name}: FAILED (exit {rc}) -- {workspace / 'run.log'}")
-            continue
-        if not args.controlled:
-            failed[name] += read_straight_and_resumed(
-                name, workspace, resumed[name] if legs else None, pause_after
-            )
+    failed = read_children(home, children, resumed, pause_after, controlled=args.controlled)
+    # After the straight run, never beside it: two processes would land one root at entry.
+    if args.l4 and failed.get("potter") == 0:
+        nesting = spawn("potter", home / "potter" / L4, "--l4", into=home / "potter")
     for count, leg in stopped.items():
         ok, said = leg.result()
         failed[first] += not ok

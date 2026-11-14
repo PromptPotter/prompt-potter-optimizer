@@ -42,7 +42,7 @@ def _app_version() -> str:
 APP_VERSION: str = _app_version()
 
 
-# A checkout git cannot name: it equals no landing's target, so a producer on it holds every landing.
+# A checkout with no `.git` at all: it equals no landing's target, so a producer on it holds every landing.
 UNVERSIONED = "unversioned-checkout"
 
 
@@ -66,10 +66,14 @@ def _git_head(checkout: Path) -> str:
         return loose.read_text(encoding="utf-8").strip()
     packed = refs / "packed-refs"
     lines = packed.read_text(encoding="utf-8").splitlines() if packed.is_file() else []
-    # A ref neither file holds is a branch with no commit yet: git names no head there either.
-    return next(
-        (sha for sha, _, name in (line.partition(" ") for line in lines) if name == ref),
-        UNVERSIONED,
+    for sha, _, name in (line.partition(" ") for line in lines):
+        if name == ref:
+            return sha
+    # A ref neither file holds (a branch with no commit, a reftable clone) versions no landing.
+    raise RuntimeError(
+        f"{checkout}: HEAD names {ref}, which neither its loose refs nor packed-refs hold, so this "
+        "checkout's code has no revision a landing can compare; commit on it, or, in a reftable clone, "
+        "`git refs migrate --ref-format=files`."
     )
 
 

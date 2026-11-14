@@ -69,22 +69,9 @@ jobs:
       - name: Build the wheel
         run: uv run python scripts/build_release.py --no-webapp
 
-      # Outside the checkout is the whole point — inside one, `source_checkout_root()`
-      # answers yes and every assertion in the smoke script is vacuous. It refuses to run
-      # from a source tree for that reason.
-      #
-      # `[api]` because the smoke mounts the app: the wheel's own dependencies are the
-      # engine's, and an extra is exactly what a consumer has to ask for.
+      # It installs the wheel into a venv of its own and runs it outside the checkout.
       - name: Install it elsewhere and run it
-        run: |
-          uv venv --seed "$RUNNER_TEMP/venv"
-          wheel=(dist/*.whl)
-          "$RUNNER_TEMP/venv/bin/pip" install --quiet "${wheel[0]}[api]"
-          mkdir -p "$RUNNER_TEMP/elsewhere" "$RUNNER_TEMP/home"
-          cd "$RUNNER_TEMP/elsewhere"
-          export PROMPTPOTTER_HOME="$RUNNER_TEMP/home"
-          "$RUNNER_TEMP/venv/bin/promptpotter" --help > /dev/null
-          "$RUNNER_TEMP/venv/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_wheel.py"
+        run: uv run python scripts/smoke_wheel.py dist/*.whl
 
   webapp:
     runs-on: ubuntu-latest

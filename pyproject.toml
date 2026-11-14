@@ -122,10 +122,6 @@ mcp = [
     # release promises to keep.
     "mcp>=2.3.0,<2.4",
 ]
-jupyter = [
-    "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/bbeh_potter.ipynb`
-    "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/terminal/completion.py)
-]
 benchmarks = [
     # why kept: HuggingFace loader for the public benchmark banks (BBEH / GSM8K / AIME /
     # JustLogic). OPT-IN ONLY, and deliberately absent from `all`: it drags a large transitive
@@ -140,8 +136,6 @@ all = [
     # what a developer installs by default, so anything listed becomes attack surface nobody
     # opted into. Reach for `.[all,dev,benchmarks]` when you actually fetch a public bank.
     # `harbor` and `mcp` are out for the same reason.
-    # `jupyter` is out because an installed IPython is imported by every `import dspy` and drags
-    # jsonschema's format checkers with it: 38 MB and ~4 s on each test run that reaches DSPy.
     "fastapi>=0.119.0",
     "starlette>=1.0.1",
     "python-multipart>=0.0.27",
@@ -241,10 +235,9 @@ files = [
     "promptpotter",
     "scripts",
     "tests",
-    "paper/bbeh-comparison/bbeh_potter_runner.py",
     "examples/optimizer-plugin/example_optimizer",
 ]
-mypy_path = ["paper/bbeh-comparison", "examples/optimizer-plugin"]
+mypy_path = ["examples/optimizer-plugin"]
 python_version = "3.13"
 strict = true
 warn_unreachable = true
@@ -270,7 +263,6 @@ module = [
     "datasets.*",
     "dspy.*",
     "harbor.*",
-    "IPython.*",
     # Pure transitive (0 first-party imports) — pulled in by the CLI rendering chains; nothing here is in our typed call surface.
     "rich.*",
     "markdown_it.*",
@@ -285,10 +277,12 @@ implicit_reexport = true
 [tool.ruff]
 target-version = "py313"
 line-length = 100
-# The peers' Colab notebooks run promptolution and DSPy on Colab, never this repo.
+# The peers' Colab notebooks run promptolution and DSPy on Colab, never this repo; the potter
+# runner runs against `promptpotter==0.8.20`, whose modules this checkout no longer holds.
 extend-exclude = [
     "paper/bbeh-comparison/bbeh_capo.ipynb",
     "paper/bbeh-comparison/bbeh_dspy.ipynb",
+    "paper/bbeh-comparison/bbeh_potter_runner.py",
 ]
 
 [tool.ruff.lint]
@@ -337,11 +331,9 @@ known_first_party = ["gate", "last_green", "offline_world", "processes"]
 [tool.deptry.per_rule_ignores]
 # CLI/tool deps — invoked by command, not imported.
 DEP002 = [
-    "ipython",
     "uvicorn",
     "python-multipart",  # imported by FastAPI at runtime for multipart/form-data, never directly by promptpotter/
     "python-dotenv",     # a CVE floor for pydantic-settings' `env_file` read; see [project] dependencies
-    "jupyterlab",
     "pytest",
     "pytest-asyncio",
     "ruff",
@@ -349,8 +341,6 @@ DEP002 = [
     "deptry",
     "types-PyYAML",      # stub-only package: consumed by mypy, never imported
 ]
-# `ipython` ([jupyter]) is in no gate env, so deptry cannot map it to the module it installs.
-DEP001 = ["IPython"]
 # Imported directly and deliberately left transitive: pydantic pins `pydantic_core` to one exact
 # version, so the `core_schema` a model builds (`domain/scoring.py::CellSheet`) must be the one
 # pydantic resolved.

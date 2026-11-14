@@ -14,6 +14,7 @@ from promptpotter.application.account import accept_terms, local_stores
 from promptpotter.config.paths import PROJECTS_DIR
 from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.infrastructure.store.io import rmtree_robust
+from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 
 
 def main(argv: list[str]) -> int:
@@ -49,6 +50,9 @@ def main(argv: list[str]) -> int:
     if home.exists():
         rmtree_robust(home)
     shutil.copytree(source, home / PROJECTS_DIR)
+    # An L4 cell's inner run sits in the sandbox registry beside the projects, never inside them.
+    if (sandboxes := inner_sandboxes_dir(source)).is_dir():
+        shutil.copytree(sandboxes, inner_sandboxes_dir(home / PROJECTS_DIR))
     accept_terms(local_stores(tenant=None), TERMS_VERSION)
     print(f"[e2e] walk world {home} from {source}")
     return 0

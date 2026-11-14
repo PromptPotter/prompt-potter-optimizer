@@ -1239,7 +1239,7 @@ def _optimizer_plugin(_: Selection) -> Outcome:
 
 
 # What the `walk` tier serves a copy of: potter's straight run's data root
-# (`offline_run.py::data_root`), in a home of its own under the `walk-world` check's key, so a world is read only by a tree whose engine built it. One world
+# (`offline_run.py::data_root`), an L4 campaign over inner runs nested in it (`--l4`), in a home of its own under the `walk-world` check's key, so a world is read only by a tree whose engine built it. One world
 # stands: building one removes every other entry of `walk-world/`, under the clone's lock, which
 # a walk's copy of its world takes too (`webapp/e2e/walk_world.py`), so no world goes while a tree
 # copies it; a tree whose world went builds its own again (`Check.kept` reads `builds`). Spelled
@@ -1255,7 +1255,7 @@ def _walk_world(sel: Selection) -> Outcome:
             shutil.rmtree(other)
         elif other.is_file():
             other.unlink()
-    argv = [sys.executable, "scripts/offline_run.py", "--optimizer=potter", "--straight"]
+    argv = [sys.executable, "scripts/offline_run.py", "--optimizer=potter", "--straight", "--l4"]
     return run(argv, REPO, PROMPTPOTTER_HOME=str(home))
 
 
@@ -1409,8 +1409,16 @@ CHECKS: tuple[Check, ...] = (
         _probe("scripts/build_optimizer_schemas.py", _rewrote),
         mb=80,  # 65
         tier="commit",
-        reads=(*_ENGINE_RUNTIME, "scripts/build_optimizer_schemas.py"),
-        writes=("promptpotter/assets/optimizers/", "promptpotter/assets/checkin/"),
+        reads=(
+            *_ENGINE_RUNTIME,
+            "scripts/build_optimizer_schemas.py",
+            f"{_EXAMPLE_PLUGIN_DIR}/",
+        ),
+        writes=(
+            "promptpotter/assets/optimizers/",
+            "promptpotter/assets/checkin/",
+            f"{_EXAMPLE_PLUGIN_DIR}/example_optimizer/resolved_schemas.json",
+        ),
     ),
     Check(
         "specs",
@@ -1765,28 +1773,21 @@ def _prove_tips(refs: str, checks: Sequence[Check]) -> int:
 # `api`, `mcp`: mypy resolves fastapi and the MCP SDK. `harbor`, `dspy`, `mcp`: a test skipped
 # for a missing extra never ran. `benchmarks`: the hub datasets the box offers start here too.
 _PINNED_EXTRAS = ("dev", "api", "harbor", "dspy", "excel", "mcp", "benchmarks")
-# What decides the installed env; a tool table (`[tool.ruff]`, `[tool.deptry]`) does not.
-_INSTALL_KEYS = ("dependencies", "optional-dependencies", "requires-python")
 _LOCK_STAMP = _PINNED / "gate-lock.sha256"
 
 
-def _install_digest(extras: list[str]) -> str:
-    """The project's own version is no pin: a release bumps it and installs nothing else, and a
-    checkout reads it off `pyproject.toml` (`settings.py::_app_version`), never the venv."""
-    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
-    declared = {key: pyproject["project"].get(key) for key in _INSTALL_KEYS}
-    declared["build-system"] = pyproject.get("build-system")
-    lock = tomllib.loads((REPO / "uv.lock").read_text(encoding="utf-8"))
-    own = pyproject["project"]["name"]
-    lock["package"] = [
-        {key: value for key, value in package.items() if package["name"] != own or key != "version"}
-        for package in lock.get("package", [])
-    ]
-    return digest(
-        json.dumps(lock, sort_keys=True).encode(),
-        json.dumps(declared, sort_keys=True).encode(),
-        " ".join(extras).encode(),
-    ).hex()
+def _install_digest(uv: str, extras: list[str]) -> str:
+    """The resolved pinned set, never the lock's bytes: a lock edit outside the pinned extras, or
+    the project's own version (a release bumps it and installs nothing else), moves nothing."""
+    export = subprocess.run(
+        [uv, "export", "--frozen", "--quiet", "--no-header", "--no-annotate", *extras],
+        cwd=REPO,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    if export.returncode:
+        raise SystemExit(f"gate: `uv export --frozen` failed:\n{export.stderr}")
+    return digest(export.stdout.encode()).hex()
 
 
 def _editable_target() -> Path | None:
@@ -1884,7 +1885,7 @@ def _reexec_pinned() -> None:
         raise SystemExit(
             f"gate: `uv` is not on PATH, so the locked env is unreachable.\nRun: {exact}"
         )
-    locked = _install_digest(extras)
+    locked = _install_digest(uv, extras)
     bindir = _PINNED / ("Scripts" if sys.platform == "win32" else "bin")
     python = bindir / ("python.exe" if sys.platform == "win32" else "python")
     stamped = _LOCK_STAMP.exists() and _LOCK_STAMP.read_text() == locked
@@ -2008,9 +2009,9 @@ def main() -> int:
         return _prove_index()
     kinds = "+".join(sorted(_kinds(args)))
     label = "staged" if args.staged else kinds + ("/changed" * args.changed)
-    # One CI runner, one gate.
+    # A CI runner has no sibling to queue behind, so it takes the lock like a desk does.
     unqueued = all(c.tier == "commit" for c in checks)
-    queue_behind_siblings(f"gate[{label}]", exempt=unqueued or bool(os.environ.get("CI")))
+    queue_behind_siblings(f"gate[{label}]", exempt=unqueued)
     budget = RamBudget.read()
 
     # `--staged` checks less than any key names, so it neither reads nor records a green, and CI

@@ -1,4 +1,7 @@
-"""Runs under a bare venv holding only the wheel, CWD outside any checkout: no test framework."""
+"""`smoke_wheel.py <wheel>` installs the wheel (`[api]`: the smoke mounts the app, and an extra is
+what a consumer asks for) into a venv of its own, then reruns itself there, CWD and
+`PROMPTPOTTER_HOME` outside any checkout, so `source_checkout_root()` answers no and no assertion
+is vacuous. No test framework."""
 
 from __future__ import annotations
 
@@ -7,10 +10,30 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+import venv
 from pathlib import Path
+
+
+def _elsewhere(wheel: Path) -> int:
+    with tempfile.TemporaryDirectory(prefix="pp-smoke-") as scratch:
+        root = Path(scratch)
+        venv.create(root / "venv", with_pip=True)
+        bindir = root / "venv" / ("Scripts" if sys.platform == "win32" else "bin")
+        python = bindir / ("python.exe" if sys.platform == "win32" else "python")
+        install = [str(python), "-m", "pip", "install", "--quiet", f"{wheel.resolve()}[api]"]
+        if rc := subprocess.run(install).returncode:
+            return rc
+        elsewhere = root / "elsewhere"
+        elsewhere.mkdir()
+        env = {**os.environ, "PROMPTPOTTER_HOME": str(root / "home")}
+        cli = [str(bindir / "promptpotter"), "--help"]
+        if rc := subprocess.run(cli, cwd=elsewhere, env=env, stdout=subprocess.DEVNULL).returncode:
+            return rc
+        return subprocess.run([str(python), __file__], cwd=elsewhere, env=env).returncode
 
 
 def _free_port() -> int:
@@ -173,4 +196,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_elsewhere(Path(sys.argv[1])) if sys.argv[1:] else main())

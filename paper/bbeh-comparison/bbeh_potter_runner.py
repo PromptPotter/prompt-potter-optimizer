@@ -1,4 +1,5 @@
-"""BBEH x PromptPotter harness.
+"""BBEH x PromptPotter harness; runs against ``promptpotter==0.8.20``, the last release that ships
+the completion renderer it imports, so mypy never checks it against this checkout.
 
 Kept out of ``shared_config.py`` because the CAPO/DSPy notebooks live on
 Colab and must stay import-safe there (no ``promptpotter.*`` imports).

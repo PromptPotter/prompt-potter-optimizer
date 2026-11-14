@@ -4216,6 +4216,22 @@ def test_a_webapp_gate_runs_the_engine_checks_it_pulls_in_inside_the_pinned_venv
     assert any(c.kind in gate._PINNED_KINDS for c in pulled), "a --web gate re-execs nowhere"
 
 
+def test_the_walk_world_check_under_no_key_builds_and_prunes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A tree git lists no key for stands under no world: a prune there would take a keyed one.
+    standing = tmp_path / "a-keyed-world" / "potter" / "data"
+    standing.mkdir(parents=True)
+    monkeypatch.setattr(gate, "_WALK_WORLDS", tmp_path)
+    with pytest.raises(RuntimeError, match="no key"):
+        gate._NAMED["walk-world"].run(gate.Selection(False, (), ()))
+    assert sorted(tmp_path.rglob("*")) == [
+        tmp_path / "a-keyed-world",
+        tmp_path / "a-keyed-world" / "potter",
+        standing,
+    ], "a walk-world check with no key built or pruned a world"
+
+
 def test_a_declared_write_is_what_orders_two_gate_checks() -> None:
     # An undeclared read is invisible to the gate, so the declared write must be the whole edge.
     def green(_: gate.Selection) -> tuple[int, str]:

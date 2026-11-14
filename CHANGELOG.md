@@ -6,6 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- The `jupyter` extra and its one renderer, `presentation/terminal/completion.py`; the BBEH notebook's runner (`paper/bbeh-comparison/bbeh_potter_runner.py`) runs against `promptpotter==0.8.20`.
+
 ## [0.8.20] — 2026-11-13
 
 > Every command is filed on its account's log, where it is read and cancelled by its id. A budget is a hard ceiling, diagnostics are campaign settings, and the webapp updates live and fits a phone. Upgrading wipes run data; accounts and the install's settings survive. 169 commits since `v0.8.19`.

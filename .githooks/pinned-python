@@ -1,0 +1,10 @@
+#!/bin/sh
+# The pinned venv's interpreter, the one `scripts/gate.py::_reexec_pinned` names: the clone's main
+# tree's `.venv` (`bin/python`, or `Scripts/python.exe` on Windows), which every worktree shares.
+
+root=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+for python in "$root/.venv/bin/python" "$root/.venv/Scripts/python.exe"; do
+    [ -x "$python" ] && exec "$python" "$@"
+done
+echo "hook: $root/.venv holds no interpreter; build it with \`python3 scripts/gate.py\` in $root" >&2
+exit 1

@@ -1574,44 +1574,9 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ### batch/32 · rel
 
-- **A renderer outside `views/` keeps an extra for one paper script**:
-  `presentation/terminal/completion.py::report_completion` has one caller,
-  `paper/bbeh-comparison/bbeh_potter_runner.py:38`, and alone keeps the `jupyter` extra. Action: pin the
-  paper script to its release, then delete the module and the extra. **Rides with:** rel 1. **Re-test:**
-  `git grep -n "terminal.completion" -- paper promptpotter` is empty.
-- **The wheel's "install it elsewhere and run it" is written twice** (`.github/workflows/ci.yml:78-87`,
-  `publish.yml:89-100`). Action: `scripts/smoke_wheel.py`, which already exists and runs inside the
-  venv, is extended to take the wheel and make its own venv; each workflow calls it once. **Rides with:** rel 1. **Re-test:** `git grep -c 'RUNNER_TEMP/elsewhere' -- .github` is 0.
-- **The example plugin's `resolved_schemas.json` is tracked, and no gate run writes it.** **Rides with:**
-  rel 1. **Re-test:** edit it by hand; a gate is red.
-- **`scripts/build_optimizer_schemas.py` names its outputs by absolute path.** Action: repo-relative
-  wherever the output is in the checkout. **Rides with:** rel 1. **Re-test:** every regenerator prints
-  `wrote|unchanged <repo-relative path>`.
-- **The git hooks call bare `python`**: `.githooks/pre-commit`, `commit-msg` and `pre-push` each
-  `exec python scripts/gate.py …` (`commit-msg:5`, `pre-commit:10`, `pre-push:8`); `gate.py` imports no
-  `promptpotter` at module level, so the real failure is a `python` without PyYAML (`gate.py:30`), though
-  the repo refuses bare `python` at import. Action: the hooks call the
-  pinned venv's interpreter, the one `gate.py::_reexec_pinned` names. **Rides with:** rel 2, which holds
-  `scripts/gate.py`; its Owns gain `.githooks/`. **Re-test:** `git grep -n "exec python" -- .githooks` is empty.
-- **`paper/bbeh-comparison/bbeh_potter_runner.py` closes a client the run already closed**:
-  `run_bbeh_campaign` calls `session.backend_client.aclose()` (`:232-233`) after `run_campaign`, which closes
-  its own. Action: the line and its `suppress` go. **Rides with:** rel 1, which holds this script.
-  **Re-test:** `git grep -n "aclose" -- paper/bbeh-comparison/bbeh_potter_runner.py` is empty.
-- **The pinned venv is keyed on the raw `uv.lock`**: `scripts/gate.py::_install_digest` hashes the lock's
-  bytes, so a worktree whose lock moved only outside the pinned extras (batch/22's mlflow exit) is
-  refused a venv that `uv export --frozen` proves identical. Action: hash the resolved pinned set.
-  **Rides with:** rel 2. **Re-test:** a lock edit outside `_PINNED_EXTRAS` leaves the digest unmoved.
-- **The walk world has no outer/inner run, so the seat-cell drill never runs**: `scripts/gate.py::_walk_world`
-  builds `offline_run.py --optimizer=potter --straight` alone, so `webapp/e2e/walk/cells.spec.ts:40`
-  always skips. Action: the walk world carries an offline L4 leg (`offline_run.py --l4`, `:2123`,
-  1ba7ab27a, now exists), and the spec's skip becomes a failure. **Rides with:** rel 2. **Re-test:** `npx playwright test --project=walk e2e/walk/cells.spec.ts`
-  passes 1, skips 0.
 - **The dev loop still serializes on Vitest**: its pool fails a worker past its hard-coded 90 s start,
   which a host loaded from outside the gate lock still trips. **Rides with:** rel 2. **Re-test:** five
   builders plus one full gate, no reap.
-- **`config/settings.py::_git_head` answers `UNVERSIONED` silently** for a ref in neither the loose refs
-  nor `packed-refs`. Action: it refuses, naming the checkout it could not version. **Rides with:** rel 2.
-  **Re-test:** a landing from a reftable clone names why.
 - **Run data is stat'ed bare outside `store/io.py`**: `store/read_model.py::file_sig`, six more
   `.stat()` sites (`optimizer_manifest.py:96`, `pricing.py:114`, `event_stream.py:49`,
   `run_state.py:39`, `measurement_archive.py:480`, `private_root.py:32`) and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger
@@ -1623,15 +1588,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `store/io.py::_long_path`, `scripts/processes.py::long_path` and the `.stat()` and `os.scandir` reads
   of the files the re-test names. **Re-test:** `git grep -lE "\.stat\(\)" -- promptpotter` names no file
   outside `store/io.py`.
-- **The walk world keyed by its check's key has no test for the key-is-None path** (`scripts/gate.py`,
-  `6381c24b9`: a world is never built or pruned under no key). Action: a test holds that path. **Rides
-  with:** rel 2. **Re-test:** a gate test runs the `walk-world` check with no key.
-- **Two gates on one desk share playwright's port and the clone's `.gate_cache` homes, and `CI` alone
-  waives the clone lock** (`scripts/gate.py::main`, `processes.py::queue_behind_siblings`): a `CI=1`
-  gate on the desk collided with a pre-push gate (port 8123 in use; `offline_run.py::prepared_home`'s
-  rmtree, WinError 32). The DAG schedules inside one gate only. Action: the waiver keys on the runner,
-  not an env var a desk sets. **Rides with:** rel 2. **Re-test:** a `CI=1` gate beside `gate.py --push`
-  queues.
 - **Unverified, for the next change to each file**: `shell/CriticalAlertBanner` builds `Said` rows in the
   browser; `ViewTabs.show` is many `open`/`close` calls, not one workspace act;
   `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after; `FileTree` mounts a 2 s

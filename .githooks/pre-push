@@ -6,4 +6,4 @@
 #
 # Enabled with pre-commit, by `git config core.hooksPath .githooks`.
 
-exec python scripts/gate.py --push
+exec "$(dirname "$0")/pinned-python" scripts/gate.py --push

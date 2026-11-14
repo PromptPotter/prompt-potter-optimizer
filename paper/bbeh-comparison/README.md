@@ -36,7 +36,7 @@ hyperparameters are unmeasured starting points, tagged in `config.note`.
 |---|---|---|
 | `bbeh_capo.ipynb` | CAPO ([promptolution](https://github.com/automl/promptolution)) | Colab: `GROQ_API_KEY` in Secrets → Run All → download `results_*.json` |
 | `bbeh_dspy.ipynb` | GEPA, MIPROv2, BootstrapFewShot ([DSPy](https://github.com/stanfordnlp/dspy)) | Colab, as above; toggle the `RUN_*` flags |
-| [`../../notebooks/bbeh_potter.ipynb`](../../notebooks/bbeh_potter.ipynb) | PromptPotter | Local: `pip install -e ".[dev,jupyter]" datasets`, `GROQ_API_KEY` in `.env`, a TermNorm backend with `llm_only` on `:8000`; `results_potter.json` lands beside it |
+| [`../../notebooks/bbeh_potter.ipynb`](../../notebooks/bbeh_potter.ipynb) | PromptPotter | Local: runs against `promptpotter==0.8.20` (`pip install "promptpotter==0.8.20" jupyterlab ipython datasets`), `GROQ_API_KEY` in `.env`, a TermNorm backend with `llm_only` on `:8000`; `results_potter.json` lands beside it |
 
 ## References
 
