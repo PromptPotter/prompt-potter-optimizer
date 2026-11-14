@@ -33,6 +33,8 @@ from processes import REPO, clone_cache, git, replace_changed, run
 
 # The ceiling each row's last raise declared; a row that never rose past it in this branch ignores it.
 BASELINE = {
+    # Lines of the package's own Python: a change removes more than it adds (operator, 2026-11-13).
+    "package_lines": 112081,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
@@ -413,19 +415,20 @@ def _imports_own_package(node: ast.AST) -> typing.TypeGuard[ast.stmt | ast.expr]
 
 
 def _source_counts(py_files: list[Path]) -> dict[str, int]:
-    """The four counts read off source, in ONE parse and one walk per module.
+    """The five counts read off source, in ONE parse and one walk per module.
 
     A deferred import counts once per function enclosing it, so a closure's import is charged to
     the closure and to the function that holds it. ``domain_any_maps`` is scoped to ``domain/``
     because package-wide the shape is mostly the backend's own runtime-keyed overlay, and a count
     that flags what nobody may fix gets muted."""
     domain_root = _PACKAGE_ROOT / "domain"
-    any_params = any_maps = deferred = 0
+    package_lines = any_params = any_maps = deferred = 0
     bases: dict[str, list[str]] = {}
     declared: dict[str, str | None] = {}
     for path in py_files:
         source = path.read_text(encoding="utf-8")
         lines = source.splitlines()
+        package_lines += len(lines)
         in_domain = domain_root in path.parents
         for node, depth in _nodes(ast.parse(source)):
             if isinstance(node, _Function):
@@ -445,6 +448,7 @@ def _source_counts(py_files: list[Path]) -> dict[str, int]:
                 context = lines[max(0, node.lineno - 2) : node.end_lineno or node.lineno]
                 deferred += depth * (not any(_EXTRAS_MARKER in line for line in context))
     return {
+        "package_lines": package_lines,
         "any_params": any_params,
         "domain_any_maps": any_maps,
         "models_lax": _count_lax_models(bases, declared),
@@ -500,6 +504,7 @@ def compute_ledger() -> dict[str, int]:
     test_files, test_functions_over_150 = _count_tests()
 
     return {
+        "package_lines": source["package_lines"],
         "reexport_shims": sum(_is_reexport_shim(p) for p in py_files if p.name == "__init__.py"),
         # The overlay leaf stands for the node knobs each member declares, counted instead.
         "config_leaf_fields": len(KNOBS) - 1 + member_knob_count(),
@@ -523,7 +528,7 @@ def compute_ledger() -> dict[str, int]:
 
 def _format(ledger: dict[str, int]) -> str:
     width = max(len(k) for k in ledger)
-    rows = [f"  {k.ljust(width)}  {v:>4}  / {BASELINE.get(k, '-')}" for k, v in ledger.items()]
+    rows = [f"  {k.ljust(width)}  {v:>6}  / {BASELINE.get(k, '-')}" for k, v in ledger.items()]
     return "complexity ledger (count / ceiling)\n" + "\n".join(rows)
 
 
