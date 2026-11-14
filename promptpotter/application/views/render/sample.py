@@ -135,14 +135,16 @@ def fmt_query_result(
         line += f"\n{_ann_indent}{YELLOW}⚠ {w.step}: {msg}{RESET}"
 
     match facts.stale_outcome:
-        # An exhausted ladder reran first, and the tape reads its rerun.
         case StaleOutcome.RETRIED | StaleOutcome.PERSISTENTLY_DEGRADED:
+            said = (
+                "reran" if facts.stale_outcome is StaleOutcome.RETRIED else "exhausted the ladder"
+            )
             line = _append_annotation(
                 line,
                 _ann_indent,
                 YELLOW,
                 "\U0001f504",
-                f"cache had pipeline warnings → reran{_rerun_detail(facts)}",
+                f"cache had pipeline warnings → {said}{_rerun_detail(facts)}",
             )
         case StaleOutcome.SWITCHED_OUT:
             line = _append_annotation(

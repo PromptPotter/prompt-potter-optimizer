@@ -6,12 +6,12 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from promptpotter.domain.activity import ActivityItem
 from promptpotter.domain.arm_reading import ArmReading, DisplayMetric
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.opt_search_point import Variation
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import PauseReading, RunAdmission, RunState
 from promptpotter.domain.records.run_records import ForkDirection, ForkTrigger
 from promptpotter.domain.run_standing import RunStanding
@@ -469,10 +469,12 @@ class StepFacts(FrozenModel):
         "the family that the window knows of; 0 where none. A heartbeat takes no slot of a "
         "window, so a long open call never serves one empty.",
     )
-    activity: ActivityItem = Field(
-        description="The record's reading. A `running` step with no later step on its course is a "
-        "call still open."
+    activity: Said = Field(
+        description="The record's line, as the readout log writes it. A `live` step with no later "
+        "step on its course is a call still open."
     )
+    round: int | None = Field(description="The round the record names.")
+    arm: ArmKey | None = Field(description="The arm the record is about, by its key.")
 
 
 class HierarchyStep(_HierarchyNode):

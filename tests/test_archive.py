@@ -143,6 +143,7 @@ from promptpotter.domain.hierarchy import (
     entries_under,
 )
 from promptpotter.domain.job import CampaignLaunch
+from promptpotter.domain.narration import Narration
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
@@ -151,7 +152,6 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
-    AnnouncedArms,
     ArmRecord,
     ConfigOverrides,
     CycleSeed,
@@ -1086,7 +1086,7 @@ def test_a_reentered_rounds_arm_folds_only_its_new_walk(
     stores.campaigns.rewind_to_round(hop, 1)
     stores.campaigns.rewind_to_round(hop, 0)
     # Every live fold reads the rewind off its record.
-    folds = AnnouncedArms()
+    folds = Narration()
     walk = ArmRecord(round=1, arm=ArmKey(ids[1]), state=closed[1].arms[ArmKey(ids[1])])
     [cell] = arm_walk(
         CycleEventLog(stores.projects_root / "rewalk.jsonl"),

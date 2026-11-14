@@ -312,22 +312,33 @@ class RoundResult(RoundOutcome):
 
 
 class InRunCells:
-    def __init__(self, rounds: Sequence[RoundResult]) -> None:
-        self._walks = [
-            walk
-            for rr in rounds
-            for walk in _round_walks(
-                arms={k: _by_sample(v) for k, v in rr.cells.items()},
-                overlap={k: _by_sample(v) for k, v in rr.overlap_results.items()},
+    """Each round's walks, folded once: *held*'s rounds are reused, so a restated round re-folds alone."""
+
+    def __init__(self, rounds: Sequence[RoundResult], held: InRunCells | None = None) -> None:
+        kept = {} if held is None else held._rounds
+        self._rounds: dict[int, tuple[RoundResult, list[IndividualWalk[_SampleCell]]]] = {
+            rr.round: kept[rr.round]
+            if rr.round in kept and kept[rr.round][0] is rr
+            else (
+                rr,
+                _round_walks(
+                    arms={k: _by_sample(v) for k, v in rr.cells.items()},
+                    overlap={k: _by_sample(v) for k, v in rr.overlap_results.items()},
+                ),
             )
-        ]
+            for rr in rounds
+        }
 
     def sheet(self, individual_id: str, scope: RoleScope) -> CellSheet:
-        folded = individual_cells(self._walks, individual_id, scope)
+        walks = [walk for _, round_walks in self._rounds.values() for walk in round_walks]
+        folded = individual_cells(walks, individual_id, scope)
         if not folded:
             return NO_CELLS
         return CellSheet(folded[0][2], tuple(cell for _, cell, _ in folded)).standing()
 
 
-def _by_sample(sheet: CellSheet) -> list[tuple[str, GradedCell, str]]:
+type _SampleCell = tuple[str, GradedCell, str]
+
+
+def _by_sample(sheet: CellSheet) -> list[_SampleCell]:
     return [(cell.key, cell, sheet.scorer_id) for cell in sheet]

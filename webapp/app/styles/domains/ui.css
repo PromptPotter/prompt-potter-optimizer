@@ -63,6 +63,16 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
   --tone-glyph: "⛔";
   --tone-ink: var(--color-danger);
 }
+/* A narrated row's glyph at every tone, as `domain/said.py::GLYPH` writes it in a log. */
+.tone-mark::before {
+  content: var(--tone-glyph, "·");
+}
+.tone-live > .tone-mark {
+  --tone-glyph: "↻";
+}
+.tone-success > .tone-mark {
+  --tone-glyph: "✓";
+}
 /* Spaced like the prose notes it stacks among: every call site places it bare. */
 .said {
   display: block;

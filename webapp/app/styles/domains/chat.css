@@ -95,9 +95,8 @@
 .chat-activity.tone-success .chat-activity-icon{color:var(--color-success)}
 .chat-activity.tone-warn .chat-activity-icon{color:var(--color-accent)}
 .chat-activity.tone-danger .chat-activity-icon{color:var(--color-danger)}
-.chat-activity.kind-warning .chat-activity-label,.chat-activity.kind-error .chat-activity-label{color:var(--color-danger)}
-.chat-activity.kind-merge .chat-activity-label{color:var(--color-accent)}
-.chat-activity.kind-progress{opacity:.85}
+.chat-activity:is(.tone-warn,.tone-danger) .chat-activity-label{color:var(--color-danger)}
+.chat-activity.tone-quiet{opacity:.85}
 
 .chat-msg.chat-decision{border:1px solid var(--color-accent);box-shadow:0 0 14px var(--color-accent-glow);display:flex;flex-direction:column;gap:var(--space-10);max-width:100%;width:100%;align-self:stretch}
 .chat-decision-title{font-weight:600;font-size:var(--text-md);color:var(--color-text-primary)}

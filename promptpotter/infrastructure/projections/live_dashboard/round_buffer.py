@@ -5,12 +5,9 @@ from typing import NamedTuple
 
 from promptpotter.domain.arms import ArmState, arm_name
 from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.narration import Narration
 from promptpotter.domain.paired_reading import ArmKey, ArmName
-from promptpotter.domain.records.run_records import (
-    AnnouncedArms,
-    ArmRecord,
-    SampleScoredRecord,
-)
+from promptpotter.domain.records.run_records import ArmRecord, SampleScoredRecord
 from promptpotter.domain.results import Election
 from promptpotter.domain.scoring import Grade, MeasuredCell
 
@@ -25,7 +22,7 @@ class WalkedSample(NamedTuple):
 class RoundBuffer:
     round_num: int = 0
     # Every round's: a cell names an arm announced before the buffer reached its round.
-    announced: AnnouncedArms = field(default_factory=AnnouncedArms)
+    announced: Narration = field(default_factory=Narration)
     # Each arm of THIS round, in announcement order, with the cells it walked.
     samples: dict[ArmKey, list[WalkedSample]] = field(default_factory=dict)
     race_standings: dict[str, float] = field(default_factory=dict)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fmtGap } from "@/lib/format";
 import { raySteps } from "@/lib/derivations";
-import type { ActivityItem, HierarchyStep } from "@/lib/api/types";
+import type { HierarchyStep, StepFacts } from "@/lib/api/types";
 import { hierarchyStep } from "@/lib/test-fixtures";
 
 const ROOT = "camp::cycle_root";
@@ -10,42 +10,26 @@ const INNER = "camp::cycle_root~inner::cycle_in";
 const T0 = Date.parse("2026-01-01T00:00:00Z");
 const at = (sec: number): string => new Date(T0 + sec * 1000).toISOString();
 
-function read(over: Partial<ActivityItem>): ActivityItem {
-  return {
-    id: "x",
-    kind: "round",
-    icon: "★",
-    label: "Round 1",
-    detail: null,
-    tone: "success",
-    round: 1,
-    arm: null,
-    healed: null,
-    ...over,
-  };
-}
-
 function item(
-  over: { ts: string; offset?: number; gap?: number; activity?: ActivityItem },
+  over: { ts: string; offset?: number; gap?: number; label?: string } & Partial<StepFacts>,
   course = ROOT,
 ): HierarchyStep {
   return hierarchyStep(course, {
     offset: over.offset ?? 0,
     ts: over.ts,
     gap_before_s: over.gap ?? 0,
-    activity: over.activity ?? read({}),
+    activity: { key: "x", tone: "success", label: over.label ?? "Round 1", value: null, sub: null, detail: null },
+    round: over.round ?? 1,
+    arm: over.arm ?? null,
   });
 }
 
 function round(sec: number, n: number, offset: number, gap = 0): HierarchyStep {
-  return item({ ts: at(sec), offset, gap, activity: read({ label: `Round ${n}`, round: n }) });
+  return item({ ts: at(sec), offset, gap, label: `Round ${n}`, round: n });
 }
 
 function innerRound(sec: number, n: number, offset: number, gap = 0): HierarchyStep {
-  return item(
-    { ts: at(sec), offset, gap, activity: read({ label: `Round ${n}`, round: n }) },
-    INNER,
-  );
+  return item({ ts: at(sec), offset, gap, label: `Round ${n}`, round: n }, INNER);
 }
 
 describe("raySteps", () => {
@@ -84,10 +68,7 @@ describe("raySteps", () => {
   });
 
   it("carries the round and the arm key a click needs", () => {
-    const minted = item({
-      ts: at(0),
-      activity: read({ kind: "candidate", label: "C2.1", round: 2, arm: "c2a" }),
-    });
+    const minted = item({ ts: at(0), label: "C2.1", round: 2, arm: "c2a" });
     const steps = raySteps([minted, round(1, 3, 1)], ROOT);
     expect(steps[0]?.arm).toBe("c2a");
     expect(steps[0]?.round).toBe(2);

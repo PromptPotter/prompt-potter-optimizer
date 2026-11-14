@@ -9,6 +9,7 @@ from typing import Any, ClassVar, NamedTuple, assert_never, cast, get_args
 from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
 from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.narration import Narration
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import IndividualWalk
 from promptpotter.domain.phase_views import (
@@ -24,7 +25,6 @@ from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     BABYSAT,
-    AnnouncedArms,
     ArmRecord,
     CampaignCeilingRecord,
     ComparisonExit,
@@ -333,7 +333,7 @@ class _Progress:
 
 
 class StandingArm(NamedTuple):
-    """One arm of one round as its records left it; ``fold`` is `AnnouncedArms.fold`."""
+    """One arm of one round as its records left it; ``fold`` is `Narration.fold`."""
 
     state: ArmState
     cells: dict[str, WalkedCell]
@@ -469,8 +469,10 @@ class _Standing:
     def __init__(self) -> None:
         self.at_offset = -1
         self._held = StandingRounds.none()
-        self._arms = AnnouncedArms()
+        self._arms = Narration()
         self._cells: dict[tuple[int, ArmKey], dict[str, WalkedCell]] = {}
+        # Below the round last entered, a value shares an arm's cells: a later cell copies them first.
+        self._live: int | None = None
 
     def feed(self, record: _RoundStep) -> None:
         if isinstance(record, CycleMintedRecord):
@@ -490,6 +492,7 @@ class _Standing:
                 )
                 self._arms.enter(rnd)
                 self._cells = _before(self._cells, rnd)
+                self._live = rnd
             case ElectionRecord():
                 held.elections[rnd] = record
             case ResumeCheckpointRecord():
@@ -525,7 +528,10 @@ class _Standing:
                 if (cell := _walked_cell(record)) is None:
                     return
                 if walking is not None:
-                    _take(self._cells[rnd, walking], cell)
+                    taken = self._cells[rnd, walking]
+                    if self._shared(rnd):
+                        self._cells[rnd, walking] = taken = dict(taken)
+                    _take(taken, cell)
                 else:
                     _take(
                         held.passes.setdefault((rnd, record.individual_id, record.role), {}), cell
@@ -533,16 +539,21 @@ class _Standing:
             case _:
                 assert_never(record)
 
+    def _shared(self, rnd: int) -> bool:
+        return self._live is not None and rnd < self._live
+
     def value(self) -> StandingRounds:
-        held = self._held
-        arms = self._arms
+        """The aggregate plus the live round: only the live round's cells are copied."""
+        held, arms, cells = self._held, self._arms, self._cells
         return held._replace(
             rounds=dict(held.rounds),
             proposals=dict(held.proposals),
             submitted=dict(held.submitted),
             arms={
                 (rnd, key): StandingArm(
-                    arms.state(rnd, key), dict(self._cells[rnd, key]), arms.fold(rnd, key)
+                    arms.state(rnd, key),
+                    cells[rnd, key] if self._shared(rnd) else dict(cells[rnd, key]),
+                    arms.fold(rnd, key),
                 )
                 for rnd, key in arms
             },

@@ -204,107 +204,6 @@
         "title": "ActivityDecision",
         "type": "object"
       },
-      "ActivityItem": {
-        "additionalProperties": false,
-        "description": "One record's reading: a line to show, and the round and candidate it is about.",
-        "properties": {
-          "arm": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The arm the record is about, by its key; `label` renders it.",
-            "title": "Arm"
-          },
-          "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The quieter half of the line.",
-            "title": "Detail"
-          },
-          "healed": {
-            "anyOf": [
-              {
-                "enum": [
-                  "layer_parse_failure",
-                  "injection_budget_overrun",
-                  "derived_file_stale"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The self-heal a round warning reports; null on every other item.",
-            "title": "Healed"
-          },
-          "icon": {
-            "title": "Icon",
-            "type": "string"
-          },
-          "id": {
-            "description": "The record's kind and ledger offset; one record, one id.",
-            "title": "Id",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "running",
-              "done",
-              "candidate",
-              "round",
-              "warning",
-              "error",
-              "progress"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The round the record names.",
-            "title": "Round"
-          },
-          "tone": {
-            "$ref": "#/components/schemas/Tone",
-            "default": "quiet"
-          }
-        },
-        "required": [
-          "id",
-          "kind",
-          "icon",
-          "label"
-        ],
-        "title": "ActivityItem",
-        "type": "object"
-      },
       "ActivityState": {
         "additionalProperties": false,
         "description": "A run's current state: what it is doing, and what was said that still holds.",
@@ -323,7 +222,7 @@
           "notices": {
             "description": "Warnings and controls of the round the run is in, and any error of this launch.",
             "items": {
-              "$ref": "#/components/schemas/ActivityItem"
+              "$ref": "#/components/schemas/Said"
             },
             "title": "Notices",
             "type": "array"
@@ -331,7 +230,7 @@
           "status": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ActivityItem"
+                "$ref": "#/components/schemas/Said"
               },
               {
                 "type": "null"

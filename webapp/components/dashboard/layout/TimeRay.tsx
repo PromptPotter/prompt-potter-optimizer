@@ -147,7 +147,7 @@ function Step({
           onClick={() => onPick(step)}
           title={`${step.activity.label}${step.activity.detail ? ` — ${step.activity.detail}` : ""}\n${when}${where}${many}`}
         >
-          <span aria-hidden="true">{step.activity.icon}</span>
+          <span className="tone-mark" aria-hidden="true" />
           <span className="dash-time-ray-step-label">{step.activity.label}</span>
           {step.cluster > 1 && <span className="dash-time-ray-x">×{step.cluster}</span>}
         </button>

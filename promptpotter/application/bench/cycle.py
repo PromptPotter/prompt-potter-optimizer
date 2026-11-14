@@ -32,7 +32,7 @@ from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import ResumeCheckpointRecord, RoundProposedRecord
-from promptpotter.domain.results import Election, RoundOutcome, RoundResult
+from promptpotter.domain.results import Election, InRunCells, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import RulerStamp
 from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
 from promptpotter.domain.sample import Sample
@@ -174,6 +174,8 @@ class Cycle:
     _pool_theta: dict[tuple[RulerStamp, str], float | None] = field(default_factory=dict)
     # `sealed_rounds`' copies at a version.
     _sealed: tuple[int, tuple[RoundResult, ...]] | None = None
+    # Every round's walks, re-folded only for a round the last restatement replaced.
+    in_run_cells: InRunCells = field(default_factory=lambda: InRunCells(()))
 
     @classmethod
     def start(
@@ -332,6 +334,7 @@ class Cycle:
         """The ONE writer of the rounds, so a memo keyed on the version reads no stale round."""
         self._rounds = rounds
         self._rounds_version += 1
+        self.in_run_cells = InRunCells(rounds, self.in_run_cells)
 
     def seat(self, rr: RoundResult) -> RoundResult:
         slot = next(i for i, held in enumerate(self._rounds) if held.round == rr.round)

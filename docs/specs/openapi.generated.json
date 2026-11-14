@@ -251,103 +251,6 @@
         "title": "ActivityDecision",
         "type": "object"
       },
-      "ActivityItem": {
-        "additionalProperties": false,
-        "description": "One record's reading: a line to show, and the round and candidate it is about.",
-        "properties": {
-          "arm": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The arm the record is about, by its key; `label` renders it.",
-            "title": "Arm"
-          },
-          "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The quieter half of the line.",
-            "title": "Detail"
-          },
-          "healed": {
-            "anyOf": [
-              {
-                "enum": [
-                  "layer_parse_failure",
-                  "injection_budget_overrun",
-                  "derived_file_stale"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The self-heal a round warning reports; null on every other item.",
-            "title": "Healed"
-          },
-          "icon": {
-            "title": "Icon",
-            "type": "string"
-          },
-          "id": {
-            "description": "The record's kind and ledger offset; one record, one id.",
-            "title": "Id",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "running",
-              "done",
-              "candidate",
-              "round",
-              "warning",
-              "error",
-              "progress"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The round the record names.",
-            "title": "Round"
-          },
-          "tone": {
-            "$ref": "#/components/schemas/Tone",
-            "default": "quiet"
-          }
-        },
-        "required": [
-          "id",
-          "kind",
-          "icon",
-          "label"
-        ],
-        "title": "ActivityItem",
-        "type": "object"
-      },
       "ActivityResponse": {
         "additionalProperties": false,
         "description": "Time-bucketed spend / requests / tokens over the requested window.",
@@ -492,7 +395,7 @@
           "notices": {
             "description": "Warnings and controls of the round the run is in, and any error of this launch.",
             "items": {
-              "$ref": "#/components/schemas/ActivityItem"
+              "$ref": "#/components/schemas/Said"
             },
             "title": "Notices",
             "type": "array"
@@ -500,7 +403,7 @@
           "status": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ActivityItem"
+                "$ref": "#/components/schemas/Said"
               },
               {
                 "type": "null"
@@ -16290,8 +16193,20 @@
         "additionalProperties": false,
         "properties": {
           "activity": {
-            "$ref": "#/components/schemas/ActivityItem",
-            "description": "The record's reading. A `running` step with no later step on its course is a call still open."
+            "$ref": "#/components/schemas/Said",
+            "description": "The record's line, as the readout log writes it. A `live` step with no later step on its course is a call still open."
+          },
+          "arm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The arm the record is about, by its key.",
+            "title": "Arm"
           },
           "gap_before_s": {
             "description": "Seconds of silence before it: since the newest step or heartbeat anywhere in the family that the window knows of; 0 where none. A heartbeat takes no slot of a window, so a long open call never serves one empty.",
@@ -16305,6 +16220,18 @@
             "title": "Offset",
             "type": "integer"
           },
+          "round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The round the record names.",
+            "title": "Round"
+          },
           "ts": {
             "description": "The record's own time, raised to its file predecessor's when the two invert (records are stamped at construction but appended later).",
             "title": "Ts",
@@ -16315,7 +16242,9 @@
           "offset",
           "ts",
           "gap_before_s",
-          "activity"
+          "activity",
+          "round",
+          "arm"
         ],
         "title": "StepFacts",
         "type": "object"

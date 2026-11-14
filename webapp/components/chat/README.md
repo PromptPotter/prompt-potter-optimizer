@@ -25,8 +25,9 @@ The core imports nothing from an optimizer module; each file's import list is th
   `components/chat/Composer.tsx` is attach + one field + send. Neither knows what a `block` or
   a `run` holds: the host hands `Thread` a `renderRun` and `Composer` its `tools`.
 - **The served current state** — `promptpotter/domain/activity.py::ActivityFeed`, on the
-  server. The thread shows what the task is doing NOW, never its log: a record reads as at most
-  one `ActivityItem`, every `ActivityKind` declares a lifetime in `LIFETIME`
+  server, keeping the rows of `promptpotter/domain/narration.py::Narration` that still live: the
+  one table the readout log also writes. The thread shows what the task is doing NOW, never its
+  log: a record reads as at most one row, each with its `Lifetime`
   ([`stable-api.md`](../../../docs/developer/stable-api.md) § The event stream), and every SSE frame
   carries the fold whole as `activity: {status, notices}`. A new kind is one row in that table,
   and any client — this one, an MCP tool, another agent's UI — renders the newest frame.
@@ -52,10 +53,9 @@ To strip this down to a generic chat + tool-activity app, remove:
 - **The host** — `components/chat/ChatPane.tsx` is PromptPotter's composition: the pipeline
   hero, ingest's items, the live tail and the run card. Replace it with a host that hands
   `Thread` your own items.
-- **The optimizer-specific readings** in `domain/activity.py` — the `arm` /
-  `sample_scored` cases, the `phase` round headline and the held-out pass (`candidate`, `round`
-  `ActivityKind`s). Keep the generic `running`/`done`/`progress`/`warning`/`error`/`merge`
-  readings; rewire them to your own tool's event records.
+- **The optimizer-specific readings** in `domain/narration.py` — the `arm` /
+  `sample_scored` rows, the round headline and the held-out pass. Keep the generic call,
+  progress, hold, warning and error rows; rewire them to your own tool's event records.
 - **The optimizer-specific decision** — the served `ActivityDecision` (a round's arms) and the
   `submit-arms` verb `LiveSegment` fires; keep `LiveSegment`'s button rendering and point it at
   your own gated commands.

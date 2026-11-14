@@ -39,7 +39,7 @@ class CycleLedgerTail:
             cycle_id=self._cycle_id,
             sequence=offset,
             payload=body,
-            activity=self._index().view(ActivityFeed, offset).state(),
+            activity=self._index().view(ActivityFeed, offset).state,
         )
 
     def read_new(self) -> list[ProjectionEnvelope]:
@@ -67,7 +67,7 @@ class CycleLedgerTail:
             self._line_index += 1
         if not read:
             return []
-        activity = feed.state()
+        activity = feed.state
         return [
             ProjectionEnvelope(
                 kind=cast(ProjectionKind, rec["record_type"]),

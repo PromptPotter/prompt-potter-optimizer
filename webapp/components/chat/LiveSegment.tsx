@@ -4,7 +4,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import type { CyclePath } from "@/lib/ids";
 import { FailureLine, Said } from "@/components/ui";
-import type { ActivityDecision, ActivityItem } from "@/lib/api/types";
+import type { ActivityDecision, Said as SaidRow } from "@/lib/api/types";
 
 type DecisionAction = ActivityDecision["actions"][number];
 
@@ -14,8 +14,8 @@ export function LiveSegment({
   listening,
   decision,
 }: {
-  notices: ActivityItem[];
-  status: ActivityItem | null;
+  notices: SaidRow[];
+  status: SaidRow | null;
   // Socket open AND the run in flight: the socket stays open against a finished cycle.
   listening: boolean;
   decision: ActivityDecision | null;
@@ -24,7 +24,7 @@ export function LiveSegment({
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
 
-  const now = listening ? (status ?? { icon: "·", label: "Listening for activity…", detail: null }) : null;
+  const now = listening ? (status ?? { tone: "quiet" as const, label: "Listening for activity…", detail: null }) : null;
   if (notices.length === 0 && !now && !decision) return null;
 
   // The activity is the viewed leaf's, so its decision is addressed there like any command.
@@ -35,23 +35,16 @@ export function LiveSegment({
   return (
     <div className="chat-live">
       {notices.map((a) => (
-        <div
-          key={a.id}
-          className={cx("chat-activity", `tone-${a.tone}`, `kind-${a.kind}`)}
-        >
-          <span className="chat-activity-icon" aria-hidden="true">
-            {a.icon}
-          </span>
+        <div key={a.key} className={cx("chat-activity", `tone-${a.tone}`)}>
+          <span className="chat-activity-icon tone-mark" aria-hidden="true" />
           <span className="chat-activity-label">{a.label}</span>
           {a.detail ? <span className="chat-activity-detail">{a.detail}</span> : null}
         </div>
       ))}
 
       {now ? (
-        <div className="chat-activity tone-quiet kind-progress" role="status" aria-live="polite">
-          <span className="chat-activity-icon" aria-hidden="true">
-            {now.icon}
-          </span>
+        <div className={cx("chat-activity", `tone-${now.tone}`)} role="status" aria-live="polite">
+          <span className="chat-activity-icon tone-mark" aria-hidden="true" />
           <span className="chat-activity-label">{now.label}</span>
           {now.detail ? <span className="chat-activity-detail">{now.detail}</span> : null}
         </div>

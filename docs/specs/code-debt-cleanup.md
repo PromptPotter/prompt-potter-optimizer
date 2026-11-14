@@ -300,17 +300,6 @@ row it closes.
 
 ### batch/26 · narr (links 1-2, on stream-rk's tip)
 
-- **U3: the ledger is narrated twice.** `views/readout.py::ReadoutProjection` (the readout log) and
-  `domain/activity.py::ActivityFeed` (the chat) word the same record kinds their own way, each with its
-  own hold dedupe and arm labels. Their builders sit outside the views: `run_observers.py` and
-  `scoring/passes.py` build `ReadoutProjection`, `projections/event_stream.py` streams `ActivityFeed`, and
-  `round_buffer.py` and `arm_reading.py` hold `AnnouncedArms`. Action: one narration table from record to
-  `Said` with a lifetime, owning those construction sites: the readout log writes it as lines, the chat
-  keeps the latest per lifetime, and the round tables render from fold state. **Rides with:** narr 1.
-  **Re-test:** `git grep -c "AnnouncedArms" -- promptpotter` is 0.
-- **An activity row is a `Said` row under other names**: `domain/activity.py::ActivityItem` carries
-  label, tone and detail, with kind glyphs beside the CSS tone glyphs. It reshapes the event contract
-  (AsyncAPI) and its chat readers. **Rides with:** narr 1.
 - **U3: one phase act is said three ways, and render text is banked on the ledger.**
   `run_records.py::PhaseRecord` carries a phase string, an untyped event string and a view whose kind
   repeats both; `InitEnterView` banks display text; `view_models.py::ViewContext` is a mutable bag a
@@ -345,9 +334,6 @@ row it closes.
   `cause: "interrupt"`, and no surface names it. Action: a stop's cause is narrated and served on every
   door. **Rides with:** narr 2. **Re-test:** interrupt a running `new`; the readout and `hierarchy` name
   the interrupt.
-- **An exhausted stale-data ladder prints its rerun line**: `render/sample.py` reads
-  `PERSISTENTLY_DEGRADED` as `RETRIED`. Decided (2026-11-10): its word is "exhausted". **Rides with:**
-  narr 2. **Re-test:** a persistently degraded cell's tape line says it exhausted the ladder.
 - **`domain/phases.py::RunPhaseInfo.parked` is read only for a phase with an action**: QUEUED's,
   STARTING's and GATE's words are served and read by nothing. Action: the word lives only where it is
   read. **Rides with:** narr 2. **Re-test:** every non-empty `parked` row has a reader.
@@ -365,17 +351,29 @@ row it closes.
   though `potter-run/SKILL.md:29,53` relies on one; the disk `dashboard.json` lacks `run_phase`,
   `admission`, `run_limits` and pause; `embedded_run.py:64-73` exports no read. Action: one served read
   every door reaches. **Rides with:** narr.
-- **The live projections copy history per poll** (a hot-path pass, ✓ unless reported):
-  `activity.py:205-207`'s `ActivityFeed.value()` is `copy.deepcopy(self)`, per 0.5 s tail poll per
-  subscriber, every arm of every past round included; reported, `_cycle_cells` and `_campaign_edits` cost
-  O((R·A)²) per request, `_Standing.value()` copies every round's cells, `snapshot_frame` re-folds per
-  connect, a ray page re-folds per "older", and `InRunCells` is built twice per round. Root: a
-  projection's value is its aggregate plus the live round, never a copy of its history. The same root
-  serves the wire: the polled live dashboard re-serves every closed round on every frame (570 kB at 16
+- **The live reads re-serve history per poll** (a hot-path pass, ✓ unless reported): `_cycle_cells`
+  and `_campaign_edits` cost O((R·A)²) per request, `snapshot_frame` re-folds per connect, and a ray
+  page re-folds per "older". Root: a value is its aggregate plus the live round, never a copy of its
+  history. The same root serves the wire: the polled live dashboard re-serves every closed round on every frame (570 kB at 16
   rounds, `domain/dashboard_rows.py::served_rounds`); a browser stitch of `…/rounds/{n}` per round, or a
   new read, breaks R7, so the closed-round series' read is decided first, then every `dash.rounds` reader
   moves. **Rides with:** narr; webb-4's Owns gain `hooks/useOriginEvidence.ts`, `hooks/useVerify.ts` and
   the `dash.rounds` panes. **Re-test:** `git grep -nE "dash\??\.rounds" -- webapp/lib webapp/components`.
+- **The live dashboard keeps a third hold tracker** (narr-1's landing): `live_dashboard/projection.py::_holds`
+  keeps the last `ProviderHoldRecord` per sender and, unlike `narration.py::Narration`'s, is never
+  cleared at a run-phase declaration. Action: the dashboard reads the narration's holds. **Rides with:**
+  narr 2. **Re-test:** `git grep -c "_holds" -- promptpotter/infrastructure/projections/live_dashboard` is 0.
+- **`_Standing.value` builds a `StandingArm` per arm of every round on each call** (narr-1's landing):
+  closed rounds' cells are shared, but the tuples and outer dicts stay O(R·A) per poll. Action: a closed
+  round's `StandingArm`s freeze at its close. **Rides with:** narr 2. **Re-test:** a value at round R
+  builds tuples for the live round only.
+- **`RoundBuffer` wraps `Narration`'s arm API one call deep** (narr-1's landing,
+  `live_dashboard/round_buffer.py:28`: `announce`, `take`, `enter`): the buffer is a view of the
+  narration's live round, not a holder of its own. Action: its readers read the narration and the
+  buffer goes. **Rides with:** narr 2. **Re-test:** `git ls-files promptpotter/infrastructure/projections/live_dashboard/round_buffer.py` is empty.
+- **The arms gate is worded twice** (narr-1's landing): `views/readout.py`'s `[ARM GATE]` block and
+  `activity.py::_arms_gate` say one hold, because the gate is no narration row. Action: the gate is the
+  typed act's narration row (the U3 row above). **Rides with:** narr 2.
 
 ### batch/26 · rk-run
 
@@ -645,9 +643,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `logger.warning` and appends anyway, a state the run enters and reports nowhere. Action: the moved
   panel lands as a field of `ResolvedRunRecord`, read by the readout. **Rides with:** hubs.
   **Re-test:** no `logger.warning` in `write_resolved_run`.
-- **A fold matches 11 kinds to ignore them**: `domain/activity.py`'s fold holds a `case …: pass` arm
-  over 11 record kinds beside its `assert_never`. Action: the fold declares the kinds it reads and is
-  fed nothing else. **Rides with:** hubs. **Re-test:** no `pass` arm in it.
 - **A hop's chain is spelled 16 times**: `ledger_chain(CycleDir(...), moment=None)` across the
   package. Action: one store read of a hop's chain (`CampaignStore.chain`). **Rides with:** hubs.
   **Re-test:** `git grep -c "ledger_chain(CycleDir(" -- promptpotter` sums to at most 1.

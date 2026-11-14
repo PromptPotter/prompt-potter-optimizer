@@ -1129,27 +1129,13 @@ export interface StepFacts {
    * the family that the window knows of; 0 where none. A heartbeat takes no
    * slot of a window, so a long open call never serves one empty. */
   gap_before_s: number;
-  /** The record's reading. A `running` step with no later step on its course is a
-   * call still open. */
-  activity: ActivityItem;
-}
-
-/** One record's reading: a line to show, and the round and candidate it is about. */
-export interface ActivityItem {
-  /** The record's kind and ledger offset; one record, one id. */
-  id: string;
-  kind: 'running' | 'done' | 'candidate' | 'round' | 'warning' | 'error' | 'progress';
-  icon: string;
-  label: string;
-  /** The quieter half of the line. */
-  detail: string | null;
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
+  /** The record's line, as the readout log writes it. A `live` step with no later
+   * step on its course is a call still open. */
+  activity: Said;
   /** The round the record names. */
   round: number | null;
-  /** The arm the record is about, by its key; `label` renders it. */
+  /** The arm the record is about, by its key. */
   arm: string | null;
-  /** The self-heal a round warning reports; null on every other item. */
-  healed: 'layer_parse_failure' | 'injection_budget_overrun' | 'derived_file_stale' | null;
 }
 
 /** A campaign as the subtree read serves it: every level under it. */
@@ -2478,10 +2464,10 @@ export interface ProjectionEnvelope {
 /** A run's current state: what it is doing, and what was said that still holds. */
 export interface ActivityState {
   /** The one line saying what the run is doing; each new one replaces it. */
-  status: ActivityItem | null;
+  status: Said | null;
   /** Warnings and controls of the round the run is in, and any error of this
    * launch. */
-  notices: ActivityItem[];
+  notices: Said[];
   /** What the run is holding for the operator to decide; null while it holds for
    * nothing. */
   decision: ActivityDecision | null;

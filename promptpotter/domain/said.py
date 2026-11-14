@@ -10,6 +10,15 @@ from promptpotter.domain.strict_model import FrozenModel
 # In order of loudness; only `warn` and `danger` pin.
 type Tone = Literal["quiet", "success", "live", "attention", "warn", "danger"]
 TONES: tuple[Tone, ...] = get_args(Tone.__value__)
+# A tone's glyph in a medium without the stylesheet's (`ui.css`'s `--tone-glyph`): a log, a terminal.
+GLYPH: dict[Tone, str] = {
+    "quiet": "·",
+    "success": "✓",
+    "live": "↻",
+    "attention": "ⓘ",
+    "warn": "⚠",
+    "danger": "✗",
+}
 
 
 class Said(FrozenModel):

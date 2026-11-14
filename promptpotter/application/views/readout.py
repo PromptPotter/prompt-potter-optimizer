@@ -55,11 +55,10 @@ from promptpotter.domain.arms import (
     arm_elimination,
     arm_name,
 )
-from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.paired_reading import ArmKey, PriorStanding
+from promptpotter.domain.narration import NarratedRecord, Narration
 from promptpotter.domain.phase_views import (
     InitExitView,
     RoundCompleteView,
@@ -69,7 +68,6 @@ from promptpotter.domain.phase_views import (
 from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import (
-    AnnouncedArms,
     ArmRecord,
     ElectionRecord,
     LLMCallProgressRecord,
@@ -91,9 +89,8 @@ from promptpotter.domain.records.run_records import (
     SampleScoredRecord,
     SampleStartedRecord,
 )
+from promptpotter.domain.said import GLYPH
 from promptpotter.domain.sample import sample_tag
-from promptpotter.domain.scoring import Grade, MeasuredCell
-from promptpotter.domain.spend import prefix_reading
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
@@ -108,10 +105,6 @@ logger = logging.getLogger(__name__)
 StatusFn = Callable[[str], None]
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def _clock(epoch: float) -> str:
-    return time.strftime("%H:%M:%S", time.localtime(epoch))
 
 
 class ReadoutProjection(Projection):
@@ -141,14 +134,11 @@ class ReadoutProjection(Projection):
         self._blocks_of = 0
         self._block_size = 1
         self._headed: set[int] = set()
-        self._pending_calls: dict[str, int] = {}
         self._readout: Path | None = None
         self._cycle_dir: Path | None = None
         self._verdict: RoundCompleteView | None = None
-        self._held: dict[str, BackpressureReading] = {}
-        # Each arm's label as its announcement named it: the election and a race speak in keys.
-        self._labels: dict[ArmKey, str] = {}
-        self._arms = AnnouncedArms()
+        # The election and a race speak in keys; the narration names each arm as announced.
+        self._narration = Narration()
         self._order_shown: list[int] = []
 
     @classmethod
@@ -189,6 +179,7 @@ class ReadoutProjection(Projection):
             self._readout = None
 
     def _handle_phase(self, record: PhaseRecord) -> None:
+        self._narration.read(self.at_offset, record)
         if record.phase == CampaignPhase.ORIGIN and record.event == "enter":
             self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
         view = record.view
@@ -212,6 +203,7 @@ class ReadoutProjection(Projection):
             self._closed = {n: held.close for n, held in standing.items()}
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
+        self._narration.read(self.at_offset, record)
         if record.spend is not None:
             self._write(render_run_spend(record.spend))
         if record.stop_reason is not None:
@@ -260,100 +252,36 @@ class ReadoutProjection(Projection):
             )
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
+        self._narration.read(self.at_offset, record)
         self._closed[record.round] = record
         self._anchors = record.anchors
         self.on_round_complete(record)
 
+    def _say(self, record: NarratedRecord) -> None:
+        """The narration's row as one line: its tone's glyph, its label, then its detail."""
+        if (row := self._narration.read(self.at_offset, record)) is not None:
+            said = row.said
+            ink = YELLOW if said.tone in ("attention", "warn", "danger") else DIM
+            tail = "" if said.detail is None else f" · {said.detail}"
+            self._write(f"  {ink}{GLYPH[said.tone]} {said.label}{tail}{RESET}")
+
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
-        self._pending_calls[record.call_id] = record.started_at_ms
-        model = record.model or "(default)"
-        round_tag = f"r{record.round}" if record.round is not None else ""
-        node_label = f"{record.node}_{round_tag}" if round_tag else record.node
-        # The alarm is a REFUSED panel, never a big prompt: a mandatory floor is admitted whatever it costs.
-        refused = record.refused_panels
-        marker = "⚠ " if refused else "↻ "
-        bits = [f"{marker}optimizer call: {node_label} · {model}"]
-        if record.prompt_chars > 0:
-            bits.append(f"{record.prompt_chars:,}c prompt")
-        if refused:
-            bits.append(f"NO ROOM: {', '.join(refused[:3])}")
-        color = YELLOW if refused else DIM
-        self._write(f"  {color}{' · '.join(bits)}{RESET}")
-
-    def _handle_round_warning(self, record: RoundWarningRecord) -> None:
-        round_tag = f"r{record.round}" if record.round is not None else ""
-        glyph = "✗" if record.severity == "error" else "⚠"
-        prefix = f"{glyph} {round_tag}".rstrip()
-        self._write(f"  {YELLOW}{prefix} {record.message}{RESET}")
-
-    def _handle_provider_eased(self, record: ProviderEasedRecord) -> None:
-        if self._held.pop(record.sender, None) is not None:
-            after = fmt_elapsed(record.held_s)
-            self._write(f"  {GREEN}✓ {record.sender} answers again after {after}{RESET}")
-
-    def _handle_provider_hold(self, record: ProviderHoldRecord) -> None:
-        sender = record.sender
-        held, shown = record.reading, self._held.get(sender)
-        if held == shown:
-            return
-        self._held[sender] = held
-        hold = "" if held.resumes_at is None else f" · sends held until {_clock(held.resumes_at)}"
-        if held.at_once is not None:
-            hold += f", then {held.at_once} at once"
-        if shown is not None and shown.since == held.since:
-            self._write(
-                f"  {YELLOW}⚠ still rate-limited · {sender}, throttle {record.strikes}{hold}{RESET}"
-            )
-            return
-        said = f' · "{held.detail}"' if held.detail else ""
-        self._write(
-            f"  {YELLOW}⚠ RATE-LIMITED · {sender} ({record.scope}){said}{hold}"
-            f" · the run stops if still throttled at {_clock(record.gives_up_at)}{RESET}"
-        )
-
-    def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
-        """``detail`` prints VERBATIM: a bare tick proves only liveness, and a healthy inner campaign reads as frozen."""
-        round_tag = f"r{record.round}" if record.round is not None else ""
-        node_label = f"{record.node}_{round_tag}" if round_tag else record.node
-        line = f"  · {node_label} still waiting · {record.elapsed_s:.0f}s"
-        if record.detail:
-            line += f" · {record.detail}"
-        if record.inner is not None:
-            line += f" · inner {record.inner.campaign_id}/{record.inner.cycle_id}"
-        self._write(f"  {DIM}{line}{RESET}")
+        self._say(record)
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
-        payload = record.payload
-        cached = bool(payload.get("cached"))
-        started = self._pending_calls.pop(record.call_id, None) if record.call_id else None
-        duration_s = payload.get("duration_s")
-        if duration_s is None and started is not None:
-            duration_s = max(0.0, (time.time() * 1000 - started) / 1000.0)
-        round_tag = f"r{record.round}" if record.round is not None else ""
-        node_label = f"{record.node}_{round_tag}" if round_tag else record.node
-        bits: list[str] = [node_label]
-        if isinstance(duration_s, (int, float)):
-            bits.append(f"{duration_s:.1f}s")
-        if (usage := record.usage) is not None:
-            if usage.total > 0:
-                bits.append(f"{usage.total} tok")
-            if usage.reasoning > 0 and usage.output > 0:
-                bits.append(f"{usage.reasoning / usage.output:.0%} reasoning")
-            prefix = prefix_reading(usage.cache_share(replayed=cached), replayed=cached)
-            if prefix.state == "unreported":
-                bits.append("prefix not reported")
-            elif prefix.share is not None:
-                bits.append(f"{prefix.share:.0%} prefix cached")
-        # "replayed", not "cached": OUR archive served it; `cached` names the provider-side discount above.
-        if cached:
-            bits.append("replayed")
-        flags: list[str] = []
-        if retries := len(payload.get("schema_repair_errors") or ()):
-            flags.append(f"re-asked {retries}x")
-        if payload.get("finish_reason") == "length":
-            flags.append("TRUNCATED at max_tokens")
-        lead = f"{YELLOW}⚠" if flags else f"{DIM}✓"
-        self._write(f"  {lead} {' · '.join([*bits, *flags])}{RESET}")
+        self._say(record)
+
+    def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
+        self._say(record)
+
+    def _handle_round_warning(self, record: RoundWarningRecord) -> None:
+        self._say(record)
+
+    def _handle_provider_hold(self, record: ProviderHoldRecord) -> None:
+        self._say(record)
+
+    def _handle_provider_eased(self, record: ProviderEasedRecord) -> None:
+        self._say(record)
 
     def _handle_election(self, record: ElectionRecord) -> None:
         """One line and no numbers: the board, reason and overlap series first all exist at round close."""
@@ -363,7 +291,7 @@ class ReadoutProjection(Projection):
         self._write(
             f"  {DIM}· held the best-so-far{RESET}"
             if key is None
-            else f"  {GREEN}✓ selected {self._labels.get(key, key[:6])}{RESET}"
+            else f"  {GREEN}✓ selected {self._narration.label(key) or key[:6]}{RESET}"
         )
 
     def _handle_sample_started(self, record: SampleStartedRecord) -> None:
@@ -389,80 +317,57 @@ class ReadoutProjection(Projection):
         self._write(f"  {DIM}⇉ sample look-ahead depth {depth}{tail}{RESET}")
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
-        self._arms.enter(record.round)
+        self._narration.read(self.at_offset, record)
 
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
-        self._arms.take(record)
-        self.on_sample_scored(record.position, record.result.facts, record.result.grade)
+        self._narration.read(self.at_offset, record)
+        self.sample_counter += 1
+        facts, grade = record.result.facts, record.result.grade
+        prefix = f"  [{self.sample_counter:>3d}] "
+        tags = self._display_tags
+        self._write(
+            fmt_query_result(record.position, facts, grade, prefix=prefix, display_tags=tags)
+        )
 
     def _handle_arm(self, record: ArmRecord) -> None:
-        self._arms.announce(record)
         state = record.state
+        # A proposal's line is its variation chain; one with none says nothing yet.
+        if isinstance(state, Proposed) and state.individual.lineage.variations:
+            self._say(record)
+            return
+        self._narration.read(self.at_offset, record)
         # A reference re-read is no arm the round proposed: its numbers print on the verdict line.
         if state.role is MeasurementRole.PARENT:
             return
-        self._labels[record.arm] = state.label
         match state:
-            case Proposed():
-                if chain := " → ".join(
-                    f"{v.node} ({v.mode}): {', '.join(v.loci) or 'nothing'}"
-                    for v in state.individual.lineage.variations
-                ):
-                    self._write(f"  {DIM}◆ {state.label} ← {chain}{RESET}")
             case Measuring():
                 self.on_sample_order(state.sample_order, state.n_priors)
                 self.on_arm_measuring(state)
             case Cut() | Measured():
                 self._anchors = record.anchors
-                self.on_arm_concluded(state, self._arms.fold(record.round, record.arm))
+                self.on_arm_concluded(state, self._narration.fold(record.round, record.arm))
 
     def _handle_race_standing(self, record: RaceStandingRecord) -> None:
-        self.on_race_standing(
-            record.member,
-            record.current,
-            record.n_samples,
-            record.p_best,
-            record.paired_breakdown,
+        current, breakdown = record.current, record.paired_breakdown
+        if self._block_racing or not current or current == self._standing_printed_for:
+            return
+        self._standing_printed_for = current
+        hardest_tag, hardest_p = "*self*", record.p_best
+        if breakdown:
+            hardest_id, hardest = min(breakdown.items(), key=lambda kv: kv[1].p_better)
+            hardest_tag, hardest_p = hardest_id[:6], hardest.p_better
+        n = len(breakdown)
+        self._write(
+            f"  {DIM}{record.member}:{RESET} P(best)={record.p_best:.1%} @ q{record.n_samples}  "
+            f"vs hardest={hardest_tag} (P(c>p)={hardest_p:.1%})  "
+            f"(of {n} prior{'' if n == 1 else 's'})"
         )
 
     def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None:
-        self.on_race_catch_up(record.member, record.position, record.prior_keys)
-
-    def on_sample_scored(self, position: int, facts: MeasuredCell, grade: Grade) -> None:
-        self.sample_counter += 1
-        prefix = f"  [{self.sample_counter:>3d}] "
-        self._write(
-            fmt_query_result(
-                position,
-                facts,
-                grade,
-                prefix=prefix,
-                display_tags=self._display_tags,
-            )
-        )
-
-    def on_race_standing(
-        self,
-        member: str,
-        current_id: str,
-        n_samples: int,
-        p_best: float,
-        paired_breakdown: dict[ArmKey, PriorStanding],
-    ) -> None:
-        if not self._block_racing and current_id and current_id != self._standing_printed_for:
-            self._standing_printed_for = current_id
-            current_p = p_best
-            if paired_breakdown:
-                hardest_id, hardest = min(paired_breakdown.items(), key=lambda kv: kv[1].p_better)
-                hardest_tag, hardest_p = hardest_id[:6], hardest.p_better
-            else:
-                hardest_tag, hardest_p = "*self*", current_p
-            n_priors = len(paired_breakdown)
-            prior_s = "" if n_priors == 1 else "s"
+        if record.prior_keys:
+            tags = ", ".join(self._narration.label(k) or k[:6] for k in record.prior_keys)
             self._write(
-                f"  {DIM}{member}:{RESET} P(best)={current_p:.1%} @ q{n_samples}  "
-                f"vs hardest={hardest_tag} (P(c>p)={hardest_p:.1%})  "
-                f"(of {n_priors} prior{prior_s})"
+                f"  {DIM}↻ {record.member} catch-up {sample_tag(record.position)}:{RESET} {tags}"
             )
 
     def on_sample_order(self, sample_order: list[int], n_priors: int) -> None:
@@ -477,12 +382,6 @@ class ReadoutProjection(Projection):
             f"({len(sample_order)} samples, win-opportunities first; "
             f"{n_priors} candidate prior{prior_s})"
         )
-
-    def on_race_catch_up(self, member: str, position: int, prior_keys: list[ArmKey]) -> None:
-        if not prior_keys:
-            return
-        tags = [self._labels.get(key, key[:6]) for key in prior_keys]
-        self._write(f"  {DIM}↻ {member} catch-up {sample_tag(position)}:{RESET} " + ", ".join(tags))
 
     def _render_block_lines(self) -> list[str]:
         lines = []

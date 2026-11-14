@@ -11,14 +11,13 @@ from functools import partial
 from pathlib import Path
 from typing import ClassVar, NamedTuple
 
-from promptpotter.domain import activity
-from promptpotter.domain.activity import ActivityFeed, ActivityItem
+from promptpotter.domain import activity, narration
 from promptpotter.domain.cycle_paths import CyclePath, Subject
 from promptpotter.domain.hierarchy import MAX_STEP_LIMIT, HierarchyStep, HierarchySteps, StepFacts
+from promptpotter.domain.narration import Narrated
 from promptpotter.domain.projection_envelope import bearing_record
 from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.records import CycleRecord
-from promptpotter.domain.records.run_records import LLMCallProgressRecord
 from promptpotter.infrastructure.store.layout import (
     course_validator_ns,
     cycle_dir_for,
@@ -44,7 +43,10 @@ assert RECORDS.registered().keys() >= _INNER_KINDS, (
 # A validator input that moves on DEPLOY, not on a write: left out, a changed one 304s forever.
 _CURATION_TAG = (
     sorted(_INNER_KINDS),
-    *(hashlib.sha256(Path(f).read_bytes()).hexdigest() for f in (activity.__file__, __file__)),
+    *(
+        hashlib.sha256(Path(f).read_bytes()).hexdigest()
+        for f in (activity.__file__, narration.__file__, __file__)
+    ),
 )
 
 
@@ -52,7 +54,7 @@ class _Raw(NamedTuple):
     offset: int
     epoch: float
     ts: str
-    activity: ActivityItem
+    row: Narrated
     # This ledger's previous step or heartbeat: what ends a silence, on this course or any after it.
     heard: float | None
 
@@ -73,7 +75,7 @@ class _RayTail:
         self.at_offset = -1
         self._below = path_and_bound
         # Fed every bearing record, kept or not: one record declares the round of those after it.
-        self._feed = ActivityFeed()
+        self._narration = narration.Narration()
         self._own: deque[_Raw] = deque(maxlen=limit)
         self._inner: deque[_Raw] = deque(maxlen=limit)
         self._own_total = 0
@@ -86,7 +88,7 @@ class _RayTail:
         offset = self.at_offset
         kind = whole.record_type
         record = bearing_record(whole)
-        item = None if record is None else self._feed.read(offset, record)
+        said = None if record is None else self._narration.read(offset, record)
         own = epoch_seconds(whole.timestamp)
         if own is None or (self._last_epoch is not None and own < self._last_epoch):
             if self._last_epoch is None:
@@ -94,15 +96,15 @@ class _RayTail:
                 return
         else:
             self._last_epoch, self._last_ts = own, whole.timestamp
-        if item is None:
+        if said is None or said.lifetime == "tick":
             # A bare heartbeat takes no slot of a window; it only ends a silence.
-            if isinstance(record, LLMCallProgressRecord):
+            if said is not None:
                 self._heard = self._last_epoch
             return
         assert self._last_epoch is not None
         if self._below and (self._last_epoch, self._below[0], offset) >= self._below[1]:
             return
-        row = _Raw(offset, self._last_epoch, self._last_ts, item, self._heard)
+        row = _Raw(offset, self._last_epoch, self._last_ts, said, self._heard)
         self._heard = self._last_epoch
         self._own.append(row)
         self._own_total += 1
@@ -210,7 +212,9 @@ def build_family_ray(
                 offset=row.offset,
                 ts=row.ts,
                 gap_before_s=_silence(row.epoch, heard),
-                activity=row.activity,
+                activity=row.row.said,
+                round=row.row.round,
+                arm=row.row.arm,
             ),
         )
         for (_epoch, key, _offset), path, row in pool

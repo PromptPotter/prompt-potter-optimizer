@@ -248,7 +248,7 @@ def round_origin_panel(cycle: Cycle, scoring_pool: list[Sample]) -> list[int]:
     """Fixed before the round's election, so its own pick joins the line's cells from the next."""
     pairs = _OriginPanelPairs(cycle, scoring_pool)
     ordered = sorted(best_line(cycle.rounds), key=lambda s: s.arm.round)
-    held = InRunCells(cycle.rounds)
+    held = cycle.in_run_cells
     # The origin's OWN round, never every cell read since: a later re-score would move the exam.
     origin_round = next(rr for rr in cycle.rounds if rr.round == ordered[0].arm.round)
     filed = cycle.session.measured_dataset
@@ -314,7 +314,7 @@ async def measure_overlap(
     pairs = _OriginPanelPairs(cycle, scoring_pool)
     # The line INCLUDING this round, which may have made its own result the new best.
     ordered = sorted(best_line(cycle.rounds), key=lambda s: s.arm.round)
-    held = InRunCells(cycle.rounds)
+    held = cycle.in_run_cells
     origin = ordered[0]
     keep = set(panel)
     bought = dict(passed)

@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING, Any, Literal, TypeIs, get_args
 
 from pydantic import Field
 
-from promptpotter.domain.activity import ActivityRecord, ActivityState
+from promptpotter.domain.activity import ActivityState
+from promptpotter.domain.narration import NarratedRecord
 from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.strict_model import FrozenModel
@@ -16,14 +17,14 @@ if TYPE_CHECKING:
 else:
     ProjectionKind = Literal[*RECORDS.registered(), "stream_snapshot"]
 
-_ACTIVITY_ARMS: tuple[type, ...] = get_args(ActivityRecord)
+_NARRATED: tuple[type, ...] = get_args(NarratedRecord)
 
 
-def _renders(record: CycleRecord) -> TypeIs[ActivityRecord]:
-    return isinstance(record, _ACTIVITY_ARMS)
+def _renders(record: CycleRecord) -> TypeIs[NarratedRecord]:
+    return isinstance(record, _NARRATED)
 
 
-def bearing_record(record: CycleRecord) -> ActivityRecord | None:
+def bearing_record(record: CycleRecord) -> NarratedRecord | None:
     """``None`` for a kind that never renders."""
     return record if _renders(record) else None
 

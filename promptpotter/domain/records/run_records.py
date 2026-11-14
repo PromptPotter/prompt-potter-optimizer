@@ -3,10 +3,10 @@ from __future__ import annotations
 import enum
 import os
 import re
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self
+from typing import Annotated, Any, ClassVar, Literal, Self
 
 from pydantic import (
     AfterValidator,
@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 from promptpotter.domain.arm_reading import DisplayMetric
-from promptpotter.domain.arms import ArmRole, ArmState, Proposal, Proposed, arm_name
+from promptpotter.domain.arms import ArmRole, ArmState, Proposal, arm_name
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
@@ -381,54 +381,6 @@ class SampleScoredRecord(_Pass):
     position: int
     result: LedgerCell
     running: ScoreSummary | None = None
-
-
-class _Announced(NamedTuple):
-    state: ArmState
-    running: ScoreSummary | None
-
-
-class AnnouncedArms:
-    """Each announced arm's last state and running fold by ``(round, key)``; a re-read continues it."""
-
-    def __init__(self) -> None:
-        self._arms: dict[tuple[int, ArmKey], _Announced] = {}
-
-    def __iter__(self) -> Iterator[tuple[int, ArmKey]]:
-        return iter(self._arms)
-
-    def announce(self, record: ArmRecord) -> None:
-        held = self._arms.get((record.round, record.arm))
-        running = None if held is None else held.running
-        self._arms[record.round, record.arm] = _Announced(record.state, running)
-
-    def take(self, record: SampleScoredRecord) -> ArmKey | None:
-        """The arm *record*'s cell continues; ``None`` for a pass no arm walks."""
-        if (arm := record.arm) is None:
-            return None
-        if (held := self._arms.get((record.round, arm))) is None:
-            raise LookupError(
-                f"a round {record.round} cell names arm {arm}, which its own cycle file never "
-                "announced: the SSE tail and the ray fold one file, so each file announces its arms"
-            )
-        if record.running is not None:
-            self._arms[record.round, arm] = held._replace(running=record.running)
-        return arm
-
-    def close(self, record: RoundStatement, keys: Iterable[ArmKey]) -> None:
-        """The statement is each arm's last record: its fold covers the reference reads too."""
-        for key in keys:
-            self._arms[record.round, key] = _Announced(record.arms[key], record.folds.get(key))
-
-    def enter(self, round_num: int) -> None:
-        self._arms = {at: held for at, held in self._arms.items() if at[0] < round_num}
-
-    def state(self, round_num: int, key: ArmKey) -> ArmState:
-        return self._arms[round_num, key].state
-
-    def fold(self, round_num: int, key: ArmKey) -> ScoreSummary | None:
-        held = self._arms[round_num, key]
-        return None if isinstance(held.state, Proposed) else held.running
 
 
 class FlightWaiting(FrozenModel):

@@ -492,7 +492,7 @@ class ArmReading(FrozenModel):
         election: ArmElection,
         fit: ArmFit | None,
     ) -> ArmReading:
-        """*fold* is its round's, or `AnnouncedArms.fold` in flight; *fit* the election's, ``None`` until held."""
+        """*fold* is its round's, or `narration.py::Narration.fold` in flight; *fit* the election's, ``None`` until held."""
         walked = None if isinstance(arm, Proposed) else arm
         tokens = None if fold is None else fold.tokens
         panel = ArmPanel.of(
