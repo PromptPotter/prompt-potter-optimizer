@@ -196,7 +196,7 @@ class CampaignPipelineResponse(StrictModel):
     )
     optimizer_setup: OptimizerSetup = Field(
         description="That optimizer as the addressed cycle runs it — the manifest's knobs under "
-        "the campaign's and the cycle seed's overlays, its arms and its pools"
+        "the campaign's and the cycle start's overlays, its arms and its pools"
     )
     params: dict[str, Any] = Field(
         description="Resolved config as the engine holds it — the bytes each arm of a round file "

@@ -8,7 +8,7 @@
 - **`store/__init__.py` re-exports nothing**, or a leaf import cycles back through `ledger`. <!-- probe: git grep -cE "^(from|import) " -- promptpotter/infrastructure/store/__init__.py == 0 -->
 - **JSON for what code writes, YAML for the operator-authored tier; there is no tolerant YAML reader.** <!-- probe: git grep -cE "read_yaml_tolerant" -- promptpotter/*.py == 0 -->
 - **`account_spend.py` banks a cycle's spend inside every destroyer**; `mirrored` L4 inner copies are skipped, or that money banks twice.
-- **A cycle's own facts are ledger records; `index.json` is their fold**, read back off the ledger, never the file; so are the cycle seed and the standing budget (last-wins, never inherited by a fork). What a cycle's loop was asked is the account's command log's (`CommandBook.controls`), which no ledger move or delete reaches. The δ ruler is the tenant's `ruler.jsonl`, never rewritten.
+- **A cycle's own facts are ledger records; `index.json` is their fold**, read back off the ledger, never the file; so are the cycle start and the standing budget (last-wins, never inherited by a fork). What a cycle's loop was asked is the account's command log's (`CommandBook.controls`), which no ledger move or delete reaches. The δ ruler is the tenant's `ruler.jsonl`, never rewritten.
 
 ## The lineage tree
 

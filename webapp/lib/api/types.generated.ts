@@ -3586,7 +3586,7 @@ export interface CampaignPipelineResponse {
    * draft included */
   optimizer: string;
   /** That optimizer as the addressed cycle runs it — the manifest's knobs under the
-   * campaign's and the cycle seed's overlays, its arms and its pools */
+   * campaign's and the cycle start's overlays, its arms and its pools */
   optimizer_setup: OptimizerSetup;
   /** Resolved config as the engine holds it — the bytes each arm of a round file
    * carries as `resolved_params`, which makes that field this endpoint's

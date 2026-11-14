@@ -127,7 +127,7 @@ def _read_curated(
         below = [r for r in tail.rows if (r.epoch, encoded_path, r.offset) < bound]
         if len(below) < keep and tail.total > len(tail.rows):
             window = partial(_RayTail, keep, (encoded_path, bound))
-            deeper = folded(ledger, window, seed=None, until=None).value()[min(depth, 1)]
+            deeper = folded(ledger, window, start=None, until=None).value()[min(depth, 1)]
             return deeper.rows, deeper.total > keep
         older = tail.total - len(tail.rows) + len(below)
         return below[-keep:], older > keep

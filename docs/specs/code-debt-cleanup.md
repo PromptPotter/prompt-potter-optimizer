@@ -1084,10 +1084,9 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   thirteen `propose` signatures take `RoundSamples` and ignore it. Root: gepa reads them through
   `NodeContext` as a declared read, and the parameter goes. **Rides with:** small 3. **Re-test:** no
   `propose` signature in `promptpotter/application/optimizers/` takes `RoundSamples`.
-- **"panel" names two things; a fold still says `seed=`** (ren's report): `RoundResult.panel` (a
-  round's arms) beside the origin panel (its cells), and `read_model.py` / `live_dashboard.py` fold a
-  cycle's start as `seed=`. Root: each named for what it holds (`start` for the fold). **Rides with:**
-  small 3. **Re-test:** `git grep -n "seed=" -- promptpotter/infrastructure/read_model.py promptpotter/infrastructure/projections/live_dashboard.py` is empty.
+- **"panel" names two things** (ren's report): `RoundResult.panel` (a round's arms) beside the origin
+  panel (its cells). Root: each named for what it holds. **Rides with:** small 3. **Re-test:** one
+  meaning per `git grep -n "\.panel\b" -- promptpotter`.
 - **Archive hygiene before the next bulk delete**: (1) reclaim, a dataset-scoped destructive `delete`,
   dry-run by default, refusing while a producer can append; (2) attribution, an L4 outer cell stamps the
   runs its inner campaign produced; (3) the entry-to-run lookup (which runs an archive entry serves,

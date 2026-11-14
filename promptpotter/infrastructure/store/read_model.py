@@ -356,8 +356,8 @@ class _Feeder:
                 raise refusal.with_traceback(None)
 
 
-def _fresh[F](make: Callable[[], F], seed: F | None) -> F:
-    made = make() if seed is None else copy.deepcopy(seed)
+def _fresh[F](make: Callable[[], F], start: F | None) -> F:
+    made = make() if start is None else copy.deepcopy(start)
     if isinstance(made, Positioned):
         made.at_offset = -1
     return made
@@ -373,10 +373,10 @@ def _fold_lines(ledger: Path, feeder: _Feeder, until: int | None) -> None:
 
 
 def folded[F: LedgerFold[Any, Any]](
-    ledger: Path, fold: Callable[[], F], *, seed: F | None, until: int | None
+    ledger: Path, fold: Callable[[], F], *, start: F | None, until: int | None
 ) -> F:
     """No index holds it, so nothing feeds it after: its caller alone owns what it folds on to."""
-    made = _fresh(fold, seed)
+    made = _fresh(fold, start)
     feeder = _Feeder(ledger, {fold: made})
     _fold_lines(ledger, feeder, until)
     feeder.vouch(fold)
@@ -452,7 +452,7 @@ class LedgerIndex(_LedgerTail):
             raise RuntimeError(f"No fold on the roster reads these record kinds: {unread}.")
 
     def __init__(self, path: Path) -> None:
-        self._seeds: dict[_Make, LedgerFold[Any, Any] | None] = {}
+        self._starts: dict[_Make, LedgerFold[Any, Any] | None] = {}
         self._feeder = _Feeder(path, {})
         # A projection by its type, with how many hold it; the lines it waits on, in append order.
         self._held: dict[type[Any], tuple[Projected, int]] = {}
@@ -573,7 +573,7 @@ class LedgerIndex(_LedgerTail):
 
     def _reset(self) -> None:
         super()._reset()
-        held = {make: _fresh(make, self._seeds.get(make)) for make in self._feeder.folds}
+        held = {make: _fresh(make, self._starts.get(make)) for make in self._feeder.folds}
         self._feeder = _Feeder(self._path, held)
         self._prefixes: OrderedDict[tuple[_Make, int], LedgerFold[Any, Any]] = OrderedDict()
         self._cuts: dict[
@@ -585,43 +585,43 @@ class LedgerIndex(_LedgerTail):
         fold: Callable[[], LedgerFold[Any, V]],
         until: int | None = None,
         *,
-        seed: LedgerFold[Any, V] | None = None,
+        start: LedgerFold[Any, V] | None = None,
     ) -> V:
         with self._lock:
-            self._open(fold, seed)
+            self._open(fold, start)
             if until is None or until >= self._lines:
                 self._feeder.vouch(fold)
                 return cast("LedgerFold[Any, V]", self._feeder.folds[fold]).value()
             return cast("LedgerFold[Any, V]", self._prefix(fold, until)).value()
 
-    def live[F: LedgerFold[Any, Any]](self, fold: Callable[[], F], *, seed: F | None = None) -> F:
+    def live[F: LedgerFold[Any, Any]](self, fold: Callable[[], F], *, start: F | None = None) -> F:
         """The slot itself, fed on past this call: a field held off it reads each line as it lands."""
         with self._lock:
-            self._open(fold, seed)
+            self._open(fold, start)
             self._feeder.vouch(fold)
             return cast("F", self._feeder.folds[fold])
 
     def prefix[F: LedgerFold[Any, Any]](
-        self, fold: Callable[[], F], until: int, *, seed: F | None = None
+        self, fold: Callable[[], F], until: int, *, start: F | None = None
     ) -> F:
-        """Held until this ledger is rewritten, so a fork's slot seeded off it reads a rewrite by identity;
-        never fed again, so it may seed another ledger's slot outside this lock."""
+        """Held until this ledger is rewritten, so a fork's slot started off it reads a rewrite by identity;
+        never fed again, so it may start another ledger's slot outside this lock."""
         with self._lock:
             self._refresh()
             held = self._cuts.get((fold, until))
-            if held is None or held[0] is not seed:
-                cut = folded(self._path, fold, seed=seed, until=until)
-                held = self._cuts[(fold, until)] = (seed, cut)
+            if held is None or held[0] is not start:
+                cut = folded(self._path, fold, start=start, until=until)
+                held = self._cuts[(fold, until)] = (start, cut)
             return cast("F", held[1])
 
-    def _open(self, fold: _Make, seed: LedgerFold[Any, Any] | None) -> None:
+    def _open(self, fold: _Make, start: LedgerFold[Any, Any] | None) -> None:
         self._refresh()
         held = self._feeder.folds
         if fold in self._screened:
             joining = {make: make() for make in self._screened if make not in held}
-        elif fold not in held or self._seeds[fold] is not seed:
-            self._seeds[fold] = seed
-            joining = {fold: _fresh(fold, seed)}
+        elif fold not in held or self._starts[fold] is not start:
+            self._starts[fold] = start
+            joining = {fold: _fresh(fold, start)}
         else:
             return
         if not joining:
@@ -651,7 +651,7 @@ class LedgerIndex(_LedgerTail):
     def _prefix(self, fold: _Make, until: int) -> LedgerFold[Any, Any]:
         held = self._prefixes.pop((fold, until), None)
         if held is None:
-            held = folded(self._path, fold, seed=self._seeds.get(fold), until=until)
+            held = folded(self._path, fold, start=self._starts.get(fold), until=until)
         self._prefixes[(fold, until)] = held
         while len(self._prefixes) > PREFIXES_MAX:
             self._prefixes.popitem(last=False)

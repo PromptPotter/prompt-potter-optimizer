@@ -2685,7 +2685,7 @@
           },
           "optimizer_setup": {
             "$ref": "#/components/schemas/OptimizerSetup",
-            "description": "That optimizer as the addressed cycle runs it — the manifest's knobs under the campaign's and the cycle seed's overlays, its arms and its pools"
+            "description": "That optimizer as the addressed cycle runs it — the manifest's knobs under the campaign's and the cycle start's overlays, its arms and its pools"
           },
           "params": {
             "additionalProperties": true,

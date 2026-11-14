@@ -893,7 +893,7 @@ class DashboardCheckout:
     def live(self) -> LiveDashboardProjection:
         """The run's own fold, fed on as its ledger grows."""
         return self._index.live(
-            LiveDashboardProjection, seed=_seed(LiveDashboardProjection, self._prefix)
+            LiveDashboardProjection, start=_start(LiveDashboardProjection, self._prefix)
         )
 
     @property
@@ -940,7 +940,7 @@ class DashboardCheckout:
             self._timer = None
         self._dirty = False
         state = self._index.view(
-            LiveDashboardProjection, seed=_seed(LiveDashboardProjection, self._prefix)
+            LiveDashboardProjection, start=_start(LiveDashboardProjection, self._prefix)
         )
         if state is None:
             return
@@ -977,14 +977,14 @@ def fold_at(cut: CycleAt) -> LiveDashboardState | None:
     """`None`: the cut holds no `RunWiringRecord` yet (a check-in still authoring its origin)."""
     *prefix, own = ledger_chain(cut.cycle, moment=None)
     return LedgerIndex.of(own.path).view(
-        LiveDashboardProjection, _until(cut), seed=_seed(LiveDashboardProjection, prefix)
+        LiveDashboardProjection, _until(cut), start=_start(LiveDashboardProjection, prefix)
     )
 
 
 def run_limits_at(cut: CycleAt) -> RunLimits | None:
     *prefix, own = ledger_chain(cut.cycle, moment=None)
     return LedgerIndex.of(own.path).view(
-        RunLimitsProjection, _until(cut), seed=_seed(RunLimitsProjection, prefix)
+        RunLimitsProjection, _until(cut), start=_start(RunLimitsProjection, prefix)
     )
 
 
@@ -992,9 +992,9 @@ def _until(cut: CycleAt) -> int | None:
     return None if cut.offset is None else cut.offset + 1
 
 
-def _seed[F: LedgerFold[Any, Any]](fold: type[F], prefix: list[LedgerSpan]) -> F | None:
-    seed: F | None = None
+def _start[F: LedgerFold[Any, Any]](fold: type[F], prefix: list[LedgerSpan]) -> F | None:
+    start: F | None = None
     for span in prefix:
         assert span.until is not None, "a fork's parent is read to its cut"
-        seed = LedgerIndex.of(span.path).prefix(fold, span.until, seed=seed)
-    return seed
+        start = LedgerIndex.of(span.path).prefix(fold, span.until, start=start)
+    return start
