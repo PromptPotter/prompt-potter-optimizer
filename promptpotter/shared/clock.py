@@ -21,7 +21,8 @@ def duration_words(seconds: float) -> str:
 
 
 def iso_z(dt: datetime) -> str:
-    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    """Fixed-width microseconds, so two stamps sort as strings in time order."""
+    return dt.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def utcnow_iso() -> str:
@@ -29,7 +30,6 @@ def utcnow_iso() -> str:
 
 
 def epoch_seconds(value: object) -> float | None:
-    """Stamps sort by this, never as strings: ``utcnow_iso`` omits a zero fractional part."""
     if not isinstance(value, str) or not value:
         return None
     try:

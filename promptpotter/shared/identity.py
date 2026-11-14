@@ -15,12 +15,12 @@ UserId = NewType("UserId", str)
 Issuer = NewType("Issuer", str)
 SafeName = NewType("SafeName", str)
 
-_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
+_SAFE_NAME_RE = re.compile(r"[a-zA-Z0-9_\-]+")
 _MAX_SAFE_NAME_LEN = 64
 
 
 def safe_name(raw: str) -> SafeName:
-    if not raw or not _SAFE_NAME_RE.match(raw) or len(raw) > _MAX_SAFE_NAME_LEN:
+    if not raw or not _SAFE_NAME_RE.fullmatch(raw) or len(raw) > _MAX_SAFE_NAME_LEN:
         raise ValueError(
             f"Invalid identity slug: {raw!r}. "
             f"Must match [a-zA-Z0-9_-]+ with length <= {_MAX_SAFE_NAME_LEN}."

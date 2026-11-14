@@ -300,6 +300,18 @@ class Budget(FrozenModel):
             self.tokens is not None and self.tokens <= 0
         )
 
+    def less(self, *taken: Budget) -> Budget:
+        """What is LEFT per money axis this bound names once *taken* (amounts) is out, never below
+        nothing: a provider bills after the send is admitted, so spend can pass a bound."""
+        usd, tokens = self.usd, self.tokens
+        for amount in taken:
+            usd = None if usd is None else usd - amount.usd_amount
+            tokens = None if tokens is None else tokens - amount.token_amount
+        return Budget(
+            usd=None if usd is None else max(0.0, usd),
+            tokens=None if tokens is None else max(0, tokens),
+        )
+
     @classmethod
     def amount(cls, usd: float, tokens: int) -> Budget:
         return cls(usd=round(usd, 6), tokens=tokens)

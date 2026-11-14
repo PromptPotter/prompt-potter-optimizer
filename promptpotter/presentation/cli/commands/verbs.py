@@ -247,8 +247,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 '`--steer llm_only.output_schema=\'{"type":"object",...}\'`. A value is read '
                 "in the param's declared type, so a number, bool or object is spelled as JSON. "
                 "Steering a node to a gateway or to a model it does not permit is a babysit act: "
-                "it requires the `campaign.babysit` capability and grades the fork's runs C. CLI "
-                "twin of the web steer-fork (`POST /commands/fork-cycle`), same seam + gate.",
+                "it requires the `campaign.babysit` capability and grades the fork's runs C.",
             ),
             Arg(
                 "--step-rounds",

@@ -71,13 +71,7 @@ class Coupon(NamedTuple):
 
     @property
     def left(self) -> Budget:
-        drawn = self.drawn
-        return Budget(
-            usd=None if self.face.usd is None else max(0.0, self.face.usd - drawn.usd_amount),
-            tokens=None
-            if self.face.tokens is None
-            else max(0, self.face.tokens - drawn.token_amount),
-        )
+        return self.face.less(self.drawn)
 
     @property
     def exhausted(self) -> bool:

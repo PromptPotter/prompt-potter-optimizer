@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pydantic import Field
 
 from promptpotter.application.account import registered_or_default_identity
+from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
@@ -27,6 +28,17 @@ def latest_launch(stores: Stores, *, inside: CyclePath = ()) -> CycleHop | None:
     hop = read_active_pointer(stores.base_dir)
     if hop is None or not stores.campaigns.cycle_dir(hop).is_dir():
         return None
+    return hop
+
+
+def launched(stores: Stores) -> CycleHop:
+    """`latest_launch` for a terminal verb naming no campaign, refused where nothing ran."""
+    if (hop := latest_launch(stores)) is None:
+        refusal = NotFoundError(
+            "No active cycle — name its campaign and cycle, or start one with `mint-campaign`."
+        )
+        refusal.add_note(no_dataset_hint(stores))
+        raise refusal
     return hop
 
 
@@ -126,11 +138,7 @@ def cycle_target(stores: Stores, campaign: str, cycle: str) -> CycleHop:
         return CycleHop(
             campaign_id=campaign_id, cycle_id=resolve_cycle_id(stores, campaign_id, cycle or None)
         )
-    hop = latest_launch(stores)
-    if hop is None or not (cycle or hop.cycle_id):
-        raise NotFoundError(
-            "No active cycle — name its campaign and cycle, or start one with `mint-campaign`."
-        )
+    hop = launched(stores)
     cycle_id = resolve_cycle_id(stores, hop.campaign_id, cycle) if cycle else hop.cycle_id
     return CycleHop(campaign_id=hop.campaign_id, cycle_id=cycle_id)
 

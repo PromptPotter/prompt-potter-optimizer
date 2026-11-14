@@ -6,17 +6,11 @@ import argparse
 
 from promptpotter.application.account import local_stores
 from promptpotter.application.bench.resume_and_fork.ab_replay import ab_replay_cycle
-from promptpotter.application.cycle_addressing import (
-    latest_launch,
-    named_campaign,
-    resolve_cycle_id,
-)
-from promptpotter.application.datasets.loaders import no_dataset_hint
+from promptpotter.application.cycle_addressing import launched, named_campaign, resolve_cycle_id
 from promptpotter.application.initialization.scoring_scope import open_diagnostic
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.shared.errors import NotFoundError
 
 
 async def cmd_ab(args: argparse.Namespace) -> CommandResult:
@@ -30,11 +24,7 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
                 cycle_id = resolve_cycle_id(stores, root.campaign_id, args.cycle)
                 return CycleHop(campaign_id=root.campaign_id, cycle_id=cycle_id)
             return root
-        hop = latest_launch(stores)
-        if hop is None:
-            refusal = NotFoundError("No active campaign: pass --campaign, or start one.")
-            refusal.add_note(no_dataset_hint(stores))
-            raise refusal
+        hop = launched(stores)
         if not args.cycle:
             return hop
         return CycleHop(

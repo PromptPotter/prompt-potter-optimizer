@@ -622,8 +622,8 @@ def share_campaign_ceiling(
     _refuse_unshared(stores, job_registry, money, hop=hop, job=job)
     beside = _held_by_siblings(stores, job_registry, hop, meter)
     spent = stores.campaigns.metered_spend(hop.campaign_id, meter)
-    left = _left(money, spent=spent, beside=beside)
-    if (left.usd is not None and left.usd <= 0) or (left.tokens is not None and left.tokens <= 0):
+    left = money.less(spent, beside)
+    if left.run_out:
         held = (
             f" and {money_text(beside, on=money)} held by its other live cycles. Pause one, or "
             "raise"
@@ -642,28 +642,10 @@ def share_campaign_ceiling(
     return _allotment(left, own=stores.campaigns.cycle_metered(hop, meter))
 
 
-class _Left(NamedTuple):
-    """SIGNED, never a `Budget`: a provider bills after the send is admitted, so spend can pass a
-    ceiling, and a ceiling moved under the spend leaves less than nothing."""
-
-    usd: float | None
-    tokens: int | None
-
-
-def _left(ceiling: Budget, *, spent: Budget, beside: Budget) -> _Left:
-    """Per axis *ceiling* names: what neither the campaign's spend nor its siblings' holds took."""
-    return _Left(
-        usd=None if ceiling.usd is None else ceiling.usd - spent.usd_amount - beside.usd_amount,
-        tokens=None
-        if ceiling.tokens is None
-        else ceiling.tokens - spent.token_amount - beside.token_amount,
-    )
-
-
-def _allotment(left: _Left, *, own: Budget) -> Budget:
+def _allotment(left: Budget, *, own: Budget) -> Budget:
     return Budget(
-        usd=None if left.usd is None else own.usd_amount + max(0.0, left.usd),
-        tokens=None if left.tokens is None else own.token_amount + max(0, left.tokens),
+        usd=None if left.usd is None else own.usd_amount + left.usd,
+        tokens=None if left.tokens is None else own.token_amount + left.tokens,
     )
 
 
@@ -759,7 +741,7 @@ def _reshare_campaign_ceiling(
         for other in jobs:
             if other.job_id != job.job_id:
                 beside = beside.plus(_held(held[other.job_id], own[other.job_id]))
-        share = _allotment(_left(moved, spent=spent, beside=beside), own=own[job.job_id])
+        share = _allotment(moved.less(spent, beside), own=own[job.job_id])
         hold_moved(stores, job.hop, held[job.job_id].over(share.only(moved.named)))
 
 

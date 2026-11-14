@@ -167,9 +167,7 @@ def bank_spend(
 ) -> PaidSpend:
     """Destroyers only (archiving keeps the rows); a tombstone already standing is a crashed delete's, kept for the retry."""
     spent = billed_spend(CycleLayout(d).ledger for d in cycle_dirs)
-    # A replayed cell bills nothing and still meters, on a search-incurred ceiling.
-    if spent == NOTHING_PAID and all(m == NOTHING_METERED for m in metered.values()):
-        return spent
+    # Written at nothing spent too: the tombstone is the delete's commit (`WorkspaceBank.deleted`).
     log = CycleEventLog.open_workspace(workspace)
     if subject in LedgerIndex.of(log.path).view(_Tombstones).subjects:
         return spent

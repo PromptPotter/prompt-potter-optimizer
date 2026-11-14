@@ -246,7 +246,8 @@ class _CycleFacts:
                     if held.ended is not None
                     else held.resumed_ending,
                     final=None,
-                    superseded_by=None,
+                    # A fork's pause of its parent lands after the parent is named superseded.
+                    superseded_by=held.superseded_by if paused else None,
                     error=None,
                 )
             case ErrorRecord():

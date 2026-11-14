@@ -283,6 +283,7 @@ from promptpotter.infrastructure.store.account_spend import (
     campaign_spend,
     ledger_cost,
     unreported_under,
+    workspace_bank,
 )
 from promptpotter.infrastructure.store.campaign_store import store as campaign_store_module
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -5158,3 +5159,36 @@ def test_a_campaign_id_is_drawn_again_over_a_live_dir_a_tombstone_and_a_charged_
     )
     assert [p.name for p in live.iterdir()] == ["mark"], "the draw wrote into a live campaign"
     assert (live / "mark").read_text(encoding="utf-8") == "live"
+
+
+def test_a_delete_that_spent_nothing_commits_at_its_tombstone_and_its_id_is_never_drawn_again(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    campaigns = built_stores.campaigns
+    prefix = dataset_id_prefix("ds1")
+    hop = CycleHop(campaign_id=f"{prefix}__aaaaaa", cycle_id="cycle-0")
+    campaigns.mint_cycle(hop)
+    camp_dir = campaigns.campaign_root_dir(hop.campaign_id)
+    with monkeypatch.context() as patched:
+
+        def torn(path: Path) -> None:
+            if path == camp_dir:
+                raise OSError(f"killed while removing {path}")
+            rmtree_robust(path)
+
+        patched.setattr(campaign_store_module, "rmtree_robust", torn)
+        with pytest.raises(OSError):
+            campaigns.delete_campaign(
+                hop.campaign_id, keep_results=False, changed_at="2026-01-01T00:00:00Z"
+            )
+    assert workspace_bank(campaigns.workspace).deleted(hop.campaign_id), (
+        "a zero-spend delete torn at its tree read as live: it wrote no tombstone"
+    )
+    assert campaigns.delete_campaign(
+        hop.campaign_id, keep_results=False, changed_at="2026-01-01T00:00:00Z"
+    )
+    drawn = iter(["aaaaaa", "cccccc"])
+    monkeypatch.setattr("secrets.token_hex", lambda _n: next(drawn))
+    assert campaigns.claim_campaign_id("ds1", built_stores.charges) == f"{prefix}__cccccc", (
+        "a zero-spend delete's id was minted again"
+    )

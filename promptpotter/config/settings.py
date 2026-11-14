@@ -187,17 +187,13 @@ class Settings(BaseSettings):
     # A JSON object, like RATE_LIMITS; a unit left out keeps its default.
     HOST_COUPON: HostCoupon = HostCoupon()
 
-    # A ceiling on the remainder once the USD total is understated, never a bonus added to it.
+    # Each described where it is listed, in `.env.example`, as `QUEUE_MAX_WAIT_S` is.
     UNPRICED_GRACE_USD: float = 0.10
-
-    # Per-user token bucket per server process, reset by a restart: two servers grant twice it.
     USER_RATE_BURST: int = 5
-    # Positive: a refused ask's `Retry-After` is when its bucket refills.
     USER_RATE_PER_MIN: PositiveFloat = 1.0
 
     # The machine's ceiling, not an allowance: `jobs/capacity.py::resolve_run_capacity` may only lower it.
     MACHINE_RUN_CAPACITY: int = 3
-
     QUEUE_MAX_WAIT_S: float = 6 * 3600.0
 
     model_config = {"env_file": env_file_path(), "case_sensitive": True, "extra": "ignore"}

@@ -29,6 +29,7 @@ Rules not derivable from the code. Root [`CLAUDE.md`](../../CLAUDE.md) holds the
 - **A query module reads a persisted document through its MODEL**, never as a dict; a dict walk survives only in a cross-cycle survey (`read_json_tolerant`).
 - **String-keyed *call* dispatch is a defect** — a `match` with literal calls, a registration decorator (`@signal`), or an enum-keyed dict with an import-time completeness assert. String-keyed *data* is fine.
 - **A function-local import of our own package goes to module scope**; `# extras: <name>` exempts a third-party extras import ([`../decisions.md`](../decisions.md) § 0006).
+- **An immutable record is written one way per role**: a record crossing a seam (disk, wire, ledger) is a `FrozenModel`; a local value is a `NamedTuple`. A frozen `dataclass` or a `StrictModel` standing for either converts when a chain touches its file, never in a sweep.
 - **Simplify by subtracting a concept, never relocating one.** A shared helper earns its place at ≥3 call sites, or when it removes a concept or holds an invariant callers must not diverge from.
 
 ## Reviewing

@@ -16,6 +16,7 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import enter, run_campaign
+from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -148,42 +149,45 @@ async def run_bbeh_campaign(
     print("=" * 60)
 
     per_task_results: dict[str, Record] = {}
-    # Outside the run, so a verify pass of its own: a job whose hold every cell draws on.
-    bound = await cell_bound(session, result_pipeline_params)
-    calls = result_pipeline_params.nodes
-    billed = cell_billing(
-        session.pipeline_schema,
-        priced_pairs(session, calls),
-        await attempt_bounds(session, calls),
-    )
-    client = session.backend_client
-    sends = sends_on(session.store, campaign_config, client.connector.name)
-    async with paid_pass(
-        stores=session.store,
-        pass_kind=MeasurementRole.VERIFY,
-        hop=None,
-        declared=Budget(),
-        sends=sends,
-    ):
-        for i, task in enumerate(tasks, start=1):
-            test_items = test_norm_by_task[task]
-            hits = 0
-            for ex in test_items:
-                # Each cell is a unit of work of its own: its envelope opens its send budget.
-                async with CellEnvelope(
-                    client.connector.cell_envelope_s(ex, result_pipeline_params),
-                    attempts=client.connector.cell_attempts,
-                    label=f"{task}:{ex.id}",
-                ):
-                    data, _spent = await client.run_query(
-                        ex, pipeline_params=result_pipeline_params, bound=bound, billed=billed
-                    )
-                ranking = data.get("final_ranking") or []
-                predicted = ranking[0].get("candidate", "") if ranking else ""
-                hits += int(label_match(predicted, ex.ground_truth))
-            acc = hits / len(test_items) if test_items else 0.0
-            per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
-            print(f"  [{i:2d}/{len(tasks)}] {task:<40s} {acc:>6.1%}  ({hits}/{len(test_items)})")
+    # Outside the run, so a session and a verify pass of their own: the run closed its client.
+    async with init_services("bbeh", identity=session.identity, stores=stores) as verifying:
+        bound = await cell_bound(verifying, result_pipeline_params)
+        calls = result_pipeline_params.nodes
+        billed = cell_billing(
+            verifying.pipeline_schema,
+            priced_pairs(verifying, calls),
+            await attempt_bounds(verifying, calls),
+        )
+        client = verifying.backend_client
+        sends = sends_on(verifying.store, campaign_config, client.connector.name)
+        async with paid_pass(
+            stores=verifying.store,
+            pass_kind=MeasurementRole.VERIFY,
+            hop=None,
+            declared=Budget(),
+            sends=sends,
+        ):
+            for i, task in enumerate(tasks, start=1):
+                test_items = test_norm_by_task[task]
+                hits = 0
+                for ex in test_items:
+                    # Each cell is a unit of work of its own: its envelope opens its send budget.
+                    async with CellEnvelope(
+                        client.connector.cell_envelope_s(ex, result_pipeline_params),
+                        attempts=client.connector.cell_attempts,
+                        label=f"{task}:{ex.id}",
+                    ):
+                        data, _spent = await client.run_query(
+                            ex, pipeline_params=result_pipeline_params, bound=bound, billed=billed
+                        )
+                    ranking = data.get("final_ranking") or []
+                    predicted = ranking[0].get("candidate", "") if ranking else ""
+                    hits += int(label_match(predicted, ex.ground_truth))
+                acc = hits / len(test_items) if test_items else 0.0
+                per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
+                print(
+                    f"  [{i:2d}/{len(tasks)}] {task:<40s} {acc:>6.1%}  ({hits}/{len(test_items)})"
+                )
 
     macro_avg = sum(r["accuracy"] for r in per_task_results.values()) / len(per_task_results)
     total_test = sum(r["n_test"] for r in per_task_results.values())

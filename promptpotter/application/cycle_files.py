@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -65,8 +66,6 @@ def _entry(path: str, scope: FileScope, held: os.stat_result) -> FileEntry:
 
 
 def _resolve_safe_file(scope_root: Path, raw_path: str) -> Path:
-    if not raw_path or ".." in raw_path or "\\" in raw_path or raw_path.startswith("/"):
-        raise BadRequestError("Invalid path")
     resolved = (scope_root / raw_path).resolve()
     if not resolved.is_relative_to(scope_root.resolve()):
         raise BadRequestError("Path escapes scope root")
@@ -120,7 +119,11 @@ def read_cycle_file(
     resolved = _resolve_safe_file(scope_root, file)
     held = stat_optional(resolved)
     # The listing's rule, at both scopes: a campaign-scope path reaches its cycles' dot-dirs.
-    if held is None or not _shown(resolved.relative_to(scope_root.resolve())):
+    if (
+        held is None
+        or not stat.S_ISREG(held.st_mode)
+        or not _shown(resolved.relative_to(scope_root.resolve()))
+    ):
         raise NotFoundError(f"File not found: {file}")
     raw = None if held.st_size > _MAX_PREVIEW_BYTES else read_bytes_optional(resolved)
     content_type: Literal["json", "markdown", "log", "text", "binary"] = (

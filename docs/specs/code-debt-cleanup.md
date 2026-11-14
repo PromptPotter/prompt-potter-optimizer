@@ -545,19 +545,6 @@ row it closes.
   `format.ts::shortId`, `compare/EvidenceCharts.tsx` and `evidence/read.py`. **Re-test:**
   `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
 
-### life-2b (what life-2b left)
-
-- **The inner layers carry life-2's +285 net**: the async doors offload through hand-written thread
-  shims (`_open_pass`, `_close_pass`, `_land`, `_unmint`), each a sync body wrapped once. Action: one
-  offload-once helper at the async doors replaces the shims. **Rides with:** a lean chain. **Re-test:**
-  `git diff --shortstat 805feffd6 HEAD -- promptpotter/domain promptpotter/application promptpotter/infrastructure`
-  is ≤ 0 net.
-- **The bbeh runner queries through a client its run closed**: `paper/bbeh-comparison/bbeh_potter_runner.py`'s
-  test-eval loop calls `session.backend_client.run_query` after `run_campaign` returned, and
-  `run_campaign` closes that client on every exit. Action: the verify pass opens and closes its own
-  client, as every opener does. **Rides with:** the next chain touching `paper/bbeh-comparison/`.
-  **Re-test:** `git grep -c "session.backend_client" -- paper/bbeh-comparison/bbeh_potter_runner.py` is 0.
-
 ### passes-6 (what passes-5 and holders-3 left at landing 54)
 
 passes-5 landed a pause standing for its hold and one reader of a reply's usage; holders-3 `reindex`'s
@@ -1377,9 +1364,6 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 - **Two selectors override one pair identically**: `levi/members.py` and potter's `ThetaElection`
   (`potter/members.py`) each define `parent_cells` and `parent_read` as the panel's cells. Action: the
   `Selector` default. **Rides with:** small.
-- **Four settings no operator can discover**: `QUEUE_MAX_WAIT_S`, `UNPRICED_GRACE_USD`,
-  `USER_RATE_BURST` and `USER_RATE_PER_MIN` appear in no `.env.example` or deploy config. Action: each
-  is listed where the box's settings are. **Rides with:** small.
 - **No verb sets an account's coupon or starts it afresh**: `grant.json` is hand-written, and a reset is
   moving `charges.jsonl` aside; `wallet_store.py::CouponGrant.granted_at` is written and never read.
   **Rides with:** small 1.
@@ -1393,35 +1377,20 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   so a delete names what it breaks; not `pipeline_schema.py::reach_map`, a node's reach).
   **Rides with:** small 3. **Re-test:**
   `compact-archive inventory`.
-- **An immutable record is written four ways**: `FrozenModel`, `StrictModel`, `NamedTuple` and frozen
-  `dataclass`. Action: `docs/developer/conventions.md` names one per role (a record crossing a seam, a
-  local value); a file converts when a chain touches it, never a sweep. **Rides with:** small 5.
-- **ISO stamps sort as strings at ~12 sites against `shared/clock.py::epoch_seconds`'s rule**:
-  `jobs/registry.py:191,347,363,369,374`, `jobs/quota.py:711`, `evidence/read.py:404,451`,
-  `head_to_head_price.py:118`, `origin_listing.py:98,142`, `application/hierarchy.py:426,496,603,612` and `registry.py:443-445`; the formatter at the root, `shared/clock.py::iso_z` (`:23-24`, also called
-  by `cycle_files.py:60` and `registry.py:439`), omits a zero fractional part, so string order is not
-  time order. Root: `iso_z` emits fixed-width microseconds, and the "never as strings" rule goes.
-  **Rides with:** small 6. **Re-test:** `iso_z` at a whole second ends `.000000Z`.
-- **Three torn-write smells from a crash-point pass (the first and third confirmed; confirm the second)**:
-  `stores.py:168-169` leaves an old `origin.yaml` when the origin is empty, and is reachable
-  (`teleprompter.py:157` always passes `origin={}`); `ledger_scan.py:232-244` clears `superseded_by`
-  on PAUSED; `account_spend.py:152` writes no tombstone for a zero-spend delete, worse than filed: the
-  tombstone is the delete's commit (`account_spend.py:73-75`), so a torn zero-spend delete reads as
-  live (`store.py:229`) and its id can be minted again (`store.py:181`). **Rides with:** small.
-- **Two wrong names at the doors** (reported): `--steer`'s help calls itself the web steer-fork's twin;
-  `bench.py:21-27` keeps its own active-campaign default (the `mint-campaign` names close in faults).
-  **Rides with:** small.
-- **Three name checks stand beside the one validator** (filed by paths): `shared/identity.py::safe_name`
-  matches with `$`, so `abc\n` passes as an identity slug until the store join refuses it;
-  `application/cycle_files.py:68` prechecks `..`, `\` and `/` beside the `resolve` containment that owns
-  it; `draft_campaign.py:159`'s `c.isalnum()` admits a Unicode letter, and `safe_name` then raises a bare
-  `ValueError` out of `ingest_draft` (a 500 for `café.csv`). Root: `fullmatch` in `safe_name`, one
-  containment rule, and a derived slug built in the dataset-name charset. **Rides with:** small.
-  **Re-test:** `café.csv` uploads under a refused-or-derived slug, never a 500.
-- **A budget's remainder has two shapes** (payer-2's symptom): `jobs/quota.py::_Left` (signed, per
-  axis) repeats the "nothing left on a bounded axis" test that `domain/spend.py::Budget.run_out` owns.
-  Root: one shape of a budget's remainder, and `_Left` goes. **Rides with:** small. **Re-test:**
-  `git grep -c "class _Left(" -- promptpotter/application/jobs/quota.py` is 0.
+- **An overdrawn remainder has no type** (small-1's landing): `infrastructure/llm/spend_book.py::_left`
+  (`:351`) is a signed `(usd, tokens)` tuple beside `domain/spend.py::Budget.less`, which clamps at
+  zero, and `_at_least_nothing` (`:602`) clamps it again; `_times` admits a free send at exactly zero
+  left but nothing once overdrawn, so it cannot fold into `less` unchanged. Action: one typed remainder
+  that carries the overdraft, read by both. **Rides with:** small 2. **Re-test:**
+  `git grep -c "_at_least_nothing" -- promptpotter` is 0.
+- **A read answers for any inode kind** (small-1's landing): `cycle_files.py:116`'s
+  `stat_optional` treats a directory as a file, so a directory path reached `read_bytes_optional`
+  until small-1 refused it at the read. Action: `stat_optional` answers for regular files only.
+  **Rides with:** small 2.
+- **The paper harness tracks no named tree** (small-1's landing): `paper/bbeh-comparison/bbeh_potter_runner.py:1`
+  pins `promptpotter==0.8.20` while the ledger fixes it against the current API. Action: the
+  harness names the release it runs against, and a fix to it targets that release. **Rides with:** the
+  next chain touching `paper/bbeh-comparison/`.
 
 ### batch/31 · box
 

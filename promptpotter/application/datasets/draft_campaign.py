@@ -25,7 +25,6 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import NotFoundError
-from promptpotter.shared.identity import safe_name
 
 PREVIEW_ROWS = 10
 """Sample-preview head size returned alongside every mutation response."""
@@ -153,8 +152,8 @@ def default_slug_from_filename(filename: str) -> str:
     stem = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if "." in stem:
         stem = stem.rsplit(".", 1)[0]
-    cleaned = "".join(c if c.isalnum() or c in "-_" else "-" for c in stem.lower()).strip("-_")
-    if not cleaned:
-        cleaned = "upload"
-    safe_name(cleaned)
-    return cleaned
+    # The dataset-name charset, so a derived slug is refused only where a typed one would be.
+    cleaned = "".join(
+        c if c.isascii() and (c.isalnum() or c in "-_") else "-" for c in stem.lower()
+    )
+    return cleaned.strip("-_") or "upload"

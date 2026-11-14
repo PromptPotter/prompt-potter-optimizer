@@ -1802,6 +1802,21 @@ def test_a_supersede_ends_its_parent_only_where_no_producer_holds_it(
     )
 
 
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_running_parents_pause_landing_after_its_supersede_keeps_it_superseded(
+    built_stores: Stores, displaced_line: _Displaced
+) -> None:
+    # The fork files its parent's pause for the loop, then supersedes it: the pause lands last.
+    store = built_stores.campaigns
+    displaced, fork_hop, *_ = displaced_line
+    store.append(displaced, CycleSupersededRecord(successor_cycle_id=fork_hop.cycle_id))
+    store.append(displaced, RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT))
+    index = store.load(displaced, moment=None)
+    assert index is not None and index.superseded_by == fork_hop.cycle_id, (
+        "the parent's own pause erased its supersede: the line still reads as the parent's"
+    )
+
+
 def _ident(name: str) -> str:
     return prompted(instruction=name).id
 
