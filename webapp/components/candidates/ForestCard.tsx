@@ -17,7 +17,7 @@ import { useWorkspace } from "@/lib/state/workspace";
 import { pickOf } from "@/lib/derivations";
 import { shortFamilyTail } from "@/lib/ids";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
-import { TreePairing } from "./CandidatesCard";
+import { TreePairing } from "./TreePairing";
 import { Forest, type CladogramCtx } from "./Forest";
 import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
 import { useViewedCycle } from "@/lib/state/lineage";

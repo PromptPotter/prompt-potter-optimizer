@@ -5,7 +5,7 @@ import { DendrogramStrip } from "./DendrogramStrip";
 import { ThetaCaveats } from "./AbilityInfo";
 import { CandidatesToolbar } from "./CandidatesToolbar";
 import { useCandidatesModel, type CandidatesModel } from "./useCandidatesModel";
-import { CardFrame, Chip, HoverCard, IconTree, Loading, ReadState } from "@/components/ui";
+import { CardFrame, HoverCard, Loading, ReadState } from "@/components/ui";
 import { Criterion } from "@/components/criterion/Criterion";
 import { ApplyScenarioPanel } from "@/components/candidates/ApplyScenarioPanel";
 import { setScoringMask } from "@/lib/state/scoring-mask";
@@ -14,36 +14,7 @@ import { SampleSetControl } from "./SampleSetControl";
 import { cx } from "@/lib/cx";
 import { useViewedLineage } from "@/lib/state/lineage";
 import { DASHBOARD_PENDING, useViewedDashboard } from "@/lib/state/poll";
-
-// The one button between the tree's two layouts: paired under the bars, or freed as its own card.
-export function TreePairing({
-  freed,
-  setFreed,
-  descendants,
-}: {
-  freed: boolean;
-  setFreed: (freed: boolean) => void;
-  descendants: number;
-}) {
-  return (
-    <Chip
-      icon={descendants === 0}
-      on={freed}
-      ariaLabel={
-        freed
-          ? "Pair the lineage tree under the bars"
-          : `Free the lineage tree from the bars — the full campaign tree, ${descendants} descendant${descendants === 1 ? "" : "s"}`
-      }
-      title={freed ? "Pair the tree under the bars" : "Free the tree from the bars"}
-      onClick={() => setFreed(!freed)}
-    >
-      <span className="cand-forest-toggle">
-        <IconTree />
-        {descendants > 0 && <span className="cand-view-count">{descendants}</span>}
-      </span>
-    </Chip>
-  );
-}
+import { TreePairing } from "./TreePairing";
 
 function FitnessLegend({ model: m }: { model: CandidatesModel }) {
   const { legend, seriesCtx } = m;
